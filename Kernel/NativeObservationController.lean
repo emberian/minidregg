@@ -41,8 +41,10 @@ abbrev Context := ResourceObservationAdmission.Context
 
 variable {deployment : Deployment} {durable : Durable}
 
-/-- What an unauthenticated requester may be told. Before its signature has
-verified, a refusal names only facts the challenge endpoint already publishes:
+/-- What a requester may be told before its header signatures verify. (Before that, the
+request itself is authenticated by the intent signature -- `authenticated`, FIX-DISCLOSE --
+so this reaches only the subject's own key.) A refusal here names only facts the challenge
+endpoint already publishes:
 whether the named subject has an enrolled key (the challenge's public
 enrollment coordinate) and whether the signed challenge's world root is current
 (the world root is a public challenge field). Every other pre-signature

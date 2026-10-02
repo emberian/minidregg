@@ -25,7 +25,15 @@ Disclosure order. A requester learns only what it is entitled to learn:
   and other-target capabilities are therefore indistinguishable, so a key
   cannot probe another holder's revocation, validity window or epochs;
 * only a covered holder with a verified use learns `revoked`,
-  `outsideValidity`, `staleGrant` or `lawDenied`.
+  `outsideValidity`, `staleGrant` or `lawDenied`;
+* a `lawDenied` names its clause, path and slot values only through the slots the
+  holder's grant covers (`Refusal.lawDeniedFor`, `refusal_leaf_depends_only_on_covered_fields`):
+  a clause over a field outside a `--fields` grant is not named, and no such value is shown.
+
+Before any of this, an observation request is authenticated: the subject's signature over
+the intent's bytes is checked against its current key before a target is read
+(`NativeObservationController.authenticated`), so a key that was never enrolled is answered
+`unknownKey` or `badSignature`, whatever the intent names.
 
 Blind submission keeps its uniform refusal (`undisclosed`); see
 `NativeHost.publicSubmissionOutcome`.
