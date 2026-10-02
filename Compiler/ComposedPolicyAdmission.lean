@@ -121,6 +121,19 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
       exact ⟨graph, rfl, targetExact, step.2.2.2.1, step.2.2.2.2, result.2.1,
         by simpa only [step.2.2.2.1, step.2.2.2.2] using result.2.2⟩
 
+/-- The same source capability constructor used by the original portal. Portal
+replacement cannot skip holder/scope, native use, membership or revocation. -/
+def Config.capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
+    (config : Config F) {kind : ResourceKind} (request : Request kind)
+    (identifier : CapabilityId)
+    (commitment : config.portal.CapabilityCommitmentWitness)
+    (use : config.portal.CapabilityUseWitness) (issuer : config.portal.IssuerWitness)
+    (revocation : RevocationKey → config.portal.NonRevocationWitness) :
+    Except RefusalReason
+      (Evidence config.portal config.snapshot.authState request) :=
+  (capabilityEvidenceCheckedFor config.snapshot config.portal request identifier
+    commitment use issuer revocation (fun id => .capability kind id)).map Subtype.val
+
 /-- Witness construction uses the same loaded closure and the receiver's exact
 pre/post projection. Failure never supplies a permissive fallback witness. -/
 def Config.witness? {F : Type} [Field F] [DecidableEq F]

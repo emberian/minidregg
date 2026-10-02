@@ -61,10 +61,18 @@ def loadPrevious (store : PayloadStore) (newer : CommittedPolicy) :
               else none
 
 /-- A finite chain rooted at the actually authenticated current head. -/
-inductive Historical (store : PayloadStore) (head : CommittedPolicy) : CommittedPolicy → Prop
+inductive Historical (store : PayloadStore) (head : CommittedPolicy) : CommittedPolicy → Type
   | current : Historical store head head
   | previous {newer : CommittedPolicy} (earlier : Historical store head newer)
       (step : Previous store newer) : Historical store head step.committed
+
+/-- Runtime-visible authenticated read dependencies. Retaining the history in
+Type, rather than an erased proposition, lets physical receivers guard every
+predecessor read as well as the current head and selected pinned record. -/
+def Historical.records {store : PayloadStore} {head current : CommittedPolicy} :
+    Historical store head current → List CommittedPolicy
+  | .current => [head]
+  | .previous earlier step => step.committed :: earlier.records
 
 structure Selected (store : PayloadStore) (head : CommittedPolicy)
     (revision : PolicyRevision) (address : Digest) where
