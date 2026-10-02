@@ -2334,7 +2334,7 @@ fn sealing_room(explicit: Option<&str>, root: &Path, reference: &Value) -> Resul
     // Room aliases are equivalent only when they resolve to the same cell.
     let mut identity = None;
     for room in &rooms {
-        let id = member(&self::reference(root, room)?, "target")?.to_owned();
+        let id = member(&self::local_reference(root, room)?, "target")?.to_owned();
         if identity.as_ref().is_some_and(|other| other != &id) {
             return Err("conflicting private rooms for the same document reference".into());
         }
@@ -2378,7 +2378,7 @@ pub(crate) fn sealed_room(root: &Path, reference: &Value) -> Option<String> {
         .collect();
     names.sort();
     names.into_iter().find_map(|name| {
-        let other = crate::workspace::reference(root, &name).ok()?;
+        let other = crate::workspace::local_reference(root, &name).ok()?;
         (other.get("target").and_then(Value::as_str) == Some(target)
             && other.get("kind").and_then(Value::as_str) == kind)
             .then(|| other.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
@@ -2520,7 +2520,7 @@ fn propose_summary_once(
                 if !seen.insert(local_name.to_owned()) {
                     return Err("duplicate named target".into());
                 }
-                let reference = reference(root, local_name)?;
+                let reference = protected_document::reference_context(root, reference(root, local_name)?)?;
                 let protected = reference.get("protectedDocument").is_some();
                 let (view, challenge, signed) = signed_view(root, workspace, &reference, "resource")?;
                 let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
