@@ -28,6 +28,9 @@ mod endpoint;
 #[path = "broker_runtime_adoption.rs"]
 mod runtime_adoption;
 
+#[path = "broker_home.rs"]
+mod home_visibility;
+
 pub const SOCKET: &str = "/run/mini-spk-broker.sock";
 const MAX_REQUEST: u64 = 16 * 1024;
 const MAX_CONFIG: u64 = 64 * 1024;
@@ -159,6 +162,8 @@ pub struct BrokerConfig {
     pub ingest_helper: PathBuf,
     pub volume_helper: PathBuf,
     pub app_uids: Vec<u32>,
+    #[serde(default)]
+    pub resident_home_read_only_paths: Vec<PathBuf>,
 }
 
 struct Broker {
@@ -526,6 +531,7 @@ impl Broker {
                 "operator must be an unprivileged user outside the app pool",
             ));
         }
+        home_visibility::validate(&config.resident_home_read_only_paths,operator_uid)?;
         for uid in &config.app_uids {
             if unsafe { libc::getpwuid(*uid) }.is_null() {
                 return Err(invalid(format!("app pool UID {uid} has no account")));
@@ -1005,11 +1011,16 @@ impl Broker {
                 let gen_dir = format!("g{generation}");
                 // The config must exist and be operator-owned; its contents are
                 // the resident's to check (it runs as the operator).
-                open_operator_file(
+                let mut resident_file=open_operator_file(
                     self.root(),
                     &[&store, "host", "apps", &app, &gen_dir, "resident.json"],
                     self.operator_uid,
                 )?;
+                let mut resident_bytes=Vec::new();
+                Read::by_ref(&mut resident_file).take(MAX_CONFIG+1).read_to_end(&mut resident_bytes)?;
+                if resident_bytes.len() as u64>MAX_CONFIG { return Err(invalid("resident visibility config exceeds bound")); }
+                let resident:Value=serde_json::from_slice(&resident_bytes)?;
+                let visibility=home_visibility::render(self,&store,&app,&resident)?;
                 let config = self
                     .root()
                     .join(&store)
@@ -1053,6 +1064,12 @@ impl Broker {
                 // No reset-failed here: a crashed generation's failed state and
                 // InvocationID are what STOP's pre-stop check identifies the
                 // dead incarnation by. `start` and `stop` reset it.
+                if !visibility.is_empty() {
+                    let drop_dir=Path::new(RUNTIME_UNITS).join(format!("{unit}.d"));
+                    fs::create_dir_all(&drop_dir)?;
+                    fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755))?;
+                    write_root_text(&drop_dir.join("10-native-visibility.conf"),&visibility,0o644,false)?;
+                }
                 systemctl(&["daemon-reload"])?;
                 self.save_unit_runtime(&unit, &runtime)?;
                 Ok(
