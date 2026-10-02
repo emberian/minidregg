@@ -930,7 +930,9 @@ pub(crate) fn read(
             .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
     }
     let mut answered = answered?;
-    if let Some(at) = &judged { shared_names::check_opened(&reference, at)?; }
+    if reference.get("sharedName").is_some() {
+        shared_names::check_opened(&reference, judged.as_ref().ok_or("shared-name target read lacks its challenge")?)?;
+    }
     if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
         object.insert("judgedAt".to_owned(), judged);
     }
@@ -1101,6 +1103,9 @@ fn doc_query(
         &attempt,
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    if reference.get("sharedName").is_some() {
+        shared_names::check_opened(reference, &challenge)?;
+    }
     let mode = if view == "at" { ContinuityMode::Historical } else { ContinuityMode::Ordinary };
     receipt_continuity::finish(root, workspace, ticket, &challenge, mode)?;
     Ok((value, attempt))
