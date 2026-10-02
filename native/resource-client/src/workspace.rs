@@ -664,6 +664,65 @@ pub(crate) fn complete_fresh_onboarding(root: &Path) -> Result<Value> {
         Ok(signed_view_unchecked(root, &workspace, reference, "resource")?.1)
     })
 }
+
+/// Paid recovery can finish exact first-trust bookkeeping with a later admitted
+/// owner. The old fresh record and its candidate remain initial provenance.
+/// The caller holds the paid setup and key-transition locks until publication.
+pub(crate) fn paid_owner_transition(root:&Path, key:&Path, next:Option<&Path>,
+    epoch:&Value, account:&Value) -> Result<(Value,Value,Value)> {
+    let original = load_for_key_transition(root)?;
+    let mut selected = original.clone();
+    selected["key"] = json!(crate::absolute(key)?);
+    let public = crate::read_secret(key)?.verifying_key().to_bytes();
+    let host = workspace_host(&original)?;
+    let config = member_path(&original,"config")?;
+    let socket = SOCKET.get().ok_or("paid recovery requires pinned source transport")?;
+    let subject = member(&original,"subject")?;
+    let current = crate::key_rotation::status_if_enrolled(&host,socket,&config,subject,&public)?
+        .ok_or("paid recovery requires admitted current authority")?;
+    if current["subject"] != subject || current["isCurrent"] != true
+        || current["currentRevoked"] != false || current["keyEpoch"] != *epoch {
+        return Err("paid recovery key is not exact current source authority".into());
+    }
+    let commitment = match next {
+        Some(path) => crate::key_rotation::Commitment::Mine(crate::key_rotation::public_file(path)?),
+        None => crate::key_rotation::Commitment::Without,
+    };
+    crate::key_rotation::check_commitment(&host,socket,&config,subject,&public,&commitment)?
+        .ok_or("paid recovery requires current source commitment")?;
+    match commitment {
+        crate::key_rotation::Commitment::Mine(next) => {
+            selected["prerotation"] = json!(true);
+            selected["nextPublicKey"] = json!(hex(&next));
+        }
+        crate::key_rotation::Commitment::Without => {
+            selected["prerotation"] = json!(false);
+            selected.as_object_mut().ok_or("workspace object required")?.remove("nextPublicKey");
+        }
+    }
+    if original.get("freshContinuity").is_none() {
+        return Err("paid recovery requires retained fresh enrollment provenance".into());
+    }
+    // For awaiting-first-read, this closed own-account read is admitted by the
+    // current key. For verified-candidate, complete does not call this closure:
+    // it finishes the exact saved proof even if its key has since rotated.
+    let first = receipt_continuity::fresh::complete(root,&original,|reference| {
+        if reference["kind"] != "account" || reference["target"] != account["target"]
+            || reference["observeCapability"] != account["observeCapability"] {
+            return Err("paid recovery first reference differs from admitted account".into());
+        }
+        Ok(signed_view_unchecked(root,&selected,reference,"resource")?.1)
+    })?;
+    let before = load_for_key_transition(root)?;
+    selected["receiptContinuity"] = before["receiptContinuity"].clone();
+    // Existing candidate/anchor trust now guards this fresh possession read.
+    let ticket = receipt_continuity::begin(root,&selected)?;
+    let (_,challenge,signed) = signed_view_unchecked(root,&selected,account,"resource")?;
+    let continued = receipt_continuity::finish(root,&selected,ticket,&challenge,receipt_continuity::Mode::Ordinary)?;
+    Ok((before,selected,json!({"firstTrust":first,"continued":continued,
+        "currentAuthority":current,"challenge":challenge,"signedObservation":signed,
+        "signedObservationSha256":crate::host_image_sha256(&signed)?})))
+}
 #[path = "shared_names.rs"]
 pub(crate) mod shared_names;
 

@@ -310,10 +310,10 @@ def join(name):
     return mini("join","--memo-version","v2","--solana","--host",HOST,"--config",CONFIG,
                 "--socket",SOCKET,"--enrol",PIN,"--dir",path("join",name),"--name",name,
                 "--weeks",WEEKS,"--starter-credit",STARTER,"--birth-context",BIRTH_CONTEXT)
-def wait(name,signature,*custody):
-    return mini("join","--memo-version","v2","--wait","--host",HOST,"--config",CONFIG,
-                "--socket",SOCKET,"--dir",path("join",name),"--signature",gen.b58(signature),
-                "--timeout","0","--birth-context",BIRTH_CONTEXT,*custody)
+def wait(name,signature,*custody,member_socket=None,extra_env=None):
+    return run([MINI,"join","--memo-version","v2","--wait","--host",HOST,"--config",CONFIG,
+                "--socket",member_socket or SOCKET,"--dir",path("join",name),"--signature",gen.b58(signature),
+                "--timeout","0","--birth-context",BIRTH_CONTEXT,*custody],env=extra_env)
 
 missing=source_json(181,{"identityKey":public[OBSERVER]},"missing-tip-status")
 require("fresh genesis has no authenticated chain evidence",
@@ -496,15 +496,122 @@ require("current quote consumes once: exact weeks, spendable extra-week remainde
         and bal_after[str(acct(FLOAT))]==bal_pending[str(acct(FLOAT))]
         and int(BP["birthFee"])+int(BP["membershipCredit"])+int(BP["creditedRemainder"])==int(BP["mintedCredit"])
         and after["entry"]["subject"]==bob_ids["subject"],BP)
-bob_join=wait("bob",B,"--key",successor,"--next-public",path("after-next.pub"))
+# A second ordinary completed workspace represents another legitimate controller
+# of the same subject. Only payment provenance is copied before either onboarding;
+# all membership/key authority is freshly checked by the actual source.
+shutil.copytree(path("join","bob"),path("join","bob-controller"))
+controller_key=path("controller.key")
+shutil.copyfile(successor,controller_key);os.chmod(controller_key,0o600)
+controller_join=wait("bob-controller",B,"--key",controller_key,"--next-public",path("after-next.pub"))
+require("another controller establishes fresh custody for the same admitted subject",
+        controller_join.returncode==0,controller_join.stderr[-300:])
+controller_workspace=path("join","bob-controller","workspace")
+
+# Drop only a real first-trust proof reply. The published workspace and awaiting
+# pin survive; no synthetic outcome or Store mutation is produced by this relay.
+MEMFAULT=path("member-fault.sock");MEMSTOP=threading.Event();MEMDROP=threading.Event();MEMDROP.set()
+MEMCALLS=[];MEMERRORS=[]
+def member_fault_loop(listener):
+    while not MEMSTOP.is_set():
+        try:client,_=listener.accept()
+        except socket.timeout:continue
+        except OSError:
+            if MEMSTOP.is_set():return
+            raise
+        try:
+            with client:
+                client.settimeout(120);frame=read_frame(client)
+                n=struct.unpack("<I",frame[1:5])[0];op=frame[5+n+(32 if frame[0]==2 else 0)]
+                MEMCALLS.append(op)
+                with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as upstream:
+                    upstream.settimeout(120);upstream.connect(SOCKET)
+                    upstream.sendall(struct.pack("<I",len(frame))+frame);reply=read_frame(upstream)
+                number=len(MEMCALLS)
+                open(path(f"member-fault-{number}-op{op}.request.bin"),"wb").write(frame)
+                open(path(f"member-fault-{number}-op{op}.response.bin"),"wb").write(reply)
+                if op==151 and MEMDROP.is_set():MEMDROP.clear();continue
+                client.sendall(struct.pack("<I",len(reply))+reply)
+        except Exception as error:MEMERRORS.append(repr(error))
+member_listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+member_listener.bind(MEMFAULT);member_listener.listen(4);member_listener.settimeout(.2)
+member_thread=threading.Thread(target=member_fault_loop,args=(member_listener,),daemon=True);member_thread.start()
+def stop_member_fault():
+    MEMSTOP.set();member_listener.close();member_thread.join(timeout=3)
+atexit.register(stop_member_fault)
+interrupted=wait("bob",B,"--key",successor,"--next-public",path("after-next.pub"),member_socket=MEMFAULT)
+pending_path=path("join","bob","workspace","receipt-continuity.pending.json")
+initial_pending=json.load(open(pending_path))
+require("interrupted onboarding retains awaiting first trust and exact B custody",
+        interrupted.returncode!=0 and not MEMDROP.is_set() and initial_pending["state"]=="awaiting-first-read"
+        and json.load(open(path("join","bob","workspace-setup.json")))["authorizingKey"]==successor_public,
+        interrupted.stderr[-300:])
+rotation_c=mini("rotate-key","--workspace",controller_workspace,"--next-key",path("after-next.key"))
+require("ordinary admitted owner rotates B to C while the first workspace is unfinished",
+        rotation_c.returncode==0,rotation_c.stderr[-300:] or rotation_c.stdout[-250:])
+c_key=path("current-c.key");d_pub=path("committed-d.pub")
+shutil.copyfile(controller_key,c_key);os.chmod(c_key,0o600)
+shutil.copyfile(controller_key+".next.pub",d_pub);os.chmod(d_pub,0o600)
+
+# Physical crash injection only: after the real admitted transition renames its
+# workspace manifest, exit before setup/selection publication. Host and Store
+# remain the qualified binaries; every source reply above is retained unchanged.
+crash_source=path("crash-publication.c");crash_lib=path("crash-publication.so")
+open(crash_source,"w").write(r'''#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+int rename(const char *a,const char *b) {
+  int (*real)(const char*,const char*)=dlsym(RTLD_NEXT,"rename");
+  int result=real(a,b); const char *root=getenv("MINI_TEST_RECOVERY_DIR");
+  if (!result && root) {
+    char target[4096],pointer[4096],bytes[4096];
+    snprintf(target,sizeof target,"%s/workspace/workspace.json",root);
+    snprintf(pointer,sizeof pointer,"%s/paid-onboarding-recovery.json",root);
+    if (!strcmp(b,target)) {
+      FILE *f=fopen(pointer,"r");
+      if(f){size_t n=fread(bytes,1,sizeof bytes-1,f);bytes[n]=0;fclose(f);
+        if(strstr(bytes,"\"complete\": false"))_exit(97);}
+    }
+  }
+  return result;
+}
+''')
+run(["cc","-shared","-fPIC","-O2",crash_source,"-ldl","-o",crash_lib],check=True)
+crash_env=dict(os.environ,LD_PRELOAD=crash_lib,MINI_TEST_RECOVERY_DIR=path("join","bob"))
+cut=wait("bob",B,"--key",c_key,"--next-public",d_pub,member_socket=MEMFAULT,extra_env=crash_env)
+active_path=path("join","bob","paid-onboarding-recovery.json")
+active=json.load(open(active_path));first_candidate=json.load(open(pending_path))
+require("admitted C recovery crashes after manifest publication with exact journal retained",
+        cut.returncode==97 and active["complete"]==False and first_candidate["state"]=="complete"
+        and json.load(open(path("join","bob","workspace","workspace.json")))["key"]==c_key
+        and json.load(open(path("join","bob","workspace-setup.json")))["authorizingKey"]==successor_public,
+        {"exit":cut.returncode,"pointer":active,"error":cut.stderr[-220:]})
+rotation_d=mini("rotate-key","--workspace",controller_workspace,"--next-key",path("after-next.key"))
+require("ordinary controller rotates C to D after the admitted local C cut",
+        rotation_d.returncode==0,rotation_d.stderr[-300:] or rotation_d.stdout[-250:])
+stale_retry=wait("bob",B,"--key",c_key,"--next-public",d_pub,member_socket=MEMFAULT)
+require("exact C publication finishes before fresh stale C authority is refused",
+        stale_retry.returncode!=0 and json.load(open(active_path))["complete"]==True
+        and json.load(open(path("join","bob","workspace-setup.json")))["key"]==c_key
+        and json.load(open(pending_path))==first_candidate,stale_retry.stderr[-300:])
+current_key=path("current-d.key")
+shutil.copyfile(controller_key,current_key);os.chmod(current_key,0o600)
+current_public=nacl.signing.SigningKey(open(current_key,"rb").read()).verify_key.encode().hex()
+current_next=controller_key+".next.pub"
+bob_join=wait("bob",B,"--key",current_key,"--next-public",current_next,member_socket=MEMFAULT)
 require("accepted pending claim joins with source-checked rotated custody and original stable identity",
         bob_join.returncode==0 and os.path.exists(path("join","bob","workspace","workspace.json")),
         bob_join.stderr[-400:] or bob_join.stdout[-300:])
 bob_workspace=json.load(open(path("join","bob","workspace","workspace.json")))
 require("rotated onboarding retains the original payment and actual member authority",
-        bob_workspace["subject"]==bob_ids["subject"] and bob_workspace["key"]==successor
-        and json.load(open(path("join","bob","join.json")))==JB,bob_workspace)
-os.rename(successor,successor+".retired-evidence")
+        bob_workspace["subject"]==bob_ids["subject"] and bob_workspace["key"]==current_key
+        and json.load(open(path("join","bob","join.json")))==JB
+        and json.load(open(pending_path))==first_candidate
+        and len(glob.glob(path("join","bob","paid-custody-*.json")))==2
+        and len(HISTORY)==2 and not MEMERRORS,bob_workspace)
+os.rename(current_key,current_key+".retired-evidence")
 call_mark=len(FAULT_CALLS)
 lookups=[mini(*claim_args("bob","lookup","--operation-record",ACCEPT)) for _ in range(2)]
 well_replayed,bal_replayed=ledger_well()
@@ -515,8 +622,8 @@ renew=source_json(182,{"kind":"purchase","identityKey":JB["miniKey"],"sshKey":JB
     "mode":"renew","weeks":"1","starter":"0","expiryHour":str(int(after["asOf"]["hour"])+1)},"bob-registry-renewal")
 require("post-admission source owner comes from registry with stable subject and rotated key",
         renew["owner"]["identityKey"]==JB["miniKey"]
-        and renew["owner"]["authorizingKey"]==successor_public
-        and renew["owner"]["authorityEpoch"]==QC["owner"]["authorityEpoch"]
+        and renew["owner"]["authorizingKey"]==current_public
+        and int(renew["owner"]["authorityEpoch"])==int(QC["owner"]["authorityEpoch"])+2
         and after["entry"]["subject"]==bob_ids["subject"],renew["owner"])
 require("fault relay generated no result and observed only fixed public paid operations",
         not FAULT_ERRORS,{"ops":FAULT_CALLS,"errors":FAULT_ERRORS})

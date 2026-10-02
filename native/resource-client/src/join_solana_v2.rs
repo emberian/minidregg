@@ -546,6 +546,16 @@ fn check_birth_context(record: &Value, selected: Option<&Path>) -> Result<Option
 }
 /// Onboarding custody can advance while the signed payment stays immutable.
 /// Check current registry authority and NEXT before pinning any workspace setup.
+fn stable_ids(common:&Common,identity:&[u8;32])->Result<Value> {
+    let output=scratch(common)?.join("ids.json");
+    check_pins(common)?;
+    let run=Command::new(&common.host).arg(&common.config).arg("pay-enrol-ids")
+        .arg(hex(identity)).arg(&output).output().map_err(|e|e.to_string())?;
+    check_pins(common)?;
+    same(run.status.success(),"source stable identity derivation failed")?;
+    workspace::bounded_json(&output)
+}
+
 fn onboarding_record(common: &Common, record: &Value, subject: &str,
     selected_key: Option<&Path>, selected_next: Option<&Path>) -> Result<Value> {
     let binding = common.directory.join(format!("onboarding-{}.json",
@@ -579,10 +589,8 @@ fn onboarding_record(common: &Common, record: &Value, subject: &str,
     updated["authorizingKey"] = json!(hex(&daily));
     updated["authorityEpoch"] = current["keyEpoch"].clone();
     updated["nextPublicFile"] = json!(next);
-    let selection = json!({"miniKeyFile":updated["miniKeyFile"],"authorizingKey":updated["authorizingKey"],
-        "authorityEpoch":updated["authorityEpoch"],"nextPublicFile":updated["nextPublicFile"]});
-    if let Some(held) = held { same(held == selection,"onboarding custody differs from retained selection")?; }
-    else { retain_json(&binding,&selection)?; }
+    // The shared paid setup lock owns custody publication. A different current
+    // owner must first prove possession and continue any retained first trust.
     Ok(updated)
 }
 
@@ -598,6 +606,13 @@ fn wait(
 ) -> Result<()> {
     let identity = fixed(field(record, "miniKey")?, "identity")?;
     let recipient = fixed(field(record, "enrolAddress")?, "recipient")?;
+    // An exact admitted custody transition is bookkeeping, so replay precedes
+    // membership/current-owner reads and never asks the old key to sign again.
+    if common.directory.join("paid-onboarding-recovery.json").exists() {
+        let ids = stable_ids(common,&identity)?;
+        crate::paid_onboarding::resume(&common.directory,&record["miniKey"],&ids["subject"],
+            &common.host_sha256,&config_sha256(common))?;
+    }
     let pin = Pin::parse(record["enrolPin"].clone())?;
     metadata(common, &pin)?;
     let locator_file = common.directory.join(format!(
@@ -655,22 +670,7 @@ fn wait(
                             == join_solana::ssh_blob(&fixed(field(record, "sshKey")?, "SSH key")?),
                         "admitted SSH key differs from retained payment",
                     )?;
-                    let dir = scratch(common)?;
-                    let output = dir.join("ids.json");
-                    check_pins(common)?;
-                    let run = Command::new(&common.host)
-                        .arg(&common.config)
-                        .arg("pay-enrol-ids")
-                        .arg(hex(&identity))
-                        .arg(&output)
-                        .output()
-                        .map_err(|e| e.to_string())?;
-                    check_pins(common)?;
-                    same(
-                        run.status.success(),
-                        "source stable identity derivation failed",
-                    )?;
-                    let ids = workspace::bounded_json(&output)?;
+                    let ids = stable_ids(common,&identity)?;
                     same(
                         entry.subject.as_str() == field(&ids, "subject")?
                             && entry.account.as_str() == field(&ids, "account")?,

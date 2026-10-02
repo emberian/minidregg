@@ -767,12 +767,19 @@ fn admitted_workspace(common: &Common, record: &Value, entry: &Value, ids: &Valu
     if !pin.exists() && common.directory.join("workspace").exists() {
         return Err("workspace already exists without a retained paid setup; refusing to adopt it".into());
     }
+    if record.get("type").and_then(Value::as_str)==Some("minidregg-join-solana-v2") {
+        crate::paid_onboarding::reconcile(&common.directory,record,&setup,&first_ref,|staged| {
+            paid_workspace_init(common,staged,&key_path,field(ids,"subject")?,
+                &common.directory.join("namespace"),
+                record.get("nextPublicFile").and_then(Value::as_str).map(Path::new),Some(&first_ref))
+        })?;
+    }
     if pin.exists() {
         if workspace::bounded_json(&pin)? != setup {
             return Err("paid workspace setup differs from retained deployment, identity, or birth context".into());
         }
     } else {
-        workspace::private_file(&pin, &serde_json::to_vec_pretty(&setup).map_err(|e|e.to_string())?)?;
+        workspace::replace_private_file(&pin, &serde_json::to_vec_pretty(&setup).map_err(|e|e.to_string())?)?;
     }
     let root = common.directory.join("workspace");
     let namespace = common.directory.join("namespace");

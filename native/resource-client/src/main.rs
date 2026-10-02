@@ -101,6 +101,7 @@ mod pay_status;
 mod pay_claim;
 #[cfg(unix)]
 mod paid_context;
+mod paid_onboarding;
 #[cfg(unix)]
 mod enrollment_bootstrap;
 #[cfg(unix)]
