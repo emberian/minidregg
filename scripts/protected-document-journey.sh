@@ -86,9 +86,10 @@ def load(p): return json.loads(pathlib.Path(p).read_text())
 def raw(v): return {x['id']: x for x in v['view']['cell']['entries'] if x['type']=='atom'}
 def opened(v): return {x['id']: x for x in v['openedEntries'] if x['type']=='atom'}
 def epoch(a):
-    b=bytes.fromhex(a['payload']); f=b'MINI/PROTECTED-DOCUMENT-ATOM/v1'
+    assert a['kind']['type']=='sealedObject' and a['payload']=='', 'atom is not an authored protected fragment'
+    b=bytes.fromhex(a['kind']['fragment']['wrapping']); f=b'MINI/PROTECTED-AUTHORED-WRAP/v1'
     assert b.startswith(f), 'atom is not protected ciphertext'
-    start=len(f)+64; msg=b'MINI/OBJECT-MESSAGE/v1'
+    start=len(f)+32; msg=b'MINI/OBJECT-MESSAGE/v1'
     assert b[start:].startswith(msg), 'wrong protected message frame'
     start+=len(msg)+32
     return int.from_bytes(b[start:start+8], 'big')
@@ -115,7 +116,12 @@ elif mode=='shared':
         private=a.get('private'); value=private.get('text') if isinstance(private,dict) else None
         if value in ('PROTECTED-DOCS-first','PROTECTED-DOCS-second'):
             assert epoch(new[a['id']])==target, 'current text was not rekeyed'
-            assert old[a['id']]['payload']!=new[a['id']]['payload'], 'ciphertext did not rotate'
+            prior=old[a['id']];current=new[a['id']]
+            for key in ('document','payload','createdBy','createdAt','revision','tombstonedAt'):
+                assert prior[key]==current[key], f'atom semantic field changed: {key}'
+            for key in ('ciphertext','author','operation'):
+                assert prior['kind']['fragment'][key]==current['kind']['fragment'][key], f'authored atom changed: {key}'
+            assert prior['kind']['fragment']['wrapping']!=current['kind']['fragment']['wrapping'], 'key wrapping did not rotate'
 elif mode=='annotations':
     before,after=map(load,args[:2]);wanted=args[2]
     def annotations(v, projection=False):
@@ -126,13 +132,26 @@ elif mode=='annotations':
     aid=matches[0];a,b=old[aid],new[aid]
     for key in ('author','operation','anchor','tombstonedAt'):
         assert a[key]==b[key], f'annotation origin changed: {key}'
-    assert a['body']['ciphertext']==b['body']['ciphertext'], 'authored ciphertext was resealed'
-    assert a['body']['wrapping']!=b['body']['wrapping'], 'annotation key wrapping did not rotate'
+    assert a['body']['fragment']['ciphertext']==b['body']['fragment']['ciphertext'], 'authored ciphertext was resealed'
+    assert a['body']['fragment']['wrapping']!=b['body']['fragment']['wrapping'], 'annotation key wrapping did not rotate'
     assert annotations(after,True)[aid]['private']['text']==wanted, 'legitimate member cannot open old comment'
-elif mode=='annotation-stale':
+elif mode=='annotation-fresh' or mode=='annotation-stale':
     view=load(args[0]);wanted=args[1]
     matches=[a for a in view['openedEntries'] if a['type']=='annotation' and isinstance(a.get('private'),dict) and a['private'].get('text')==wanted]
-    assert len(matches)==1 and matches[0]['fresh'] is False, 'historical anchor was silently rebased'
+    assert len(matches)==1 and matches[0]['fresh'] is (mode=='annotation-fresh'), 'semantic comment freshness differs'
+elif mode=='custody':
+    before,after=map(load,args);old,new=raw(before),raw(after)
+    changed=0
+    assert old.keys()==new.keys(), 'custody changed atom identities'
+    for aid,prior in old.items():
+        current=new[aid]
+        for key in ('document','payload','createdBy','createdAt','revision','tombstonedAt'):
+            assert prior[key]==current[key], f'custody changed semantic atom field: {key}'
+        if prior['kind']['type']=='sealedObject':
+            for key in ('ciphertext','author','operation'):
+                assert prior['kind']['fragment'][key]==current['kind']['fragment'][key], f'authored atom changed: {key}'
+            changed+=prior['kind']['fragment']['wrapping']!=current['kind']['fragment']['wrapping']
+    assert changed>0, 'no current atom wrapping rotated'
 elif mode=='same-atoms':
     assert raw(load(args[0]))==raw(load(args[1])), 'refused write changed source atoms'
 elif mode=='rotation':
@@ -189,7 +208,7 @@ check 'shared current atoms use new epoch' python3 "$SD/assert.py" shared \
 check 'new member opens old authored comment without resealing it' python3 "$SD/assert.py" annotations \
   "$SD/before-share-seen.json" "$SD/member-shared-seen.json" PROTECTED-DOCS-owner-comment
 ok member "doc show $DOC"; check 'comment appears in member rendered view' grep -F PROTECTED-DOCS-owner-comment "$OUT"
-check 'current atom rekey retains original comment anchor with honest stale marker' python3 "$SD/assert.py" annotation-stale \
+check 'key maintenance retains original comment anchor and freshness' python3 "$SD/assert.py" annotation-fresh \
   "$SD/member-shared-seen.json" PROTECTED-DOCS-owner-comment
 check 'new member cannot open untouched detached history' python3 "$SD/assert.py" detached \
   "$SD/seed-seen.json" "$SD/member-shared-seen.json" PROTECTED-DOCS-detached-history member
@@ -198,7 +217,7 @@ pull member "$MEMBER_HOME/requests/pd-edit.md"
 printf 'PROTECTED-DOCS-member-first\nPROTECTED-DOCS-second\n' >"$MEMBER_HOME/requests/pd-edit.md"
 ok member "doc push pd-member-edit $DOC @pd-edit.md"
 pull owner "$SD/owner-after-member.txt"; seen owner "$SD/owner-after-member-seen.json"
-check 'text editing preserves readable comment and original stale anchor' python3 "$SD/assert.py" annotation-stale \
+check 'genuine text editing preserves original comment anchor with honest stale marker' python3 "$SD/assert.py" annotation-stale \
   "$SD/owner-after-member-seen.json" PROTECTED-DOCS-owner-comment
 pull member "$SD/member-comment-anchor.txt"
 ok member "doc annotate pd-member-comment $DOC 2 PROTECTED-DOCS-member-comment"
@@ -251,7 +270,9 @@ ok owner "doc membership-recover pd-cut $DOC"
 ok owner "doc epoch-export $DOC @pd-current-epoch.json"
 check 'coordinated revocation advances epoch' python3 "$SD/assert.py" rotation \
   "$OWNER_HOME/requests/pd-shared-epoch.json" "$OWNER_HOME/requests/pd-current-epoch.json"
-pull owner "$SD/rotated.txt"
+pull owner "$SD/rotated.txt"; seen owner "$SD/rotated-seen.json"
+check 'revoke custody preserves semantic revisions and authored atom payloads' python3 "$SD/assert.py" custody \
+  "$SD/before-blocked-seen.json" "$SD/rotated-seen.json"
 ok owner "doc edit pd-post-cut $DOC 2 PROTECTED-DOCS-owner-after-cut"
 ok owner 'submit pd-post-cut'
 pull owner "$SD/owner-final.txt"; seen owner "$SD/owner-final-seen.json"

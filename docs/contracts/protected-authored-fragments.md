@@ -1,10 +1,11 @@
-# Protected authored annotation fragments
+# Protected authored fragments
 
 A comment is authored content. Adding or removing a document member must not
 reattribute every comment to the membership administrator, or permit that
 administrator to substitute a different body under an earlier author's name.
 
-`AnnotationBody.sealed` separates immutable signed ciphertext from encrypted
+Shared `AuthoredFragment`, used by `AnnotationBody.sealed` and
+`AtomKind.sealedObject`, separates immutable signed ciphertext from encrypted
 fragment-key wrapping. The original annotation author, operation, document,
 anchor and ciphertext stay unchanged. `rewrapAnnotation` accepts the exact
 canonical complete prior record, refuses retired/nonsealed records, and changes
@@ -38,24 +39,54 @@ resurrect a deleted or replaced record. Historical ciphertext and wrappers remai
 in admitted history. Historical key possession does not replace current read
 entitlement, and revocation cannot erase already disclosed plaintext or keys.
 
-The existing protected atom path still reseals placed text through `editAtom`
-on membership changes. This advances atom revisions even when text is unchanged,
-so an immutable comment correctly becomes stale rather than being silently
-reanchored. Preserving freshness through custody-only text rotation requires the
-same typed immutable-fragment/key-wrapper separation for atoms. The current
-annotation work does not assert that key rotation leaves atom revision unchanged.
+Protected text stores its entire authored fragment in the typed sealed atom
+kind; its outer payload must be empty, checked by the source create/edit path.
+Atom birth attribution remains in `createdBy`/`createdAt`. Fragment `author` and
+`operation` identify the latest genuine semantic edit, normalized from the
+receiving actor and operation. Initial wrapping gets the same provenance.
+`rewrapAtom` requires the complete exact prior record and preserves its entire
+semantic identity: document, schema, original ciphertext and fragment origin,
+outer payload, birth, revision and death. Only wrapping and maintenance provenance
+change. It refuses retired or unprotected records. A genuine edit creates a new
+immutable fragment and advances the atom revision; a tombstone retains the
+existing authored fragment while recording the semantic retirement.
 
-This changes the annotation record codec to v3, content wire to v6, and content
-mutation grammar to v8. Current deployments use teardown/rebuild. Public inline
+The source `KeepsAt` relation now preserves exact semantic records, omitting
+only key wrapping and its maintenance provenance. Its former full-record equality
+was false for custody-only updates at unchanged revisions. `transclusion_pinned`
+consumes the semantic relation and proves that a pin retains the same authored
+bytes or reports movement. Sealed source rendering projects immutable encrypted
+capsule bytes, never empty outer payload or plaintext. Independent source read,
+source opening and explicit disclosure authority remain required by receiving
+consumers. Maintenance does not rebase any anchor; existing comments and marks
+stay fresh, while genuine edits make their old revisions honestly stale.
+
+Fresh membership recovery emits only source-guarded wrapping changes for authored
+atoms and comments, without plaintext staging or formatting reconstruction.
+Prospective conversion of previously public text still creates a genuinely new
+protected representation and retains its original signed history. Unsupported
+old private formats can remain historical; no legacy migration is a release gate.
+
+High-level edit/push lowering refreshes a retained raw atom guard from its
+fresh authorized signed source only when the complete semantic record is exactly
+equal. The comparison removes only wrapping and wrapping provenance, preserving
+ciphertext, schema, origin, birth, revision and retirement. This happens before
+initial command emission; raw content action guards and uncertain emitted calls
+are never rewritten. A real edit, origin change or deletion retains the old guard
+and gets the ordinary stale refusal. Signed history retains maintenance events;
+semantic document diff does not label a wrapper update as a content edit.
+
+This successor changes atom records to v3, annotation records to v4, content wire
+to v7 and mutation grammar to v9. Current deployments use teardown/rebuild. Public inline
 comments are not silently reattributed by protection or membership recovery;
 these paths refuse unsupported plaintext comments and retain their original
 public history. A separate deliberate conversion contract can preserve that
 public origin if required.
 
 The receiving journey exercises private comment creation, authorized new-member
-reads, immutable authored ciphertext across invitation/revocation, stale anchors,
+reads, immutable authored ciphertext across invitation/revocation, stable maintenance anchors, genuine-edit stale anchors,
 rendered comments and absence of plaintext in persisted source/submitted intents.
-Rust custody tests additionally exercise current-epoch-only recipients, exact
+Rust custody tests exercise both atom and annotation current-epoch-only recipients, exact
 creation/wrapper retries, and wrong anchor/object/tampered-cipher refusals.
 Source proofs describe guarded replacement, preservation of authored fields and
 framing of document text/structure. Those obligations do not replace a successful

@@ -964,7 +964,7 @@ def decodeAnnotationRecord?
     match record.body with
     | .inline bytes => .inline bytes
     | .reference document => .reference document
-    | .sealed ciphertext wrapping _ _ => .sealed ciphertext wrapping
+    | .sealed fragment => .sealed fragment.ciphertext fragment.wrapping
   let decoded := fun target =>
     some { id := id
            author := record.author

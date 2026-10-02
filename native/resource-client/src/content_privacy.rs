@@ -11,6 +11,7 @@ pub(crate) enum Exposure {
     EditText,
     Annotation,
     RewrapAnnotation,
+    RewrapAtom,
     Unsupported,
 }
 
@@ -43,6 +44,7 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "editElement" => (&["type", "element", "revision", "op"], Exposure::Structure),
         "link" => (&["type", "link", "source", "target", "relation"], Exposure::Unsupported),
         "annotate" => (&["type", "annotation", "atom", "revision", "body"], Exposure::Annotation),
+        "rewrapAtom" => (&["type", "atom", "before", "wrapping"], Exposure::RewrapAtom),
         "rewrapAnnotation" => (&["type", "annotation", "before", "wrapping"], Exposure::RewrapAnnotation),
         "transclude" => (&["type", "transclusion", "link", "request"], Exposure::Unsupported),
         "unlink" => (&["type", "link"], Exposure::Unsupported),
@@ -74,7 +76,7 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
             }
             decimal(&op["child"])?;
         }
-        "createAtom" | "editAtom" => decimal(&action["atom"])? ,
+        "createAtom" | "editAtom" | "rewrapAtom" => decimal(&action["atom"])? ,
         "annotate" => {decimal(&action["annotation"])?;decimal(&action["atom"])?;decimal(&action["revision"])?;}
         "rewrapAnnotation" => decimal(&action["annotation"])? ,
         _ => {}

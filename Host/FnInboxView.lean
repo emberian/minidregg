@@ -94,6 +94,11 @@ private def textPayloadJson (kind : Minidregg.Theory.Hyperdocument.AtomKind)
   | .inlineObject schema => Json.mkObj <| base ++
       [("encoding", toJson "hex"), ("schema", number schema.value),
        ("bytes", hex payload)]
+  | .sealedObject schema fragment => Json.mkObj
+      [("exactBytes", number (fragment.ciphertext.length + fragment.wrapping.length)),
+       ("trust", toJson "untrusted encrypted source bytes"), ("encoding", toJson "sealed"),
+       ("schema", number schema.value), ("ciphertext", hex fragment.ciphertext),
+       ("wrapping", hex fragment.wrapping)]
 
 private def contentActionJson (action : ContentResource.Action) : Json :=
   match action with

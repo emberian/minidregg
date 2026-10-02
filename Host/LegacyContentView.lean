@@ -73,8 +73,8 @@ def renderReference (source : Option ContentResource.ContentStore)
       else match reference.mode with
       | .snapshot =>
           if atom.revision != reference.revision then empty "moved"
-          else Json.mkObj [("view", .str "snapshot"), ("lines", .arr #[hex atom.payload])]
-      | .live => Json.mkObj [("view", .str "live"), ("lines", .arr #[hex atom.payload]),
+          else Json.mkObj [("view", .str "snapshot"), ("lines", .arr #[hex atom.bodyBytes])]
+      | .live => Json.mkObj [("view", .str "live"), ("lines", .arr #[hex atom.bodyBytes]),
           ("revised", .bool (atom.revision != reference.revision))]
 
 end Minidregg.Host.LegacyContentView

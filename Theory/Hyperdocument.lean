@@ -268,15 +268,48 @@ structure AuthenticatedPrincipal
 
 /-! ## Typed hyperdocument values -/
 
+/-- Authored ciphertext is immutable; access maintenance changes only its key
+wrapping and the authenticated maintenance provenance. -/
+structure AuthoredFragment where
+  ciphertext : List UInt8
+  wrapping : List UInt8
+  author : PrincipalRef
+  operation : OperationId
+  wrappedBy : PrincipalRef
+  wrappedAt : OperationId
+  deriving DecidableEq, Repr
+
+def AuthoredFragment.authored (author : PrincipalRef) (operation : OperationId)
+    (fragment : AuthoredFragment) : AuthoredFragment :=
+  { fragment with
+    author := author
+    operation := operation
+    wrappedBy := author
+    wrappedAt := operation }
+
+def AuthoredFragment.rewrapped (author : PrincipalRef) (operation : OperationId)
+    (wrapping : List UInt8) (fragment : AuthoredFragment) : AuthoredFragment :=
+  { fragment with wrapping := wrapping, wrappedBy := author, wrappedAt := operation }
+
 inductive AtomKind where
   | text
   | inlineObject (schema : Digest)
+  | sealedObject (schema : Digest) (fragment : AuthoredFragment)
   deriving DecidableEq, Repr
 
-/-- `revision` is the operation that last wrote the atom: its creation, then
+def AtomKind.authored (author : PrincipalRef) (operation : OperationId) : AtomKind → AtomKind
+  | .sealedObject schema fragment => .sealedObject schema (fragment.authored author operation)
+  | kind => kind
+
+/-- Sealed data has exactly one durable body representation. -/
+def AtomKind.validPayload (kind : AtomKind) (payload : List UInt8) : Bool :=
+  match kind with | .sealedObject .. => payload.isEmpty | _ => true
+
+/-- `revision` is the operation that last semantically wrote the atom: its creation, then
 each edit.  It is the atom's version: an annotation or quote names the
-revision it read, and a later write moves it, so a pin goes stale by
-comparison, with no copy or digest of the bytes stored beside the pin. -/
+revision it read, and a later semantic edit moves it, so a pin goes stale by
+comparison, with no copy or digest of the bytes stored beside the pin. Key
+wrapping maintenance preserves the revision and the entire semantic record. -/
 structure AtomRecord where
   document : DocumentId
   kind : AtomKind
@@ -286,6 +319,20 @@ structure AtomRecord where
   revision : OperationId
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
+
+/-- Remove only mutable key custody from the semantic record used by pins. -/
+def AtomRecord.semantic (record : AtomRecord) : AtomRecord :=
+  { record with kind := match record.kind with
+    | .sealedObject schema fragment => .sealedObject schema
+        { fragment with wrapping := [], wrappedBy := fragment.author, wrappedAt := fragment.operation }
+    | kind => kind }
+
+/-- The source renderer projects authenticated ciphertext, never plaintext. -/
+def AtomRecord.bodyBytes (record : AtomRecord) : List UInt8 :=
+  match record.kind with | .sealedObject _ fragment => fragment.ciphertext | _ => record.payload
+
+@[simp] theorem AtomRecord.semantic_revision (record : AtomRecord) :
+    record.semantic.revision = record.revision := rfl
 
 structure RunRecord where
   document : DocumentId
@@ -560,8 +607,7 @@ inductive AnnotationBody where
   | reference (document : DocumentId)
   /-- Authored ciphertext stays immutable; custody maintenance replaces only its
   encrypted fragment-key wrapper, with source-owned maintenance provenance. -/
-  | sealed (ciphertext wrapping : List UInt8) (wrappedBy : PrincipalRef)
-      (wrappedAt : OperationId)
+  | sealed (fragment : AuthoredFragment)
   deriving DecidableEq, Repr
 
 structure AnnotationRecord where

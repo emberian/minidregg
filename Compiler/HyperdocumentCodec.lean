@@ -191,13 +191,29 @@ def storedTransclusionRefStream : StreamCodec StoredTransclusionRef :=
 
 /-! ## Content bodies -/
 
+def authoredFragmentStream : StreamCodec AuthoredFragment :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product principalRefStream
+        (StreamCodec.product (identifierStream .v1 .operationIntent)
+          (StreamCodec.product principalRefStream (identifierStream .v1 .operationIntent))))))
+    (fun fragment => (fragment.ciphertext, fragment.wrapping, fragment.author,
+      fragment.operation, fragment.wrappedBy, fragment.wrappedAt))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
+    (by intro fragment; rfl)
+
+
+
 def atomKindTag : AtomKind -> Nat
   | .text => 0
   | .inlineObject _ => 1
+  | .sealedObject .. => 2
 
 def atomKindPayload : AtomKind -> List UInt8
   | .text => []
   | .inlineObject schema => digestStream.encode schema
+  | .sealedObject schema fragment =>
+      (StreamCodec.product digestStream authoredFragmentStream).encode (schema, fragment)
 
 def atomKindStream : StreamCodec AtomKind where
   encode value := StreamCodec.nat.encode (atomKindTag value) ++ atomKindPayload value
@@ -205,6 +221,9 @@ def atomKindStream : StreamCodec AtomKind where
     let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
     match tag with
     | 0 => some (.text, afterTag)
+    | 2 => do
+        let ((schema, fragment), suffix) ← (StreamCodec.product digestStream authoredFragmentStream).decodePrefix afterTag
+        some (.sealedObject schema fragment, suffix)
     | _ => do
         let (schema, suffix) ← digestStream.decodePrefix afterTag
         some (.inlineObject schema, suffix)
@@ -215,6 +234,10 @@ def atomKindStream : StreamCodec AtomKind where
     | inlineObject schema =>
         simp [atomKindTag, atomKindPayload, List.append_assoc,
           StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
+
+    | sealedObject schema fragment =>
+        simp [atomKindTag, atomKindPayload, List.append_assoc,
+          StreamCodec.nat.decodePrefix_encode, StreamCodec.decodePrefix_encode]
 
 def atomRecordStream : StreamCodec AtomRecord :=
   StreamCodec.xmap

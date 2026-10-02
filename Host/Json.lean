@@ -697,6 +697,15 @@ private def principal (path : String) (json : Lean.Json) : Result Hyperdocument.
     ← resourceKind (path ++ ".capabilityKind") (← field path "capabilityKind" obj),
     ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩⟩
 
+private def authoredFragment (path : String) (json : Lean.Json) : Result Hyperdocument.AuthoredFragment := do
+  let obj ← exactObject path ["ciphertext", "wrapping", "author", "operation", "wrappedBy", "wrappedAt"] json
+  pure ⟨← decodeHex (path ++ ".ciphertext") (← field path "ciphertext" obj),
+    ← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj),
+    ← principal (path ++ ".author") (← field path "author" obj),
+    ← identifier (path ++ ".operation") (← field path "operation" obj),
+    ← principal (path ++ ".wrappedBy") (← field path "wrappedBy" obj),
+    ← identifier (path ++ ".wrappedAt") (← field path "wrappedAt" obj)⟩
+
 private def atomKind (path : String) (json : Lean.Json) : Result Hyperdocument.AtomKind := do
   let (tag, _) ← tagged path json
   match tag with
@@ -704,7 +713,11 @@ private def atomKind (path : String) (json : Lean.Json) : Result Hyperdocument.A
   | "inlineObject" =>
       let obj ← exactObject path ["type", "schema"] json
       pure (.inlineObject ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
-  | _ => failAt (path ++ ".type") "expected text or inlineObject"
+  | "sealedObject" =>
+      let obj ← exactObject path ["type", "schema", "fragment"] json
+      pure (.sealedObject ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
+        (← authoredFragment (path ++ ".fragment") (← field path "fragment" obj)))
+  | _ => failAt (path ++ ".type") "expected text, inlineObject or sealedObject"
 
 private def transclusionMode (path : String) (json : Lean.Json) :
     Result Hyperdocument.TransclusionMode := do
@@ -841,14 +854,13 @@ private def markSpec (path : String) (json : Lean.Json) : Result ContentResource
 
 /-- Protected body provenance is normalized by the content receiver. -/
 private def annotationBody (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationBody := do
-  if let .str _ := json then return .inline (← decodeHex path json)
-  let obj ← exactObject path ["type", "ciphertext", "wrapping"] json
-  if (← string (path ++ ".type") (← field path "type" obj)) != "sealed" then
-    failAt path "annotation body must be inline bytes or a sealed fragment"
-  else
-    pure (.sealed (← decodeHex (path ++ ".ciphertext") (← field path "ciphertext" obj))
-      (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj))
-      ⟨⟨0⟩, .object, ⟨0⟩⟩ ⟨⟨0⟩⟩)
+  match json with
+  | .str _ => pure (.inline (← decodeHex path json))
+  | _ =>
+      let obj ← exactObject path ["type", "fragment"] json
+      if (← string (path ++ ".type") (← field path "type" obj)) != "sealed" then
+        failAt path "expected sealed annotation body"
+      else pure (.sealed (← authoredFragment (path ++ ".fragment") (← field path "fragment" obj)))
 
 private def annotationBefore (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationRecord := do
   let bytes ← decodeHex path json
@@ -901,6 +913,11 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
         (← identifier (path ++ ".atom") (← field path "atom" obj))
         (← identifier (path ++ ".revision") (← field path "revision" obj))
         (← annotationBody (path ++ ".body") (← field path "body" obj)))
+  | "rewrapAtom" =>
+      let obj ← exactObject path ["type", "atom", "before", "wrapping"] json
+      pure (.rewrapAtom (← identifier (path ++ ".atom") (← field path "atom" obj))
+        (← atomRecord (path ++ ".before") (← field path "before" obj))
+        (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
   | "rewrapAnnotation" =>
       let obj ← exactObject path ["type", "annotation", "before", "wrapping"] json
       pure (.rewrapAnnotation (← identifier (path ++ ".annotation") (← field path "annotation" obj))
@@ -4514,9 +4531,15 @@ private def principalJson (value : Hyperdocument.PrincipalRef) : Lean.Json := .m
      | .object => "object" | .account => "account" | .program => "program"),
    ("capability", decimal value.capabilityId.value)]
 
+private def authoredFragmentJson (fragment : Hyperdocument.AuthoredFragment) : Lean.Json :=
+  .mkObj [("ciphertext", hexJson fragment.ciphertext), ("wrapping", hexJson fragment.wrapping),
+    ("author", principalJson fragment.author), ("operation", decimal fragment.operation.digest.value),
+    ("wrappedBy", principalJson fragment.wrappedBy), ("wrappedAt", decimal fragment.wrappedAt.digest.value)]
+
 private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
   | .text => .mkObj [("type", "text")]
   | .inlineObject schema => .mkObj [("type", "inlineObject"), ("schema", decimal schema.value)]
+  | .sealedObject schema fragment => .mkObj [("type", "sealedObject"), ("schema", decimal schema.value), ("fragment", authoredFragmentJson fragment)]
 
 private def optionalOperationJson (value : Option Hyperdocument.OperationId) : Lean.Json :=
   value.map (fun id => decimal id.digest.value) |>.getD .null
@@ -4605,9 +4628,7 @@ private def annotationBodyJson : Hyperdocument.AnnotationBody → Lean.Json
   | .inline bytes => .mkObj [("type", "inline"), ("bytes", hexJson bytes)]
   | .reference document => .mkObj [("type", "reference"),
       ("document", decimal document.digest.value)]
-  | .sealed ciphertext wrapping wrappedBy wrappedAt => .mkObj [
-      ("type", "sealed"), ("ciphertext", hexJson ciphertext), ("wrapping", hexJson wrapping),
-      ("wrappedBy", principalJson wrappedBy), ("wrappedAt", decimal wrappedAt.digest.value)]
+  | .sealed fragment => .mkObj [("type", "sealed"), ("fragment", authoredFragmentJson fragment)]
 
 private def markAnchorJson : Hyperdocument.MarkAnchor → Lean.Json
   | .range range => .mkObj [("type", "range"), ("range", stableRangeJson range)]
@@ -4898,7 +4919,7 @@ private def lineValueJson (store : ContentResource.ContentStore) :
   | .atom atom record marks =>
       [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++
       (match record with
-        | some record => [("payload", hexJson record.payload),
+        | some record => [("payload", hexJson record.bodyBytes),
             ("revision", decimal record.revision.digest.value),
             ("createdBy", principalJson record.createdBy), ("struck", .bool record.tombstonedAt.isSome)]
         | none => [("payload", .null)]) ++

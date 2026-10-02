@@ -894,19 +894,29 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
         simp
   | createAtom atom kind payload =>
       simp only [step] at accepted
-      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
-      obtain ⟨_, rfl⟩ := allocate_ok first
-      exact appendLeaf_tree author operation document rfl
-        (tree.set_other _ _ (by simp) (by simp)) rest
+      split at accepted
+      · obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+        obtain ⟨_, rfl⟩ := allocate_ok first
+        exact appendLeaf_tree author operation document rfl
+          (tree.set_other _ _ (by simp) (by simp)) rest
+      · cases accepted
   | editAtom edit =>
       simp only [step] at accepted
-      unfold replaceAtom at accepted
       split at accepted
+      · unfold replaceAtom at accepted
+        split at accepted
+        · cases accepted
+        · split at accepted
+          · cases accepted
+          · cases accepted
+            exact tree.set_other _ _ (by simp) (by simp)
       · cases accepted
-      · split at accepted
-        · cases accepted
-        · cases accepted
-          exact tree.set_other _ _ (by simp) (by simp)
+  | rewrapAtom atom before wrapping =>
+      simp only [step] at accepted
+      obtain ⟨_, schema, fragment, _, post⟩ :=
+        rewrapAtom_guarded_post author operation document progress next atom before wrapping accepted
+      rw [post]
+      exact tree.set_other _ _ (by simp) (by simp)
   | link link source target relation =>
       simp only [step] at accepted
       split at accepted
@@ -927,7 +937,7 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
       · cases accepted
   | rewrapAnnotation annotation before wrapping =>
       simp only [step] at accepted
-      obtain ⟨_, ciphertext, _, _, _, _, post⟩ :=
+      obtain ⟨_, fragment, _, post⟩ :=
         rewrapAnnotation_guarded_post author operation document progress next
           annotation before wrapping accepted
       rw [post]

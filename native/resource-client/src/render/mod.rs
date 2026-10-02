@@ -221,9 +221,9 @@ fn annotation_of(view: &View, entry: &Value) -> Annotation {
         author: author_text(view.me, &entry["author"]),
         fresh: entry["fresh"] == true,
         body,
-        key_wrapping: if entry["body"]["type"]=="sealed" && entry["body"]["wrappedAt"]!=entry["operation"] {
-            Some(format!("key wrapping updated by {} at {}",author_text(view.me,&entry["body"]["wrappedBy"]),
-                entry["body"]["wrappedAt"].as_str().unwrap_or("?")))
+        key_wrapping: if entry["body"]["type"]=="sealed" && entry["body"]["fragment"]["wrappedAt"]!=entry["operation"] {
+            Some(format!("key wrapping updated by {} at {}",author_text(view.me,&entry["body"]["fragment"]["wrappedBy"]),
+                entry["body"]["fragment"]["wrappedAt"].as_str().unwrap_or("?")))
         } else {None},
     }
 }
@@ -374,10 +374,13 @@ pub fn render(view: &View) -> Result<Rendered, String> {
                     if std::str::from_utf8(&bytes).is_ok() { Body::Text { bytes, struck } }
                     else { Body::Object { label: format!("[private binary {}]", size_text(bytes.len())), bytes, struck } }
                 } else { match kind.and_then(|kind| kind["type"].as_str()) {
-                    Some("inlineObject") if kind.is_some_and(crate::workspace::private::is_private_kind) => Body::Object {
+                    Some("inlineObject" | "sealedObject") if kind.is_some_and(crate::workspace::private::is_private_kind) => Body::Object {
                         label: opened.and_then(|entry| entry["private"].as_str()).unwrap_or("[private: locked or unreadable]").to_owned(),
                         bytes,
                         struck,
+                    },
+                    Some("sealedObject") => Body::Object {
+                        label: "[private: unsupported encrypted schema]".to_owned(), bytes, struck,
                     },
                     Some("inlineObject") => Body::Object {
                         label: format!(

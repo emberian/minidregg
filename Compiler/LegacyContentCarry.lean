@@ -141,8 +141,72 @@ def markRecordStream : StreamCodec MarkRecord :=
     (by intro record; rfl)
 
 
-/-- Frozen source-v2 annotation body; target confidential variants are never
-accepted under this legacy wire identity. -/
+/-- Frozen legacy atom kinds; new confidential kinds are never accepted under
+this old wire identity. -/
+inductive AtomKind where
+  | text
+  | inlineObject (schema : Digest)
+  deriving DecidableEq, Repr
+
+structure AtomRecord where
+  document : DocumentId
+  kind : AtomKind
+  payload : List UInt8
+  createdBy : PrincipalRef
+  createdAt : OperationId
+  revision : OperationId
+  tombstonedAt : Option OperationId
+  deriving DecidableEq, Repr
+
+def atomKindTag : AtomKind -> Nat
+  | .text => 0
+  | .inlineObject _ => 1
+
+def atomKindPayload : AtomKind -> List UInt8
+  | .text => []
+  | .inlineObject schema => digestStream.encode schema
+
+def atomKindStream : StreamCodec AtomKind where
+  encode value := StreamCodec.nat.encode (atomKindTag value) ++ atomKindPayload value
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => some (.text, afterTag)
+    | _ => do
+        let (schema, suffix) ← digestStream.decodePrefix afterTag
+        some (.inlineObject schema, suffix)
+  decodePrefix_encode := by
+    intro value suffix
+    cases value with
+    | text => simp [atomKindTag, atomKindPayload, StreamCodec.nat.decodePrefix_encode]
+    | inlineObject schema =>
+        simp [atomKindTag, atomKindPayload, List.append_assoc,
+          StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
+
+def atomRecordStream : StreamCodec AtomRecord :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .document)
+      (StreamCodec.product atomKindStream
+        (StreamCodec.product bytesStream
+          (StreamCodec.product principalRefStream
+            (StreamCodec.product (identifierStream .v1 .operationIntent)
+              (StreamCodec.product (identifierStream .v1 .operationIntent)
+                (StreamCodec.option (identifierStream .v1 .operationIntent))))))))
+    (fun value => (value.document, value.kind, value.payload, value.createdBy,
+      value.createdAt, value.revision, value.tombstonedAt))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
+    (by intro value; rfl)
+
+def AtomRecord.toCurrent (record : AtomRecord) : Hyperdocument.AtomRecord :=
+  { document := record.document
+    kind := match record.kind with | .text => .text | .inlineObject schema => .inlineObject schema
+    payload := record.payload
+    createdBy := record.createdBy
+    createdAt := record.createdAt
+    revision := record.revision
+    tombstonedAt := record.tombstonedAt }
+
 inductive AnnotationBody where
   | inline (bytes : List UInt8)
   | reference (document : DocumentId)
@@ -193,7 +257,7 @@ def Value : Hyperdocument.Namespace → Type
   | .elements => ElementRecord
   | .marks => MarkRecord
   | .documents => Hyperdocument.DocumentRecord
-  | .atoms => Hyperdocument.AtomRecord
+  | .atoms => AtomRecord
   | .runs => Hyperdocument.RunRecord
   | .fields => Hyperdocument.FieldRecord
   | .conflicts => Hyperdocument.ConflictRecord
@@ -215,7 +279,7 @@ def valueStream : (space : Hyperdocument.Namespace) → StreamCodec (Value space
   | .elements => elementRecordStream
   | .marks => markRecordStream
   | .documents => HyperdocumentCell.documentRecordStream
-  | .atoms => HyperdocumentCodec.atomRecordStream
+  | .atoms => atomRecordStream
   | .runs => HyperdocumentCell.runRecordStream
   | .fields => HyperdocumentCell.fieldRecordStream
   | .conflicts => HyperdocumentCell.conflictRecordStream
@@ -430,7 +494,7 @@ private def liftBody (identifier : ElementId) (record : Legacy.ElementRecord)
 private def preserveUnchanged (entry : Entry Legacy.layout) (store : CurrentStore) : CurrentStore :=
   match entry with
   | ⟨⟨.documents, key⟩, value⟩ => store.set ⟨.documents, key⟩ (some value)
-  | ⟨⟨.atoms, key⟩, value⟩ => store.set ⟨.atoms, key⟩ (some value)
+  | ⟨⟨.atoms, key⟩, value⟩ => store.set ⟨.atoms, key⟩ (some value.toCurrent)
   | ⟨⟨.runs, key⟩, value⟩ => store.set ⟨.runs, key⟩ (some value)
   | ⟨⟨.fields, key⟩, value⟩ => store.set ⟨.fields, key⟩ (some value)
   | ⟨⟨.conflicts, key⟩, value⟩ => store.set ⟨.conflicts, key⟩ (some value)
@@ -447,7 +511,7 @@ private def documents (entries : List (Entry Legacy.layout)) : List (DocumentId 
 
 private def atoms (entries : List (Entry Legacy.layout)) : List (AtomId × AtomRecord) :=
   (entries.filterMap fun entry => match entry with
-    | ⟨⟨.atoms, identifier⟩, record⟩ => some (identifier, record)
+    | ⟨⟨.atoms, identifier⟩, record⟩ => some (identifier, record.toCurrent)
     | _ => none).mergeSort (fun left right => decide (left.1.digest.value ≤ right.1.digest.value))
 
 private def elements (entries : List (Entry Legacy.layout)) : List (ElementId × Legacy.ElementRecord) :=

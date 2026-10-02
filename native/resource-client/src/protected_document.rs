@@ -15,6 +15,10 @@ pub(crate) mod members;
 mod rewriting;
 #[path = "protected_annotations.rs"]
 mod annotations;
+#[path = "protected_fragments.rs"]
+mod fragments;
+#[path = "protected_atoms.rs"]
+mod atoms;
 #[path = "protected_document_conversion.rs"]
 mod conversion;
 
@@ -51,6 +55,7 @@ fn decimal(bytes: &[u8]) -> String {
 }
 pub(crate) fn schema() -> String { decimal(&Sha256::digest(FRAME)) }
 pub(crate) fn is_kind(kind: &Value) -> bool {
+    if atoms::is_kind(kind){return true;}
     kind == &json!({"type":"inlineObject","schema":schema()})
 }
 fn atom_operation(object: &[u8;32], atom: &[u8;32], operation: &[u8;32]) -> [u8;32] {
@@ -115,10 +120,10 @@ impl Audience {
         for action in result["actions"].as_array_mut().expect("validated actions") {
             match content_privacy::classify(action)? {
                 Exposure::Structure => {},
+                Exposure::RewrapAtom => atoms::seal(self,action,operation,store,writer)?,
                 Exposure::Annotation | Exposure::RewrapAnnotation => annotations::seal(self,action,operation,store,writer)?,
                 Exposure::Unsupported => return Err("protected document action has no disclosure contract".into()),
                 Exposure::CreateText | Exposure::EditText => {
-                    let atom = nat32(text(action,"atom")?)?;
                     if action["type"] == "editAtom" {
                         let before = &action["before"];
                         let fields = ["document","kind","payload","createdBy","createdAt","revision","tombstonedAt"];
@@ -137,19 +142,36 @@ impl Audience {
                     if action["kind"] != json!({"type":"text"}) && !is_kind(&action["kind"]) {
                         return Err("protected document seals text atoms only".into());
                     }
-                    let context = Context { object:self.anchor.object, epoch:self.anchor.epoch,
-                        transition:self.anchor.transition, law:self.law,
-                        operation:atom_operation(&self.anchor.object,&atom,operation) };
-                    let plain = Zeroizing::new(private::decode_hex(text(action,"payload")?)?);
-                    let cipher = store.prepare(&self.anchor, &context, writer, &plain)?;
-                    let bytes = [FRAME, &atom, operation, &cipher].concat();
-                    action["kind"] = json!({"type":"inlineObject","schema":schema()});
-                    action["payload"] = json!(crate::hex(&bytes));
+                    atoms::seal(self,action,operation,store,writer)?;
                 }
             }
         }
         Ok(result)
     }
+}
+
+/// Exact semantic equality strips only mutable key custody. Raw content actions
+/// retain strict guards; this refresh applies only during high-level authoring
+/// before any command has been emitted or signed.
+pub(crate) fn semantic_atom(record:&Value)->Value {
+    let mut semantic=record.clone();
+    if atoms::is_kind(&semantic["kind"]){
+        if let Some(fragment)=semantic["kind"]["fragment"].as_object_mut(){
+            for key in ["wrapping","wrappedBy","wrappedAt"]{fragment.remove(key);}
+        }
+    }
+    semantic
+}
+pub(crate) fn refresh_document_guards(actions:&mut [Value],current:&[Value])->Result<()> {
+    for action in actions.iter_mut().filter(|a|a["type"]=="editAtom") {
+        if !atoms::is_kind(&action["before"]["kind"]){continue;}
+        let Some(entry)=current.iter().find(|e|e["type"]=="atom"&&e["id"]==action["atom"]) else{continue};
+        let before=super::atom_record(entry)?;
+        if semantic_atom(&before)!=semantic_atom(&action["before"]){continue;}
+        if action["tombstone"]==true{action["kind"]=before["kind"].clone();action["payload"]=before["payload"].clone();}
+        action["before"]=before;
+    }
+    Ok(())
 }
 
 /// Workspace-owned custody uses the same private-file requirements as signing
@@ -269,7 +291,9 @@ pub(crate) fn opened_entries(root:&std::path::Path,reference:&Value,view:&Value)
         }
         if atom["type"]!="atom" || !is_kind(&atom["kind"]) {continue;}
         let opened=store.as_ref().ok_or_else(||"protected document epoch key is not held".to_owned())
-            .and_then(|store|open_atom(super::member(reference,"target")?,text(atom,"id")?,text(atom,"payload")?,store));
+            .and_then(|store|if atoms::is_kind(&atom["kind"]) {
+                atoms::open(super::member(reference,"target")?,atom,store)
+            }else{open_atom(super::member(reference,"target")?,text(atom,"id")?,text(atom,"payload")?,store)});
         atom["private"]=match opened {
             Ok(bytes)=>match String::from_utf8(bytes) {
                 Ok(text)=>json!({"text":text}), Err(error)=>json!({"hex":crate::hex(error.as_bytes())})
@@ -786,7 +810,7 @@ pub(crate) fn reject_fresh_legacy(actions:&Value) -> Result<()> {
         match content_privacy::classify(action)? {
             Exposure::CreateText => return Err("fresh private text requires protected-document audience enrollment; existing data and drafts are retained".into()),
             Exposure::EditText if action["tombstone"] != true => return Err("fresh private text requires protected-document audience enrollment; existing data and drafts are retained".into()),
-            Exposure::Unsupported | Exposure::Annotation | Exposure::RewrapAnnotation => return Err("private document action requires protected-document audience enrollment".into()),
+            Exposure::Unsupported | Exposure::Annotation | Exposure::RewrapAnnotation | Exposure::RewrapAtom => return Err("private document action requires protected-document audience enrollment".into()),
             _ => {}
         }
     }
@@ -861,19 +885,19 @@ mod tests {
         let maintenance=json!([{"type":"rewrapAnnotation","annotation":"12","before":"exact canonical guard", "wrapping":entry["body"]}]);
         let updated=current.seal_actions(&maintenance,&[5;32],&mut original,&SigningKey::from_bytes(&[11;32])).unwrap();
         assert_eq!(updated,current.seal_actions(&maintenance,&[5;32],&mut original,&SigningKey::from_bytes(&[11;32])).unwrap());
-        let mut newest=entry.clone();newest["body"]["wrapping"]=updated["actions"][0]["wrapping"].clone();
-        assert_eq!(newest["body"]["ciphertext"],entry["body"]["ciphertext"]);
+        let mut newest=entry.clone();newest["body"]["fragment"]["wrapping"]=updated["actions"][0]["wrapping"].clone();
+        assert_eq!(newest["body"]["fragment"]["ciphertext"],entry["body"]["fragment"]["ciphertext"]);
         let (reader_root,mut reader)=store();reader.retain(&current.anchor,&[9;32]).unwrap();
         assert!(reader.historical_key(&audience.anchor).is_err());
         assert_eq!(annotations::open("72",&newest,&reader).unwrap(),b"authored comment");
         let mut wrong_anchor=newest.clone();wrong_anchor["anchor"]["revision"]=json!("5");
         assert!(annotations::open("72",&wrong_anchor,&reader).is_err());
         assert!(annotations::open("73",&newest,&reader).is_err());
-        let mut forged=newest.clone();let mut cipher=private::decode_hex(text(&forged["body"],"ciphertext").unwrap()).unwrap();
-        *cipher.last_mut().unwrap()^=1;forged["body"]["ciphertext"]=json!(crate::hex(&cipher));
+        let mut forged=newest.clone();let mut cipher=private::decode_hex(text(&forged["body"]["fragment"],"ciphertext").unwrap()).unwrap();
+        *cipher.last_mut().unwrap()^=1;forged["body"]["fragment"]["ciphertext"]=json!(crate::hex(&cipher));
         assert!(annotations::open("72",&forged,&reader).is_err());
-        let mut broken_wrap=newest.clone();let mut wrap=private::decode_hex(text(&broken_wrap["body"],"wrapping").unwrap()).unwrap();
-        *wrap.last_mut().unwrap()^=1;broken_wrap["body"]["wrapping"]=json!(crate::hex(&wrap));
+        let mut broken_wrap=newest.clone();let mut wrap=private::decode_hex(text(&broken_wrap["body"]["fragment"],"wrapping").unwrap()).unwrap();
+        *wrap.last_mut().unwrap()^=1;broken_wrap["body"]["fragment"]["wrapping"]=json!(crate::hex(&wrap));
         assert_eq!(annotations::epoch(&broken_wrap["body"]).unwrap(),current.anchor.epoch);
         assert!(annotations::open("72",&broken_wrap,&reader).is_err());
         let mut locked=broken_wrap.clone();locked["private"]=json!("[private: annotation epoch is locked or unreadable]");
@@ -885,27 +909,80 @@ mod tests {
     #[test]
     fn protected_atoms_have_distinct_stable_operations_and_historical_context() {
         let (v,c)=source(7,9);let a=Audience::from_checked(&v,&c,"72").unwrap();
-        let (root,mut store)=store();store.retain(&a.anchor,&[8;32]).unwrap();
+        let (root,mut retained)=store();retained.retain(&a.anchor,&[8;32]).unwrap();
         let writer=SigningKey::from_bytes(&[7;32]);
         let actions=json!([
             {"type":"createAtom","atom":"10","kind":{"type":"text"},"payload":crate::hex(b"one")},
             {"type":"createAtom","atom":"11","kind":{"type":"text"},"payload":crate::hex(b"two")}]);
-        let sealed=a.seal_actions(&actions,&[4;32],&mut store,&writer).unwrap();
-        assert_eq!(sealed,a.seal_actions(&actions,&[4;32],&mut store,&writer).unwrap());
-        let first=sealed["actions"][0]["payload"].as_str().unwrap();
-        assert_eq!(open_atom("72","10",first,&store).unwrap(),b"one");
-        assert_eq!(open_atom("72","11",sealed["actions"][1]["payload"].as_str().unwrap(),&store).unwrap(),b"two");
-        assert!(open_atom("73","10",first,&store).is_err());assert!(open_atom("72","11",first,&store).is_err());
-        // Rewriting the unsigned outer address cannot change the signed operation binding.
-        let mut forged=private::decode_hex(first).unwrap();
-        forged[FRAME.len()..FRAME.len()+32].copy_from_slice(&nat32("11").unwrap());
-        assert!(open_atom("72","11",&crate::hex(&forged),&store).is_err());
+        let sealed=a.seal_actions(&actions,&[4;32],&mut retained,&writer).unwrap();
+        assert_eq!(sealed,a.seal_actions(&actions,&[4;32],&mut retained,&writer).unwrap());
+        let entry=|n:usize|json!({"id":actions[n]["atom"],"kind":sealed["actions"][n]["kind"],"payload":""});
+        let first=entry(0);let second=entry(1);
+        assert_eq!(atoms::open("72",&first,&retained).unwrap(),b"one");
+        assert_eq!(atoms::open("72",&second,&retained).unwrap(),b"two");
+        assert!(atoms::open("73",&first,&retained).is_err());
+        let mut wrong_address=first.clone();wrong_address["id"]=json!("11");
+        assert!(atoms::open("72",&wrong_address,&retained).is_err());
         let mut changed=actions.clone();changed[0]["payload"]=json!(crate::hex(b"changed"));
-        assert!(a.seal_actions(&changed,&[4;32],&mut store,&writer).is_err());
+        assert!(a.seal_actions(&changed,&[4;32],&mut retained,&writer).is_err());
         let (newv,newc)=source(8,12);let newer=Audience::from_checked(&newv,&newc,"72").unwrap();
-        store.retain(&newer.anchor,&[9;32]).unwrap();store.reconcile_anchor(&newer.anchor).unwrap();
-        assert_eq!(open_atom("72","10",first,&store).unwrap(),b"one");
-        drop(store);std::fs::remove_dir_all(root).unwrap();
+        retained.retain(&newer.anchor,&[9;32]).unwrap();retained.reconcile_anchor(&newer.anchor).unwrap();
+        assert_eq!(atoms::open("72",&first,&retained).unwrap(),b"one");
+        let before=json!({"document":"72","kind":first["kind"],"payload":"","createdBy":{"subject":"7"},
+            "createdAt":"3","revision":"6","tombstonedAt":null});
+        let maintenance=json!([{"type":"rewrapAtom","atom":"10","before":before,"wrapping":first["kind"]["fragment"]}]);
+        let updated=newer.seal_actions(&maintenance,&[5;32],&mut retained,&SigningKey::from_bytes(&[11;32])).unwrap();
+        assert_eq!(updated,newer.seal_actions(&maintenance,&[5;32],&mut retained,&SigningKey::from_bytes(&[11;32])).unwrap());
+        let mut newest=first.clone();newest["kind"]["fragment"]["wrapping"]=updated["actions"][0]["wrapping"].clone();
+        assert_eq!(newest["kind"]["fragment"]["ciphertext"],first["kind"]["fragment"]["ciphertext"]);
+        let (reader_root,mut reader)=store();reader.retain(&newer.anchor,&[9;32]).unwrap();
+        assert!(reader.historical_key(&a.anchor).is_err());
+        assert_eq!(atoms::open("72",&newest,&reader).unwrap(),b"one");
+        let mut opened=newest.clone();opened["private"]=json!({"text":"one"});
+        assert!(rewriting::planned_atom(&newest,&opened,newer.anchor.epoch).unwrap().is_none());
+        let planned=rewriting::planned_atom(&newest,&opened,newer.anchor.epoch+1).unwrap().unwrap();
+        assert!(planned.get("plaintext").is_none());
+        let full_before=json!({"type":"atom","id":"10","document":"72","kind":newest["kind"],"payload":"", "createdBy":{"subject":"7"},"createdAt":"3","revision":"6","tombstonedAt":null});
+        let plan=json!({"root":"123","atoms":[{"atom":"10","rawBefore":full_before}],"annotations":[]});
+        let request=rewriting::rekey_request("paper",&plan).unwrap();
+        assert_eq!(request["targets"][0]["payload"]["actions"][0]["type"],"rewrapAtom");
+        assert!(request["targets"][0]["payload"]["actions"][0].get("payload").is_none());
+        let mut tampered=newest.clone();let mut wrap=private::decode_hex(text(&tampered["kind"]["fragment"],"wrapping").unwrap()).unwrap();
+        *wrap.last_mut().unwrap()^=1;tampered["kind"]["fragment"]["wrapping"]=json!(crate::hex(&wrap));
+        assert_eq!(atoms::epoch(&tampered["kind"]).unwrap(),newer.anchor.epoch);
+        assert!(atoms::open("72",&tampered,&reader).is_err());
+        let mut locked=tampered.clone();locked["private"]=json!("[private: locked]");
+        assert!(rewriting::planned_atom(&tampered,&locked,newer.anchor.epoch).is_err());
+        let mut wrong_wrap=newest.clone();wrong_wrap["kind"]["fragment"]["wrapping"]=second["kind"]["fragment"]["wrapping"].clone();
+        assert!(atoms::open("72",&wrong_wrap,&reader).is_err());
+        drop(retained);drop(reader);std::fs::remove_dir_all(root).unwrap();std::fs::remove_dir_all(reader_root).unwrap();
+    }
+    #[test]
+    fn document_guard_refresh_accepts_only_exact_semantics_before_emission() {
+        let origin=json!({"subject":"7","capabilityKind":"object","capability":"1"});
+        let record=json!({"document":"72","kind":{"type":"sealedObject","schema":atoms::schema(),"fragment":{
+            "ciphertext":"signed authored body","wrapping":"old wrap","author":origin,"operation":"6","wrappedBy":origin,"wrappedAt":"6"}},
+            "payload":"","createdBy":origin,"createdAt":"3","revision":"6","tombstonedAt":null});
+        let mut current=record.clone();current["kind"]["fragment"]["wrapping"]=json!("new wrap");
+        current["kind"]["fragment"]["wrappedBy"]["subject"]=json!("9");current["kind"]["fragment"]["wrappedAt"]=json!("8");
+        let mut entry=current.clone();entry["type"]=json!("atom");entry["id"]=json!("10");
+        let original=json!({"type":"editAtom","atom":"10","before":record,"kind":record["kind"],"payload":"new text","tombstone":false});
+        let mut actions=vec![original.clone()];refresh_document_guards(&mut actions,&[entry.clone()]).unwrap();
+        assert_eq!(actions[0]["before"],current);assert_eq!(actions[0]["payload"],"new text");
+        // Every immutable field, semantic revision and retirement remain part of the comparison.
+        for (key,value) in [("ciphertext","forged"),("author","forged"),("operation","7")] {
+            let mut changed=entry.clone();changed["kind"]["fragment"][key]=json!(value);
+            let mut actions=vec![original.clone()];refresh_document_guards(&mut actions,&[changed]).unwrap();
+            assert_eq!(actions[0]["before"],record);
+        }
+        for (key,value) in [("document","73"),("revision","7"),("tombstonedAt","8")] {
+            let mut changed=entry.clone();changed[key]=json!(value);
+            let mut actions=vec![original.clone()];refresh_document_guards(&mut actions,&[changed]).unwrap();
+            assert_eq!(actions[0]["before"],record);
+        }
+        let mut tombstone=original;tombstone["tombstone"]=json!(true);tombstone["payload"]=json!("");
+        let mut actions=vec![tombstone];refresh_document_guards(&mut actions,&[entry]).unwrap();
+        assert_eq!(actions[0]["kind"],current["kind"]);assert_eq!(actions[0]["before"],current);
     }
     #[test]
     fn legacy_confidentiality_cannot_be_upgraded_by_an_epoch_hint() {
@@ -939,7 +1016,7 @@ mod tests {
         let reopened=custody(&root).unwrap();
         assert_eq!(&*reopened.historical_key(&old.anchor).unwrap(),&[8;32]);
         assert_eq!(&*reopened.historical_key(&current.anchor).unwrap(),&[9;32]);
-        assert_eq!(open_atom("72","10",sealed["actions"][0]["payload"].as_str().unwrap(),&reopened).unwrap(),b"retained history");
+        assert_eq!(atoms::open("72",&json!({"id":"10","kind":sealed["actions"][0]["kind"],"payload":""}),&reopened).unwrap(),b"retained history");
         drop(reopened);std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

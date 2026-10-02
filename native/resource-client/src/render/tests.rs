@@ -266,11 +266,21 @@ fn opened_binary_comment_and_wrapper_provenance_are_distinct_from_locked_body() 
     let document=json!({});let entries=Vec::new();let names=BTreeMap::new();let sources=BTreeMap::new();
     let view=View{document:&document,entries:&entries,names:&names,sources:&sources,me:"7"};
     let entry=json!({"type":"annotation","id":"12","author":{"subject":"7"},"operation":"4","fresh":false,
-        "body":{"type":"sealed","ciphertext":"opaque","wrapping":"opaque","wrappedBy":{"subject":"8"},"wrappedAt":"5"},
+        "body":{"type":"sealed","fragment":{"ciphertext":"opaque","wrapping":"opaque","wrappedBy":{"subject":"8"},"wrappedAt":"5"}},
         "private":{"hex":"ff00"}});
     let rendered=annotation_of(&view,&entry);
     assert_eq!(rendered.author,"you");assert_eq!(rendered.body,"[binary annotation: ff00]");
     assert_eq!(rendered.key_wrapping.as_deref(),Some("key wrapping updated by subject 8 at 5"));
     let mut locked=entry;locked["private"]=json!("[private: annotation epoch is locked or unreadable]");
     assert!(annotation_of(&view,&locked).body.contains("locked"));
+}
+
+#[test]
+fn unknown_sealed_atom_schema_never_becomes_unauthenticated_text() {
+    let document=json!({"root":"1","order":[{"element":"2","atom":"2","kind":"atom","payload":"736563726574","struck":false,"parent":"1"}]});
+    let entries=vec![json!({"type":"atom","id":"2","kind":{"type":"sealedObject","schema":"unsupported","fragment":{}},"payload":""})];
+    let rendered=render_with(&document,&entries,&BTreeMap::new());
+    assert!(matches!(rendered.lines[0].body,Body::Object{..}));
+    assert!(rendered.text().contains("unsupported encrypted schema"));
+    assert!(!rendered.text().contains("secret"));
 }

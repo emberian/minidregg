@@ -252,6 +252,7 @@ inductive Action where
   /-- A new atom, and in a document its `atom` leaf, appended to the root. -/
   | createAtom (atom : AtomId) (kind : AtomKind) (payload : List UInt8)
   | editAtom (edit : EditAtomPayload)
+  | rewrapAtom (atom : AtomId) (before : AtomRecord) (wrapping : List UInt8)
   | link (link : LinkId) (source : Option StableRange) (target : LinkTarget)
       (relation : Digest)
   | createRun (runId : RunId) (atoms : List AtomId)
@@ -317,12 +318,16 @@ def originalActionWireStream : StreamCodec OriginalActionWire :=
                         (StreamCodec.product (identifierStream .v1 .mark) markRequestStream)
                         (identifierStream .v1 .mark)))))))))))
 
-abbrev ActionWire := Sum OriginalActionWire (AnnotationId × AnnotationRecord × List UInt8)
+abbrev ActionWire := Sum OriginalActionWire
+  (Sum (AnnotationId × AnnotationRecord × List UInt8) (AtomId × AtomRecord × List UInt8))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum originalActionWireStream
-    (StreamCodec.product (identifierStream .v1 .annotation)
-      (StreamCodec.product HyperdocumentCell.annotationRecordStream bytesStream))
+    (StreamCodec.sum
+      (StreamCodec.product (identifierStream .v1 .annotation)
+        (StreamCodec.product HyperdocumentCell.annotationRecordStream bytesStream))
+      (StreamCodec.product (identifierStream .v1 .atom)
+        (StreamCodec.product atomRecordStream bytesStream)))
 
 def Action.toWire : Action → ActionWire
   | .createDocument root schema => .inl (.inl (root, schema))
@@ -341,7 +346,8 @@ def Action.toWire : Action → ActionWire
   | .mark markId request =>
       .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request))))))))))))
   | .unmark markId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId))))))))))))
-  | .rewrapAnnotation annotation before wrapping => .inr (annotation, before, wrapping)
+  | .rewrapAnnotation annotation before wrapping => .inr (.inl (annotation, before, wrapping))
+  | .rewrapAtom atom before wrapping => .inr (.inr (atom, before, wrapping))
 
 def Action.ofWire : ActionWire → Action
   | .inl (.inl (root, schema)) => .createDocument root schema
@@ -360,7 +366,8 @@ def Action.ofWire : ActionWire → Action
   | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request)))))))))))) =>
       .mark markId request
   | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId)))))))))))) => .unmark markId
-  | .inr (annotation, before, wrapping) => .rewrapAnnotation annotation before wrapping
+  | .inr (.inl (annotation, before, wrapping)) => .rewrapAnnotation annotation before wrapping
+  | .inr (.inr (atom, before, wrapping)) => .rewrapAtom atom before wrapping
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -377,7 +384,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 8
+def commandVersion : Nat := 9
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -405,16 +412,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 through version-7 command frames refuse to decode. -/
+/-- Version-1 through version-8 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
-    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7 ∨ version = 8)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -424,6 +431,7 @@ inductive Reject where
   | duplicateAddress
   | staleAtom
   | staleAnnotation
+  | unprotectedAtom
   | unprotectedAnnotation
   | wrongDocument
   | invalidPatch
@@ -495,11 +503,52 @@ def rewrapAnnotation (author : PrincipalRef) (operation : OperationId)
   else if (show Option AnnotationRecord from progress.1 ⟨.annotations, annotation⟩) ≠ some before then
     .error .staleAnnotation
   else match before.body with
-    | .sealed ciphertext _ _ _ =>
-        let after := { before with body := .sealed ciphertext wrapping author operation }
+    | .sealed fragment =>
+        let after := { before with body := .sealed (fragment.rewrapped author operation wrapping) }
         .ok (progress.1.set ⟨.annotations, annotation⟩ (some after),
           progress.2 ++ [.write .annotations annotation before after])
     | _ => .error .unprotectedAnnotation
+
+/-- Key access maintenance cannot advance an atom's semantic revision. -/
+def rewrapAtom (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress : Progress) (atom : AtomId)
+    (before : AtomRecord) (wrapping : List UInt8) : Except Reject Progress :=
+  if before.document ≠ document ∨ before.tombstonedAt ≠ none ∨ before.kind.validPayload before.payload ≠ true then .error .wrongDocument
+  else if (show Option AtomRecord from progress.1 ⟨.atoms, atom⟩) ≠ some before then
+    .error .staleAtom
+  else match before.kind with
+    | .sealedObject schema fragment =>
+        let after := { before with kind := .sealedObject schema (fragment.rewrapped author operation wrapping) }
+        .ok (progress.1.set ⟨.atoms, atom⟩ (some after),
+          progress.2 ++ [.write .atoms atom before after])
+    | _ => .error .unprotectedAtom
+
+/-- Genuine edits normalize semantic author attribution. Retirement retains
+its exact authored payload instead of assigning the tombstoner authorship. -/
+def sourceEditAtomRecord (author : PrincipalRef) (operation : OperationId)
+    (edit : EditAtomPayload) : AtomRecord :=
+  editAtomRecord operation { edit with
+    kind := if edit.tombstone then edit.before.kind else edit.kind.authored author operation
+    payload := if edit.tombstone then edit.before.payload else edit.payload }
+
+@[simp] theorem sourceEditAtomRecord_revision (author : PrincipalRef)
+    (operation : OperationId) (edit : EditAtomPayload) :
+    (sourceEditAtomRecord author operation edit).revision = operation := rfl
+
+theorem sourceEditAtomRecord_authored (author : PrincipalRef) (operation : OperationId)
+    (edit : EditAtomPayload) (schema : Digest) (fragment : AuthoredFragment)
+    (fresh : edit.tombstone = false) (sealed : edit.kind = .sealedObject schema fragment) :
+    (sourceEditAtomRecord author operation edit).kind =
+      .sealedObject schema (fragment.authored author operation) := by
+  simp [sourceEditAtomRecord, editAtomRecord, fresh, sealed, AtomKind.authored]
+
+/-- Even a raw tombstone carrying forged ciphertext/provenance retires the
+exact existing payload; caller replacement fields cannot reattribute it. -/
+theorem sourceEditAtomRecord_retirement_preserves_authorship (author : PrincipalRef)
+    (operation : OperationId) (edit : EditAtomPayload) (retired : edit.tombstone = true) :
+    (sourceEditAtomRecord author operation edit).kind = edit.before.kind ∧
+      (sourceEditAtomRecord author operation edit).payload = edit.before.payload := by
+  simp [sourceEditAtomRecord, editAtomRecord, retired]
 
 /-- Retire a live link of `document`: the exact stored record guards the write,
 and only `tombstonedAt` changes. -/
@@ -569,7 +618,7 @@ def cellReaders : Digest := ⟨0⟩
 def annotationRecord (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (atom : AtomId) (revision : OperationId) (body : AnnotationBody) : AnnotationRecord :=
   let body := match body with
-    | .sealed ciphertext wrapping _ _ => .sealed ciphertext wrapping author operation
+    | .sealed fragment => .sealed (fragment.authored author operation)
     | body => body
   ⟨document, .atom atom revision, body, author, operation, cellReaders, none⟩
 
@@ -910,11 +959,18 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
   | .createDocument root schema => do
       let next ← allocate progress .documents document ⟨root, schema, author, operation⟩
       allocate next .elements root ⟨document, none, .container [], author, operation, operation, none⟩
-  | .createAtom atom kind payload => do
-      let next ← allocate progress .atoms atom ⟨document, kind, payload, author, operation, operation, none⟩
-      appendLeaf author operation document next (atomElement atom) (.atom atom)
+  | .createAtom atom kind payload =>
+      if kind.validPayload payload then do
+        let next ← allocate progress .atoms atom
+          ⟨document, kind.authored author operation, payload, author, operation, operation, none⟩
+        appendLeaf author operation document next (atomElement atom) (.atom atom)
+      else .error .invalidPatch
   | .editAtom edit =>
-      replaceAtom document progress edit.atomId edit.before (editAtomRecord operation edit)
+      if (sourceEditAtomRecord author operation edit).kind.validPayload
+          (sourceEditAtomRecord author operation edit).payload then
+        replaceAtom document progress edit.atomId edit.before (sourceEditAtomRecord author operation edit)
+      else .error .invalidPatch
+  | .rewrapAtom atom before wrapping => rewrapAtom author operation document progress atom before wrapping
   | .link link source target relation =>
       if source.all (rangeCheck progress.1 document) then
         allocate progress .links link
@@ -1289,6 +1345,13 @@ theorem unmarkStep_markStep {author : PrincipalRef} {operation : OperationId}
   exact first.trans (retireMarkLink_markStep rest)
 
 
+/-- A raw request cannot hide a second body beside a typed sealed fragment. -/
+theorem createAtom_sealed_nonempty_refused (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (context : Context) (progress : Progress) (atom : AtomId)
+    (schema : Digest) (fragment : AuthoredFragment) (byte : UInt8) (rest : List UInt8) :
+    step author operation document context progress
+      (.createAtom atom (.sealedObject schema fragment) (byte :: rest)) = .error .invalidPatch := rfl
+
 theorem step_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (progress next : Progress) (action : Action)
     (holds : Executes pre progress)
@@ -1302,11 +1365,30 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
         (allocate_executes pre progress middle _ _ _ holds first) rest
   | createAtom atom kind payload =>
       simp only [step] at accepted
-      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
-      exact (appendLeaf_step author operation document rest).1 pre
-        (allocate_executes pre progress middle _ _ _ holds first)
+      split at accepted
+      · obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+        exact (appendLeaf_step author operation document rest).1 pre
+          (allocate_executes pre progress middle _ _ _ holds first)
+      · cases accepted
   | editAtom edit =>
-      exact replaceAtom_executes pre document progress next _ _ _ holds accepted
+      simp only [step] at accepted
+      split at accepted
+      · exact replaceAtom_executes pre document progress next _ _ _ holds accepted
+      · cases accepted
+  | rewrapAtom atom before wrapping =>
+      simp only [step, rewrapAtom] at accepted
+      split at accepted
+      · cases accepted
+      · split at accepted
+        · cases accepted
+        · rename_i present
+          cases shape : before.kind with
+          | text => simp [shape] at accepted
+          | inlineObject schema => simp [shape] at accepted
+          | sealedObject schema fragment =>
+              simp only [shape] at accepted
+              cases accepted
+              exact executes_append pre progress _ holds ⟨rfl, not_not.mp present⟩
   | link link source target relation =>
       simp only [step] at accepted
       split at accepted
@@ -1332,7 +1414,7 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
           cases shape : before.body with
           | inline bytes => simp [shape] at accepted
           | reference source => simp [shape] at accepted
-          | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+          | sealed fragment =>
               simp only [shape] at accepted
               cases accepted
               exact executes_append pre progress _ holds ⟨rfl, not_not.mp present⟩
@@ -1489,7 +1571,9 @@ theorem atom_payload_encoding_distinct (before after : AtomRecord)
 def payloadBytesAt (store : ContentStore) : Store.Address Hyperdocument.layout → Nat
   | ⟨.atoms, atom⟩ =>
       match Hyperdocument.lookup store .atoms atom with
-      | some record => record.payload.length
+      | some record => match record.kind with
+          | .sealedObject _ fragment => fragment.ciphertext.length + fragment.wrapping.length
+          | _ => record.payload.length
       | none => 0
   | ⟨.elements, element⟩ =>
       match Hyperdocument.lookup store .elements element with
@@ -1537,6 +1621,7 @@ def Action.tag : Action → Nat
   | .mark .. => 10
   | .unmark .. => 11
   | .rewrapAnnotation .. => 12
+  | .rewrapAtom .. => 13
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -1546,6 +1631,7 @@ def touchedAtoms (command : Command) : List Nat :=
   command.actions.filterMap fun action => match action with
     | .createAtom atom _ _ => some atom.digest.value
     | .editAtom edit => some edit.atomId.digest.value
+    | .rewrapAtom atom .. => some atom.digest.value
     | _ => none
 
 /-- The least / greatest of `f` over the touched atom identifiers; `-1` when the
@@ -1646,12 +1732,11 @@ theorem rewrapAnnotation_guarded_post (author : PrincipalRef) (operation : Opera
     (before : AnnotationRecord) (wrapping : List UInt8)
     (accepted : rewrapAnnotation author operation document progress annotation before wrapping = .ok next) :
     progress.1 ⟨.annotations, annotation⟩ = some before ∧
-      ∃ ciphertext oldWrapping oldAuthor oldOperation,
-        before.body = .sealed ciphertext oldWrapping oldAuthor oldOperation ∧
+      ∃ fragment, before.body = .sealed fragment ∧
         next = (progress.1.set ⟨.annotations, annotation⟩
-          (some { before with body := .sealed ciphertext wrapping author operation }),
+          (some { before with body := .sealed (fragment.rewrapped author operation wrapping) }),
           progress.2 ++ [.write .annotations annotation before
-            { before with body := .sealed ciphertext wrapping author operation }]) := by
+            { before with body := .sealed (fragment.rewrapped author operation wrapping) }]) := by
   unfold rewrapAnnotation at accepted
   split at accepted
   · cases accepted
@@ -1661,22 +1746,60 @@ theorem rewrapAnnotation_guarded_post (author : PrincipalRef) (operation : Opera
       cases shape : before.body with
       | inline bytes => simp [shape] at accepted
       | reference source => simp [shape] at accepted
-      | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+      | sealed fragment =>
           simp only [shape] at accepted
           cases accepted
-          exact ⟨not_not.mp present, ciphertext, oldWrapping, oldAuthor, oldOperation, rfl, rfl⟩
+          exact ⟨not_not.mp present, fragment, rfl, rfl⟩
 
-/-- Annotation custody maintenance cannot alter document text or structure. -/
 theorem rewrapAnnotation_preserves_body (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (progress next : Progress) (annotation : AnnotationId)
     (before : AnnotationRecord) (wrapping : List UInt8)
     (accepted : rewrapAnnotation author operation document progress annotation before wrapping = .ok next)
     (address : Hyperdocument.Address) (outside : address.1 ≠ .annotations) :
     next.1 address = progress.1 address := by
-  obtain ⟨_, ciphertext, _, _, _, _, post⟩ :=
+  obtain ⟨_, fragment, _, post⟩ :=
     rewrapAnnotation_guarded_post author operation document progress next annotation before wrapping accepted
   rw [post]
   exact Store.Store.set_ne _ _ _ address (fun same => outside (congrArg Sigma.fst same))
+
+/-- Exact prior record and byte-identical authored payload/origin. -/
+theorem rewrapAtom_guarded_post (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (atom : AtomId)
+    (before : AtomRecord) (wrapping : List UInt8)
+    (accepted : rewrapAtom author operation document progress atom before wrapping = .ok next) :
+    progress.1 ⟨.atoms, atom⟩ = some before ∧
+      ∃ schema fragment, before.kind = .sealedObject schema fragment ∧
+        next = (progress.1.set ⟨.atoms, atom⟩
+          (some { before with kind := .sealedObject schema (fragment.rewrapped author operation wrapping) }),
+          progress.2 ++ [.write .atoms atom before
+            { before with kind := .sealedObject schema (fragment.rewrapped author operation wrapping) }]) := by
+  unfold rewrapAtom at accepted
+  split at accepted
+  · cases accepted
+  · split at accepted
+    · cases accepted
+    · rename_i present
+      cases shape : before.kind with
+      | text => simp [shape] at accepted
+      | inlineObject schema => simp [shape] at accepted
+      | sealedObject schema fragment =>
+          simp only [shape] at accepted
+          cases accepted
+          exact ⟨not_not.mp present, schema, fragment, rfl, rfl⟩
+
+/-- Authorization maintenance preserves the exact semantic revision used by
+annotations, stable ranges and marks. -/
+theorem rewrapAtom_preserves_revision (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (atom : AtomId)
+    (before : AtomRecord) (wrapping : List UInt8)
+    (accepted : rewrapAtom author operation document progress atom before wrapping = .ok next) :
+    ∃ after, next.1 ⟨.atoms, atom⟩ = some after ∧ after.revision = before.revision ∧
+      after.payload = before.payload ∧ after.createdBy = before.createdBy ∧
+      after.createdAt = before.createdAt ∧ after.tombstonedAt = before.tombstonedAt := by
+  obtain ⟨_, schema, fragment, _, post⟩ :=
+    rewrapAtom_guarded_post author operation document progress next atom before wrapping accepted
+  rw [post]
+  exact ⟨_, Store.Store.set_eq _ _ _, rfl, rfl, rfl, rfl, rfl⟩
 
 /-! ## Annotations: attached to a read revision, never touching the body -/
 
@@ -1942,15 +2065,35 @@ inductive TransclusionView where
   | unresolved
   deriving DecidableEq, Repr
 
+def semanticAtom (store : ContentStore) (atom : AtomId) : Option AtomRecord :=
+  (Hyperdocument.lookup store .atoms atom).map AtomRecord.semantic
+
+/-- Every semantic source lookup stays identical through custody maintenance. -/
+theorem rewrapAtom_preserves_semantic (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (atom target : AtomId)
+    (before : AtomRecord) (wrapping : List UInt8)
+    (accepted : rewrapAtom author operation document progress atom before wrapping = .ok next) :
+    semanticAtom next.1 target = semanticAtom progress.1 target := by
+  obtain ⟨present, schema, fragment, shape, post⟩ :=
+    rewrapAtom_guarded_post author operation document progress next atom before wrapping accepted
+  rw [post]
+  unfold semanticAtom Hyperdocument.lookup
+  by_cases same : target = atom
+  · subst target
+    rw [Store.Store.set_eq, present]
+    simp only [Option.map]
+    simp [AtomRecord.semantic, shape, AuthoredFragment.rewrapped]
+  · rw [Store.Store.set_ne _ _ _ _ (fun eq => same (by cases eq; rfl))]
+
 def pinHolds (store : ContentStore) (document : DocumentId) (pin : AtomId × OperationId) : Bool :=
-  match Hyperdocument.lookup store .atoms pin.1 with
+  match semanticAtom store pin.1 with
   | some record => decide (record.document = document) && decide (record.revision = pin.2) &&
       record.tombstonedAt.isNone
   | none => false
 
 def pinnedBytes (store : ContentStore) (pin : AtomId × OperationId) : List UInt8 :=
-  match Hyperdocument.lookup store .atoms pin.1 with
-  | some record => record.payload
+  match semanticAtom store pin.1 with
+  | some record => record.bodyBytes
   | none => []
 
 def renderSnapshot (store : ContentStore) (opening : RangeOpening) : TransclusionView :=
@@ -2070,24 +2213,32 @@ theorem uncovered_reader_sees_shape (opening : RangeOpening) (mode : Transclusio
 
 /-! ### Snapshots are pinned -/
 
-/-- Every atom standing at `revision` in `after` is the record it was in `before`. -/
+/-- Every atom standing at `revision` retains the same semantic record.
+Only fragment-key custody and its maintenance provenance may differ. -/
 def KeepsAt (revision : OperationId) (before after : ContentStore) : Prop :=
   ∀ atom (record : AtomRecord), Hyperdocument.lookup after .atoms atom = some record →
-    record.revision = revision → Hyperdocument.lookup before .atoms atom = some record
+    record.revision = revision → ∃ previous,
+      Hyperdocument.lookup before .atoms atom = some previous ∧ previous.semantic = record.semantic
 
 theorem KeepsAt.refl (revision : OperationId) (store : ContentStore) :
-    KeepsAt revision store store :=
-  fun _ _ found _ => found
+    KeepsAt revision store store := fun _ record found _ => ⟨record, found, rfl⟩
 
 theorem KeepsAt.trans {revision : OperationId} {first second third : ContentStore}
     (left : KeepsAt revision first second) (right : KeepsAt revision second third) :
-    KeepsAt revision first third :=
-  fun atom record found pinned => left atom record (right atom record found pinned) pinned
+    KeepsAt revision first third := by
+  intro atom record found pinned
+  obtain ⟨middle, middleFound, middleSame⟩ := right atom record found pinned
+  have middleRevision : middle.revision = revision := by
+    have equal := congrArg AtomRecord.revision middleSame
+    simpa only [AtomRecord.semantic_revision, pinned] using equal
+  obtain ⟨previous, previousFound, previousSame⟩ := left atom middle middleFound middleRevision
+  exact ⟨previous, previousFound, previousSame.trans middleSame⟩
 
 private theorem keepsAt_set_other (revision : OperationId) (store : ContentStore)
     (space : Namespace) (key : Key space) (value : Value space) (other : space ≠ .atoms) :
     KeepsAt revision store (store.set ⟨space, key⟩ (some value)) := by
   intro atom record found _
+  refine ⟨record, ?_, rfl⟩
   unfold Hyperdocument.lookup at found ⊢
   rwa [Store.Store.set_ne _ _ _ _ (fun same => other (congrArg Sigma.fst same).symm)] at found
 
@@ -2095,13 +2246,15 @@ private theorem keepsAt_set_atom (revision : OperationId) (store : ContentStore)
     (value : AtomRecord) (stamped : value.revision ≠ revision) :
     KeepsAt revision store (store.set ⟨.atoms, key⟩ (some value)) := by
   intro atom record found pinned
-  unfold Hyperdocument.lookup at found ⊢
+  unfold Hyperdocument.lookup at found
   by_cases same : atom = key
   · subst same
     rw [Store.Store.set_eq] at found
     cases found
     exact absurd pinned stamped
-  · rwa [Store.Store.set_ne _ _ _ _ (fun eq => same (by cases eq; rfl))] at found
+  · refine ⟨record, ?_, rfl⟩
+    unfold Hyperdocument.lookup
+    rwa [Store.Store.set_ne _ _ _ _ (fun eq => same (by cases eq; rfl))] at found
 
 private theorem keepsAt_allocate_other (revision : OperationId) (progress next : Progress)
     (space : Namespace) (key : Key space) (value : Value space)
@@ -2113,6 +2266,7 @@ private theorem keepsAt_allocate_other (revision : OperationId) (progress next :
 private theorem keepsAt_of_markStep (revision : OperationId) {progress next : Progress}
     (stepped : MarkStep progress next) : KeepsAt revision progress.1 next.1 := by
   intro atom record found _
+  refine ⟨record, ?_, rfl⟩
   unfold Hyperdocument.lookup at found ⊢
   rwa [stepped.2 ⟨.atoms, atom⟩ (by simp) (by simp)] at found
 
@@ -2122,6 +2276,7 @@ operation itself. -/
 private theorem keepsAt_of_elementStep (revision : OperationId) {progress next : Progress}
     (stepped : ElementStep progress next) : KeepsAt revision progress.1 next.1 := by
   intro atom record found _
+  refine ⟨record, ?_, rfl⟩
   unfold Hyperdocument.lookup at found ⊢
   rwa [stepped.2 ⟨.atoms, atom⟩ (by simp)] at found
 
@@ -2141,21 +2296,38 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
         (keepsAt_allocate_other revision middle next _ _ _ rest (by decide))
   | createAtom atom kind payload =>
       simp only [step] at accepted
-      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
-      have atomKept : KeepsAt revision progress.1 middle.1 := by
-        rw [allocate_post progress middle _ _ _ first]
-        exact keepsAt_set_atom revision progress.1 atom _ other
-      exact atomKept.trans
-        (keepsAt_of_elementStep revision (appendLeaf_step author operation document rest))
+      split at accepted
+      · obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+        have atomKept : KeepsAt revision progress.1 middle.1 := by
+          rw [allocate_post progress middle _ _ _ first]
+          exact keepsAt_set_atom revision progress.1 atom _ other
+        exact atomKept.trans
+          (keepsAt_of_elementStep revision (appendLeaf_step author operation document rest))
+      · cases accepted
   | editAtom edit =>
       simp only [step] at accepted
-      unfold replaceAtom at accepted
       split at accepted
+      · unfold replaceAtom at accepted
+        split at accepted
+        · cases accepted
+        · split at accepted
+          · cases accepted
+          · cases accepted
+            exact keepsAt_set_atom revision progress.1 _ _ (by rw [sourceEditAtomRecord_revision]; exact other)
       · cases accepted
-      · split at accepted
-        · cases accepted
-        · cases accepted
-          exact keepsAt_set_atom revision progress.1 _ _ (by rw [editAtomRecord_revision]; exact other)
+  | rewrapAtom atom before wrapping =>
+      obtain ⟨present, schema, fragment, shape, post⟩ :=
+        rewrapAtom_guarded_post author operation document progress next atom before wrapping accepted
+      rw [post]
+      intro target record found pinned
+      unfold Hyperdocument.lookup at found ⊢
+      by_cases same : target = atom
+      · subst target
+        rw [Store.Store.set_eq] at found
+        cases found
+        exact ⟨before, present, by simp [AtomRecord.semantic, shape, AuthoredFragment.rewrapped]⟩
+      · refine ⟨record, ?_, rfl⟩
+        rwa [Store.Store.set_ne _ _ _ _ (fun eq => same (by cases eq; rfl))] at found
   | link link source target relation =>
       simp only [step] at accepted
       split at accepted
@@ -2180,7 +2352,7 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
         · cases shape : before.body with
           | inline bytes => simp [shape] at accepted
           | reference source => simp [shape] at accepted
-          | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+          | sealed fragment =>
               simp only [shape] at accepted
               cases accepted
               exact keepsAt_set_other revision progress.1 .annotations annotation _ (by decide)
@@ -2265,16 +2437,15 @@ private theorem pinHolds_found {store : ContentStore} {document : DocumentId}
     {pin : AtomId × OperationId} (holds : pinHolds store document pin = true) :
     ∃ record : AtomRecord, Hyperdocument.lookup store .atoms pin.1 = some record ∧
       record.revision = pin.2 := by
-  unfold pinHolds at holds
+  unfold pinHolds semanticAtom at holds
   cases found : Hyperdocument.lookup store .atoms pin.1 with
-  | none => simp [found] at holds
+  | none => simp [found, Option.map] at holds
   | some record =>
-      simp only [found, Bool.and_eq_true, decide_eq_true_eq] at holds
+      simp only [found, Option.map, AtomRecord.semantic, Bool.and_eq_true, decide_eq_true_eq] at holds
       exact ⟨record, rfl, holds.1.2⟩
 
 private theorem renderSnapshot_congr (earlier later : ContentStore) (opening : RangeOpening)
-    (agree : ∀ pin ∈ opening.pins, Hyperdocument.lookup later .atoms pin.1 =
-      Hyperdocument.lookup earlier .atoms pin.1) :
+    (agree : ∀ pin ∈ opening.pins, semanticAtom later pin.1 = semanticAtom earlier pin.1) :
     renderSnapshot later opening = renderSnapshot earlier opening := by
   have holds := all_congr_mem opening.pins (pinHolds later (documentOf opening.source))
     (pinHolds earlier (documentOf opening.source))
@@ -2295,7 +2466,7 @@ private theorem livePins_mem {store : ContentStore} {document : DocumentId} {ato
       split at produced
       · rename_i live
         cases produced
-        exact ⟨inside, by simp [pinHolds, found, live.1, live.2]⟩
+        exact ⟨inside, by simp [pinHolds, semanticAtom, Option.map, AtomRecord.semantic, found, live.1, live.2]⟩
       · cases produced
 
 /-- Snapshot transclusions are pinned.  At the opening's height (the state the
@@ -2335,7 +2506,8 @@ theorem transclusion_pinned (earlier later : ContentStore) (operations : List Op
     apply renderSnapshot_congr
     intro pin member
     obtain ⟨record, found, pinned⟩ := pinHolds_found (List.all_eq_true.mp holds pin member)
-    rw [found, reached.keepsAt pin.2 (fresh pin member) pin.1 record found pinned]
+    obtain ⟨previous, previousFound, same⟩ := reached.keepsAt pin.2 (fresh pin member) pin.1 record found pinned
+    simp only [semanticAtom, found, previousFound, Option.map, same]
   · right
     simp [renderSnapshot, RangeOpening.ofRequest, holds]
 
@@ -2405,7 +2577,7 @@ theorem live_reads_only_its_run (earlier later : ContentStore) (opening : RangeO
         exact filterMap_congr_mem atoms _ _ (fun atom member => by simp only [agree atom member])
       have bytes := map_congr_mem (livePins earlier (documentOf opening.source) atoms)
         (pinnedBytes later) (pinnedBytes earlier)
-        (fun pin member => by simp only [pinnedBytes, agree pin.1 (livePins_mem member).1])
+        (fun pin member => by simp only [pinnedBytes, semanticAtom, agree pin.1 (livePins_mem member).1])
       simp only [renderLive, same, resolved]
       rw [pins, bytes]
   | invalidated => simp only [renderLive, same, resolved]
@@ -2449,6 +2621,12 @@ theorem live_reads_only_its_run (earlier later : ContentStore) (opening : RangeO
 /-- info: 'Minidregg.Kernel.ContentResource.Reaches.keepsAt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Reaches.keepsAt
 
+#assert_axioms sourceEditAtomRecord_authored
+#assert_axioms createAtom_sealed_nonempty_refused
+#assert_axioms sourceEditAtomRecord_retirement_preserves_authorship
+#assert_axioms rewrapAtom_guarded_post
+#assert_axioms rewrapAtom_preserves_revision
+#assert_axioms rewrapAtom_preserves_semantic
 #assert_axioms rewrapAnnotation_guarded_post
 #assert_axioms rewrapAnnotation_preserves_body
 

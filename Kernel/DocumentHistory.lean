@@ -212,18 +212,49 @@ inductive Line where
   | missing
   deriving DecidableEq, Repr
 
-/-- The line at `element`, given the cell's marks (`marks`: every mark record
+/-- The authored semantic line at `element`; key wrapping changes are retained
+in signed history but are not reported as content changes. The line, given the cell's marks (`marks`: every mark record
 of the cell, as its store lists them). -/
 def lineOf (store : ContentStore) (marks : List (MarkId × MarkRecord)) (element : ElementId) : Line :=
   match elementAt store element with
   | none => .missing
   | some record =>
       match record.body with
-      | .atom atom => .atom atom (lookup store .atoms atom) (rowMarks marks element (some atom))
+      | .atom atom => .atom atom (semanticAtom store atom) (rowMarks marks element (some atom))
       | .embed transclusion => .embed transclusion (rowMarks marks element none)
       | .container _ => .section record.revision (rowMarks marks element none)
       | .runs _ => .runs
       | .opaque _ _ => .opaque
+
+/-- A source-admitted wrapping update creates no semantic line difference. -/
+theorem lineOf_rewrapAtom (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (atom : AtomId)
+    (before : AtomRecord) (wrapping : List UInt8) (marks : List (MarkId × MarkRecord))
+    (element : ElementId)
+    (accepted : rewrapAtom author operation document progress atom before wrapping = .ok next) :
+    lineOf next.1 marks element = lineOf progress.1 marks element := by
+  have sameElements : elementAt next.1 element = elementAt progress.1 element := by
+    obtain ⟨_, _, _, _, post⟩ :=
+      rewrapAtom_guarded_post author operation document progress next atom before wrapping accepted
+    rw [post]
+    unfold elementAt lookup
+    exact Minidregg.Theory.Store.Store.set_ne _ _ _ _ (by simp)
+  unfold lineOf
+  rw [sameElements]
+  cases elementAt progress.1 element with
+  | none => rfl
+  | some record =>
+      cases body : record.body with
+      | atom target =>
+          simp only [body]
+          exact congrArg (fun value => Line.atom target value (rowMarks marks element (some target)))
+            (rewrapAtom_preserves_semantic author operation document progress next atom target before wrapping accepted)
+      | embed transclusion => simp only [body]
+      | container children => simp only [body]
+      | runs runs => simp only [body]
+      | «opaque» schema payload => simp only [body]
+
+#assert_axioms lineOf_rewrapAtom
 
 /-- The page's lines: `view-document`'s order, each element with its line. -/
 def lines (store : ContentStore) (document : DocumentId) (marks : List (MarkId × MarkRecord)) :

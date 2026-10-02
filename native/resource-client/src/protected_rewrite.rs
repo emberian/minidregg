@@ -1,4 +1,4 @@
-//! One durable current-text rewrite for conversion and membership rotation.
+//! Durable prospective text conversion and custody-only membership maintenance.
 //! Ciphertext and carried formatting have separate source receipts. Original
 //! marks and links remain historical records with their authors. Annotation
 //! ciphertext/authorship stays immutable while its fragment-key custody rotates.
@@ -22,6 +22,18 @@ fn visible(document:&Value)->Result<BTreeSet<String>> {
 fn atom<'a>(entries:&'a [Value],id:&str)->Result<&'a Value> {
     entries.iter().find(|r|r["type"]=="atom"&&r["id"]==id).ok_or("rewrite atom disappeared".into())
 }
+/// The authenticated display must be readable even when a wrapper advertises
+/// the current epoch. Maintenance plans contain exact ciphertext, not plaintext.
+pub(super) fn planned_atom(current:&Value,display:&Value,epoch:u64)->Result<Option<Value>> {
+    let plain=plaintext(display)?;
+    let atom=text(current,"id")?;
+    if super::atoms::is_kind(&current["kind"]) {
+        if current["payload"]!=""{return Err("sealed atom has a duplicate payload".into());}
+        if super::atoms::epoch(&current["kind"])?==epoch{return Ok(None);}
+        Ok(Some(json!({"atom":atom,"rawBefore":current})))
+    }else{Ok(Some(json!({"atom":atom,"plaintext":plain,"rawBefore":current})))}
+}
+
 /// A current epoch header never substitutes for successfully authenticated
 /// opening. Validate every live comment before selecting bounded maintenance.
 pub(super) fn pending_annotations(raw:&[Value],opened:&[Value],epoch:u64,limit:usize)->Result<Vec<Value>> {
@@ -70,11 +82,16 @@ fn plans(dir:&Path)->Result<Vec<(u64,std::path::PathBuf)>> {
     }
     found.sort_by_key(|r|r.0);Ok(found)
 }
-fn rekey_request(name:&str,plan:&Value)->Result<Value> {
-    let mut edits=plan["atoms"].as_array().ok_or("rewrite plan lacks atoms")?.iter().map(|a|
-        Ok(json!({"type":"editAtom","atom":a["atom"],"before":ws::atom_record(&a["rawBefore"])?,
-            "kind":{"type":"text"},"payload":a["plaintext"],"tombstone":false})))
-        .collect::<Result<Vec<Value>>>()?;
+pub(super) fn rekey_request(name:&str,plan:&Value)->Result<Value> {
+    let mut edits=plan["atoms"].as_array().ok_or("rewrite plan lacks atoms")?.iter().map(|a| {
+        let before=ws::atom_record(&a["rawBefore"])?;
+        if super::atoms::is_kind(&before["kind"]) {
+            Ok(json!({"type":"rewrapAtom","atom":a["atom"],"before":before,"wrapping":before["kind"]["fragment"]}))
+        } else {
+            Ok(json!({"type":"editAtom","atom":a["atom"],"before":before,
+                "kind":{"type":"text"},"payload":a["plaintext"],"tombstone":false}))
+        }
+    }).collect::<Result<Vec<Value>>>()?;
     for annotation in plan["annotations"].as_array().into_iter().flatten() {
         edits.push(json!({"type":"rewrapAnnotation","annotation":annotation["id"],
             "before":annotation["canonical"],"wrapping":annotation["body"]}));
@@ -204,11 +221,10 @@ pub(super) fn current(root:&Path,workspace:&Value,name:&str,dir:&Path,namespace:
         let mut edits=Vec::new();let mut atoms=Vec::new();let mut selected=BTreeSet::new();
         for current in raw.iter().filter(|r|r["type"]=="atom"&&r["tombstonedAt"].is_null()&&r["id"].as_str().is_some_and(|id|visible.contains(id))) {
             let atom_id=text(current,"id")?;
-            let plain=plaintext(atom(&read.entries,atom_id)?)?;
-            if is_kind(&current["kind"])&&members::atom_epoch(text(current,"payload")?)?==epoch {continue;}
-            selected.insert(atom_id.to_owned());atoms.push(json!({"atom":atom_id,"plaintext":plain,"rawBefore":current}));
-            edits.push(json!({"type":"editAtom","atom":atom_id,"before":ws::atom_record(current)?,
-                "kind":{"type":"text"},"payload":plain,"tombstone":false}));
+            let Some(planned)=planned_atom(current,atom(&read.entries,atom_id)?,epoch)? else{continue};
+            if !super::atoms::is_kind(&current["kind"]){selected.insert(atom_id.to_owned());}
+            atoms.push(planned);
+            edits.push(json!(atom_id));
             if edits.len()==64{break;}
         }
         let annotations=pending_annotations(raw,&read.entries,epoch,64-edits.len())?;

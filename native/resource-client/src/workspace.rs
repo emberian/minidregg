@@ -4704,6 +4704,7 @@ fn document_actions(
             _ => unreachable!("document action tags were checked"),
         });
     }
+    protected_document::refresh_document_guards(&mut lowered,page_entries(content_page(view,name)?)?)?;
     Ok(Value::Array(lowered))
 }
 
@@ -5138,7 +5139,7 @@ fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &
         let was = atom_of(&was_entries, id).ok_or("a pinned line is missing from the seen record")?;
         let how = match atom_of(&now_entries, id) {
             None => "is gone".to_owned(),
-            Some(atom) if atom_record(&atom)? == atom_record(&was)? => continue,
+            Some(atom) if protected_document::semantic_atom(&atom_record(&atom)?) == protected_document::semantic_atom(&atom_record(&was)?) => continue,
             Some(atom) if atom.get("tombstonedAt").is_some_and(|value| !value.is_null()) => "was struck".to_owned(),
             Some(atom) => {
                 let opened = atom_of(&displayed, id).unwrap_or_else(|| atom.clone());
@@ -5160,7 +5161,7 @@ fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &
         return Ok(None);
     }
     Ok(Some(format!(
-        "{} since you pulled {name} at {} (read again at {now}; the store records who created a line, not who edited it); nothing of this push landed: doc pull {name}, merge, push again",
+        "{} since you pulled {name} at {} (read again at {now}); nothing of this push landed: doc pull {name}, merge, push again",
         changed.join(", "),
         plan.pulled_at
     )))
