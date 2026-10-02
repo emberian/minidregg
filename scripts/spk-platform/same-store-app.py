@@ -65,7 +65,53 @@ def validate(c):
     require(all(decimal(a['factory'][k]) for k in ['target','capability']),'factory authority invalid')
     require(all(decimal(a['template'][k]) for k in ['issuer','ownerBudget','lifetime']),'birth template invalid')
     require(all(decimal(a['tariff'][k]) for k in ['base','perBirth']),'birth tariff invalid')
+    validate_lifecycle(c,artifacts)
     return m,artifacts
+
+def validate_lifecycle(c, artifacts):
+    delegation=c.get('lifecycleDelegation')
+    if delegation is None:return None
+    require(isinstance(delegation,dict) and set(delegation)=={'ownerWorkspace','manager','requestId'},'lifecycle delegation input must name ownerWorkspace, manager, requestId')
+    require(decimal(delegation['manager']) and isinstance(delegation['requestId'],str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,39}',delegation['requestId']) is not None,'lifecycle manager/request ID invalid')
+    workspace=absolute(delegation['ownerWorkspace']);f.protected_parent(workspace)
+    pin=load(workspace/'workspace.json')
+    require(pin['subject']==c['authority']['owner'] and pin['config']==c['miniConfig'] and pin['socket']==c['publicSocket'],'lifecycle workspace belongs to a different owner/world')
+    require(pin['key']==c['keys'][pin['subject']]['seedPath'] and sha(pin['host'])==artifacts['host']['sha256'],'lifecycle owner workspace key/Host pin differs')
+    return delegation
+
+def delegate_lifecycle(x,c):
+    delegation=c['lifecycleDelegation'];workspace=absolute(delegation['ownerWorkspace'])
+    application=c['application'];prefix='spk-'+hashlib.sha256(x.app.encode()).hexdigest()[:12]
+    names=[prefix+'-'+kind for kind in ['app','package','snapshot']]
+    resources=[('app','appOwnerCapability','appControlCapability'),('packageManifest','packageOwnerCapability','packageControlCapability'),('snapshotManifest','snapshotOwnerCapability','snapshotControlCapability')]
+    provenance=x.fresh('owner-root-provenance.json')
+    save(provenance,{'type':'mini-spk-source-owner-roots-v1','authority':'hint-only-requires-current-source','subject':x.owner,'applicationSource':x.f['applicationSource'],'applicationSourceSha256':sha(x.f['applicationSource']),'applicationReceipt':x.f['applicationReceipt'],'applicationReceiptSha256':sha(x.f['applicationReceipt'])})
+    for name,(resource,capability,control) in zip(names,resources):
+        expected={'name':name,'kind':'object','target':application[resource],'observeCapability':application[capability],'operationCapability':application[capability],'controlCapability':application[control]}
+        retained=workspace/'refs'/(name+'.json')
+        if retained.exists():
+            prior=load(retained);require(all(prior.get(k)==v for k,v in expected.items()),'existing owner root reference differs')
+        else:
+            x.run([x.m['mini']['path'],'workspace','--action','import','--dir',workspace,'--name',name,'--kind','object','--target',expected['target'],'--observe-capability',expected['observeCapability'],'--operation-capability',expected['operationCapability'],'--control-capability',expected['controlCapability'],'--provenance',provenance])
+    common=[x.m['mini']['path'],'workspace','--action','app-lifecycle','--dir',workspace,'--request-id',delegation['requestId']]
+    for phase in ['app-policy','package-policy','snapshot-policy','app-grant','package-grant','snapshot-grant']:
+        _,prepared,_=x.run([*common,'--op','prepare','--name',names[0],'--package-name',names[1],'--snapshot-name',names[2],'--manager',delegation['manager']])
+        before=load(prepared)
+        require(before.get('type')=='mini-member-app-lifecycle-result-v1' and before.get('owner')==x.owner and before.get('manager')==delegation['manager'],'owner lifecycle preparation identity differs')
+        if before.get('complete') is True:result=before;break
+        # The owner module alone classifies phases and retains exact calls.
+        # An uncertain submit fails here with its attempt intact; it is never
+        # replaced by a fresh source request or a manager signature.
+        _,submitted,_=x.run([*common,'--op','submit'])
+        result=load(submitted)
+        require(result.get('type')=='mini-member-app-lifecycle-result-v1' and result.get('owner')==x.owner and result.get('manager')==delegation['manager'],'owner lifecycle submission identity differs')
+        if result.get('complete') is True:break
+        require(result.get('phase')!=before.get('phase'),'owner lifecycle phase did not confirm; retain exact call for recovery')
+    require(result.get('complete') is True,'owner lifecycle workflow incomplete; retain exact workspace request')
+    selector=absolute(result['managementSelector']);selected=load(selector)
+    require(selected['appOwner']==x.owner and selected['managementSubject']==delegation['manager'] and all(selected['selector'][k]==application[k] for k in ['app','packageManifest','snapshotManifest']),'owner lifecycle selector differs from app/manager')
+    x.f['lifecycleDelegation']={'request':delegation,'result':result,'selectorSha256':sha(selector)};x.write_state()
+    return selector
 
 def birth_app(x):
     x.reserve(int(x.authority['tariff']['base'])+3*int(x.authority['tariff']['perBirth']))
@@ -97,6 +143,8 @@ def attach(path):
     # Validate native Store/profile provenance before creating any app or member.
     state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket','/run/mini-spk-broker.sock'),absolute(c['profileResult']),absolute(c['initStoreResult']))
     require(profile_value['miniOperatorSocket']==c['privateSocket'],'profile points at a different private Store owner')
+    if c.get('lifecycleDelegation') is not None:require(c['lifecycleDelegation']['manager']==profile_value['managementSubject'],'lifecycle delegated manager differs from native profile')
+    elif c['authority']['owner']!=profile_value['managementSubject']:raise RuntimeError('member-owned hosting requires explicit lifecycleDelegation before app birth')
     root.mkdir(mode=0o700);(root/'hooks').mkdir(mode=0o700)
     save(root/'input.json',c);save(root/'manifest.json',m)
     save(root/'source-inputs.json',{str(HERE/name):sha(HERE/name) for name in ['same-store-app.py','ws-continuity-fixture.py']})
@@ -114,7 +162,9 @@ def attach(path):
     require(all(room['challenge'][k]==c['namespace'][k] for k in ['domain','semantics']),'room authority belongs to another namespace')
     save(root/'source-room.json',{'target':c['room']['target'],'authorityEvidence':str(room['dir']),'challenge':room['challenge']})
     birth_app(x)
-    x.run([artifacts['spkHost']['path'],'grain','install',x.profile,x.f['applicationSource'],x.f['applicationReceipt'],c['spk'],'--class',c.get('sizeClass','S')])
+    install=[artifacts['spkHost']['path'],'grain','install',x.profile,x.f['applicationSource'],x.f['applicationReceipt'],c['spk'],'--class',c.get('sizeClass','S')]
+    if c.get('lifecycleDelegation') is not None:install+=['--management-selector',delegate_lifecycle(x,c)]
+    x.run(install)
     for label,d in x.f['delegates'].items():
         x.birth_session(d);x.delegate(x.app,x.appcap,d['appObserve'],d['subject']);x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject'])
         x.issue(d);x.route(route_name(label),d);x.write_state()

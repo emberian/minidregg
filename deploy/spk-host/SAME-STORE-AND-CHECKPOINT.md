@@ -232,3 +232,31 @@ not authorize another physical invocation. The current receiving app531101 has
 confirmed installation105/ticket112 and generation2 never-begun, with a
 sandbox visibility failure. Browser and checkpoint receiving remain pending
 until the source-rendered unit actually runs.
+
+
+The same-Store attachment input can request member-owned hosting explicitly:
+
+```json
+"lifecycleDelegation": {
+  "ownerWorkspace": "/absolute/member/workspace",
+  "manager": "8",
+  "requestId": "hosting-530101"
+}
+```
+
+The adapter checks that workspace's owner, config, public socket, current key
+path, and Host bytes against the supplied world, then matches the manager to
+the native profile before birth. It imports the three born owner root selectors
+as local hints and runs the six phases through the owner's ordinary workspace
+consumer. Every policy installation and child grant still requires current
+source admission under that owner's key. The resulting exact selector is
+passed to physical installation. Without this explicit input, an owner distinct
+from the manager refuses before birth.
+
+This is an initial receiving adapter, not a transaction over the entire attach
+root. An uncertain lifecycle phase stops with its exact owner workspace request
+retained; `status`, `recover`, and `submit` operate on that retained request.
+The adapter does not rebirth an app or replace an uncertain call. Complete
+attachment restart orchestration remains separate work. Fixture key inventories
+do not grant a service permission to read production participants' secrets;
+the production owner workflow runs in each owner's own workspace.

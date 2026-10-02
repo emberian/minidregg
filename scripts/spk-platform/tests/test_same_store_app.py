@@ -60,6 +60,40 @@ class AttachTests(unittest.TestCase):
     def test_pin_changes_refuse_before_provisioning(self):
         (self.root/'spk').write_bytes(b'changed')
         with self.assertRaisesRegex(RuntimeError,'package pin'):self.validate()
+    def test_explicit_lifecycle_input_binds_owner_world_host_and_key(self):
+        workspace=self.root/'owner-ws';workspace.mkdir();(workspace/'workspace.json').write_text(json.dumps({'subject':'70007','config':self.c['miniConfig'],'socket':self.c['publicSocket'],'key':self.c['keys']['70007']['seedPath'],'host':str(self.root/'host')}))
+        self.c['lifecycleDelegation']={'ownerWorkspace':str(workspace),'manager':'80008','requestId':'hosting-1'}
+        self.validate()
+        self.c['lifecycleDelegation']['requestId']='bad/path'
+        with self.assertRaisesRegex(RuntimeError,'request ID'):self.validate()
+        self.c['lifecycleDelegation']['requestId']='hosting-1'
+        pin=f.load(workspace/'workspace.json');pin['subject']='80008';(workspace/'workspace.json').write_text(json.dumps(pin))
+        with self.assertRaisesRegex(RuntimeError,'different owner/world'):self.validate()
+    def test_owner_workflow_imports_roots_and_uses_own_source_cli(self):
+        workspace=self.root/'owner-ws';workspace.mkdir();(workspace/'refs').mkdir()
+        self.c['lifecycleDelegation']={'ownerWorkspace':str(workspace),'manager':'80008','requestId':'hosting-1'}
+        x=Mock();x.app=self.c['application']['app'];x.owner='70007';x.m={'mini':{'path':'/pinned/mini'}}
+        source=self.root/'birth-source.json';source.write_text('{}');receipt=self.root/'birth-receipt.json';receipt.write_text('{}');x.f={'applicationSource':str(source),'applicationReceipt':str(receipt)}
+        counter=iter(range(30));x.fresh.side_effect=lambda name:self.root/(str(next(counter))+'-'+name)
+        selector=self.root/'selector.json';selector.write_text(json.dumps({'appOwner':'70007','managementSubject':'80008','selector':{k:self.c['application'][k] for k in ['app','packageManifest','snapshotManifest']}}))
+        phases=['app-policy','package-policy','snapshot-policy','app-grant','package-grant','snapshot-grant'];calls=[];index=0
+        def run(args):
+            nonlocal index
+            calls.append(args)
+            result={'type':'mini-member-app-lifecycle-result-v1','owner':'70007','manager':'80008','complete':False,'phase':phases[index]}
+            if '--op' in args and args[args.index('--op')+1]=='submit':
+                index+=1
+                result.update(complete=index==6)
+                if index<6:result['phase']=phases[index]
+                else:result['managementSelector']=str(selector)
+            out=self.root/('reply-'+str(len(calls))+'.json');out.write_text(json.dumps(result));return 0,out,None
+        x.run.side_effect=run
+        self.assertEqual(app.delegate_lifecycle(x,self.c),selector)
+        self.assertEqual(len([a for a in calls if 'import' in a]),3)
+        self.assertEqual(len([a for a in calls if 'app-lifecycle' in a]),12)
+        self.assertTrue(all(a[a.index('--dir')+1]==workspace for a in calls))
+        self.assertFalse(any('--key' in a or '--socket' in a for a in calls))
+        self.assertEqual(x.f['lifecycleDelegation']['selectorSha256'],f.sha(selector))
     def test_birth_distinguishes_sponsor_and_app_owner_and_task_observation_caps(self):
         x=Mock();x.owner='70007';x.creator='80008';x.accountcap='42042';x.authority=self.c['authority'];x.tool=x.authority['tool'];x.parent=x.authority['parent'];x.f={'application':self.c['application']};x.genesis=self.root/'genesis';x.genesis.write_text('{}');x.n.return_value='9000001';x.key.side_effect=lambda subject:self.root/(subject+'.key')
         calls=[];x.query.side_effect=lambda *args:dict(view=dict(cell=dict(root='42',grain=dict(generation='2',status='3',remaining='10',reserved='5'))))
