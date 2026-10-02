@@ -4,7 +4,7 @@
 use super::agent_reserve::{bounded, digest, field, private_bytes, private_socket, retain_json};
 use super::*;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 
 const FORMAT: &str = "minidregg-session-reenroll-v1";
 const LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
@@ -136,17 +136,23 @@ fn lock(directory: &Path) -> Result<File> {
         .create(true)
         .truncate(false)
         .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(directory.join("lock"))
         .map_err(|e| e.to_string())?;
-    unsafe extern "C" {
-        fn flock(fd: i32, operation: i32) -> i32;
+    let metadata = file.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err("reenrollment lock is not an owner-private single-link regular file".into());
     }
-    if unsafe { flock(file.as_raw_fd(), 2 | 4) } != 0 {
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("reenrollment attempt is already running".into());
     }
     Ok(file)
 }
-fn pinned(value: &Value, directory: &Path) -> Result<()> {
+fn retained_identity(value: &Value, directory: &Path) -> Result<(Value, Value)> {
     let original = read(&directory.join("contract.json"))?;
     let mut identity = value.clone();
     if value.get("newGeneration").is_some() {
@@ -164,11 +170,44 @@ fn pinned(value: &Value, directory: &Path) -> Result<()> {
     let pin = read(&directory.join("pin.json"))?;
     if field(&pin, "contractSha256")?
         != digest(&private_bytes(&directory.join("contract.json"), LIMIT)?)
-        || field(&pin, "hostSha256")? != host_image_sha256(&path_field(&original, "host")?)?
         || field(&pin, "configSha256")?
             != digest(&private_bytes(&directory.join("config.json"), 65_536)?)
     {
         return Err("reenrollment Host/config/input pin changed".into());
+    }
+    Ok((original, pin))
+}
+/// The source bytes may have been replaced at the same pathname. Only capture
+/// reads that live image; resume binds historical pins to a root-authenticated
+/// admission, while check_execution independently validates the live target.
+enum SourceImage<'a> {
+    CaptureLive,
+    Admitted(&'a compatible_upgrade_custody::Candidate),
+}
+fn source_image(original: &Value, pin: &Value, source: SourceImage<'_>) -> Result<()> {
+    match source {
+        SourceImage::CaptureLive => {
+            if field(pin, "hostSha256")? != host_image_sha256(&path_field(original, "host")?)? {
+                return Err("capture Host image pin changed".into());
+            }
+        }
+        SourceImage::Admitted(source) => {
+            let (host, sha) = compatible_upgrade_custody::image(&source.manifest, "host")
+                .map_err(|e| e.to_string())?;
+            if path_field(original, "host")? != host
+                || field(pin, "hostSha256")? != sha
+                || field(pin, "configSha256")? != source.config_sha256
+            {
+                return Err("compatible admission does not start from captured Host/config".into());
+            }
+        }
+    }
+    Ok(())
+}
+fn pinned(value: &Value, directory: &Path) -> Result<()> {
+    let (original, pin) = retained_identity(value, directory)?;
+    if value.get("newGeneration").is_none() {
+        source_image(&original, &pin, SourceImage::CaptureLive)?;
     }
     let socket = path_field(value, "publicSocket")?;
     if SOCKET.get() != Some(&socket) {
@@ -196,6 +235,8 @@ fn check_execution(value: &Value, directory: &Path) -> Result<()> {
     }
     let admission_path = path_field(&execution, "admissionPath")?;
     let admission = compatible_upgrade_custody::load(&admission_path).map_err(|e| e.to_string())?;
+    let (original, pin) = retained_identity(value, directory)?;
+    source_image(&original, &pin, SourceImage::Admitted(&admission.source))?;
     if digest(
         &compatible_upgrade_custody::root_bytes(&admission_path, 4 * 1024 * 1024)
             .map_err(|e| e.to_string())?,
@@ -225,15 +266,12 @@ fn bind_execution(
 ) -> Result<Value> {
     let admission_path = absolute(admission_path)?;
     let admission = compatible_upgrade_custody::load(&admission_path).map_err(|e| e.to_string())?;
-    let (old_host, old_sha) = compatible_upgrade_custody::image(&admission.source.manifest, "host")
-        .map_err(|e| e.to_string())?;
-    let original_pin = read(&directory.join("pin.json"))?;
-    if path_field(original, "host")? != old_host
-        || field(&original_pin, "hostSha256")? != old_sha
-        || field(&original_pin, "configSha256")? != admission.source.config_sha256
-    {
-        return Err("compatible admission does not start from captured Host/config".into());
-    }
+    let (retained, original_pin) = retained_identity(original, directory)?;
+    source_image(
+        &retained,
+        &original_pin,
+        SourceImage::Admitted(&admission.source),
+    )?;
     let (host, sha) = compatible_upgrade_custody::image(&admission.target.manifest, "host")
         .map_err(|e| e.to_string())?;
     if host_image_sha256(&host)? != sha {
@@ -793,7 +831,7 @@ fn run_inner(
             &json!({"contractSha256":digest(&private_bytes(&directory.join("contract.json"), LIMIT)?),"hostSha256":host_image_sha256(&path_field(&value, "host")?)?,"configSha256":digest(&config)}),
         )?;
     }
-    pinned(&value, &directory)?;
+    retained_identity(&value, &directory)?;
     let value = match phase {
         "capture" => {
             if admission.is_some() || generation.is_some() {
@@ -808,6 +846,7 @@ fn run_inner(
             generation.ok_or("resume requires --new-generation")?,
         )?,
     };
+    pinned(&value, &directory)?;
     let was_quiet = QUIET_WORKER.swap(true, Ordering::Relaxed);
     let result = if phase == "capture" {
         capture(&value, &directory)
@@ -867,6 +906,83 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn admitted_source_survives_old_image_replacement_or_removal_but_capture_does_not() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!(
+            "mini-reenroll-source-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let host = directory.join("current-Host");
+        create_private(&host, b"captured image").unwrap();
+        let sha = host_image_sha256(&host).unwrap();
+        let config_sha = digest(b"captured config");
+        let original = json!({"host":host});
+        let pin = json!({"hostSha256":sha,"configSha256":config_sha});
+        // This seam receives Candidate only after production load() has
+        // authenticated root admission. Test the subsequent source-pin rule.
+        let mut source = compatible_upgrade_custody::Candidate {
+            manifest: json!({"host":host,"sha256":{"host":sha}}),
+            config_path: directory.join("old-config"),
+            config_sha256: config_sha,
+            config: Value::Null,
+            profile: Value::Null,
+        };
+        source_image(&original, &pin, SourceImage::CaptureLive).unwrap();
+        source_image(&original, &pin, SourceImage::Admitted(&source)).unwrap();
+        fs::write(&host, b"replacement target image").unwrap();
+        assert!(source_image(&original, &pin, SourceImage::CaptureLive).is_err());
+        source_image(&original, &pin, SourceImage::Admitted(&source)).unwrap();
+        fs::remove_file(&host).unwrap();
+        assert!(source_image(&original, &pin, SourceImage::CaptureLive).is_err());
+        source_image(&original, &pin, SourceImage::Admitted(&source)).unwrap();
+        source.manifest["sha256"]["host"] = json!(digest(b"different history"));
+        assert!(source_image(&original, &pin, SourceImage::Admitted(&source)).is_err());
+        source.manifest["sha256"]["host"] = pin["hostSha256"].clone();
+        source.config_sha256 = digest(b"different config");
+        assert!(source_image(&original, &pin, SourceImage::Admitted(&source)).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn lock_rejects_symlink_hardlink_and_nonprivate_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            env::temp_dir().join(format!("mini-reenroll-lock-{}-{stamp}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let target = directory.join("target");
+        create_private(&target, b"retained").unwrap();
+        let name = directory.join("lock");
+        symlink(&target, &name).unwrap();
+        assert!(lock(&directory).is_err());
+        fs::remove_file(&name).unwrap();
+        fs::hard_link(&target, &name).unwrap();
+        assert!(lock(&directory).is_err());
+        fs::remove_file(&name).unwrap();
+        create_private(&name, b"").unwrap();
+        fs::set_permissions(&name, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(lock(&directory).is_err());
+        fs::set_permissions(&name, fs::Permissions::from_mode(0o600)).unwrap();
+        let held = lock(&directory).unwrap();
+        assert!(lock(&directory).is_err());
+        drop(held);
+        drop(lock(&directory).unwrap());
+        assert_eq!(fs::read(&target).unwrap(), b"retained");
+        fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn request_keeps_restrictive_role_exactly() {
         let prior = json!({"request":{"issueIndex":"7","ticketResource":"8","packageManifest":"9","descriptorCapability":"10","sessionObserveCapability":"11","descriptorObserveCapability":"12","manifestObserveCapability":"13","role":{"basis":{"type":"role","id":"1"},"addedHex":["72656164"],"removedHex":["7772697465"],"roleSchemaRoot":"99","roleVersion":"2"}}});
