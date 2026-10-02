@@ -1039,6 +1039,19 @@ def nockDirectory (config : NativeHost.Config)
     IO (Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) := do
   return (← sessionOpened config state).directory.directory
 
+/-- Unauthenticated evaluator assistance shares the operator's synchronous fuel
+bound. The supplied caller is sample data, never payment authorization. Larger
+runs need a separately authenticated service; they cannot spend member credit. -/
+def checkNockServiceBudget (config : NativeHost.Config)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
+    (programId : Minidregg.Theory.TypedAuthorization.Digest) : IO Unit := do
+  match CanonicalCellRegistry.loadProgram config.deployment.domain directory programId with
+  | none => pure () -- the operation reports its ordinary programUnknown verdict
+  | some program =>
+    if config.nockFSync < program.abi.fuel then
+      throw (IO.userError s!"overSyncBudget: evaluator assistance fuel {program.abi.fuel} exceeds operator nockFSync {config.nockFSync}")
+
+
 def sessionConfirmed (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (kind : DurableReceiverIO.Confirmation)
@@ -5930,6 +5943,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
                             let directory := opened.directory.directory
+                            checkNockServiceBudget pinnedConfig directory programId
                             let verdict := Minidregg.Kernel.Run.dryRun
                               pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId
@@ -5942,6 +5956,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (programId, view, wire, cause) ← IO.ofExcept
                               (Minidregg.Host.Json.nockDoorPokeRequest source)
                             let directory ← nockDirectory pinnedConfig state
+                            checkNockServiceBudget pinnedConfig directory programId
                             let verdict := match CanonicalCellRegistry.loadProgram
                                 pinnedConfig.deployment.domain directory programId with
                               | none => .refused .programUnknown
@@ -5964,6 +5979,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (programId, view, path) ← IO.ofExcept
                               (Minidregg.Host.Json.nockDoorReadRequest source isPeek)
                             let directory ← nockDirectory pinnedConfig state
+                            checkNockServiceBudget pinnedConfig directory programId
                             let verdict : Except Minidregg.Kernel.Run.Refusal
                                 (Minidregg.Theory.Eval.Ran Minidregg.Theory.Noun) :=
                               match CanonicalCellRegistry.loadProgram

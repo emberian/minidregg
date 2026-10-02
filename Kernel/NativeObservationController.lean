@@ -19,6 +19,7 @@ import Kernel.ResourceObservationAdmission
 import Compiler.StoreHiding
 import Kernel.CapabilityRenounce
 import Kernel.StreamWrite
+import Kernel.RunComputeView
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -703,18 +704,18 @@ def openingStream : StreamCodec OpeningView :=
 
 /-- A resource view: the cell's own root, the packed cell as the reader's
 scope narrows it, its narrowed account cut, and the opening of the root. -/
-abbrev ResourceView := Digest × List UInt8 × List (Nat × Int) × OpeningView
+abbrev ResourceView := Digest × List UInt8 × List (Nat × Int) × OpeningView ×
+  Option RunComputeView.ComputeQuote
 
 /-- This codec is a read view, not a writable Book/registry payload. -/
 def resourceViewStream : StreamCodec ResourceView :=
   StreamCodec.product digestStream
-    (StreamCodec.product bytesStream (StreamCodec.product balanceStream openingStream))
+    (StreamCodec.product bytesStream (StreamCodec.product balanceStream
+      (StreamCodec.product openingStream (StreamCodec.option RunComputeView.computeQuoteStream))))
 
-/-- Version 5 (K-NARROW-HIDE): the root is the salted root and the view carries
-its opening, so a narrowed reader recomputes the root from the entries it may
-read, their salts, and the sealed leaves of the rest.  Version 4 (an unsalted
-root over the whole store, no opening) refuses. -/
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList
+/-- Version 6 retains salted openings and appends the authenticated reader's
+optional compute quote. Version 5 has no quote and refuses at this frame gate. -/
+def resourceViewFrame : List UInt8 := WorldExecutionContract.resourceViewFrame
 
 def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
@@ -772,6 +773,7 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           | world _ => simp [append] at shown
           | kindDefinition _ => simp [append] at shown
           | read => simp [append] at shown
+          | computeFunding _ => simp [append] at shown
           | append request =>
             simp only [append] at shown
             by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest
@@ -1377,13 +1379,13 @@ theorem presence_views_share_footprint (context : Context deployment durable)
 /-- What a reader under `fields` receives of a selected cell: its root, the
 cell with every unnamed field absent, and the named balances. -/
 def resourceView (fields : Option (Finset CellField))
-    (packed : PackedCell CanonicalCellRegistry.registry) (balances : List (Nat × Int)) :
-    ResourceView :=
+    (packed : PackedCell CanonicalCellRegistry.registry) (balances : List (Nat × Int))
+    (computeQuote : Option RunComputeView.ComputeQuote := none) : ResourceView :=
   (packed.payload.root,
     PackedCell.bytes CanonicalCellRegistry.registry
       (ResourceObservationAdmission.narrowPacked fields packed),
     ResourceObservationAdmission.narrowBalances fields balances,
-    openingView fields packed)
+    openingView fields packed, computeQuote)
 
 
 /-! ## Links and backlinks (K-DOC-INDEX)
@@ -1549,7 +1551,9 @@ def AuthorizedIntent.queryResult
         -- The authorizing capability (the one this grant names) narrows the view.
         let some stored := reader | throw .malformed
         pure (resourceViewCodec.encode (resourceView stored.head.scope.fields
-          checked.selected.packed checked.selected.accountBalances))
+          checked.selected.packed checked.selected.accountBalances
+          (if query.kind = .account then
+            RunComputeView.load deployment durable.snapshot intent.subject else none)))
     | .policy => do
         let address := state.policyAddress ⟨grant.target⟩ (state.policyRevision ⟨grant.target⟩)
         let some source := CanonicalCellRegistry.loadPolicySource deployment.domain
@@ -1700,8 +1704,21 @@ theorem CheckedGrant.current_generation_and_source
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
+/-- A version-5 resource view (no compute quote) refuses: its
+frame is not the v6 frame. -/
+theorem v5_view_refused (payload : List UInt8) :
+    resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList ++ payload) =
+      none := by
+  have len : ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList).length =
+      resourceViewFrame.length := by decide +kernel
+  have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList ≠ resourceViewFrame := by
+    decide +kernel
+  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
+
 /-- A version-4 resource view (an unsalted root, no opening) refuses: its
-frame is not the v5 frame. -/
+frame is not the v6 frame. -/
 theorem v4_view_refused (payload : List UInt8) :
     resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList ++ payload) =
       none := by

@@ -45,8 +45,8 @@ end Minidregg.Kernel.PolicyInstallReceiver
 
 namespace Minidregg.Kernel.DeclaredResourceController
 
-/-- Version 8 unifies observe-only reads, world-kind mutations and typed
-audience epoch/roster bindings. Both prior v7 shapes refuse. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [8]
+/-- After-core version9 adds explicit compute-funding payload tag6. The target
+nine-tuple and tags0–5 retain their order; core transaction8 refuses this gate. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [9]
 
 end Minidregg.Kernel.DeclaredResourceController

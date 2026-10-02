@@ -621,8 +621,17 @@ def declaredCell (_config : Config) (identifier : Nat) (account : Bool)
 
 /-- The genesis pay cell: the invalid placeholder tariff, an empty deposit
 book and no assignment (`PayCell.genesisStore`). -/
-def payCell : PackedCell CanonicalCellRegistry.registry :=
-  ⟨.pay, materialize Kernel.PayCell.materializer Kernel.PayCell.genesisStore⟩
+def payCell {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
+    PackedCell CanonicalCellRegistry.registry :=
+  -- This constructor is the explicit zero-history seed route, not a carry.
+  -- The seed pins this domain/profile activation together with clock day zero.
+  let history := (Sp800185Cshake256.hash WorldExecutionContract.freshActivationCustomization
+    ((StreamCodec.product digestStream digestStream).encode
+      (config.deployment.domain, profile.semantics))).digest
+  let activation : Kernel.PayCell.ComputeActivation := ⟨0, none, history⟩
+  let store := Kernel.PayCell.genesisStore.set Kernel.PayCell.computeActivationAddress (some activation)
+  ⟨.pay, materialize Kernel.PayCell.materializer store⟩
 /-- The genesis clock cell: the clock at zero (`ClockCell.genesisStore`). -/
 def clockCell : PackedCell CanonicalCellRegistry.registry :=
   ⟨.clock, materialize Kernel.ClockCell.materializer Kernel.ClockCell.genesisStore⟩
@@ -645,7 +654,7 @@ def baseCells {F : Type} [Field F]
   (policies profile config).map (fun record =>
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
       CanonicalCellRegistry.policySourceCell record)) ++
-  [(Kernel.PayCell.physicalId config.deployment.domain, payCell),
+  [(Kernel.PayCell.physicalId config.deployment.domain, payCell profile config),
    (Kernel.ClockCell.physicalId config.deployment.domain, clockCell),
    (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config)]
 

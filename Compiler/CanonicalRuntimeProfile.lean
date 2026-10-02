@@ -15,6 +15,7 @@ premises are explicit here. Concrete native field/range selection lives in
 -/
 import Compiler.CanonicalPolicyAdmission
 import Compiler.NativeProtocolFrames
+import Compiler.WorldExecutionContract
 import Compiler.ObjectAudienceRoster
 import Compiler.WorldKindDescriptor
 import Compiler.WorldKindCell
@@ -86,7 +87,7 @@ def installProjectionVersion : List UInt8 :=
 target/index joint slots, semantic world-kind fields and composed-law dependencies.
 Protected objects bind the fresh epoch and complete roster at the same receiving image. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER/v9".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER.ROM-METHOD-OUTPUTS-ATOMIC-QUOTA-BOOK-COMPUTE-FUNDING/v10".toUTF8.toList
 
 /-- Content uses the complete typed document tree, revisioned atoms, ordered marks,
 transclusion read guards, event/history/link indexes and live shared-name uniqueness.
@@ -120,7 +121,7 @@ def renounceVersion : List UInt8 :=
 fields, exact observe-grant footprints and independently authorized document/index
 views. Protected release binds current epoch and complete roster/catalog guards. -/
 def observationProjectionVersion : List UInt8 :=
-  "observe/v6:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content|stream|worldKind|worldInstance;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-content-tree-and-subject-bound-world-kind-slots;document-history-marks-links-query-sum;current-kind-export-descriptor-and-composed-law-guards;sparse-account-cut;same-image-intent-signatures;submit-foreign-view-read-gate;audience-epoch-complete-roster-catalog".toUTF8.toList
+  "observe/v7:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content|stream|worldKind|worldInstance;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-content-tree-and-subject-bound-world-kind-slots;document-history-marks-links-query-sum;current-kind-export-descriptor-and-composed-law-guards;sparse-account-cut;same-image-intent-signatures;submit-foreign-view-read-gate;audience-epoch-complete-roster-catalog;reader-subject-clockday-compute-quote-book-root".toUTF8.toList
 
 /-- Authorization binds exact inner semantic field footprints, current key and
 policy revision, separate grant generation, and current authenticated composed dependencies. -/
@@ -201,6 +202,11 @@ role. Codec/root epochs are read from their actual exported identities, without
 a separately maintained blanket version label. -/
 def sourceComponents : List (List UInt8) :=
   [authorizationVersion, nativeClockVersion, nativeHostWireVersion,
+   WorldExecutionContract.methodTableMeaning.toUTF8.toList,
+   WorldExecutionContract.methodTableFrame, WorldExecutionContract.resourceViewFrame,
+   WorldExecutionContract.freshActivationCustomization,
+   StreamCodec.nat.encode WorldExecutionContract.freeStepsPerDay,
+   WorldExecutionContract.receivingContract,
    CanonicalCellRegistry.logicalLawVersion, observationProjectionVersion,
    CredentialSignatureAdmission.signatureDomain,
    CredentialSignatureAdmission.requestFrame,

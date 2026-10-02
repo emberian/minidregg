@@ -67,7 +67,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
     Verb { name: "kind", usage: "kind create NAME DEFINITION-JSON|@FILE LAW [--in ROOM] | kind show NAME | kind revise ID NAME DEFINITION-JSON|@FILE", operation: "world-resident definition create, signed read, or guarded revision" },
-    Verb { name: "instance", usage: "instance show NAME | instance set ID NAME FIELD KEY VALUE | instance erase ID NAME FIELD KEY", operation: "signed descriptor and entry read; named guarded edits using the last displayed values" },
+    Verb { name: "program", usage: "program create NAME SOURCE-JSON|@FILE LAW [--in ROOM]", operation: "register canonical code and ABI with the existing evaluator, then birth its immutable program cell" },
+    Verb { name: "instance", usage: "instance show NAME | instance call ID NAME METHOD [--fund ACCOUNT --max-compute-credits N] | instance set ID NAME FIELD KEY VALUE | instance erase ID NAME FIELD KEY", operation: "signed descriptor and entry read; named guarded edits using the last displayed values" },
     Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
@@ -775,7 +776,7 @@ fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
     let create = matches!(verb.0, Some("create"));
     let first = match verb {
         (Some("create"), _) => 2,
-        (Some("doc"), Some("new")) | (Some("kind"), Some("create")) => 3,
+        (Some("doc"), Some("new")) | (Some("kind"), Some("create")) | (Some("program"), Some("create")) => 3,
         _ => return Ok(Birth::default()),
     };
     let mut birth = Birth::default();
@@ -1899,6 +1900,20 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 client("workspace", flags)
             }
         }
+        "program" => {
+            if w.get(1).map(String::as_str)!=Some("create") { return Err(u.into()); }
+            arity(&w,4,4,u)?;ref_name(&w[2],"program name")?;
+            let source=json_argument(session,&w[3],"program source")?;
+            let predicate=law_argument(session,&w[4..5])?;
+            let prefix=session.home.join("requests");
+            let path=prefix.join(format!("program-{}.json",ref_file(&w[2])));
+            let lawpath=prefix.join(format!("program-{}-law.json",ref_file(&w[2])));
+            let mut flags=vec![flag("action","program-create"),flag("dir",ws()),flag("name",&w[2]),
+                flag("source",path.clone()),flag("predicate",lawpath.clone())];
+            if let Some(room)=&room {flags.push(flag("in",room));}
+            Plan::Client {command:"workspace".into(),flags,
+                writes:vec![request_file(path,&source),request_file(lawpath,&predicate)]}
+        }
         "kind" => {
             match w.get(1).map(String::as_str) {
                 Some("show") => {
@@ -1932,6 +1947,22 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 Some("show") => {
                     arity(&w, 2, 2, u)?; ref_name(&w[2], "instance name")?;
                     client("workspace", vec![flag("action", "instance-show"), flag("dir", ws()), flag("name", &w[2])])
+                }
+                Some("call") => {
+                    arity(&w, 4, 8, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "instance name")?;
+                    let mut flags=vec![flag("action", "instance-call"),flag("dir",ws()),
+                        flag("proposal-id",&w[2]),flag("name",&w[3]),flag("method",&w[4])];
+                    let mut seen=std::collections::BTreeSet::new();
+                    let mut options=w[5..].iter();
+                    while let Some(option)=options.next() {
+                        let key=match option.as_str() {"--fund"=>"fund", "--max-compute-credits"=>"max-compute-credits", _=>return Err(u.into())};
+                        if !seen.insert(key) {return Err("duplicate compute consent option".into());}
+                        let value=options.next().ok_or("compute consent option needs a value")?;
+                        if key=="fund" {ref_name(value,"funding account")?;} else {decimal(value,"maximum compute credits")?;}
+                        flags.push(flag(key,value));
+                    }
+                    if seen.len()==1 {return Err("--fund and --max-compute-credits must be supplied together".into());}
+                    client("workspace", flags)
                 }
                 Some(operation @ ("set" | "erase")) => {
                     let count = if operation == "set" { 6 } else { 5 };
@@ -3032,6 +3063,20 @@ mod tests {
         let revision = client(plan(&s, &format!("kind revise rev poll {definition}")).unwrap());
         let request: Value = serde_json::from_str(&revision.2[0].1).unwrap();
         assert_eq!(request["targets"][0]["payload"]["type"], "kindDefinition");
+    }
+
+    #[test]
+    fn world_kind_method_compute_consent_is_explicit() {
+        let s=session();
+        let call=client(plan(&s,"instance call close poll close --max-compute-credits 12 --fund purse").unwrap());
+        assert!(call.1.contains(&("fund".into(),"purse".into())));
+        assert!(call.1.contains(&("max-compute-credits".into(),"12".into())));
+        for bad in ["instance call close poll close --fund purse", "instance call close poll close --max-compute-credits 12",
+          "instance call close poll close --fund purse --fund other", "instance call close poll close --max-cost 12"] {
+            assert!(plan(&s,bad).is_err(),"{bad}");
+        }
+        let program=client(plan(&s,r#"program create close {"jam":"02","abi":{}} open --in lab"#).unwrap());
+        assert!(program.1.contains(&("in".into(),"lab".into())));
     }
 
     #[test]

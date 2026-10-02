@@ -156,7 +156,7 @@ def schemaRef : Kind → SchemaRef
   | .accountMetadata => ⟨⟨91007⟩, 4⟩
   | .declaredProgram => ⟨⟨91008⟩, 4⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
-  | .pay => ⟨⟨91010⟩, 3⟩
+  | .pay => ⟨⟨91010⟩, 4⟩
   | .stream => ⟨⟨91012⟩, 3⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩

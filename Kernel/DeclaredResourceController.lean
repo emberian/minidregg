@@ -166,6 +166,17 @@ def storageKind (prepared : PreparedInvocation deployment profile ambient durabl
 /- These slots depend on the admitted tuple and incidence, but not on which
 old/new logical state the policy examines. Derive them here once per step;
 the caller cannot inject an independent request or command projection. -/
+def computeSlots (prepared : PreparedInvocation deployment profile ambient durable command) : List (String × Int) :=
+  match prepared.compute with
+  | none => []
+  | some compute =>
+    let quoted := compute.budget.quota.quoted
+    [("compute/subject", Int.ofNat quoted.subject.value),
+     ("compute/day", Int.ofNat quoted.day),
+     ("compute/used-before", Int.ofNat quoted.usedBefore),
+     ("compute/steps", Int.ofNat quoted.steps),
+     ("compute/credits", Int.ofNat quoted.credits)]
+
 def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command) : List (String × Int) :=
   let selected := incidenceTarget command primary
@@ -177,7 +188,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
-    runSlots prepared.run
+    runSlots prepared.run ++ computeSlots prepared
 
 /-- Participant `i`'s own slots: exactly what a law on `i` reads locally. -/
 def participantSlots (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -263,12 +274,18 @@ theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store Stream
         simp only [h, List.mem_cons, List.not_mem_nil, or_false] at hp
         rcases hp with rfl | rfl <;> dsimp only <;> decide
 
+theorem fundingProject_unjoint (funding : ComputeFunding) : Unjoint (fundingProject funding) := by
+  intro p hp
+  simp only [fundingProject, List.mem_cons, List.not_mem_nil, or_false] at hp
+  rcases hp with rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
+
 theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before after : Store target.layout) :
     Unjoint (targetProjection subject target before after) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact scalarSlots_unjoint _ _
+    | computeFunding funding => exact fundingProject_unjoint funding
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
@@ -301,16 +318,27 @@ theorem clockSlots_unjoint (clock : Kernel.ClockCell.Clock) : Unjoint (Kernel.Cl
   simp only [Kernel.ClockCell.slots, List.mem_cons, List.not_mem_nil, or_false] at hp
   rcases hp with rfl | rfl | rfl <;> dsimp only <;> decide
 
+theorem computeSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Unjoint (computeSlots prepared) := by
+  intro p hp
+  cases computed : prepared.compute with
+  | none => simp [computeSlots, computed] at hp
+  | some budget =>
+    simp only [computeSlots, computed, List.mem_cons, List.not_mem_nil, or_false] at hp
+    rcases hp with rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
+
 theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command) :
     Unjoint (projectCommonSlots prepared primary source) :=
   unjoint_append _ _
     (unjoint_append _ _
       (unjoint_append _ _
-        (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
-          (clockSlots_unjoint _)) (requestSlots_unjoint _))
-      (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
-    (runSlots_unjoint _)
+        (unjoint_append _ _
+          (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
+            (clockSlots_unjoint _)) (requestSlots_unjoint _))
+        (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
+      (runSlots_unjoint _))
+    (computeSlots_unjoint prepared)
 
 /-- Every joint key is read from the joint block: nothing local or common can shadow it. -/
 theorem project_joint_get (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -768,6 +796,7 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
     | kindDefinition _ => exact fun _ => .body
+    | computeFunding funding => exact fun _ => .balance funding.asset
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentField address.1
 
@@ -779,7 +808,7 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | read => exact fun _ _ => 0
+    | world _ | kindDefinition _ | computeFunding _ | read => exact fun _ _ => 0
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -793,7 +822,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
-    | world _ | kindDefinition _ => exact fun _ => false
+    | world _ | kindDefinition _ | computeFunding _ => exact fun _ => false
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
@@ -805,6 +834,9 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
+    | computeFunding funding =>
+        exact ⟨if funding.credits = 0 then ∅ else {.balance funding.asset},
+          fun field => if field = .balance funding.asset then -(Int.ofNat funding.credits) else 0⟩
     | world actions =>
         exact (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
     | scalar actions =>
@@ -833,7 +865,7 @@ actual patch writes and exclude the hiding ratchet. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   match target.payload with
-  | .world _ => targetFullFootprint target pre post
+  | .world _ | .computeFunding _ => targetFullFootprint target pre post
   | _ => ResourceObservationAdmission.footprintOf
       (ResourceObservationAdmission.changedWithin
         ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
@@ -1020,7 +1052,10 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient durabl
       (prepared.targets i).pre).map StreamWrite.entryWrite
 
 /-- An observe-only read target is read, not written. -/
-def Target.isRead (target : Target) : Bool := decide (target.payload = .read)
+def Target.isRead (target : Target) : Bool :=
+  match target.payload with
+  | .read | .computeFunding _ => true
+  | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the
 authority cell does: the commit refuses if the cell moved, and nothing of it
@@ -1033,10 +1068,17 @@ def targetReadGuard (prepared : PreparedInvocation deployment profile ambient du
 /-- The physical writes are the written targets plus fresh append entries: the authority incidence
 and every observe-only read target are reads, so their cells enter as read
 guards (`readGuards`). -/
-def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
+def ordinaryWrites (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
   ((List.finRange command.targets.length).filterMap fun i =>
     if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared
 
+
+/-- Compute usage and actual Book debit settle in the same CAS as program effects. -/
+def computeWrites (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
+  prepared.compute.map RunComputeBudgetDomain.Prepared.writes |>.getD []
+
+def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
+  ordinaryWrites prepared ++ computeWrites prepared
 
 /-- Audience checks use the same loaded directory and authority as the signed
 invocation. The inspected view is the validated target post, including the
@@ -1319,7 +1361,8 @@ def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient du
 
 /-- The domain reads of every invocation: the authority cell and the clock. -/
 def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  prepared.authority.readGuards ++ [prepared.clock.readGuard] ++ (lawSourceGuards prepared).getD []
+  prepared.authority.readGuards ++ [prepared.clock.readGuard] ++ (lawSourceGuards prepared).getD [] ++
+    (prepared.compute.map RunComputeBudgetDomain.Prepared.readGuards).getD []
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
@@ -1362,15 +1405,21 @@ instance physicalShapeDecidable (prepared : PreparedInvocation deployment profil
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  rcases List.mem_append.mp member with target | entry
-  · obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp target
-    split at produced
-    · cases produced
-    · cases produced
-      rfl
-  · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
-    obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
-    exact StreamWrite.entryWrite_root appended
+  rcases List.mem_append.mp member with ordinary | compute
+  · rcases List.mem_append.mp ordinary with target | entry
+    · obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp target
+      split at produced
+      · cases produced
+      · cases produced
+        rfl
+    · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
+      obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
+      exact StreamWrite.entryWrite_root appended
+  · cases bound : prepared.compute with
+    | none => simp [computeWrites, bound] at compute
+    | some budget =>
+      simp only [computeWrites, bound, Option.map_some, Option.getD_some] at compute
+      exact budget.writes_roots_bound write compute
 
 theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
@@ -1475,7 +1524,8 @@ def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient d
   | .memoryTouches => ws.length + guards.length
   | .storageBytes => (ws.map fun write => write.canonicalPostBytes.length).sum
   | .proofWork => (prepared.run.map fun checked => checked.verdict.steps).getD 0
-  | .feeDebit | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
+  | .feeDebit => (prepared.compute.map RunComputeBudgetDomain.Prepared.credits).getD 0
+  | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) : ResourceCost.Charge :=
@@ -1515,7 +1565,7 @@ theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
         (List.finRange command.targets.length).filterMap (fun i =>
-          if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared :=
+          if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
   ⟨rfl, rfl⟩
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]

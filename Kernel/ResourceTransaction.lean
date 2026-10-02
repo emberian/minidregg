@@ -5,6 +5,7 @@ contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Compiler.NativeProtocolFrames
 import Kernel.DeclaredResourceScalar
 import Kernel.WorldKindProjection
+import Kernel.WorldKindMethods
 import Compiler.ObjectAudienceRoster
 import Kernel.ObjectAudience
 import Kernel.ContentResource
@@ -13,6 +14,7 @@ import Compiler.ResourceAuthorityProjection
 import Kernel.Run
 import Kernel.NockDoor
 import Kernel.ClockCellDomain
+import Kernel.RunComputeBudgetDomain
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -37,6 +39,25 @@ abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
 abbrev Ambient := DeclaredResourceScalar.Ambient
 
+/-- Transaction9's explicit consent to a source-derived Book burn. Payer and
+capability are the containing signed account target, not duplicated here. -/
+structure ComputeFunding where
+  asset : Nat
+  credits : Nat
+  expectedPayerBalance : Int
+  expectedBookRoot : Digest
+  deriving DecidableEq, Repr
+
+def computeFundingStream : StreamCodec ComputeFunding :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product Minidregg.Compiler.IntStream.intStream digestStream)))
+    (fun funding => (funding.asset, funding.credits,
+      funding.expectedPayerBalance, funding.expectedBookRoot))
+    (fun (asset, credits, payer, bookRoot) => ⟨asset, credits, payer, bookRoot⟩)
+    (by intro funding; cases funding; rfl)
+
 /-- A target's payload: declared scalar actions, a content command, or one
 stream append (the entry's bytes; the receiver derives its sequence position
 and digest). -/
@@ -52,6 +73,7 @@ inductive Payload where
   transcluder's grant and the source's own policy at this height, and its
   loaded state is what the opening is checked against. -/
   | read
+  | computeFunding (funding : ComputeFunding)
   deriving DecidableEq
 
 /-- A content command shows as its canonical command bytes. -/
@@ -64,6 +86,7 @@ instance : Repr Payload where
     | .world actions => Repr.addAppParen ("Payload.world " ++ reprArg actions) prec
     | .kindDefinition definition => Repr.addAppParen ("Payload.kindDefinition " ++ reprArg definition) prec
     | .read => "Payload.read"
+    | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
 
 structure Target where
   kind : ResourceKind
@@ -122,6 +145,7 @@ def payloadStream : StreamCodec Payload where
     | .read => [3]
     | .world actions => 4 :: (StreamCodec.list WorldKindInstance.actionStream).encode actions
     | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
+    | .computeFunding funding => 6 :: computeFundingStream.encode funding
   decodePrefix
     | 0 :: bytes => do
         let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
@@ -139,6 +163,9 @@ def payloadStream : StreamCodec Payload where
     | 5 :: bytes => do
         let (definition, rest) ← WorldKindCell.definitionStream.decodePrefix bytes
         some (.kindDefinition definition, rest)
+    | 6 :: bytes => do
+        let (funding, rest) ← computeFundingStream.decodePrefix bytes
+        some (.computeFunding funding, rest)
     | _ => none
   decodePrefix_encode := by
     intro payload suffix
@@ -245,6 +272,16 @@ theorem v7_command_refused (payload : List UInt8) :
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
 
+/-- Core transaction8 is never reinterpreted under paid execution semantics. -/
+theorem v8_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 8 :: payload) = none := by
+  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [8]
+  have lengthExact : commandFrame.length = oldFrame.length := by simp [commandFrame, oldFrame]
+  have different : oldFrame ≠ commandFrame := by decide +kernel
+  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
+    simp [rawCommandCodec, lengthExact, different]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+
 @[simp] theorem command_decode_encode (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode command
 
@@ -300,6 +337,14 @@ def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
 
+/-- Payment authority is charged the exact consented credit amount; all other
+legs retain canonical command-byte cost. Structural preparation rejects a
+funding payload on any role except account. -/
+def requestCost (encodedCommand : List UInt8) (target : Target) : Nat :=
+  match target.payload with
+  | .computeFunding funding => funding.credits
+  | _ => encodedCommand.length
+
 /-- The original expression is retained as a specification for the optimized
 request construction. It is not called by the production request path. -/
 def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -319,11 +364,11 @@ def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (amb
   policyId := ⟨target.target⟩
   policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
   policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-  cost := (commandCodec.encode command).length
+  cost := requestCost (commandCodec.encode command) target
 
 /-- Encode the canonical command and its domain/profile frame once per
 request. The same exact framed bytes feed both digest domains; the raw
-canonical command length remains the declared request cost. -/
+funding credits are the funding leg cost; other legs retain canonical command length. -/
 def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (preRoot : Digest) : Request target.kind :=
   let encodedCommand := commandCodec.encode command
@@ -345,7 +390,7 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     policyId := ⟨target.target⟩
     policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
     policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-    cost := encodedCommand.length }
+    cost := requestCost encodedCommand target }
 
 /-- For every old authority snapshot and transaction input, caching only the
 two canonical byte strings changes no request field, digest, or cost. -/
@@ -375,6 +420,8 @@ inductive Reject where
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   | worldKind | kindDefinition
+  | computeFunding
+  | computeBudget (reason : RunComputeBudgetDomain.Reject)
   | audience (reason : ObjectAudience.Reject)
   /-- CH-EPOCH: a channel record's append refused by the channel law, the clause named. -/
   | channel (reason : DomainEpoch.Refusal)
@@ -391,7 +438,7 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
 /-- The store layout of the target's role: a declared-effect cell for scalar
 actions, a hyperdocument content cell for content commands. -/
 def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .scalar _ => EffectDeclaration.effectLayout
+  | .scalar _ | .computeFunding _ => EffectDeclaration.effectLayout
   | .content _ | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
@@ -401,7 +448,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredEffectCell.materializer
+    | scalar _ | computeFunding _ => exact DeclaredEffectCell.materializer
     | content _ => exact HyperdocumentCell.contentMaterializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
@@ -421,6 +468,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
+    | computeFunding _ => exact ⟨.accountMetadata, cell⟩
     | content _ => exact ⟨.content, cell⟩
     | append _ => exact ⟨.stream, cell⟩
     | world _ => exact ⟨.worldInstance, cell⟩
@@ -433,6 +481,8 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
+    | computeFunding _ => exact if kind = .account then
+        CanonicalCellRegistry.selectDeclared deployment id .account cell else none
     | content _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.content, value⟩ => some value | _ => none
@@ -511,6 +561,12 @@ def computeTarget (snapshot : AuthoritySnapshot)
         | .error reason => .error (.scalar reason)
         | .ok prepared => .ok (Patch.run prepared.post
             (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
+    | computeFunding _ => exact do
+        if kind != .account then throw .wrongRole
+        if version != 1 then throw .unsupportedVersion
+        if root != pre.root then throw .staleTarget
+        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
+        pure pre.logical
     | content content => exact do
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
@@ -583,7 +639,7 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | read => exact []
+    | read | computeFunding _ => exact []
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
@@ -596,7 +652,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact none
+    | scalar _ | computeFunding _ => exact none
     | content _ => exact none
     | world _ => exact none
     | kindDefinition _ => exact none
@@ -634,7 +690,7 @@ def Target.contentStore? (target : Target) (cell : TargetCell target) :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact none
+    | scalar _ | computeFunding _ => exact none
     | content _ => exact some cell.logical
     | append _ => exact none
     | read => exact some cell.logical
@@ -838,6 +894,16 @@ def streamSlots (request : StreamCell.Append) (before : Store StreamCell.headLay
     | some (cell, sequence) => [("request/ref/cell", Int.ofNat cell), ("request/ref/sequence", Int.ofNat sequence)]
     | none => [])
 
+/-- The explicit consent's numeric view. prepareCompute binds these exact
+payer balance, Book root and credits to the loaded Book before an accepted invocation can use
+them; no arbitrary balance mutation is installed in account metadata. -/
+def fundingProject (funding : ComputeFunding) : List (String × Int) :=
+  [("compute/charge", 1),
+   ("compute/asset", Int.ofNat funding.asset),
+   ("compute/credits", Int.ofNat funding.credits),
+   ("compute/payer/before", funding.expectedPayerBalance),
+   ("compute/payer/after", funding.expectedPayerBalance - Int.ofNat funding.credits)]
+
 /-- Exact scalar/content/stream projection from the committed old and candidate
 final states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -846,6 +912,7 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact DeclaredResourceProjection.project id before after
+    | computeFunding funding => exact fundingProject funding
     | content content => exact ContentResource.project before after content
     | append request => exact streamSlots request before
     | world _ => exact WorldKindProjection.project subject before after
@@ -861,6 +928,34 @@ def sampleRead (command : Command) (pre : (i : Fin command.targets.length) → S
       Minidregg.Pred.State).get slot
   else none
 
+/-- The validated system funding leg is last and is not an evaluator participant.
+Without the source budget token's index, every signed target remains in the sample. -/
+def programTargets (command : Command) (validatedFundingIndex : Option Nat := none) : List Nat :=
+  match validatedFundingIndex with
+  | none => command.targets.map Target.target
+  | some index => (command.targets.take index).map Target.target
+
+/-- Preserve program-local coordinates while preventing a slot from reading the
+funding participant (or any index beyond the actual program prefix). -/
+def programSampleRead (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (validatedFundingIndex : Option Nat := none) : Nat → String → Option Int :=
+  match validatedFundingIndex with
+  | none => sampleRead command pre
+  | some _ => fun i slot =>
+      if i < (programTargets command validatedFundingIndex).length then sampleRead command pre i slot
+      else none
+
+theorem programTargets_unfunded (command : Command) :
+    programTargets command none = command.targets.map Target.target := rfl
+
+theorem programSampleRead_outside {command : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {fundingIndex i : Nat} (slot : String)
+    (outside : (programTargets command (some fundingIndex)).length ≤ i) :
+    programSampleRead command pre (some fundingIndex) i slot = none := by
+  simp [programSampleRead, Nat.not_lt.mpr outside]
+
 /-- One action as a field write of the command's `i`-th target, when it is one. -/
 def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option Eval.FieldWrite
   | .write (.objectField object field) _ value =>
@@ -869,27 +964,38 @@ def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option Eval
       if object.value = target then some ⟨i, field.value, value⟩ else none
   | _ => none
 
-def targetWrites (i : Nat) (target : Target) : Option (List Eval.FieldWrite) :=
-  match target.payload with
-  | .scalar actions => actions.mapM (actionWrite i target.target)
-  | .content _ => none
-  -- A stream append is not a field write a program's output can name.
-  | .append _ | .world _ | .kindDefinition _ => none
-  -- An observe-only read makes no write.
-  | .read => some []
+/-- The actual pre-state supplies world method bindings. Output coordinates are
+program-local names, never substitutes for capability semantic field IDs. -/
+def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
+    (program : Digest) (validatedFundingIndex : Option Nat := none) :
+    Option (List Eval.FieldWrite) := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | scalar actions => exact actions.mapM (actionWrite i id)
+    | world actions => exact WorldKindMethods.writes pre program i actions
+    | content _ | append _ | kindDefinition _ => exact none
+    | read => exact some []
+    | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
 
-def writesFrom : Nat → List Target → Option (List Eval.FieldWrite)
-  | _, [] => some []
-  | i, target :: rest => do
-      let here ← targetWrites i target
-      let later ← writesFrom (i + 1) rest
-      pure (here ++ later)
+/-- Merely spelling a funding payload cannot remove it from run-effect
+checking. Only prepareCompute's validated index enables the system-leg route. -/
+theorem funding_unvalidated (index target : Nat) (capability : CapabilityId)
+    (root program : Digest) (funding : ComputeFunding)
+    (pre : Store EffectDeclaration.effectLayout) :
+    targetWrites index ⟨.account, target, capability, 1, root,
+      .computeFunding funding, none, none, none⟩ pre program none = none := by
+  simp [targetWrites]
 
-/-- Every write the command makes, as field writes; `none` when any action is not
-an own-object field write (a move, a content edit) — under a run claim that is a
-write the program's output cannot name. -/
-def commandWrites (command : Command) : Option (List Eval.FieldWrite) :=
-  writesFrom 0 command.targets
+/-- Extract checked effects from every actual loaded participant. A world
+participant must bind the claimed immutable program in its retained ROM table. -/
+def commandWrites (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (program : Digest) (validatedFundingIndex : Option Nat := none) :
+    Option (List Eval.FieldWrite) := do
+  let groups ← (List.finRange command.targets.length).mapM fun i =>
+    targetWrites i.val command.targets[i] (pre i) program validatedFundingIndex
+  pure groups.flatten
 
 /-- What the controller learned from a checked run: the claim, the evaluator it ran
 on (registry id), the ABI fuel, and the accepted product (its bytes, count, writes). -/
@@ -912,15 +1018,16 @@ def checkProgram (E : Evaluator) (program : NockProgramCodec.Program)
     (libraries : List NockProgramCodec.Program)
     (ambient : Ambient) (command : Command)
     (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
-    (claim : Run.RunClaim) (writes : List Eval.FieldWrite) :
+    (claim : Run.RunClaim) (writes : List Eval.FieldWrite)
+    (validatedFundingIndex : Option Nat := none) :
     Except Run.Refusal Run.Accepted :=
   match program.abi.door with
   | none =>
-    match E.overMax (sampleRead command pre) program.abi.sample with
+    match E.overMax (programSampleRead command pre validatedFundingIndex) program.abi.sample with
     | some _ => .error .fieldOverMax
     | none =>
     match E.sampleOf program.abi (runContext ambient command)
-        (command.targets.map Target.target) (sampleRead command pre) with
+        (programTargets command validatedFundingIndex) (programSampleRead command pre validatedFundingIndex) with
     | none => .error .sampleUnavailable
     | some sample =>
       (Run.checkRun E.toMachine program libraries sample claim writes).map
@@ -929,7 +1036,7 @@ def checkProgram (E : Evaluator) (program : NockProgramCodec.Program)
     match E.door with
     | none => .error .doorUnsupported
     | some d =>
-      match Door.viewOf door (sampleRead command pre) with
+      match Door.viewOf door (programSampleRead command pre validatedFundingIndex) with
       | .error e => .error e
       | .ok view =>
         (Door.checkPoke E.toMachine d program door view claim writes).map (Run.Verdict.erase E.toMachine)
@@ -940,7 +1047,8 @@ re-execute it against the loaded pre-states (`checkProgram`). -/
 def checkClaim (disabled : List Digest) (domain : Digest) (directory : Directory Nat Registry)
     (ambient : Ambient) (command : Command)
     (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
-    (claim : Run.RunClaim) : Except Run.Refusal CheckedRun :=
+    (claim : Run.RunClaim) (validatedFundingIndex : Option Nat := none) :
+    Except Run.Refusal CheckedRun :=
   match CanonicalCellRegistry.loadProgram domain directory claim.programId with
   | none => .error .programUnknown
   | some program =>
@@ -950,18 +1058,53 @@ def checkClaim (disabled : List Digest) (domain : Digest) (directory : Directory
       let libraries ← program.abi.libraries.mapM fun library =>
         Run.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
       if !Run.librariesAgree program libraries then throw .libraryEvaluator
-      let writes ← Run.require .writeNotInOutput (commandWrites command)
-      let verdict ← checkProgram E program libraries ambient command pre claim writes
+      let writes ← Run.require .writeNotInOutput (commandWrites command pre claim.programId validatedFundingIndex)
+      let verdict ← checkProgram E program libraries ambient command pre claim writes validatedFundingIndex
       pure ⟨claim, E.id, program.abi.fuel, verdict⟩
 
 /-- No claim: nothing to check. A claim: `checkClaim`, its refusal named `run`. -/
 def checkCommandRun (disabled : List Digest) (domain : Digest) (directory : Directory Nat Registry)
     (ambient : Ambient) (command : Command)
-    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout) :
-    Except Reject (Option CheckedRun) :=
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (validatedFundingIndex : Option Nat := none) : Except Reject (Option CheckedRun) :=
   match command.run with
   | none => .ok none
-  | some claim => ((checkClaim disabled domain directory ambient command pre claim).map some).mapError .run
+  | some claim => ((checkClaim disabled domain directory ambient command pre claim validatedFundingIndex).map some).mapError .run
+
+/-- Extract at most one explicit account funding leg from the actual signed
+command. No run means no funding; caller-selected exclusion indices do not enter
+this API. The domain quote and Book preparation run before the evaluator. -/
+def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.Physical)
+    (clock : ClockCell.Clock) (command : Command) :
+    Except Reject (Option (RunComputeBudgetDomain.Prepared deployment physical command.subject)) := do
+  let funding ← (List.finRange command.targets.length).foldlM
+    (fun (selected : Option RunComputeBudgetDomain.FundingInput) i => do
+      let target := command.targets[i]
+      match target.payload with
+      | .computeFunding consent =>
+          if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
+            throw .computeFunding
+          pure (some ⟨i.val, target.target, target.capability, consent.asset, consent.credits,
+            consent.expectedPayerBalance, consent.expectedBookRoot⟩)
+      | _ => pure selected) none
+  match command.run with
+  | none => if funding.isSome then throw .computeFunding else pure none
+  | some claim =>
+      let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
+        claim.steps funding).mapError Reject.computeBudget
+      pure (some prepared)
+
+def computeFundingIndex {deployment : Deployment} {physical : RunComputeBudgetDomain.Physical}
+    {subject : SubjectId} (compute : Option (RunComputeBudgetDomain.Prepared deployment physical subject)) :
+    Option Nat := compute.bind (fun prepared => prepared.fundingIndex)
+
+/-- No compute plan can settle an unchecked/differently counted execution. -/
+def computeRunMatches {deployment : Deployment} {physical : RunComputeBudgetDomain.Physical}
+    {subject : SubjectId} :
+    Option (RunComputeBudgetDomain.Prepared deployment physical subject) → Option CheckedRun → Bool
+  | none, none => true
+  | some compute, some run => decide (compute.steps = run.verdict.steps)
+  | _, _ => false
 
 structure PreparedInvocation {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -979,10 +1122,24 @@ structure PreparedInvocation {F : Type} [Field F]
   /-- Every transclusion's opening holds on its source read, at this height. -/
   openings : openingsCheck command (fun j => command.targets[j].contentStore? (targets j).pre) = true
   marker : MarkerMode authority.snapshot profile.semantics command
+  compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)
+  computeChecked : prepareCompute deployment durable.snapshot clock.clock command = .ok compute
   /-- The re-executed run, when the command claims one. -/
   run : Option CheckedRun
   runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory
-    ambient command (fun i => (targets i).pre.logical) = .ok run
+    ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
+  computeRunExact : computeRunMatches compute run = true
+
+/-- The accounting plan's amount is tied to the actual accepted oracle count. -/
+theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {durable : Durable} {command : Command}
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (compute : RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)
+    (run : CheckedRun) (hasCompute : prepared.compute = some compute)
+    (hasRun : prepared.run = some run) : compute.steps = run.verdict.steps := by
+  have exact := prepared.computeRunExact
+  simpa [hasCompute, hasRun, computeRunMatches] using exact
 
 /-- `prepare` over a directory the caller already holds for this image (the
 Host's `Opened.directory`), or `none` for an image whose directory does not load.
@@ -1001,10 +1158,17 @@ def prepareFrom {F : Type} [Field F] (deployment : Deployment)
       if openings : openingsCheck command
           (fun j => command.targets[j].contentStore? (targets j).pre) = true then
         let marker ← prepareMarker authority.snapshot profile.semantics command
-        match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory ambient command
-            (fun i => (targets i).pre.logical) with
+        match computeChecked : prepareCompute deployment durable.snapshot clock.clock command with
         | .error reason => .error reason
-        | .ok run => .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker, run, checked⟩
+        | .ok compute =>
+          match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory ambient command
+              (fun i => (targets i).pre.logical) (computeFundingIndex compute) with
+          | .error reason => .error reason
+          | .ok run =>
+            if computeRunExact : computeRunMatches compute run = true then
+              .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
+                compute, computeChecked, run, checked, computeRunExact⟩
+            else .error .computeFunding
       else .error (.content .staleOpening)
     else .error .duplicateTargets
   else .error .emptyTargets
@@ -1044,10 +1208,11 @@ theorem PreparedInvocation.authorityPost_logical {F : Type} [Field F] {deploymen
 /-! ## The run check is what prepared -/
 
 theorem checkCommandRun_none {disabled : List Digest} {domain : Digest}
+    {validatedFundingIndex : Option Nat}
     {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     (unclaimed : command.run = none) :
-    checkCommandRun disabled domain directory ambient command pre = .ok none := by
+    checkCommandRun disabled domain directory ambient command pre validatedFundingIndex = .ok none := by
   unfold checkCommandRun; rw [unclaimed]
 
 /-- What an accepted `checkProgram` ran: a gate's `checkRun` on its evaluator and the
@@ -1056,23 +1221,25 @@ def ProgramAccepted (E : Evaluator) (program : NockProgramCodec.Program)
     (libraries : List NockProgramCodec.Program)
     (ambient : Ambient) (command : Command)
     (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
-    (claim : Run.RunClaim) (writes : List Eval.FieldWrite) (verdict : Run.Accepted) : Prop :=
+    (claim : Run.RunClaim) (writes : List Eval.FieldWrite) (verdict : Run.Accepted)
+    (validatedFundingIndex : Option Nat := none) : Prop :=
   match program.abi.door with
   | none => ∃ sample v, E.sampleOf program.abi (runContext ambient command)
-      (command.targets.map Target.target) (sampleRead command pre) = some sample ∧
+      (programTargets command validatedFundingIndex) (programSampleRead command pre validatedFundingIndex) = some sample ∧
       Run.checkRun E.toMachine program libraries sample claim writes = .ok v ∧
       Run.Verdict.erase E.toMachine v = verdict
   | some door => ∃ d view v, E.door = some d ∧
-      Door.viewOf door (sampleRead command pre) = .ok view ∧
+      Door.viewOf door (programSampleRead command pre validatedFundingIndex) = .ok view ∧
       Door.checkPoke E.toMachine d program door view claim writes = .ok v ∧
       Run.Verdict.erase E.toMachine v = verdict
 
 theorem checkProgram_sound {E : Evaluator} {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} {writes : List Eval.FieldWrite} {verdict : Run.Accepted}
-    (accepted : checkProgram E program libraries ambient command pre claim writes = .ok verdict) :
-    ProgramAccepted E program libraries ambient command pre claim writes verdict := by
+    (accepted : checkProgram E program libraries ambient command pre claim writes validatedFundingIndex = .ok verdict) :
+    ProgramAccepted E program libraries ambient command pre claim writes verdict validatedFundingIndex := by
   unfold checkProgram at accepted
   unfold ProgramAccepted
   split at accepted
@@ -1104,12 +1271,13 @@ theorem checkProgram_sound {E : Evaluator} {program : NockProgramCodec.Program}
 /-- **`checkProgram_fieldOverMax`** (NC-2): a gate whose sample slot value lies above the slot's
 declared maximum is refused by name, before any sample is built or any run. -/
 theorem checkProgram_fieldOverMax {E : Evaluator} {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} {writes : List Eval.FieldWrite} {slot : NockProgramCodec.SampleSlot}
     (gate : program.abi.door = none)
-    (above : E.overMax (sampleRead command pre) program.abi.sample = some slot) :
-    checkProgram E program libraries ambient command pre claim writes = .error .fieldOverMax := by
+    (above : E.overMax (programSampleRead command pre validatedFundingIndex) program.abi.sample = some slot) :
+    checkProgram E program libraries ambient command pre claim writes validatedFundingIndex = .error .fieldOverMax := by
   unfold checkProgram
   rw [gate]
   simp only [above]
@@ -1120,10 +1288,11 @@ evaluator) from the directory, and re-executed it against the loaded pre-states:
 gate on the kernel's own sample (`Run.checkRun`), a door on target 0's stored state
 (`Door.checkPoke` with the evaluator's door), accepting the command's writes. -/
 theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
+    {validatedFundingIndex : Option Nat}
     {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} {checked : CheckedRun}
-    (accepted : checkClaim disabled domain directory ambient command pre claim = .ok checked) :
+    (accepted : checkClaim disabled domain directory ambient command pre claim validatedFundingIndex = .ok checked) :
     ∃ program E libraries writes,
       checked.claim = claim ∧
       CanonicalCellRegistry.loadProgram domain directory checked.claim.programId = some program ∧
@@ -1131,10 +1300,10 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
       program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram domain directory library)) = .ok libraries ∧
       Run.librariesAgree program libraries = true ∧
-      commandWrites command = some writes ∧
+      commandWrites command pre claim.programId validatedFundingIndex = some writes ∧
       checked.fuel = program.abi.fuel ∧
       ProgramAccepted E program libraries ambient command pre checked.claim writes
-        checked.verdict := by
+        checked.verdict validatedFundingIndex := by
   unfold checkClaim at accepted
   cases hprog : CanonicalCellRegistry.loadProgram domain directory claim.programId with
   | none => rw [hprog] at accepted; cases accepted
@@ -1156,13 +1325,13 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
         · cases accepted
         rename_i hagree
         revert accepted
-        cases hwrites : commandWrites command with
+        cases hwrites : commandWrites command pre claim.programId validatedFundingIndex with
         | none => intro accepted; cases accepted
         | some writes =>
           intro accepted
           simp only [Run.require_some] at accepted
           revert accepted
-          cases hrun : checkProgram E program libraries ambient command pre claim writes with
+          cases hrun : checkProgram E program libraries ambient command pre claim writes validatedFundingIndex with
           | error e => intro accepted; cases accepted
           | ok verdict =>
             intro accepted
@@ -1175,12 +1344,13 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
 compiled-in evaluator has is refused `unknownEvaluator`, before any library is loaded
 or anything runs. -/
 theorem checkClaim_unknownEvaluator {disabled : List Digest} {domain : Digest}
+    {validatedFundingIndex : Option Nat}
     {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} {program : NockProgramCodec.Program}
     (stored : CanonicalCellRegistry.loadProgram domain directory claim.programId = some program)
     (absent : ∀ E ∈ Evaluator.registry, E.id ≠ program.evaluator) :
-    checkClaim disabled domain directory ambient command pre claim = .error .unknownEvaluator := by
+    checkClaim disabled domain directory ambient command pre claim validatedFundingIndex = .error .unknownEvaluator := by
   unfold checkClaim
   rw [stored]
   simp only
@@ -1189,18 +1359,19 @@ theorem checkClaim_unknownEvaluator {disabled : List Digest} {domain : Digest}
 /-- **`checkCommandRun_sound`**: a checked run in a prepared invocation is the
 command's own claim, accepted by `checkClaim`. -/
 theorem checkCommandRun_sound {disabled : List Digest} {domain : Digest}
+    {validatedFundingIndex : Option Nat}
     {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {checked : CheckedRun}
-    (accepted : checkCommandRun disabled domain directory ambient command pre = .ok (some checked)) :
+    (accepted : checkCommandRun disabled domain directory ambient command pre validatedFundingIndex = .ok (some checked)) :
     command.run = some checked.claim ∧
-      checkClaim disabled domain directory ambient command pre checked.claim = .ok checked := by
+      checkClaim disabled domain directory ambient command pre checked.claim validatedFundingIndex = .ok checked := by
   unfold checkCommandRun at accepted
   cases hclaim : command.run with
   | none => rw [hclaim] at accepted; cases accepted
   | some claim =>
     rw [hclaim] at accepted
-    cases hc : checkClaim disabled domain directory ambient command pre claim with
+    cases hc : checkClaim disabled domain directory ambient command pre claim validatedFundingIndex with
     | error e => simp [hc, Except.map, Except.mapError] at accepted
     | ok c =>
       simp only [hc, Except.map, Except.mapError, Except.ok.injEq, Option.some.injEq] at accepted
@@ -1212,14 +1383,15 @@ theorem checkCommandRun_sound {disabled : List Digest} {domain : Digest}
 /-- A claim is never dropped: a command that claims a run is either refused
 with the claim's `run` refusal, or carries the checked run. -/
 theorem checkCommandRun_claimed {disabled : List Digest} {domain : Digest}
+    {validatedFundingIndex : Option Nat}
     {directory : Directory Nat Registry}
     {ambient : Ambient} {command : Command}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} (claimed : command.run = some claim) :
-    checkCommandRun disabled domain directory ambient command pre ≠ .ok none := by
+    checkCommandRun disabled domain directory ambient command pre validatedFundingIndex ≠ .ok none := by
   unfold checkCommandRun
   rw [claimed]
-  cases h : checkClaim disabled domain directory ambient command pre claim <;>
+  cases h : checkClaim disabled domain directory ambient command pre claim validatedFundingIndex <;>
     simp [h, Except.map, Except.mapError]
 
 /-- **`PreparedInvocation.run_sound`**: a prepared invocation whose command claims
@@ -1242,9 +1414,10 @@ theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployme
       program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory library)) =
           .ok libraries ∧
-      commandWrites command = some writes ∧
+      commandWrites command (fun i => (prepared.targets i).pre.logical) claim.programId
+        (computeFundingIndex prepared.compute) = some writes ∧
       ProgramAccepted E program libraries ambient command (fun i => (prepared.targets i).pre.logical)
-        claim writes checked.verdict := by
+        claim writes checked.verdict (computeFundingIndex prepared.compute) := by
   have h := prepared.runChecked
   cases hrun : prepared.run with
   | none => rw [hrun] at h; exact absurd h (checkCommandRun_claimed claimed)
@@ -1274,25 +1447,26 @@ targets, whenever the ABI's named slots hold the values they held. A job whose
 sample reads only its order's write-once fields therefore has one truth at
 every height (COMPUTE §2.2). -/
 theorem pinned_claim_admissible_across_heights {E : Evaluator} {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
-    {command command' : Command}
+    {command command' : Command} {validatedFundingIndex' : Option Nat}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
     {claim : Run.RunClaim} {writes : List Eval.FieldWrite} {verdict : Run.Accepted}
     (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
-    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
+    (sameTargets : programTargets command' validatedFundingIndex' = programTargets command validatedFundingIndex)
     (unchanged : ∀ slot ∈ program.abi.sample,
-      sampleRead command' pre' slot.target slot.slot = sampleRead command pre slot.target slot.slot)
-    (accepted : checkProgram E program libraries ambient command pre claim writes = .ok verdict) :
-    checkProgram E program libraries ambient' command' pre' claim writes = .ok verdict := by
+      programSampleRead command' pre' validatedFundingIndex' slot.target slot.slot = programSampleRead command pre validatedFundingIndex slot.target slot.slot)
+    (accepted : checkProgram E program libraries ambient command pre claim writes validatedFundingIndex = .ok verdict) :
+    checkProgram E program libraries ambient' command' pre' claim writes validatedFundingIndex' = .ok verdict := by
   have same : E.sampleOf program.abi (runContext ambient' command')
-      (command'.targets.map Target.target) (sampleRead command' pre') =
+      (programTargets command' validatedFundingIndex') (programSampleRead command' pre' validatedFundingIndex') =
       E.sampleOf program.abi (runContext ambient command)
-      (command.targets.map Target.target) (sampleRead command pre) := by
+      (programTargets command validatedFundingIndex) (programSampleRead command pre validatedFundingIndex) := by
     rw [sameTargets]
     exact E.sampleOf_pinned_of_fields pinned _ _ _ unchanged
-  have hmax : E.overMax (sampleRead command' pre') program.abi.sample =
-      E.overMax (sampleRead command pre) program.abi.sample := E.overMax_congr unchanged
+  have hmax : E.overMax (programSampleRead command' pre' validatedFundingIndex') program.abi.sample =
+      E.overMax (programSampleRead command pre validatedFundingIndex) program.abi.sample := E.overMax_congr unchanged
   unfold checkProgram at accepted ⊢
   rw [gate] at accepted ⊢
   simp only at accepted ⊢
@@ -1303,35 +1477,36 @@ theorem pinned_claim_admissible_across_heights {E : Evaluator} {program : NockPr
 one named slot of a pinned gate moved, the claim the kernel accepted before
 refuses `sampleStale` naming that slot's key, at any height. -/
 theorem pinned_claim_stale_on_field_change {E : Evaluator} {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
-    {command command' : Command}
+    {command command' : Command} {validatedFundingIndex' : Option Nat}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
     {claim : Run.RunClaim} {writes writes' : List Eval.FieldWrite}
     {verdict : Run.Accepted} {slot : NockProgramCodec.SampleSlot} {sample' : E.Input}
     (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
-    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
-    (accepted : checkProgram E program libraries ambient command pre claim writes = .ok verdict)
+    (sameTargets : programTargets command' validatedFundingIndex' = programTargets command validatedFundingIndex)
+    (accepted : checkProgram E program libraries ambient command pre claim writes validatedFundingIndex = .ok verdict)
     (current : E.sampleOf program.abi (runContext ambient' command')
-      (command'.targets.map Target.target) (sampleRead command' pre') = some sample')
+      (programTargets command' validatedFundingIndex') (programSampleRead command' pre' validatedFundingIndex') = some sample')
     (named : slot ∈ program.abi.sample)
-    (changed : sampleRead command pre slot.target slot.slot ≠
-      sampleRead command' pre' slot.target slot.slot)
+    (changed : programSampleRead command pre validatedFundingIndex slot.target slot.slot ≠
+      programSampleRead command' pre' validatedFundingIndex' slot.target slot.slot)
     (only : ∀ s ∈ program.abi.sample, s ≠ slot →
-      sampleRead command pre s.target s.slot = sampleRead command' pre' s.target s.slot) :
-    checkProgram E program libraries ambient' command' pre' claim writes' =
+      programSampleRead command pre validatedFundingIndex s.target s.slot = programSampleRead command' pre' validatedFundingIndex' s.target s.slot) :
+    checkProgram E program libraries ambient' command' pre' claim writes' validatedFundingIndex' =
       .error (.sampleStale (some slot.key)) := by
   have sound := checkProgram_sound accepted
   unfold ProgramAccepted at sound
   rw [gate] at sound
   obtain ⟨sample, v, hsample, ran, -⟩ := sound
   obtain ⟨-, -, -, -, -, computed, -⟩ := Run.checkRun_sound ran
-  have under : E.overMax (sampleRead command' pre') program.abi.sample = none := by
-    cases hs : E.overMax (sampleRead command' pre') program.abi.sample with
+  have under : E.overMax (programSampleRead command' pre' validatedFundingIndex') program.abi.sample = none := by
+    cases hs : E.overMax (programSampleRead command' pre' validatedFundingIndex') program.abi.sample with
     | none => rfl
     | some s =>
       have refused : E.sampleOf program.abi (runContext ambient' command')
-          (command'.targets.map Target.target) (sampleRead command' pre') = none :=
+          (programTargets command' validatedFundingIndex') (programSampleRead command' pre' validatedFundingIndex') = none :=
         E.sampleOf_overMax hs
       rw [refused] at current; cases current
   unfold checkProgram
@@ -1348,50 +1523,53 @@ theorem pinned_claim_stale_on_field_change {E : Evaluator} {program : NockProgra
 namespace nock
 
 theorem checkProgram_fieldOverMax {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : Run.RunClaim} {writes : List Eval.FieldWrite} {slot : NockProgramCodec.SampleSlot}
     (gate : program.abi.door = none)
-    (above : NockProgramCell.overMax (sampleRead command pre) program.abi.sample = some slot) :
-    checkProgram Evaluator.nock program libraries ambient command pre claim writes =
+    (above : NockProgramCell.overMax (programSampleRead command pre validatedFundingIndex) program.abi.sample = some slot) :
+    checkProgram Evaluator.nock program libraries ambient command pre claim writes validatedFundingIndex =
       .error .fieldOverMax :=
   DeclaredResourceController.checkProgram_fieldOverMax (E := Evaluator.nock) gate above
 
 theorem pinned_claim_admissible_across_heights {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
-    {command command' : Command}
+    {command command' : Command} {validatedFundingIndex' : Option Nat}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
     {claim : Run.RunClaim} {writes : List Eval.FieldWrite} {verdict : Run.Accepted}
     (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
-    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
+    (sameTargets : programTargets command' validatedFundingIndex' = programTargets command validatedFundingIndex)
     (unchanged : ∀ slot ∈ program.abi.sample,
-      sampleRead command' pre' slot.target slot.slot = sampleRead command pre slot.target slot.slot)
-    (accepted : checkProgram Evaluator.nock program libraries ambient command pre claim writes =
+      programSampleRead command' pre' validatedFundingIndex' slot.target slot.slot = programSampleRead command pre validatedFundingIndex slot.target slot.slot)
+    (accepted : checkProgram Evaluator.nock program libraries ambient command pre claim writes validatedFundingIndex =
       .ok verdict) :
-    checkProgram Evaluator.nock program libraries ambient' command' pre' claim writes = .ok verdict :=
+    checkProgram Evaluator.nock program libraries ambient' command' pre' claim writes validatedFundingIndex' = .ok verdict :=
   DeclaredResourceController.pinned_claim_admissible_across_heights gate pinned sameTargets
     unchanged accepted
 
 theorem pinned_claim_stale_on_field_change {program : NockProgramCodec.Program}
+    {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
-    {command command' : Command}
+    {command command' : Command} {validatedFundingIndex' : Option Nat}
     {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
     {claim : Run.RunClaim} {writes writes' : List Eval.FieldWrite}
     {verdict : Run.Accepted} {slot : NockProgramCodec.SampleSlot} {sample' : Noun}
     (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
-    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
-    (accepted : checkProgram Evaluator.nock program libraries ambient command pre claim writes =
+    (sameTargets : programTargets command' validatedFundingIndex' = programTargets command validatedFundingIndex)
+    (accepted : checkProgram Evaluator.nock program libraries ambient command pre claim writes validatedFundingIndex =
       .ok verdict)
     (current : NockProgramCell.sampleOf program.abi (runContext ambient' command')
-      (command'.targets.map Target.target) (sampleRead command' pre') = some sample')
+      (programTargets command' validatedFundingIndex') (programSampleRead command' pre' validatedFundingIndex') = some sample')
     (named : slot ∈ program.abi.sample)
-    (changed : sampleRead command pre slot.target slot.slot ≠
-      sampleRead command' pre' slot.target slot.slot)
+    (changed : programSampleRead command pre validatedFundingIndex slot.target slot.slot ≠
+      programSampleRead command' pre' validatedFundingIndex' slot.target slot.slot)
     (only : ∀ s ∈ program.abi.sample, s ≠ slot →
-      sampleRead command pre s.target s.slot = sampleRead command' pre' s.target s.slot) :
-    checkProgram Evaluator.nock program libraries ambient' command' pre' claim writes' =
+      programSampleRead command pre validatedFundingIndex s.target s.slot = programSampleRead command' pre' validatedFundingIndex' s.target s.slot) :
+    checkProgram Evaluator.nock program libraries ambient' command' pre' claim writes' validatedFundingIndex' =
       .error (.sampleStale (some slot.key)) :=
   DeclaredResourceController.pinned_claim_stale_on_field_change (E := Evaluator.nock) gate pinned
     sameTargets accepted current named changed only
