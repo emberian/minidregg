@@ -707,6 +707,14 @@ mod tests {
         json!({"algorithm":EDGE,"oldIdentity":selected("2").identity,"newIdentity":selected("4").identity,
         "oldCut":full(&endpoint(5)).unwrap(),"newStart":full(&endpoint(6)).unwrap(),"bodyDigest":"7","originIndexDigest":"8", "operatorPublicKey":"b".repeat(64),"targetVerifierDigest":"a".repeat(64)})
     }
+    fn completed_fresh_provenance(root: &Path) {
+        // Match the actual onboarding module's immutable completed provenance,
+        // rather than the placeholder object used before these lanes converged.
+        save(root, "receipt-continuity.pending.json", &json!({
+            "type":"minidregg-fresh-continuity-v1","enrollment":"11","state":"complete",
+            "reference":{"name":"initial","kind":"object","target":"1","observeCapability":"2"}
+        })).unwrap();
+    }
     fn prepared() -> (Temp, Value, Ticket) {
         let root = Temp::new();
         let custody = root.0.join(DIRECTORY);
@@ -715,7 +723,8 @@ mod tests {
         workspace::make_private_dir(&custody.join("lineages/1")).unwrap();
         let settings = selected("2");
         let replacement = selected("4");
-        let manifest = json!({"receiptContinuity":ALGORITHM,"config":"/old/config","host":"/old/verifier","hostSha256":"a".repeat(64),"freshContinuity":{"id":"immutable-first-use","state":"complete"}});
+        completed_fresh_provenance(&root.0);
+        let manifest = json!({"receiptContinuity":ALGORITHM,"config":"/old/config","host":"/old/verifier","hostSha256":"a".repeat(64),"freshContinuity":"11"});
         let mut next = manifest.clone();
         next["config"] = json!("/new/config");
         next["host"] = json!("/new/verifier");
@@ -1013,7 +1022,9 @@ mod tests {
         let socket = root.0.join("s");
         SOCKET.set(socket.clone()).unwrap();
         let mut manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"1","key":root.0.join("unused-key"),"receiptContinuity":ALGORITHM,"config":root.0.join("old-config.json"),"host":host,"hostSha256":old.verifier_sha256,"socket":socket,
-            "freshContinuity":{"id":"first-enrollment","state":"complete"}});
+            "freshContinuity":"11"});
+        completed_fresh_provenance(&root.0);
+        let fresh_before = fs::read(root.0.join("receipt-continuity.pending.json")).unwrap();
         save(&root.0, "workspace.json", &manifest).unwrap();
         let pinned = pin_authority(&root.0, &manifest, &"b".repeat(64)).unwrap();
         let capsule = PathBuf::from(text(&pinned, "sourceCapsulePath").unwrap());
@@ -1150,6 +1161,7 @@ mod tests {
         result.unwrap();
         let next = read_json(&root.0.join("workspace.json")).unwrap();
         assert_eq!(next["freshContinuity"], manifest["freshContinuity"]);
+        assert_eq!(fs::read(root.0.join("receipt-continuity.pending.json")).unwrap(), fresh_before);
         assert!(marker.exists());
         let retained = fs::read(custody.join("anchor.json")).unwrap();
         let ticket = begin(&root.0, &next).unwrap();
@@ -1207,6 +1219,11 @@ mod tests {
             assert!(!attempt.join(format!("retry-{n:04}.json")).exists());
         }
         service.unwrap().join().unwrap();
+        // Metadata-only lookup skips current-key checks, never continuity custody.
+        fs::rename(custody.join("anchor.json"), custody.join("held-anchor.json")).unwrap();
+        assert!(crate::retry(&attempt, "lookup", false).is_err());
+        assert!(!custody.join("anchor.json").exists());
+        assert_eq!(fs::read(attempt.join("call.bin")).unwrap(), b"exact-retained-call-fixture");
     }
     #[test]
     fn carry_receiving_fixture_new_endpoint_old_proof_and_refused_target_execution() {
@@ -1439,7 +1456,9 @@ pub(crate) fn retry_lookup(attempt: &Path, mode: &str, direct: bool) -> Result<O
     if manifest.get("receiptCarryLineage").is_none() {
         return Ok(None);
     }
-    let workspace = workspace::load(root)?;
+    // Receipt-only recovery needs current transport and authenticated custody,
+    // but neither a signing key nor current key-commitment entitlement.
+    let workspace = workspace::load_for_key_transition(root)?;
     let ticket = begin(root, &workspace)?
         .ok_or_else(|| fail("carried workspace has no current continuity custody"))?;
     let custody = root.join(DIRECTORY);

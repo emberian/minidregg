@@ -134,10 +134,13 @@ def main():
         assert len(result.stdout)==64
         save(name+'.sig',result.stdout)
         return result.stdout
-    def refused(name,frame,opcode):
+    def refused(name,frame,opcode,expected_detail,phase='adopt-next-key'):
         assert frame[0] in (255,opcode), (name,frame[:80])
         view=inspect(name+'-outcome','outcome',frame[1:])
-        assert view['type'] != 'confirmed', (name,view)
+        assert view['type']=='refused' and view['reason']=='operation-rejected',(name,view)
+        assert bytes.fromhex(view['phase']).decode()==phase,(name,view)
+        detail=bytes.fromhex(view['detail']).decode()
+        assert detail==expected_detail or detail.endswith('.'+expected_detail),(name,detail)
         passed(name)
     save_json('provenance.json', {'mini':str(mini),'miniSha256':hashlib.sha256(mini.read_bytes()).hexdigest(),
         'host':str(host),'hostSha256':host_digest.hex(),'workspace':str(workspace),
@@ -169,7 +172,7 @@ def main():
     wrong=dict(pin['request'], currentPublicKey=alternate_public)
     frame=call('wrong-current-request',187,json.dumps(wrong).encode())
     assert frame[0]==255,frame[:80]
-    passed('wrong-current-request-refused')
+    refused('wrong-current-request-refused',frame,187,'presented key is not current',phase='op 187')
     stale_request=dict(pin['request'],nonce=str(secrets.randbits(128)),nextPublicKey=alternate_public)
     stale_plan=accepted_body(call('stale-plan',187,json.dumps(stale_request).encode()),187)
     stale_view=inspect('stale-plan-inspection','subject-key-adoption-plan',stale_plan)
@@ -179,15 +182,21 @@ def main():
     # Actual distinct-key signatures, rather than edited Lean command bytes.
     wrong_current=sign('wrong-current-signature',alternate,bytes.fromhex(plan['currentAuthorizationHeader']))
     wrong_next=sign('wrong-next-possession',alternate,bytes.fromhex(plan['nextPossessionHeader']))
-    for name,first,second in [('wrong-current-signature',wrong_current,next_signature),('wrong-next-possession',current_signature,wrong_next)]:
+    for name,first,second,reason in [('wrong-current-signature',wrong_current,next_signature,'invalidCurrentSignature'),('wrong-next-possession',current_signature,wrong_next,'invalidNextPossession')]:
         frame=call(name+'-assembly',188,pair(plan_bytes,pair(first,second)))
-        if frame[0]==255:
-            refused(name,frame,188)
-        else:
-            refused(name,call(name+'-submit',189,accepted_body(frame,188)),189)
+        ingress=accepted_body(frame,188)  # semantic gate must run at submit
+        refused(name,call(name+'-submit',189,ingress),189,reason)
     missing=call('missing-next-possession',188,pair(plan_bytes,pair(current_signature,b'')))
-    assert missing[0] in (254,255),missing[:80]
-    passed('missing-next-possession-refused')
+    if missing[0]==254:
+        assert missing[1:]==b'operation unavailable on selected socket',missing[:160]
+    else:
+        assert missing[0]==255,missing[:80]
+        view=inspect('missing-next-possession-outcome','outcome',missing[1:])
+        assert view['type']=='refused' and view['reason'] in ('malformed','operation-rejected'),view
+        assert bytes.fromhex(view['phase']).decode()=='op 188',view
+        detail=bytes.fromhex(view['detail']).decode()
+        assert 'signatures must be 64 bytes' in detail or 'pair' in detail,detail
+    passed('missing-next-possession-framing-refused')
     cli('wrong-next-cli','adopt-next-key','--workspace',workspace,'--attempt',attempt,'--next-key',alternate,success=False)
     assert (custody/'ingress.bin').read_bytes()==original
     passed('conflicting-next-cannot-replace-sealed-attempt')
@@ -199,7 +208,7 @@ def main():
     assert daily.read_bytes()==daily_before and next_key.read_bytes()==next_before
     assert adopted['keyEpoch']==status['keyEpoch'] and adopted['keyId']==status['keyId']
     passed('adoption-changes-only-next-commitment')
-    refused('independently-signed-stale-plan',call('stale-submit',189,stale_ingress),189)
+    refused('independently-signed-stale-plan',call('stale-submit',189,stale_ingress),189,'ineligible')
     # Completed exact lookup needs neither original signing secret.
     moved_daily=daily.with_name(daily.name+'.journey-held')
     moved_next=next_key.with_name(next_key.name+'.journey-held')

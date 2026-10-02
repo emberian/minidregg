@@ -5383,7 +5383,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 context.as_deref(), namespace.as_deref()),
         };
     }
-    let workspace = load(&root)?;
+    // Carry custody is authenticated locally, and must remain reachable when
+    // the endpoint already serves the target profile or a genuine old workspace
+    // predates next-key metadata. These actions still require locked old custody.
+    let workspace = if matches!(action.as_str(), "continuity-verifier" | "continuity-carry-authority"
+        | "continuity-carry-verifier" | "continuity-carry") {
+        load_for_key_transition(&root)?
+    } else {
+        load(&root)?
+    };
     match action.as_str() {
         "onboard" => {
             args.finish()?;
@@ -7334,6 +7342,125 @@ mod tests {
         );
         assert_eq!(move_line(&document, 1, 2).unwrap().len(), 2);
         assert!(move_line(&document, 2, 2).is_err());
+    }
+
+    #[test]
+    fn legacy_carry_custody_actions_do_not_query_remote_key_status() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "workspace::tests::legacy_carry_custody_child", "--nocapture"])
+            .env("MINI_LEGACY_CARRY_CUSTODY", "1").output().unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+    #[test]
+    fn legacy_carry_custody_child() {
+        if std::env::var_os("MINI_LEGACY_CARRY_CUSTODY").is_none() { return; }
+        use crate::{participant_enrollment, transport};
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+        let root = std::env::temp_dir().join(format!("mini-legacy-carry-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        for name in ["refs","attempts","sources","proposals","receipt-continuity"] {
+            make_private_dir(&root.join(name)).unwrap();
+        }
+        let host = root.join("host"); let helper = root.join("signature"); let portable = root.join("portable");
+        // Injected verifier for CLI/custody composition; native proof semantics
+        // are separately qualified by the real receiving journey.
+        private_file(&host,br#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[2] == 'profile':
+    print(json.dumps(json.load(open(sys.argv[1]))))
+elif sys.argv[2] == 'continuity-verify':
+    response = json.load(open(sys.argv[4]))
+    with open(sys.argv[5], 'w') as output:
+        json.dump({'to':response['to'],'complete':True,'chain':response['endChain'],'siblings':response['toSiblings']}, output)
+else:
+    sys.exit(92)
+"#).unwrap();
+        private_file(&helper,b"#!/bin/sh\nexit 0\n").unwrap();
+        for file in [&host,&helper] { fs::set_permissions(file,fs::Permissions::from_mode(0o700)).unwrap(); }
+        private_file(&portable,br#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[2] != 'carry-verifier-profile':
+    sys.exit(91)
+request = json.load(open(sys.argv[3]))
+with open(sys.argv[4], 'w') as output:
+    json.dump({'algorithm':'minidregg-carry-verifier-v1','identity':request['oldIdentity'],
+        'sourceCapsulePins':request['sourceCapsulePins'],'edgeAlgorithm':'minidregg-carry-edge-v1'}, output)
+"#).unwrap();
+        fs::set_permissions(&portable,fs::Permissions::from_mode(0o700)).unwrap();
+        let config = root.join("config.json"); let key = root.join("current.key"); let socket = root.join("socket");
+        let identity = json!({"algorithm":"minidregg-continuity-v1","domain":"1","semantics":"2","expectedSeed":"3"});
+        let mut profile = identity.clone(); profile["signatureBinary"] = json!(helper);
+        participant_enrollment::save_json(&config,&profile).unwrap();
+        private_file(&key,&[19;32]).unwrap();
+        let host_sha = crate::host_image_sha256(&host).unwrap();
+        // Real old3b1 shape: no prerotation or nextPublicKey, but already anchored.
+        let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"7","key":key,
+            "host":host,"hostSha256":host_sha,"config":config,"socket":socket,
+            "receiptContinuity":"minidregg-continuity-v1"});
+        participant_enrollment::save_json(&root.join("workspace.json"),&manifest).unwrap();
+        let custody = root.join("receipt-continuity");
+        participant_enrollment::save_json(&custody.join("enabled.json"),&json!({"type":"minidregg-receipt-continuity-custody-v1",
+            "identity":identity,"verifier":host,"verifierSha256":host_sha})).unwrap();
+        participant_enrollment::save_json(&custody.join("anchor.json"),&json!({"identity":identity,
+            "point":{"height":"4","worldRoot":"68"},"chain":"28","siblings":vec!["0";256]})).unwrap();
+        let anchor_before=fs::read(custody.join("anchor.json")).unwrap();
+        let listener=UnixListener::bind(&socket).unwrap(); listener.set_nonblocking(true).unwrap();
+        let stop=Arc::new(AtomicBool::new(false)); let calls=Arc::new(AtomicUsize::new(0));
+        let (server_stop,server_calls)=(stop.clone(),calls.clone());
+        let server=std::thread::spawn(move || {
+            while !server_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream,_)) => {
+                        server_calls.fetch_add(1,Ordering::SeqCst);
+                        stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+                        let _=transport::read_frame(&mut stream);
+                        let _=transport::write_frame(&mut stream,&[vec![254],b"unexpected remote custody query".to_vec()].concat());
+                    }
+                    Err(error) if error.kind()==std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(5)),
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        });
+        let action=|name:&str, extra:Vec<(&str,OsString)>| {
+            let mut values=vec![("--action".into(),name.into()),("--dir".into(),root.as_os_str().to_owned())];
+            values.extend(extra.into_iter().map(|(name,value)|(OsString::from(format!("--{name}")),value)));
+            run(Args {command:"workspace".into(),values})
+        };
+        action("continuity-verifier",vec![("verifier",host.as_os_str().to_owned())]).unwrap();
+        action("continuity-carry-authority",vec![("operator-key","aa".repeat(32).into())]).unwrap();
+        action("continuity-carry-verifier",vec![("verifier",portable.as_os_str().to_owned()),
+            ("sha256",crate::host_image_sha256(&portable).unwrap().into())]).unwrap();
+        let authority=participant_enrollment::json_private(&custody.join("carry-authority.json")).unwrap();
+        let capsule=PathBuf::from(authority["sourceCapsulePath"].as_str().unwrap());
+        let edge=root.join("edge.json"); private_file(&edge,b"{}").unwrap();
+        let carry_args=|| vec![("edge",edge.as_os_str().to_owned()),("source-capsule",capsule.as_os_str().to_owned()),
+            ("new-config",config.as_os_str().to_owned()),("new-verifier",host.as_os_str().to_owned())];
+        assert!(action("continuity-carry",carry_args()).unwrap_err().contains("trusted source verifier refused carry edge"));
+        assert_eq!(fs::read(custody.join("anchor.json")).unwrap(),anchor_before);
+        assert!(load(&root).unwrap_err().contains("records no key commitment"));
+        fs::rename(custody.join("carry-verifier.json"),custody.join("held-carry-verifier.json")).unwrap();
+        assert!(action("continuity-carry",carry_args()).is_err());
+        fs::rename(custody.join("anchor.json"),custody.join("held-anchor.json")).unwrap();
+        for name in ["continuity-verifier","continuity-carry-authority","continuity-carry-verifier","continuity-carry"] {
+            let arguments=match name {
+                "continuity-verifier" => vec![("verifier",host.as_os_str().to_owned())],
+                "continuity-carry-authority" => vec![("operator-key","aa".repeat(32).into())],
+                "continuity-carry-verifier" => vec![("verifier",portable.as_os_str().to_owned()),("sha256",crate::host_image_sha256(&portable).unwrap().into())],
+                _ => carry_args(),
+            };
+            assert!(action(name,arguments).is_err(),"{name} accepted missing custody");
+        }
+        assert!(!custody.join("anchor.json").exists());
+        stop.store(true,Ordering::SeqCst); server.join().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst),0,"local carry actions must never query remote144 first");
+        let after=participant_enrollment::json_private(&root.join("workspace.json")).unwrap();
+        assert!(after.get("prerotation").is_none() && after.get("nextPublicKey").is_none());
+        assert_eq!(fs::read(key).unwrap(),vec![19;32]);
     }
 
 }
