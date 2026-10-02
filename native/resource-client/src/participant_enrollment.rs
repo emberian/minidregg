@@ -1324,9 +1324,11 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &directory.join("possession-signature.bin"),
         &possession_signature,
     )?;
+    // possession (64), then for a pre-rotated record the next key (32) and its
+    // co-signature (64): the second half of the pair is 64 or 160 bytes.
     let signatures = pair(
         &sponsor_signature,
-        &pair(&possession_signature, &pair(&pin.next_public, &pin.next_cosign)?)?,
+        &[&possession_signature[..], &pin.next_public, &pin.next_cosign].concat(),
     )?;
     let assembly = pair(&pin.plan, &signatures)?;
     let ingress = staged_invoke(

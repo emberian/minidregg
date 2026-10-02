@@ -99,8 +99,14 @@ pub(crate) fn status_if_enrolled(
             .map_err(|error| format!("invalid key status: {error}")),
         [255 | 254, encoded @ ..] => {
             let decoded = inspect_bytes(host, socket, config, "outcome", encoded)?;
-            let text = decoded.to_string();
-            if text.contains("subject has no current signing key") {
+            let detail = decoded
+                .get("detail")
+                .and_then(Value::as_str)
+                .and_then(|text| workspace::private::decode_hex(text).ok())
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .unwrap_or_default();
+            let text = format!("{detail} {decoded}");
+            if detail == "subject has no current signing key" {
                 Ok(None)
             } else {
                 Err(format!("the Host refused the key-status query: {text}"))

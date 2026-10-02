@@ -5967,9 +5967,14 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((86 : UInt8), bytes)
                         | 87 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
+                            -- pair(sponsor, possession ‖ [next public key ‖ its co-signature]):
+                            -- the second half is 64 bytes, or 160 for a pre-rotated record.
                             let (sponsorSignature, rest) ← splitPair signaturesBytes
-                            let (possessionSignature, rest) ← splitPair rest
-                            let (nextPublicKey, nextSignature) ← splitPair rest
+                            unless rest.length = 64 ∨ rest.length = 160 do
+                              throw (IO.userError "enrollment signatures: possession (64) and, for a pre-rotated record, next key (32) and co-signature (64)")
+                            let possessionSignature := rest.take 64
+                            let nextPublicKey := (rest.drop 64).take 32
+                            let nextSignature := rest.drop 96
                             let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode
                                 planBytes
                               | throw (IO.userError "noncanonical participant enrollment plan")
