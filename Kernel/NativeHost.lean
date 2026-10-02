@@ -756,7 +756,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
         envelopes.drop targetCount |>.take observeCount, authority⟩)
   | .install subject control bytes =>
       match envelopes with
-      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope⟩))
+      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope, none⟩))
       | _ => .error "install signing slots mismatch"
   | .birth bytes capabilities => do
       if let some finalized := GrainResourceBirthHostCodec.finalizedCodec.decode bytes then
