@@ -89,6 +89,19 @@ pub(super) fn lookup(
     expected: [&str; 4],
     directory: &Path,
 ) -> Result<()> {
+    print_json(&lookup_verified(
+        host, config, socket, call_path, expected, directory,
+    )?)
+}
+
+pub(super) fn lookup_verified(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    call_path: &Path,
+    expected: [&str; 4],
+    directory: &Path,
+) -> Result<Value> {
     if !host.is_absolute()
         || !config.is_absolute()
         || !socket.is_absolute()
@@ -150,7 +163,7 @@ pub(super) fn lookup(
         return Err("historical call Host, config, input or inspection changed".into());
     }
     exact_receipt(&outcome, expected)?;
-    print_json(&outcome)
+    Ok(outcome)
 }
 
 #[cfg(test)]

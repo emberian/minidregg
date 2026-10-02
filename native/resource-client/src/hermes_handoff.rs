@@ -332,7 +332,7 @@ fn verify(
     let call = attempt.join("origin-call.bin");
     workspace::private_file(&call, &unhex(text(&p["origin"], "callHex")?)?)?;
     let receipt = &p["origin"]["receipt"];
-    crate::historical_call_receipt::lookup(
+    crate::historical_call_receipt::lookup_verified(
         &host,
         &config,
         socket,
@@ -603,13 +603,9 @@ fn publish_dismissal(inbox: &Path, bundle: &Value) -> Result<Value> {
     } else {
         let stage = inbox.join(format!(".dismissal-{id}"));
         let bytes = serde_json::to_vec(bundle).map_err(|e| e.to_string())?;
-        if stage.exists() {
-            if read(&stage)? != bytes {
-                return Err("staged dismissal differs".into());
-            }
-        } else {
-            workspace::private_file(&stage, &bytes)?;
-        }
+        // This name is uncommitted until renamed to dismissal.json. Recover
+        // interrupted writes from the newly verified exact dismissal payload.
+        staged_file(&stage, &bytes)?;
         fs::rename(&stage, &target).map_err(|e| e.to_string())?;
         fs::File::open(inbox)
             .and_then(|f| f.sync_all())
@@ -1002,6 +998,31 @@ mod tests {
         publish(&inbox, &bundle).unwrap();
         assert_eq!(ready_bundle(&inbox).unwrap()["bundle"], bundle);
         assert_eq!(publish(&inbox, &bundle).unwrap()["replayed"], true);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn uncommitted_partial_dismissal_recovers_after_crash() {
+        let root = scratch();
+        let inbox = root.join("room-70/assignment-1");
+        let (mut p, bundle) = fixture("70", "1");
+        publish(&inbox, &bundle).unwrap();
+        p["type"] = json!("mini-hermes-dismiss-bundle-v1");
+        for action in p["origin"]["command"]["targets"][0]["payload"]["actions"]
+            .as_array_mut()
+            .unwrap()
+        {
+            action["type"] = json!("write");
+            action["expected"] = action["value"].clone();
+            action["value"] = json!("0");
+        }
+        let bytes = serde_json::to_vec(&p).unwrap();
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let dismiss = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
+        let (_, id) = decode(&dismiss).unwrap();
+        workspace::private_file(&inbox.join(format!(".dismissal-{id}")), b"{").unwrap();
+        publish_dismissal(&inbox, &dismiss).unwrap();
+        assert_eq!(json_file(&inbox.join("dismissal.json")).unwrap(), dismiss);
+        publish_dismissal(&inbox, &dismiss).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
