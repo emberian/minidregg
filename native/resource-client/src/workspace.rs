@@ -3092,8 +3092,11 @@ fn controlling_reference(root: &Path, room: &str, room_target: &str, policy: &st
 /// room `name` (the founder's invite, a concierge's window, any other grant
 /// under the room), enumerated from the Host's signed `who` view, never
 /// guessed. The first is `proposal_id`; the rest `proposal_id-cN`, listed in
-/// the first's `companions.json`, so `submit proposal_id` submits them all
-/// (`submit_now` submits each here: the private-room kick rotates after).
+/// the first's `companions.json`, so `submit proposal_id` submits them all.
+/// Each revoke names the authority root it was authored against, so a
+/// companion is proposed only when its turn comes (after the one before it
+/// landed), never ahead. `submit_now` proposes and submits each here, in turn
+/// (the private-room kick rotates after).
 pub(crate) fn room_kick(
     root: &Path,
     workspace: &Value,
@@ -3125,6 +3128,10 @@ pub(crate) fn room_kick(
         let mut bytes = serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?;
         bytes.push(b'\n');
         private_file(&source, &bytes)?;
+        if index > 0 && !submit_now {
+            ids.push(id);
+            continue;
+        }
         propose_summary(root, workspace, &source, &id, None, false).map_err(|error| frozen_roster(name, error))?;
         if submit_now {
             submit_intent(root, workspace, &root.join("proposals").join(&id).join("intent.json"), "intent", false,
@@ -3406,8 +3413,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 prepare_only,
                 attempt.as_deref(),
             )?;
-            // A kick's companions (`room_kick`): every other standing grant
-            // the member held under the room, revoked by the same submit.
+            // A kick's companions (`room_kick`): every other grant the member
+            // held in the room, each proposed now (against the authority root
+            // the previous revoke left) and submitted, in turn.
             let companions = source.parent().map(|dir| dir.join("companions.json"));
             if let (false, Some(companions)) = (prepare_only, companions.filter(|path| path.exists())) {
                 let listed = bounded_json(&companions)?;
@@ -3417,6 +3425,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     let attempt = root.join("attempts").join(id);
                     if attempt.exists() {
                         continue;
+                    }
+                    if !root.join("proposals").join(id).join("intent.json").exists() {
+                        propose_summary(&root, &workspace, &root.join("sources").join(format!("kick-{id}.json")),
+                            id, None, false)?;
                     }
                     submit_intent(&root, &workspace, &root.join("proposals").join(id).join("intent.json"),
                         "intent", false, Some(&attempt))?;
