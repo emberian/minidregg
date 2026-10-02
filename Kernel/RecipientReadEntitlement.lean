@@ -45,15 +45,17 @@ controller proves the candidate post preserves that immutable descriptor. -/
 def composedConfig (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
-    (step : PolicyStepContext) : Option (ComposedPolicyAdmission.Config F) := do
+    (step : PolicyStepContext) : Option (ComposedPolicyAdmission.Config F) :=
   if preserved : CanonicalCellRegistry.instanceBinding prepared.observed.before =
       CanonicalCellRegistry.instanceBinding view then
-    let dependencies ← WorldKindLawDependencies.loadPost deployment
+    match WorldKindLawDependencies.loadPost deployment
       context.directory.directory wanted.target.value prepared.observed.before view
-      prepared.observed.present preserved
-    pure (PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-      context.directory.directory (sourceCapabilityPortal context.authority.snapshot marker)
-      step wanted.target.value dependencies.additional)
+      prepared.observed.present preserved with
+    | none => none
+    | some dependencies =>
+      some (PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
+        context.directory.directory (sourceCapabilityPortal context.authority.snapshot marker)
+        step wanted.target.value dependencies.additional)
   else none
 
 /-- Guard the full authenticated closure (including historical source chains),
