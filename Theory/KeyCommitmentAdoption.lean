@@ -133,7 +133,7 @@ theorem adoption_enables_rotation (digestOf : List UInt8 → Digest)
       .ok (adopted digestOf adoption) := by
   have eligibility := ((gate_ok_iff _ _ _ _ _).1 accepted).1
   apply (KeyPreRotation.gate_ok_iff _ _ _ _ _).2
-  exact ⟨sameSubject ▸ post_current digestOf logical adoption eligibility.1,
+  exact ⟨by rw [sameSubject]; exact post_current digestOf logical adoption eligibility.1,
     by simp [adopted, sameNext], successor, commits, possession⟩
 
 namespace Witness
