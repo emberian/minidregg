@@ -195,7 +195,14 @@ def stop(output):
             write(journal_path, journal)
             label = f'{journal["serial"]:04d}-' + label
             write(output / (label + ".command.json"), argv)
-            result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=620)
+            try:
+                result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=620)
+            except subprocess.TimeoutExpired as error:
+                (output / (label + ".out")).write_bytes(error.stdout or b"")
+                (output / (label + ".err")).write_bytes(error.stderr or b"")
+                journal["unresolvedDrainCommand"] = str(output / (label + ".command.json"))
+                write(journal_path, journal)
+                raise
             (output / (label + ".out")).write_bytes(result.stdout)
             (output / (label + ".err")).write_bytes(result.stderr)
             require(result.returncode == 0, "native drain refused; exact evidence retained")
