@@ -397,7 +397,21 @@ theorem entries_fromEntries_eq_iff (entryList : List (Entry L)) :
 /-! ## Payload codec and canonical decoding -/
 
 def payloadStream : StreamCodec (Store L) :=
-  StreamCodec.xmap (entryListStream W) (entries W) fromEntries (fromEntries_entries W)
+  letI := addressOrder W
+  StreamCodec.xmap (entryListStream W) (entries W)
+    (fun items => FiniteDependentMapCodec.fromEntriesFast (items.map Entry.toCoordinate))
+    (by intro store; simpa [fromEntries] using fromEntries_entries W store)
+
+/-- Reconstruction changes representation only: every payload result and byte is unchanged. -/
+theorem payloadStream_eq :
+    payloadStream W =
+      StreamCodec.xmap (entryListStream W) (entries W) fromEntries (fromEntries_entries W) := by
+  letI := addressOrder W
+  have same : (fun items : List (Entry L) =>
+      FiniteDependentMapCodec.fromEntriesFast (items.map Entry.toCoordinate)) = fromEntries := by
+    funext items
+    exact FiniteDependentMapCodec.fromEntriesFast_eq _
+  simp only [payloadStream, same]
 
 /-- Canonical payload decoding: lax decode, then exact re-encoding. -/
 def decodePayload (payload : List UInt8) : Option (Store L) := do
@@ -434,7 +448,7 @@ theorem lax_entryList (entryList : List (Entry L)) :
       some (fromEntries entryList) := by
   have parsed := (entryListStream W).decodePrefix_encode entryList []
   simp only [List.append_nil] at parsed
-  simp [StreamCodec.toLawful, payloadStream, StreamCodec.xmap, parsed]
+  simp [StreamCodec.toLawful, payloadStream, StreamCodec.xmap, parsed, fromEntries]
 
 /-- Exact acceptance law for every raw entry list: accepted iff it is the
 canonical list of the store it denotes. -/
