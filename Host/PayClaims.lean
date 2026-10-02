@@ -1,6 +1,6 @@
 /-
 Strict JSON boundary for source paid status and source purchase/claim quotes.
-Uncompiled candidate for the integrator's authorized Lean pass. Main must apply
+Main must apply
 its duplicate-key parser and 4096-byte raw-body limit before passing Json here.
 Byte values and 32-byte little-endian digests are hexadecimal. Natural scalars
 are canonical decimal strings. No signing, transfer, or pricing is done in JSON.
@@ -165,7 +165,9 @@ private def paymentJson : PayClaimStatus.Payment → Json
       ("creditedRemainder", decimal value.creditedRemainder),
       ("pricingCommitment", digest value.pricingCommitment),
       ("authorization", match value.authorization with
-        | .originalMemo => "originalMemo" | .acceptCurrentQuote => "acceptCurrentQuote")]
+        | .originalMemo => "originalMemo" | .acceptCurrentQuote => "acceptCurrentQuote"),
+      ("acceptedRequest", optional (fun request => hex
+        (PayEnrolClaim.acceptRequestCodec.encode request)) value.acceptedRequest)]
   | .journalV1Negative value => .mkObj [("state", "journalV1Negative"),
       ("amountAtomic", decimal value.amountAtomic), ("slot", decimal value.slot),
       ("index", decimal value.index), ("reasonCode", decimal value.reason.code),
@@ -192,6 +194,25 @@ def statusLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened co
   let response ← need "noncanonical source paid status response"
     (PayClaimStatus.responseCodec.decode responseBytes)
   boundedJson (statusJson response)
+
+
+/-- Offline operator accounting is derived from one already genesis-walked image.
+The caller must supply the opened image returned by NativeHostSession.startWalked. -/
+def auditLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (json : Json) : Result Json := do
+  let obj ← object ["requests"] [] json
+  let requests ← (← field obj "requests").getArr?.mapError (fun _ => "requests: array expected")
+  unless requests.size ≤ 1024 do throw "paid audit exceeds 1024 exact origins"
+  let statuses ← requests.toList.mapM (statusLoadedJson config opened)
+  let ledger ← NativeHost.payLedgerLoaded config opened
+  return .mkObj [("type", "payClaimAudit"),
+    ("domain", decimal config.deployment.domain.value),
+    ("semantics", decimal config.profile.semantics.value),
+    ("expectedSeed", decimal config.expectedSeed.value),
+    ("auditedHeight", decimal opened.durable.image.accepted.length),
+    ("worldRoot", decimal opened.durable.worldRoot.value),
+    ("statuses", toJson statuses),
+    ("ledger", .mkObj [("well", .str (toString ledger.well))])]
 
 private def ownerJson (value : PayEnrolV2Decision.CurrentOwner) : Json := .mkObj
   [("identityKey", hex value.identityKey), ("authorizingKey", hex value.currentKey),

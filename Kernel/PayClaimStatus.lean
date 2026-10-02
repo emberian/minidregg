@@ -16,6 +16,7 @@ import Kernel.PayChainTip
 
 namespace Minidregg.Kernel.PayClaimStatus
 
+open Minidregg.Compiler.StoreCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.PayCell
 open Minidregg.Kernel.PayTariff
@@ -162,13 +163,14 @@ structure Consumed where
   creditedRemainder : Nat
   pricingCommitment : Digest
   authorization : AuthorizationKind
+  acceptedRequest : Option PayEnrolClaim.AcceptRequest
   deriving DecidableEq, Repr
 
 def consumedStream : StreamCodec Consumed :=
   StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product PayEnrolClaim.modeStream (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream authorizationKindStream))))))))))
-    (fun value => (value.amountAtomic, value.slot, value.index, value.mode, value.requestedWeeks, value.mintedCredit, value.birthFee, value.membershipCredit, value.creditedRemainder, value.pricingCommitment, value.authorization))
-    (fun (amountAtomic, slot, index, mode, requestedWeeks, mintedCredit, birthFee, membershipCredit, creditedRemainder, pricingCommitment, authorization) => ⟨amountAtomic, slot, index, mode, requestedWeeks, mintedCredit, birthFee, membershipCredit, creditedRemainder, pricingCommitment, authorization⟩)
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product PayEnrolClaim.modeStream (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream (StreamCodec.product authorizationKindStream (StreamCodec.option PayEnrolClaim.acceptRequestStream))))))))))))
+    (fun value => (value.amountAtomic, value.slot, value.index, value.mode, value.requestedWeeks, value.mintedCredit, value.birthFee, value.membershipCredit, value.creditedRemainder, value.pricingCommitment, value.authorization, value.acceptedRequest))
+    (fun (amountAtomic, slot, index, mode, requestedWeeks, mintedCredit, birthFee, membershipCredit, creditedRemainder, pricingCommitment, authorization, acceptedRequest) => ⟨amountAtomic, slot, index, mode, requestedWeeks, mintedCredit, birthFee, membershipCredit, creditedRemainder, pricingCommitment, authorization, acceptedRequest⟩)
     (by intro value; cases value; rfl)
 
 structure NegativeV1 where
@@ -281,7 +283,10 @@ def consumedOf (claim : PayEnrolClaim.Claim) (consumed : PayEnrolClaim.Consumpti
     consumed.pricingCommitment,
     match consumed.authorization with
       | .originalMemo => .originalMemo
-      | .acceptCurrentQuote _ => .acceptCurrentQuote⟩
+      | .acceptCurrentQuote _ => .acceptCurrentQuote,
+    match consumed.authorization with
+      | .originalMemo => none
+      | .acceptCurrentQuote request => some request⟩
 
 /-- Exact reads only. A v1 negative row identifies this payment locator, but
 cannot prove which identity an invalid/missing memo intended to enroll.
@@ -392,7 +397,7 @@ theorem encoded_response_bound (response : Response) (bytes : List UInt8)
 
 theorem malformed_key_refuses (store : PayStore) (clock : ClockCell.Clock) (request : Request)
     (malformed : ¬request.valid) : project store clock request = .error .malformedRequest := by
-  simp [project, malformed]
+  simp [project, malformed, Except.bind, Except.pure, throw, MonadExceptOf.throw]
 
 theorem exact_expiry_boundary (hour : Nat) (record : EnrolRecord) (expired : record.leaseUntil ≤ hour) :
     leaseState hour (some record) = .expired := by
@@ -449,9 +454,9 @@ theorem consumed_requires_exact_original_match (store : PayStore) (identity : Li
     (consumption : claimConsumptionAt store locator.id = some consumed)
     (journal : journalAt store locator.id = none)
     (idExact : claim.id = locator.id) (owner : claim.ownerIdentityKey = identity)
-    (matches : consumed.matchesClaim claim) :
+    (matched : consumed.matchesClaim claim) :
     paymentAt store identity locator = .ok (.consumedV2 (consumedOf claim consumed)) := by
-  simp [paymentAt, origin, consumption, journal, idExact, owner, matches]
+  simp [paymentAt, origin, consumption, journal, idExact, owner, matched]
 
 theorem direct_origin_without_atomic_consumption_refuses (store : PayStore) (identity : List UInt8)
     (locator : Locator) (claim : PayEnrolClaim.Claim)
@@ -484,7 +489,7 @@ theorem malformed_recipient_fixture :
 private def sampleResponse : Response :=
   ⟨sampleRequest, 42, some ⟨1000, 150000⟩, some .stale, .expired,
     some ⟨101, 102, List.replicate 51 4, some 7, 41, 900⟩,
-    .consumedV2 ⟨1000, 900, 7, .enroll, 2, 1000, 10, 336, 654, ⟨123⟩, .originalMemo⟩⟩
+    .consumedV2 ⟨1000, 900, 7, .enroll, 2, 1000, 10, 336, 654, ⟨123⟩, .originalMemo, none⟩⟩
 
 theorem sample_response_fits :
     encodeResponse sampleResponse = .ok (responseCodec.encode sampleResponse) := by decide

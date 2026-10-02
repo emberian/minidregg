@@ -193,6 +193,30 @@ fn retain_json(path: &Path, value: &Value) -> Result<()> {
     create_private(path, &bytes)
 }
 
+/// Publish complete decision evidence before a receipt can acknowledge it to the
+/// watcher. A crash leaves an unused stage or the complete immutable value.
+fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
+    if path.exists() {
+        return if workspace::bounded_json(path)? == *value { Ok(()) }
+            else { Err("retained payment decision differs; refusing to replace it".into()) };
+    }
+    let parent = path.parent().ok_or("payment decision has no parent")?;
+    let stage = parent.join(format!(".decision-stage-{}.json", workspace::random_nonce()?));
+    retain_json(&stage, value)?;
+    match fs::hard_link(&stage, path) {
+        Ok(()) => {},
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            if workspace::bounded_json(path)? != *value {
+                return Err("concurrent payment decision differs; refusing to replace it".into());
+            }
+        },
+        Err(error) => return Err(format!("cannot publish payment decision: {error}")),
+    }
+    sync_directory_ancestors(parent)?;
+    fs::remove_file(&stage).map_err(|error| format!("cannot remove own decision stage: {error}"))?;
+    sync_directory_ancestors(parent)
+}
+
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
@@ -502,9 +526,13 @@ fn lookup(session: &Session, directory: &Path, ops: Ops) -> Result<Answer> {
 fn decide(directory: &Path, decision: &str, answer: &Answer) -> Result<()> {
     let path = directory.join("decision.json");
     if path.exists() {
+        let retained = workspace::bounded_json(&path)?;
+        if retained["type"] != "minidregg-pay-decision-v1" || retained["decision"] != decision {
+            return Err("retained payment decision mismatch".into());
+        }
         return Ok(());
     }
-    retain_json(
+    publish_decision_json(
         &path,
         &json!({"type":"minidregg-pay-decision-v1","decision":decision,"host":answer.render()}),
     )
@@ -944,6 +972,7 @@ struct Tally {
     enrolled: usize,
     renewed: usize,
     journalled: usize,
+    claims_retained: usize,
     /// Enrollment-index records still undecided when this run stopped (the tip was spent).
     enrol_pending: usize,
 }
@@ -1365,6 +1394,82 @@ fn memo_key(session: &Session, record: &Record, directory: &Path) -> Result<Opti
     })
 }
 
+/// Extract only the stable identity from the exact canonical v2 memo. This
+/// selects a read-only source lookup; it is not signature verification or an
+/// admission decision. Confirmed op119/120 plus op181 own those facts.
+fn v2_memo_identity(record: &Record) -> Result<Option<String>> {
+    let Some(encoded) = record.value.get("memo").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let bytes = decode_hex(encoded)?;
+    let Ok(text) = std::str::from_utf8(&bytes) else { return Ok(None); };
+    Ok(crate::pay_memo_v2::SignedMemo::parse(text).ok()
+        .map(|memo| hex(&memo.unsigned.identity_key)))
+}
+
+fn v2_status_request(record: &Record, identity: &str) -> Value {
+    json!({"identityKey":identity, "signature":record.signature,
+        "originalRecipient":record.address})
+}
+
+fn v2_enrol_classification(record: &Record, status: &crate::pay_status::Status)
+    -> Result<(&'static str, Value)> {
+    use crate::pay_status::{Authorization, Mode, Payment};
+    let coordinates = status.payment.coordinates()
+        .ok_or("confirmed v2 observation lacks an exact source payment decision")?;
+    if !coordinates.amount_atomic.matches_u128(record.amount)
+        || !coordinates.index.matches_u128(record.index)
+        || !coordinates.slot.matches_u128(number(&record.value, "slot")?) {
+        return Err("source payment coordinates differ from retained observation".into());
+    }
+    let decision = match &status.payment {
+        Payment::Pending(_) => "claimRetained",
+        Payment::Consumed(value) => match value.authorization {
+            // A later acceptance may already exist when recovering the original
+            // observer receipt. Its mint belongs to that independent operation.
+            Authorization::AcceptCurrentQuote => "claimRetained",
+            Authorization::OriginalMemo => match value.mode {
+                Mode::Enrol => "enrolled", Mode::Renew => "renewed",
+            },
+        },
+        Payment::JournalNegative(_) => "journalled",
+        Payment::NotRequested | Payment::Unknown => unreachable!("no coordinates"),
+    };
+    let detail = json!({"miniKey":hex(&status.identity_key),
+        "sourceStatus":status.raw, "reason":status.raw["payment"]["reason"],
+        "amount":coordinates.amount_atomic.as_str(),
+        "subject":status.raw["entry"]["subject"],
+        "lease":{"expiresAt":status.raw["entry"]["leaseUntil"]},
+        "index":status.raw["entry"]["index"],
+        "message":status.pending_message().unwrap_or_else(||
+            if decision == "claimRetained" {
+                "Payment received; a later claim acceptance consumed it. Do not send this deposit again.".into()
+            } else { String::new() })});
+    Ok((decision, detail))
+}
+
+fn v2_enrol_decision(session: &Session, attempt: &Path, record: &Record)
+    -> Result<Option<(&'static str, Value)>> {
+    let Some(identity) = v2_memo_identity(record)? else { return Ok(None); };
+    let request = v2_status_request(record, &identity);
+    let path = attempt.join("enrol-status-v2.json");
+    let value = if path.exists() {
+        workspace::bounded_json(&path)?
+    } else {
+        let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
+        let frame = session.call(181, &payload)?;
+        let body = frame_body(&frame, 181)?;
+        if body.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
+        serde_json::from_slice(body).map_err(|e| format!("invalid source paid status: {e}"))?
+    };
+    let status = crate::pay_status::parse(&value, &request)?;
+    let classified = v2_enrol_classification(record, &status)?;
+    // Once published, use this exact status on recovery. Never replace an
+    // observer's zero-mint decision with a later claim's independent mint.
+    publish_decision_json(&path, &status.raw)?;
+    Ok(Some(classified))
+}
+
 /// What the kernel decided for a CONFIRMED self-enrollment, read back from the enrollment
 /// view the Host serves: a journal row named by the transfer, or the memo key's entry (new
 /// = enrolled, present before = renewed). The client does not re-derive the decision.
@@ -1375,6 +1480,9 @@ fn enrol_decided(
     result: &Answer,
     tally: &mut Tally,
 ) -> Result<()> {
+    let (decision, detail) = if let Some(classified) = v2_enrol_decision(session, attempt, record)? {
+        classified
+    } else {
     let after = read_enrolment_view(session, attempt, "enrolment-after")?;
     let before = workspace::bounded_json(&attempt.join("enrolment-before.json"))?;
     let journal = after
@@ -1393,7 +1501,7 @@ fn enrol_decided(
             .find(|entry| entry.get("miniKey").and_then(Value::as_str) == Some(key))
             .cloned()
     };
-    let (decision, detail) = match journal {
+    match journal {
         Some(row) => (
             "journalled",
             json!({"reason": row.get("reason"), "amount": row.get("amount")}),
@@ -1414,8 +1522,9 @@ fn enrol_decided(
                     "index": entry.get("index")}),
             )
         }
+    }
     };
-    retain_json(
+    publish_decision_json(
         &attempt.join("enrol.json"),
         &json!({"type":"minidregg-pay-enrol-decision-v1","decision":decision,"detail":detail}),
     )?;
@@ -1424,9 +1533,11 @@ fn enrol_decided(
     match decision {
         "journalled" => tally.journalled += 1,
         "renewed" => tally.renewed += 1,
+        "claimRetained" => tally.claims_retained += 1,
         _ => tally.enrolled += 1,
     }
     let shown = match decision {
+        "claimRetained" => text(&detail, "message")?,
         "journalled" => detail
             .get("reason")
             .and_then(Value::as_str)
@@ -1569,7 +1680,7 @@ fn enrol_records(
 fn resolve_pending_enrolments(session: &Session, tally: &mut Tally) -> Result<()> {
     for attempt in pay_attempts(session, "enrol")? {
         match decision(&attempt).as_deref() {
-            Some("enrolled" | "renewed" | "journalled" | "alreadyDecided") => {
+            Some("enrolled" | "renewed" | "journalled" | "claimRetained" | "alreadyDecided") => {
                 for record in retained_records(&attempt)? {
                     receipt(session, &record, &attempt)?;
                 }
@@ -1645,11 +1756,12 @@ fn summary(tip: &Tip, tally: &Tally, step: Step) {
     // a tick without one reads exactly as before.
     let enrol = if tally.enrol_submissions + tally.enrol_pending > 0 {
         format!(
-            " enrol-submissions {} enrolled {} renewed {} journalled {} enrol-pending {}",
+            " enrol-submissions {} enrolled {} renewed {} journalled {} claims-retained {} enrol-pending {}",
             tally.enrol_submissions,
             tally.enrolled,
             tally.renewed,
             tally.journalled,
+            tally.claims_retained,
             tally.enrol_pending
         )
     } else {
@@ -1759,7 +1871,136 @@ fn report_credit(attempt: &Path) -> Result<(u128, u128, usize)> {
     Ok((credit, residual, records.len()))
 }
 
+/// The inventory identifies source origins, not separate mint events. Multiple
+/// retained observer attempts for one transfer are reconciled exactly once.
+fn v2_audit_origins(session: &Session) -> Result<Vec<(Record, String)>> {
+    let mut origins = std::collections::BTreeMap::<String, (Record, String)>::new();
+    for attempt in pay_attempts(session, "enrol")? {
+        if !attempt.join("records.json").exists() { continue; }
+        for record in retained_records(&attempt)? {
+            let Some(identity) = v2_memo_identity(&record)? else { continue; };
+            if let Some((prior, owner)) = origins.get(&record.name()) {
+                if owner != &identity || prior.amount != record.amount || prior.index != record.index
+                    || number(&prior.value, "slot")? != number(&record.value, "slot")? {
+                    return Err("retained attempts disagree about one payment origin".into());
+                }
+            } else {
+                origins.insert(record.name(), (record, identity));
+            }
+        }
+    }
+    if origins.len() > 1024 {
+        return Err("paid audit exceeds the source batch bound of 1024 exact origins".into());
+    }
+    Ok(origins.into_values().collect())
+}
+
+struct PaidAudit {
+    statuses: Vec<crate::pay_status::Status>,
+    verified_ledger: Option<Value>,
+}
+
+/// Offline source audit performs full signed-history re-admission once and
+/// derives every status plus the ledger from the same verified opened image.
+fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: bool) -> Result<PaidAudit> {
+    let requests: Vec<Value> = origins.iter().map(|(record, identity)| v2_status_request(record, identity)).collect();
+    if !offline {
+        let mut statuses = Vec::new();
+        for request in &requests {
+            let payload = serde_json::to_vec(request).map_err(|e|e.to_string())?;
+            let frame = session.call(181, &payload)?;
+            let bytes = frame_body(&frame, 181)?;
+            if bytes.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
+            let value = serde_json::from_slice(bytes).map_err(|e|format!("source paid status: {e}"))?;
+            statuses.push(crate::pay_status::parse(&value, request)?);
+        }
+        return Ok(PaidAudit { statuses, verified_ledger: None });
+    }
+    let directory = session.pay_dir().join(format!("audit-{}",workspace::random_nonce()?));
+    workspace::make_private_dir(&directory)?;
+    let input = directory.join("requests.json");
+    let output = directory.join("source-audit.json");
+    retain_json(&input, &json!({"requests":requests}))?;
+    let host_sha = host_image_sha256(&session.host)?;
+    let config_sha = hex(&sha2::Sha256::digest(fs::read(&session.config).map_err(|e|e.to_string())?));
+    let result = Command::new(&session.host).arg(&session.config).arg("pay-claim-audit")
+        .arg(&input).arg(&output).output().map_err(|e|format!("cannot run source paid audit: {e}"))?;
+    create_private(&directory.join("stdout.txt"), &result.stdout)?;
+    create_private(&directory.join("stderr.txt"), &result.stderr)?;
+    if !result.status.success() {
+        return Err(format!("source paid history audit refused; evidence retained at {}",directory.display()));
+    }
+    if host_image_sha256(&session.host)? != host_sha
+        || hex(&sha2::Sha256::digest(fs::read(&session.config).map_err(|e|e.to_string())?)) != config_sha {
+        return Err("Host or exact config changed during source paid audit".into());
+    }
+    let metadata = fs::symlink_metadata(&output).map_err(|e|e.to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > 16*1024*1024 {
+        return Err("source paid audit file exceeds its bound or is not regular".into());
+    }
+    let bytes = fs::read(&output).map_err(|e|e.to_string())?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e|e.to_string())?;
+    if value["type"] != "payClaimAudit" { return Err("source paid audit type mismatch".into()); }
+    for field in ["domain","semantics","expectedSeed","auditedHeight","worldRoot"] {
+        crate::pay_status::Nat::parse(&text(&value, field)?)?;
+    }
+    let rows = value["statuses"].as_array().ok_or("source paid audit lacks exact statuses")?;
+    if rows.len() != requests.len() { return Err("source paid audit response count mismatch".into()); }
+    let statuses = rows.iter().zip(&requests).map(|(row,request)|crate::pay_status::parse(row,request))
+        .collect::<Result<Vec<_>>>()?;
+    publish_decision_json(&directory.join("provenance.json"),&json!({
+        "type":"minidregg-source-paid-audit-v1","hostSha256":host_sha,"configSha256":config_sha,
+        "sourceOutputSha256":hex(&sha2::Sha256::digest(&bytes)),
+        "domain":value["domain"],"semantics":value["semantics"],"expectedSeed":value["expectedSeed"],
+        "auditedHeight":value["auditedHeight"],"worldRoot":value["worldRoot"]}))?;
+    println!("host-audit\tfully re-admitted {} accepted records; source image {}\t{}",
+        text(&value,"auditedHeight")?,text(&value,"worldRoot")?,directory.display());
+    Ok(PaidAudit { statuses, verified_ledger: Some(value["ledger"].clone()) })
+}
+
+fn consumed_origin_credit(record: &Record, status: &crate::pay_status::Status) -> Result<(u128, u128)> {
+    use crate::pay_status::{Authorization, Payment};
+    if let Some(coordinates) = status.payment.coordinates() {
+        if !coordinates.amount_atomic.matches_u128(record.amount)
+            || !coordinates.slot.matches_u128(number(&record.value,"slot")?)
+            || !coordinates.index.matches_u128(record.index) {
+            return Err("source audit origin differs from retained observation".into());
+        }
+    }
+    match &status.payment {
+        Payment::Consumed(value) => {
+            let credit = value.minted_credit.to_u128()?;
+            match value.authorization {
+                Authorization::OriginalMemo => Ok((credit, 0)),
+                Authorization::AcceptCurrentQuote => {
+                    if value.accepted_request.is_none() { return Err("claim consumption lacks its accepted semantic request".into()); }
+                    Ok((0, credit))
+                },
+            }
+        },
+        Payment::Pending(_) | Payment::JournalNegative(_) | Payment::Unknown => Ok((0,0)),
+        Payment::NotRequested => Err("audit omitted exact payment locator".into()),
+    }
+}
+
+fn verified_ledger_identity(session: &Session, now: &Value, credited: u128) -> Result<usize> {
+    let genesis = workspace::bounded_json(&session.config.parent().ok_or("config has no directory")?
+        .join("pay-ledger-genesis.json"))?;
+    let well = |value:&Value| -> Result<i128> { text(value,"well")?.parse().map_err(|_|"ledger well is not an integer".into()) };
+    let now = well(now)?;
+    let genesis = well(&genesis)?;
+    let credit = i128::try_from(credited).map_err(|_|"credited total exceeds audit range")?;
+    let expected = genesis.checked_sub(credit).ok_or("audit well arithmetic overflow")?;
+    let holds = now == expected;
+    println!("ledger\twell_now={now}\twell_genesis={genesis}\tcredited={credit}\t{}",
+        if holds { "identity holds on fully audited image" } else { "FINDING: identity fails" });
+    Ok(usize::from(!holds))
+}
+
 fn audit(session: &Session, offline: bool) -> Result<()> {
+    let v2_origins = v2_audit_origins(session)?;
+    let source = if v2_origins.is_empty() { None }
+        else { Some(v2_audit_source(session, &v2_origins, offline)?) };
     let mut credited = 0u128;
     let mut residual = 0u128;
     let mut transfers = 0usize;
@@ -1790,6 +2031,12 @@ fn audit(session: &Session, offline: bool) -> Result<()> {
     // enrollment float exactly as a credited report does; a journal row mints nothing. Each
     // decided submission must replay through op 120 (operator socket).
     for attempt in pay_attempts(session, "enrol")? {
+        // V2 credit is read once from the immutable source consumption index,
+        // including independent claim acceptance after this observer's receipt.
+        if attempt.join("records.json").exists() && retained_records(&attempt)?.iter()
+            .map(v2_memo_identity).collect::<Result<Vec<_>>>()?.iter().any(Option::is_some) {
+            continue;
+        }
         let decided = decision(&attempt);
         let minted = matches!(decided.as_deref(), Some("enrolled" | "renewed"));
         if !minted && decided.as_deref() != Some("journalled") {
@@ -1818,6 +2065,21 @@ fn audit(session: &Session, offline: bool) -> Result<()> {
             );
         }
     }
+    if let Some(source) = &source {
+        let mut observer_credit = 0u128;
+        let mut claim_credit = 0u128;
+        for ((record, _), status) in v2_origins.iter().zip(&source.statuses) {
+            let (observer, claim) = consumed_origin_credit(record, status)?;
+            observer_credit = observer_credit.checked_add(observer).ok_or("observer credit audit overflow")?;
+            claim_credit = claim_credit.checked_add(claim).ok_or("claim credit audit overflow")?;
+            transfers += 1;
+            println!("origin\t{}\t{}\tobserver+{observer}\tclaim+{claim}",
+                record.name(),status.raw["payment"]["state"].as_str().unwrap_or("?"));
+        }
+        credited = credited.checked_add(observer_credit).and_then(|n|n.checked_add(claim_credit))
+            .ok_or("total paid credit audit overflow")?;
+        println!("v2 consumed origins\tobserver credit {observer_credit}\tindependent claim credit {claim_credit}");
+    }
     let quarantined = fs::read_dir(session.quarantine_dir())
         .map_err(|error| error.to_string())?
         .count();
@@ -1826,7 +2088,9 @@ fn audit(session: &Session, offline: bool) -> Result<()> {
          quarantined {quarantined}"
     );
     if offline {
-        findings += ledger_identity(session, credited)?;
+        findings += if let Some(ledger) = source.as_ref().and_then(|e|e.verified_ledger.as_ref()) {
+            verified_ledger_identity(session, ledger, credited)?
+        } else { ledger_identity(session, credited)? };
     }
     if findings > 0 {
         set_exit(3);
@@ -2052,6 +2316,61 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn source_status_fixture(payment: Value) -> (Record, crate::pay_status::Status) {
+        let record = Record::parse(&json!({"signature":hex(&[1;64]),"address":hex(&[2;32]),
+            "amount":"522","index":"0","slot":"99"})).unwrap();
+        let request = v2_status_request(&record, &hex(&[3;32]));
+        let source = crate::pay_status::fixture(&request, payment);
+        (record, crate::pay_status::parse(&source, &request).unwrap())
+    }
+
+    #[test]
+    fn exact_pending_origin_is_decided_without_mint_or_membership_inference() {
+        let (record, status) = source_status_fixture(json!({"state":"pendingV2",
+            "amountAtomic":"522","slot":"99","index":"0","reason":"termsStale"}));
+        let (decision, detail) = v2_enrol_classification(&record, &status).unwrap();
+        assert_eq!(decision, "claimRetained");
+        assert!(detail["message"].as_str().unwrap().contains("do not pay again"));
+        for field in ["amount", "slot", "index"] {
+            let mut changed = record.value.clone();
+            changed[field] = json!("1");
+            assert!(v2_enrol_classification(&Record::parse(&changed).unwrap(), &status).is_err());
+        }
+    }
+
+    #[test]
+    fn later_claim_acceptance_never_becomes_original_observer_mint() {
+        let payment = json!({"state":"consumedV2","amountAtomic":"522","slot":"99","index":"0",
+            "mode":"enrol","weeks":"1","mintedCredit":"522","birthFee":"7",
+            "membershipCredit":"168","creditedRemainder":"347","pricingCommitment":hex(&[4;32]),
+            "authorization":"originalMemo","acceptedRequest":null});
+        let (record, original) = source_status_fixture(payment.clone());
+        assert_eq!(v2_enrol_classification(&record, &original).unwrap().0, "enrolled");
+        let mut payment = payment;
+        payment["authorization"] = json!("acceptCurrentQuote");
+        payment["acceptedRequest"] = json!("01");
+        let (_, later) = source_status_fixture(payment);
+        assert_eq!(v2_enrol_classification(&record, &later).unwrap().0, "claimRetained");
+    }
+
+    #[test]
+    fn decision_publication_survives_stages_and_refuses_replacement() {
+        let root = std::env::temp_dir().join(format!("mini-pay-decision-{}",workspace::random_nonce().unwrap()));
+        workspace::make_private_dir(&root).unwrap();
+        create_private(&root.join(".decision-stage-interrupted.json"), b"{partial").unwrap();
+        let path = root.join("enrol-status-v2.json");
+        let original = json!({"origin":"exact","state":"pendingV2"});
+        publish_decision_json(&path, &original).unwrap();
+        publish_decision_json(&path, &original).unwrap();
+        assert!(publish_decision_json(&path, &json!({"origin":"other"})).is_err());
+        assert_eq!(workspace::bounded_json(&path).unwrap(), original);
+        assert!(root.join(".decision-stage-interrupted.json").exists());
+        decide(&root, "claimRetained", &Answer::Undecided("fixture".into())).unwrap();
+        decide(&root, "claimRetained", &Answer::Undecided("replayed fixture".into())).unwrap();
+        assert!(decide(&root, "enrolled", &Answer::Undecided("fixture".into())).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn a_blind_refusal_reads_undisclosed_and_names_nothing_else() {

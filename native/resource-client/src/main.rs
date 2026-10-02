@@ -96,6 +96,7 @@ mod join_solana;
 mod join_solana_v2;
 #[cfg(unix)]
 mod pay_memo_v2;
+mod pay_status;
 #[cfg(unix)]
 mod pay_claim;
 #[cfg(unix)]

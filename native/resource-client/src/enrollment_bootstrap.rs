@@ -626,7 +626,11 @@ impl App {
             if json_input {
                 if bytes.len() > 8192 { return Err(HttpError(503,"sourceResponseTooLarge")); }
                 let result:Value=serde_json::from_slice(&bytes).map_err(|_|HttpError(503,"invalidHostResponse"))?;
-                let expected = if operation==HostRead::PaidStatus { "payStatus" } else { "payQuote" };
+                if operation==HostRead::PaidStatus {
+                    let requested:Value=serde_json::from_slice(&request.body).map_err(|_|HttpError(503,"invalidHostResponse"))?;
+                    return crate::pay_status::parse(&result,&requested).map(|v|v.raw).map_err(|_|HttpError(503,"invalidHostResponse"));
+                }
+                let expected = "payQuote";
                 if result["type"] != expected || (operation==HostRead::PaidQuote && result["priceReserved"] != false) {
                     return Err(HttpError(503,"invalidHostResponse"));
                 }
@@ -921,6 +925,26 @@ mod tests {
         assert_eq!(app.handle(request("POST","/mini/v2/quote",json!({})),peer,Instant::now()+REQUEST_TIME).status,429);
     }
 
+    struct FixedPaidStatus(Value);
+    impl Dispatch for FixedPaidStatus {
+        fn call(&self,operation:HostRead,_:&[u8],_:Instant)->Result<Vec<u8>> {
+            assert_eq!(operation,HostRead::PaidStatus);
+            Ok([vec![operation as u8],serde_json::to_vec(&self.0).unwrap()].concat())
+        }
+    }
+    #[test]
+    fn typed_paid_status_preserves_pending_and_refuses_incomplete_host_json() {
+        let peer="127.0.0.1".parse().unwrap();
+        let body=json!({"identityKey":"aa".repeat(32),"signature":"bb".repeat(64),"originalRecipient":"cc".repeat(32)});
+        let source=crate::pay_status::fixture(&body,json!({"state":"pendingV2","amountAtomic":"522","slot":"99","index":"0","reason":"termsStale"}));
+        let (mut app,_)=app();app.host=Arc::new(FixedPaidStatus(source.clone()));
+        let response=app.handle(request("POST","/mini/v2/status",body.clone()),peer,Instant::now()+REQUEST_TIME);
+        assert_eq!(response.status,200);assert_eq!(response.body,source);
+        app.host=Arc::new(FixedPaidStatus(json!({"type":"payStatus","leaseState":"notEnrolled"})));
+        let response=app.handle(request("POST","/mini/v2/status",body),peer,Instant::now()+REQUEST_TIME);
+        assert_eq!(response.status,503);assert_eq!(response.body["error"],"invalidHostResponse");
+    }
+
     fn quote() -> Value {
         json!({"miniKey":"aa".repeat(32),"mode":"enrol","weeks":"1","starterCredit":null})
     }
@@ -951,7 +975,11 @@ mod tests {
                         "journal":[{"signature":"cc".repeat(64),"reason":"enrolled"},
                             {"signature":"dd".repeat(64),"reason":"other"}]})
                 }
-                HostRead::PaidStatus => json!({"type":"payStatus","leaseState":"notEnrolled"}),
+                HostRead::PaidStatus => {
+                    let request:Value=serde_json::from_slice(payload).unwrap();
+                    let payment=if request.get("signature").is_some(){json!({"state":"pendingV2","amountAtomic":"522","slot":"99","index":"0","reason":"termsStale"})}else{json!({"state":"notRequested"})};
+                    crate::pay_status::fixture(&request,payment)
+                },
                 HostRead::PaidQuote => json!({"type":"payQuote","priceReserved":false}),
                 HostRead::ClaimPlan | HostRead::ClaimAssemble | HostRead::ClaimSubmit | HostRead::ClaimLookup => {
                     return Ok(vec![operation as u8,1,2,3]);

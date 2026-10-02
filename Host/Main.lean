@@ -5572,6 +5572,24 @@ def run (arguments : List String) : IO UInt32 := do
             (← IO.ofExcept settings.providerMeteringPin)
             (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
+      | "pay-claim-status", [input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "paid status JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          writeJson output (← IO.ofExcept
+            (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
+          pure 0
+      | "pay-claim-audit", [input, output] =>
+          let bytes ← readBoundedBytes input (1024 * 4096)
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "paid audit JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          writeJson output (← IO.ofExcept
+            (Minidregg.Host.PayClaims.auditLoadedJson config walked.verified.opened source))
+          pure 0
       | "pay-enrol-v2-context", [input, output] =>
           let bytes ← readBoundedBytes input 4096
           let some text := String.fromUTF8? bytes.toByteArray

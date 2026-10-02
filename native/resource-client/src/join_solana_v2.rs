@@ -2,6 +2,7 @@
 //! payment material, and shared admitted-workspace setup. Never submits funds.
 use crate::participant_enrollment::{reply, retain_exact};
 use crate::pay_memo_v2::{self, Context, ExpectedPurchase, PurchaseMode, ValidatedQuote};
+use crate::pay_status::{self, Freshness, LeaseState, Payment};
 use crate::*;
 use serde_json::{json, Value};
 use sha2::Sha256;
@@ -304,32 +305,24 @@ fn status(
     common: &Common,
     identity: &[u8; 32],
     locator: Option<(&[u8; 64], &[u8; 32])>,
-) -> Result<Value> {
+) -> Result<pay_status::Status> {
     let mut input = json!({"identityKey":hex(identity)});
     if let Some((signature, recipient)) = locator {
         input["signature"] = json!(hex(signature));
         input["originalRecipient"] = json!(hex(recipient));
     }
-    let value = request(common, STATUS_OP, &input)?;
-    same(
-        field(&value, "type")? == "payStatus" && field(&value, "identityKey")? == hex(identity),
-        "source status identity mismatch",
-    )?;
-    if let Some((signature, recipient)) = locator {
-        same(
-            field(&value["paymentLocator"], "signature")? == hex(signature)
-                && field(&value["paymentLocator"], "originalRecipient")? == hex(recipient),
-            "source status payment locator mismatch",
-        )?;
-    }
-    Ok(value)
+    pay_status::parse(&request(common, STATUS_OP, &input)?, &input)
 }
-fn expiry(common: &Common, status: &Value) -> Result<u64> {
-    let freshness=field(status,"chainFreshness")?;
-    if freshness!="fresh" {
-        return Err(format!("finalized chain evidence is {freshness}; as-of {}. Wait for the verified payment watcher heartbeat before requesting a new quote",status["asOf"]));
+fn expiry(common: &Common, status: &pay_status::Status) -> Result<u64> {
+    if status.chain_freshness != Freshness::Fresh {
+        return Err(format!("finalized chain evidence is {}; as-of {}. Wait for the verified payment watcher heartbeat before requesting a new quote",status.chain_freshness.as_str(),status.raw["asOf"]));
     }
-    let hour = scalar(&status["asOf"], "hour")?;
+    let hour = status
+        .as_of
+        .as_ref()
+        .ok_or("fresh chain evidence missing")?
+        .hour
+        .to_u64()?;
     let expiry = common
         .expiry
         .unwrap_or(hour.checked_add(1).ok_or("chain hour overflow")?);
@@ -441,8 +434,8 @@ fn prepare_payment(
     let before = status(common, &identity, None)?;
     let expiry = expiry(common, &before)?;
     same(
-        (mode == PurchaseMode::Enrol && field(&before, "leaseState")? == "notEnrolled")
-            || (mode == PurchaseMode::Renew && field(&before, "leaseState")? != "notEnrolled"),
+        (mode == PurchaseMode::Enrol && before.lease_state == LeaseState::NotEnrolled)
+            || (mode == PurchaseMode::Renew && before.lease_state != LeaseState::NotEnrolled),
         "requested economic mode differs from source membership",
     )?;
     let context = source_context(common, pin, next_public)?;
@@ -601,29 +594,85 @@ fn wait(
         .ok_or("wait timeout out of range")?;
     loop {
         let value = status(common, &identity, Some((&signature, &recipient)))?;
-        let state = field(&value["payment"], "state")?;
-        match state {
-            "pendingV2"=>return Err(format!("payment retained as recoverable pending claim {} ({}) with {} atomic units; use the explicit current-quote claim recovery flow; do not send this deposit again",field(&value["paymentLocator"],"claimId")?,field(&value["payment"],"reason")?,field(&value["payment"],"amountAtomic")?)),
-            "journalV1Negative"=>return Err(format!("payment has a negative journal decision: {}; no v2 consumption recorded",value["payment"]["reason"])),
-            "consumedV2"=>{
-                same(field(&value["payment"],"amountAtomic")?==field(record,"amountAtomic")?,"consumption amount differs from retained original payment")?;
-                if field(&value,"leaseState")?=="active" {
-                    let entry=&value["entry"];same(field(entry,"sshBlob")?==hex(&join_solana::ssh_blob(&fixed(field(record,"sshKey")?,"SSH key")?)),"admitted SSH key differs from retained payment")?;
-                    same(scalar(entry,"leaseUntil")?>scalar(&value,"clockHour")?,"active lease source coordinates disagree")?;
-                    let dir=scratch(common)?;let output=dir.join("ids.json");
-                    check_pins(common)?;
-                    let run=Command::new(&common.host).arg(&common.config).arg("pay-enrol-ids").arg(hex(&identity)).arg(&output).output().map_err(|e|e.to_string())?;
-                    check_pins(common)?;
-                    same(run.status.success(),"source stable identity derivation failed")?;let ids=workspace::bounded_json(&output)?;
-                    same(field(entry,"subject")?==field(&ids,"subject")?&&field(entry,"account")?==field(&ids,"account")?,"source status and stable identifiers differ")?;
-                    let root=join_solana::admitted_workspace_v2(&common.host,&common.config,&common.directory,common.bootstrap.as_deref(),record,entry,&ids,birth.as_deref())?;
-                    println!("payment consumed; active membership until chain hour {}",field(entry,"leaseUntil")?);
-                    println!("workspace {}",root.display());println!("enter mini shell --workspace {} --home {}",root.display(),common.directory.join("home").display());return Ok(())
-                }
-                return Err(format!("payment was consumed, but membership is {}; obtain a new renewal quote",field(&value,"leaseState")?));
+        match &value.payment {
+            Payment::Pending(_) => {
+                return Err(value
+                    .pending_message()
+                    .ok_or("pending payment lacks locator")?)
             }
-            "unobservedOrUnknownPositiveV1"=>{},
-            _=>return Err(format!("unexpected exact-payment status {state}")),
+            Payment::JournalNegative(negative) => {
+                return Err(format!(
+                    "payment has a negative journal decision: {}; no v2 consumption recorded",
+                    negative.reason
+                ))
+            }
+            Payment::Consumed(consumed) => {
+                same(
+                    consumed.coordinates.amount_atomic.as_str() == field(record, "amountAtomic")?,
+                    "consumption amount differs from retained original payment",
+                )?;
+                if value.lease_state == LeaseState::Active {
+                    let entry = value
+                        .entry
+                        .as_ref()
+                        .ok_or("active source status lacks entry")?;
+                    same(
+                        entry.ssh_blob
+                            == join_solana::ssh_blob(&fixed(field(record, "sshKey")?, "SSH key")?),
+                        "admitted SSH key differs from retained payment",
+                    )?;
+                    let dir = scratch(common)?;
+                    let output = dir.join("ids.json");
+                    check_pins(common)?;
+                    let run = Command::new(&common.host)
+                        .arg(&common.config)
+                        .arg("pay-enrol-ids")
+                        .arg(hex(&identity))
+                        .arg(&output)
+                        .output()
+                        .map_err(|e| e.to_string())?;
+                    check_pins(common)?;
+                    same(
+                        run.status.success(),
+                        "source stable identity derivation failed",
+                    )?;
+                    let ids = workspace::bounded_json(&output)?;
+                    same(
+                        entry.subject.as_str() == field(&ids, "subject")?
+                            && entry.account.as_str() == field(&ids, "account")?,
+                        "source status and stable identifiers differ",
+                    )?;
+                    let root = join_solana::admitted_workspace_v2(
+                        &common.host,
+                        &common.config,
+                        &common.directory,
+                        common.bootstrap.as_deref(),
+                        record,
+                        &value.raw["entry"],
+                        &ids,
+                        birth.as_deref(),
+                    )?;
+                    println!(
+                        "payment consumed; active membership until chain hour {}",
+                        entry.lease_until
+                    );
+                    println!("workspace {}", root.display());
+                    println!(
+                        "enter mini shell --workspace {} --home {}",
+                        root.display(),
+                        common.directory.join("home").display()
+                    );
+                    return Ok(());
+                }
+                return Err(format!(
+                    "payment was consumed, but membership is {}; obtain a new renewal quote",
+                    value.lease_state.as_str()
+                ));
+            }
+            Payment::Unknown => {}
+            Payment::NotRequested => {
+                return Err("exact payment request returned no payment request".into())
+            }
         }
         if Instant::now() >= deadline {
             return Err("exact payment is not yet observed; retained memo and locator are unchanged; retry --wait".into());
@@ -1046,6 +1095,12 @@ mod tests {
             assert!(validate_url(bad).is_err());
         }
     }
+    fn status_fixture(freshness: &str) -> pay_status::Status {
+        let request = json!({"identityKey":hex(&[1;32])});
+        let mut v = pay_status::fixture(&request, json!({"state":"notRequested"}));
+        v["chainFreshness"] = json!(freshness);
+        pay_status::parse(&v, &request).unwrap()
+    }
     #[test]
     fn fresh_quote_expiry_never_uses_local_wall_time() {
         let root = temp();
@@ -1061,26 +1116,11 @@ mod tests {
             host_sha256: String::new(),
             config_bytes: Vec::new(),
         };
-        assert_eq!(
-            expiry(
-                &common,
-                &json!({"chainFreshness":"fresh","asOf":{"hour":"1000"}})
-            )
-            .unwrap(),
-            1001
-        );
-        assert!(expiry(
-            &common,
-            &json!({"chainFreshness":"stale","asOf":{"hour":"1000"}})
-        )
-        .is_err());
+        assert_eq!(expiry(&common, &status_fixture("fresh")).unwrap(), 1001);
+        assert!(expiry(&common, &status_fixture("stale")).is_err());
         let mut wrong = common.clone();
         wrong.expiry = Some(1002);
-        assert!(expiry(
-            &wrong,
-            &json!({"chainFreshness":"fresh","asOf":{"hour":"1000"}})
-        )
-        .is_err());
+        assert!(expiry(&wrong, &status_fixture("fresh")).is_err());
     }
     fn mock_payment(enrol: bool, starter: Option<u64>) {
         let root = temp();
@@ -1135,18 +1175,29 @@ mod tests {
                 "/mini/v2/status" => {
                     if body.get("signature").is_some() {
                         let phase = observed_phase.load(std::sync::atomic::Ordering::SeqCst);
-                        let state = match phase {
-                            1 => "pendingV2",
-                            2 | 4 => "unobservedOrUnknownPositiveV1",
-                            _ => "consumedV2",
+                        let payment = match phase {
+                            1 => {
+                                json!({"state":"pendingV2","amountAtomic":if enrol{"522"}else{"515"},"slot":"99","index":"0","reason":"termsStale"})
+                            }
+                            2 | 4 => json!({"state":"unobservedOrUnknownPositiveV1"}),
+                            _ => {
+                                json!({"state":"consumedV2","amountAtomic":if enrol{"522"}else{"515"},"slot":"99","index":"0","mode":if enrol{"enrol"}else{"renew"},"weeks":"1","mintedCredit":if enrol{"522"}else{"515"},"birthFee":if enrol{"7"}else{"0"},"membershipCredit":"168","creditedRemainder":"347","pricingCommitment":hex(&[12;32]),"authorization":"originalMemo","acceptedRequest":null})
+                            }
                         };
-                        json!({"type":"payStatus","identityKey":body["identityKey"],
-                            "paymentLocator":{"signature":body["signature"],"originalRecipient":if phase==4 {json!(hex(&[77;32]))}else{body["originalRecipient"].clone()},"claimId":"fixture-claim"},
-                            "payment":{"state":state,"amountAtomic":if enrol{"522"}else{"515"},"reason":"termsStale"},
-                            "clockHour":"1000","leaseState":if phase==5{"active"}else{"expired"},
-                            "entry":{"sshBlob":"00","leaseUntil":"1100"}})
+                        let mut v = pay_status::fixture(&body, payment);
+                        v["leaseState"] = json!(if phase == 5 { "active" } else { "expired" });
+                        v["entry"] = json!({"subject":"12","account":"13","sshBlob":"00","index":"0","leaseUntil":if phase==5{"1100"}else{"999"},"enrolledSlot":"98"});
+                        if phase == 4 {
+                            v["paymentLocator"]["originalRecipient"] = json!(hex(&[77; 32]));
+                        }
+                        v
                     } else {
-                        json!({"type":"payStatus","identityKey":body["identityKey"],"chainFreshness":"fresh","asOf":{"hour":"1000"},"leaseState":if enrol{"notEnrolled"}else{"expired"}})
+                        let mut v = pay_status::fixture(&body, json!({"state":"notRequested"}));
+                        if !enrol {
+                            v["leaseState"] = json!("expired");
+                            v["entry"] = json!({"subject":"12","account":"13","sshBlob":"","index":"0","leaseUntil":"999","enrolledSlot":"98"});
+                        }
+                        v
                     }
                 }
                 "/mini/v2/quote" => {
@@ -1249,7 +1300,7 @@ mod tests {
             );
         }
         for (value, expected_error) in [
-            (1, "recoverable pending claim fixture-claim"),
+            (1, "payment received; admission pending"),
             (2, "not yet observed"),
             (3, "payment was consumed, but membership is expired"),
             (4, "payment locator mismatch"),
@@ -1271,7 +1322,7 @@ mod tests {
         phase.store(1, std::sync::atomic::Ordering::SeqCst);
         assert!(wait(&common, &record, None, 0, 1, None)
             .unwrap_err()
-            .contains("recoverable pending claim"));
+            .contains("payment received; admission pending"));
         assert_eq!(
             workspace::bounded_json(&directory.join("latest-payment.json")).unwrap(),
             record
