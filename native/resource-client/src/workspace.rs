@@ -3,6 +3,7 @@
 //! the signed observation, current Plan, and Lean admission in `main`.
 
 use crate::current_birth;
+use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
     absolute, author, hex, inspect, path, print_json, query_retained, retry, submit, Args,
@@ -815,6 +816,7 @@ pub(crate) fn read(
     window: Option<(&str, &str)>,
     ephemeral: bool,
 ) -> Result<()> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
     let reference = reference(root, resource_name)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
@@ -846,6 +848,10 @@ pub(crate) fn read(
         &attempt,
     );
     let judged = judged_at(&attempt).ok();
+    if answered.is_ok() {
+        let challenge = bounded_json(&attempt.join("challenge.json"))?;
+        receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+    }
     if ephemeral {
         // A read commits nothing: once its answer (or refusal) is in hand the attempt
         // and its intent source are not needed for any retry. One journal line stays.
@@ -962,6 +968,19 @@ pub(crate) fn signed_view(
     reference: &Value,
     view: &str,
 ) -> Result<(Value, Value, PathBuf)> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
+    let (result, challenge, signed) = signed_view_unchecked(root, workspace, reference, view)?;
+    receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+    Ok((result, challenge, signed))
+}
+
+// Only continuity-init may bypass the pre-read baseline to establish explicit first trust.
+fn signed_view_unchecked(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    view: &str,
+) -> Result<(Value, Value, PathBuf)> {
     let (attempt, nonce) = new_attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
@@ -1002,6 +1021,7 @@ fn doc_query(
     height: Option<&str>,
     inspection: &str,
 ) -> Result<(Value, PathBuf)> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
         "target":member(reference,"target")?,"view":view});
@@ -1027,6 +1047,9 @@ fn doc_query(
         inspection,
         &attempt,
     )?;
+    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    let mode = if view == "at" { ContinuityMode::Historical } else { ContinuityMode::Ordinary };
+    receipt_continuity::finish(root, workspace, ticket, &challenge, mode)?;
     Ok((value, attempt))
 }
 
@@ -3137,6 +3160,7 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
 }
 
 pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+    let continuity = receipt_continuity::begin_attempt(attempt)?;
     let mut names = Vec::new();
     for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -3155,6 +3179,7 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
                 Some("installed" | "replayed")
             )
         {
+            receipt_continuity::finish_attempt(continuity, &value, true)?;
             return Ok(Some(value));
         }
     }
@@ -5237,6 +5262,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     }
     let workspace = load(&root)?;
     match action.as_str() {
+        "continuity-init" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let verifier = args.optional("verifier").map(path);
+            args.finish()?;
+            let reference = reference(&root, &name)?;
+            let result = receipt_continuity::initialize(&root, &workspace, verifier.as_deref(), || {
+                Ok(signed_view_unchecked(&root, &workspace, &reference, "resource")?.1)
+            })?;
+            print_json(&result)
+        }
+        "continuity-verifier" => {
+            let verifier = path(args.required("verifier")?);
+            args.finish()?;
+            print_json(&receipt_continuity::replace_verifier(&root, &workspace, &verifier)?)
+        }
+        "continuity-check" => {
+            let attempt = path(args.required("attempt")?);
+            let historical = match args.optional("historical").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--historical must be true or false".into()),
+            };
+            args.finish()?;
+            print_json(&receipt_continuity::check_retained(&root, &workspace, &attempt, historical)?)
+        }
         "import" => {
             if let Some(from) = args.optional("from-ref") {
                 let name = os_string(args.required("name")?, "reference name")?;
@@ -5887,7 +5938,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             crate::market::show(&root, &workspace, &name)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
+            "workspace action must be init, continuity-init, continuity-verifier, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }
