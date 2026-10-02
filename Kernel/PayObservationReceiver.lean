@@ -15,7 +15,7 @@ turn over two cells:
 
 Authorization: the observer signs a capability-mode request of kind `program`,
 target and policy the pay cell (`PayCell.physicalId`), verb `observePayment`,
-presenting its capability; it is admitted under the pay cell's current law
+presenting its capability; it is admitted under the pay cell's complete current law closure
 (genesis installs `eq request/subject observer`, `NativeHostGenesis`), with the
 operation slot `authority/operation/pay-observe`.  The effect digest commits
 to the command bytes and to the decided plan, so the authorized request binds
@@ -31,6 +31,8 @@ import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.PayObservation
 import Kernel.ClockCellDomain
+import Compiler.PhysicalLawResolution
+import Compiler.WorldKindLawDependencies
 
 namespace Minidregg.Kernel.PayObservationReceiver
 
@@ -228,13 +230,18 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   resources : CanonicalResourceKernel.AcceptedBatch book.payload plan.batch
   candidate : Candidate (family deployment authority.snapshot pay.cell profile.semantics ambient command)
     pay.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
-  source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
-    (authority.snapshot.authState.policyAddress ⟨payTarget deployment⟩
-      (authority.snapshot.authState.policyRevision ⟨payTarget deployment⟩))
+  /-- Structural selector roots are mandatory, not a default empty list. -/
+  dependencies : WorldKindLawDependencies.Dependencies
+  dependenciesExact : WorldKindLawDependencies.loadTarget deployment directory.directory
+    (payTarget deployment) = some dependencies
+  /-- Every resolved component and historical predecessor is guarded at CAS. -/
+  sourceGuards : List (Nat × Digest)
+  sourceGuardsExact : PhysicalLawResolution.readGuards authority.snapshot directory.directory
+    profile.semantics (payTarget deployment) dependencies.additional = some sourceGuards
 
 /-- The decision, in order: the loaded cells, the two pinned roots, the pure
 `decideObservations` (which includes the Book admission), the pay patch's
-validation and the pay law's source.  Refusal reasons before the signature
+validation and the complete current law dependency closure.  Refusal reasons before the signature
 check are named (the enrollment pattern of this branch). -/
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -260,19 +267,24 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
         match validate PayCell.materializer pay.cell pay.cell.root ([] : Patch PayCell.layout) with
         | .rejected _ => throw .validation
         | .accepted validated =>
-            let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-              snapshot.domain directory.directory
-              (snapshot.authState.policyAddress ⟨payTarget deployment⟩
-                (snapshot.authState.policyRevision ⟨payTarget deployment⟩)))
             let candidate : Candidate (family deployment snapshot pay.cell profile.semantics
                 ambient command) pay.cell d () :=
               { preStateBound := rfl
                 modeEvidence := ⟨rootExact⟩
                 validated := validated
                 postcondition := validated.resultAt }
-            pure ⟨directory, authority, pay, clock, book, plan, decided, clockValid,
-              CanonicalResourceKernel.AcceptedBatch.ofAdmission
-                (decideObservations_admitted decided), candidate, source⟩
+            match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
+                directory.directory (payTarget deployment) with
+            | none => throw .policyUnavailable
+            | some dependencies =>
+              match sourceGuardsExact : PhysicalLawResolution.readGuards snapshot
+                  directory.directory profile.semantics (payTarget deployment) dependencies.additional with
+              | none => throw .policyUnavailable
+              | some sourceGuards =>
+                pure ⟨directory, authority, pay, clock, book, plan, decided, clockValid,
+                  CanonicalResourceKernel.AcceptedBatch.ofAdmission
+                    (decideObservations_admitted decided), candidate,
+                  dependencies, dependenciesExact, sourceGuards, sourceGuardsExact⟩
     else throw .stalePay
   else throw .staleAuthority
 
@@ -311,7 +323,9 @@ theorem Prepared.clock_post_slot (prepared : Prepared deployment profile ambient
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : PayStore) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory
+      (payTarget deployment) ++
+    CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
         command prepared.plan) ++
     [("authority/operation/pay-observe", 1),
@@ -325,18 +339,13 @@ def project (prepared : Prepared deployment profile ambient durable command)
 def step (prepared : Prepared deployment profile ambient durable command) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (project prepared) profile.semantics prepared.candidate
 
-def sourceStore (prepared : Prepared deployment profile ambient durable command) :
-    CanonicalPolicyRegistry.PayloadStore :=
-  ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
-    prepared.directory.directory⟩
-
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    (prepared : Prepared deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) (payTarget deployment) prepared.dependencies.additional
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
@@ -356,22 +365,17 @@ def authorize [DecidableEq F]
     ambient command prepared.plan
   let config := policyConfig prepared
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.capability receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.capability () receipt () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
-      evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
+  match ComposedPolicyAdmission.admit config wanted evidence witness
+      (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
@@ -383,6 +387,25 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+
+/-- Acceptance evaluates the full source-resolved current restriction
+closure on the observer's actual scoped step, including selector coordinates. -/
+theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true := by
+  exact ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
+      command prepared.plan) accepted.semantic.authorization
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -452,23 +475,50 @@ def bookWrite (prepared : Prepared deployment profile ambient durable command) :
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
   [clockWrite prepared, bookWrite prepared]
 
-def policyGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
-  ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
+/-- The successful physical resolver's complete source/history closure plus
+the actual target and structural kind roots. Prepared retains both load proofs. -/
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
+  (prepared.sourceGuards ++ prepared.dependencies.readGuards).map
+    fun (id, root) => ⟨⟨id⟩, root⟩
 
 /-- The pay cell is read (tariff, book, assignment), not written. -/
 def payGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   prepared.pay.readGuard
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  policyGuard prepared :: payGuard prepared ::
-    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+  payGuard prepared ::
+    (prepared.authority.readGuards ++ lawReadGuards prepared).filter
+      fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
+/-- No resolved dependency can disappear between admission and commit:
+an existing write guards its pre-root, otherwise the intent reads its root. -/
+theorem lawGuard_read_or_written (prepared : Prepared deployment profile ambient durable command)
+    (guard : ReadGuard) (member : guard ∈ lawReadGuards prepared) :
+    guard ∈ readGuards prepared ∨ guard.cellId ∈ (writes prepared).map DataWrite.cellId := by
+  by_cases written : guard.cellId ∈ (writes prepared).map DataWrite.cellId
+  · exact Or.inr written
+  · apply Or.inl
+    apply List.mem_cons_of_mem
+    apply List.mem_filter.mpr
+    exact ⟨List.mem_append_right _ member, by simpa using written⟩
+
+theorem Prepared.dependencies_available (prepared : Prepared deployment profile ambient durable command) :
+    (WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
+      (payTarget deployment)).isSome = true := by
+  rw [prepared.dependenciesExact]
+  rfl
+
+theorem Prepared.source_guards_available (prepared : Prepared deployment profile ambient durable command) :
+    (PhysicalLawResolution.readGuards prepared.authority.snapshot prepared.directory.directory
+      profile.semantics (payTarget deployment) prepared.dependencies.additional).isSome = true := by
+  rw [prepared.sourceGuardsExact]
+  rfl
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ write ∈ writes prepared, rootBytes write.canonicalPostBytes = write.exactPost) ∧
-    (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (payGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
@@ -482,9 +532,7 @@ theorem readGuards_readonly (prepared : Prepared deployment profile ambient dura
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   rcases List.mem_cons.mp member with rfl | rest
   · exact shape.2.2.2.2.1
-  rcases List.mem_cons.mp rest with rfl | authority
-  · exact shape.2.2.2.2.2.1
-  · simpa using (List.mem_filter.mp authority).2
+  · simpa using (List.mem_filter.mp rest).2
 
 structure AcceptedObservation [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -597,8 +645,12 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
 
+#assert_axioms Accepted.policy_evaluated_actual_post
 #assert_axioms Prepared.bookPost_exact
 #assert_axioms Prepared.clock_post
+#assert_axioms lawGuard_read_or_written
+#assert_axioms Prepared.dependencies_available
+#assert_axioms Prepared.source_guards_available
 #assert_axioms readGuards_readonly
 #assert_axioms intent_writes
 #assert_axioms intent_spends
