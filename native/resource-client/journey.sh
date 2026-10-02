@@ -56,7 +56,8 @@
 # Note: by the time M3-M7 run, the resource `shared` is deliberately locked
 # (J8). A hook that needs an open resource creates its own through SPONSOR_WS.
 #
-# Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
+# Tunables: JOURNEY_TIMER_COUNTS (the timers' accepted counts, see accept());
+# JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
 # JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
@@ -216,12 +217,25 @@ decode() {
 installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
 replayed() { jq -e '.type == "confirmed" and .confirmation == "replayed"' "$1" >/dev/null 2>&1; }
 count_of() { jq -r '.acceptedCount' "$1"; }
-# Accept a new record: installed and exactly one past the previous count.
+# Accept a new record: installed and exactly one past the previous count, plus the
+# records the deployment's timers (clock tick, certify) were accepted at in between.
+# JOURNEY_TIMER_COUNTS names the file the timers append each accepted count to (one per
+# line); unset means no timer runs and the count must be exactly LAST + 1. Every record
+# between is accounted for either way: a stranger's record still fails the step.
+timer_between() {  # timer_between LOW HIGH -> how many timer records have LOW < count < HIGH
+  [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ -f "$JOURNEY_TIMER_COUNTS" ] || { echo 0; return; }
+  awk -v lo="$1" -v hi="$2" '$1 > lo && $1 < hi { n++ } END { print n + 0 }' "$JOURNEY_TIMER_COUNTS"
+}
 accept() {
-  local f=$1 c
+  local f=$1 c k=0 tries=0
   installed "$f" || return 1
   c=$(count_of "$f")
-  [ "$c" = $((LAST_COUNT + 1)) ] || { DETAIL="acceptedCount $c, expected $((LAST_COUNT + 1)) in $f"; return 1; }
+  k=$(timer_between "$LAST_COUNT" "$c")
+  # A timer's record can land before the timer has logged it: wait up to 30 s for the log.
+  while [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ "$c" != $((LAST_COUNT + 1 + k)) ] && [ "$tries" -lt 60 ]; do
+    sleep 0.5; tries=$((tries + 1)); k=$(timer_between "$LAST_COUNT" "$c")
+  done
+  [ "$c" = $((LAST_COUNT + 1 + k)) ] || { DETAIL="acceptedCount $c, expected $((LAST_COUNT + 1 + k)) ($k timer records between) in $f"; return 1; }
   LAST_COUNT=$c
 }
 field_value() { jq -r --arg f "$2" '[.cell.entries[]? | select(.key.field == $f) | .value][0] // "absent"' "$1"; }
