@@ -50,6 +50,12 @@ mod inspect_views;
 #[path = "lawsat.rs"]
 mod lawsat;
 
+#[path = "world_kind.rs"]
+mod world_kind;
+
+#[path = "law_export.rs"]
+mod law_export;
+
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
@@ -2442,6 +2448,9 @@ fn propose_summary_once(
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
         return Err("unknown workspace proposal version".into());
     }
+    if member(&request, "action")? == "install-export" {
+        if let Some(summary) = law_export::retained(root, proposal_id, &request)? { return Ok(summary); }
+    }
     if private_room_name.is_some() && member(&request, "action")? != "invoke" {
         return Err("--private applies to invoke proposals only".into());
     }
@@ -2567,6 +2576,8 @@ fn propose_summary_once(
                         )?));
                     }
                     lowered
+                } else if member(payload, "type")? == "kindDefinition" && sealing.is_none() {
+                    world_kind::revise(payload, &view, target)?
                 } else if read_only {
                     // An observe-only read of a content cell (K-TRANSCLUDE): the
                     // source a `transclude` of another target names.
@@ -2585,6 +2596,7 @@ fn propose_summary_once(
                         return Err("payload may contain only type and actions".into());
                     }
                     match (member(payload, "type")?, &sealing) {
+                        ("worldNamed", None) => world_kind::named_actions(root, local_name, &view, &payload["actions"], fresh)?,
                         ("scalar", None) => scalar_actions(&payload["actions"], target)?,
                         ("content", None) => content_actions(&payload["actions"], false)?,
                         ("content", Some((room, key))) => legacy_private_content(
@@ -2642,34 +2654,24 @@ fn propose_summary_once(
                 "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
                 "grants":grants})
         }
-        "install-policy" => {
+        "install-policy" | "install-export" => {
+            let exporting = member(&request, "action")? == "install-export";
+            let body = if exporting { "component" } else { "predicate" };
             let obj = request.as_object().ok_or("proposal must be an object")?;
-            if obj.len() != 4 || !obj.contains_key("name") || !obj.contains_key("predicate") {
-                return Err(
-                    "install-policy proposal may contain only type, action, name, predicate".into(),
-                );
+            if obj.len() != 4 || !obj.contains_key("name") || !obj.contains_key(body) {
+                return Err(format!("law proposal may contain only type, action, name, {body}"));
             }
             let reference = reference(root, member(&request, "name")?)?;
             let control = member(&reference, "controlCapability")?;
             let (policy, challenge, _) = signed_view(root, workspace, &reference, "policy")?;
-            let version = member(&policy, "version")?
-                .parse::<u64>()
-                .map_err(|_| "signed policy version exceeds client range")?;
-            let next = version
-                .checked_add(1)
-                .ok_or("policy version overflow")?
-                .to_string();
-            let prior = member(&policy, "address")?;
             let target = member(&reference, "target")?;
+            let source = law_export::source(&policy, &request)?;
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"install-source",
                     "subject":member(workspace,"subject")?,"control":control,
                     "declaration":{"expectedPreRoot":signed_authority_root(&challenge)?,
-                        "expected":{"version":version.to_string(),"address":prior},
-                        "nonce":random_nonce()?,"source":{"policyId":member(&policy,"policyId")?,
-                            "version":next,"domain":member(&policy,"domain")?,
-                            "semantics":member(&policy,"semantics")?,"previous":prior,
-                            "predicate":request["predicate"]}}}},
+                        "expected":{"version":member(&policy,"version")?,"address":member(&policy,"address")?},
+                        "nonce":random_nonce()?,"source":source}}},
                 "grants":[{"kind":member(&reference,"kind")?,"target":target,
                     "capability":member(&reference,"observeCapability")?}]})
         }
@@ -2971,7 +2973,7 @@ fn propose_summary_once(
         }
         _ => {
             return Err(
-                "proposal action must be invoke, install-policy, delegate, revoke, or renounce"
+                "proposal action must be invoke, install-policy, install-export, delegate, revoke, or renounce"
                     .into(),
             )
         }
@@ -3377,6 +3379,8 @@ struct BirthShape<'a> {
     /// `storage: "declared"`: the fields the cell may ever hold (K-FIELD-CLOSURE),
     /// `["0","1",…]` or `"open"`. `None` declares none: the cell can hold no field.
     fields: Option<Value>,
+    /// Source JSON, encoded and admitted only by Lean.
+    world: Option<Value>,
 }
 
 /// `--fields`: `open`, or a comma list of field numbers and inclusive ranges
@@ -3647,8 +3651,8 @@ fn birth(
         }
         None => None,
     };
-    if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
-        return Err("supported resource storage is content, declared, stream or nock".into());
+    if !matches!(shape.storage, "content" | "declared" | "stream" | "nock" | "world-kind" | "world-instance") {
+        return Err("supported storage is content, declared, stream, nock, world-kind or world-instance".into());
     }
     if shape.fields.is_some() && shape.storage != "declared" {
         return Err("--fields is only for declared storage".into());
@@ -3657,6 +3661,9 @@ fn birth(
     // An account (a realm well, or a holder's purse) is declared storage only.
     if !matches!((shape.kind, shape.storage), ("object", _) | ("account", "declared")) {
         return Err("resource kind is object, or account with declared storage".into());
+    }
+    if matches!(shape.storage, "world-kind" | "world-instance") != shape.world.is_some() {
+        return Err("world storage requires source definition or signed kind selection".into());
     }
     let program = shape.program.clone();
     match (shape.storage, &program) {
@@ -3688,6 +3695,9 @@ fn birth(
     }
     if let Some(fields) = &shape.fields {
         requested_core["fields"] = fields.clone();
+    }
+    if let Some(world) = &shape.world {
+        requested_core["world"] = world.clone();
     }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -3792,6 +3802,14 @@ fn birth(
     // recomputes every salt and no reader of a subset of fields holds an
     // unsalted commitment to the rest.
     let mut resource = resource;
+    if let Some(world) = &shape.world {
+        for (key, value) in world.as_object().ok_or("world birth source must be an object")? {
+            resource[key] = value.clone();
+        }
+        if shape.storage == "world-kind" {
+            resource["definition"] = world_kind::definition(&resource["definition"], Some(&reservation.ids["target"]))?;
+        }
+    }
     if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
         let seed = crate::hiding::read_seed(&member_path(workspace, "key")?)?;
         let target = reservation.ids["target"].as_str();
@@ -4039,6 +4057,7 @@ fn create_with_template(
             room,
             program: program.clone(),
             fields,
+            world: None,
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
@@ -4095,6 +4114,7 @@ pub(crate) fn create_funded_account(
             room: None,
             program: None,
             fields: None,
+            world: None,
         },
     )?;
     let resource = &source["birth"]["resources"][0];
@@ -4199,6 +4219,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
             room: None,
             program: None,
             fields: None,
+            world: None,
         },
     )?;
     let account = &source["birth"]["resources"][0];
@@ -4305,6 +4326,8 @@ fn content_page<'a>(view: &'a Value, name: &str) -> Result<&'a Value> {
 /// cell's entries are typed hyperdocument records. An empty stream has no
 /// entries, so `nextSeq` is what tells it from a document.
 fn cell_storage(cell: &Value) -> Result<&'static str> {
+    if cell.get("worldKind").is_some() { return Ok("world-kind"); }
+    if cell.get("worldInstance").is_some() { return Ok("world-instance"); }
     // A stream read shows its HEAD (nextSeq, count, tail, binding; no
     // entries: they are their own cells, read with `tail`), FLEET-TOPIC-ON-STREAM.
     if cell.get("nextSeq").is_some() || cell.get("head").is_some() {
@@ -5784,6 +5807,27 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 (true, Some(name)) => result.map_err(|error| frozen_roster(name, error)),
                 _ => result,
             }
+        }
+        "law-export-show" => {
+            let name = os_string(args.required("name")?, "resource name")?;
+            args.finish()?;
+            law_export::show(&root, &workspace, &name)
+        }
+        "kind-show" | "instance-show" => {
+            let name = os_string(args.required("name")?, "resource name")?;
+            args.finish()?;
+            world_kind::show(&root, &workspace, &name,
+                if action == "kind-show" { "worldKind" } else { "worldInstance" })
+        }
+        "kind-create" | "instance-create" => {
+            let name = os_string(args.required("name")?, "resource name")?;
+            let predicate = path(args.required("predicate")?);
+            let definition = args.optional("definition").map(path);
+            let from = args.optional("from").map(|value| os_string(value, "kind reference")).transpose()?;
+            let room = args.optional("in").map(|value| os_string(value, "room name")).transpose()?;
+            args.finish()?;
+            if (action == "kind-create") != definition.is_some() { return Err("kind-create needs definition; instance-create needs from".into()); }
+            world_kind::create(&root, &workspace, &name, &predicate, room.as_deref(), definition.as_deref(), from.as_deref())
         }
         "create" => {
             let name = os_string(args.required("name")?, "resource name")?;

@@ -66,11 +66,13 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "why", usage: "why [ATTEMPT] [--json]", operation: "mini workspace --action inspect --view why [--name ATTEMPT] --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
-    Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
+    Verb { name: "kind", usage: "kind create NAME DEFINITION-JSON|@FILE LAW [--in ROOM] | kind show NAME | kind revise ID NAME DEFINITION-JSON|@FILE", operation: "world-resident definition create, signed read, or guarded revision" },
+    Verb { name: "instance", usage: "instance show NAME | instance set ID NAME FIELD KEY VALUE | instance erase ID NAME FIELD KEY", operation: "signed descriptor and entry read; named guarded edits using the last displayed values" },
+    Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
-    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
+    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law export ID REF COMPONENT-JSON|@FILE|none | law export show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
     Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
     Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
     Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
@@ -741,6 +743,7 @@ fn enc_argument(session: &Session, word: &str) -> std::result::Result<String, St
 struct Birth {
     room: Option<String>,
     owner: Option<String>,
+    from: Option<String>,
 }
 
 fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
@@ -748,7 +751,7 @@ fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
     let create = matches!(verb.0, Some("create"));
     let first = match verb {
         (Some("create"), _) => 2,
-        (Some("doc"), Some("new")) => 3,
+        (Some("doc"), Some("new")) | (Some("kind"), Some("create")) => 3,
         _ => return Ok(Birth::default()),
     };
     let mut birth = Birth::default();
@@ -757,6 +760,7 @@ fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
         let slot = match words[i].as_str() {
             "--in" => &mut birth.room,
             "--owner" if create => &mut birth.owner,
+            "--from" if create => &mut birth.from,
             _ => {
                 i += 1;
                 continue;
@@ -775,6 +779,7 @@ fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
     if let Some(room) = &birth.room {
         ref_name(room, "room name")?;
     }
+    if let Some(from) = &birth.from { ref_name(from, "kind reference")?; }
     if let Some(owner) = &birth.owner {
         decimal(owner, "owner")?;
     }
@@ -1831,6 +1836,62 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 client("workspace", flags)
             }
         }
+        "kind" => {
+            match w.get(1).map(String::as_str) {
+                Some("show") => {
+                    arity(&w, 2, 2, u)?; ref_name(&w[2], "kind name")?;
+                    client("workspace", vec![flag("action", "kind-show"), flag("dir", ws()), flag("name", &w[2])])
+                }
+                Some("create") => {
+                    arity(&w, 4, 4, u)?; ref_name(&w[2], "kind name")?;
+                    let definition = json_argument(session, &w[3], "kind definition")?;
+                    let predicate = law_argument(session, &w[4..5])?;
+                    let prefix = session.home.join("requests");
+                    let defpath = prefix.join(format!("kind-{}.json", ref_file(&w[2])));
+                    let lawpath = prefix.join(format!("kind-{}-law.json", ref_file(&w[2])));
+                    let mut flags = vec![flag("action", "kind-create"), flag("dir", ws()), flag("name", &w[2]),
+                        flag("definition", defpath.clone()), flag("predicate", lawpath.clone())];
+                    if let Some(room) = &room { flags.push(flag("in", room)); }
+                    Plan::Client { command:"workspace".into(), flags,
+                        writes:vec![request_file(defpath,&definition),request_file(lawpath,&predicate)] }
+                }
+                Some("revise") => {
+                    arity(&w, 4, 4, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "kind name")?;
+                    let definition = json_argument(session, &w[4], "kind definition")?;
+                    proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                        "targets":[{"name":w[3],"payload":{"type":"kindDefinition","definition":definition}}]}))
+                }
+                _ => return Err(u.into()),
+            }
+        }
+        "instance" => {
+            match w.get(1).map(String::as_str) {
+                Some("show") => {
+                    arity(&w, 2, 2, u)?; ref_name(&w[2], "instance name")?;
+                    client("workspace", vec![flag("action", "instance-show"), flag("dir", ws()), flag("name", &w[2])])
+                }
+                Some(operation @ ("set" | "erase")) => {
+                    let count = if operation == "set" { 6 } else { 5 };
+                    arity(&w, count, count, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "instance name")?;
+                    decimal(&w[5], "entry key")?;
+                    let mut action = json!({"type":operation,"field":w[4],"key":w[5]});
+                    if operation == "set" { action["value"] = json!(w[6]); }
+                    proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                        "targets":[{"name":w[3],"payload":{"type":"worldNamed","actions":[action]}}]}))
+                }
+                _ => return Err(u.into()),
+            }
+        }
+        "create" if birth.from.is_some() => {
+            arity(&w, 2, 2, u)?; ref_name(&w[1], "instance name")?;
+            if birth.owner.is_some() { return Err("create --from currently creates for the signing member".into()); }
+            let predicate = law_argument(session, &w[2..3])?;
+            let path = session.home.join("requests").join(format!("create-{}.json",ref_file(&w[1])));
+            let mut flags = vec![flag("action", "instance-create"),flag("dir",ws()),flag("name",&w[1]),
+                flag("from",birth.from.as_ref().expect("matched")),flag("predicate",path.clone())];
+            if let Some(room) = &room { flags.push(flag("in",room)); }
+            Plan::Client { command:"workspace".into(),flags,writes:vec![request_file(path,&predicate)] }
+        }
         "create" => {
             arity(&w, 3, 4, u)?;
             ref_name(&w[1], "resource name")?;
@@ -1891,6 +1952,19 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":w[2],"recipient":w[3],"verbs":verbs,"maxCost":w[5]});
             proposal(session, &w[1], &request)
+        }
+        "law" if w.get(1).map(String::as_str) == Some("export") => {
+            if w.len() == 4 && w[2] == "show" {
+                ref_name(&w[3], "reference name")?;
+                client("workspace", vec![flag("action", "law-export-show"), flag("dir", ws()), flag("name", &w[3])])
+            } else {
+                arity(&w, 4, 4, u)?;
+                workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "reference name")?;
+                let component = if w[4] == "none" { Value::Null }
+                    else { json_argument(session, &w[4], "descendant law component")? };
+                proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1",
+                    "action":"install-export","name":w[3],"component":component}))
+            }
         }
         "law" if w.len() == 3 && w[1] == "show" => {
             workspace_name(&w[2], "reference name")?;
@@ -2870,6 +2944,45 @@ mod tests {
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
         items.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn world_kind_shell_routes_named_world_operations() {
+        let s = session();
+        let created = client(plan(&s, "create election --from poll open --in lab").unwrap());
+        assert!(created.1.contains(&("action".into(), "instance-create".into())));
+        assert!(created.1.contains(&("from".into(), "poll".into())));
+        assert!(created.1.contains(&("in".into(), "lab".into())));
+        assert!(plan(&s, "create election --from poll --from other open").is_err());
+        assert!(plan(&s, "create election --from poll open --owner 7").is_err());
+        let edit = client(plan(&s, "instance set vote election votes 7 1").unwrap());
+        let request: Value = serde_json::from_str(&edit.2[0].1).unwrap();
+        assert_eq!(request["targets"][0]["payload"], json!({"type":"worldNamed", "actions":[
+            {"type":"set","field":"votes","key":"7","value":"1"}]}));
+        let shown = client(plan(&s, "kind show poll").unwrap());
+        assert!(shown.1.contains(&("action".into(), "kind-show".into())));
+        assert!(plan(&s, "instance erase delete election votes -1").is_err());
+        let definition = r#"{"descriptor":{"revision":"1","fields":[]},"defaults":[]}"#;
+        let kind = client(plan(&s, &format!("kind create poll {definition} open --in lab")).unwrap());
+        assert!(kind.1.contains(&("action".into(), "kind-create".into())));
+        assert_eq!(kind.2.len(),2);
+        let revision = client(plan(&s, &format!("kind revise rev poll {definition}")).unwrap());
+        let request: Value = serde_json::from_str(&revision.2[0].1).unwrap();
+        assert_eq!(request["targets"][0]["payload"]["type"], "kindDefinition");
+    }
+
+    #[test]
+    fn law_export_is_a_separate_facet_operation() {
+        let s=session();
+        let plan=client(super::plan(&s,r#"law export change poll {"selector":{"physicalKinds":["18"]},"predicate":{"type":"all","predicates":[]},"parents":[]}"#).unwrap());
+        let request:Value=serde_json::from_str(&plan.2[0].1).unwrap();
+        assert_eq!(request["action"],"install-export"); assert_eq!(request["name"],"poll");
+        assert!(request.get("predicate").is_none());
+        let shown=client(super::plan(&s,"law export show poll").unwrap());
+        assert!(shown.1.contains(&("action".into(),"law-export-show".into())));
+        let removed=client(super::plan(&s,"law export remove poll none").unwrap());
+        let request:Value=serde_json::from_str(&removed.2[0].1).unwrap();
+        assert!(request["component"].is_null());
     }
 
     #[test]
