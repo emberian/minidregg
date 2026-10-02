@@ -4,6 +4,7 @@ Uncompiled candidate for the integrator's authorized Lean pass. No reservation,
 write, signature, RPC, or duplicated native pricing formula is performed here.
 The Host supplies authenticated cells/Clock and the actual source birth pricing.
 -/
+import Kernel.PayReceivingContract
 import Kernel.PayClaimDecision
 
 namespace Minidregg.Kernel.PayClaimQuote
@@ -26,7 +27,7 @@ abbrev FixedQuote := PayEnrolClaim.FixedQuote
 def maxRequestBytes : Nat := 1024
 def maxResponseBytes : Nat := 8192
 /-- Bounds processing-chain hours, not an elapsed wall-clock promise. -/
-def maxQuoteLifetimeHours : Nat := 1
+def maxQuoteLifetimeHours : Nat := PayReceivingContract.maxQuoteLifetimeHours
 
 structure Terms where
   mode : PayEnrolClaim.Mode
@@ -87,7 +88,7 @@ instance (request : Request) : Decidable request.valid := by
   | inl purchase => unfold Request.valid; cases purchase.freshNext <;> infer_instance
   | inr claim => unfold Request.valid; infer_instance
 
-def requestFrame : List UInt8 := "DREGG/PAY/CLAIM-QUOTE/REQUEST/v1".toUTF8.toList
+def requestFrame : List UInt8 := PayReceivingContract.quoteRequestFrame
 def requestCodec : LawfulCodec Request := framed requestFrame requestStream
 
 /-- Total metadata encoding; purchase output additionally checks the exact fixed
@@ -167,7 +168,7 @@ def responseStream : StreamCodec Response :=
 /-- A quote cannot reserve price, custody, a book index, or a lease. -/
 def Response.priceReserved (_response : Response) : Bool := false
 
-def responseFrame : List UInt8 := "DREGG/PAY/CLAIM-QUOTE/RESPONSE/v1".toUTF8.toList
+def responseFrame : List UInt8 := PayReceivingContract.quoteResponseFrame
 def responseCodec : LawfulCodec Response := framed responseFrame responseStream
 
 inductive Reject where

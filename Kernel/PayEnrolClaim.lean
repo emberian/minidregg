@@ -17,6 +17,7 @@ boundary. Here authorization compares concrete stable identity, current key and
 epoch, and recomputes value from the retained deposit and current source tariff.
 No caller-supplied boolean acts as a proof of possession or correct pricing.
 -/
+import Kernel.PayReceivingContract
 import Kernel.PayTariff
 
 namespace Minidregg.Kernel.PayEnrolClaim
@@ -206,7 +207,8 @@ instance (original : Observation) : Decidable original.valid := by
 the fixed transport shape without importing the v2 memo's receiver graph. -/
 def Claim.valid (claim : Claim) : Prop :=
   claim.original.valid ∧ claim.ownerIdentityKey.length = 32 ∧
-  claim.rawMemo.length = 485 ∧ claim.rawMemo.take 9 = "enrol:v2:".toUTF8.toList ∧
+  claim.rawMemo.length = PayReceivingContract.textMemoBytes ∧
+    claim.rawMemo.take PayReceivingContract.memoPrefix.length = PayReceivingContract.memoPrefix ∧
   claim.originalPricingCommitment.value < 2 ^ 256
 
 instance (claim : Claim) : Decidable claim.valid := by
@@ -302,7 +304,7 @@ def observationStream : StreamCodec Observation :=
     (fun (signature, recipient, slot, amountAtomic, mint, tokenProgram, index) => ⟨signature, recipient, slot, amountAtomic, mint, tokenProgram, index⟩)
     (by intro value; cases value; rfl)
 
-def observationFrame : List UInt8 := "DREGG/PAY/CLAIM/OBSERVATION/v1".toUTF8.toList
+def observationFrame : List UInt8 := PayReceivingContract.observationFrame
 
 def observationCodec : LawfulCodec Observation := framed observationFrame observationStream
 
@@ -322,7 +324,7 @@ def claimStream : StreamCodec Claim :=
     (fun (original, rawMemo, ownerIdentityKey, reason, originalPricingCommitment) => ⟨original, rawMemo, ownerIdentityKey, reason, originalPricingCommitment⟩)
     (by intro value; cases value; rfl)
 
-def claimFrame : List UInt8 := "DREGG/PAY/CLAIM/v2".toUTF8.toList
+def claimFrame : List UInt8 := PayReceivingContract.claimFrame
 
 def claimCodec : LawfulCodec Claim := framed claimFrame claimStream
 
@@ -342,7 +344,7 @@ def pendingOwnerStream : StreamCodec PendingOwner :=
     (fun (identityKey, currentKey, epoch, nextKeyDigest) => ⟨identityKey, currentKey, epoch, nextKeyDigest⟩)
     (by intro value; cases value; rfl)
 
-def pendingOwnerFrame : List UInt8 := "DREGG/PAY/PENDING-OWNER/v1".toUTF8.toList
+def pendingOwnerFrame : List UInt8 := PayReceivingContract.pendingOwnerFrame
 
 def pendingOwnerCodec : LawfulCodec PendingOwner := framed pendingOwnerFrame pendingOwnerStream
 
@@ -362,7 +364,7 @@ def acceptRequestStream : StreamCodec AcceptRequest :=
     (fun (mode, claimId, ownerIdentityKey, authorizingKey, authorityEpoch, nonce, pricingCommitment, requestedWeeks, minimumStarterCredit, expiresAtProcessingChainHour) => ⟨mode, claimId, ownerIdentityKey, authorizingKey, authorityEpoch, nonce, pricingCommitment, requestedWeeks, minimumStarterCredit, expiresAtProcessingChainHour⟩)
     (by intro value; cases value; rfl)
 
-def acceptRequestFrame : List UInt8 := "DREGG/PAY/CLAIM/ACCEPT/v1".toUTF8.toList
+def acceptRequestFrame : List UInt8 := PayReceivingContract.acceptRequestFrame
 
 def acceptRequestCodec : LawfulCodec AcceptRequest := framed acceptRequestFrame acceptRequestStream
 
@@ -407,7 +409,7 @@ def consumptionStream : StreamCodec Consumption :=
       ⟨authorization, terms, amount, tariff, credit, birth, membership, remainder⟩)
     (by intro value; cases value; rfl)
 
-def consumptionFrame : List UInt8 := "DREGG/PAY/CLAIM/CONSUMPTION/v2".toUTF8.toList
+def consumptionFrame : List UInt8 := PayReceivingContract.consumptionFrame
 
 def consumptionCodec : LawfulCodec Consumption := framed consumptionFrame consumptionStream
 

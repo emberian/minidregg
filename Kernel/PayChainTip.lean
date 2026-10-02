@@ -7,6 +7,7 @@ manufactures missing chain evidence. Finality and the chain RPC verification
 remain the observer capability's responsibility. This module preserves the
 exact asserted slot and block time, separately from the mixed deployment clock.
 -/
+import Kernel.PayReceivingContract
 import Kernel.PayCell
 import Kernel.ClockCell
 
@@ -51,7 +52,7 @@ inductive FreshnessReject where
   | missing | malformed | future | stale
   deriving DecidableEq, Repr
 
-def defaultMaxLagSeconds : Nat := 180
+def defaultMaxLagSeconds : Nat := PayReceivingContract.defaultMaxLagSeconds
 
 /-- The caller supplies the authenticated deployment clock. Check future time
 before age: truncated natural subtraction must never make future evidence fresh.

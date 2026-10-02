@@ -7,6 +7,7 @@ Canonical integers are fixed-width little endian; unbounded source values must
 pass WellFormed before encoding for transport. Nothing here reserves a price,
 verifies a signature, or treats a digest as mathematically collision-free.
 -/
+import Kernel.PayReceivingContract
 import Kernel.PayEnrolMemo
 import Compiler.SigningKeyCommitment
 
@@ -127,7 +128,7 @@ def unsignedParts (value : Unsigned) : List (List UInt8) :=
     encodeLE 8 value.minimumStarterCredit, encodeLE 8 value.expiresAtProcessingChainHour]
 
 def unsignedWidths : List Nat := [1, 32, 32, 32, 32, 8, 32, 32, 4, 8, 8]
-def unsignedLength : Nat := 229
+def unsignedLength : Nat := PayReceivingContract.unsignedMemoBytes
 
 def unsignedBytes (value : Unsigned) : List UInt8 :=
   (unsignedParts value).flatten ++ encodeLE 8 value.amountAtomic
@@ -191,9 +192,9 @@ def Memo.WellFormed (memo : Memo) : Prop :=
 instance (memo : Memo) : Decidable memo.WellFormed := by
   unfold Memo.WellFormed; infer_instance
 
-def binaryLength : Nat := 357
-def memoLength : Nat := 485
-def prefix : List UInt8 := "enrol:v2:".toUTF8.toList
+def binaryLength : Nat := PayReceivingContract.binaryMemoBytes
+def memoLength : Nat := PayReceivingContract.textMemoBytes
+def prefix : List UInt8 := PayReceivingContract.memoPrefix
 
 def binary (memo : Memo) : List UInt8 :=
   [unsignedBytes memo.unsigned, memo.miniSignature].flatten ++ memo.sshSignature
@@ -316,7 +317,7 @@ def Context.WellFormed (context : Context) : Prop :=
 
 /-- No cSHAKE prehash is inserted into Ed25519 or SSHSIG signing. The commitments
 inside the value are source cSHAKE outputs; both signatures bind their exact bytes. -/
-def possessionTag : List UInt8 := "DREGG/PAY/ENROL/POSSESSION/v2".toUTF8.toList
+def possessionTag : List UInt8 := PayReceivingContract.memoPossession
 
 def unsignedFrame (context : Context) (value : Unsigned) : List UInt8 :=
   [possessionTag, unsignedBytes value, context.mint, context.tokenProgram].flatten ++
@@ -325,7 +326,7 @@ def unsignedFrame (context : Context) (value : Unsigned) : List UInt8 :=
 def miniFrame (context : Context) (memo : Memo) : List UInt8 :=
   unsignedFrame context memo.unsigned
 
-def sshsigNamespace : List UInt8 := "dregg-enrol@v2".toUTF8.toList
+def sshsigNamespace : List UInt8 := PayReceivingContract.sshNamespace
 
 def sshsigMessage (context : Context) (memo : Memo) : List UInt8 :=
   unsignedFrame context memo.unsigned

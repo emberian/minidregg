@@ -3,6 +3,7 @@ Closed public paid-claim actions. Prepare and seal carry exactly these canonical
 bytes; submit and lookup retain the same ingress. Neither action conveys a
 capability to arbitrary programs or a generic command-execution surface.
 -/
+import Kernel.PayReceivingContract
 import Kernel.PayEnrolClaim
 import Kernel.SubjectKeyRotation
 
@@ -64,7 +65,7 @@ def commandStream : StreamCodec Command :=
     (fun (authority, pay, action) => ⟨authority, pay, action⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/CLAIM/COMMAND/v1".toUTF8.toList
+def commandFrame : List UInt8 := PayReceivingContract.commandFrame
 
 def commandCodec : LawfulCodec Command :=
   ParticipantKeyEnrollment.framed commandFrame commandStream
@@ -75,7 +76,7 @@ def Command.signingKey (command : Command) : List UInt8 :=
   | .inr rotate => rotate.successorKey
 
 def possessionFrame (domain semantics : Digest) (command : Command) : List UInt8 :=
-  "DREGG/PAY/CLAIM/POSSESSION/v1".toUTF8.toList ++
+  PayReceivingContract.claimPossession ++
     (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
       (domain, semantics, commandCodec.encode command)
 
@@ -92,7 +93,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, signature) => ⟨command, signature⟩)
     (by intro i; cases i; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/PAY/CLAIM/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := PayReceivingContract.ingressFrame
 
 def ingressCodec : LawfulCodec Ingress :=
   ParticipantKeyEnrollment.framed ingressFrame ingressStream
