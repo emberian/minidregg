@@ -94,9 +94,24 @@ class AttachTests(unittest.TestCase):
         self.assertTrue(all(a[a.index('--dir')+1]==workspace for a in calls))
         self.assertFalse(any('--key' in a or '--socket' in a for a in calls))
         self.assertEqual(x.f['lifecycleDelegation']['selectorSha256'],f.sha(selector))
+    def test_dormant_or_held_tasks_refuse_before_reserving(self):
+        x=Mock();x.creator='80008';x.parent=self.c['authority']['parent'];x.tool=self.c['authority']['tool'];x.f={}
+        def read(generation,status,reserved):
+            return dict(dir=self.root/'query',view=dict(cell=dict(grain=dict(generation=generation,status=status,reserved=reserved,remaining='20'))))
+        for parent,tool in [(read('0','0','0'),read('0','0','0')),(read('1','4','1'),read('1','4','3'))]:
+            x.query.side_effect=[parent,tool]
+            with self.assertRaisesRegex(RuntimeError,'birth (parent|tool)'):app.birth_app(x)
+            x.reserve.assert_not_called();x.submit.assert_not_called()
+        x.query.side_effect=[read('1','4','1'),read('1','2','0')]
+        app.check_task_readiness(x)
+        self.assertEqual(x.f['taskReadiness']['parent'],str(self.root/'query'))
     def test_birth_distinguishes_sponsor_and_app_owner_and_task_observation_caps(self):
         x=Mock();x.owner='70007';x.creator='80008';x.accountcap='42042';x.authority=self.c['authority'];x.tool=x.authority['tool'];x.parent=x.authority['parent'];x.f={'application':self.c['application']};x.genesis=self.root/'genesis';x.genesis.write_text('{}');x.n.return_value='9000001';x.key.side_effect=lambda subject:self.root/(subject+'.key')
-        calls=[];x.query.side_effect=lambda *args:dict(view=dict(cell=dict(root='42',grain=dict(generation='2',status='3',remaining='10',reserved='5'))))
+        calls=[]
+        def query(subject,target,cap):
+            reserved=target==x.parent['task'] or x.reserve.called
+            return dict(dir=self.root/('query-'+target),view=dict(cell=dict(root='42',grain=dict(generation='2',status='3' if reserved else '2',remaining='10',reserved='5' if reserved else '0'))))
+        x.query.side_effect=query
         counter=iter(range(10));x.fresh.side_effect=lambda name:self.root/(str(next(counter))+'-'+name)
         def mini(*args):
             calls.append(args)
@@ -108,6 +123,7 @@ class AttachTests(unittest.TestCase):
         source=f.load(x.f['applicationSource']);spec=source['applicationGrainBirth']['applicationBirth']
         self.assertEqual((source['subject'],spec['creator'],spec['feePayer'],spec['application']['owner']),('80008','80008','80008','70007'))
         self.assertEqual(source['applicationGrainBirth']['tool']['observeCapability'],'82')
-        self.assertEqual(x.query.call_args_list[0].args,('80008','7902','82'))
+        self.assertEqual(x.query.call_args_list[0].args,('80008','7901','74'))
+        self.assertEqual(x.query.call_args_list[-1].args,('80008','7902','82'))
         self.assertEqual(calls[-1][-3],self.root/'80008.key')
 if __name__=='__main__':unittest.main()

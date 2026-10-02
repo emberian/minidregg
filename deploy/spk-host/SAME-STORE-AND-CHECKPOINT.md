@@ -260,3 +260,11 @@ The adapter does not rebirth an app or replace an uncertain call. Complete
 attachment restart orchestration remains separate work. Fixture key inventories
 do not grant a service permission to read production participants' secrets;
 the production owner workflow runs in each owner's own workspace.
+
+Before reserving app birth funds, the adapter records signed current task reads.
+The parent must already hold a reservation, and the tool must be attached with
+no outstanding reservation. Dormant or held tasks stop attachment before its
+first mutation. The world's constructor prepares these tasks using their own
+ordinary authority; attachment neither silently activates a controller nor
+settles an unknown attempt. The later source birth still checks its exact
+parent witness and current tool state.

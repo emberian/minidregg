@@ -113,9 +113,20 @@ def delegate_lifecycle(x,c):
     x.f['lifecycleDelegation']={'request':delegation,'result':result,'selectorSha256':sha(selector)};x.write_state()
     return selector
 
+def check_task_readiness(x):
+    parent=x.query(x.creator,x.parent['task'],x.parent['observeCapability'])
+    tool=x.query(x.creator,x.tool['task'],x.tool['observeCapability'])
+    p,t=[q['view']['cell']['grain'] for q in [parent,tool]]
+    require(all(decimal(g[k]) for g in [p,t] for k in ['generation','status','remaining','reserved']),'task readiness fields invalid')
+    require(int(p['generation'])>0 and p['status'] in ['3','4'] and int(p['reserved'])>0,'birth parent is not reserved; prepare its ordinary owner task or recover exact retained attempt before attachment')
+    require(int(t['generation'])>0 and t['status'] in ['1','2'] and t['reserved']=='0','birth tool is not attached and settled; prepare its ordinary owner task or recover exact retained attempt before attachment')
+    x.f['taskReadiness']={'parent':str(parent['dir']),'tool':str(tool['dir'])};x.write_state()
+    return parent
+
 def birth_app(x):
+    parent=check_task_readiness(x)
     x.reserve(int(x.authority['tariff']['base'])+3*int(x.authority['tariff']['perBirth']))
-    observations=[x.query(x.creator,t['task'],t['observeCapability']) for t in [x.tool,x.parent]]
+    observations=[x.query(x.creator,x.tool['task'],x.tool['observeCapability']),parent]
     nonce=x.n()
     def witness(q,t):
         return dict(t,targetRoot=q['view']['cell']['root'],before={k:q['view']['cell']['grain'][k] for k in ['generation','status','remaining','reserved']})
