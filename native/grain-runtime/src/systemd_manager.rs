@@ -128,12 +128,13 @@ pub(crate) fn launch_client(args: &[std::ffi::OsString]) -> Result<()> {
     let r:Registration=serde_json::from_slice(&rbytes).map_err(|e|e.to_string())?;
     validate_registration(&r,&config.task,Some(config_path),unsafe {libc::geteuid()})?;
     require_launchers(&config,r.manager,r.worker_manager)?;
+    let operator=resident_preflight::require_private_operator(&config)?;
     let mut result=projection(&r,registration,&std::env::current_exe().map_err(|e|e.to_string())?);
     result["configSha256"]=json!(sha256_bytes(&bytes)?);
     result["registrationSha256"]=json!(sha256_bytes(&rbytes)?);
     result["bindingSha256"]=json!(sha256_bytes(&serde_json::to_vec(&json!({"config":config,"configPath":config_path})).map_err(|e|e.to_string())?)?);
     result["transport"]=json!({"mini":config.mini,"host":config.host,
-        "hostConfig":config.host_config,"hostSocket":config.host_socket});
+        "hostConfig":config.host_config,"hostSocket":config.host_socket,"operator":operator});
     println!("{result}");Ok(())
 }
 fn fixture(

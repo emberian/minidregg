@@ -77,3 +77,12 @@ remapped root-owned archive metadata; a direct registrar check did not qualify
 that launch. The joined protected controller uses an actual system service with
 its registered service UID and separately managed user workers. Both launcher
 components must expose the exact controller lifetime protocol used by the runtime.
+
+Launch readiness also queries the configured native Mini `operator-status`.
+Its current owner-private control endpoint must return `mini-operator-drain-v1`
+serving with open admission, positive Mini/Host process identities and exact
+Host/config hashes. The native CLI verifies the fresh response nonce and peer
+custody. A descriptor naming an operator socket or a filesystem mode cache is
+not enough: public-mode `mini serve` can admit some signed work while refusing
+later private provider settlement. Source controllers use `mini serve-operator`
+and repeat this read-only check before resident work starts.

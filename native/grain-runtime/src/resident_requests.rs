@@ -187,6 +187,45 @@ pub(crate) fn refuse_selected(state:&Path,evidence:Value)->Result<()> {
     record(state,r,"refused",evidence)?;q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;
     atomic_json(&path(state),&q)
 }
+/// Only the source's exact lexical pre-admission proof can close started
+/// custody without an operation. Absence or local request counts cannot.
+pub(crate) fn receive_preadmission_refusal(state:&Path,pending:&Value,proof:&Value)->Result<()> {
+    if proof["type"]!="mini-resident-prompt-preadmission-refused-v1" || proof["admitted"]!=false
+        || proof["effects"]!="none" || proof["modelRequests"]!=0
+        || proof["residentPromptId"]!=pending["residentPromptId"] || proof["promptSha256"]!=pending["promptSha256"] {
+        return Err("request refusal requires exact source preadmission proof".into());
+    }
+    let mut q=open(state)?;
+    let identity=&pending["selectedRequest"];
+    let expected_started=json!({"residentPromptId":pending["residentPromptId"],"inputSha256":pending["inputSha256"]});
+    if q.maintenance_pending.as_ref().is_some_and(|maintenance|maintenance["residentPromptId"]!=pending["residentPromptId"]) {
+        return Err("maintenance refusal names another source prompt".into());
+    }
+    if !identity.is_null() {
+        let evidence=json!({"basis":"source-pre-admission-refusal","admission":proof,"started":expected_started});
+        if let Some(selected)=q.selected.as_ref() {
+            if selected.identity!=*identity || selected.started.as_ref()!=Some(&expected_started) {
+                return Err("source refusal differs from retained selected request".into());
+            }
+            let mut projection=selected.clone();projection.started=None;
+            record(state,&projection,"refused",evidence)?;
+            q.last_author=selected.entry["author"].as_str().map(str::to_owned);q.selected=None;
+        } else {
+            // Queue publication may have committed before resident.json was
+            // cleared; require the exact already retained terminal record.
+            let file=state.join(format!("request-{}-refused.json",digest(identity)?));
+            let receipt:Value=serde_json::from_slice(&bounded_regular_file(&file,1_048_576)?).map_err(|e|e.to_string())?;
+            if receipt!=json!({"type":"mini-resident-request-outcome-v1","identity":identity,"status":"refused","evidence":evidence,"modelRequests":0}) {
+                return Err("retained request refusal is not this source preadmission proof".into());
+            }
+        }
+    }
+    if let Some(maintenance)=&q.maintenance_pending {
+        if maintenance["residentPromptId"]!=pending["residentPromptId"] {return Err("maintenance refusal names another source prompt".into());}
+        q.maintenance_pending=None;
+    }
+    atomic_json(&path(state),&q)
+}
 pub(crate) fn maintenance_needed(state:&Path,revision:&str)->Result<bool> {
     Ok(open(state)?.maintenance_revision.as_deref()!=Some(revision))
 }
@@ -332,6 +371,24 @@ mod tests {
         fs::remove_dir_all(state).unwrap();
     }
 
+    #[test]fn source_preadmission_receiving_is_exact_and_restarts_after_queue_publication() {
+        let state=fixture("source-refusal");let p=prepared(vec![entry("20",1),entry("21",2)]);
+        let selected=select(&p,&state,Limits::default()).unwrap().unwrap();started(&state,"source-id","input").unwrap();
+        maintenance_started(&state,"source-id","baseline").unwrap();
+        let pending=json!({"residentPromptId":"source-id","promptSha256":"sha","inputSha256":"input","selectedRequest":selected["selectedRequest"]});
+        let proof=json!({"type":"mini-resident-prompt-preadmission-refused-v1","residentPromptId":"source-id","promptSha256":"sha","admitted":false,"effects":"none","modelRequests":0});
+        let before=fs::read(path(&state)).unwrap();let mut wrong=proof.clone();wrong["residentPromptId"]=json!("other-id");
+        assert!(receive_preadmission_refusal(&state,&pending,&wrong).is_err());assert_eq!(fs::read(path(&state)).unwrap(),before);
+        receive_preadmission_refusal(&state,&pending,&proof).unwrap();
+        // A killed driver can retain old pending after the queue outcome commits.
+        receive_preadmission_refusal(&state,&pending,&proof).unwrap();
+        let q=open(&state).unwrap();assert!(q.selected.is_none());assert!(q.maintenance_pending.is_none());assert!(q.maintenance_revision.is_none());
+        let record:Value=serde_json::from_slice(&fs::read(state.join(format!("request-{}-refused.json",digest(&pending["selectedRequest"]).unwrap()))).unwrap()).unwrap();
+        assert_eq!(record["modelRequests"],0);assert_eq!(record["evidence"]["started"]["residentPromptId"],"source-id");
+        assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["selectedRequest"]["author"],"21");
+        assert!(receive_preadmission_refusal(&state,&pending,&proof).is_err(),"old proof cannot close next author's selection");
+        fs::remove_dir_all(state).unwrap();
+    }
     #[test]fn deterministic_prompt_refusal_advances_author_without_provider_dispatch() {
         let state=fixture("prompt-refusal");let p=prepared(vec![entry("20",1),entry("21",2)]);
         select(&p,&state,Limits::default()).unwrap();refuse_selected(&state,json!({"basis":"prompt-frame-byte-bound"})).unwrap();

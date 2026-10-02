@@ -14377,6 +14377,21 @@ impl Runtime {
     }
 
     fn hermes_session(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
+        if let Some((id,sha))=invocation.resident_identity() {
+            resident_origin::validate(id,sha,invocation.prompt().unwrap_or(""))?;
+            self.retained_preparation(id,sha)?;
+            if self.config.state_dir.join(format!("resident-entered-{id}.json")).try_exists().map_err(|e|e.to_string())? {
+                return Err("resident prompt identity previously entered native preparation; exact recovery required".into());
+            }
+            if let Err(reason)=self.preflight_resident_prompt() {
+                self.record_resident_preadmission_refusal(id,sha,invocation.prompt().unwrap_or(""),&reason)?;
+                return Err(format!("resident prompt refused before admission: {reason}"));
+            }
+            if self.config.state_dir.join(format!("resident-preadmission-refused-{id}.json")).try_exists().map_err(|e|e.to_string())? {
+                return Err("resident prompt identity has a retained preadmission refusal; receive it without replay".into());
+            }
+            self.enter_resident_prompt(id,sha)?;
+        }
         let outcome=self.hermes_session_inner(invocation,input);
         if !invocation.is_prompt() { return outcome; }
         let retirement=self.retire_refused_provider_request();
@@ -17708,6 +17723,20 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         Ok(value) => value.to_string(),
                         Err(error) => format!("error: {error}"),
                     });
+                    continue;
+                }
+                if let Some(sha)=request.command.strip_prefix("resident prepare ") {
+                    let result=rt.prepare_resident_prompt(sha);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
+                if let Some(identity)=request.command.strip_prefix("resident admission ") {
+                    let result=(|| -> Result<Value> {
+                        let pair:Vec<&str>=identity.split_whitespace().collect();
+                        let [id,sha]=pair.as_slice() else{return Err("usage: resident admission ID SHA256".into())};
+                        rt.resident_admission(id,sha)
+                    })();
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
                     continue;
                 }
                 if request.command == "resident preflight" {

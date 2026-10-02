@@ -71,3 +71,34 @@ checks; preflight is a snapshot, not a reservation. A failure or lost reply afte
 the started boundary remains retained for exact recovery. This preflight cannot
 clear an older started request or substitute a zero local provider count for
 source completion evidence.
+
+Before a driver marks work started, `resident prepare SHA256` runs the source
+preflight and issues a fresh source-chosen prompt ID. It fsyncs the exact text
+hash/task/config/binding in `resident-prepared-ID.json`; callers cannot re-present
+an old unknown ID as a new preparation. Native invocation requires that exact
+preparation and repeats preflight, then fsyncs `resident-entered-ID.json` BEFORE
+entering Hermes preparation or its first possible reserve. A previously entered
+ID cannot run again or acquire zero-effects refusal evidence.
+
+If repeated preflight fails before the entry fence, the source retains
+`resident-preadmission-refused-ID.json`: exact preparation hash, unique prompt
+ID/text digest, current task/config/binding, admitted:false, effects:none and zero
+model requests for that prompt. The read-only `resident admission ID SHA256`
+lookup requires its exact preparation and no entered/admitted origin. Missing
+evidence reports unrecorded, which cannot clear a started request. Old unknown
+work without the new source-issued preparation cannot be retrospectively
+classified as unadmitted, including a reserve accepted before an old origin file
+was written.
+
+On restart the resident receives this exact refusal before completion recovery,
+retaining the request outcome before clearing its pending journal. Repeating
+after a publication cut requires the same exact outcome. This advances fairness
+without counting a completion or marking maintenance satisfied. Failures after
+the entry fence remain subject to ordinary exact native origin/completion/
+delivery recovery; local provider counts cannot discharge them.
+
+The preflight includes a live native private-operator role check, not merely a
+socket path or declared descriptor. An unavailable, drained, public or differently
+pinned source transport refuses before the started marker and before the source
+Hermes preparation/reserve boundary. Launch projection exposes the verified
+operator control observation with the transport pins.
