@@ -338,7 +338,7 @@ pub const NEXT_KEY_ADOPTION_LOOKUP: u8 = 190;
 pub const CARRY_PAY_CLAIM_LOOKUP: u8 = 191;
 // reserved; public,operator; owner: law-diagnostics
 pub const LAW_DIAGNOSTIC: u8 = 192;
-// reserved; public,operator; owner: application-dispatch/member-workspace
+// active; public,operator; owner: application-dispatch/member-workspace
 pub const APPLICATION_DISPATCH_READY: u8 = 193;
-// reserved; public,operator; owner: application-dispatch/member-workspace
+// active; public,operator; owner: application-dispatch/member-workspace
 pub const APPLICATION_DISPATCH_AUTHENTICATED_PLAN: u8 = 194;

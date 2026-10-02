@@ -1949,26 +1949,26 @@
     {
       "code": 193,
       "symbol": "APPLICATION_DISPATCH_READY",
-      "status": "reserved",
+      "status": "active",
       "routes": [
         "public",
         "operator"
       ],
       "owner": "application-dispatch/member-workspace",
-      "purpose": "Authenticated bounded signed-ingress observation of specialized current app dispatch admission; read-only, no physical permit or CAS until qualified activation",
-      "receiver": null
+      "purpose": "Bounded canonical plan and participant signatures through current specialized verified app admission; read-only, no physical permit, CAS, append or app call",
+      "receiver": "fnDispatch"
     },
     {
       "code": 194,
       "symbol": "APPLICATION_DISPATCH_AUTHENTICATED_PLAN",
-      "status": "reserved",
+      "status": "active",
       "routes": [
         "public",
         "operator"
       ],
       "owner": "application-dispatch/member-workspace",
-      "purpose": "Member-authenticated bounded app/session signing preparation bound to exact request intent; existing operator-only36 remains private until qualified activation",
-      "receiver": null
+      "purpose": "Member-authenticated exact app request planning after current signature and five full current resource-grant observations; operator preparation36 remains private",
+      "receiver": "fnDispatch"
     }
   ],
   "response_markers": [
@@ -2078,6 +2078,16 @@
       "path": "native/resource-client/src/join_solana_v2.rs",
       "constant": "QUOTE_OP",
       "operation": "PAY_CLAIM_QUOTE"
+    },
+    {
+      "path": "native/resource-client/src/member_app.rs",
+      "constant": "PLAN_OP",
+      "operation": "APPLICATION_DISPATCH_AUTHENTICATED_PLAN"
+    },
+    {
+      "path": "native/resource-client/src/member_app.rs",
+      "constant": "READY_OP",
+      "operation": "APPLICATION_DISPATCH_READY"
     }
   ]
 }

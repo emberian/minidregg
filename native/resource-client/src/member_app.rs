@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::path::Path;
 #[path = "../../host-operations.rs"]
-mod operations;
-const PLAN_OP: u8 = operations::APPLICATION_DISPATCH_AUTHENTICATED_PLAN;
-const READY_OP: u8 = operations::APPLICATION_DISPATCH_READY;
+mod host_operations;
+const PLAN_OP: u8 = host_operations::APPLICATION_DISPATCH_AUTHENTICATED_PLAN;
+const READY_OP: u8 = host_operations::APPLICATION_DISPATCH_READY;
 
 fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
     workspace::member(v, key)

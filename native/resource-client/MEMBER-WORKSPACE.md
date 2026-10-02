@@ -133,5 +133,6 @@ inspection; the command asks the member to inspect again rather than weakening
 currentness. A shared one-image observation batch is the next simplification.
 Browser entry remains unavailable until actual registered proxy metadata and a
 member-owned protected bootstrap credential are delivered. No route URL is invented.
-Operations 193/194 remain reserved during the scoped compiler/native receiving phase;
-this successor must not be treated as available in an older sealed Host.
+The source candidate activates operations 193/194 for scoped native qualification.
+Native receiving remains pending; this successor must not be treated as available
+in an older sealed Host.
