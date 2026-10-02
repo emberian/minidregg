@@ -23,10 +23,11 @@ class DrainBoundary(unittest.TestCase):
                      "privateSocket": str(root/"operator.sock")}
             cut.write(root/"runtime", state)
             proposal = {"runtime": cut.pin(root/"runtime"), "sourceIdentity": state["identity"],
-                "ownedServices": owned, "artifacts": {}, "descriptor": {"dataRoot": directory,
+                "ownedServices": owned, "artifacts": {"platform-service-cut.py": cut.digest(cut.__file__)}, "descriptor": {"dataRoot": directory,
                     "deployment": {"memberCommands": [], "rolePaths": {"host": "/native-host"},
                         **{name: cut.pin(root/name) for name in ("config", "manifest", "cli")}}}}
             cut.write(root/"proposal.json", proposal)
+            (root/"platform-service-cut.py").write_bytes(Path(cut.__file__).read_bytes())
             status = {"processId": 91, "instanceId": "instance", "hostSha256": "a"*64,
                       "configSha256": proposal["descriptor"]["deployment"]["config"]["sha256"]}
             drained = {**status, "format": "mini-operator-drain-v1", "phase": "drained",

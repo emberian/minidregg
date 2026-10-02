@@ -141,6 +141,10 @@ def prepare(request, output):
             "config": config, "manifest": pin(selected), "rolePaths": roles, "cli": cli,
             "memberCommands": commands}}
     write(output / "deployment-binding.json", descriptor)
+    # The reviewed stop implementation and its ownership checks travel with
+    # the proposal; later source edits cannot change an already prepared cut.
+    for name in ("platform-service-cut.py", "platform-provision.py", "joined-member-journey.py"):
+        (output / name).write_bytes((HERE / name).read_bytes())
     write(output / "proposal.json", {"protocol": "mini-platform-service-cut-proposal-v1",
         "runtime": pin(runtime_path), "input": request, "sourceIdentity": state["identity"],
         "ownedServices": state["services"], "descriptor": descriptor,
@@ -150,6 +154,8 @@ def prepare(request, output):
 
 def stop(output):
     proposal = read(output / "proposal.json")
+    require(digest(__file__) == proposal["artifacts"]["platform-service-cut.py"],
+            "stop implementation differs from prepared cut")
     for name, sha in proposal["artifacts"].items():
         require(Path(name).name == name and digest(output / name) == sha, "cut proposal artifact changed")
     state = read(proposal["runtime"]["path"])

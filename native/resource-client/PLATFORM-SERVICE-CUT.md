@@ -19,12 +19,13 @@ it does not relabel the currently running CLI. Root controller registration
 still requires protected root executable custody independently of this descriptor.
 
 Only after app/controller writers are quiescent and the service owner signals
-the cut, execute `platform-service-cut.py stop --output PROPOSAL_DIRECTORY` as
+the cut, execute `python3 PROPOSAL_DIRECTORY/platform-service-cut.py stop --output PROPOSAL_DIRECTORY` as
 the retained runtime's owner. It stops the exact public process group, asks the
 operator's native status/drain protocol for an instance/PID/config/Host-bound
 zero-work boundary, durably records that reply, then stops the exact operator
 group. It does not signal SSH, apps, controllers or other deployments. Drain
 refusal or timeout retains the journal and operator. Retrying uses the same
 proposal and retains separate command/output evidence. The service owner then
+uses the source files frozen in the proposal rather than a mutable checkout,
 starts the SYSTEM units and publishes the new executable/roster inventory;
 normal service readiness and signed member commands qualify the resulting cut.
