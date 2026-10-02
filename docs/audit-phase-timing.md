@@ -1,0 +1,9 @@
+# Optional audit phase timing
+
+Set `MINI_AUDIT_TIMING=1` on the Host process running the next ordinary cold audit. The native client must pass that environment to its Host subprocess. Other values leave timing disabled. The normal audit result and stdout protocol are unchanged; aggregate diagnostic rows go to stderr after audit completes or refuses.
+
+Each row contains only a fixed phase label, invocation count, and total monotonic nanoseconds. Phases cover physical load, genesis decode/validation, native admission grouped by recorded event family, exact record comparison, advance, incremental post-validation, and final image comparison. Codec-version labels are the fallback for families without a fixed frame grouping. Classification is diagnostic only and does not select the receiver. No ingress, credential, document, or target bytes are printed.
+
+`AuditTiming.measure_disabled`, `value_disabled`, and `report_disabled` are definitional equalities. Disabled wrappers perform their original action without clock reads, timing allocation, classification, or output. Pure timing returns a subtype carrying equality to the original computation; replay recovers the same record-match, advance, post-validation, and final-image witnesses from that equality. Admission, refusal order, profile selection, signatures, roots, receipts, and final full-image checks remain in place. Timing report I/O errors cannot turn a successful audit into refusal.
+
+Qualification pending: compile the small timing module, then NativeHostReplay and NativeHost in the already scheduled native closure; use the next matched normal audit, not a duplicate frozen run. Compare its ordinary audit result and final signed read against the retained fixture and use aggregate phase totals to choose the next optimization. This source change alone establishes no latency improvement. Phase totals do not cover every bookkeeping instruction and should not be presented as the entire wall time.

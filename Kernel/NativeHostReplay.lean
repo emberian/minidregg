@@ -13,6 +13,7 @@ wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
+import Kernel.AuditTiming
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
 import Kernel.FnSelectiveReleaseSourceReceiver
@@ -2309,6 +2310,29 @@ private def selectedReleaseAfter (config : Config) (after : Opened config)
     ⟨record, receipt⟩ :: releases
   else releases
 
+/-- Diagnostic grouping only, never an ingress decoder or admission choice.
+Fixed labels distinguish the native families sharing event version 1; other
+families retain their recorded codec version. No record bytes are printed. -/
+private def admissionPhase (record : DurableReceiver.IntentRecord) : String :=
+  let frames : List (String × String) :=
+    [("delegate", "DREGG/CAPABILITY/DELEGATE/"),
+     ("revoke", "DREGG/CAPABILITY/REVOKE/"),
+     ("renounce", "DREGG/CAPABILITY/RENOUNCE/"),
+     ("policy-install", "DREGG/POLICY/INSTALL/"),
+     ("fleet", "DREGG/FLEET/TURN/"),
+     ("key-enroll", "DREGG/PARTICIPANT/KEY-ENROLL/"),
+     ("factory-provision", "DREGG/PARTICIPANT/FACTORY-OBSERVE/"),
+     ("key-rotate", "DREGG/SUBJECT-KEY/ROTATE/"),
+     ("well", "DREGG/WELL/"), ("clock", "DREGG/CLOCK/TICK/"),
+     ("pay-book", "DREGG/PAY/BOOK/"), ("pay-assign", "DREGG/PAY/ASSIGN/"),
+     ("pay-refill", "DREGG/PAY/REFILL/"), ("pay-enrol", "DREGG/PAY/SELF-ENROL/"),
+     ("job-money", "DREGG/JOB/MONEY/"), ("certify", "DREGG/CERTIFY/")]
+  match frames.find? (fun row =>
+      let frame := row.2.toUTF8.toList
+      record.event.canonicalBytes.take frame.length == frame) with
+  | some row => s!"admission/{row.1}"
+  | none => s!"admission/event-v{record.event.codecVersion}"
+
 private def walk (config : Config) (opened : Opened config)
     (issues : List (PriorIssue config))
     (reserves : List (PriorDispatchReserve config))
@@ -2322,30 +2346,40 @@ private def walk (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
-    (selectIndex : Option Nat) :
+    (selectIndex : Option Nat) (timing : AuditTiming.Handle) :
     (records : List DurableReceiver.IntentRecord) →
     IO (Except Failure (Walked config opened records))
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
       frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
-      match ← derive config opened issues reserves begins beginsV2 claimsV2
-          beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
-          record.event.canonicalBytes with
+      match ← AuditTiming.measure timing (fun _ => admissionPhase record)
+          (derive config opened issues reserves begins beginsV2 claimsV2
+            beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
+            record.event.canonicalBytes) with
       | .error detail => return .error ⟨index, detail⟩
       | .ok derived =>
-        if matched : recordMatches record derived.intent = true then
-          match advanced : advance opened derived with
+        let compared ← AuditTiming.value timing (fun _ => "record-compare")
+          (fun _ => recordMatches record derived.intent)
+        if matches : compared.val = true then
+          have matched : recordMatches record derived.intent = true := compared.property.symm.trans matches
+          let advancedValue ← AuditTiming.value timing (fun _ => "advance")
+            (fun _ => advance opened derived)
+          match advancedResult : advancedValue.val with
           | .error detail => return .error ⟨index, detail⟩
           | .ok next =>
+            have advanced : advance opened derived = .ok next := advancedValue.property.symm.trans advancedResult
             -- The prior prefix was just validated. Reuse unchanged decoded
             -- rows and cell laws; the existing equality theorem preserves the
             -- complete Opened value and every refusal of full validation.
-            match incremental : validateLoadedFrom config opened next with
+            let post ← AuditTiming.value timing (fun _ => "post-validation")
+              (fun _ => validateLoadedFrom config opened next)
+            match incremental : post.val with
             | .error detail => return .error ⟨index, s!"native post image: {detail}"⟩
             | .ok after =>
               have validated : validateLoaded config next = .ok after :=
-                (validateLoadedFrom_eq config opened next).symm.trans incremental
+                (validateLoadedFrom_eq config opened next).symm.trans
+                  (post.property.symm.trans incremental)
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
                   index + 1, next.worldRoot⟩
@@ -2366,7 +2400,7 @@ private def walk (config : Config) (opened : Opened config)
               let nextReleases := selectedReleaseAfter config after releases record receipt
               match ← walk config after nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
                   nextBeginsV3 nextClaimsV3 nextCreatedV3 nextRunningV3 nextGrants
-                  nextFrontier nextReleases selectIndex rest with
+                  nextFrontier nextReleases selectIndex timing rest with
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
@@ -2806,17 +2840,26 @@ theorem SemanticReplay.append_stable {config : Config}
       (priorReceipts ++ laterReceipts) :=
   (left.verifier_congr stable).append right
 
-def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Verified config target)) := do
-  match DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed) target.image.seed with
+def verifyLoaded (config : Config) (target : Durable)
+    (timing : AuditTiming.Handle := none) : IO (Except Failure (Verified config target)) := do
+  let initialValue ← AuditTiming.value timing (fun _ => "genesis-load")
+    (fun _ => DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed) target.image.seed)
+  match initialValue.val with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
   | .ok initial =>
-    match validateLoaded config initial with
+    let openedValue ← AuditTiming.value timing (fun _ => "genesis-validation")
+      (fun _ => validateLoaded config initial)
+    match openedValue.val with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] none timing target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
-        if exactImage : walked.final.durable.image = target.image then
+        let comparison ← AuditTiming.value timing (fun _ => "final-compare")
+          (fun _ => decide (walked.final.durable.image = target.image))
+        if same : comparison.val = true then
+          have exactImage : walked.final.durable.image = target.image :=
+            of_decide_eq_true (comparison.property.symm.trans same)
           if countExact : walked.receipts.length = target.image.accepted.length then
             return .ok ⟨opened, walked.final, exactImage, walked.receipts,
               countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
@@ -2888,7 +2931,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] (some index) none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactImage : walked.final.durable.image = target.image then
@@ -2929,7 +2972,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
     let suffix := target.image.accepted.drop count
     match ← walk config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
         old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
-        old.frontier old.releases none suffix with
+        old.frontier old.releases none none suffix with
     | .error failure => return .error failure
     | .ok walked =>
       if exactImage : walked.final.durable.image = target.image then

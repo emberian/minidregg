@@ -45,16 +45,24 @@ stored history record for record (formerly the request path's `verifyLoaded`).
 Returns the number of accepted records audited and the presence and link
 indexes of the re-admitted history (`NativeHostReplay.Verified.index_from_replay`
 and `Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
-def audit (config : Config) :
+private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
     IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
-  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+  match ← AuditTiming.measure timing (fun _ => "load")
+      (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable with
+      match ← NativeHostReplay.verifyLoaded config durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index,
           verified.opened.durable.links)
+
+/-- Timing is opt-in operator output only; the profile, durable image and
+all receiving judgments are exactly the same arguments as ordinary audit. -/
+def audit (config : Config) :
+    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
+  let timing ← AuditTiming.fromEnvironment
+  try auditWithTiming config timing finally AuditTiming.report timing
 
 /-- Operator read of the whole presence index after an ordinary (checkpoint +
 suffix) open. Local administration only: the operator holds the Store. -/
