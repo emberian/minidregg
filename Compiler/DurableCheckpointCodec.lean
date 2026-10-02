@@ -313,4 +313,7 @@ theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → 
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl
 
+/-- info: 'Minidregg.Compiler.DurableCheckpointCodec.sealAt_eq_sealCheckpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sealAt_eq_sealCheckpoint
+
 end Minidregg.Compiler.DurableCheckpointCodec

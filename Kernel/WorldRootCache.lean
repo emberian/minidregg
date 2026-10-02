@@ -508,6 +508,37 @@ write — no longer has the root. -/
 theorem stale_cache_refuted :
     t0.digest scheme E scheme.depth ≠ scheme.root (write ix m0 6 (some 200)) := by decide
 
+/-- Satisfiable pole: keys 1 and 2 sit at different index paths, and the two
+write orders give one slot map (`slotsOf_eq_of_lastVal`). -/
+theorem order_free_when_injective :
+    slotsOf ix ([(1, 10), (2, 20)] : List (UInt8 × UInt8)) = slotsOf ix [(2, 20), (1, 10)] :=
+  slotsOf_eq_of_lastVal ix (by unfold KeysInjective; decide) (by
+    intro k
+    by_cases h1 : k = 1
+    · subst h1; decide
+    by_cases h2 : k = 2
+    · subst h2; decide
+    simp [lastVal, List.filter, Ne.symm h1, Ne.symm h2])
+
+/-- Refuting pole: keys 1 and 9 share an index path. The two orders give every
+key the same last value, yet their slot maps differ at that path, and the
+injectivity check refuses the list: the premise is load-bearing. -/
+theorem order_matters_on_collision :
+    (∀ k : UInt8, lastVal ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) k =
+        lastVal [(9, 90), (1, 10)] k) ∧
+      slotsOf ix ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) (ix 1) ≠
+        slotsOf ix [(9, 90), (1, 10)] (ix 1) ∧
+      ¬ KeysInjective ix ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) := by
+  refine ⟨?_, by decide, ?_⟩
+  · intro k
+    by_cases h1 : k = 1
+    · subst h1; decide
+    by_cases h9 : k = 9
+    · subst h9; decide
+    simp [lastVal, List.filter, Ne.symm h1, Ne.symm h9]
+  unfold KeysInjective
+  decide
+
 end Toy
 
 end Minidregg.Kernel.WorldRootCache
@@ -522,3 +553,21 @@ end Minidregg.Kernel.WorldRootCache
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.deployedWrite_root
 /-- info: 'Minidregg.Kernel.WorldRootCache.Toy.stale_cache_refuted' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.stale_cache_refuted
+/-- info: 'Minidregg.Kernel.WorldRootCache.find_good' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.find_good
+/-- info: 'Minidregg.Kernel.WorldRootCache.lastVal_append' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.lastVal_append
+/-- info: 'Minidregg.Kernel.WorldRootCache.lookup_slotsOf_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.lookup_slotsOf_injective
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_of_lastVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_of_lastVal
+/-- info: 'Minidregg.Kernel.WorldRootCache.slotsOf_eq_of_lastVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.slotsOf_eq_of_lastVal
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_of_occupants' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_of_occupants
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_snoc' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_snoc
+/-- info: 'Minidregg.Kernel.WorldRootCache.Toy.order_free_when_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.order_free_when_injective
+/-- info: 'Minidregg.Kernel.WorldRootCache.Toy.order_matters_on_collision' depends on axioms: [propext]  -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.order_matters_on_collision

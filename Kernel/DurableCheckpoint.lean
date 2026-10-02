@@ -338,6 +338,9 @@ theorem dishonest_checkpoint_diverges :
 
 end Witness
 
+/-- info: 'Minidregg.Kernel.DurableCheckpoint.State.admissibleAgainst_iff' depends on axioms: [propext, Quot.sound]  -/
+#guard_msgs (whitespace := lax) in #print axioms State.admissibleAgainst_iff
+
 end Minidregg.Kernel.DurableCheckpoint
 
 /-- info: 'Minidregg.Kernel.DurableCheckpoint.resume_sound' depends on axioms: [propext, Quot.sound] -/

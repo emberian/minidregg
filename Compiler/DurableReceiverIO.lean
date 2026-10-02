@@ -950,6 +950,18 @@ theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
 #guard_msgs (whitespace := lax) in #print axioms Loaded.worldRoot_eq
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.entriesOf_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms entriesOf_step
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.cachedSeal_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cachedSeal_root
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootsExact.root_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootsExact.root_eq
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.entriesOf_rebase' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms entriesOf_rebase
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootCache.writeAllFresh?_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootCache.writeAllFresh?_sound
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.RootCache.injectiveCheck_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootCache.injectiveCheck_sound
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.stateEntries_ofSnapshot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stateEntries_ofSnapshot
 
 /-- Seal and store a checkpoint of the head. A failed write loses nothing (the
 log is complete); the caller then keeps its old base. -/
