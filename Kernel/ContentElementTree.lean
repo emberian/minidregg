@@ -925,6 +925,13 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
       · obtain ⟨_, rfl⟩ := allocate_ok accepted
         exact tree.set_other _ _ (by simp) (by simp)
       · cases accepted
+  | rewrapAnnotation annotation before wrapping =>
+      simp only [step] at accepted
+      obtain ⟨_, ciphertext, _, _, _, _, post⟩ :=
+        rewrapAnnotation_guarded_post author operation document progress next
+          annotation before wrapping accepted
+      rw [post]
+      exact tree.set_other _ _ (by simp) (by simp)
   | transclude transclusion link request =>
       cases covered : context.sourceRead request.source with
       | none => simp [step, covered] at accepted
