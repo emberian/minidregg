@@ -66,6 +66,7 @@ deriving instance Countable for IdDomain
 deriving instance Countable for IdPreimage
 deriving instance Countable for Identifier
 deriving instance Countable for PrincipalRef
+deriving instance Countable for AuthoredFragment
 deriving instance Countable for AtomKind
 deriving instance Countable for TransclusionMode
 deriving instance Countable for AtomRecord
