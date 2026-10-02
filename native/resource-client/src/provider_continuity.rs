@@ -5,6 +5,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
 const DESCRIPTOR_MAX: usize = 16_384;
 pub(crate) const V2: &[u8] = b"DREGG/PROVIDER-CONTINUITY/v2\0";
+pub(crate) const V3: &[u8] = b"DREGG/PROVIDER-CONTINUITY/v3\0";
 
 /// Reject duplicate keys, including escaped aliases, before using a descriptor.
 /// serde_json validates grammar; this scan only tracks object-key uniqueness.
@@ -178,7 +179,7 @@ pub(crate) fn request_payload(
     }
     Ok(bytes)
 }
-fn resolution_payload(v2_payload: &[u8], previous: &Value) -> Result<Vec<u8>> {
+pub(crate) fn resolution_payload(v2_payload: &[u8], previous: &Value) -> Result<Vec<u8>> {
     let body = v2_payload
         .strip_prefix(V2)
         .ok_or("resolution needs exact v2 reserve/fence input")?;
@@ -188,7 +189,7 @@ fn resolution_payload(v2_payload: &[u8], previous: &Value) -> Result<Vec<u8>> {
         return Err("original continuity prefix must be nonzero".into());
     }
     let point = pair(count.as_bytes(), root.as_bytes())?;
-    let mut wire = b"DREGG/PROVIDER-CONTINUITY/v3\0".to_vec();
+    let mut wire = V3.to_vec();
     wire.extend(pair(body, &point)?);
     if wire.len() + 1 > transport::HOST_MAX_FRAME {
         return Err("resolution request exceeds frame bound".into());
