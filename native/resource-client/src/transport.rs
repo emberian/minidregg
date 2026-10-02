@@ -199,6 +199,10 @@ fn continuity_request(payload: &[u8]) -> bool {
 
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
+        // Source-owned enrollment/renewal quote. Host/Json validates the fields;
+        // ingress only bounds the JSON object before any backend exchange.
+        [121, payload @ ..] => !payload.is_empty() && payload.len() <= 4096
+            && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object()),
         [151, payload @ ..] => continuity_request(payload),
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
@@ -1389,6 +1393,25 @@ pub(crate) fn effective_uid() -> u32 {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn enrollment_quote_is_public_only_with_bounded_json_object() {
+        let mut max = b"{}".to_vec();
+        max.resize(4096, b' ');
+        for payload in [b"{}".as_slice(), max.as_slice()] {
+            let mut request = vec![121];
+            request.extend_from_slice(payload);
+            assert!(allowed_operation(&request, false));
+        }
+        let mut too_large = max;
+        too_large.push(b' ');
+        for payload in [b"".as_slice(), b"[]", b"null", b"x", &[255], too_large.as_slice()] {
+            let mut request = vec![121];
+            request.extend_from_slice(payload);
+            assert!(!allowed_operation(&request, false));
+        }
+        assert!(!allowed_operation(&[152, 1], false), "private renew remains private");
+    }
 
     #[test]
     fn pinned_envelope_checks_config_and_host_before_exposing_request() {
