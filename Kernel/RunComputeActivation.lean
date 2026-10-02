@@ -66,7 +66,7 @@ inductive Reject where
 Only prepare constructs this token. Inputs remain indices so consumers cannot
 accidentally attribute a result to a different clock, cutoff or history. -/
 structure Prepared (pre : PayCell.Cell) (expectedRoot : Digest)
-    (clock : ClockCell.Clock) (legacyThroughDay : Nat) (history : Digest) where
+    (clock : ClockCell.Clock) (legacyThroughDay : Nat) (history : Digest) : Type where
   private mk ::
   dayAfter : legacyThroughDay < clock.now / ClockCell.secondsPerDay
   historyNonzero : history.value ≠ 0
@@ -116,7 +116,7 @@ theorem Prepared.activation_exact {pre : PayCell.Cell} {expectedRoot : Digest}
     PayCell.computeActivationOf prepared.post.logical =
       some (activation clock legacyThroughDay history) := by
   simp [PayCell.computeActivationOf, Prepared.post, ValidatedPatch.apply_logical,
-    patch, Patch.run, Op.apply, PayCell.computeActivationAddress]
+    patch, Patch.run, Op.apply, PayCell.computeActivationAddress] <;> rfl
 
 /-- Payment, custody, tariff, and every subject usage row survive exactly. -/
 theorem Prepared.preserves {pre : PayCell.Cell} {expectedRoot : Digest}

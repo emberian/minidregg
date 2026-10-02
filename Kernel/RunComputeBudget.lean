@@ -248,7 +248,7 @@ def prepare (subject : SubjectId) (clock : ClockCell.Clock)
 obtain this evidence from the actual checked evaluator count before settlement. -/
 structure CheckedSteps {subject : SubjectId} {payPre : PayCell.Cell}
     {payRoot : Digest} {bookPre : BookCell}
-    (prepared : Prepared subject payPre payRoot bookPre) (checkedSteps : Nat) where
+    (prepared : Prepared subject payPre payRoot bookPre) (checkedSteps : Nat) : Type where
   private mk ::
   exact : prepared.quota.quoted.steps = checkedSteps
 

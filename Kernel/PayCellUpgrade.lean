@@ -112,21 +112,30 @@ theorem lift_apply (store : OldStore) (address : OldAddress) :
 
 @[simp] theorem tariff_preserved (store : OldStore) :
     PayCell.tariffOf (lift store) = PayCellLegacyV4.tariffOf store := by
-  simpa [PayCell.tariffOf, PayCellLegacyV4.tariffOf,
-    PayCell.tariffAddress, PayCellLegacyV4.tariffAddress, addressMap, valueMap]
-    using lift_apply store PayCellLegacyV4.tariffAddress
+  have identity : valueMap (PayCellLegacyV4.tariffAddress) = _root_.id := by
+    funext value
+    rfl
+  change lift store (addressMap (PayCellLegacyV4.tariffAddress)) = store (PayCellLegacyV4.tariffAddress)
+  rw [lift_apply, identity]
+  cases store (PayCellLegacyV4.tariffAddress) <;> rfl
 
 @[simp] theorem book_preserved (store : OldStore) (index : Nat) :
     PayCell.bookAt (lift store) index = PayCellLegacyV4.bookAt store index := by
-  simpa [PayCell.bookAt, PayCellLegacyV4.bookAt,
-    PayCell.bookAddress, PayCellLegacyV4.bookAddress, addressMap, valueMap]
-    using lift_apply store (PayCellLegacyV4.bookAddress index)
+  have identity : valueMap (PayCellLegacyV4.bookAddress index) = _root_.id := by
+    funext value
+    rfl
+  change lift store (addressMap (PayCellLegacyV4.bookAddress index)) = store (PayCellLegacyV4.bookAddress index)
+  rw [lift_apply, identity]
+  cases store (PayCellLegacyV4.bookAddress index) <;> rfl
 
 @[simp] theorem assignment_preserved (store : OldStore) (index : Nat) :
     PayCell.assignmentAt (lift store) index = PayCellLegacyV4.assignmentAt store index := by
-  simpa [PayCell.assignmentAt, PayCellLegacyV4.assignmentAt,
-    PayCell.assignmentAddress, PayCellLegacyV4.assignmentAddress, addressMap, valueMap]
-    using lift_apply store (PayCellLegacyV4.assignmentAddress index)
+  have identity : valueMap (PayCellLegacyV4.assignmentAddress index) = _root_.id := by
+    funext value
+    rfl
+  change lift store (addressMap (PayCellLegacyV4.assignmentAddress index)) = store (PayCellLegacyV4.assignmentAddress index)
+  rw [lift_apply, identity]
+  cases store (PayCellLegacyV4.assignmentAddress index) <;> rfl
 
 @[simp] theorem enrolment_preserved (store : OldStore) (key : List UInt8) :
     PayCell.enrolmentAt (lift store) key =
@@ -137,9 +146,12 @@ theorem lift_apply (store : OldStore) (address : OldAddress) :
 
 @[simp] theorem sshIndex_preserved (store : OldStore) (blob : List UInt8) :
     PayCell.sshIndexAt (lift store) blob = PayCellLegacyV4.sshIndexAt store blob := by
-  simpa [PayCell.sshIndexAt, PayCellLegacyV4.sshIndexAt,
-    PayCell.sshIndexAddress, PayCellLegacyV4.sshIndexAddress, addressMap, valueMap]
-    using lift_apply store (PayCellLegacyV4.sshIndexAddress blob)
+  have identity : valueMap (PayCellLegacyV4.sshIndexAddress blob) = _root_.id := by
+    funext value
+    rfl
+  change lift store (addressMap (PayCellLegacyV4.sshIndexAddress blob)) = store (PayCellLegacyV4.sshIndexAddress blob)
+  rw [lift_apply, identity]
+  cases store (PayCellLegacyV4.sshIndexAddress blob) <;> rfl
 
 @[simp] theorem journal_preserved (store : OldStore) (nullifier : List UInt8) :
     PayCell.journalAt (lift store) nullifier =
@@ -208,16 +220,18 @@ theorem old_row_preserved (store : OldStore) (address : OldAddress) :
   | tariff => rfl
   | assignment => rfl
   | journal => rfl
-  | book => simp [addressMap, PayCell.rowShaped, PayCellLegacyV4.rowShaped]
+  | book =>
+      simp [addressMap, PayCell.rowShaped, PayCellLegacyV4.rowShaped] <;> rfl
   | enrolment =>
       simp only [addressMap, PayCell.rowShaped, PayCellLegacyV4.rowShaped, enrolment_preserved]
       cases found : PayCellLegacyV4.enrolmentAt store key <;>
-        simp [liftEnrolRecord, sshIndex_preserved]
+        simp [liftEnrolRecord, sshIndex_preserved] <;> rfl
   | sshIndex =>
       simp only [addressMap, PayCell.rowShaped, PayCellLegacyV4.rowShaped, sshIndex_preserved]
       cases found : PayCellLegacyV4.sshIndexAt store key with
       | none => rfl
       | some identity =>
+          dsimp only
           rw [enrolment_preserved]
           cases PayCellLegacyV4.enrolmentAt store identity <;> rfl
 
@@ -292,7 +306,7 @@ theorem upgradeBytes_exact {oldBytes newBytes : List UInt8}
   | none => simp [decoded] at upgraded
   | some store =>
       simp only [decoded, Option.map_some, Option.some.injEq] at upgraded
-      refine ⟨store, decoded, StoreCodec.decode_reencodes _ decoded, upgraded, ?_⟩
+      refine ⟨store, rfl, StoreCodec.decode_reencodes _ decoded, upgraded, ?_⟩
       rw [← upgraded]
       exact upgraded_payload_decodes store
 
