@@ -20,6 +20,7 @@ import Theory
 import Kernel
 import Pred
 import Effects
+import Assurance.NockDoorAudit  -- required concrete Nock door poles, outside the Host runtime closure
 import Assurance.StoryLaw  -- P-STORY: a sealed story's table is the law on every player's cell (sealed_story_scene_monotone, sealed_story_never_relawed); kernel-level, not proof-system Assurance: it imports Kernel.LawView and Kernel only
 import Host
 -- Kernel and policy modules `Minidregg` roots beside the per-directory roots
