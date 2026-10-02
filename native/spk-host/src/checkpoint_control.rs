@@ -154,7 +154,8 @@ impl CheckpointControl {
         self.listener.as_raw_fd()
     }
     pub fn paused(&self) -> bool {
-        fs::symlink_metadata(&self.pause_path).is_ok()
+        // An unreadable fence cannot establish reopened admissions.
+        !matches!(fs::symlink_metadata(&self.pause_path), Err(error) if error.kind() == io::ErrorKind::NotFound)
     }
     fn process(
         &self,
