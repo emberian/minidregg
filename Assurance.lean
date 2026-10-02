@@ -136,3 +136,7 @@ import Assurance.CanonicalResourceBookInvariantAudit
 import Assurance.SheetLaw  -- MUD item 6: the literal law.sheet as a Pred, judged by the kernel (checked_leg_policy_eval: every CheckedLeg satisfies its installed law); stranger_write_bounded, deaths monotone and alive raised only by clause 23 over any accepted history, death_is_reachable; without K-CLOCK nobody revives; regenerated from mud-law-fix 8280b8d7: clause 33 refuses the referee's smite (smite_refused, death_needs_hp) and a clockless death fails closed (death_needs_clock)
 import Assurance.ItemLaw  -- MUD item 6: no_dupe_unique over the literal law.item (holder or referee writes; the referee never moves a held item; a holder who never writes keeps it, by induction over the accepted log), kernel_holder_or_referee over CheckedLeg; the law alone admits two concurrent gives, the durable CAS refuses the second
 import Assurance.KeyPreRotationAudit
+
+-- Current member-admin / delegated-manager contracts and executable authoring poles.
+import Kernel.ApplicationManagedPolicyCheck
+import Host.ApplicationManagedPolicyAuthoringCheck
