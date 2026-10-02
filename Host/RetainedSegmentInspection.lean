@@ -165,7 +165,19 @@ private def lengthBytes (length : Nat) : ByteArray :=
 private def frameLength (bytes : List UInt8) : Nat :=
   bytes.foldr (fun byte rest => byte.toNat + 256 * rest) 0
 
-private def oldContinuity (registry : Registry) (payload : List UInt8) : IO Json :=
+/-- The retained process exposes only this closed read-only opcode set. -/
+private inductive ReadonlyOperation where
+  | continuity
+  | receiptByTransaction
+  | dispatchLookup
+
+private def ReadonlyOperation.opcode : ReadonlyOperation → UInt8
+  | .continuity => 151
+  | .receiptByTransaction => 102
+  | .dispatchLookup => 35
+
+private def readonlyFrame (registry : Registry) (operation : ReadonlyOperation)
+    (payload : List UInt8) : IO (List UInt8) :=
   CarriedSegmentIO.withExecutionConfig registry.capsule fun executionConfig => do
     let child ← IO.Process.spawn {
       cmd := "/usr/bin/timeout"
@@ -176,18 +188,22 @@ private def oldContinuity (registry : Registry) (payload : List UInt8) : IO Json
       stderr := .null }
     let (input, child) ← child.takeStdin
     try
-      input.write (lengthBytes (payload.length + 1) ++ ((151 : UInt8) :: payload).toByteArray)
+      input.write (lengthBytes (payload.length + 1) ++ (operation.opcode :: payload).toByteArray)
       input.flush
       let size := frameLength (← readExact child.stdout 4).toList
-      if size < 1 || size > maxResponse + 1 then throw (IO.userError "retained continuity response bound")
+      if size < 1 || size > maxResponse + 1 then throw (IO.userError "retained readonly response bound")
       let bytes := (← readExact child.stdout size).toList
-      if bytes.head? != some (151 : UInt8) then throw (IO.userError "retained continuity refused")
-      let some text := String.fromUTF8? (bytes.drop 1).toByteArray
-        | throw (IO.userError "retained continuity is not UTF-8")
-      liftResult (Json.parse text)
+      if bytes.head? != some operation.opcode then throw (IO.userError "retained readonly refused")
+      return bytes.drop 1
     finally
       child.kill
       discard child.wait
+
+private def oldContinuity (registry : Registry) (payload : List UInt8) : IO Json := do
+  let bytes ← readonlyFrame registry .continuity payload
+  let some text := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "retained continuity is not UTF-8")
+  liftResult (Json.parse text)
 
 /-- Historical roots come from the retained executable's 151 endpoint. Decode,
 verify and reconstruct the hash-only response; never forward arbitrary JSON. -/
@@ -290,5 +306,76 @@ def serveLookup (config : NativeHost.Config) (current : NativeHost.Durable)
       if bytes.length > maxResponse then return .error "receipt-invalid"
       return .ok bytes
   catch _ => return .error "malformed-call"
+
+
+/-- Original transaction receipt metadata comes from the retained executable,
+never from recomputing an old prefix using today's profile. The accepted index
+and transaction/event identity must agree with the audited retained image. -/
+def serveReceiptByTransaction (config : NativeHost.Config) (current : NativeHost.Durable)
+    (registry : Registry) (transactionId : Nat) : IO (Except String Json) := do
+  try
+    if transactionId ≥ 2^256 then return .error "retained receipt transaction exceeds digest bound"
+    let custody ← liftResult (← validate config current registry)
+    let bytes ← readonlyFrame registry .receiptByTransaction (toString transactionId).toUTF8.toList
+    let some text := String.fromUTF8? bytes.toByteArray
+      | return .error "retained receipt response is not UTF-8"
+    let response ← liftResult (Json.parse text)
+    let selected := custody.source.durable.image.accepted.findIdx?
+      (fun record => record.transactionId.value == transactionId)
+    let result ← match selected with
+    | none => do
+      if (← liftResult (stringField response "type")) != "absent" ||
+          (← liftResult (natural (← liftResult (field response "transactionId")))) != transactionId then
+        throw (IO.userError "retained receipt absence differs from audited source")
+      pure (Json.mkObj [("type", .str "absent"), ("transactionId", decimal transactionId)])
+    | some index => do
+      let some record := custody.source.durable.image.accepted[index]?
+        | throw (IO.userError "retained receipt record unavailable")
+      if (← liftResult (stringField response "type")) != "confirmed" then
+        throw (IO.userError "retained receipt lookup lost audited original")
+      let receipt ← liftResult (field response "receipt")
+      let transaction ← liftResult (digest (← liftResult (field receipt "transactionId")))
+      let event ← liftResult (digest (← liftResult (field receipt "eventId")))
+      let count ← liftResult (natural (← liftResult (field receipt "acceptedCount")))
+      let root ← liftResult (digest (← liftResult (field receipt "worldRoot")))
+      if transaction.value != transactionId || event != record.event.eventId ||
+          count != index + 1 || count > registry.edge.body.cut.height then
+        throw (IO.userError "retained receipt metadata differs from audited original")
+      pure (Json.mkObj [("type", .str "confirmed"), ("receipt", Json.mkObj [
+        ("transactionId", decimal transaction.value), ("eventId", decimal event.value),
+        ("acceptedCount", decimal count), ("worldRoot", decimal root.value)])])
+    unchanged registry
+    return .ok result
+  catch _ => return .error "retained transaction receipt unavailable"
+
+/-- Exact old special-dispatch recovery is receipt-only. Neither this route nor
+the old process can issue a physical delivery permit or submit an absent call. -/
+def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durable)
+    (registry : Registry) (payload : List UInt8) : IO (Except String Json) := do
+  try
+    if payload.isEmpty || payload.length > maxRawCall then
+      return .error "retained dispatch request exceeds bound"
+    let custody ← liftResult (← validate config current registry)
+    let some index := custody.source.durable.image.accepted.findIdx? (fun record =>
+        record.event.codecVersion == 11 && record.event.canonicalBytes == payload)
+      | return .error "exact dispatch is absent from retained original segment"
+    let some record := custody.source.durable.image.accepted[index]?
+      | return .error "retained dispatch original unavailable"
+    IO.FS.withTempDir fun directory => do
+      let outcome := directory / "dispatch-outcome.bin"
+      IO.FS.writeBinFile outcome (← readonlyFrame registry .dispatchLookup payload).toByteArray
+      let inspected := directory / "dispatch-outcome.json"
+      if !(← readonlyCli registry #["inspect", "outcome", outcome.toString, inspected.toString]) then
+        return .error "retained dispatch receipt inspection refused"
+      let value ← liftResult (receiptMetadata registry (← readJsonBounded inspected))
+      if (← liftResult (stringField value "type")) != "confirmed" then
+        return .error "retained dispatch lookup lost audited original"
+      if (← liftResult (natural (← liftResult (field value "acceptedCount")))) != index + 1 ||
+          (← liftResult (digest (← liftResult (field value "transactionId")))) != record.transactionId ||
+          (← liftResult (digest (← liftResult (field value "eventId")))) != record.event.eventId then
+        return .error "retained dispatch receipt differs from audited original"
+      unchanged registry
+      return .ok value
+  catch _ => return .error "retained dispatch receipt unavailable"
 
 end Minidregg.Host.RetainedSegmentInspection
