@@ -175,6 +175,7 @@ if [ "$client_only" = 0 ]; then
   # provenance.json .binaries and SHA256SUMS like the four above.
   build_rust grain-runtime grain-runtime
   build_rust grain-runtime grain-provider-bridge
+  build_rust inference-scheduler mini-inference-scheduler
   build_rust spk-host spk-host
   build_rust spk-host spk-browser-proxy
   build_rust discord-entrance mini-discord
@@ -305,6 +306,7 @@ jq -n \
   --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
   --arg grain "$(sha_of bin/grain-runtime)" --arg discord "$(sha_of bin/mini-discord)" \
   --arg providerBridge "$(sha_of bin/grain-provider-bridge)" \
+  --arg inferenceScheduler "$(sha_of bin/mini-inference-scheduler)" \
   --arg spkHost "$(sha_of bin/spk-host)" --arg spkBrowser "$(sha_of bin/spk-browser-proxy)" \
   --arg payWatcher "$(sha_of bin/pay-watcher)" \
   --arg hostManifest "$host_build_manifest_sha" \
@@ -324,6 +326,7 @@ jq -n \
                verifier: {path: "bin/minidregg-credential-signature-verifier", sha256: $verifier},
                grainRuntime: {path: "bin/grain-runtime", sha256: $grain},
                grainProviderBridge: {path: "bin/grain-provider-bridge", sha256: $providerBridge},
+               inferenceScheduler: {path: "bin/mini-inference-scheduler", sha256: $inferenceScheduler},
                spkHost: {path: "bin/spk-host", sha256: $spkHost},
                spkBrowserProxy: {path: "bin/spk-browser-proxy", sha256: $spkBrowser},
                discord: {path: "bin/mini-discord", sha256: $discord},
@@ -334,15 +337,16 @@ jq -n \
     builtUtc: $built}' > "$out/provenance.json"
 (cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
   bin/minidregg-credential-signature-verifier bin/grain-runtime bin/grain-provider-bridge \
-  bin/spk-host bin/spk-browser-proxy bin/mini-discord bin/pay-watcher \
+  bin/mini-inference-scheduler bin/spk-host bin/spk-browser-proxy bin/mini-discord bin/pay-watcher \
   $(jq -r '.clients[].path' provenance.json | grep -vx bin/mini) \
   provenance.json run.sh lib.sh genesis.sh INTERFACES.md \
   genesis-params.example.json source.tar logs/source-files.sha256) > "$out/SHA256SUMS"
-jq -n --arg dir "$out" \
+jq -n --arg dir "$out" --arg sourceCommit "$commit" --arg sourcePath "$src" \
   --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
   --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
   --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
   --arg grain "$(sha_of bin/grain-runtime)" --arg providerBridge "$(sha_of bin/grain-provider-bridge)" \
+  --arg inferenceScheduler "$(sha_of bin/mini-inference-scheduler)" \
   --arg spkHost "$(sha_of bin/spk-host)" --arg spkBrowser "$(sha_of bin/spk-browser-proxy)" \
   --arg discord "$(sha_of bin/mini-discord)" --arg payWatcher "$(sha_of bin/pay-watcher)" \
   --arg candidate "$(sha_of provenance.json)" --argjson clients "$clients_json" \
@@ -352,13 +356,17 @@ jq -n --arg dir "$out" \
     hermes: ($dir + "/bin/grain-runtime"),
     grainRuntime: ($dir + "/bin/grain-runtime"),
     grainProviderBridge: ($dir + "/bin/grain-provider-bridge"),
-    spkHost: ($dir + "/bin/spk-host"), spkBrowserProxy: ($dir + "/bin/spk-browser-proxy"),
+    inferenceScheduler: ($dir + "/bin/mini-inference-scheduler"),
+    spkHost: ($dir + "/bin/spk-host"), spkHostFeatures: [],
+    spkBrowserProxy: ($dir + "/bin/spk-browser-proxy"), browserProxy: ($dir + "/bin/spk-browser-proxy"),
+    sourceCommit: $sourceCommit, sourcePath: $sourcePath,
     discord: ($dir + "/bin/mini-discord"), payWatcher: ($dir + "/bin/pay-watcher"),
     candidate: ($dir + "/provenance.json"),
     clients: ($clients | with_entries(.value = ($dir + "/" + .value.path))),
     sha256: {host: $host, mini: $mini, shell: $mini, store: $store, verifier: $verifier,
              hermes: $grain, grainRuntime: $grain, grainProviderBridge: $providerBridge,
-             spkHost: $spkHost, spkBrowserProxy: $spkBrowser, discord: $discord,
+             inferenceScheduler: $inferenceScheduler,
+             spkHost: $spkHost, spkBrowserProxy: $spkBrowser, browserProxy: $spkBrowser, discord: $discord,
              payWatcher: $payWatcher, candidate: $candidate}}' \
   > "$out/manifest.json"
 stamp "done: $out/manifest.json"
