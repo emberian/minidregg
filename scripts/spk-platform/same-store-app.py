@@ -16,7 +16,7 @@ spec=importlib.util.spec_from_file_location('continuity_fixture',HERE/'ws-contin
 f=importlib.util.module_from_spec(spec);spec.loader.exec_module(f)
 load,save,require,sha,absolute=f.load,f.save,f.require,f.sha,f.absolute
 
-def route_name(label): return 'member-'+hashlib.sha256(label.encode()).hexdigest()[:24]
+def route_name(label): return 'm'+hashlib.sha256(label.encode()).hexdigest()[:12]
 def decimal(value): return isinstance(value,str) and re.fullmatch(r'0|[1-9][0-9]*',value) is not None
 
 def validate(c):
@@ -45,7 +45,7 @@ def validate(c):
     capabilities=[app[k] for k in app_fields[3:]]
     require(1<=len(c['delegates'])<=64,'explicit route capacity is 64')
     session_fields=['session','descriptor','cap','sessionControlCapability','descriptorOwnerCapability','descriptorControlCapability','ticket','appObserve','pkgObserve','ticketOwner','ticketControl','ticketObserve']
-    subjects=[]
+    subjects=[];route_names=[]
     for label,d in c['delegates'].items():
         require(re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,63}',label) is not None,'route label invalid')
         require(d['subject'] in c['keys'] and decimal(d['subject']),'participant signer missing')
@@ -53,7 +53,11 @@ def validate(c):
         resources.extend(d[k] for k in ['session','descriptor','ticket'])
         capabilities.extend(d[k] for k in session_fields if k not in ['session','descriptor','ticket'])
         require('expectedHost' in d and d['expectedHost'],'route host required')
-        subjects.append(d['subject'])
+        subjects.append(d['subject']);route_names.append(route_name(label))
+    require(len(set(route_names))==len(route_names),'route name hash collision; choose distinct inventory keys')
+    state=Path(c['grainsRoot'])/c['miniConfigSha256'][:16]/'host'/'apps'/app['app']
+    sockets=[state/'g1/checkpoint-control.sock',*[state/'routes'/name/'http.sock' for name in route_names]]
+    require(all(len(os.fsencode(path))<=107 for path in sockets),'Linux socket pathname exceeds bound; shorten grains root or app ID')
     require(len(set(resources))==len(resources) and len(set(capabilities))==len(capabilities),'resource or capability allocations overlap')
     require(decimal(a.get('creatorAccountCapability',a.get('ownerAccountCapability'))),'account capability invalid')
     for name in ['tool','parent']:

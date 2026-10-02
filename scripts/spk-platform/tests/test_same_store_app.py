@@ -40,10 +40,15 @@ class AttachTests(unittest.TestCase):
         self.validate()
         names=[app.route_name(key) for key in self.c['delegates']]
         self.assertEqual(len(set(names)),2)
-        self.assertTrue(all(len(name)<=32 for name in names))
+        self.assertTrue(all(len(name)==13 for name in names))
         self.assertEqual(app.route_name('1000'),names[0])
         self.c['delegates']={'A'*64:first,'1001':second};self.validate()
         self.assertLessEqual(len(app.route_name('A'*64)),32)
+    def test_actual_fixture_route_socket_paths_fit_before_source_writes(self):
+        self.c['grainsRoot']='/var/lib/minidregg/pv1-20261002-a2/grains'
+        self.validate()
+        self.c['application']['app']='18446744073709551615'
+        with self.assertRaisesRegex(RuntimeError,'socket pathname exceeds bound'):self.validate()
     def test_overlapping_sessions_caps_or_unknown_signer_refuse(self):
         original=copy.deepcopy(self.c)
         self.c['delegates']['member-two']['descriptor']=self.c['application']['app']
