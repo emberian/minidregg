@@ -3183,9 +3183,18 @@ mod tests {
         assert_eq!(request["verbs"], json!(["observe","place","delegate"]));
         assert_eq!(request["fields"], json!(["1","annotations"]));
         assert_eq!(request["maxDelta"], json!([{"field":"7","max":"50"}]));
-        let (_, request) = request_of(plan(&s, "room kick k1 lab 12").unwrap());
-        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
-            "name":"lab","recipient":"12"}));
+        // A kick enumerates every standing grant the member holds (room-kick).
+        assert_eq!(client(plan(&s, "room kick k1 lab 12").unwrap()).1,
+            pairs(&[("action", "room-kick"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab"),
+                ("member", "12"), ("proposal-id", "k1")]));
+        // Sealing a room says what it costs and needs --freeze-roster.
+        assert!(plan(&s, "room seal s1 lab").unwrap_err().contains("--freeze-roster"));
+        let (flags, request) = request_of(plan(&s, "room seal s1 lab --freeze-roster").unwrap());
+        assert_eq!(request["predicate"], json!({"type":"any","predicates":[]}));
+        assert!(flags.contains(&("freeze-roster".into(), "true".into())));
+        let (flags, _) = request_of(plan(&s, "law s2 lab sealed --allow-unsatisfiable --freeze-roster").unwrap());
+        assert!(flags.contains(&("freeze-roster".into(), "true".into())));
+        assert!(flags.contains(&("allow-unsatisfiable".into(), "true".into())));
         assert_eq!(client(plan(&s, "room members lab").unwrap()).1,
             pairs(&[("action", "who"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab")]));
         assert_eq!(client(plan(&s, "room law lab").unwrap()).1,
@@ -3272,9 +3281,9 @@ mod tests {
         let (_, flags, _) = client(plan(&s, "room kick k1 lab 12").unwrap());
         assert_eq!(flags, pairs(&[("action", "room-key"), ("op", "kick"),
             ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("member", "12"), ("proposal-id", "k1")]));
-        // A public room's kick is K-ROOM's revoke proposal, unchanged.
-        let (_, request) = request_of(plan(&s, "room kick k2 pub 12").unwrap());
-        assert_eq!(request["action"], "revoke");
+        // A public room's kick is the room-kick enumeration, not submitted.
+        let (_, flags, _) = client(plan(&s, "room kick k2 pub 12").unwrap());
+        assert!(flags.contains(&("action".into(), "room-kick".into())));
         assert_eq!(client(plan(&s, "room keys lab").unwrap()).1, pairs(&[("action", "room-key"),
             ("op", "list"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab")]));
         assert_eq!(client(plan(&s, "room rotate r1 lab").unwrap()).1, pairs(&[("action", "room-key"),

@@ -687,9 +687,12 @@ mod tests {
         let other = Quote { room: "8".into(), week: 100, at: 38 };
         assert_eq!(decide(&entry(40, 100), "0", "9", Some(&other), Some(&priced(100)), true, None),
             Decision::Refund { reason: "unquoted" });
-        let old = quote(100, 40 - PRICE_SLACK - 1);
-        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&old), Some(&priced(100)), true, None),
+        let old = quote(100, 200 - PRICE_SLACK - 1);
+        assert_eq!(decide(&entry(200, 100), "0", "9", Some(&old), Some(&priced(100)), true, None),
             Decision::Refund { reason: "stale-quote" });
+        let edge = quote(100, 200 - PRICE_SLACK);
+        assert_eq!(decide(&entry(200, 100), "0", "9", Some(&edge), Some(&priced(100)), true, None),
+            Decision::Issue { not_after: 212, period: 12, week: 100 });
         let future = quote(100, 41);
         assert_eq!(decide(&entry(40, 100), "0", "9", Some(&future), Some(&priced(100)), true, None),
             Decision::Refund { reason: "stale-quote" });
