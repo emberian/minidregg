@@ -116,9 +116,19 @@ pub(super) fn lock(state_root: &Path, exclusive: bool) -> io::Result<File> {
 }
 
 pub(super) fn selected_path(state_root: &Path) -> io::Result<PathBuf> {
+    selected_snapshot(state_root).map(|(path, _)| path)
+}
+fn selected_snapshot(state_root: &Path) -> io::Result<(PathBuf, Vec<u8>)> {
     let pointer = state_root.join("active-profile.json");
     if !exists(&pointer)? {
-        return Ok(state_root.join("grain-host.json"));
+        let path = state_root.join("grain-host.json");
+        let bytes = read_private(&path, MAX_JSON)?;
+        let profile: HostProfile = serde_json::from_slice(&bytes)?;
+        profile_layout(&path, &profile)?;
+        if profile.state_root != state_root || profile.genesis_config_sha256.is_some() {
+            return Err(invalid("baseline profile cannot override Store identity"));
+        }
+        return Ok((path, bytes));
     }
     let selection: Selection = serde_json::from_slice(&read_private(&pointer, MAX_JSON)?)?;
     if selection.protocol != "mini-spk-active-profile-v1" || !hex64(&selection.sha256) {
@@ -133,12 +143,13 @@ pub(super) fn selected_path(state_root: &Path) -> io::Result<PathBuf> {
         return Err(invalid("selected profile names another Store"));
     }
     validate_successor(&selection, &profile)?;
-    Ok(selection.path)
+    Ok((selection.path, bytes))
 }
 
 pub(super) fn validate_selected(path: &Path, profile: &HostProfile) -> io::Result<()> {
     profile_layout(path, profile)?;
-    if selected_path(&profile.state_root)? != path {
+    let (selected, bytes) = selected_snapshot(&profile.state_root)?;
+    if selected != path || serde_json::from_slice::<HostProfile>(&bytes)? != *profile {
         return Err(invalid("profile is not the selected Store profile"));
     }
     if path == profile.state_root.join("grain-host.json") && profile.genesis_config_sha256.is_some()
@@ -452,6 +463,90 @@ pub(super) fn session_intents(host: &Host, app: &str) -> io::Result<Value> {
     Ok(
         json!({"protocol":"mini-spk-session-intents-v1","store":host.store,"app":app,"intents":intents}),
     )
+}
+
+/// Discovery performs no Host invocation and writes no profile or lock file.
+pub(super) fn current_profile(baseline: &Path) -> io::Result<Value> {
+    let old: HostProfile = serde_json::from_slice(&read_private(baseline, MAX_JSON)?)?;
+    profile_layout(baseline, &old)?;
+    if baseline != old.state_root.join("grain-host.json") || old.genesis_config_sha256.is_some() {
+        return Err(invalid(
+            "current-profile requires the retained canonical baseline",
+        ));
+    }
+    let (path, bytes) = selected_snapshot(&old.state_root)?;
+    Ok(
+        json!({"protocol":"mini-spk-current-profile-v1","store":store(&old)?,"profile":path,"profileSha256":sha(&bytes)}),
+    )
+}
+
+pub(super) fn runtime_status(path: &Path) -> io::Result<Value> {
+    let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
+    let _lock = lock(&profile.state_root, false)?;
+    validate_selected(path, &profile)?;
+    broker::call(&Request::RuntimeStatus {
+        store: store(&profile)?.into(),
+    })
+}
+
+pub(super) fn require_ready_runtime(profile: &HostProfile) -> io::Result<()> {
+    let value = broker::call(&Request::RuntimeStatus {
+        store: store(profile)?.into(),
+    })?;
+    if value.get("protocol").and_then(Value::as_str) != Some("mini-spk-runtime-status-v1")
+        || value.get("brokerProtocol").and_then(Value::as_str) != Some("mini-spk-broker-runtime-v1")
+        || value.get("store").and_then(Value::as_str) != Some(store(profile)?)
+        || !matches!(
+            value.get("state").and_then(Value::as_str),
+            Some("baseline" | "ready")
+        )
+        || value.get("spkHost").and_then(Value::as_str) != profile.spk_host.to_str()
+        || value.get("spkHostSha256").and_then(Value::as_str) != Some(&profile.spk_host_sha256)
+    {
+        return Err(invalid(
+            "broker runtime is not ready for selected profile; adopt runtime before START",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn adopt_runtime(path: &Path, admission: &Path) -> io::Result<Value> {
+    if unsafe { libc::geteuid() } == 0 {
+        return Err(invalid("grain runtime adoption runs as Store operator"));
+    }
+    let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
+    let _lock = lock(&profile.state_root, true)?;
+    validate_selected(path, &profile)?;
+    let expected = custody::load(admission)?;
+    let (target_path, target_sha) = image(&expected.target.manifest, "spkHost")?;
+    if profile.spk_host != target_path
+        || profile.spk_host_sha256 != target_sha
+        || profile.mini_config != expected.target.config_path
+        || profile.mini_config_sha256 != expected.target.config_sha256
+    {
+        return Err(invalid(
+            "selected profile differs from admitted target runtime",
+        ));
+    }
+    let reply = broker::call(&Request::AdoptRuntime {
+        store: store(&profile)?.into(),
+        admission: admission.into(),
+    })?;
+    if reply.get("protocol").and_then(Value::as_str) != Some("mini-spk-runtime-adoption-v1")
+        || reply.get("brokerProtocol").and_then(Value::as_str) != Some("mini-spk-broker-runtime-v1")
+        || reply.get("store").and_then(Value::as_str) != Some(store(&profile)?)
+        || reply.get("state").and_then(Value::as_str) != Some("ready")
+        || reply.get("spkHost").and_then(Value::as_str) != profile.spk_host.to_str()
+        || reply.get("spkHostSha256").and_then(Value::as_str) != Some(&profile.spk_host_sha256)
+        || reply.get("admission").and_then(Value::as_str) != admission.to_str()
+        || reply.get("admissionSha256").and_then(Value::as_str)
+            != Some(&sha(&root_bytes(admission, 4 * 1024 * 1024)?))
+    {
+        return Err(invalid(
+            "broker runtime adoption reply differs from request",
+        ));
+    }
+    Ok(reply)
 }
 
 #[cfg(test)]

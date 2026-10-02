@@ -48,6 +48,15 @@ fn main() {
             }
         }
     }
+    if let [_, verb, config] = args.as_slice() {
+        if verb == "broker-serve" {
+            if let Err(error) = minidregg_spk_host::broker::serve(std::path::Path::new(config)) {
+                eprintln!("spk-host broker: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     if args.len() >= 4 && args[1] == "grain" {
         match minidregg_spk_host::grain::run(&args[2..]) {
             Ok(result) => {
@@ -204,7 +213,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ..."
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ... | broker-serve CONFIG"
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
     std::process::exit(2);

@@ -875,6 +875,7 @@ fn install_unit(host: &Host, app: &str, generation: u64) -> io::Result<String> {
         store: host.store.clone(),
         app: app.to_owned(),
         generation: generation.to_string(),
+        runtime_sha256: Some(host.profile.spk_host_sha256.clone()),
     })?;
     let unit = broker::resident_unit(app, &generation.to_string());
     if reply.get("unit").and_then(Value::as_str) != Some(unit.as_str()) {
@@ -926,6 +927,7 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
 
 /// `spk-host grain start PROFILE APP`
 fn start(host: &Host, app: &str) -> io::Result<Value> {
+    profile_upgrade::require_ready_runtime(&host.profile)?;
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
     let placement = load_placement(&app_dir.join("placement.json"))?;
@@ -1322,7 +1324,8 @@ pub fn usage() -> &'static str {
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
      grain init-store GRAINS_ROOT MINI_CONFIG | grain backup PROFILE | \
      grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
-     grain register-route --socket PATH --request PATH"
+     grain register-route --socket PATH --request PATH | \
+     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
 }
 
 fn install_options(rest: &[String]) -> io::Result<(String, Option<(PathBuf, String)>)> {
@@ -1372,6 +1375,19 @@ fn init_store(root: &Path, config: &Path) -> io::Result<Value> {
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, profile] = args {
+        if verb == "current-profile" {
+            return profile_upgrade::current_profile(Path::new(profile));
+        }
+        if verb == "runtime-status" {
+            return profile_upgrade::runtime_status(Path::new(profile));
+        }
+    }
+    if let [verb, profile, admission] = args {
+        if verb == "adopt-runtime" {
+            return profile_upgrade::adopt_runtime(Path::new(profile), Path::new(admission));
+        }
+    }
     if let [verb, socket_flag, socket, request_flag, request] = args {
         if verb == "register-route" && socket_flag == "--socket" && request_flag == "--request" {
             return Ok(serde_json::to_value(

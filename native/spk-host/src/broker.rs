@@ -22,6 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[path = "broker_runtime_adoption.rs"]
+mod runtime_adoption;
+
 pub const SOCKET: &str = "/run/mini-spk-broker.sock";
 const MAX_REQUEST: u64 = 16 * 1024;
 const MAX_CONFIG: u64 = 64 * 1024;
@@ -200,11 +203,21 @@ pub enum Request {
         store: String,
         app: String,
     },
+    /// Adopt a root-admitted runtime for one stopped Store.
+    AdoptRuntime {
+        store: String,
+        admission: PathBuf,
+    },
+    RuntimeStatus {
+        store: String,
+    },
     /// Render the resident unit for one generation.
     InstallUnit {
         store: String,
         app: String,
         generation: String,
+        #[serde(rename = "runtimeSha256", default)]
+        runtime_sha256: Option<String>,
     },
     Start {
         unit: String,
@@ -334,7 +347,7 @@ fn open_operator_file(root: &Path, rel: &[&str], operator_uid: u32) -> io::Resul
         let leaf = index + 1 == rel.len();
         let name = CString::new(*part).map_err(|_| invalid("NUL"))?;
         let flags = if leaf {
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC
         } else {
             libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
         };
@@ -547,6 +560,8 @@ impl Broker {
         root_dir(&broker, 0o700)?;
         root_dir(&broker.join("placements"), 0o700)?;
         root_dir(&broker.join("units"), 0o700)?;
+        root_dir(&broker.join("runtimes"), 0o700)?;
+        root_dir(&broker.join("unit-runtimes"), 0o700)?;
         let log = OpenOptions::new()
             .append(true)
             .create(true)
@@ -601,6 +616,7 @@ impl Broker {
             0o644,
             true,
         )?;
+        self.render_adopted_supervisors()?;
         systemctl(&["daemon-reload"])?;
         Ok(())
     }
@@ -711,6 +727,7 @@ impl Broker {
             }
             Request::Place { store, app } => {
                 Self::check_coordinates(&store, &app)?;
+                self.require_not_pending(&store)?;
                 if let Ok(placement) = self.placement(&store, &app) {
                     return Ok(
                         json!({"appUid":placement.app_uid,"appGid":placement.app_gid,
@@ -759,6 +776,7 @@ impl Broker {
                 class: name,
             } => {
                 Self::check_coordinates(&store, &app)?;
+                self.require_not_pending(&store)?;
                 let class = class(&name)?;
                 let mut placement = self.placement(&store, &app)?;
                 if let Some(existing) = &placement.class {
@@ -790,6 +808,7 @@ impl Broker {
             }
             Request::Ingest { store, app, sha256 } => {
                 Self::check_coordinates(&store, &app)?;
+                let runtime = self.runtime_for(&store)?;
                 if !hex64(&sha256) {
                     return Err(invalid("package SHA-256 refused"));
                 }
@@ -823,11 +842,8 @@ impl Broker {
                     helper(
                         &self.config.ingest_helper,
                         &[
-                            self.config
-                                .spk_host
-                                .to_str()
-                                .ok_or_else(|| invalid("path"))?,
-                            &self.config.spk_host_sha256,
+                            runtime.spk_host.to_str().ok_or_else(|| invalid("path"))?,
+                            &runtime.spk_host_sha256,
                             inbox.to_str().ok_or_else(|| invalid("path"))?,
                             &placement.app_uid.to_string(),
                         ],
@@ -951,15 +967,24 @@ impl Broker {
                 )?;
                 Ok(json!({"unmounted":mount}))
             }
+            Request::AdoptRuntime { store, admission } => self.adopt_runtime(&store, &admission),
+            Request::RuntimeStatus { store } => self.runtime_status(&store),
             Request::InstallUnit {
                 store,
                 app,
                 generation,
+                runtime_sha256,
             } => {
                 Self::check_coordinates(&store, &app)?;
                 if !decimal(&generation) {
                     return Err(invalid("generation refused"));
                 }
+                let runtime = self.runtime_for(&store)?;
+                runtime_adoption::check_install_pin(
+                    runtime_sha256.as_deref(),
+                    &runtime.spk_host_sha256,
+                    self.adoption_exists(&store)?,
+                )?;
                 let placement = self.placement(&store, &app)?;
                 if placement.class.is_none() {
                     return Err(invalid("set-cgroup must precede install-unit"));
@@ -1017,10 +1042,10 @@ impl Broker {
                     uid = placement.app_uid,
                     gid = placement.app_gid,
                     root = self.root().display(),
-                    spk = self.config.spk_host.display(),
+                    spk = runtime.spk_host.display(),
                     config = config.display(),
                 );
-                pinned_root_executable(&self.config.spk_host, Some(&self.config.spk_host_sha256))?;
+                self.render_store_supervisor(&store, &app, &runtime)?;
                 write_root_text(
                     &self.unit_tag_path(&unit),
                     &format!("{store}\n"),
@@ -1032,13 +1057,17 @@ impl Broker {
                 // InvocationID are what STOP's pre-stop check identifies the
                 // dead incarnation by. `start` and `stop` reset it.
                 systemctl(&["daemon-reload"])?;
-                Ok(json!({"unit":unit,"slice":app_slice(prefix, &store, &app)}))
+                self.save_unit_runtime(&unit, &runtime)?;
+                Ok(
+                    json!({"unit":unit,"slice":app_slice(prefix, &store, &app),"spkHostSha256":runtime.spk_host_sha256}),
+                )
             }
             Request::Start { unit } => {
                 Self::check_resident_unit_name(&unit)?;
-                if self.unit_store(&unit)?.is_none() {
-                    return Err(invalid("start refused: unit not installed by this broker"));
-                }
+                let store = self
+                    .unit_store(&unit)?
+                    .ok_or_else(|| invalid("start refused: unit not installed by this broker"))?;
+                self.require_unit_runtime(&store, &unit)?;
                 // A never-begun generation's earlier failed attempt.
                 if active_state(&unit)? == "failed" {
                     systemctl(&["reset-failed", &unit])?;
