@@ -160,7 +160,7 @@ Hash collision resistance remains an explicit external assumption. -/
 def wire (descriptor : Descriptor) : StoreCodec.Wire (layout descriptor) where
   name := "minidregg/world-kind/v1/" ++ toString descriptor.identity.value
   namespaces := List.finRange descriptor.fields.length
-  namespaces_complete := by intro space; simp
+  namespaces_complete := fun space => List.mem_finRange space
   namespaceStream := finStream descriptor.fields.length
   keyStream := fun _ => StreamCodec.nat
   valueStream := fun space => (descriptor.fields.get space).codec.stream
