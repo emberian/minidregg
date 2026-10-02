@@ -129,6 +129,7 @@ import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
 import Host.CarryInspection
 import Host.NeutralCarryReceiving
+import Host.KeyCommitmentAdoptionInspection
 import Host.RetainedSegmentInspection
 import Kernel.CarriedNativeHostSession
 import Kernel.CarriedSessionEnrollmentReceiver
@@ -710,6 +711,10 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleClaimInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
+  else if kind == "subject-key-adoption-plan" then
+    KeyCommitmentAdoptionInspection.inspectPlan bytes
+  else if kind == "subject-key-adoption-ingress" then
+    KeyCommitmentAdoptionInspection.inspectIngress bytes
   else if kind == "application-session-enrollment-request" then
     ApplicationGrainSessionEnrollmentInspection.inspectRequest bytes
   else if kind == "application-session-enrollment-plan" then
@@ -5789,6 +5794,36 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 187 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let bytes ← IO.ofExcept <|
+                              KeyCommitmentAdoptionInspection.planLoaded pinnedConfig opened payload
+                            return ((187 : UInt8), bytes)
+                        | 188 =>
+                            let (planBytes, signatures) ← splitPair payload
+                            let (currentSignature, nextSignature) ← splitPair signatures
+                            let some plan := SubjectKeyCommitmentAdoption.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical key commitment plan")
+                            let bytes ← IO.ofExcept <|
+                              NativeHostKeyCommitmentAdoption.assemble plan currentSignature nextSignature
+                            return ((188 : UInt8), bytes)
+                        | 189 | 190 =>
+                            let opened ← if settings.carryRegistry.isSome then do
+                              pure (← sessionCarriedWalked pinnedConfig state carriedState settings).verified.opened
+                            else sessionOpened pinnedConfig state
+                            let outcome ← if operation == 189 then
+                              NativeHostKeyCommitmentAdoption.submitLoaded pinnedConfig opened payload
+                            else pure (NativeHostKeyCommitmentAdoption.lookupLoaded pinnedConfig opened payload)
+                            let outcome ← if settings.carryRegistry.isSome then do
+                              match outcome with
+                              | .confirmed kind receipt =>
+                                  let current ← sessionCarriedWalked pinnedConfig state carriedState settings
+                                  match carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
+                                  | some exact => pure (.confirmed kind exact)
+                                  | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
+                              | other => pure other
+                            else pure outcome
+                            return (operation, outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 140 =>
                             let opened ← sessionOpened pinnedConfig state
                             match NativeHost.rotationPlanLoaded pinnedConfig opened payload with

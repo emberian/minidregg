@@ -94,6 +94,11 @@ Committed hiding-key material is excluded from the predicate view. -/
 def contentProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CONTENT.FULL-DOCUMENT-TREE-REVISIONED-ATOMS-MARKS-TRANSCLUSION-HISTORY-LINKS.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS.NO-HIDING-KEY-PROJECTION/v5".toUTF8.toList
 
+/-- The initial next-key commitment is an explicit current-key-authorized
+admission with a separate next-key possession signature and exact record pin. -/
+def keyCommitmentAdoptionVersion : List UInt8 :=
+  "DREGG.SUBJECT-KEY.ADOPT-NEXT/current-live-exact-record+two-signatures+first-commitment-only/v1".toUTF8.toList
+
 /-- Factory, initial source, grants and newborn share one prepared tuple. The authored
 height window, inherited lineage, current kind/descriptor/ROM guards and composed
 exports all contribute; a newborn local law is installed without self-gating birth. -/
@@ -273,7 +278,7 @@ def sourceComponents : List (List UInt8) :=
         (CanonicalCellRegistry.schemaRef kind).version,
         requestKindTag (CanonicalCellRegistry.resourceKindOf kind)]),
    StreamCodec.nat.encode CanonicalCellRegistry.factoryKind.tag.toNat,
-   installProjectionVersion, invocationProjectionVersion, birthProjectionVersion,
+   installProjectionVersion, invocationProjectionVersion, birthProjectionVersion, keyCommitmentAdoptionVersion,
    delegationProjectionVersion, revocationProjectionVersion, renounceVersion, contentProjectionVersion,
    (StreamCodec.list (StreamCodec.list StreamCodec.nat)).encode
      [[requestKindTag .object,

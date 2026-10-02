@@ -42,7 +42,7 @@ def documentOf? (store : ContentResource.ContentStore) : Option DocumentId :=
   (StoreCodec.entries HyperdocumentCell.contentWire store).findSome? fun entry =>
     match entry with
     | ⟨⟨.fields, key⟩, _⟩ =>
-      match key.target with
+      match key.owner with
       | .document document =>
         if (LegacyContentCarry.carriedDocument store document).isSome then some document else none
       | _ => none
