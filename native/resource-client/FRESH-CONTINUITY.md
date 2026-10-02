@@ -55,9 +55,10 @@ existing explicit `continuity-init` migration and cannot be reclassified by
 `onboard`. Paid join owns its `init_fresh` staging hook and calls completion after
 account/factory imports, before success publication. Fresh Hermes bootstrap calls
 it separately for each workspace after socket readiness and before resource work.
-Existing active Hermes workspaces need explicit legacy migration. Remote
-`join_welcome` still needs a portable pinned verifier and a readable first reference
-before it can adopt this contract; it is not implicitly protected by this helper.
+Existing active Hermes workspaces need explicit legacy migration. Key-only remote
+`join_welcome` instead authenticates its exact admitted enrollment by read-only
+lookup and uses `FreshBaseline::AdmittedReceipt`, without a resource reference.
+It still requires a portable pinned local verifier; see `WELCOME-CONTINUITY.md`.
 
 `fresh-onboarding-journey.sh HOST MINI STORE CREDENTIAL_VERIFIER NEW_RUNROOT` creates
 a private deployment using `genesis.sh` and `genesis-params.example.json`. It checks

@@ -41,6 +41,17 @@ theorem changedWithin_eq_changed {L : Layout.{0, 0, 0}} {candidates : Finset (Ad
     exact Finset.mem_filter.mpr ⟨by_contra fun outside => different (frame address outside),
       different⟩
 
+/-- Excluding a source-owned non-effect address commutes with the exact
+patch-footprint reduction. Used by hiding ratchets, not by caller claims. -/
+theorem changedWithin_filtered {L : Layout.{0, 0, 0}} {candidates : Finset (Address L)}
+    {pre post : Store L} (frame : ∀ address, address ∉ candidates → pre address = post address)
+    (keep : Address L → Prop) [DecidablePred keep] :
+    changedWithin (candidates.filter keep) pre post = (changed pre post).filter keep := by
+  rw [← changedWithin_eq_changed frame]
+  ext address
+  simp only [changedWithin, Finset.mem_filter]
+  tauto
+
 /-- What a write changed, field by field, over a set of changed addresses: the
 touched fields, and on each the summed change of its numeric values
 (`amount`; absence counts as `0`). -/

@@ -6,6 +6,66 @@ use super::*;
 pub(super) const RECORD: &str = "receipt-continuity.pending.json";
 const TYPE: &str = "minidregg-fresh-continuity-v1";
 
+/// Receipt provenance must come from the source-decoded exact enrollment lookup,
+/// not directly from a sponsor welcome. Only the join admission path constructs it.
+pub(crate) enum FreshBaseline<'a> {
+    Reference(&'a Value),
+    AdmittedReceipt(&'a Value),
+}
+fn receipt_point(value: &Value) -> Result<Point> {
+    if value["type"] != "minidregg-authenticated-enrollment-receipt-v1" {
+        return Err(fail("unknown admitted receipt provenance"));
+    }
+    for name in ["ingressSha256", "lookupFrameSha256"] {
+        let digest = text(value, name)?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(fail("invalid admission evidence digest"));
+        }
+    }
+    for name in ["transactionId", "eventId"] {
+        decimal(text(&value["receipt"], name)?)?;
+    }
+    Point::parse(
+        &json!({"height":value["receipt"]["acceptedCount"],"worldRoot":value["receipt"]["worldRoot"]}),
+    )
+}
+fn baseline_target(source: &HostProof<'_>, record: &Value, challenge: &Value) -> Result<Point> {
+    match record.get("admittedReceipt") {
+        Some(receipt) => receipt_point(receipt),
+        None => source.challenge_point(challenge),
+    }
+}
+
+pub(crate) fn verifier_pin(config: &Path, verifier: &Path) -> Result<Value> {
+    let verifier = crate::absolute(verifier)?;
+    Ok(Settings {
+        identity: local_identity(&verifier, config)?,
+        verifier_sha256: crate::host_image_sha256(&verifier)?,
+        verifier,
+    }
+    .json())
+}
+/// Creation evidence lives outside the workspace it protects. Reuse custody's
+/// nofollow/private atomic save and directory fsync, under the caller's join lock.
+pub(crate) fn retain_workspace_creation(root: &Path, value: &Value) -> Result<()> {
+    let path = root.join("workspace-created.json");
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            if read_json(&path)? != *value {
+                return Err(fail("join workspace creation evidence changed"));
+            }
+            directory(root)?.sync_all().map_err(fail)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            save(root, "workspace-created.json", value)
+        }
+        Err(error) => Err(fail(error)),
+    }
+}
 fn reference_pin(reference: &Value) -> Result<Value> {
     let name = text(reference, "name")?;
     workspace::validate_name(name)?;
@@ -35,10 +95,16 @@ fn config_sha(workspace: &Value) -> Result<String> {
 pub(crate) fn prepare(
     root: &Path,
     workspace: &mut Value,
-    reference: &Value,
+    baseline: FreshBaseline<'_>,
     verifier: Option<&Path>,
 ) -> Result<()> {
-    let reference = reference_pin(reference)?;
+    let (reference, admitted) = match baseline {
+        FreshBaseline::Reference(reference) => (Some(reference_pin(reference)?), None),
+        FreshBaseline::AdmittedReceipt(receipt) => {
+            receipt_point(receipt)?;
+            (None, Some(receipt.clone()))
+        }
+    };
     if fs::symlink_metadata(root.join("workspace.json")).is_ok()
         || fs::symlink_metadata(root.join(RECORD)).is_ok()
         || fs::symlink_metadata(root.join(DIRECTORY)).is_ok()
@@ -64,9 +130,15 @@ pub(crate) fn prepare(
         verifier,
     };
     let enrollment = workspace::random_nonce()?;
-    let record = json!({"type":TYPE,"enrollment":enrollment,"state":"awaiting-first-read",
+    let mut record = json!({"type":TYPE,"enrollment":enrollment,"state":"awaiting-first-read",
         "settings":settings.json(),"configSha256":config_sha(workspace)?,
-        "workspace":binding(workspace),"reference":reference});
+        "workspace":binding(workspace)});
+    if let Some(reference) = reference {
+        record["reference"] = reference;
+    }
+    if let Some(admitted) = admitted {
+        record["admittedReceipt"] = admitted;
+    }
     save(root, RECORD, &record)?;
     workspace["freshContinuity"] = json!(enrollment);
     Ok(())
@@ -88,13 +160,25 @@ fn retained(root: &Path, workspace: &Value) -> Result<Value> {
     {
         return Err(fail("pending fresh enrollment configuration changed"));
     }
-    if reference_pin(&record["reference"])? != record["reference"] {
-        return Err(fail("fresh reference pin is not canonical"));
-    }
-    if record["state"] != "complete" {
-        let reference = workspace::reference(root, text(&record["reference"], "name")?)?;
-        if reference_pin(&reference)? != record["reference"] {
-            return Err(fail("fresh onboarding reference differs from retained pin"));
+    match (record.get("reference"), record.get("admittedReceipt")) {
+        (Some(reference), None) => {
+            if reference_pin(reference)? != *reference {
+                return Err(fail("fresh reference pin is not canonical"));
+            }
+            if record["state"] != "complete" {
+                let current = workspace::reference(root, text(reference, "name")?)?;
+                if reference_pin(&current)? != *reference {
+                    return Err(fail("fresh onboarding reference differs from retained pin"));
+                }
+            }
+        }
+        (None, Some(receipt)) => {
+            receipt_point(receipt)?;
+        }
+        _ => {
+            return Err(fail(
+                "fresh enrollment requires exactly one baseline source",
+            ))
         }
     }
     Ok(record)
@@ -169,8 +253,12 @@ fn complete_with(
                     "awaiting enrollment has unexpected prior custody; cannot rebootstrap",
                 ));
             }
-            let challenge = read(&record["reference"])?;
-            let target = source.challenge_point(&challenge)?;
+            let challenge = if record.get("admittedReceipt").is_some() {
+                Value::Null
+            } else {
+                read(&record["reference"])?
+            };
+            let target = baseline_target(&source, &record, &challenge)?;
             let request = json!({"identity":settings.identity,"from":null,"target":target.json()});
             let response = source.response(&request)?;
             let (verified, complete) = source.verify_response(&request, &response)?;
@@ -191,7 +279,7 @@ fn complete_with(
         _ => return Err(fail("unknown fresh enrollment state")),
     }
     let candidate = &record["candidate"];
-    let target = source.challenge_point(&candidate["challenge"])?;
+    let target = baseline_target(&source, &record, &candidate["challenge"])?;
     let expected = json!({"identity":settings.identity,"from":null,"target":target.json()});
     if candidate["request"] != expected {
         return Err(fail("retained candidate request changed"));
@@ -276,6 +364,22 @@ mod tests {
             fs::remove_dir_all(&self.base).unwrap();
         }
     }
+    // This unit fixture starts at the fresh-custody boundary. It does not
+    // simulate initializer key admission; the common receiving journey covers it.
+    fn custody_workspace(base: &Path, root: &Path, baseline: FreshBaseline<'_>) {
+        workspace::make_private_dir(root).unwrap();
+        for name in ["refs","sources","attempts","proposals"] {
+            workspace::make_private_dir(&root.join(name)).unwrap();
+        }
+        let mut manifest=json!({"type":"minidregg-participant-workspace-v1",
+            "host":base.join("verifier"),"config":base.join("config.json"),
+            "key":base.join("key"),"subject":"20","socket":null,"prerotation":false});
+        prepare(root,&mut manifest,baseline,Some(&base.join("verifier"))).unwrap();
+        save(root,"workspace.json",&manifest).unwrap();
+    }
+    fn resume_custody(root: &Path) -> Result<Value> {
+        complete(root,&read_json(&root.join("workspace.json"))?, |_| Err("unexpected fresh read in custody fixture".into()))
+    }
     impl Fixture {
         fn new() -> Self {
             let base = std::env::temp_dir()
@@ -303,21 +407,8 @@ else: sys.exit(2)
             let key = base.join("key");
             create_file(&key, &[0; 32]).unwrap();
             let root = base.join("workspace");
-            workspace::init_fresh(
-                &root,
-                Some(&host),
-                &config,
-                workspace::InitIdentity {
-                    key: Some(&key),
-                    subject: Some("20"),
-                    enrollment: None,
-                },
-                None,
-                None,
-                &json!({"name":"account","kind":"account","target":"20","observeCapability":"30"}),
-                None,
-            )
-            .unwrap();
+            custody_workspace(&base,&root,FreshBaseline::Reference(
+                &json!({"name":"account","kind":"account","target":"20","observeCapability":"30"})));
             workspace::import(
                 &root,
                 workspace::ImportInput {
@@ -349,6 +440,30 @@ else: sys.exit(2)
         }
     }
     #[test]
+    fn admitted_receipt_candidate_needs_no_resource_reference_or_read() {
+        let mut f = Fixture::new();
+        let receipt = json!({"type":"minidregg-authenticated-enrollment-receipt-v1",
+            "receipt":{"transactionId":"1","eventId":"2","acceptedCount":"2","worldRoot":"34"},
+            "ingressSha256":"a".repeat(64),"lookupFrameSha256":"b".repeat(64)});
+        let root = f.base.join("receipt-workspace");
+        custody_workspace(&f.base,&root,FreshBaseline::AdmittedReceipt(&receipt));
+        f.root = root;
+        f.candidate();
+        assert_eq!(fs::read_dir(f.root.join("refs")).unwrap().count(), 0);
+        let result = complete_with(
+            &f.root,
+            &f.manifest(),
+            |_| panic!("receipt baseline never reads a resource"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(result["point"], json!({"height":"2","worldRoot":"34"}));
+        assert!(begin(&f.root, &f.manifest()).unwrap().is_some());
+        fs::remove_file(f.root.join(DIRECTORY).join("anchor.json")).unwrap();
+        assert!(resume_custody(&f.root).is_err());
+    }
+
+    #[test]
     fn fresh_init_pin_blocks_legacy_read_and_manual_rebootstrap() {
         let f = Fixture::new();
         assert!(begin(&f.root, &f.manifest())
@@ -371,7 +486,7 @@ else: sys.exit(2)
         assert!(!f.root.join(DIRECTORY).exists());
         fs::remove_file(f.root.join(RECORD)).unwrap();
         assert!(begin(&f.root, &f.manifest()).is_err());
-        assert!(workspace::complete_fresh_onboarding(&f.root).is_err());
+        assert!(resume_custody(&f.root).is_err());
     }
     #[test]
     fn every_interrupted_install_resumes_exact_candidate_through_shared_helper() {
@@ -400,7 +515,7 @@ else: sys.exit(2)
                 .is_err());
             }
             assert!(begin(&f.root, &f.manifest()).is_err());
-            let result = workspace::complete_fresh_onboarding(&f.root).unwrap();
+            let result = resume_custody(&f.root).unwrap();
             assert_eq!(result["status"], "resumed");
             assert_eq!(result["point"]["height"], "2");
             assert!(begin(&f.root, &f.manifest()).unwrap().is_some());
@@ -456,7 +571,7 @@ else: sys.exit(2)
                 }
             }
             assert!(
-                workspace::complete_fresh_onboarding(&f.root).is_err(),
+                resume_custody(&f.root).is_err(),
                 "{mutation}"
             );
             assert_ne!(
@@ -470,14 +585,14 @@ else: sys.exit(2)
         for missing in ["anchor.json", "enabled.json", "directory", "record"] {
             let f = Fixture::new();
             f.candidate();
-            workspace::complete_fresh_onboarding(&f.root).unwrap();
+            resume_custody(&f.root).unwrap();
             match missing {
                 "directory" => fs::remove_dir_all(f.root.join(DIRECTORY)).unwrap(),
                 "record" => fs::remove_file(f.root.join(RECORD)).unwrap(),
                 name => fs::remove_file(f.root.join(DIRECTORY).join(name)).unwrap(),
             }
             assert!(
-                workspace::complete_fresh_onboarding(&f.root).is_err(),
+                resume_custody(&f.root).is_err(),
                 "{missing}"
             );
             assert!(begin(&f.root, &f.manifest()).is_err());
@@ -487,7 +602,7 @@ else: sys.exit(2)
     fn completed_provenance_allows_anchor_advance_and_explicit_verifier_upgrade() {
         let f = Fixture::new();
         f.candidate();
-        workspace::complete_fresh_onboarding(&f.root).unwrap();
+        resume_custody(&f.root).unwrap();
         let custody = f.root.join(DIRECTORY);
         let initial = read_json(&f.root.join(RECORD)).unwrap();
         let settings = Settings::load(&custody).unwrap();
@@ -522,10 +637,16 @@ else: sys.exit(2)
         manifest.as_object_mut().unwrap().remove("freshContinuity");
         save(&f.root, "workspace.json", &manifest).unwrap();
         fs::remove_file(f.root.join(RECORD)).unwrap();
-        assert!(workspace::complete_fresh_onboarding(&f.root).is_err());
+        assert!(resume_custody(&f.root).is_err());
         let record =
             json!({"name":"account","kind":"account","target":"20","observeCapability":"30"});
-        assert!(prepare(&f.root, &mut manifest, &record, None).is_err());
+        assert!(prepare(
+            &f.root,
+            &mut manifest,
+            FreshBaseline::Reference(&record),
+            None
+        )
+        .is_err());
         assert!(begin(&f.root, &manifest).unwrap().is_none());
     }
     #[test]
@@ -573,7 +694,7 @@ else: sys.exit(2)
                 .status;
             assert_eq!(status.code(), Some(73));
             if stop != Stage::Complete {
-                workspace::complete_fresh_onboarding(&f.root).unwrap();
+                resume_custody(&f.root).unwrap();
             }
             assert!(begin(&f.root, &f.manifest()).unwrap().is_some());
             assert_eq!(

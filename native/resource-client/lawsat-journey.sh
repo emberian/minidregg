@@ -283,7 +283,21 @@ op S "bootstrap fresh private Store, sponsor workspace, mini serve" \
 op S "ssh key, rendered authorized_keys, private sshd on 127.0.0.1:$PORT" setup_sshd
 OPEN='{"type":"all","predicates":[]}'
 for c in ctl f adm board dl st sl ro; do
-  step S 0 sponsor "create $c declared $OPEN"
+  # Closed declarations name the fields each later scenario actually uses.
+  case $c in
+    f|adm|st) fields=1 ;;
+    board|dl) fields=2 ;;
+    *) fields= ;;
+  esac
+  step S 0 sponsor "create $c declared $OPEN${fields:+ $fields}"
+done
+# These scenarios assume an existing field 1 at zero: the falsifier must fail
+# its equality clause, adm must remain readable, and st later writes 0 -> 3.
+for c in f adm st; do
+  step S 0 sponsor "invoke seed-$c $c create 1 0"
+  step S 0 sponsor "submit seed-$c"
+  step S 0 sponsor "read $c"
+  check S "$c: signed read confirms field 1 starts at 0" is "$(field "$LAST" 1)" 0
 done
 world_ok() { [[ $(world) != read-failed ]]; }
 check S "the differential's signed read of ctl answers" world_ok
@@ -439,4 +453,6 @@ FAILS=$(awk -F'\t' 'NR > 1 && $8 != "ok"' "$TABLE" | wc -l)
 ROWS=$(awk 'NR > 1' "$TABLE" | wc -l)
 echo "rows: $ROWS  failed: $FAILS  queries: $QS (each with root+height and audit differential)" | tee "$LOG/verdicts.txt"
 echo "step table: $TABLE"
+# The journey hook reports the final stderr line on failure.
+echo "JLAWSAT: $FAILS of $ROWS rows failed (see $TABLE)" >&2
 [[ $FAILS == 0 ]]

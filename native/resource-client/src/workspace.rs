@@ -424,13 +424,23 @@ pub(crate) fn init_fresh(
     birth_context: Option<&Path>, namespace_root: Option<&Path>,
     first_ref: &Value, verifier: Option<&Path>,
 ) -> Result<()> {
-    init_impl(root, host, config, identity, birth_context, namespace_root, Some((first_ref, verifier)))
+    init_impl(root, host, config, identity, birth_context, namespace_root, Some((receipt_continuity::fresh::FreshBaseline::Reference(first_ref), verifier)))
+}
+/// Used only after join has authenticated an exact enrollment receipt by lookup.
+pub(crate) fn init_fresh_receipt(
+    root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
+    birth_context: Option<&Path>, namespace_root: Option<&Path>,
+    receipt: &Value, verifier: &Path,
+) -> Result<()> {
+    init_impl(root, host, config, identity, birth_context, namespace_root,
+        Some((receipt_continuity::fresh::FreshBaseline::AdmittedReceipt(receipt), Some(verifier))))
 }
 fn init_impl(
     root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
     birth_context: Option<&Path>, namespace_root: Option<&Path>,
-    fresh: Option<(&Value, Option<&Path>)>,
+    fresh: Option<(receipt_continuity::fresh::FreshBaseline<'_>, Option<&Path>)>,
 ) -> Result<()> {
+    let receipt_baseline = matches!(fresh.as_ref(), Some((receipt_continuity::fresh::FreshBaseline::AdmittedReceipt(_), _)));
     let InitIdentity {
         key,
         subject,
@@ -591,7 +601,7 @@ fn init_impl(
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(&root.join("workspace.json"), &bytes)?;
-    println!("{}", root.display());
+    if !receipt_baseline { println!("{}", root.display()); }
     Ok(())
 }
 

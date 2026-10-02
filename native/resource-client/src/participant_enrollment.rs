@@ -1069,6 +1069,7 @@ fn offer(directory: &Path) -> Result<()> {
 /// context their own `workspace create` uses.
 fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
     let directory = absolute(directory)?;
+    let (_pin, ingress) = sealed(&directory)?;
     let enrollment = json_private(&directory.join("enrollment.json"))?;
     pinned(&enrollment, "type", "minidregg-participant-enrollment-result-v1")?;
     pinned(&enrollment, "authority", "admitted-key-only")?;
@@ -1085,7 +1086,8 @@ fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
         pinned(context, "type", "minidregg-participant-birth-context-v1")?;
     }
     print_json(&json!({"type":"minidregg-participant-join-welcome-v1",
-        "enrollment":enrollment,"birthContext":context}))
+        "enrollment":enrollment,"birthContext":context,
+        "ingressHex":hex(&ingress),"ingressSha256":digest(&ingress)}))
 }
 
 fn join_dir(path: &Path) -> Result<()> {
@@ -1110,6 +1112,10 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     let key_path = absolute(&path(args.required("key")?))?;
     let offer = args.optional("sponsor-plan").map(path);
     let welcome = args.optional("welcome").map(path);
+    let verifier = args.optional("verifier").map(|value| absolute(&path(value))).transpose()?;
+    if verifier.is_some() && welcome.is_none() {
+        return Err("join --verifier is used with --welcome".into());
+    }
     let root = args.optional("dir").map(|dir| absolute(&path(dir))).transpose()?;
     args.finish()?;
     match (offer, welcome, root) {
@@ -1135,7 +1141,8 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
             Ok(())
         }
         (Some(offer), None, Some(root)) => join_possess(&key_path, &absolute(&offer)?, &root),
-        (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root),
+        (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root,
+            verifier.as_deref().ok_or("join --welcome requires the pinned portable --verifier LOCAL-HOST")?),
         _ => Err("join takes --key alone, or --key with --sponsor-plan or --welcome and --dir".into()),
     }
 }
@@ -1246,25 +1253,113 @@ fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
     print_json(&json!({"type":"minidregg-participant-join-possession-v1",
         "subject":summary["subject"],"publicKey":summary["publicKey"],
         "possessionSignature":hex(&signature),
-        "next":"give possessionSignature to your sponsor; then run join --welcome"}))
+        "next":"give possessionSignature to your sponsor; then run join --welcome with the pinned portable --verifier"}))
 }
 
-fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()> {
-    join_remote()?;
+fn stable_receipt(value: &Value) -> Result<Value> {
+    let mut result = json!({});
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+        decimal(field(value, name)?, name)?;
+        result[name] = value[name].clone();
+    }
+    Ok(result)
+}
+
+/// Only the source Host decodes semantic bytes. A fresh output prevents a stale
+/// successful inspection from surviving a failed verifier invocation.
+fn local_join_inspect(verifier: &Path, pin: &Value, config: &Path, kind: &str,
+    input: &Path, directory: &Path) -> Result<Value> {
+    if host_image_sha256(verifier)? != field(pin, "verifierSha256")? {
+        return Err("join local verifier image changed".into());
+    }
+    let output = directory.join(format!("inspect-{}.json", nonce()?));
+    create_private(&output, b"")?;
+    let result = Command::new(verifier).arg(config).arg("inspect").arg(kind)
+        .arg(input).arg(&output).output().map_err(|error| format!("cannot inspect join evidence: {error}"))?;
+    if !result.status.success() {
+        return Err(format!("local source verifier refused join {kind}"));
+    }
+    json_private(&output)
+}
+fn match_join_ingress(view: &Value, ingress: &[u8], command: &[u8], possession: &[u8], admitted: &Value) -> Result<()> {
+    if view["type"] != "participant-key-enrollment-ingress-v2"
+        || field(view, "canonical")? != hex(ingress)
+        || field(view, "commandBytes")? != hex(command)
+        || field(view, "possessionSignature")? != hex(possession)
+        || field(view, "possessionSignatureLength")? != "64" {
+        return Err("welcome sealed ingress differs from the participant's signed request or possession signature".into());
+    }
+    for name in ["subject", "keyId", "publicKey"] {
+        if view["command"]["key"][name] != admitted[name] {
+            return Err(format!("welcome sealed command {name} differs from admitted identity"));
+        }
+    }
+    Ok(())
+}
+/// The signed command and admitted ingress must name the participant-owned next
+/// key, including its real co-signature. Absence is an explicit signed policy.
+fn match_join_prerotation(view: &Value, own_next: Option<[u8; 32]>, public: &[u8; 32]) -> Result<bool> {
+    let offered = view["command"]["key"].get("nextKeyDigest")
+        .ok_or("welcome command lacks nextKeyDigest")?;
+    let next = decode_hex(field(view,"nextPublicKey")?)?;
+    let cosign = decode_hex(field(view,"nextPossessionSignature")?)?;
+    match own_next {
+        Some(own) => {
+            decimal(offered.as_str().ok_or("welcome removes the participant next-key commitment")?, "next-key digest")?;
+            if next != own {
+                return Err("welcome next key differs from the participant retained next key".into());
+            }
+            let signature: [u8; 64] = cosign.try_into().map_err(|_| "welcome next-key co-signature is malformed")?;
+            crate::key_rotation::verify_cosign(public, &own, &signature)?;
+            Ok(false)
+        }
+        None if offered.is_null() && next.is_empty() && cosign.is_empty() => Ok(true),
+        None => Err("welcome commits to a next key the participant does not hold".into()),
+    }
+}
+
+fn match_join_receipt(outcome: &Value, admitted: &Value) -> Result<Value> {
+    confirmed(outcome)?;
+    let receipt = stable_receipt(outcome)?;
+    if receipt != stable_receipt(&admitted["receipt"])? {
+        return Err("welcome receipt differs from exact read-only enrollment lookup".into());
+    }
+    Ok(receipt)
+}
+
+/// Retain the fact that this join has created custody outside that custody's
+/// directory. Losing the whole workspace must not look like another first use.
+fn retain_join_workspace_marker(state: &Path, root: &Path, evidence: &Value, manifest: &Value) -> Result<()> {
+    let marker = state.join("workspace-created.json");
+    let expected = json!({"type":"minidregg-join-workspace-created-v1",
+        "evidence":evidence,"freshContinuity":manifest["freshContinuity"]});
+    if !marker.exists() {
+        let pending = json_private(&root.join("receipt-continuity.pending.json"))?;
+        if manifest.get("receiptContinuity").is_some() || root.join("receipt-continuity").exists()
+            || pending["state"] != "awaiting-first-read" {
+            return Err("join workspace creation marker is missing; restore retained custody".into());
+        }
+    }
+    crate::receipt_continuity::fresh::retain_workspace_creation(state,&expected)
+}
+
+fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Path) -> Result<()> {
+    let socket = join_remote()?;
     let state = root.join("join");
     drain::private_dir(&state)?;
-    let offer: Value = serde_json::from_slice(&bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?)
-        .map_err(|error| error.to_string())?;
-    if !state.join("possession-signature.bin").is_file() {
-        return Err("join has not signed possession yet: run join --sponsor-plan first".into());
-    }
+    let _lock = transport::service_lock(&state.join("welcome.lock"))?;
+    let offer_bytes = bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?;
+    let offer: Value = serde_json::from_slice(&offer_bytes).map_err(|error| error.to_string())?;
+    pinned(&offer, "type", "minidregg-participant-join-offer-v1")?;
+    let possession = private_bytes(&state.join("possession-signature.bin"), 64)?;
     let welcome: Value = serde_json::from_slice(&bounded(welcome_path, 512 * 1024)?)
         .map_err(|error| format!("invalid welcome: {error}"))?;
     pinned(&welcome, "type", "minidregg-participant-join-welcome-v1")?;
     let admitted = welcome.get("enrollment").ok_or("welcome lacks the enrollment")?;
     pinned(admitted, "type", "minidregg-participant-enrollment-result-v1")?;
     pinned(admitted, "authority", "admitted-key-only")?;
-    let public_key = hex(&key(key_path)?.verifying_key().to_bytes());
+    let signing = key(key_path)?;
+    let public_key = hex(&signing.verifying_key().to_bytes());
     for name in ["subject", "keyId", "publicKey"] {
         if field(admitted, name)? != field(&offer, name)? {
             return Err(format!("welcome {name} differs from the plan this key signed"));
@@ -1273,7 +1368,93 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()>
     if field(admitted, "publicKey")? != public_key {
         return Err("welcome names another key than --key".into());
     }
+    let ingress = decode_hex(field(&welcome, "ingressHex")?)?;
+    if ingress.is_empty() || ingress.len() > LIMIT || digest(&ingress) != field(&welcome, "ingressSha256")? {
+        return Err("welcome ingress exceeds bound or differs from its digest".into());
+    }
+    let workspace_root = root.join("workspace");
+    let evidence_path = state.join("authenticated-receipt.json");
+    if !workspace_root.exists() && fs::symlink_metadata(state.join("workspace-created.json")).is_ok() {
+        return Err("joined workspace custody is missing; restore it instead of trusting another first baseline".into());
+    }
+    if workspace_root.exists() {
+        // Repeated welcome can only finish this workspace's recorded fresh birth.
+        // It cannot adopt legacy state, restore lost anchors or select another head.
+        let evidence = json_private(&evidence_path)?;
+        if evidence["receipt"] != stable_receipt(&admitted["receipt"])?
+            || evidence["ingressSha256"] != digest(&ingress) {
+            return Err("welcome differs from authenticated enrollment evidence".into());
+        }
+        let manifest = crate::workspace::bounded_json(&workspace_root.join("workspace.json"))?;
+        if manifest.get("freshContinuity").is_none()
+            || field(&manifest,"subject")? != field(admitted,"subject")?
+            || crate::workspace::member_path(&manifest,"key")? != key_path {
+            return Err("welcome cannot adopt an existing or changed workspace".into());
+        }
+        let initial = json_private(&workspace_root.join("receipt-continuity.pending.json"))?;
+        if initial["admittedReceipt"] != evidence {
+            return Err("workspace first trust differs from admitted enrollment evidence".into());
+        }
+        retain_join_workspace_marker(&state,&workspace_root,&evidence,&manifest)?;
+        return print_json(&json!({"type":"minidregg-participant-joined-v1","workspace":workspace_root,
+            "continuity":crate::workspace::complete_fresh_onboarding(&workspace_root)?}));
+    }
+    let config = root.join("config.json");
+    let config_bytes = bounded(&config, 65_536)?;
+    if digest(&config_bytes) != field(&offer,"configSha256")?
+        || config_bytes != decode_hex(field(&offer,"configHex")?)? {
+        return Err("join config differs from retained offer".into());
+    }
     pin_remote_host(field(&offer, "hostSha256")?)?;
+    let verifier_pin = crate::receipt_continuity::fresh::verifier_pin(&config, verifier)?;
+    let command = private_bytes(&state.join("command.bin"), LIMIT)?;
+    let plan = private_bytes(&state.join("plan.bin"), LIMIT)?;
+    save_json_staged(&state.join("welcome-pin.json"), &json!({
+        "type":"minidregg-participant-welcome-pin-v1","verifier":verifier_pin,
+        "offerSha256":digest(&offer_bytes),"configSha256":digest(&config_bytes),
+        "remote":socket,"publicKey":public_key,"ingressSha256":digest(&ingress),
+        "commandSha256":digest(&command),"possessionSha256":digest(&possession)}))?;
+    retain_exact(&state.join("welcome-ingress.bin"), &ingress)?;
+    let plan_view = local_join_inspect(verifier,&verifier_pin,&config,PLAN_KIND,&state.join("plan.bin"),&state)?;
+    validate_plan(&plan_view,&command,&plan)?;
+    let header = decode_hex(field(&plan_view,"possessionHeader")?)?;
+    signing.verifying_key().verify(&header, &ed25519_dalek::Signature::from_slice(&possession)
+        .map_err(|_| "retained possession signature is malformed")?)
+        .map_err(|_| "retained possession signature does not verify")?;
+    let ingress_view = local_join_inspect(verifier,&verifier_pin,&config,INGRESS_KIND,&state.join("welcome-ingress.bin"),&state)?;
+    match_join_ingress(&ingress_view,&ingress,&command,&possession,admitted)?;
+    let without_prerotation = match_join_prerotation(&ingress_view, own_next_public(key_path)?, &signing.verifying_key().to_bytes())?;
+    let evidence = if evidence_path.exists() {
+        // The exact confirmed frame is durable before this marker; re-decode it
+        // locally rather than depending on another server response after a crash.
+        let evidence = json_private(&evidence_path)?;
+        let frame = private_bytes(&state.join("welcome-confirmed.frame"), transport::HOST_MAX_FRAME)?;
+        if evidence["lookupFrameSha256"] != digest(&frame) || evidence["ingressSha256"] != digest(&ingress) {
+            return Err("retained admission frame or ingress changed".into());
+        }
+        retain_exact(&state.join("welcome-confirmed.bin"), reply(&frame,89)?)?;
+        let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join("welcome-confirmed.bin"),&state)?;
+        if evidence["receipt"] != match_join_receipt(&outcome,admitted)? {
+            return Err("retained admission receipt changed".into());
+        }
+        evidence
+    } else {
+        // This path has no submit operation. A transport failure, absent result or
+        // refusal leaves retained ingress available for another read-only lookup.
+        let frame = session_invoke(Path::new(""),&socket,&config,89,&ingress)
+            .map_err(|e| format!("join receipt lookup unresolved; retry this exact welcome (no submission): {e}"))?;
+        let stem = format!("welcome-lookup-{}",nonce()?);
+        retained_frame(&state,&stem,&frame,89)?;
+        let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join(format!("{stem}.bin")),&state)?;
+        let receipt = match_join_receipt(&outcome,admitted)?;
+        retain_exact(&state.join("welcome-confirmed.frame"),&frame)?;
+        retain_exact(&state.join("welcome-confirmed.bin"),reply(&frame,89)?)?;
+        let evidence = json!({"type":"minidregg-authenticated-enrollment-receipt-v1",
+            "receipt":receipt,"ingressSha256":digest(&ingress),"lookupFrameSha256":digest(&frame)});
+        save_json_staged(&evidence_path,&evidence)?;
+        evidence
+    };
+    save_json_staged(&state.join("welcome.json"),&welcome)?;
     let mut record = admitted.clone();
     record["keyPath"] = json!(utf8_path(key_path)?);
     save_json_staged(&state.join("enrollment.json"), &record)?;
@@ -1286,20 +1467,13 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()>
     };
     let namespace = root.join("namespace");
     join_dir(&namespace)?;
-    crate::workspace::init(
-        &root.join("workspace"),
-        None,
-        &root.join("config.json"),
-        crate::workspace::InitIdentity {
-            key: None,
-            subject: None,
-            enrollment: Some(&state.join("enrollment.json")),
-            next_public: None,
-            without_prerotation: false,
-        },
-        context.as_deref(),
-        Some(&namespace),
-    )
+    crate::workspace::init_fresh_receipt(&workspace_root,None,&config,
+        crate::workspace::InitIdentity {key:None,subject:None,enrollment:Some(&state.join("enrollment.json")),next_public:None,without_prerotation},
+        context.as_deref(),Some(&namespace),&evidence,verifier)?;
+    let manifest = crate::workspace::bounded_json(&workspace_root.join("workspace.json"))?;
+    retain_join_workspace_marker(&state,&workspace_root,&evidence,&manifest)?;
+    print_json(&json!({"type":"minidregg-participant-joined-v1","workspace":workspace_root,
+        "continuity":crate::workspace::complete_fresh_onboarding(&workspace_root)?}))
 }
 
 fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
@@ -1589,6 +1763,75 @@ mod tests {
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn join_creation_marker_precedes_enablement_and_cannot_be_recreated_afterward() {
+        let base=scratch("welcome-marker");
+        let state=base.join("join");let root=base.join("workspace");
+        crate::workspace::make_private_dir(&state).unwrap();
+        crate::workspace::make_private_dir(&root).unwrap();
+        save_json(&root.join("receipt-continuity.pending.json"),&json!({"state":"awaiting-first-read"})).unwrap();
+        let mut manifest=json!({"freshContinuity":"123"});let evidence=json!({"receipt":"retained"});
+        retain_join_workspace_marker(&state,&root,&evidence,&manifest).unwrap();
+        manifest["receiptContinuity"]=json!("minidregg-continuity-v1");
+        retain_join_workspace_marker(&state,&root,&evidence,&manifest).unwrap();
+        fs::remove_file(state.join("workspace-created.json")).unwrap();
+        assert!(retain_join_workspace_marker(&state,&root,&evidence,&manifest).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn welcome_source_inspection_must_match_exact_participant_preimage() {
+        let admitted=json!({"subject":"20","keyId":"30","publicKey":"aa"});
+        let ingress=[1,2]; let command=[3,4]; let possession=[7;64];
+        let view=json!({"type":"participant-key-enrollment-ingress-v2","canonical":hex(&ingress),
+            "commandBytes":hex(&command),"possessionSignature":hex(&possession),"possessionSignatureLength":"64",
+            "command":{"key":admitted}});
+        match_join_ingress(&view,&ingress,&command,&possession,&admitted).unwrap();
+        for field in ["canonical","commandBytes","possessionSignature","possessionSignatureLength"] {
+            let mut wrong=view.clone(); wrong[field]=json!("00");
+            assert!(match_join_ingress(&wrong,&ingress,&command,&possession,&admitted).is_err(),"{field}");
+        }
+        for field in ["subject","keyId","publicKey"] {
+            let mut wrong=view.clone(); wrong["command"]["key"][field]=json!("999");
+            assert!(match_join_ingress(&wrong,&ingress,&command,&possession,&admitted).is_err(),"{field}");
+        }
+    }
+    #[test]
+    fn welcome_prerotation_requires_owned_next_key_and_real_cosign() {
+        let current=SigningKey::from_bytes(&[11;32]);
+        let next=SigningKey::from_bytes(&[12;32]);
+        let public=current.verifying_key().to_bytes();
+        let own=next.verifying_key().to_bytes();
+        let signature=crate::key_rotation::cosign(&public,&next);
+        let mut view=json!({"command":{"key":{"nextKeyDigest":"123"}},
+            "nextPublicKey":hex(&own),"nextPossessionSignature":hex(&signature)});
+        assert!(!match_join_prerotation(&view,Some(own),&public).unwrap());
+        assert!(match_join_prerotation(&view,None,&public).is_err());
+        assert!(match_join_prerotation(&view,Some([0;32]),&public).is_err());
+        view["nextPossessionSignature"]=json!(hex(&[0;64]));
+        assert!(match_join_prerotation(&view,Some(own),&public).is_err());
+        view=json!({"command":{"key":{"nextKeyDigest":null}},"nextPublicKey":"","nextPossessionSignature":""});
+        assert!(match_join_prerotation(&view,None,&public).unwrap());
+        assert!(match_join_prerotation(&view,Some(own),&public).is_err());
+        view["command"]["key"].as_object_mut().unwrap().remove("nextKeyDigest");
+        assert!(match_join_prerotation(&view,None,&public).is_err());
+    }
+    #[test]
+    fn welcome_receipt_requires_confirmed_exact_lookup() {
+        let receipt=json!({"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+        let admitted=json!({"receipt":receipt});
+        let mut outcome=receipt.clone(); outcome["type"]=json!("confirmed"); outcome["confirmation"]=json!("replayed");
+        assert_eq!(match_join_receipt(&outcome,&admitted).unwrap(),receipt);
+        for name in ["transactionId","eventId","acceptedCount","worldRoot"] {
+            let mut wrong=outcome.clone(); wrong[name]=json!("9");
+            assert!(match_join_receipt(&wrong,&admitted).is_err(),"{name}");
+        }
+        for state in ["absent","uncertain","refused","unavailable"] {
+            let mut wrong=outcome.clone(); wrong["type"]=json!(state);
+            assert!(match_join_receipt(&wrong,&admitted).is_err(),"{state}");
+        }
     }
 
     #[test]

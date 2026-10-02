@@ -183,7 +183,7 @@ def participantSlots (prepared : PreparedInvocation deployment profile ambient d
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : List (String × Int) :=
   bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
-    targetProjection command.targets[i] (prepared.targets i).pre.logical (logical (some i))
+    targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical (logical (some i))
 
 /-- Local names for the primary participant, then every participant under
 `joint/target/{id}/…` and again under `joint/index/{i}/…` (`jointSlots`). -/
@@ -262,14 +262,16 @@ theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store Stream
         simp only [h, List.mem_cons, List.not_mem_nil, or_false] at hp
         rcases hp with rfl | rfl <;> dsimp only <;> decide
 
-theorem targetProjection_unjoint (target : Target) (before after : Store target.layout) :
-    Unjoint (targetProjection target before after) := by
+theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before after : Store target.layout) :
+    Unjoint (targetProjection subject target before after) := by
   cases target with
-  | mk kind id capability version root payload observe =>
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact scalarSlots_unjoint _ _
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
+    | world _ => exact WorldKindProjection.project_unjoint _ _ _
+    | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
     | read => exact contentProject_unjoint _ _ _
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -290,7 +292,7 @@ theorem participantSlots_unjoint (prepared : PreparedInvocation deployment profi
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : Unjoint (participantSlots prepared logical i) :=
   unjoint_append _ _ (bytesSlots_unjoint "resource/bytes" 'r' (by decide) (by decide) _ _)
-    (targetProjection_unjoint _ _ _)
+    (targetProjection_unjoint _ _ _ _)
 
 /-- The clock's common slots (`clock/now`, `clock/day`, `clock/slot`) are not joint keys. -/
 theorem clockSlots_unjoint (clock : Kernel.ClockCell.Clock) : Unjoint (Kernel.ClockCell.slots clock) := by
@@ -759,23 +761,25 @@ computed post-state of the leg, never from the request or the command. -/
 
 def targetField (target : Target) : Address target.layout → CellField := by
   cases target with
-  | mk kind id capability version root payload observe =>
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
     | append _ => exact fun _ => .body
+    | world _ => exact fun _ => .body
+    | kindDefinition _ => exact fun _ => .body
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentField address.1
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by
   cases target with
-  | mk kind id capability version root payload observe =>
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | read => exact fun _ _ => 0
+    | world _ | kindDefinition _ | read => exact fun _ _ => 0
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -783,25 +787,61 @@ it (`writableKeyCheck`), no scope names it, and it is left out of the
 footprint. -/
 def targetRatchet (target : Target) : Address target.layout → Bool := by
   cases target with
-  | mk kind id capability version root payload observe =>
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
+    | world _ | kindDefinition _ => exact fun _ => false
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
   (ResourceObservationAdmission.changed pre post).filter fun address => targetRatchet target address = false
 
-/-- A target's footprint, scanning only the patch's write footprint, without
-the ratchet's address. -/
+/-- The actual semantic write footprint. Interpreted kinds decode their own
+immutable layout; other roles omit only the source-owned hiding ratchet. -/
+def targetFullFootprint (target : Target) (pre post : Store target.layout) : Footprint := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | world actions =>
+        exact (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
+    | scalar actions => exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) pre post
+    | content action => exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) pre post
+    | append action => exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
+    | kindDefinition definition => exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) pre post
+    | read => exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) pre post
+
+/-- Dynamic inner stores share the footprint engine. Existing roles scan their
+actual patch writes and exclude the hiding ratchet. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
-  ResourceObservationAdmission.footprintOf
-    (ResourceObservationAdmission.changedWithin
-      ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
-    (targetField target) (targetAmount target) pre post
+  match target.payload with
+  | .world _ => targetFullFootprint target pre post
+  | _ => ResourceObservationAdmission.footprintOf
+      (ResourceObservationAdmission.changedWithin
+        ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
+      (targetField target) (targetAmount target) pre post
+
+theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
+    (pre post : Store target.layout)
+    (frame : ∀ address, address ∉ Patch.writeFootprint patch → pre address = post address) :
+    targetFootprint target patch pre post = targetFullFootprint target pre post := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> simp only [targetFootprint, targetFullFootprint, changedEffect]
+    all_goals rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame]
 
 /-- The footprint of one incidence: a target's write, or nothing for the
 authority read. -/
@@ -819,23 +859,13 @@ the target cell (`Patch.run_frame`), so it equals the whole-cell footprint over
 every address except the blinding the kernel advanced. -/
 theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprintOf
-      (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
-      (targetField command.targets[i]) (targetAmount command.targets[i])
+    legFootprint prepared (some i) = some (targetFullFootprint command.targets[i]
       (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  simp only [legFootprint, targetFootprint, changedEffect]
-  congr 2
-  have whole := ResourceObservationAdmission.changedWithin_eq_changed
-    (candidates := Patch.writeFootprint (targetPatch prepared.authority.snapshot profile.semantics
-      ambient command command.targets[i] (prepared.targets i).pre))
-    (pre := (prepared.targets i).pre.logical) (post := (prepared.targets i).post) (by
-      intro address outside
-      rw [← (prepared.targets i).postExact]
-      exact (Patch.run_frame _ _ address outside).symm)
-  rw [← whole]
-  ext address
-  simp only [ResourceObservationAdmission.changedWithin, Finset.mem_filter]
-  tauto
+  unfold legFootprint
+  rw [targetFootprint_exact]
+  intro address outside
+  rw [← (prepared.targets i).postExact]
+  exact (Patch.run_frame _ _ address outside).symm
 
 /-- The authorizing capability's scope against a leg's footprint. Refusals
 name the failed coordinate: a field the scope does not name, or a named field
@@ -913,9 +943,7 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
     {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple (some i) envelope) :
     ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      cap.scope.FieldsCover (ResourceObservationAdmission.footprintOf
-        (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
-        (targetField command.targets[i]) (targetAmount command.targets[i])
+      cap.scope.FieldsCover (targetFullFootprint command.targets[i]
         (prepared.targets i).pre.logical (prepared.targets i).post) := by
   have fields := leg.fields
   rw [legFootprint_exact] at fields

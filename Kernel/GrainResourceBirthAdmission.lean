@@ -191,12 +191,12 @@ def project {F : Type} [Field F]
       let command := source.grainCommand tariff
       let ownSlots := ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
         (command.targets[index].materializer.codec.encode (logical (.inr index))) ++
-        DeclaredResourceController.targetProjection command.targets[index]
+        DeclaredResourceController.targetProjection command.subject command.targets[index]
           (grain.targets index).pre.logical (logical (.inr index))
       let observed := DeclaredResourceController.jointSlots command.targets fun i =>
         ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
           (command.targets[i].materializer.codec.encode (logical (.inr i))) ++
-         DeclaredResourceController.targetProjection command.targets[i]
+         DeclaredResourceController.targetProjection command.subject command.targets[i]
            (grain.targets i).pre.logical (logical (.inr i))
       ⟨common ++ ResourceBirthPolicyController.Concrete.bytesSlots "command/bytes" 0
         (DeclaredResourceController.commandCodec.encode command) ++ ownSlots ++ observed⟩

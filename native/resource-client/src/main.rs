@@ -420,7 +420,7 @@ usage:
   mini key-status --workspace WORKSPACE [--next-public-key NEXT.pub]
   mini join --key KEY
   mini join --remote DEST --key KEY --sponsor-plan PLAN.json --dir JOIN-ROOT
-  mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
+  mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT --verifier LOCAL-HOST
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
   mini key --action export-blinding --secret KEY

@@ -85,8 +85,11 @@ run finit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --so
 
 # The sponsor's resource and the friend's grant.
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
+# Include the denied attempts' fields (8 and 9) too: those must fail because
+# the grant is revoked or the key is stale, not because a field is undeclared.
 run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name rot --storage declared \
-  --predicate "$D/req/permit-all.json" || die "create rot: $(tail -1 "$D/create.err")"
+  --predicate "$D/req/permit-all.json" --fields 2,3,4,5,6,7,8,9 \
+  || die "create rot: $(tail -1 "$D/create.err")"
 jq -n --arg r "$FRIEND" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"rot",
   recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate.json"
 run dprop "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate.json" \
