@@ -171,12 +171,29 @@ fn delegate(root:&Path,workspace:&Value,dir:&Path,stage:&Value,label:&str,name:&
     retain_json(&saved,&hint)?;Ok(hint)
 }
 
+/// Reconcile every retained generation, then grant this invocation a bounded
+/// fresh budget. A busy authority history never permanently exhausts an epoch.
+fn phase_generations(dir:&Path,phase:&str)->Result<Vec<u64>> {
+    let mut existing=Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e|e.to_string())? {
+        let entry=entry.map_err(|e|e.to_string())?;
+        let name=entry.file_name();let Some(name)=name.to_str() else{continue};
+        if let Some(number)=name.strip_prefix(&format!("{phase}-")).and_then(|s|s.parse::<u64>().ok()) {
+            existing.push(number);
+        }
+    }
+    existing.sort_unstable();existing.dedup();
+    let next=match existing.last(){Some(n)=>n.checked_add(1).ok_or("phase generation counter exhausted")?,None=>0};
+    for offset in 0..128 {existing.push(next.checked_add(offset).ok_or("phase generation counter exhausted")?);}
+    Ok(existing)
+}
+
 fn phase(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,phase:&str,
     mut request:Value)->Result<Value> {
     let done=dir.join(format!("{phase}-accepted.json"));if done.exists(){return read(&done);}
     let expected_before=if phase=="freeze"{stage["before"].clone()}else{read(&dir.join("freeze-accepted.json"))?["audience"].clone()};
     let (state,key)=custody_paths(root);
-    for generation in 0..128 {
+    for generation in phase_generations(dir,phase)? {
         let label=format!("{phase}-{generation}");let wrapper=dir.join(&label);let directory=wrapper.join("epoch");
         let operation=id(text(stage,"namespace")?,&label);
         let op=private::decode_hex(&operation)?.try_into().map_err(|_|"invalid phase operation")?;
@@ -517,6 +534,11 @@ mod tests {
         assert_eq!(next_post(&dir,"rekey").unwrap(),4098);
         assert_eq!(next_post(&dir,"publish").unwrap(),13);
         assert_eq!(post_generations(&dir,"rekey").unwrap().len(),2);
+        ws::make_private_dir(&dir.join("resume-0")).unwrap();
+        ws::make_private_dir(&dir.join("resume-128")).unwrap();
+        let phases=phase_generations(&dir,"resume").unwrap();
+        assert_eq!(&phases[..3],&[0,128,129]);
+        assert_eq!(phases.last(),Some(&256));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test] fn durable_step_ids_fit_and_separate_operation_phases(){
