@@ -144,7 +144,11 @@ fn store_key(root: &Path) -> Result<Zeroizing<[u8; 32]>> {
             .map_err(|e| e.to_string())?;
         replace_private_file(&path, &*seed)?;
     }
-    Ok(Zeroizing::new(crate::read_secret(&path)?.to_bytes()))
+    let secret = Zeroizing::new(crate::read_secret(&path)?.to_bytes());
+    File::open(&parent)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| e.to_string())?;
+    Ok(secret)
 }
 fn aad(workspace: &Value, id: &str) -> Result<Vec<u8>> {
     Ok([
@@ -203,12 +207,19 @@ fn opened(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
             )
             .map_err(|_| "connector custody integrity failed")?,
     );
-    serde_json::from_slice(&plain).map_err(|e| e.to_string())
+    let value = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
+    File::open(path.parent().ok_or("capture parent absent")?)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| e.to_string())?;
+    Ok(value)
 }
 /// Immutable phase records are atomically published under their custody lock.
 fn save(path: &Path, v: &Value) -> Result<()> {
     if path.exists() {
         if bounded_json(path)? == *v {
+            File::open(path.parent().ok_or("phase parent absent")?)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| e.to_string())?;
             return Ok(());
         }
         return Err("retained connector phase differs; no replacement".into());
@@ -444,6 +455,25 @@ fn fetch(dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>
     Ok((bytes[..end + 4].to_vec(), bytes[end + 4..].to_vec()))
 }
 
+fn occupied_capture(
+    root: &Path,
+    workspace: &Value,
+    binding: &Value,
+    id: &str,
+) -> Result<Option<Value>> {
+    let dir = operation(root, id)?;
+    if dir.join("capture.enc").exists() {
+        if opened(root, workspace, id)?["binding"] != *binding {
+            return Err("capture identity already belongs to another binding".into());
+        }
+        return Ok(Some(status(root, workspace, id)?));
+    }
+    if dir.join("fetch-started.json").exists() {
+        return Ok(Some(status(root, workspace, id)?));
+    }
+    Ok(None)
+}
+
 pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str) -> Result<Value> {
     validate(binding, workspace)?;
     let dir = operation(root, id)?;
@@ -475,6 +505,11 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
     let _ = pull_text(&seen)?;
     make_private_dir(&dir)?;
     let _lock = crate::transport::service_lock(&dir.join("operation.lock"))?;
+    // Signed reads do not reserve the operation directory. A concurrent rebase
+    // may have claimed it meanwhile: do not make a second physical request.
+    if let Some(retained) = occupied_capture(root, workspace, binding, id)? {
+        return Ok(retained);
+    }
     let mut nonce = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut nonce))
@@ -741,6 +776,25 @@ mod tests {
             hex(&serde_json::to_vec(r).unwrap())
         )
         .into_bytes()
+    }
+    #[test]
+    fn occupied_rebase_successor_prevents_any_new_physical_capture() {
+        let root = std::env::temp_dir().join(format!("app-doc-race-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        let ws = json!({"subject":"8"});
+        store_key(&root).unwrap();
+        let dir = operation(&root, "next").unwrap();
+        make_private_dir(&dir).unwrap();
+        let v = json!({"binding":binding(),"rebasedFrom":"old","body":"616263","receipt":receipt(),"refs":{"document":{"target":"22"}}});
+        seal(&root, &ws, "next", &v).unwrap();
+        assert!(occupied_capture(&root, &ws, &binding(), "next")
+            .unwrap()
+            .is_some());
+        let mut wrong = binding();
+        wrong["document"] = json!("other");
+        assert!(occupied_capture(&root, &ws, &wrong, "next").is_err());
+        assert!(!dir.join("fetch-started.json").exists());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn shared_discovery_head_changes_preserve_exact_grants_but_redirects_refuse() {
