@@ -30,6 +30,8 @@ BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
 SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
 HOST=${GRAIN_HOST:-$BIN/minidregg-host}
 GRAINS_ROOT=${GRAINS_ROOT:-/var/lib/mini/grains}
+# Explicit native CLI/profile pin; never a native environment-selected endpoint.
+BROKER_SOCKET=${BROKER_SOCKET:-}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -46,8 +48,10 @@ STATE= PROFILE=
 state_paths() {
   if [ -f "$PROFILE_RESULT" ]; then
     jq -e --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
-      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" --arg init "$EV/init-store.json" '
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" --arg init "$EV/init-store.json" \
+      --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
       .protocol == "mini-spk-grain-profile-result-v1" and
+      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker and
       .miniConfig == $config and .miniConfigSha256 == $configSha and
       .grainsRoot == $grains and .initStoreResult == $init and (.stateRoot | startswith($grains + "/")) and
       .profilePath == (.stateRoot + "/grain-host.json")' "$PROFILE_RESULT" >/dev/null || {
@@ -55,16 +59,18 @@ state_paths() {
       }
     STATE=$(jq -er .stateRoot "$PROFILE_RESULT")
     PROFILE=$(jq -er .profilePath "$PROFILE_RESULT")
-    jq -e --arg state "$STATE" '
-      .protocol == "mini-spk-grain-init-store-v1" and .stateRoot == $state' "$EV/init-store.json" >/dev/null || {
+    jq -e --arg state "$STATE" --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
+      .protocol == "mini-spk-grain-init-store-v1" and .stateRoot == $state and
+      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker' "$EV/init-store.json" >/dev/null || {
         echo "grain journey: retained profile differs from native Store initialization" >&2; exit 1;
       }
     [ "$(realpath -- "$STATE")" = "$STATE" ] && [ -f "$PROFILE" ] || {
       echo "grain journey: retained profile path is absent or noncanonical" >&2; exit 1;
     }
     jq -e --arg state "$STATE" --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
-      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" '
-      .stateRoot == $state and .miniConfig == $config and
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" \
+      --arg broker "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
+      (.brokerSocket // "/run/mini-spk-broker.sock") == $broker and .stateRoot == $state and .miniConfig == $config and
       .miniConfigSha256 == $configSha and .grainsRoot == $grains' "$PROFILE" >/dev/null || {
         echo "grain journey: retained profile contradicts its result" >&2; exit 1;
       }
@@ -579,14 +585,21 @@ write_profile() {
     return 0
   fi
   [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
-  "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" >"$EV/init-store.json"
+  if [ -n "${BROKER_SOCKET:-}" ]; then
+    [ "$BROKER_SOCKET" = "$GRAINS_ROOT/broker.sock" ] || fail "isolated broker must belong to grains root"
+    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" --broker-socket "$BROKER_SOCKET" >"$EV/init-store.json"
+  else
+    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" >"$EV/init-store.json"
+  fi
+  broker=$(jq -er --arg expected "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
+    (.brokerSocket // "/run/mini-spk-broker.sock") | select(. == $expected)' "$EV/init-store.json") || fail "native broker endpoint differs"
   STATE=$(jq -er 'select(.protocol == "mini-spk-grain-init-store-v1") | .stateRoot' "$EV/init-store.json")
   case "$STATE" in "$GRAINS_ROOT"/*) ;; *) fail "native Store root is outside the pinned grains root" ;; esac
   [ -d "$STATE" ] && [ "$(realpath -- "$STATE")" = "$STATE" ] || fail "native Store root is absent or noncanonical"
   PROFILE=$STATE/grain-host.json
   [ ! -e "$PROFILE" ] || fail "profile already exists without this fixture result; preserve it"
   semantics=$(jq -er .semantics "$WR/operator-profile.json")
-  jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" \
+  jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" --arg broker "$broker" \
     --arg hostSha "$(sha "$HOST")" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" --arg socket "$OSOCK" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" \
@@ -598,14 +611,15 @@ write_profile() {
      miniOperatorSocket:$socket,managementSubject:"8",managementKeyEpoch:"2",
      managementPublicKeyHex:$public,managementSeed:$seed,
      completionCustodianSeed:$completion,completionSemantics:$semantics,
-     bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha}' >"$PROFILE"
+     bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha} +
+    (if $broker == "/run/mini-spk-broker.sock" then {} else {brokerSocket:$broker} end)' >"$PROFILE"
   chmod 600 "$PROFILE"
-  jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" \
+  jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" --arg broker "$broker" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
     --arg init "$EV/init-store.json" '
     {protocol:"mini-spk-grain-profile-result-v1",profilePath:$profile,stateRoot:$state,
      grainsRoot:$grains,miniConfig:$config,miniConfigSha256:$configSha,
-     initStoreResult:$init}' >"$PROFILE_RESULT"
+     initStoreResult:$init,brokerSocket:$broker}' >"$PROFILE_RESULT"
   printf '%s\n' "$PROFILE_RESULT"
 }
 

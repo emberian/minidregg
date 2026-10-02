@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import signal
+import sys
 import subprocess
 from pathlib import Path
 import tempfile
@@ -20,6 +21,24 @@ spec.loader.exec_module(f)
 def view(fields, height="30"):
     return {"view":{"cell":{"root":"99","entries":[{"key":{"field":k},"value":v} for k,v in fields.items()]},"balances":[["0","123"]]},
             "challenge":{"height":height,"worldRoot":"100","authorityRoot":"200"},"dir":Path("/unused")}
+
+
+class CommandEvidenceTests(unittest.TestCase):
+    def test_success_and_timeout_retain_elapsed_outcome(self):
+        with tempfile.TemporaryDirectory() as temp:
+            prefix=Path(temp)/'success'
+            f.logged_run([sys.executable,'-c','print("ok")'],prefix,timeout=2)
+            result=f.load(str(prefix)+'.exit.json')
+            self.assertEqual(result['exit'],0);self.assertFalse(result['timedOut'])
+            self.assertGreaterEqual(result['elapsedSeconds'],0)
+            self.assertGreaterEqual(result['endedMonotonic'],result['startedMonotonic'])
+            prefix=Path(temp)/'timeout'
+            with self.assertRaises(subprocess.TimeoutExpired):
+                f.logged_run([sys.executable,'-c','import time; time.sleep(1)'],prefix,timeout=.02)
+            result=f.load(str(prefix)+'.exit.json')
+            self.assertIsNone(result['exit']);self.assertTrue(result['timedOut'])
+            self.assertEqual(result['errorType'],'TimeoutExpired')
+            self.assertGreater(result['elapsedSeconds'],0)
 
 
 class AdapterTests(unittest.TestCase):
@@ -167,6 +186,18 @@ class ProfileDiscoveryTests(unittest.TestCase):
         self.assertEqual(path,self.state/"grain-host.json")
         self.assertNotEqual(state,self.grains/f.sha(self.config)[:16]/"host")
 
+    def test_isolated_broker_must_match_every_retained_native_layer(self):
+        broker=str(self.grains/'broker.sock')
+        paths=[self.root/'evidence/profile-result.json',self.root/'evidence/init-store.json',self.state/'grain-host.json']
+        for path in paths:
+            value=f.load(path);value['brokerSocket']=broker;self.write(path,value)
+        f.discover_profile(self.root,self.config,self.grains,self.artifacts,broker)
+        for path in paths:
+            value=f.load(path);saved=value.copy();value.pop('brokerSocket');self.write(path,value)
+            with self.assertRaisesRegex(RuntimeError,'broker endpoint differs'):
+                f.discover_profile(self.root,self.config,self.grains,self.artifacts,broker)
+            self.write(path,saved)
+
     def test_init_result_mismatch_is_refused(self):
         self.write(self.root/"evidence/init-store.json",{"protocol":"mini-spk-grain-init-store-v1","stateRoot":str(self.grains/"other")})
         with self.assertRaisesRegex(RuntimeError,"native Store initialization"):
@@ -193,6 +224,12 @@ class ProfileDiscoveryTests(unittest.TestCase):
 
 class NativeProfilePublicationTests(unittest.TestCase):
     def test_profile_phase_publishes_native_deployment_path(self):
+        self.profile_case(False)
+
+    def test_profile_phase_passes_explicit_broker_and_retains_pin(self):
+        self.profile_case(True)
+
+    def profile_case(self, isolated):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory).resolve()
             grains=root/"grains"
@@ -207,7 +244,12 @@ class NativeProfilePublicationTests(unittest.TestCase):
             native.write_text("""#!/usr/bin/env python3
 import json, os, sys
 assert sys.argv[1:3]==['grain','init-store']
-print(json.dumps({'protocol':'mini-spk-grain-init-store-v1','store':'deployment-owned-key','stateRoot':os.environ['NATIVE_STATE']}))
+value={'protocol':'mini-spk-grain-init-store-v1','store':'deployment-owned-key','stateRoot':os.environ['NATIVE_STATE']}
+if os.environ.get('NATIVE_BROKER'):
+    assert sys.argv[5:]==['--broker-socket',os.environ['NATIVE_BROKER']]
+    value['brokerSocket']=os.environ['NATIVE_BROKER']
+else: assert len(sys.argv)==5
+print(json.dumps(value))
 """)
             native.chmod(0o700)
             script=(MODULE.parent/"grain-journey.sh").read_text()
@@ -216,12 +258,15 @@ print(json.dumps({'protocol':'mini-spk-grain-init-store-v1','store':'deployment-
             runner=root/"profile.sh"
             runner.write_text('set -eu\numask 077\nSTATE= PROFILE=\nfail() { echo "$*" >&2; exit 1; }\nsha() { sha256sum "$1" | cut -d " " -f 1; }\n'+paths+'\n'+writer+'\nwrite_profile\nstate_paths\n')
             env=dict(os.environ,PROFILE_RESULT=str(ev/"profile-result.json"),CONFIG=str(config),GRAINS_ROOT=str(grains),EV=str(ev),
-                SPK_HOST=str(native),HOST=str(native),WR=str(wr),OSOCK=str(root/"operator.sock"),STORE=str(root),BWRAP=str(native),NATIVE_STATE=str(state))
+                SPK_HOST=str(native),HOST=str(native),WR=str(wr),OSOCK=str(root/"operator.sock"),STORE=str(root),BWRAP=str(native),NATIVE_STATE=str(state),BROKER_SOCKET=str(grains/"broker.sock") if isolated else "",NATIVE_BROKER=str(grains/"broker.sock") if isolated else "")
             subprocess.run(["/bin/sh",str(runner)],env=env,check=True,timeout=15,capture_output=True)
             result=json.loads((ev/"profile-result.json").read_text())
             self.assertEqual(result["profilePath"],str(state/"grain-host.json"))
             self.assertEqual(result["stateRoot"],str(state))
             self.assertEqual(json.loads((state/"grain-host.json").read_text())["stateRoot"],str(state))
+            if isolated:
+                self.assertEqual(result['brokerSocket'],str(grains/'broker.sock'))
+                self.assertEqual(f.load(state/'grain-host.json')['brokerSocket'],str(grains/'broker.sock'))
             # A mismatching retained native result must stop future phase reuse.
             initialized=json.loads((ev/"init-store.json").read_text())
             initialized["stateRoot"]=str(grains/"other-deployment")

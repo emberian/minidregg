@@ -32,6 +32,25 @@ def save(path, value):
         f.write("\n")
 
 
+def logged_run(args, prefix, *, env=None, timeout=1800):
+    """Retain elapsed time and uncertainty even when a command times out."""
+    save(str(prefix)+".argv.json",[str(x) for x in args])
+    started=time.monotonic()
+    record={"exit":None,"timedOut":False,"startedMonotonic":started}
+    try:
+        with open(str(prefix)+".stdout","xb") as out,open(str(prefix)+".stderr","xb") as err:
+            result=subprocess.run([str(x) for x in args],stdout=out,stderr=err,env=env,timeout=timeout)
+        record["exit"]=result.returncode
+        return result.returncode,Path(str(prefix)+".stdout"),Path(str(prefix)+".stderr")
+    except BaseException as error:
+        record.update(timedOut=isinstance(error,subprocess.TimeoutExpired),errorType=type(error).__name__)
+        raise
+    finally:
+        ended=time.monotonic()
+        record.update(endedMonotonic=ended,elapsedSeconds=ended-started)
+        save(str(prefix)+".exit.json",record)
+
+
 def sha(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -67,7 +86,7 @@ def grant(target, cap, kind="object"):
     return {"kind": kind, "target": str(target), "capability": str(cap)}
 
 
-def discover_profile(root, config, grains, artifacts):
+def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-broker.sock"):
     """Consume the retained native/profile result, without deriving Store identity."""
     result_path = root / "evidence/profile-result.json"
     result = load(result_path)
@@ -92,6 +111,8 @@ def discover_profile(root, config, grains, artifacts):
     for role, path_field, hash_field in [("host","miniHost","miniHostSha256"),("spkHost","spkHost","spkHostSha256")]:
         require(profile.get(path_field) == artifacts[role]["path"] and profile.get(hash_field) == artifacts[role]["sha256"],
                 "profile differs from pinned candidate artifacts")
+    require(all(value.get("brokerSocket","/run/mini-spk-broker.sock") == broker
+                for value in [result,initialized,profile]), "retained native broker endpoint differs from fixture pin")
     return state, profile_path, profile
 
 
@@ -127,7 +148,7 @@ class Fixture:
         self.m = self.f["artifacts"]
         for a in self.m.values():
             require(sha(a["path"]) == a["sha256"], "candidate artifact changed")
-        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m)
+        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket","/run/mini-spk-broker.sock"))
         require(str(self.state) == self.f["state"] and str(self.profile) == self.f["profilePath"],
                 "fixture state differs from retained native profile result")
         self.app = self.f["app"]
@@ -150,14 +171,10 @@ class Fixture:
 
     def run(self, args, okay=True, env=None, timeout=1800):
         prefix = self.fresh("command")
-        save(str(prefix) + ".argv.json", [str(x) for x in args])
-        with open(str(prefix) + ".stdout", "xb") as out, open(str(prefix) + ".stderr", "xb") as err:
-            p = subprocess.run([str(x) for x in args], stdout=out, stderr=err,
-                               env=env, timeout=timeout)
-        save(str(prefix) + ".exit.json", {"exit": p.returncode})
+        rc,out,err=logged_run(args,prefix,env=env,timeout=timeout)
         if okay:
-            require(p.returncode == 0, f"command failed; retained {prefix}.stderr")
-        return p.returncode, Path(str(prefix) + ".stdout"), Path(str(prefix) + ".stderr")
+            require(rc == 0, f"command failed; retained {prefix}.stderr")
+        return rc,out,err
 
     def mini(self, *args, operator=False, okay=True):
         return self.run([self.m["mini"]["path"], *args, "--host", self.m["host"]["path"],
@@ -318,7 +335,7 @@ class Fixture:
     def route(self, name, d):
         key = self.key(d["subject"])
         request = self.fresh("route-request.json")
-        save(request, {"protocol": "mini-spk-grain-route-request-v1", "name": name, "expectedHost": "grain.test",
+        save(request, {"protocol": "mini-spk-grain-route-request-v1", "name": name, "expectedHost": d.get("expectedHost","grain.test"),
             "displayName": "Continuity delegate " + d["subject"], "preferredHandle": name,
             "sessionSource": d["sessionSource"], "sessionReceipt": d["sessionReceipt"], "ticketIssue": d["issue"],
             "manifestObserveCapability": d["pkgObserve"],
@@ -326,7 +343,7 @@ class Fixture:
                 "publicKeyHex": key.with_suffix(".pub").read_bytes().hex(), "seedPath": str(key)}})
         self.run([self.m["spkHost"]["path"], "grain", "route", self.profile, self.app, request])
         route = self.state / f"apps/{self.app}/routes/{name}"
-        d["endpoint"] = {"token": str(route/"browser.token"), "unix_socket": str(route/"http.sock"), "host": "grain.test"}
+        d["endpoint"] = {"token": str(route/"browser.token"), "unix_socket": str(route/"http.sock"), "host": d.get("expectedHost","grain.test")}
 
     def close_session(self, d):
         q = self.query(d["subject"],d["session"],d["cap"])
@@ -507,20 +524,21 @@ def prepare(path):
     lease = int(c.get("leaseSeconds",120))
     require(lease > 0, "positive lease required")
     grains = absolute(c["grainsRoot"])
+    broker = str(absolute(c.get("brokerSocket","/run/mini-spk-broker.sock")))
+    require(broker in ("/run/mini-spk-broker.sock",str(grains/"broker.sock")), "isolated broker must belong to grains root")
     root.mkdir(mode=0o700)
     (root/"hooks").mkdir(mode=0o700)
     save(root/"input.json",c)
     save(root/"manifest.json",m)
     save(root/"source-inputs.json",{str(HERE/name):sha(HERE/name) for name in ["grain-journey.sh","grain-store.sh","ws-continuity-fixture.py","ws-continuity-regressions.py","ws-continuity-supervision.py"]})
-    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
+    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),BROKER_SOCKET="" if broker == "/run/mini-spk-broker.sock" else broker,SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
     def phases(*names):
         p = root/("phase-"+"-".join(names))
-        with open(str(p)+".stdout","xb") as out,open(str(p)+".stderr","xb") as err:
-            r = subprocess.run([str(HERE/"grain-journey.sh"),"phase",str(root),*names],env=env,stdout=out,stderr=err,timeout=7200)
-        require(r.returncode == 0,f"fixture phase failed; inspect {p}.stderr; preserve all evidence")
+        rc,_,_=logged_run([str(HERE/"grain-journey.sh"),"phase",str(root),*names],p,env=env,timeout=7200)
+        require(rc == 0,f"fixture phase failed; inspect {p}.stderr; preserve all evidence")
     phases("store","services","workroom","profile")
     config = root/"store/base/workroom/deployment/pinned-config.json"
-    state, profile_path, profile = discover_profile(root,config,grains,artifacts)
+    state, profile_path, profile = discover_profile(root,config,grains,artifacts,broker)
     phases("birth-a","install-a")
     save(root/"profile-before-lease.json",profile)
     profile["wsAuthorityLeaseSeconds"] = lease
@@ -528,10 +546,10 @@ def prepare(path):
     save(tmp,profile)
     os.replace(tmp,profile_path)
     f = {"schema":SCHEMA,"root":str(root),"app":prefix+"01","artifacts":artifacts,"state":str(state),"profilePath":str(profile_path),"grainsRoot":str(grains),
-         "candidateSource":m["sourceCommit"],"leaseSeconds":lease,"enableHotRegrant":c.get("enableHotRegrant",False),"enableSealRecovery":c.get("enableSealRecovery",False),"sealSupervisor":c.get("sealSupervisor"),"enableSameIngressRace":c.get("enableSameIngressRace",False),"delegates":{}}
+         "candidateSource":m["sourceCommit"],"brokerSocket":broker,"leaseSeconds":lease,"enableHotRegrant":c.get("enableHotRegrant",False),"enableSealRecovery":c.get("enableSealRecovery",False),"sealSupervisor":c.get("sealSupervisor"),"enableSameIngressRace":c.get("enableSameIngressRace",False),"delegates":{}}
     for label,subject,session,cap,base in [("a","7",prefix+"10","3211",3230),("b","9",prefix+"12","3221",3240)]:
         f["delegates"][label] = {"subject":subject,"session":session,"cap":cap,"ticket":prefix+("20" if label=="a" else "22"),
-            "appObserve":str(base),"pkgObserve":str(base+1),"ticketOwner":str(base+2),"ticketControl":str(base+3),"ticketObserve":str(base+4)}
+            "expectedHost":c.get("delegateHosts",{}).get(label,"grain.test"),"appObserve":str(base),"pkgObserve":str(base+1),"ticketOwner":str(base+2),"ticketControl":str(base+3),"ticketObserve":str(base+4)}
     save(root/"fixture.json",f)
     fixture = Fixture(root/"fixture.json")
     for label,d in fixture.f["delegates"].items():
@@ -565,6 +583,8 @@ def prepare(path):
     if c.get("enableSameIngressRace") is True:
         require("integration-qualification" in m.get("spkHostFeatures",[]), "race needs explicitly feature-built candidate manifest")
         journey["hooks"]["sameIngressRace"] = [sys.executable,str(HERE/"ws-continuity-regressions.py"),"sameIngressRace",str(root/"fixture.json")]
+    if c.get("stopAfterJourney",True) is False:
+        journey["hooks"].pop("generationStop")
     save(root/"journey.json",journey)
     return {"fixture":str(root/"fixture.json"),"journey":str(root/"journey.json"),"prepared":True}
 

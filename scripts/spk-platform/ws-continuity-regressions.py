@@ -190,14 +190,15 @@ class Regressions:
         endpoint = d['endpoint']
         token = Path(endpoint['token']).read_text().strip()
         require(token and all(32 < ord(c) < 127 and c != ';' for c in token), 'unsafe browser token')
-        require(endpoint['host'] == 'grain.test', 'fixture browser Host differs')
+        host=endpoint['host']
+        require(re.fullmatch(r'[A-Za-z0-9.-]+(?::[0-9]{1,5})?',host) is not None, 'fixture browser Host unsafe')
         def request():
             with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:
                 sock.settimeout(150)
                 sock.connect(endpoint['unix_socket'])
-                text = (f'GET {target} HTTP/1.1\r\nHost: grain.test\r\nConnection: close\r\n'
+                text = (f'GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n'
                         'Sec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n'
-                        f'Origin: https://grain.test\r\nCookie: __Host-mini_spk_session={token}\r\n\r\n')
+                        f'Origin: https://{host}\r\nCookie: __Host-mini_spk_session={token}\r\n\r\n')
                 sock.sendall(text.encode())
                 response = http.client.HTTPResponse(sock)
                 response.begin()

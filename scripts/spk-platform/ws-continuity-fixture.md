@@ -196,3 +196,57 @@ interrupted override cleanup and the traffic harness's lifecycle/persistence
 checks. The actual run still requires a coherent pinned joined Mini/Host/SPK
 candidate, signed EtherCalc package and root-coordinated isolated broker/unit
 setup; it must not reuse a public or retained live fixture.
+
+## Isolated candidate capsule and root driver
+
+`brokerSocket` is an explicit fixture input. A nonlegacy endpoint must be exactly
+`grainsRoot/broker.sock`; preparation passes the native `grain init-store
+GRAINS_ROOT CONFIG --broker-socket PATH` argument and retains the exact returned
+endpoint in its profile/result. Snapshot and root override helpers refuse a
+changed endpoint. There is no native environment fallback. `delegateHosts` can
+pin distinct browser origins from the initial immutable route; e.g.
+`a.localhost:18447` and `b.localhost:18448`. Different ports on the same hostname
+would still share browser cookie scope.
+
+`ws-continuity-launch.py` is the root orchestration layer. It requires a root-owned
+setup plan and the complete joined candidate manifest, including `browserProxy`
+(`spk-browser-proxy`) and its hash. It stages a new root-owned capsule containing
+exact binary copies and tracked scripts archived from the original manifest's
+full `sourceCommit`. The original manifest is retained unchanged; staged paths
+and script hashes are recorded separately. It rejects missing features/artifacts,
+changed hashes, source symlinks and existing capsule destinations. No compiler runs.
+
+```sh
+sudo python3 ws-continuity-launch.py materialize SETUP_PLAN.json CANDIDATE_MANIFEST.json --expected-source FULL_COMMIT
+sudo python3 ws-continuity-launch.py run /absolute/candidate-COMMIT/ready.json
+```
+
+The driver uses the same pinned `spk-host broker-serve CONFIG` image. It starts
+only previously absent isolated service names, runs Mini preparation and traffic
+as the staged nologin operator, and installs/restores the exact old-generation
+supervision override as root. It grants no sudo privileges. The override request
+is durably retained before installation. After an interrupted driver, this command
+restores only that recorded fixture override using the helper's idempotent receipts:
+
+```sh
+sudo python3 ws-continuity-launch.py recover-supervision /absolute/candidate-COMMIT/ready.json
+```
+
+A second `run` never retries a partly executed journey. Inspect retained native
+attempts to decide any further recovery. Command logs include monotonic start/end,
+elapsed seconds, exit status and timeout uncertainty; fixture preparation phases
+and every native hook command retain the same timing fields.
+
+The staged journey performs STOP/new-generation recovery and keeps that new
+incarnation running for the browser phase (`stopAfterJourney:false`). The driver
+checks its actual, ordinary supervisor policy, then starts separate **loopback**
+TLS proxies for the two current routes. Root checks exact fixture/app/Store pins
+and non-symlink operator custody before using those paths; certificates and access
+metadata are created with operator authority. `browser-access.json` is private and
+contains only origin, certificate and token-file paths. Credentials are never
+included in command output or public documentation. SSH forwarding and trust for
+these exact private certificates are part of the subsequent browser setup.
+
+Passing native traffic is reported separately from the still-required actual
+browser edit, sharing/access change and persistence checks. Existing browser ports,
+units, Stores, packages and custody remain intact.
