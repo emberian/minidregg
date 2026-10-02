@@ -805,6 +805,24 @@ def PhysicalShape (prepared : Prepared deployment profile ambient durable comman
     (lawReadGuards prepared).isSome = true ∧
     effectLawAccepted prepared = true
 
+/-- A successful account grant cannot bypass a refusing law on the actual
+job/purse effect. This is a required receiving proposition before intent creation. -/
+theorem effect_refusal_blocks_physical
+    (prepared : Prepared deployment profile ambient durable command)
+    (refused : effectLawAccepted prepared = false) : ¬ PhysicalShape prepared := by
+  intro shape
+  rcases shape with ⟨_, _, _, _, _, _, _, admitted⟩
+  rw [refused] at admitted
+  cases admitted
+
+/-- Missing current/pinned law material is a refusal, not an empty guard set. -/
+theorem unavailable_law_blocks_physical
+    (prepared : Prepared deployment profile ambient durable command)
+    (missing : lawReadGuards prepared = none) : ¬ PhysicalShape prepared := by
+  intro shape
+  rcases shape with ⟨_, _, _, _, _, _, present, _⟩
+  simp [missing] at present
+
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
     Decidable (PhysicalShape prepared) := by
   unfold PhysicalShape
