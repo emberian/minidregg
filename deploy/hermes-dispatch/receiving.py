@@ -27,7 +27,7 @@ mini('keygen','--secret',R/'resident.key','--public',R/'resident.pub')
 public=(R/'resident.pub').read_bytes().hex()
 write(R/'enroll.json',[{'key':{'keyId':'8008','keyEpoch':'2','algorithm':'1','subject':'8','publicKey':public,'activeFrom':'0','activeUntil':'1000000','nextKeyDigest':None},'accountId':'8','spendCapabilityId':'8042','controlCapabilityId':'8052','factoryObserveCapabilityId':'8055','initialBalance':'100','accountPredicate':{'type':'all','predicates':[]}}])
 env=dict(os.environ,EXTRA_GENESIS_ENROLLMENTS=str(R/'enroll.json'))
-run(['sh',str(Path(M['fixtureSource'])/'native/resource-client/newparticipant-acceptance.sh'),HOST,a.mini,M['store'],M['verifier'],W],env=env,label='fresh-bootstrap')
+run(['sh',str(Path(M.get('fixtureSource') or M['sourcePath'])/'native/resource-client/newparticipant-acceptance.sh'),HOST,a.mini,M['store'],M['verifier'],W],env=env,label='fresh-bootstrap')
 mini('workspace','--action','init','--host',HOST,'--config',CONFIG,'--socket',SOCK,'--key',R/'resident.key','--subject','8','--no-prerotation','--namespace-root',W/'namespace','--dir',R/'resident-ws')
 (R/'resident-home').mkdir(mode=0o700,exist_ok=True)
 identity=json.loads(mini('shell','--socket',SOCK,'--host',HOST,'--config',CONFIG,'--workspace',R/'resident-ws','--home',R/'resident-home','--line','whoami'))
@@ -81,5 +81,5 @@ newinbox=R/'inbox'/second.parent.parent.name/second.parent.name
 newready=json.loads(hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',newinbox))
 newactive=json.loads(hh('activation','--registration',R/'registrations/resident.json'));assert newactive['assignment']==newready['assignment'] and newactive['account']==newready['account']
 hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,ok=False,label='refuse-replaced-assignment')
-report={'type':'mini-hermes-native-receiving-evidence-v1','nativeManifest':a.manifest,'mini':a.mini,'miniSha256':hashlib.sha256(Path(a.mini).read_bytes()).hexdigest(),'roomCell':cell,'firstReady':ready,'currentInbox':str(newinbox),'currentBundle':str(second),'registration':reg,'commands':N,'providerCalls':0,'rotationExercised':not a.skip_rotation,'limitations':['Component Host routes, not joined current source family or installed system unit; no actual controller/provider prompt.']}
+report={'type':'mini-hermes-native-receiving-evidence-v1','nativeManifest':a.manifest,'mini':a.mini,'miniSha256':hashlib.sha256(Path(a.mini).read_bytes()).hexdigest(),'roomCell':cell,'firstReady':ready,'currentInbox':str(newinbox),'currentBundle':str(second),'registration':reg,'commands':N,'providerCalls':0,'rotationExercised':not a.skip_rotation,'limitations':['No installed system unit or actual native controller/provider prompt exercised by this fixture.']}
 write(R/'evidence.json',report);print('PASS fresh native source summon, pump receiving, refusal, concurrent writes, '+('rotation, ' if not a.skip_rotation else '')+'dismissal, replacement',flush=True)

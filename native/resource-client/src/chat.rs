@@ -1854,7 +1854,7 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     }
     let me = me(session)?;
     let law = author_law(&me);
-    create_cell_as(session, name, "declared", &law, None, None, private.then_some("private"),
+    create_cell_as(session, name, "declared", &law, None, None, Some(if private { "private" } else { "chat" }),
         Some(&crate::credit::room_declared_fields()))?;
     if private {
         println!("room {name}: created private (only you write its roster; every say is sealed under the room key)");
