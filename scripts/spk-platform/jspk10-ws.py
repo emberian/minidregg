@@ -32,6 +32,51 @@ if BROWSER_URL and (BROWSER_URL.scheme != "https" or not BROWSER_URL.hostname
 HOST = BROWSER_URL.netloc if BROWSER_URL else "grain.test"
 
 
+class Endpoint:
+    """One explicit independently authenticated browser entrance.
+
+    Exactly one of Unix socket or verified HTTPS origin is selected. Token
+    bytes stay in request headers and are never included in evidence output.
+    """
+    def __init__(self, *, token, origin=None, ca=None, unix_socket=None, host=None):
+        if bool(origin) == bool(unix_socket):
+            raise ValueError("endpoint requires exactly one origin or unix_socket")
+        self.token, self.ca, self.unix_socket = token, ca, unix_socket
+        self.url = urlsplit(origin) if origin else None
+        if self.url and (self.url.scheme != "https" or not self.url.hostname
+                         or self.url.username is not None or self.url.password is not None
+                         or self.url.path or self.url.query or self.url.fragment):
+            raise ValueError("endpoint origin must be HTTPS without path or userinfo")
+        self.host = self.url.netloc if self.url else host
+        if not self.host or any(ord(c) <= 32 or ord(c) >= 127 or c in "/?#@" for c in self.host):
+            raise ValueError("endpoint Host is missing or unsafe")
+
+    def connect(self, timeout):
+        if self.url:
+            context = ssl.create_default_context(cafile=self.ca)
+            raw = socket.create_connection((self.url.hostname, self.url.port or 443), timeout=timeout)
+            try:
+                return context.wrap_socket(raw, server_hostname=self.url.hostname)
+            except BaseException:
+                raw.close()
+                raise
+        stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stream.settimeout(timeout)
+        try:
+            stream.connect(self.unix_socket)
+            return stream
+        except BaseException:
+            stream.close()
+            raise
+
+    def credentials(self):
+        with open(self.token) as source:
+            token = source.read().strip()
+        if not token or any(ord(c) <= 32 or ord(c) >= 127 or c == ";" for c in token):
+            raise ValueError("endpoint token is empty or unsafe")
+        return [("Cookie", "__Host-mini_spk_session=" + token), ("Origin", "https://" + self.host)]
+
+
 def connect_route(route, timeout=900):
     if BROWSER_URL:
         context = ssl.create_default_context(cafile=os.environ.get("SPK_BROWSER_CA", os.path.join(route, "tls.crt")))
@@ -86,21 +131,23 @@ class Refused(Exception):
 
 
 class WS:
-    def __init__(self, route, path, protocols=None, timeout=900):
-        self.sock = connect_route(route, timeout)
+    def __init__(self, route, path, protocols=None, timeout=900, endpoint=None):
+        self.sock = endpoint.connect(timeout) if endpoint else connect_route(route, timeout)
+        host = endpoint.host if endpoint else HOST
         key = base64.b64encode(os.urandom(16)).decode()
-        lines = ["GET %s HTTP/1.1" % path, "Host: " + HOST, "Connection: Upgrade", "Upgrade: websocket",
+        lines = ["GET %s HTTP/1.1" % path, "Host: " + host, "Connection: Upgrade", "Upgrade: websocket",
                  "Sec-WebSocket-Key: " + key, "Sec-WebSocket-Version: 13", "Sec-Fetch-Site: same-origin",
                  "Sec-Fetch-Mode: websocket"]
         if protocols:
             lines.append("Sec-WebSocket-Protocol: " + ", ".join(protocols))
-        lines += ["%s: %s" % kv for kv in creds(route)]
+        lines += ["%s: %s" % kv for kv in (endpoint.credentials() if endpoint else creds(route))]
         t0 = time.monotonic()
         self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
         head = b""
         while b"\r\n\r\n" not in head:
             chunk = self.sock.recv(1)
             if not chunk:
+                self.sock.close()
                 raise Refused("closed", head.decode(errors="replace"))
             head += chunk
         self.open_seconds = time.monotonic() - t0
@@ -113,16 +160,19 @@ class WS:
                 rest = self.sock.recv(4096)
             except OSError:
                 pass
+            self.sock.close()
             raise Refused(status, text + rest.decode(errors="replace"))
         want = base64.b64encode(hashlib.sha1(key.encode() + GUID).digest()).decode()
         headers = {l.split(":", 1)[0].lower(): l.split(":", 1)[1].strip() for l in text.split("\r\n")[1:] if ":" in l}
         if headers.get("sec-websocket-accept") != want:
+            self.sock.close()
             raise RuntimeError("Sec-WebSocket-Accept mismatch: %r" % headers)
         self.head = text
         self.buf = b""
         self.lock = threading.Lock()
         self.queue = None
         self.ended = None
+        self.ended_at = None
         self.pongs = 0
 
     def start(self, keepalive=None, every=20.0):
@@ -146,6 +196,7 @@ class WS:
                         self.queue.put(payload.decode(errors="replace") if op == 1 else payload)
             except Exception as e:
                 self.ended = "eof" if isinstance(e, EOFError) else "error: %s" % e
+            self.ended_at = time.monotonic()
             self.queue.put(None)
         threading.Thread(target=run, daemon=True).start()
         if keepalive is not None:
