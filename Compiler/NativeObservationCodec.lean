@@ -69,6 +69,11 @@ structure Challenge where
   authorityRoot : Digest
   height : Nat
   headers : List (List UInt8)
+  /-- The subject's Ed25519 signature over the intent's bytes (`intentCodec.encode`, whose
+  frame separates it from every other signed message). The Host verifies it against the
+  subject's current key before it reads anything about the intent's targets, and the signed
+  observation carries it back so `authorize` checks it first too (FIX-DISCLOSE). -/
+  intentSignature : List UInt8
   deriving DecidableEq, Repr
 
 structure Signed where
@@ -153,20 +158,23 @@ def challengeStream : StreamCodec Challenge :=
     (StreamCodec.product intentStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product federationStream
         (StreamCodec.product digestStream (StreamCodec.product digestStream
-          (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream))))))))
+          (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.list bytesStream)
+            bytesStream))))))))
     (fun value => (value.intent, value.domain, value.semantics, value.federation,
-      value.worldRoot, value.authorityRoot, value.height, value.headers))
+      value.worldRoot, value.authorityRoot, value.height, value.headers, value.intentSignature))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
+      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2.1,
+      wire.2.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- v6 (K-INDEX): the embedded intent is v4. v5 (the wave-c merge) bound
-`(worldRoot, height)`, named the authority root as public read data, and put
-the plan footprint in the headers (envelope version 2). Every v5 challenge
-refuses (`v5_challenge_refused`). -/
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6".toUTF8.toList
+/-- v7 (FIX-DISCLOSE): the challenge carries the intent signature that authenticated
+the request before any target was read. v6 (K-INDEX) embedded the v4 intent; v5 (the
+wave-c merge) bound `(worldRoot, height)`, named the authority root as public read data,
+and put the plan footprint in the headers (envelope version 2). Every v6 challenge
+refuses (`v6_challenge_refused`). -/
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v7".toUTF8.toList
 
-def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v5".toUTF8.toList
+def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6".toUTF8.toList
 
 def challengeCodec : LawfulCodec Challenge := NativeHostCodec.framed challengeFrame challengeStream
 
@@ -175,9 +183,9 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v7".toUTF8.toList
 
-def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v5".toUTF8.toList
+def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6".toUTF8.toList
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed signedFrame signedStream
 
@@ -208,8 +216,8 @@ theorem signed_canonical {bytes : List UInt8} {signed : Signed}
     (decoded : signedCodec.decode bytes = some signed) : signedCodec.encode signed = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
 
-/-- A v5 challenge refuses to decode. -/
-theorem v5_challenge_refused (payload : List UInt8) :
+/-- A v6 challenge refuses to decode. -/
+theorem v6_challenge_refused (payload : List UInt8) :
     challengeCodec.decode (retiredChallengeFrame ++ payload) = none := by
   have lengthExact : challengeFrame.length = retiredChallengeFrame.length := by decide +kernel
   have different : retiredChallengeFrame ≠ challengeFrame := by decide +kernel
@@ -218,8 +226,8 @@ theorem v5_challenge_refused (payload : List UInt8) :
     simp [NativeHostCodec.framedRaw, lengthExact, different]
   simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
 
-/-- A v5 signed observation refuses to decode. -/
-theorem v5_signed_refused (payload : List UInt8) :
+/-- A v6 signed observation refuses to decode. -/
+theorem v6_signed_refused (payload : List UInt8) :
     signedCodec.decode (retiredSignedFrame ++ payload) = none := by
   have lengthExact : signedFrame.length = retiredSignedFrame.length := by decide +kernel
   have different : retiredSignedFrame ≠ signedFrame := by decide +kernel
@@ -240,9 +248,9 @@ theorem v3_intent_refused (payload : List UInt8) :
 
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v3_intent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_intent_refused
-/-- info: 'Minidregg.Compiler.NativeObservationCodec.v5_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v5_challenge_refused
-/-- info: 'Minidregg.Compiler.NativeObservationCodec.v5_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v5_signed_refused
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v6_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v6_challenge_refused
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v6_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v6_signed_refused
 
 end Minidregg.Compiler.NativeObservationCodec

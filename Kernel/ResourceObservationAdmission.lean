@@ -181,11 +181,21 @@ def policyConfig (prepared : Prepared context profile wanted marker capability c
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
 
+/-- The fields the reader's capability names (K-FIELDS), which narrow what a law refusal
+tells it (`Refusal.lawDeniedFor`, FIX-DISCLOSE). A capability that does not read names no
+field (`some ∅`): its refusal then names no clause over the cell's state. -/
+def readerFields (context : Context deployment durable) (kind : ResourceKind)
+    (capability : CapabilityId) : Option (Finset CellField) :=
+  match CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability with
+  | some stored => stored.head.scope.fields
+  | none => some ∅
+
 /-- Read admission after the requester's signature has verified. Capability
 failures carry the reason of the component that decided them
 (`sourceCapabilityOnlyEvidenceChecked`); a missing or failing committed law is
-`lawDenied`, and a failing law names its failing clause (`LawLeaf.of`) on the
-very witness states the law was admitted against. -/
+`lawDenied`, and a failing law names its failing clause on the very witness states the
+law was admitted against, narrowed to the reader's own fields (`Refusal.lawDeniedFor`):
+a clause over a field outside the grant is not named, and no such value is shown. -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
@@ -202,8 +212,8 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
           match CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
               evidence witness (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
-          | none => .error (Refusal.lawDenied
-              (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
+          | none => .error (Refusal.lawDeniedFor (readerFields context kind capability)
+              committed.record.predicate witness.oldState witness.newState)
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -240,8 +250,9 @@ theorem authorizeChecked_lawDenied
         (step prepared).oldState (step prepared).newState)
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none) :
-    authorizeChecked prepared signature = .error (Refusal.lawDenied
-      (LawLeaf.of committed.record.predicate (step prepared).oldState (step prepared).newState)) := by
+    authorizeChecked prepared signature = .error (Refusal.lawDeniedFor
+      (readerFields context kind capability)
+      committed.record.predicate (step prepared).oldState (step prepared).newState) := by
   simp only [authorizeChecked, supplied, resolved, denied]
   rfl
 
@@ -261,8 +272,8 @@ theorem authorizeChecked_leaf_fails
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
   simp only [authorizeChecked, supplied, resolved] at refused
   split at refused
-  · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
-    obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
+  · simp only [Except.error.injEq] at refused
+    obtain ⟨at_, _, fails⟩ := lawDeniedFor_fails _ _ _ _ leaf refused
     exact ⟨at_, fails⟩
   · cases refused
 

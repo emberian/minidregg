@@ -3536,7 +3536,8 @@ private def challengeJson (value : Challenge) : Lean.Json := .mkObj
    ("worldRoot", decimal value.worldRoot.value),
    ("authorityRoot", decimal value.authorityRoot.value), ("height", decimal value.height),
    ("headers", .arr <| value.headers.toArray.map hexJson),
-   ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
+   ("signing", .arr <| value.headers.toArray.map signedHeaderJson),
+   ("intentSignature", hexJson value.intentSignature)]
 
 /-- The failing clause of a law refusal, as data and as the Host's own rendering
 in the shell's law grammar. -/

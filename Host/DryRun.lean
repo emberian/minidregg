@@ -4,7 +4,7 @@
 `can NAME` (P-AFFORDANCES) asks, per verb a subject holds, whether the kernel
 would admit the smallest command for it *now*, without committing it. The
 signing-plan op (op 1) answers only half of that: it authorizes the requester's
-reads and evaluates the target's law (P-LAW's `invokeLawLeaf`), but it never
+reads and evaluates the target's law (P-LAW's `invokeLawRefusal`), but it never
 consults the capability that would authorize the write, the signer's standing,
 or the nullifier. Those are decided at submission.
 
