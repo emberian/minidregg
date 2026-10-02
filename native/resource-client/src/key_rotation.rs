@@ -324,6 +324,24 @@ pub(crate) fn key_status(mut args: Args) -> Result<()> {
     Ok(())
 }
 
+/// Source-authored command equality always applies. Protected rotations also
+/// require a local inspector that reconstructs the role-specific signed frame.
+fn check_rotation_plan(view: &Value, command: &[u8], identity: Option<&Value>) -> Result<()> {
+    if view.get("commandBytes").and_then(Value::as_str) != Some(hex(command).as_str()) {
+        return Err("rotation plan names a different command".into());
+    }
+    if let Some(identity) = identity {
+        if view["type"] != "subject-key-rotation-plan-v1" || view["domain"] != identity["domain"]
+            || view["semantics"] != identity["semantics"] {
+            return Err("rotation plan differs from locally pinned identity".into());
+        }
+        if view["possessionFrameValidated"] != true {
+            return Err("pinned verifier does not validate rotation possession frames; explicitly upgrade the same-identity continuity verifier".into());
+        }
+    }
+    Ok(())
+}
+
 /// `mini rotate-key --workspace WS --next-key NEXT [--next-to PATH] [--to-public-key PUB]`
 ///
 /// `--to-public-key` names a key other than NEXT's own in the rotation (NEXT
@@ -338,6 +356,8 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     workspace::private_dir(&root)?;
     let _transition = transport::service_lock(&root.join("key-transition.lock"))?;
     let ws = workspace(&root)?;
+    let manifest = workspace::load_for_key_transition(&root)?;
+    let identity = receipt_continuity::key_transition_identity_if_enabled(&root, &manifest)?;
     let signer = key(&next_key)?;
     let signer_public = signer.verifying_key().to_bytes();
     let named_public = match &named {
@@ -373,7 +393,16 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             seed.fill(0);
         }
         let after_public = key(&after_path)?.verifying_key().to_bytes();
-        let digest = next_key_digest(&ws.host, &ws.socket, &ws.config, &after_public)?;
+        let digest = if let Some(identity) = &identity {
+            let input = serde_json::to_vec(&json!({"publicKey":hex(&after_public)})).map_err(|e| e.to_string())?;
+            let bytes = receipt_continuity::key_source(&root, &manifest, identity,
+                receipt_continuity::KeySourceOperation::NextKeyDigest, &input)?;
+            let digest = String::from_utf8(bytes).map_err(|_| "local next-key digest is not UTF-8")?;
+            participant_enrollment::decimal(&digest, "local next-key digest")?;
+            digest
+        } else {
+            next_key_digest(&ws.host, &ws.socket, &ws.config, &after_public)?
+        };
         let request_path = attempt.join("request.json");
         let nonce = if request_path.exists() {
             json_private(&request_path)?
@@ -390,12 +419,22 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             "key":{"keyId":key_id,"keyEpoch":new_epoch.to_string(),"algorithm":"1",
                 "subject":ws.subject,"publicKey":hex(&named_public),
                 "activeFrom":"0","activeUntil":u64::MAX.to_string(),"nextKeyDigest":digest}});
-        let command = author(&ws.host, &ws.socket, &ws.config, "subject-key-rotation", &source)?;
+        let command = if let Some(identity) = &identity {
+            let input = serde_json::to_vec(&source).map_err(|e| e.to_string())?;
+            receipt_continuity::key_source(&root, &manifest, identity,
+                receipt_continuity::KeySourceOperation::RotationCommand, &input)?
+        } else {
+            author(&ws.host, &ws.socket, &ws.config, "subject-key-rotation", &source)?
+        };
         let plan = call(&ws.host, &ws.socket, &ws.config, 140, &command)?;
-        let plan_view = inspect_bytes(&ws.host, &ws.socket, &ws.config, "subject-key-rotation-plan", &plan)?;
-        if plan_view.get("commandBytes").and_then(Value::as_str) != Some(hex(&command).as_str()) {
-            return Err("rotation plan names a different command".into());
-        }
+        let plan_view = if let Some(identity) = &identity {
+            let bytes = receipt_continuity::key_source(&root, &manifest, identity,
+                receipt_continuity::KeySourceOperation::RotationPlan, &plan)?;
+            serde_json::from_slice(&bytes).map_err(|e| format!("invalid local rotation inspection: {e}"))?
+        } else {
+            inspect_bytes(&ws.host, &ws.socket, &ws.config, "subject-key-rotation-plan", &plan)?
+        };
+        check_rotation_plan(&plan_view, &command, identity.as_ref())?;
         let header = workspace::private::decode_hex(
             plan_view
                 .get("possessionHeader")
@@ -456,4 +495,23 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod key_source_tests {
+    use super::*;
+    #[test]
+    fn protected_rotation_requires_local_identity_command_and_frame_validation() {
+        let identity = json!({"domain":"1","semantics":"2"});
+        let view = json!({"type":"subject-key-rotation-plan-v1","domain":"1","semantics":"2",
+            "commandBytes":"0102","possessionFrameValidated":true});
+        check_rotation_plan(&view,&[1,2],Some(&identity)).unwrap();
+        for name in ["domain","semantics","commandBytes","possessionFrameValidated"] {
+            let mut wrong = view.clone(); wrong[name] = json!("different");
+            assert!(check_rotation_plan(&wrong,&[1,2],Some(&identity)).is_err());
+        }
+        let mut old = view.clone(); old.as_object_mut().unwrap().remove("possessionFrameValidated");
+        assert!(check_rotation_plan(&old,&[1,2],Some(&identity)).unwrap_err().contains("explicitly upgrade"));
+        check_rotation_plan(&old,&[1,2],None).unwrap();
+    }
 }

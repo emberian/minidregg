@@ -38,9 +38,25 @@ canonical command bytes and separate command-bound authorization/possession
 headers. Rust does not encode a Lean command or derive a semantic commitment.
 Enrollment's pair-only possession co-signature is not used for adoption.
 
+The signature-critical plan and ingress are decoded by the checksum-pinned
+local continuity verifier using its pure `inspect` CLI. Endpoint opcode 8 JSON
+cannot authorize either signing frame. The client rechecks the exact manifest,
+identity, config bytes and verifier under the custody lock, uses private bounded
+input/output files, and retains the checked projection. Only a closed set of key
+operations is exposed; the helper does not open a generic native command route.
+
+For continuity-protected rotation, the same verifier also authors the successor
+key digest and rotation command and inspects the rotation plan. The client binds
+its command and domain/semantics, and requires `possessionFrameValidated:true`
+from an inspector that reconstructs the canonical role frame. An older verifier
+that only decodes that field requires an explicit same-identity verifier upgrade.
+A genuinely unprotected legacy rotation preserves the prior client behavior;
+enabled-but-missing custody never takes that fallback.
+
+
 The public routes are 187 (bounded JSON plan request), 188 (plan plus two raw
 64-byte signatures), 189 (exact ingress submit) and 190 (exact ingress lookup).
-The plan request uses `currentPublicKey`; inspections use
+The plan request uses `currentPublicKey`; local inspections use
 `currentAuthorizationHeader` and `nextPossessionHeader`. The source plan request
 bound is 4096 bytes. Existing general frame bounds apply to assembly and ingress.
 
@@ -77,7 +93,8 @@ attempt.
 Focused Rust tests use injected source codecs to test binding checks and actual
 private file persistence, signatures, submit markers, crash boundaries, stale
 finalization and replay. Socket tests exercise exact pinned-envelope requests;
-subprocess tests cover remote Host pins and the real client entry point's
+subprocess tests cover pinned local inspector rejection of forged frames, local
+rotation authoring, remote Host pins and the real client entry point's
 completed lookup after the original secrets disappear. These fixtures do not
 establish native semantic admission.
 

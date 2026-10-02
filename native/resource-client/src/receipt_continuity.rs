@@ -352,9 +352,81 @@ pub(crate) struct Ticket {
 /// Explicit key commitment adoption requires an already authenticated lineage.
 /// This never enrolls an unprotected workspace or trusts an endpoint profile.
 pub(crate) fn key_transition_identity(root: &Path, workspace: &Value) -> Result<Value> {
-    begin(root, workspace)?
-        .map(|ticket| ticket.settings.identity)
+    key_transition_identity_if_enabled(root, workspace)?
         .ok_or_else(|| fail("key adoption requires existing authenticated continuity custody"))
+}
+
+pub(crate) fn key_transition_identity_if_enabled(root: &Path, workspace: &Value) -> Result<Option<Value>> {
+    Ok(begin(root, workspace)?.map(|ticket| ticket.settings.identity))
+}
+
+/// Closed pure source operations for signing an adoption or protected rotation.
+/// No Store command or caller-selected arbitrary native operation is exposed.
+#[derive(Clone, Copy)]
+pub(crate) enum KeySourceOperation {
+    AdoptionPlan,
+    AdoptionIngress,
+    RotationPlan,
+    RotationCommand,
+    NextKeyDigest,
+}
+pub(crate) fn key_source(
+    root: &Path, workspace: &Value, expected_identity: &Value,
+    operation: KeySourceOperation, input: &[u8],
+) -> Result<Vec<u8>> {
+    const LIMIT: usize = 256 * 1024;
+    if input.is_empty() || input.len() > LIMIT {
+        return Err(fail("key source input exceeds bound"));
+    }
+    if key_transition_identity(root, workspace)? != *expected_identity {
+        return Err(fail("key source lineage changed"));
+    }
+    let custody = root.join(DIRECTORY);
+    let _lock = lock(&custody)?;
+    if read_json(&root.join("workspace.json"))? != *workspace {
+        return Err(fail("workspace manifest changed before key source verification"));
+    }
+    let settings = Settings::load(&custody)?;
+    let config = workspace::member_path(workspace, "config")?;
+    if settings.identity != *expected_identity {
+        return Err(fail("key source identity changed under custody lock"));
+    }
+    settings.check(&config)?;
+    anchor(&custody, &settings)?;
+    let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
+    let (verb, kind) = match operation {
+        KeySourceOperation::AdoptionPlan => ("inspect", "subject-key-adoption-plan"),
+        KeySourceOperation::AdoptionIngress => ("inspect", "subject-key-adoption-ingress"),
+        KeySourceOperation::RotationPlan => ("inspect", "subject-key-rotation-plan"),
+        KeySourceOperation::RotationCommand => ("author", "subject-key-rotation"),
+        KeySourceOperation::NextKeyDigest => ("author", "signing-key-next-digest"),
+    };
+    directory(&root.join("attempts"))?;
+    let scratch = root.join("attempts").join(format!("key-source-{}", workspace::random_nonce()?));
+    workspace::make_private_dir(&scratch)?;
+    let input_path = scratch.join("input.bin");
+    let output_path = scratch.join("output.bin");
+    create_file(&input_path, input)?;
+    create_file(&output_path, b"")?;
+    let status = Command::new(&settings.verifier).arg(&config).arg(verb).arg(kind)
+        .arg(&input_path).arg(&output_path)
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .status().map_err(fail)?;
+    if !status.success() { return Err(fail(format!("pinned local verifier refused {kind}"))); }
+    if crate::host_image_sha256(&settings.verifier)? != settings.verifier_sha256
+        || crate::agent_reserve::bounded(&config, MAX_JSON as usize)? != config_bytes
+        || read_json(&root.join("workspace.json"))? != *workspace {
+        return Err(fail("key source custody inputs changed during verification"));
+    }
+    let output = OpenOptions::new().read(true).custom_flags(NOFOLLOW).open(&output_path).map_err(fail)?;
+    private_metadata(&output, false)?;
+    if output.metadata().map_err(fail)?.len() > LIMIT as u64 {
+        return Err(fail("key source output exceeds bound"));
+    }
+    let mut bytes = Vec::new();
+    output.take((LIMIT + 1) as u64).read_to_end(&mut bytes).map_err(fail)?;
+    if bytes.is_empty() || bytes.len() > LIMIT { return Err(fail("invalid key source output size")); }
+    Ok(bytes)
 }
 
 static LEGACY_WARNING: AtomicBool = AtomicBool::new(false);

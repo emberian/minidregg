@@ -82,6 +82,10 @@ def main():
         return bytes(chunks)
     config_bytes = config.read_bytes()
     host_digest = hashlib.sha256(host.read_bytes()).digest()
+    settings = json.loads((workspace / 'receipt-continuity' / 'enabled.json').read_bytes())
+    verifier = Path(settings['verifier']).resolve(strict=True)
+    assert hashlib.sha256(verifier.read_bytes()).hexdigest() == settings['verifierSha256']
+
     def call(name, opcode, payload):
         frame = b'\x02' + struct.pack('<I', len(config_bytes)) + config_bytes + host_digest + bytes([opcode]) + payload
         assert len(payload) < MAX_FRAME
@@ -99,6 +103,15 @@ def main():
         assert frame[0] == opcode and len(frame)>1, (opcode, frame[:80])
         return frame[1:]
     def inspect(name, kind, body):
+        if kind in ('subject-key-adoption-plan', 'subject-key-adoption-ingress'):
+            assert hashlib.sha256(verifier.read_bytes()).hexdigest() == settings['verifierSha256']
+            save(name+'.input',body)
+            output=evidence/(name+'.json')
+            result=subprocess.run([str(verifier),str(config),'inspect',kind,str(evidence/(name+'.input')),str(output)],capture_output=True)
+            save(name+'.stdout',result.stdout);save(name+'.stderr',result.stderr)
+            assert result.returncode==0,(name,result.stderr)
+            assert output.stat().st_size <= 256*1024
+            return json.loads(output.read_bytes())
         encoded = kind.encode()
         frame = call(name,8,struct.pack('<H',len(encoded))+encoded+body)
         value = json.loads(accepted_body(frame,8))
@@ -128,7 +141,7 @@ def main():
         passed(name)
     save_json('provenance.json', {'mini':str(mini),'miniSha256':hashlib.sha256(mini.read_bytes()).hexdigest(),
         'host':str(host),'hostSha256':host_digest.hex(),'workspace':str(workspace),
-        'configSha256':hashlib.sha256(config_bytes).hexdigest(),
+        'configSha256':hashlib.sha256(config_bytes).hexdigest(),'verifier':str(verifier),'verifierSha256':settings['verifierSha256'],
         'scope':'actual native source; prerequisite legacy carried workspace supplied by caller'})
     save('workspace-before.json',manifest_path.read_bytes())
     daily_before=daily.read_bytes()

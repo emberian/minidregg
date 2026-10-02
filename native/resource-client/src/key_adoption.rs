@@ -14,15 +14,32 @@ const FORMAT: &str = "minidregg-key-adoption-attempt-v1";
 
 trait Source {
     fn invoke(&mut self, opcode: u8, payload: &[u8]) -> Result<Vec<u8>>;
+    fn inspect_signed(&mut self, kind: &str, bytes: &[u8]) -> Result<Value>;
 }
 struct Connection {
     host: PathBuf,
     socket: PathBuf,
     config: PathBuf,
+    trusted: Option<(PathBuf, Value, Value)>,
 }
 impl Source for Connection {
     fn invoke(&mut self, opcode: u8, payload: &[u8]) -> Result<Vec<u8>> {
         session_invoke(&self.host, &self.socket, &self.config, opcode, payload)
+    }
+    fn inspect_signed(&mut self, kind: &str, bytes: &[u8]) -> Result<Value> {
+        use receipt_continuity::KeySourceOperation;
+        let operation = match kind {
+            "subject-key-adoption-plan" => KeySourceOperation::AdoptionPlan,
+            "subject-key-adoption-ingress" => KeySourceOperation::AdoptionIngress,
+            _ => return Err("unsupported local adoption inspection".into()),
+        };
+        let (root, workspace, identity) = self
+            .trusted
+            .as_ref()
+            .ok_or("adoption lacks local verifier custody")?;
+        let output = receipt_continuity::key_source(root, workspace, identity, operation, bytes)?;
+        serde_json::from_slice(&output)
+            .map_err(|error| format!("invalid local adoption inspection: {error}"))
     }
 }
 fn reply(frame: &[u8], opcode: u8) -> Result<Vec<u8>> {
@@ -180,7 +197,7 @@ fn seal(
     let request = &pin["request"];
     let bytes = serde_json::to_vec(request).map_err(|e| e.to_string())?;
     let plan = stored_call(source, attempt, "plan", 187, &bytes)?;
-    let view = inspect(source, "subject-key-adoption-plan", &plan)?;
+    let view = source.inspect_signed("subject-key-adoption-plan", &plan)?;
     check_plan(&view, request, &pin["initialStatus"], &pin["profile"])?;
     save_json_staged(&attempt.join("plan.json"), &view)?;
     let current_header = hex_bytes(&view, "currentAuthorizationHeader", None)?;
@@ -228,7 +245,7 @@ fn seal(
         188,
         &pair(&plan, &pair(&signatures[0], &signatures[1])?)?,
     )?;
-    let decoded = inspect(source, "subject-key-adoption-ingress", &ingress)?;
+    let decoded = source.inspect_signed("subject-key-adoption-ingress", &ingress)?;
     check_ingress(&decoded, &view, &signatures[0], &signatures[1])?;
     save_json_staged(&attempt.join("ingress.json"), &decoded)?;
     save_json_staged(
@@ -383,6 +400,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         host,
         socket,
         config,
+        trusted: Some((root.clone(), ws.clone(), identity.clone())),
     };
     let profile: Value =
         serde_json::from_slice(&call(&mut source, 6, &[])?).map_err(|e| e.to_string())?;
@@ -628,6 +646,16 @@ mod tests {
         (&bytes[4..4 + length], &bytes[4 + length..])
     }
     impl Source for Fake {
+        fn inspect_signed(&mut self, kind: &str, bytes: &[u8]) -> Result<Value> {
+            let value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+            if kind == "subject-key-adoption-plan"
+                && (value["currentAuthorizationHeader"] != "aabb01"
+                    || value["nextPossessionHeader"] != "aabb02")
+            {
+                return Err("fixture local source rejected changed purpose/frame".into());
+            }
+            Ok(value)
+        }
         fn invoke(&mut self, opcode: u8, payload: &[u8]) -> Result<Vec<u8>> {
             self.calls.push((opcode, payload.to_vec()));
             let body = match opcode {
@@ -909,6 +937,7 @@ mod tests {
             host,
             config,
             socket,
+            trusted: None,
         };
         resolve(&mut source, &attempt, &ingress, false).unwrap();
         resolve(&mut source, &attempt, &ingress, false).unwrap();
@@ -993,12 +1022,33 @@ mod tests {
         }
         use std::os::unix::net::UnixListener;
         let host = f.root.join("fixture-verifier");
-        // Injected local profile only. The receipt equals the retained anchor;
-        // no native continuity or adoption semantics are claimed by this test.
+        // Injected pure local source codec, not a native semantic claim. The
+        // endpoint is forbidden from supplying plan/ingress interpretation.
         workspace::private_file(
             &host,
-            br#"#!/bin/sh
-printf '%s\n' '{"domain":"1","semantics":"2","expectedSeed":"3"}'
+            br#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[2] == 'profile':
+    print('{"domain":"1","semantics":"2","expectedSeed":"3"}')
+elif sys.argv[2] == 'author':
+    kind = sys.argv[3]
+    assert kind in ('signing-key-next-digest', 'subject-key-rotation')
+    value = json.load(open(sys.argv[4]))
+    with open(sys.argv[5], 'wb') as output:
+        output.write(b'777' if kind == 'signing-key-next-digest' else bytes([1,2]))
+else:
+    assert sys.argv[2] == 'inspect'
+    kind = sys.argv[3]
+    assert kind in ('subject-key-adoption-plan', 'subject-key-adoption-ingress', 'subject-key-rotation-plan')
+    value = json.load(open(sys.argv[4]))
+    if kind == 'subject-key-adoption-plan':
+        assert value['currentAuthorizationHeader'] == 'aabb01'
+        assert value['nextPossessionHeader'] == 'aabb02'
+    if kind == 'subject-key-rotation-plan':
+        assert value['possessionHeader'] == 'aabb03'
+        value['possessionFrameValidated'] = True
+    with open(sys.argv[5], 'w') as output:
+        json.dump(value, output)
 "#,
         )
         .unwrap();
@@ -1028,6 +1078,115 @@ printf '%s\n' '{"domain":"1","semantics":"2","expectedSeed":"3"}'
         .unwrap();
         f.pin["context"] = json!({"subject":"7","key":f.daily,"host":host,"hostSha256":host_digest,
             "config":config,"configSha256":digest(b"{}"),"socket":socket});
+        if mode == "reject-local" {
+            let mut connection = Connection {
+                host: host.clone(),
+                config: config.clone(),
+                socket: socket.clone(),
+                trusted: Some((f.root.clone(), manifest.clone(), identity.clone())),
+            };
+            let good = f.plan();
+            connection
+                .inspect_signed(
+                    "subject-key-adoption-plan",
+                    &serde_json::to_vec(&good).unwrap(),
+                )
+                .unwrap();
+            let mut wrong = good.clone();
+            wrong["currentAuthorizationHeader"] = json!("ff0011");
+            assert!(connection
+                .inspect_signed(
+                    "subject-key-adoption-plan",
+                    &serde_json::to_vec(&wrong).unwrap()
+                )
+                .unwrap_err()
+                .contains("pinned local verifier refused"));
+            assert!(connection.inspect_signed("outcome", b"anything").is_err());
+            let mut wrong_identity = identity.clone();
+            wrong_identity["semantics"] = json!("99");
+            assert!(receipt_continuity::key_source(
+                &f.root,
+                &manifest,
+                &wrong_identity,
+                receipt_continuity::KeySourceOperation::AdoptionPlan,
+                b"{}"
+            )
+            .is_err());
+            let mut wrong_manifest = manifest.clone();
+            wrong_manifest["subject"] = json!("99");
+            assert!(receipt_continuity::key_source(
+                &f.root,
+                &wrong_manifest,
+                &identity,
+                receipt_continuity::KeySourceOperation::AdoptionPlan,
+                b"{}"
+            )
+            .is_err());
+            assert!(connection
+                .inspect_signed("subject-key-adoption-plan", &vec![1; LIMIT + 1])
+                .is_err());
+            OpenOptions::new()
+                .append(true)
+                .open(&host)
+                .unwrap()
+                .write_all(b"\n# changed artifact\n")
+                .unwrap();
+            assert!(connection
+                .inspect_signed(
+                    "subject-key-adoption-plan",
+                    &serde_json::to_vec(&good).unwrap()
+                )
+                .unwrap_err()
+                .contains("verifier image changed"));
+            assert_eq!(
+                json_private(&f.root.join("workspace.json")).unwrap(),
+                manifest
+            );
+            return;
+        }
+        if mode == "rotation-reject" {
+            let listener = UnixListener::bind(&socket).unwrap();
+            let server = std::thread::spawn(move || {
+                for opcode in [144, 140] {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let frame = transport::read_frame(&mut stream).unwrap().unwrap();
+                    assert_eq!(
+                        frame[39], opcode,
+                        "rotation must use local digest/command author and local inspector"
+                    );
+                    let response = if opcode == 144 {
+                        json!({"keyId":"11","keyEpoch":"5","isCommittedNext":true,"prerotated":true})
+                    } else {
+                        assert_eq!(&frame[40..], &[1, 2]);
+                        json!({"type":"subject-key-rotation-plan-v1","domain":"1","semantics":"2",
+                                "commandBytes":"0102","possessionHeader":"ff0011","possessionFrameValidated":true})
+                    };
+                    transport::write_frame(
+                        &mut stream,
+                        &[vec![opcode], serde_json::to_vec(&response).unwrap()].concat(),
+                    )
+                    .unwrap();
+                }
+            });
+            let before = fs::read(f.root.join("workspace.json")).unwrap();
+            let error = key_rotation::rotate_key(Args {
+                command: "rotate-key".into(),
+                values: vec![
+                    ("--workspace".into(), f.root.as_os_str().to_owned()),
+                    ("--next-key".into(), f.next.as_os_str().to_owned()),
+                ],
+            })
+            .unwrap_err();
+            server.join().unwrap();
+            assert!(
+                error.contains("pinned local verifier refused subject-key-rotation-plan"),
+                "{error}"
+            );
+            assert!(!f.root.join("attempts/rotate-6/ingress.bin").exists());
+            assert_eq!(fs::read(f.root.join("workspace.json")).unwrap(), before);
+            return;
+        }
+
         let attempt = f.root.join("attempts").join("adopt-next-11-5");
         workspace::make_private_dir(&attempt).unwrap();
         save_json_staged(&attempt.join("attempt.json"), &f.pin).unwrap();
@@ -1044,7 +1203,7 @@ printf '%s\n' '{"domain":"1","semantics":"2","expectedSeed":"3"}'
         let manifest_before = fs::read(f.root.join("workspace.json")).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         let server = std::thread::spawn(move || {
-            for expected in [6, 8, 8, 190, 8] {
+            for expected in [6, 190, 8] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let frame = transport::read_frame(&mut stream).unwrap().unwrap();
                 assert_eq!(
@@ -1078,5 +1237,59 @@ printf '%s\n' '{"domain":"1","semantics":"2","expectedSeed":"3"}'
             manifest_before
         );
         assert_eq!(fs::read(current_path).unwrap(), vec![47; 32]);
+    }
+    #[test]
+    fn endpoint_inspection_cannot_authorize_changed_signing_purpose() {
+        let f = Fixture::new();
+        let attempt = f.attempt();
+        let mut altered = f.plan();
+        altered["currentAuthorizationHeader"] = json!("ff0011");
+        let mut source = Fake::new(altered);
+        assert!(seal(&mut source, &attempt, &f.pin, &f.daily, Some(&f.next))
+            .unwrap_err()
+            .contains("local source rejected"));
+        assert!(!attempt.join("current.sig").exists());
+        assert!(!attempt.join("next.sig").exists());
+        assert!(!attempt.join("submit-marker.json").exists());
+        assert_eq!(
+            source.calls.iter().map(|(op, _)| *op).collect::<Vec<_>>(),
+            vec![187]
+        );
+    }
+    #[test]
+    fn adoption_pinned_local_source_checks_frames_identity_manifest_and_artifact() {
+        let output = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "key_adoption::tests::adoption_run_fixture_child",
+                "--nocapture",
+            ])
+            .env("MINI_ADOPTION_CHILD", "reject-local")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[test]
+    fn adoption_protected_rotation_uses_local_authors_and_refuses_forged_frame() {
+        let output = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "key_adoption::tests::adoption_run_fixture_child",
+                "--nocapture",
+            ])
+            .env("MINI_ADOPTION_CHILD", "rotation-reject")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
