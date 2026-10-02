@@ -433,6 +433,13 @@ def selected_spec(spec, row, index):
     value["workload"] = dict(members=list(spec["members"])[:population], concurrency=row["concurrency"])
     value["prefix"] = spec["prefix"] + "-s" + str(index)
     require(len(value["prefix"]) <= 24, "sweep prefix exceeds Mini name bound")
+    for room in value.get("rooms", {}).values():
+        if "name" in room:
+            logical = room["name"]
+            suffix = "-s" + str(index)
+            room["name"] = logical + suffix
+            if len(room["name"]) > 64:
+                room["name"] = logical[:40] + "-" + hashlib.sha256(logical.encode()).hexdigest()[:8] + suffix
     # Workloads are selected pairs, not a Cartesian product. With no supplied
     # groups, create overlapping and disjoint groups once population permits.
     if not spec.get("rooms") and population >= 5:

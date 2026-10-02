@@ -143,3 +143,14 @@ class MultiuserWorkload(unittest.TestCase):
             write = journey.member_write(2, room, 1, "1001")
         self.assertIn("joined-r2/notes", shell.call_args.args[2])
         self.assertEqual(write["member"], "1001")
+
+
+class NamedSweepAliases(unittest.TestCase):
+    def test_explicit_group_aliases_are_fresh_on_each_selected_pair(self):
+        spec = {"prefix": "receiving", "members": {"1000": {}, "1001": {}, "1002": {}},
+                "rooms": {"work": {"name": "lab", "owner": "1000", "members": ["1000", "1001", "1002"]}}}
+        first = joined.selected_spec(spec, {"population": 2, "concurrency": 1}, 0)
+        second = joined.selected_spec(spec, {"population": 3, "concurrency": 2}, 1)
+        self.assertEqual(joined.workload(first)["rooms"]["work"]["name"], "lab-s0")
+        self.assertEqual(joined.workload(second)["rooms"]["work"]["name"], "lab-s1")
+        self.assertEqual(spec["rooms"]["work"]["name"], "lab")
