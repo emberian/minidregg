@@ -17,6 +17,20 @@ STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/targe
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
 WORKROOM_PARENT_TASK=${WORKROOM_PARENT_TASK-7101}
 WORKROOM_TOOL_TASK=${WORKROOM_TOOL_TASK-7102}
+WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-100}
+WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-100}
+WORKROOM_PARENT_BUDGET=${WORKROOM_PARENT_BUDGET-100}
+WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET-50}
+# Optional deployment policy is applied before profile/genesis identity. It
+# cannot replace Store coordinates or add old single-application lifecycle pins.
+WORKROOM_OPERATOR_POLICY=${WORKROOM_OPERATOR_POLICY-}
+for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET"; do
+  case "$value" in ''|0?*|*[!0-9]*) echo "allocation must be canonical decimal" >&2; exit 2;; esac
+done
+if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
+  case "$WORKROOM_OPERATOR_POLICY" in /*) ;; *) echo "operator policy must be absolute" >&2; exit 2;; esac
+  jq -e 'type == "object" and (keys - ["completionCustodianKey","lifecycleManagement","grainBirthTariff","providerServices","disabledEvaluators"] | length == 0)' "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "unsupported operator policy field" >&2; exit 2; }
+fi
 
 canonical_task() {
   case "$1" in
@@ -94,6 +108,10 @@ cat >"$EVIDENCE/operator.json" <<EOF
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
  "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
 EOF
+if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
+  jq --slurpfile policy "$WORKROOM_OPERATOR_POLICY" '. + $policy[0]' "$EVIDENCE/operator.json" >"$EVIDENCE/operator-with-policy.json"
+  mv "$EVIDENCE/operator-with-policy.json" "$EVIDENCE/operator.json"
+fi
 "$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
 SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
 cat >"$EVIDENCE/genesis.json" <<EOF
@@ -107,12 +125,12 @@ cat >"$EVIDENCE/genesis.json" <<EOF
   {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
     "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
    "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"100",
+   "factoryObserveCapabilityId":"54","initialBalance":"$WORKROOM_SPONSOR_BALANCE",
    "accountPredicate":{"type":"all","predicates":[]}},
   {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
     "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
    "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"100",
+   "factoryObserveCapabilityId":"55","initialBalance":"$WORKROOM_TOOL_BALANCE",
    "accountPredicate":{"type":"all","predicates":[]}}],
  "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
  "tailBound":"256",
@@ -148,10 +166,10 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
   "template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
   "creator":"7","nonce":"22000","resources":[
    {"kind":"object","storage":"grain","target":"$WORKROOM_PARENT_TASK","owner":"7",
-    "ownerCapability":"71","controlCapability":"72","budget":"100",
+    "ownerCapability":"71","controlCapability":"72","budget":"$WORKROOM_PARENT_BUDGET",
     "workerSubject":"8","workerGeneration":"1"},
    {"kind":"object","storage":"grain","target":"$WORKROOM_TOOL_TASK","owner":"8",
-    "ownerCapability":"81","controlCapability":"82","budget":"50"},
+    "ownerCapability":"81","controlCapability":"82","budget":"$WORKROOM_TOOL_BUDGET"},
    {"kind":"object","storage":"declared","target":"7003","owner":"7",
     "ownerCapability":"91","controlCapability":"92",
     "predicate":{"type":"all","predicates":[]}},
@@ -162,6 +180,13 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}
 EOF
+# The first grain uses the same optional tariff already pinned into genesis.
+if jq -e 'has("grainBirthTariff")' "$CONFIG" >/dev/null; then
+  jq --slurpfile config "$CONFIG" '.birth.grainBirthTariff =
+    ($config[0].grainBirthTariff | with_entries(.value |= tostring))' \
+    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-with-policy.json"
+  mv "$EVIDENCE/birth-with-policy.json" "$EVIDENCE/birth-intent.json"
+fi
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
   --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/birth-attempt" >"$EVIDENCE/birth.stdout"
@@ -170,9 +195,9 @@ query_task controller-born 7 "$WORKROOM_PARENT_TASK" 71 "$EVIDENCE/controller.ke
 query_task tool-born 8 "$WORKROOM_TOOL_TASK" 81 "$EVIDENCE/tool.key" 30002
 query_task publication-born 7 7003 91 "$EVIDENCE/controller.key" 30009
 query_task workroom-born 7 8001 89 "$EVIDENCE/controller.key" 30010
-jq -e --arg task "$WORKROOM_PARENT_TASK" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+jq -e --arg task "$WORKROOM_PARENT_TASK" --arg remaining "$WORKROOM_PARENT_BUDGET" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:$remaining,reserved:"0"}' \
   "$EVIDENCE/controller-born/view.json" >/dev/null
-jq -e --arg task "$WORKROOM_TOOL_TASK" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+jq -e --arg task "$WORKROOM_TOOL_TASK" --arg remaining "$WORKROOM_TOOL_BUDGET" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:$remaining,reserved:"0"}' \
   "$EVIDENCE/tool-born/view.json" >/dev/null
 
 for name in controller tool; do

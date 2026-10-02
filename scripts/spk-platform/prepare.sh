@@ -70,7 +70,7 @@ POSITIVE="$REPO/scripts/application-share-issue/native-positive-base.sh"
 ROOTS="$REPO/scripts/application-share-issue/gitweb-roots.json"
 PACKAGE="$REPO/scripts/application-share-issue/gitweb-verified-package.json"
 test "$(sha256sum "$PROVISION" | cut -d ' ' -f 1)" = \
-  4648f7222897de69e3454c8b7abad7022719697594c0b987fe24a0bb000ba9c8
+  202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb
 test "$(sha256sum "$MEMBER" | cut -d ' ' -f 1)" = \
   b76b7bda932f016e86c3013366132a16458768c3fd59cec1106cee2c0cb3ee9a
 test "$(sha256sum "$APP" | cut -d ' ' -f 1)" = \
@@ -107,7 +107,7 @@ test "${#COMPLETION_PUBLIC}" = 64
 # shellcheck disable=SC2016 # Preserve provisioner's literal shell variables.
 sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","completionManagement":{"app":8401,"packageManifest":8402,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"appObserveCapability":141,"packageCapability":143,"packageObserveCapability":143},"residentBeginManagement":{"app":8401,"packageManifest":8402,"snapshotManifest":8403,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"packageObserveCapability":143},"residentClaimManagement":{"app":8401,"packageManifest":8402,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"appObserveCapability":141,"packageObserveCapability":143},"signatureBinary"|' \
   "$PROVISION" >"$ROOT/source-stage/provision-spk.sh"
-test "$(rg -c 'completionCustodianKey' "$ROOT/source-stage/provision-spk.sh")" = 1
+test "$(rg -c 'completionCustodianKey' "$ROOT/source-stage/provision-spk.sh")" = 2
 test "$(rg -c 'residentBeginManagement' "$ROOT/source-stage/provision-spk.sh")" = 1
 test "$(rg -c 'residentClaimManagement' "$ROOT/source-stage/provision-spk.sh")" = 1
 test "$(rg -c '"signatureBinary":"\$SIGNATURE_BINARY"}' "$ROOT/source-stage/provision-spk.sh")" = 1

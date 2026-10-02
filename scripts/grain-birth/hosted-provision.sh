@@ -16,7 +16,7 @@ MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
 SOURCE="$REPO/scripts/workroom/provision.sh"
-SOURCE_SHA=4648f7222897de69e3454c8b7abad7022719697594c0b987fe24a0bb000ba9c8
+SOURCE_SHA=202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb
 test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = "$SOURCE_SHA" || {
   echo "workroom source changed; review overlay before use" >&2; exit 2;
 }
@@ -34,7 +34,7 @@ sed \
   -e 's|"birth":{"genesis":|"birth":{"grainBirthTariff":{"base":"2","perBirth":"1"},"genesis":|' \
   -e 's|"factoryPredicate":{"type":"all","predicates":\[\]}|"factoryPredicate":{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"1"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}|' \
   "$SOURCE" > "$STAGE/provision.sh"
-test "$(rg -c 'grainBirthTariff' "$STAGE/provision.sh")" = 2
+test "$(rg -c 'grainBirthTariff' "$STAGE/provision.sh")" = 6
 test "$(rg -c 'birth/mode/grain-backed' "$STAGE/provision.sh")" = 1
 chmod 700 "$STAGE/provision.sh"
 WORKROOM_PARENT_TASK=9301 WORKROOM_TOOL_TASK=9302 \

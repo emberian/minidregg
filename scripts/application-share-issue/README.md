@@ -8,7 +8,7 @@ member's underfunded balance. It hashes inputs before and after execution and
 keeps stage logs on failure. Do not point it at an existing Store.
 
 The reviewed portable source inputs are
-`scripts/workroom/provision.sh` SHA-256 `4648f7222897de69e3454c8b7abad7022719697594c0b987fe24a0bb000ba9c8`,
+`scripts/workroom/provision.sh` SHA-256 `202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb`,
 `scripts/grain-birth/native-share-member.sh` SHA-256 `b76b7bda932f016e86c3013366132a16458768c3fd59cec1106cee2c0cb3ee9a`, and
 `scripts/application-current-birth/native-share-base.sh` SHA-256 `b62a2d4ae17b6aa85a663fada3779eca3be10e252bffea1b7066e501ee9015cd`.
 The latter two were recovered from the successful fresh

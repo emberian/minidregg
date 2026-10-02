@@ -42,7 +42,7 @@ export SPK_COMPLETION_PUBLIC
 # shellcheck disable=SC2016 # Preserve the provisioner's literal variables.
 sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"signatureBinary"|' \
   "$REPO/scripts/workroom/provision.sh" >"$ROOT/source-stage/provision-grain.sh"
-[ "$(rg -c 'lifecycleManagement' "$ROOT/source-stage/provision-grain.sh")" = 1 ] ||
+[ "$(rg -c 'lifecycleManagement' "$ROOT/source-stage/provision-grain.sh")" = 2 ] ||
   fail "provisioner shape changed; review the lifecycle overlay"
 chmod 700 "$ROOT/source-stage/provision-grain.sh"
 
