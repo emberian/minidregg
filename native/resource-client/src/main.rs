@@ -167,6 +167,31 @@ fn set_exit(code: u8) {
     EXIT_STATUS.fetch_max(code, Ordering::Relaxed);
 }
 
+/// A command's typed ending from retained client custody. This is distinct
+/// from a newly received Host verdict: an absent response is never invented.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum CommandEnding {
+    Client(String),
+    Refused(String),
+    Undecided(String),
+}
+impl CommandEnding {
+    pub(crate) fn render(&self) -> (u8, String) {
+        match self {
+            Self::Client(message) => (1, format!("error: {message}\n")),
+            Self::Refused(message) => (3, format!("refused: {message}\n")),
+            Self::Undecided(message) => (4, format!("undecided: {message}\n")),
+        }
+    }
+}
+static COMMAND_ENDING: Mutex<Option<CommandEnding>> = Mutex::new(None);
+pub(crate) fn note_command_ending(ending: CommandEnding) {
+    *COMMAND_ENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ending);
+}
+pub(crate) fn take_command_ending() -> Option<CommandEnding> {
+    COMMAND_ENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
+}
+
 /// The Host's own verdict on the latest request, retained as data at the point
 /// where the Host answered, so a caller (`mini shell`) can tell a Host decision
 /// from a client error without reading error prose.
@@ -4384,6 +4409,11 @@ fn main() -> ExitCode {
     };
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
+    if let Some(ending) = take_command_ending() {
+        let (code, message) = ending.render();
+        eprint!("{message}");
+        return ExitCode::from(code);
+    }
     match parsed {
         Ok(()) => ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed)),
         Err(error) if error == USAGE => {

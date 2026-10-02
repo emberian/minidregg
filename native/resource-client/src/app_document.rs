@@ -631,17 +631,20 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
             state["status"] = result["status"].clone();
             state["message"] = result["message"].clone();
         }
-        if attempt.join("outcome.json").exists() {
-            let out = bounded_json(&attempt.join("outcome.json"))?;
-            state["outcome"] = out.clone();
-            if out["type"] == "refused" {
-                state["status"] = json!("refused");
-            }
-        }
         if attempt.exists() {
-            if let Some(out) = accepted_outcome(&attempt)? {
-                state["outcome"] = out;
-                state["status"] = json!("saved");
+            match retained_attempt_outcome(&attempt)? {
+                AttemptOutcome::Confirmed(_) => {
+                    let out = accepted_outcome(&attempt)?.ok_or("confirmed attempt lost its retained outcome")?;
+                    state["outcome"] = out;
+                    state["status"] = json!("saved");
+                }
+                AttemptOutcome::Refused => state["status"] = json!("refused"),
+                AttemptOutcome::Pending if attempt.join("call.bin").exists() => {
+                    // A newer undecided reply supersedes any earlier refusal.
+                    // The exact call remains held, so no fresh write is safe.
+                    state["status"] = json!("uncertain");
+                }
+                AttemptOutcome::Pending => {},
             }
         }
     }
@@ -739,6 +742,21 @@ pub(crate) fn rebase(root: &Path, workspace: &Value, id: &str, next: &str) -> Re
     status(root, workspace, next)
 }
 
+fn finish_result(op: &str, result: &Value) -> Result<()> {
+    print_json(result)?;
+    if op == "status" { return Ok(()); }
+    let ending = match result["status"].as_str() {
+        Some("refused") => crate::CommandEnding::Refused("retained document write was refused; export bytes remain held for an explicit rebase".into()),
+        Some("uncertain") => crate::CommandEnding::Undecided("exact document call remains undecided; recover this operation without replacing its export".into()),
+        Some("source-uncertain") => crate::CommandEnding::Undecided("source export remains uncertain; this operation cannot fetch again".into()),
+        Some("failed") => crate::CommandEnding::Client("document writer failed before submitting a call; export bytes remain held for an explicit rebase".into()),
+        _ => return Ok(()),
+    };
+    let (_, message) = ending.render();
+    crate::note_command_ending(ending);
+    Err(message.trim_end().to_owned())
+}
+
 pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> {
     let op = os_string(args.required("op")?, "connector operation")?;
     let id = os_string(args.required("id")?, "connector identity")?;
@@ -767,7 +785,7 @@ pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
         }
         _ => return Err("connector op is capture, publish, status, recover or rebase".into()),
     };
-    print_json(&result)
+    finish_result(&op, &result)
 }
 
 #[cfg(test)]
@@ -785,6 +803,40 @@ mod tests {
             hex(&serde_json::to_vec(r).unwrap())
         )
         .into_bytes()
+    }
+    #[test]
+    fn effect_endings_are_typed_but_status_is_successful() {
+        for (state, code) in [("refused", 3), ("uncertain", 4), ("source-uncertain", 4), ("failed", 1)] {
+            let value = json!({"type":"mini-app-document-result-v1","status":state});
+            let _ = crate::take_command_ending();
+            assert!(finish_result("publish", &value).is_err());
+            assert_eq!(crate::take_command_ending().unwrap().render().0, code);
+            assert!(finish_result("status", &value).is_ok());
+            assert!(crate::take_command_ending().is_none());
+        }
+        assert!(finish_result("publish", &json!({"status":"saved"})).is_ok());
+        assert!(crate::take_command_ending().is_none());
+    }
+    #[test]
+    fn status_uses_latest_retry_instead_of_original_refusal() {
+        for (initial, newest, expected) in [("uncertain", "refused", "refused"), ("refused", "uncertain", "uncertain"), ("refused", "unavailable", "uncertain")] {
+            let root = std::env::temp_dir().join(format!("app-doc-retry-status-{}", random_nonce().unwrap()));
+            make_private_dir(&root).unwrap();
+            let ws = json!({"subject":"8"});
+            store_key(&root).unwrap();
+            let dir = operation(&root, "export").unwrap();
+            make_private_dir(&dir).unwrap();
+            seal(&root, &ws, "export", &json!({"binding":binding(),"body":"616263","receipt":receipt(),"refs":{"document":{"target":"22"}}})).unwrap();
+            let attempt = root.join("write");
+            make_private_dir(&attempt).unwrap();
+            private_file(&attempt.join("call.bin"), b"exact retained call").unwrap();
+            save(&dir.join("submit-started.json"), &json!({"attempt":attempt,"proposal":"app-export"})).unwrap();
+            save(&dir.join("result.json"), &json!({"status":if initial == "refused" {"refused"} else {"uncertain"},"message":"retained original result"})).unwrap();
+            save(&attempt.join("outcome.json"), &json!({"type":initial})).unwrap();
+            save(&attempt.join("retry-0001.json"), &json!({"type":newest})).unwrap();
+            assert_eq!(status(&root, &ws, "export").unwrap()["status"], expected);
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
     #[test]
     fn unpublishable_id_refuses_before_export_custody() {

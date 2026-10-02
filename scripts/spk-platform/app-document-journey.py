@@ -56,6 +56,12 @@ def binding(config, provisioned):
         "token": token, "ca": config["ca"]}
 
 
+def retained_effect_exit(value):
+    if not isinstance(value, dict) or value.get("type") != "mini-app-document-result-v1":
+        return None
+    return {"failed": 1, "refused": 3, "uncertain": 4, "source-uncertain": 4}.get(value.get("status"))
+
+
 def verified_readback(body, status):
     receipt = status["receipt"]
     marker = ("Export " + receipt["bodySha256"] + " · operation " + receipt["operation"] + " · receipt " + receipt["transaction"] + "\n").encode()
@@ -131,10 +137,17 @@ def journey(path):
                 save(run / (label + ".json"), {"phase": label, "status": "process-uncertain", "message": "Exact Mini operation remains retained; no replacement request was made."})
                 raise RuntimeError("Mini timeout; inspect retained operation, never recapture")
             evidence = {"phase": label, "returnCode": process.returncode, "stdoutSha256": hashlib.sha256(process.stdout).hexdigest(), "stderrSha256": hashlib.sha256(process.stderr).hexdigest()}
-            if not raw and process.returncode == 0:
-                evidence["result"] = json.loads(process.stdout)
+            accepted = process.returncode == 0
+            if not raw:
+                try:
+                    value = json.loads(process.stdout)
+                except ValueError:
+                    value = None
+                if value is not None and (accepted or retained_effect_exit(value) == process.returncode):
+                    evidence["result"] = value
+                    accepted = True
             save(run / (label + ".json"), evidence)
-            require(process.returncode == 0, "Mini " + label + " did not complete; inspect retained operation")
+            require(accepted, "Mini " + label + " did not complete; inspect retained operation")
             return process.stdout if raw else evidence["result"]
 
         def action(label, op, extra=()):

@@ -2537,6 +2537,7 @@ fn execute(session: &Session, plan: Plan) -> Ending {
             .map(|(name, value)| (OsString::from(format!("--{name}")), value))
             .collect(),
     };
+    let _ = super::take_command_ending();
     let _ = super::take_host_decision();
     let _ = super::replan::take_count();
     let _ = super::take_line_refusal();
@@ -2549,6 +2550,10 @@ fn execute(session: &Session, plan: Plan) -> Ending {
         eprintln!("(re-planned {replanned}×)");
     }
     let decision = super::take_host_decision();
+    if let Some(ending) = super::take_command_ending() {
+        let (code, message) = ending.render();
+        return Ending::Rendered(i32::from(code), message);
+    }
     match (result, decision) {
         (Ok(()), _) => Ending::Done,
         (Err(client), None) => Ending::Client(client),

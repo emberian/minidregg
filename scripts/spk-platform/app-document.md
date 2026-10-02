@@ -103,3 +103,9 @@ the exported byte count and digest, the independent read's actual document
 target, and unchanged call bytes and receipt on repeat. Journey logs hold only
 readback hashes and result metadata; document plaintext stays in memory.
 Source revocation and browser rendering remain separate receiving checks.
+
+Effect commands print the retained result before returning a typed failure:
+refused writes exit 3, undecided document/source effects exit 4, and a writer
+failure before any call exits 1. Read-only `status` exits 0 while reporting
+these same states. A newer exact lookup's uncertainty supersedes an earlier
+refusal; a preserved confirmation wins over later replies.

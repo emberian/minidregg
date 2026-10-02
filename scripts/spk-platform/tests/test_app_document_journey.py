@@ -11,6 +11,12 @@ spec.loader.exec_module(m)
 
 
 class IndependentReadback(unittest.TestCase):
+    def test_retained_effect_failure_requires_exact_type_and_exit(self):
+        for state, code in [("failed", 1), ("refused", 3), ("uncertain", 4), ("source-uncertain", 4)]:
+            self.assertEqual(m.retained_effect_exit({"type":"mini-app-document-result-v1", "status":state}), code)
+        self.assertIsNone(m.retained_effect_exit({"type":"other", "status":"refused"}))
+        self.assertIsNone(m.retained_effect_exit({"type":"mini-app-document-result-v1", "status":"saved"}))
+
     def test_another_store_and_wrong_host_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
