@@ -145,7 +145,7 @@ def project (prepared : Prepared context profile federation height pin proposal)
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (signingBytes proposal) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots proposal.target
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject proposal.target
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height pin proposal) :

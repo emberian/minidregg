@@ -300,7 +300,8 @@ def observableKind (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind)
 
 theorem observable_roles_exact (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) :
     observableKind kind physical = true ↔
-      (kind = .object ∧ (physical = .declaredObject ∨ physical = .content ∨ physical = .stream)) ∨
+      (kind = .object ∧ (physical = .declaredObject ∨ physical = .content ∨ physical = .stream ∨
+        physical = .worldKind ∨ physical = .worldInstance)) ∨
       (kind = .account ∧ physical = .accountMetadata) ∨
       (kind = .program ∧ (physical = .declaredProgram ∨ physical = .pay)) := by
   cases kind <;> cases physical <;> simp [observableKind, ResourceTargetAdmission.externalKind]
@@ -763,6 +764,8 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           cases append : written.payload with
           | scalar _ => simp [append] at shown
           | content _ => simp [append] at shown
+          | world _ => simp [append] at shown
+          | kindDefinition _ => simp [append] at shown
           | append request =>
             simp only [append] at shown
             by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest
