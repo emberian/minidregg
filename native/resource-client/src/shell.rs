@@ -2873,6 +2873,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let candidates: Vec<String> = match (verb, position) {
         (_, 0) => command_catalog().map(|v| v.name.to_owned()).collect(),
         ("room" | "key" | "chat" | "app", 1) => subcommands(verb),
+        ("app", 2) if w[1] == "status" => refs(),
         ("app", 2) if w[1] == "delegate-lifecycle" => subcommands_after("app","app delegate-lifecycle "),
         ("app", 4) if w[1] == "delegate-lifecycle" && w[2] == "prepare" => refs(),
         ("ask" | "dismiss" | "summon", 1) => refs(),
@@ -4182,6 +4183,7 @@ mod tests {
         assert!(plan(&s,"doc quote paper notes 1 2").is_err());
         assert!(complete(&s, "app de").contains(&"delegate-lifecycle".to_owned()));
         assert!(complete(&s, "app delegate-lifecycle re").contains(&"recover".to_owned()));
+        assert!(complete(&s, "app st").contains(&"status".to_owned()));
     }
 
     #[test]
