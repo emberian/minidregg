@@ -330,13 +330,20 @@ fn line_number(value: OsString, flag: &str) -> Result<usize> {
         .ok_or_else(|| format!("{flag} must be a line number, 1 or more"))
 }
 
-/// `Kernel/ContentResource.commandVersion`: the content command grammar v7
-/// (createDocument … transclude 6, editElement 7, createContainer 8, unlink 9,
-/// mark 10, unmark 11); v1–v6 frames are refused (`retired_command_refused`).
+/// `Kernel/ContentResource.commandVersion`: grammar v9 adds immutable protected
+/// fragments and their guarded wrapping updates; v1–v8 are refused.
+/// The source-contract test below checks this independent client declaration.
 /// An observe-only `read` target is checked under it too.
-const CONTENT_COMMAND_VERSION: &str = "7";
+const CONTENT_COMMAND_VERSION: &str = "9";
 /// The declared scalar command version (`Kernel/DeclaredResourceScalar`).
 const SCALAR_COMMAND_VERSION: &str = "1";
+
+fn invocation_schema_version(payload: &Value) -> &'static str {
+    match payload.get("type").and_then(Value::as_str) {
+        Some("content") | Some("read") => CONTENT_COMMAND_VERSION,
+        _ => SCALAR_COMMAND_VERSION,
+    }
+}
 
 pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
@@ -3001,11 +3008,8 @@ fn propose_summary_once(
                 let observe = member(&reference, "observeCapability")?;
                 // The command version the Host checks per payload: a content
                 // command and an observe-only read are `ContentResource.commandVersion`
-                // (7); a scalar command is 1.
-                let schema_version = match lowered.get("type").and_then(Value::as_str) {
-                    Some("content") | Some("read") => CONTENT_COMMAND_VERSION,
-                    _ => SCALAR_COMMAND_VERSION,
-                };
+                // (9); a scalar command is 1.
+                let schema_version = invocation_schema_version(&lowered);
                 let mut target_row = json!({"kind":kind,"target":target,"capability":capability,
                     "observeCapability":observe,"schemaVersion":schema_version,
                     "expectedTargetRoot":root_value,"payload":lowered});
@@ -6791,6 +6795,23 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn content_invocation_version_matches_source_admission_contract() {
+        // The native grammar and the source admission guard are independent
+        // consumers: stale client versions refuse even createDocument and read.
+        let source = include_str!("../../../Kernel/ContentResource.lean");
+        let version = source.lines()
+            .find_map(|line| line.strip_prefix("def commandVersion : Nat := "))
+            .expect("source content command version").trim();
+        for payload in [json!({"type":"content","actions":[{"type":"createDocument"}]}),
+            json!({"type":"read"})] {
+            // This is the selector used in emitted target.schemaVersion.
+            assert_eq!(invocation_schema_version(&payload), version);
+        }
+        assert_eq!(invocation_schema_version(&json!({"type":"scalar"})), "1");
+        assert_ne!(CONTENT_COMMAND_VERSION, SCALAR_COMMAND_VERSION);
+    }
 
     fn atom(id: &str, text: &str, by: &str) -> Value {
         json!({"type":"atom","id":id,"document":"900","kind":{"type":"text"},
