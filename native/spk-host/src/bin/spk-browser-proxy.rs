@@ -179,8 +179,7 @@ mod linux {
         })
     }
 
-    fn read_response_head(upstream: &mut UnixStream) -> io::Result<Vec<u8>> {
-        let deadline = Instant::now() + RESPONSE_TIME;
+    fn read_response_head(upstream: &mut UnixStream, deadline: Instant) -> io::Result<Vec<u8>> {
         let mut response = Vec::new();
         loop {
             upstream.set_read_timeout(Some(remaining(deadline)?))?;
@@ -381,7 +380,8 @@ mod linux {
         if !upgrade {
             upstream.shutdown(std::net::Shutdown::Write)?;
         }
-        let mut response = read_response_head(&mut upstream)?;
+        let deadline = Instant::now() + RESPONSE_TIME;
+        let mut response = read_response_head(&mut upstream, deadline)?;
         let status = response.split(|b| *b == b'\n').next().unwrap_or_default();
         let switching = status.starts_with(b"HTTP/1.1 101 ");
         if switching {
@@ -397,7 +397,6 @@ mod linux {
             tls.flush()?;
             return splice(tls, upstream);
         }
-        let deadline = Instant::now() + RESPONSE_TIME;
         loop {
             upstream.set_read_timeout(Some(remaining(deadline)?))?;
             let mut chunk = [0_u8; 8192];
