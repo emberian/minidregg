@@ -319,9 +319,23 @@ fn put(path: &Path, value: &Value) -> Result<(), Done> {
 /// Resolve one operator-advertised registration before any grants or funding.
 /// A display alias is never a custody coordinate; tasks are room-bound.
 fn registration(session: &Session, explicit: Option<String>, room_cell: &str) -> Result<Value, Done> {
-    let registry = chat::get_json(&session.home.join("hermes/registry.json")).or_else(||chat::get_json(Path::new("/etc/mini/hermes-residents.json")));
-    let default = chat::get_json(&session.home.join(NODE_FILE));
+    let registry = match registry_file(&session.home.join("hermes/registry.json")).map_err(err)? {
+        Some(registry) => Some(registry),
+        None => registry_file(Path::new("/etc/mini/hermes-residents.json")).map_err(err)?,
+    };
+    let default = if registry.is_none() { registry_file(&session.home.join(NODE_FILE)).map_err(err)? } else { None };
     select_registration(registry.as_ref(), default.as_ref(), explicit.as_deref(), room_cell).map_err(err)
+}
+
+/// Only absence allows fallback. An existing broken advertisement must not
+/// silently resurrect another recipient from a legacy operator record.
+fn registry_file(path: &Path) -> Result<Option<Value>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => crate::hermes_handoff::json_file(path).map(Some)
+            .map_err(|error| format!("invalid resident registry {}: {error}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("cannot inspect resident registry {}: {error}", path.display())),
+    }
 }
 
 fn select_registration(
@@ -657,6 +671,28 @@ fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_missing_registry_allows_fallback() {
+        let root = std::env::temp_dir().join(format!("mini-registry-presence-{}-{}",
+            std::process::id(), workspace::random_nonce().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("registry.json");
+        assert!(registry_file(&path).unwrap().is_none());
+        fs::write(&path, b"{").unwrap();
+        assert!(registry_file(&path).unwrap_err().starts_with("invalid resident registry"));
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(registry_file(&path).is_err());
+        fs::remove_dir(&path).unwrap();
+        std::os::unix::fs::symlink(root.join("missing"), &path).unwrap();
+        assert!(registry_file(&path).is_err());
+        fs::remove_file(&path).unwrap();
+        let registry = json!({"type":"mini-hermes-registry-v1","residents":[]});
+        fs::write(&path, serde_json::to_vec(&registry).unwrap()).unwrap();
+        assert_eq!(registry_file(&path).unwrap(), Some(registry));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn summon_selects_only_the_actual_rooms_sole_registration_without_node_file() {

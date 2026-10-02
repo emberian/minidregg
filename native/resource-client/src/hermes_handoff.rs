@@ -75,7 +75,7 @@ fn read(p: &Path) -> Result<Vec<u8>> {
     }
     Ok(b)
 }
-fn json_file(p: &Path) -> Result<Value> {
+pub(crate) fn json_file(p: &Path) -> Result<Value> {
     serde_json::from_slice(&read(p)?).map_err(|e| e.to_string())
 }
 fn world(ws: &Value) -> Result<Value> {
