@@ -479,7 +479,7 @@ def writes (prepared : Prepared deployment profile ambient durable command) : Li
 the actual target and structural kind roots. Prepared retains both load proofs. -/
 def lawReadGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   (prepared.sourceGuards ++ prepared.dependencies.readGuards).map
-    fun (id, root) => ⟨⟨id⟩, root⟩
+    fun (cellIdentifier, expectedRoot) => ⟨⟨cellIdentifier⟩, expectedRoot⟩
 
 /-- The pay cell is read (tariff, book, assignment), not written. -/
 def payGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=

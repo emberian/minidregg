@@ -1013,7 +1013,7 @@ def readGuards (prepared : Prepared deployment profile ambient durable command v
     List ReadGuard :=
   policyGuard prepared ::
     (prepared.authority.readGuards ++
-      (lawReadGuards prepared).map (fun (id, root) => ⟨⟨id⟩, root⟩)).filter fun guard =>
+      (lawReadGuards prepared).map (fun (cellIdentifier, expectedRoot) => ⟨⟨cellIdentifier⟩, expectedRoot⟩)).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command verified) : Prop :=
