@@ -82,7 +82,16 @@ fn declaration(workspace: &Value, refs: &[Value; 3], manager: &str) -> Result<Va
             }
         }
     }
-    Ok(json!({"type":PROTOCOL,"owner":owner,"manager":manager,"references":refs}))
+    let stable: Vec<Value> = refs
+        .iter()
+        .map(|r| {
+            json!({
+        "name":r["name"],"kind":r["kind"],"target":r["target"],
+        "observeCapability":r["observeCapability"],"operationCapability":r["operationCapability"],
+        "controlCapability":r["controlCapability"]})
+        })
+        .collect();
+    Ok(json!({"type":PROTOCOL,"owner":owner,"manager":manager,"references":stable}))
 }
 
 fn phase_dir(state: &Path, index: usize) -> PathBuf {
@@ -304,6 +313,12 @@ pub(super) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
         reference(root, &names[2])?,
     ];
     let decl = declaration(workspace, &refs, &manager)?;
+    if !retained.exists() {
+        retain(
+            &state.join("initial-discovery.json"),
+            &json!({"references":refs}),
+        )?;
+    }
     retain(&retained, &decl)?;
     let mut index = 0;
     while index < 6 && confirmed(root, &state, index)? {
@@ -412,6 +427,24 @@ mod tests {
         r[0].as_object_mut().unwrap().remove("controlCapability");
         assert!(declaration(&json!({"subject":"7"}), &r, "8").is_err());
         assert!(declaration(&json!({"subject":"7"}), &refs(), "08").is_err());
+    }
+    #[test]
+    fn discovery_metadata_changes_do_not_change_retained_authority() {
+        let mut before = refs();
+        before[0]["sharedName"] = json!("before");
+        let mut after = before.clone();
+        after[0]["sharedName"] = json!("after");
+        after[0]["provenance"] = json!({"browser":"now available"});
+        let owner = json!({"subject":"7"});
+        assert_eq!(
+            declaration(&owner, &before, "8").unwrap(),
+            declaration(&owner, &after, "8").unwrap()
+        );
+        after[0]["target"] = json!("531101");
+        assert_ne!(
+            declaration(&owner, &before, "8").unwrap(),
+            declaration(&owner, &after, "8").unwrap()
+        );
     }
     #[test]
     fn exclusive_request_lock_is_bounded_and_recoverable() {
