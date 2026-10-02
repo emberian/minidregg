@@ -279,6 +279,15 @@ theorem heartbeat_advances_clock (store : PayStore) (clock : ClockCell.Clock) (b
     rw [same] at notSoon
     exact notSoon
 
+/-- A successful empty report retains the exact finalized chain evidence
+while the existing heartbeat theorem proves that it mints no credit. -/
+theorem heartbeat_retains_chain_tip (store : PayStore) (clock : ClockCell.Clock) (book : Book)
+    (tip : ChainTip) (plan : Plan)
+    (accepted : decideObservations store clock book tip [] = .ok plan) :
+    chainTipOf (Patch.run store (PayChainTip.patch (chainTipOf store) plan.tip)) = some tip := by
+  rw [decideObservations_tip accepted]
+  exact PayChainTip.patch_tip _ _ _
+
 /-! ## The nullifier -/
 
 /-- Two observations of the same transfer (same signature and address — for
@@ -433,6 +442,32 @@ theorem heartbeat_fixture :
       .ok ⟨exampleTariff, tickedClock, ⟨2500, 1759251000⟩, []⟩ := by
   decide +kernel
 
+/-- Finalized block time is monotone independently of the wall-clock value. -/
+theorem finalized_time_regression_refused :
+    decideObservations (fixtureStore.set chainTipAddress (some fixtureTip))
+      tickedClock fixtureBook ⟨2500, 1759249999⟩ [] =
+        .error .tipInvalidOrRegressing := by
+  decide +kernel
+
+/-- A finalized slot cannot acquire a different timestamp in a later report. -/
+theorem finalized_same_slot_time_mutation_refused :
+    decideObservations (fixtureStore.set chainTipAddress (some fixtureTip))
+      tickedClock fixtureBook ⟨1000, 1759250001⟩ [observed 0 rowA signature₁ 1000] =
+        .error .tipInvalidOrRegressing := by
+  decide +kernel
+
+theorem zero_tip_refused :
+    decideObservations fixtureStore ClockCell.genesisClock fixtureBook ⟨0, 0⟩ [] =
+      .error .tipInvalidOrRegressing := by
+  decide +kernel
+
+/-- Empty ingress updates retained evidence after the heartbeat interval. -/
+theorem retained_tip_heartbeat_fixture :
+    decideObservations (fixtureStore.set chainTipAddress (some fixtureTip))
+      tickedClock fixtureBook ⟨2500, 1759251000⟩ [] =
+      .ok ⟨exampleTariff, tickedClock, ⟨2500, 1759251000⟩, []⟩ := by
+  decide +kernel
+
 /-- Refuting pole: 1499 slots after the clock is too soon. -/
 theorem tick_too_soon_refused :
     decideObservations fixtureStore tickedClock fixtureBook ⟨2499, 1759251000⟩ [] = .error .tickTooSoon := by
@@ -444,10 +479,8 @@ theorem tip_behind_clock_refused :
         [observed 0 rowA signature₁ 1000] = .error .tipBehindClock := by
   decide +kernel
 
-/-- The clock's `now` never goes back: a tip whose block time is behind it (the
-wall-clock ticker ran ahead of finality) advances only the slot. (P2's in-cell
-chain clock also refused a tip whose block time went back; the deployment clock
-mixes wall time into `now`, so that check has no meaning here.) -/
+/-- A wall ticker ahead of chain finality does not move backward. A retained
+chain tip, when present, independently constrains finalized block time. -/
 theorem block_time_behind_now_keeps_now :
     (decideObservations fixtureStore tickedClock fixtureBook ⟨5000, 1759249999⟩ []).map
       Plan.nextClock = .ok ⟨1759250000, 5000⟩ := by
@@ -513,6 +546,11 @@ theorem credit_only_breaks_audit :
 #assert_axioms well_tracks_observed
 #assert_axioms clock_monotone_by_observation
 #assert_axioms heartbeat_advances_clock
+#assert_axioms heartbeat_retains_chain_tip
+#assert_axioms finalized_time_regression_refused
+#assert_axioms finalized_same_slot_time_mutation_refused
+#assert_axioms zero_tip_refused
+#assert_axioms retained_tip_heartbeat_fixture
 #assert_axioms same_transfer_same_nullifier
 #assert_axioms second_credit_refused
 #assert_axioms second_tick_refused

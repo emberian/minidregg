@@ -16,6 +16,7 @@ operation marker is a durable nullifier, so an exact rotation is admitted once;
 a second rotation needs the next commitment, so a replayed ingress fails the
 gate as well as the nullifier.
 -/
+import Compiler.SigningKeyCommitment
 import Kernel.ParticipantKeyEnrollment
 import Theory.KeyPreRotation
 

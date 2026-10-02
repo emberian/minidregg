@@ -119,7 +119,8 @@ theorem legs_journal_patch (command : Command) (reason : JournalReason) :
     ∀ {decision : Decision}
       (legs : Legs deployment profile ambient directory authority pay book tariff price decision),
       decision = .journal reason →
-        patchOf command legs = journalPatch command.observation reason
+        patchOf command legs = journalPatch command.observation reason ++
+          PayChainTip.patch (chainTipOf pay.cell.logical) command.tip
   | _, .journal _, same => by cases same; rfl
   | _, .enrol _ _, same => by cases same
   | _, .renew _ _ _ _, same => by cases same
@@ -139,7 +140,8 @@ theorem legs_renew_patch (command : Command) (plan : RenewPlan) :
       decision = .renew plan →
         ∃ record, enrolmentAt pay.cell.logical plan.memo.miniKey = some record ∧
           patchOf command legs =
-            [.write .enrolment plan.memo.miniKey record { record with leaseUntil := plan.leaseUntil }]
+            [.write .enrolment plan.memo.miniKey record { record with leaseUntil := plan.leaseUntil }] ++
+              PayChainTip.patch (chainTipOf pay.cell.logical) command.tip
   | _, .renew _ record recordExact _, same => by
       cases same
       exact ⟨record, recordExact, rfl⟩
@@ -334,12 +336,13 @@ theorem self_enroll_tick (accepted : AcceptedEnrol deployment profile ambient du
 
 /-- **`journal_mints_nothing`**: a journaled payment writes the pay cell and the
 clock cell and nothing else — no Book write, so no mint — and its pay patch is
-exactly the journal row. -/
+exactly the journal row plus the authenticated chain tip. -/
 theorem journal_mints_nothing (accepted : AcceptedEnrol deployment profile ambient durable ingress)
     (reason : JournalReason) (journaled : accepted.prepared.decision = .journal reason) :
     (intent accepted).writes.map DataWrite.cellId =
         [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment] ∧
-    patchOf ingress.command accepted.prepared.legs = journalPatch ingress.command.observation reason ∧
+    patchOf ingress.command accepted.prepared.legs = journalPatch ingress.command.observation reason ++
+      PayChainTip.patch (chainTipOf accepted.prepared.pay.cell.logical) ingress.command.tip ∧
     ∀ (before : DataSnapshot rootBytes) (cellId : CellId), cellId ≠ PayCellDomain.cellIdOf deployment →
       cellId ≠ ClockCellDomain.cellIdOf deployment →
       (DataSnapshot.install before (intent accepted)).canonicalBytes cellId =
@@ -362,7 +365,7 @@ theorem journal_mints_nothing (accepted : AcceptedEnrol deployment profile ambie
 
 /-- **`renew_only_extends`**: a renewal writes the pay cell, the clock cell and
 the Book and nothing else; its pay patch is the enrolment row with only its
-lease changed, and that lease never shortens and is never behind the tip. -/
+lease changed, plus the authenticated chain tip; that lease never shortens and is never behind the tip. -/
 theorem renew_only_extends (accepted : AcceptedEnrol deployment profile ambient durable ingress)
     (plan : RenewPlan) (renewed : accepted.prepared.decision = .renew plan) :
     (intent accepted).writes.map DataWrite.cellId =
@@ -370,7 +373,8 @@ theorem renew_only_extends (accepted : AcceptedEnrol deployment profile ambient 
           ⟨deployment.resourceBookId⟩] ∧
     ∃ record, enrolmentAt accepted.prepared.pay.cell.logical plan.memo.miniKey = some record ∧
       patchOf ingress.command accepted.prepared.legs =
-        [.write .enrolment plan.memo.miniKey record { record with leaseUntil := plan.leaseUntil }] ∧
+        [.write .enrolment plan.memo.miniKey record { record with leaseUntil := plan.leaseUntil }] ++
+          PayChainTip.patch (chainTipOf accepted.prepared.pay.cell.logical) ingress.command.tip ∧
       record.leaseUntil ≤ plan.leaseUntil ∧ ingress.command.tip.hour ≤ plan.leaseUntil := by
   have bookOnly := legs_renew_writes accepted.prepared.factory plan accepted.prepared.legs renewed
   obtain ⟨record, recorded, patched⟩ :=

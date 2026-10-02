@@ -1,3 +1,4 @@
+import Compiler.SigningKeyCommitment
 /-
 Runtime enrollment of a fresh signing principal. The new key is installed in
 the same canonical authority cell used by every signed receiver. Enrollment
@@ -47,13 +48,13 @@ abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 
 /-! ## The next-key digest -/
 
-def nextKeyDigestTag : List UInt8 := "DREGG.SIGNING-KEY.NEXT/v1".toUTF8.toList
+def nextKeyDigestTag : List UInt8 := SigningKeyCommitment.tag
 
 /-- The pre-rotation commitment to a public key: cSHAKE256 under its own tag,
 projected to the authority `Digest`.  The client never computes it; it asks the
 host (`Host.Json` kind `signing-key-next-digest`). -/
 def nextKeyDigest (publicKey : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash nextKeyDigestTag publicKey).digest
+  SigningKeyCommitment.digest publicKey
 
 /-- The exact bytes the committed NEXT key signs at enrollment: its consent to
 succeed the enrolled key.  Fixed layout (tag, the enrolled public key, the next

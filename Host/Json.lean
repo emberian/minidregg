@@ -4,6 +4,7 @@ notation: successful authoring constructs the real source values and invokes
 their canonical codecs. All unbounded integers are decimal strings.
 -/
 import Kernel.NativeHost
+import Kernel.PayStarterAllowance
 import Host.BirthRuntimeProfile
 import Host.CapabilityInspection
 import Host.InspectRender
@@ -3809,10 +3810,7 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
   -- session: 105 transactions, eight births, sixteen grants. Provider tokens
   -- and compute have separate tariffs and are not promised by this allowance.
   -- Byte-priced deployments choose a budget explicitly; counts cannot quote bytes.
-  let suggestion : Option Nat := if mode = "renew" then some 0 else
-    if config.tariff.perInitialPayloadByte = 0 then
-      some (105 * config.tariff.base + 8 * config.tariff.perBirth + 16 * config.tariff.perGrant)
-    else none
+  let suggestion := PayStarterAllowance.recommendation config.tariff (mode == "renew")
   let starterInput ← field "$" "starterCredit" obj
   let starter ← if starterInput == .null then
       match suggestion with

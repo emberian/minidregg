@@ -8,7 +8,7 @@ turn over two cells:
   `slot` becomes the tip's and its `now` the tip's block time when that is
   later (`Plan.nextClock`, a guarded write at the clock's exact pre-root);
 * the **pay cell** is read, not written: tariff, book and assignment, pinned
-  at its exact pre-root `expectedPayRoot` (a read guard);
+  at its exact pre-root `expectedPayRoot` and writes the finalized tip there;
 * the **Book**: one issuer mint `.mint tariff.asset payer (creditFor amount)`
   per observation, as a `Batch` decided by `Batch.Admission` at the Book's
   loaded state (`AcceptedBatch.ofAdmission`, as resource birth does).
@@ -192,11 +192,12 @@ def family (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) 
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun d _ => Mode pay d
-  -- The report writes the clock cell, not the pay cell: the family's own
-  -- patch on the pay cell is empty (the pay cell's root is pinned by the mode).
-  Postcondition := fun _ _ post => Patch.ResultAt pay.logical ([] : Patch PayCell.layout) post
+  -- The signed semantic effect retains exact finalized evidence in the pay
+  -- cell. The clock and Book writes join this same durable intent.
+  Postcondition := fun d _ post => Patch.ResultAt pay.logical
+    (PayChainTip.patch (chainTipOf pay.logical) d.plan.tip) post
   effectDigest := effectDigest snapshot.domain semantics command
-  patch := fun _ _ => []
+  patch := fun d _ => PayChainTip.patch (chainTipOf pay.logical) d.plan.tip
   nullifier := fun d _ => some d.operationNullifier
   Release := fun _ _ => Unit
   DeclassificationAuthority := fun _ _ => Unit
@@ -264,7 +265,8 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
         match validate ClockCell.materializer clock.cell clock.cell.root plan.patch with
         | .rejected _ => throw .validation
         | .accepted clockValid =>
-        match validate PayCell.materializer pay.cell pay.cell.root ([] : Patch PayCell.layout) with
+        match validate PayCell.materializer pay.cell pay.cell.root
+            (PayChainTip.patch (chainTipOf pay.cell.logical) plan.tip) with
         | .rejected _ => throw .validation
         | .accepted validated =>
             let candidate : Candidate (family deployment snapshot pay.cell profile.semantics
@@ -295,6 +297,29 @@ variable {F : Type} [Field F] {deployment : Deployment}
 /-- The clock cell after the report: the validated clock write applied. -/
 def Prepared.clockPost (prepared : Prepared deployment profile ambient durable command) : ClockCell.Cell :=
   prepared.clockValid.apply
+
+/-- The validated semantic family's exact pay post, including chain evidence. -/
+def Prepared.payPost (prepared : Prepared deployment profile ambient durable command) : PayCell.Cell :=
+  prepared.candidate.validated.apply
+
+/-- A checked observation, including a heartbeat, actually retains its tip in
+the pay post committed by this receiver. -/
+theorem Prepared.pay_post (prepared : Prepared deployment profile ambient durable command) :
+    chainTipOf prepared.payPost.logical = some prepared.plan.tip := by
+  change chainTipOf (Minidregg.Theory.Store.Patch.run prepared.pay.cell.logical
+    (PayChainTip.patch (chainTipOf prepared.pay.cell.logical) prepared.plan.tip)) =
+      some prepared.plan.tip
+  exact PayChainTip.patch_tip _ _ _
+
+/-- The committed evidence is exactly the ingress tip, not a wall-clock
+substitute or an unchecked declaration-only value. -/
+theorem Prepared.pay_post_exact (prepared : Prepared deployment profile ambient durable command) :
+    chainTipOf prepared.payPost.logical = some command.tip := by
+  rw [prepared.pay_post, decideObservations_tip prepared.decided]
+
+theorem Prepared.chain_tip_advances (prepared : Prepared deployment profile ambient durable command) :
+    PayChainTip.advances (chainTipOf prepared.pay.cell.logical) command.tip :=
+  decideObservations_chainTip prepared.decided
 
 /-- The Book after the report: the admitted batch applied. -/
 def Prepared.bookPost (prepared : Prepared deployment profile ambient durable command) :
@@ -472,8 +497,11 @@ def bookWrite (prepared : Prepared deployment profile ambient durable command) :
   ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
     ⟨.resourceBook, prepared.book.payload⟩ ⟨.resourceBook, prepared.bookPost⟩
 
+def payWrite (prepared : Prepared deployment profile ambient durable command) : DataWrite :=
+  prepared.pay.write prepared.payPost
+
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  [clockWrite prepared, bookWrite prepared]
+  [payWrite prepared, clockWrite prepared, bookWrite prepared]
 
 /-- The successful physical resolver's complete source/history closure plus
 the actual target and structural kind roots. Prepared retains both load proofs. -/
@@ -481,13 +509,8 @@ def lawReadGuards (prepared : Prepared deployment profile ambient durable comman
   (prepared.sourceGuards ++ prepared.dependencies.readGuards).map
     fun (cellIdentifier, expectedRoot) => ⟨⟨cellIdentifier⟩, expectedRoot⟩
 
-/-- The pay cell is read (tariff, book, assignment), not written. -/
-def payGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
-  prepared.pay.readGuard
-
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  payGuard prepared ::
-    (prepared.authority.readGuards ++ lawReadGuards prepared).filter
+  (prepared.authority.readGuards ++ lawReadGuards prepared).filter
       fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 /-- No resolved dependency can disappear between admission and commit:
@@ -498,7 +521,6 @@ theorem lawGuard_read_or_written (prepared : Prepared deployment profile ambient
   by_cases written : guard.cellId ∈ (writes prepared).map DataWrite.cellId
   · exact Or.inr written
   · apply Or.inl
-    apply List.mem_cons_of_mem
     apply List.mem_filter.mpr
     exact ⟨List.mem_append_right _ member, by simpa using written⟩
 
@@ -519,7 +541,7 @@ def PhysicalShape (prepared : Prepared deployment profile ambient durable comman
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ write ∈ writes prepared, rootBytes write.canonicalPostBytes = write.exactPost) ∧
-    (payGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
+
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
@@ -530,9 +552,7 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
-  rcases List.mem_cons.mp member with rfl | rest
-  · exact shape.2.2.2.2.1
-  · simpa using (List.mem_filter.mp rest).2
+  simpa [readGuards] using (List.mem_filter.mp member).2
 
 structure AcceptedObservation [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -559,7 +579,7 @@ variable [DecidableEq F] {ingress : DecodedIngress}
 
 def charge (accepted : AcceptedObservation deployment profile ambient durable ingress) :
     ResourceCost.Charge
-  | .incidences => 2
+  | .incidences => 3
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
@@ -579,10 +599,10 @@ def intent (accepted : AcceptedObservation deployment profile ambient durable in
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
 
-/-- An accepted report writes exactly the clock cell and the Book. -/
+/-- An accepted report writes retained chain evidence, the clock and the Book. -/
 theorem intent_writes (accepted : AcceptedObservation deployment profile ambient durable ingress) :
     (intent accepted).writes.map DataWrite.cellId =
-      [ClockCellDomain.cellIdOf deployment, ⟨deployment.resourceBookId⟩] := rfl
+      [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment, ⟨deployment.resourceBookId⟩] := rfl
 
 /-- An accepted report spends each observation's transfer nullifier. -/
 theorem intent_spends (accepted : AcceptedObservation deployment profile ambient durable ingress)
@@ -646,6 +666,9 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       | .uncertain detail => return .uncertain detail
 
 #assert_axioms Accepted.policy_evaluated_actual_post
+#assert_axioms Prepared.pay_post
+#assert_axioms Prepared.pay_post_exact
+#assert_axioms Prepared.chain_tip_advances
 #assert_axioms Prepared.bookPost_exact
 #assert_axioms Prepared.clock_post
 #assert_axioms lawGuard_read_or_written

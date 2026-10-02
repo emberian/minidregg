@@ -50,6 +50,7 @@ write plan and appends the pay cell.
 -/
 import Kernel.ClockCellDomain
 import Kernel.PayObservationReceiver
+import Kernel.PayChainTip
 import Kernel.PayEnrolDecision
 import Kernel.ParticipantKeyEnrollment
 import Kernel.NativeHostGenesis
@@ -488,7 +489,7 @@ def family (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | payUnavailable
   | bookUnavailable | factoryUnavailable | staleAuthority | stalePay
-  | clockUnavailable | tipBehindClock
+  | clockUnavailable | tipBehindClock | chainTipRegressed
   | decision (reason : PayEnrolDecision.Reject)
   /-- The native verifier failed: the payment is refused, never journaled. -/
   | verifier (error : CredentialSignatureIO.Error)
@@ -755,7 +756,8 @@ def patchOf {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile
     (command : Command) {decision : Decision}
     (legs : Legs deployment profile ambient directory authority pay book tariff price decision) :
     Patch PayCell.layout :=
-  payPatch command.observation decision legs.account legs.record
+  payPatch command.observation decision legs.account legs.record ++
+    PayChainTip.patch (chainTipOf pay.cell.logical) command.tip
 
 /-- The price the decision is made at, on the loaded authority cell. -/
 abbrev priceAt (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -775,6 +777,7 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
   tariffExact : tariffOf pay.cell.logical = some tariff
   clock : ClockCellDomain.Loaded deployment durable.snapshot
   tipAhead : clock.clock.slot ≤ command.tip.slot
+  chainTipAhead : PayChainTip.advances (chainTipOf pay.cell.logical) command.tip
   clockValid : ValidatedPatch ClockCell.materializer clock.cell clock.cell.root
     (ClockCell.tickPatch clock.clock (PayObservation.advanceClock clock.clock command.tip))
   decision : Decision
@@ -820,43 +823,45 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
       | none => throw (.decision .tariffInvalid)
       | some tariff =>
         if tipAhead : clock.clock.slot ≤ command.tip.slot then
-          match validate ClockCell.materializer clock.cell clock.cell.root
-              (ClockCell.tickPatch clock.clock (PayObservation.advanceClock clock.clock command.tip)) with
-          | .rejected _ => throw .validation
-          | .accepted clockValid =>
-          match decided : decideEnrol pay.cell.logical (priceAt deployment profile ambient authority command)
-              command.tip command.observation verified
-              (subjectTakenIn authority.snapshot command.observation) with
-          | .error reason => throw (.decision reason)
-          | .ok decision =>
-            let legs ← prepareLegs deployment profile ambient directory authority pay book tariff
-              (priceAt deployment profile ambient authority command) decision
-            match validate PayCell.materializer pay.cell pay.cell.root
-                (patchOf command legs) with
+          if chainTipAhead : PayChainTip.advances (chainTipOf pay.cell.logical) command.tip then
+            match validate ClockCell.materializer clock.cell clock.cell.root
+                (ClockCell.tickPatch clock.clock (PayObservation.advanceClock clock.clock command.tip)) with
             | .rejected _ => throw .validation
-            | .accepted validated =>
-                let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-                  snapshot.domain directory.directory
-                  (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
-                    (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
-                let candidate : Candidate (family deployment snapshot pay.cell profile.semantics
-                    ambient command (patchOf command legs)) pay.cell
-                    (declarationOf command legs) () :=
-                  { preStateBound := rfl
-                    modeEvidence := ⟨rootExact⟩
-                    validated := validated
-                    postcondition := validated.resultAt }
-                match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
-                    directory.directory deployment.factoryId with
-                | none => throw .policyUnavailable
-                | some dependencies =>
-                  match lawGuardsExact : PhysicalLawResolution.readGuards snapshot directory.directory
-                      profile.semantics deployment.factoryId dependencies.additional with
+            | .accepted clockValid =>
+            match decided : decideEnrol pay.cell.logical (priceAt deployment profile ambient authority command)
+                command.tip command.observation verified
+                (subjectTakenIn authority.snapshot command.observation) with
+            | .error reason => throw (.decision reason)
+            | .ok decision =>
+              let legs ← prepareLegs deployment profile ambient directory authority pay book tariff
+                (priceAt deployment profile ambient authority command) decision
+              match validate PayCell.materializer pay.cell pay.cell.root
+                  (patchOf command legs) with
+              | .rejected _ => throw .validation
+              | .accepted validated =>
+                  let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
+                    snapshot.domain directory.directory
+                    (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
+                      (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
+                  let candidate : Candidate (family deployment snapshot pay.cell profile.semantics
+                      ambient command (patchOf command legs)) pay.cell
+                      (declarationOf command legs) () :=
+                    { preStateBound := rfl
+                      modeEvidence := ⟨rootExact⟩
+                      validated := validated
+                      postcondition := validated.resultAt }
+                  match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
+                      directory.directory deployment.factoryId with
                   | none => throw .policyUnavailable
-                  | some lawGuards =>
-                    pure ⟨directory, authority, pay, book, factory, tariff, tariffExact, clock,
-                      tipAhead, clockValid, decision, decided, legs, candidate, source,
-                      dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
+                  | some dependencies =>
+                    match lawGuardsExact : PhysicalLawResolution.readGuards snapshot directory.directory
+                        profile.semantics deployment.factoryId dependencies.additional with
+                    | none => throw .policyUnavailable
+                    | some lawGuards =>
+                      pure ⟨directory, authority, pay, book, factory, tariff, tariffExact, clock,
+                        tipAhead, chainTipAhead, clockValid, decision, decided, legs, candidate, source,
+                        dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
+          else throw .chainTipRegressed
         else throw .tipBehindClock
     else throw .stalePay
   else throw .staleAuthority

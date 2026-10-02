@@ -175,7 +175,7 @@ theorem tariff_canonical {bytes : List UInt8} {t : Tariff}
 /-! ## The genesis placeholder -/
 
 /-- Installed at genesis: asset 0, 6 decimals, rate 1, cap 10⁴ tokens,
-heartbeat 1500 slots, node rate 5 952 380 credit/hour (PAY §11.8),
+heartbeat 150 slots, node rate 5 952 380 credit/hour (PAY §11.8),
 self-enrollment off, journal floor 1 token, a slashed bond split half to the
 caller, and a zeroed mint and program.
 Invalid until the operator sets the real token (`genesisDefault_invalid`). -/
@@ -187,7 +187,7 @@ def genesisDefault : Tariff where
   decimals := 6
   creditPerAtomic := 1
   maxPerObservation := 10000000000
-  minTickSlots := 1500
+  minTickSlots := 150
   nodeHourRate := 5952380
   enrolIndex := none
   journalFloor := 1000000

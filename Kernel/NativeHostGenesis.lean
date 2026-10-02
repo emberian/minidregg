@@ -13,6 +13,7 @@ Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
 import Kernel.ResourceBirthPolicyController
+import Kernel.PayClaimLaw
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.NativeHostGenesis
@@ -384,11 +385,12 @@ def confinedFactoryLaw (observer : SubjectId) (base : Minidregg.Pred.Pred) : Min
     .all [.not (.eq "request/subject" (Int.ofNat observer.value)), .not (.eq selfEnrolSlot 1),
       base]]
 
-/-- The configured factory law, confined when a payment observer is present. -/
+/-- The configured ordinary factory law plus the source-authorized claim
+branch, placed INSIDE the observer confinement when an observer is present. -/
 def observedFactoryLaw (config : Config) : Minidregg.Pred.Pred :=
   match config.payObserver with
-  | none => config.factoryPredicate
-  | some observer => confinedFactoryLaw observer.subject config.factoryPredicate
+  | none => PayClaimLaw.extend config.factoryPredicate
+  | some observer => confinedFactoryLaw observer.subject (PayClaimLaw.extend config.factoryPredicate)
 
 /-- The factory law with every clock ticker confined: a ticker's request is
 refused whatever the law beneath says (`factory_refuses_ticker`), and every
@@ -1111,13 +1113,73 @@ theorem genesis_confines_observer {F : Type} [Field F] (profile : CanonicalRunti
     (config : Config) (observer : PayObserver) (present : config.payObserver = some observer) :
     (factoryPolicy profile config).predicate =
         tickerConfinedLaw config.clockTickers
-          (confinedFactoryLaw observer.subject config.factoryPredicate) ∧
+          (confinedFactoryLaw observer.subject (PayClaimLaw.extend config.factoryPredicate)) ∧
       capabilityEntry (enrolCapability profile config observer) ∈ entries profile config ∧
       (enrolCapability profile config observer).holder = .subject observer.subject ∧
       (enrolCapability profile config observer).scope.targets = .explicit {⟨config.deployment.factoryId⟩} ∧
       (enrolCapability profile config observer).scope.verbs = {.installPolicy} := by
   refine ⟨by simp [factoryPolicy, policy, factoryLaw, observedFactoryLaw, present], ?_, rfl, rfl, rfl⟩
   simp [entries, present, capabilityEntries]
+
+/-- The default claim path remains inside both confinement layers. Its
+receiver projects no self-enrollment slot and uses the stable owner subject. -/
+theorem factory_default_allows_claim (config : Config) (old new : Minidregg.Pred.State)
+    (subject : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (operation : new.get PayClaimLaw.operationSlot = some 1)
+    (authorized : new.get PayClaimLaw.authorizedSlot = some 1)
+    (notSelfEnrol : new.get selfEnrolSlot = none)
+    (notTicker : subject ∉ config.clockTickers.map (·.subject.value))
+    (notObserver : ∀ observer ∈ config.payObserver, subject ≠ observer.subject.value) :
+    Minidregg.Pred.eval (factoryLaw config) old new = true := by
+  unfold factoryLaw
+  rw [factory_law_others config.clockTickers (observedFactoryLaw config)
+    old new subject named notTicker]
+  cases observed : config.payObserver with
+  | none =>
+      simpa [observedFactoryLaw, observed] using
+        PayClaimLaw.default_allows_claim config.factoryPredicate old new operation authorized
+  | some observer =>
+      have other : subject ≠ observer.subject.value := notObserver observer (by simp [observed])
+      simp only [observedFactoryLaw, observed]
+      rw [confined_law_others observer.subject (PayClaimLaw.extend config.factoryPredicate)
+        old new subject other named notSelfEnrol]
+      exact PayClaimLaw.default_allows_claim config.factoryPredicate old new operation authorized
+
+/-- An observer cannot use a claim receiver step: unlike its v1 observation
+path, the claim projection never carries the self-enrollment marker. -/
+theorem observer_cannot_claim (observer : SubjectId) (base : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat observer.value))
+    (notSelfEnrol : new.get selfEnrolSlot = none) :
+    Minidregg.Pred.eval (confinedFactoryLaw observer (PayClaimLaw.extend base)) old new = false := by
+  simp [confinedFactoryLaw, Minidregg.Pred.eval, Minidregg.Pred.evalWith, named, notSelfEnrol]
+
+/-- Even a fully authorized claim cannot bypass ticker confinement. -/
+theorem ticker_cannot_claim (config : Config) (ticker : ClockTicker)
+    (member : ticker ∈ config.clockTickers) (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat ticker.subject.value)) :
+    Minidregg.Pred.eval (factoryLaw config) old new = false :=
+  factory_refuses_ticker config.clockTickers (observedFactoryLaw config) ticker member old new named
+
+/-- All former factory behavior is preserved on states without the new source
+operation slot, including the observer's existing self-enrollment branch. -/
+theorem factory_ordinary_preserved (config : Config) (old new : Minidregg.Pred.State)
+    (ordinary : new.get PayClaimLaw.operationSlot = none) :
+    Minidregg.Pred.eval (factoryLaw config) old new =
+      Minidregg.Pred.eval (tickerConfinedLaw config.clockTickers
+        (match config.payObserver with
+          | none => config.factoryPredicate
+          | some observer => confinedFactoryLaw observer.subject config.factoryPredicate)) old new := by
+  cases observed : config.payObserver <;>
+    simp [factoryLaw, observedFactoryLaw, observed, tickerConfinedLaw, confinedFactoryLaw,
+      PayClaimLaw.extend, PayClaimLaw.clause, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+      List.all_append, ordinary]
+
+#assert_axioms factory_default_allows_claim
+#assert_axioms observer_cannot_claim
+#assert_axioms ticker_cannot_claim
+#assert_axioms factory_ordinary_preserved
 
 #assert_axioms observer_control_confined
 #assert_axioms self_enrol_only_observer

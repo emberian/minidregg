@@ -4,9 +4,9 @@
 The observer (an enrolled subject holding an `observePayment` capability on
 the deployment's pay cell) reports the finalized transfers it saw to the
 deposit addresses of the pay cell's `book`, together with the finalized chain
-tip it read them at.  An empty report is a heartbeat: it only advances the
-deployment clock cell's `slot` (`Kernel.ClockCell`; the pay cell keeps no
-clock since the final merge).
+tip it read them at. An empty report is a heartbeat: it advances the
+deployment clock and retains the authenticated finalized tip in the pay cell.
+The retained evidence is distinct from the deployment clock's wall time.
 
 This module holds the values and the pure decision; the signed receiver is
 `PayObservationReceiver` and the named theorems are in `PayObservationProofs`.
@@ -35,6 +35,7 @@ This module holds the values and the pure decision; the signed receiver is
 -/
 import Kernel.PayCellDomain
 import Kernel.ClockCell
+import Kernel.PayChainTip
 import Theory.CanonicalResourceKernel
 import Compiler.CredentialSignatureAdmission
 
@@ -74,7 +75,7 @@ structure Command where
   capability : CapabilityId
   nonce : Nat
   expectedAuthorityRoot : Digest
-  /-- The pay cell's exact pre-root: the report writes the clock. -/
+  /-- The pay cell's exact pre-root: the report retains finalized tip evidence. -/
   expectedPayRoot : Digest
   /-- The finalized tip the observer read the transfers at. -/
   tip : ChainTip
@@ -197,7 +198,7 @@ theorem nullifier_binds_transfer (domain : Digest) (left right : Observation)
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | bookUnavailable
   | payUnavailable | staleAuthority | stalePay
-  | tariffInvalid | clockUnavailable | tipBehindClock | tickTooSoon | duplicateInBatch
+  | tariffInvalid | clockUnavailable | tipInvalidOrRegressing | tipBehindClock | tickTooSoon | duplicateInBatch
   | malformedObservation | wrongMint | wrongTokenProgram | unknownIndex | addressMismatch
   | unassignedIndex | payerIsIssuer | zeroAmount | observationAfterTip
   | enrolIndexNeedsReceiver
@@ -285,6 +286,8 @@ def transfers (observations : List Observation) : List (List UInt8 × Address32)
 
 def decideObservations (store : PayStore) (clock : ClockCell.Clock) (book : Book) (tip : ChainTip)
     (observations : List Observation) : Except Reject Plan :=
+  if ¬PayChainTip.advances (chainTipOf store) tip then .error .tipInvalidOrRegressing
+  else
   match tariffOf store with
   | none => .error .payUnavailable
   | some tariff =>
@@ -385,6 +388,8 @@ theorem decideObservations_ok {store : PayStore} {clock : ClockCell.Clock} {book
       decideAll store plan.tariff tip observations = .ok plan.credits ∧
       plan.tip = tip ∧ plan.batch.Admission book := by
   unfold decideObservations at accepted
+  split at accepted
+  · cases accepted
   cases tariffFound : tariffOf store with
   | none => simp only [tariffFound] at accepted; cases accepted
   | some tariff =>
@@ -418,6 +423,18 @@ theorem decideObservations_ok {store : PayStore} {clock : ClockCell.Clock} {book
         cases accepted
         exact ⟨rfl, rfl, valid, ordered, soon, distinct, decided, rfl, admitted⟩
 
+/-- Every accepted report, including an empty heartbeat, carries bounded
+positive chain evidence monotone against the previously retained chain tip. -/
+theorem decideObservations_chainTip {store : PayStore} {clock : ClockCell.Clock} {book : Book}
+    {tip : ChainTip} {observations : List Observation} {plan : Plan}
+    (accepted : decideObservations store clock book tip observations = .ok plan) :
+    PayChainTip.advances (chainTipOf store) tip := by
+  unfold decideObservations at accepted
+  by_cases ordered : PayChainTip.advances (chainTipOf store) tip
+  · exact ordered
+  · rw [if_pos ordered] at accepted
+    cases accepted
+
 theorem decideObservations_tip {store : PayStore} {clock : ClockCell.Clock} {book : Book}
     {tip : ChainTip} {observations : List Observation} {plan : Plan}
     (accepted : decideObservations store clock book tip observations = .ok plan) : plan.tip = tip :=
@@ -439,6 +456,8 @@ theorem enrol_index_not_ordinary {store : PayStore} {clock : ClockCell.Clock} {b
   intro o member same
   have present := (decideObservations_ok accepted).1
   unfold decideObservations at accepted
+  split at accepted
+  · cases accepted
   rw [present] at accepted
   simp only at accepted
   have hit : observations.any (fun o => plan.tariff.enrolIndex == some o.index) = true :=
@@ -471,6 +490,7 @@ theorem enrol_index_not_ordinary {store : PayStore} {clock : ClockCell.Clock} {b
 #assert_axioms decideAll_forall₂
 #assert_axioms decideObservations_ok
 #assert_axioms enrol_index_not_ordinary
+#assert_axioms decideObservations_chainTip
 #assert_axioms decideObservations_tip
 #assert_axioms decideObservations_admitted
 

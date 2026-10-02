@@ -54,6 +54,8 @@ behind a signed account observation, 102=exact receipt by transaction id,
 117=self-enrollment signing plan, 118=self-enrollment detached assembly,
 119=self-enrollment submit, 120=self-enrollment receipt-only lookup.
 121=public enrollment/renewal quote (bounded JSON request and response).
+181=exact paid status, 182=v2 quote, 183=closed claim signing plan,
+184=claim signature assembly, 185=claim submit, 186=exact claim lookup.
 123=realm well signing plan, 124=realm well detached assembly,
 125=realm well submit (non-confirmed outcomes reply 255),
 126=clock tick signing plan, 127=clock tick detached assembly,
@@ -158,6 +160,7 @@ import Host.FnSelectiveReleaseSourceAuthoring
 import Host.FnSelectiveReleaseFnReceiving
 import Host.FnSelectiveReleaseFnAck
 import Host.Json
+import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
 import Host.FnInboxView
@@ -1707,6 +1710,9 @@ def dispatchSession (config : NativeHost.Config)
       let some text := String.fromUTF8? source.toByteArray
         | throw (RequestRefusal.malformed "native host author source is not UTF-8")
       let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
+      if kind == "pay-claim-rotation" then
+        unless source.length ≤ 4096 do throw (RequestRefusal.malformed "claim rotation JSON exceeds bound")
+        return (7, ← RequestRefusal.clientBytes (Minidregg.Host.PayClaims.authorRotation value))
       return (7, ← RequestRefusal.clientBytes (Minidregg.Host.Json.author kind value (some config) providerRoutes))
   | 8 =>
       let (kind, source) ← splitKind payload
@@ -1732,7 +1738,11 @@ def dispatchSession (config : NativeHost.Config)
           walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
         return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
       else
-        let value ← RequestRefusal.clientBytes (inspectHost kind source)
+        let value ← RequestRefusal.clientBytes (if kind == "pay-claim-plan" then
+          Minidregg.Host.PayClaims.claimPlanJson source
+          else if kind == "pay-claim-command" then Minidregg.Host.PayClaims.claimCommandJson source
+          else if kind == "pay-claim-ingress" then Minidregg.Host.PayClaims.claimIngressJson config source
+          else inspectHost kind source)
         return (8, value.compress.toUTF8.toList)
   | 9 =>
       let some text := String.fromUTF8? payload.toByteArray
@@ -5161,6 +5171,32 @@ def run (arguments : List String) : IO UInt32 := do
             (← IO.ofExcept settings.providerMeteringPin)
             (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
+      | "pay-enrol-v2-context", [input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "purchase context JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.purchaseContext config source))
+          pure 0
+      | "author", ["pay-claim-rotation", input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "claim rotation JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          writeBytes output (← IO.ofExcept (Minidregg.Host.PayClaims.authorRotation source))
+          pure 0
+      | "inspect", ["pay-claim-plan", input, output] =>
+          let bytes ← readBoundedBytes input 3072
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimPlanJson bytes))
+          pure 0
+      | "inspect", ["pay-claim-command", input, output] =>
+          let bytes ← readBoundedBytes input 2048
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimCommandJson bytes))
+          pure 0
+      | "inspect", ["pay-claim-ingress", input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimIngressJson config bytes))
+          pure 0
       | "author", [kind, input, output] =>
           let source ← if kind == "application-dispatch-request" ||
               kind == "application-share-issue-grain-request" ||
@@ -5657,10 +5693,48 @@ def run (arguments : List String) : IO UInt32 := do
                             let quoted ← IO.ofExcept
                               (Minidregg.Host.Json.payEnrolQuoteLoadedJson pinnedConfig opened request)
                             return ((121 : UInt8), quoted.compress.toUTF8.toList)
+                        | 181 | 182 =>
+                            unless payload.length ≤ 4096 do
+                              throw (IO.userError "paid status/quote request exceeds bound")
+                            let some text := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "paid status/quote request is not UTF-8")
+                            let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let opened ← sessionOpened pinnedConfig state
+                            let response ← IO.ofExcept (if operation == 181 then
+                              Minidregg.Host.PayClaims.statusLoadedJson pinnedConfig opened request
+                              else Minidregg.Host.PayClaims.quoteLoadedJson pinnedConfig opened request)
+                            let bytes := response.compress.toUTF8.toList
+                            unless bytes.length ≤ 8192 do
+                              throw (IO.userError "paid status/quote response exceeds bound")
+                            return (operation, bytes)
+                        | 183 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.payClaimPlanLoaded pinnedConfig opened payload)
+                            let bytes := NativeHost.claimSigningPlanCodec.encode plan
+                            unless bytes.length ≤ 3072 do
+                              throw (IO.userError "claim signing plan exceeds bound")
+                            return ((183 : UInt8), bytes)
+                        | 184 =>
+                            unless payload.length ≤ 4096 do
+                              throw (IO.userError "claim assembly exceeds bound")
+                            let (plan, signature) ← splitPair payload
+                            let bytes ← IO.ofExcept (NativeHost.payClaimAssemble plan signature)
+                            return ((184 : UInt8), bytes)
+                        | 185 =>
+                            unless payload.length ≤ 4096 do
+                              throw (IO.userError "claim ingress exceeds bound")
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.payClaimSubmitLoaded pinnedConfig opened payload
+                            return ((185 : UInt8), outcomeCodec.encode outcome)
+                        | 186 =>
+                            unless payload.length ≤ 4096 do
+                              throw (IO.userError "claim lookup ingress exceeds bound")
+                            let opened ← sessionOpened pinnedConfig state
+                            return ((186 : UInt8), outcomeCodec.encode (NativeHost.payClaimLookupLoaded pinnedConfig opened payload))
                         | 117 =>
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept
-                              (← NativeHost.payEnrolPlanLoaded pinnedConfig opened payload)
+                              (← NativeHost.payEnrolPlanCurrentLoaded pinnedConfig opened payload)
                             let bytes := PayCellDomain.signingPlanCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "pay enrolment plan exceeds host frame bound")
@@ -5675,7 +5749,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((118 : UInt8), ingress)
                         | 119 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payEnrolSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payEnrolSubmitCurrentLoaded pinnedConfig opened payload
                             return ((119 : UInt8), outcomeCodec.encode outcome)
                         | 120 =>
                             let opened ← sessionOpened pinnedConfig state

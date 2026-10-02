@@ -1,8 +1,9 @@
+/- Frozen v4 payload codec for the explicit v4→v5 paid-claim carry. Never decode old bytes using the v5 wire. -/
 /-
 # Kernel.PayCell — the pay cell: tariff, deposit address book, assignment, enrolment
 
 One store cell per deployment, at an identifier derived from the deployment
-domain (`physicalId`), with thirteen namespaces on `Theory.Store`:
+domain (`physicalId`), with six namespaces on `Theory.Store`:
 
 | namespace    | key              | value                     | discipline  |
 |--------------|------------------|---------------------------|-------------|
@@ -12,13 +13,6 @@ domain (`physicalId`), with thirteen namespaces on `Theory.Store`:
 | `enrolment`  | Mini key (32 B)  | `EnrolRecord`             | RAM         |
 | `sshIndex`   | ssh blob (51 B)  | Mini key                  | append-only |
 | `journal`    | nullifier bytes  | `Unattributed`            | append-only |
-| `claim`      | nullifier bytes  | original paid claim       | append-only |
-| `claimConsumption` | claim id   | exact authorized split    | append-only |
-| `pendingOwner` | identity key   | current unadmitted custody| RAM         |
-| `chainTip`   | `Unit`           | finalized slot/block time | RAM         |
-| `pendingOwnerHistory` | identity/epoch | retained custody     | append-only |
-| `computeUsage` | subject `Nat`   | day/admitted steps        | RAM         |
-| `computeActivation` | `Unit`     | activation/history anchor | append-only |
 
 The last three are PAY §11's self-enrollment state (layout v2).  An
 `enrolment` row is written once by an enrollment and rewritten only by a
@@ -29,11 +23,10 @@ enrollment-index payment that was not accepted, with its named reason.
 
 `book` is written by the operator's control capability (`PayBookReceiver`);
 `assignment` binds book index `i` to the account a subject owns
-(`PayAssignmentReceiver`); `tariff` is the operator's versioned rate. Verified
-observer ingress retains its finalized chain tip here and also advances the
-deployment clock. The deployment clock may advance independently; it is not
-chain evidence. Quote expiry uses this chain tip, with an explicit lag bound
-against the deployment clock. Empty verified observation reports refresh it.
+(`PayAssignmentReceiver`); `tariff` is the operator's versioned rate. Time is
+the deployment's one clock cell (`Kernel.ClockCell`): the pay observer advances
+its `slot` (and its `now` to the observed block time when that is later) in the
+same intent as the credits it reports; the pay cell keeps no clock.
 
 Both indexed namespaces are append-only, so an index is written once
 (`Store.Op.allocate_enabled_fresh`).  The index an observation names resolves
@@ -41,26 +34,18 @@ to both its address (`bookAt`) and its account (`assignmentAt`); a payment
 nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
 from `bookAt`.
 
-Wire: the store codec with layout name `DREGG/PAY/CELL/v5` (its frame commits
+Wire: the store codec with layout name `DREGG/PAY/CELL/v4` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
 `DREGG/PAY/TARIFF/v3`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
 clock: namespace tag 3 (the clock) is retired and decodes to nothing.  v4 = v3
-with the tariff at `DREGG/PAY/TARIFF/v3` (C3's `slashCallerPermille`). v5 adds
-claim/custody/tip tags 7–11 and compute usage/activation tags 12–13, without
-reusing retired tag 3. Old versions refuse
-this decoder. `PayCellLegacyV4` and `PayCellUpgrade` provide an explicit neutral
-v4 lift preserving every old row and leaving every new namespace empty. In particular, a neutral codec lift does
-not activate compute or assert that historical execution used no allowance.
-Compute requires a separately authenticated fresh-genesis or closed-legacy
-history activation. Its append-only record prevents resetting the free epoch.
+with the tariff at `DREGG/PAY/TARIFF/v3` (C3's `slashCallerPermille`).  A v1,
+v2 or v3 cell refuses to decode.
 -/
-import Kernel.PayEnrolClaim
-import Kernel.PayEnrolMemoV2
 import Compiler.StoreCodec
 import Kernel.PayTariff
 import Kernel.PayEnrolMemo
 
-namespace Minidregg.Kernel.PayCell
+namespace Minidregg.Kernel.PayCellLegacyV4
 
 open Minidregg.Compiler
 open Minidregg.Compiler.StoreCodec
@@ -80,18 +65,11 @@ inductive Namespace
   | enrolment
   | sshIndex
   | journal
-  | claim
-  | claimConsumption
-  | pendingOwner
-  | chainTip
-  | pendingOwnerHistory
-  | computeUsage
-  | computeActivation
   deriving DecidableEq, Repr
 
 /-- The finalized chain tip a pay observer reports at: the slot and its block
 time (unix s). It is the observer's claim about the chain, carried in its
-command. The dedicated row preserves chain evidence independently of wall ticks. -/
+command; it is not stored here (the deployment clock cell holds `now`/`slot`). -/
 structure ChainTip where
   slot : Nat
   blockTime : Nat
@@ -135,31 +113,6 @@ structure Unattributed where
   memo : MemoField
   deriving DecidableEq, Repr
 
-/-- Nonmonetary execution accounting, indexed by the actual signing subject. -/
-structure ComputeUsage where
-  day : Nat
-  admittedSteps : Nat
-  deriving DecidableEq, Repr
-
-/-- Installed only by authenticated boot/carry. `history` binds the actual
-closed legacy history, or the genesis identity for a genuinely new deployment.
-`legacyThroughDay = none` means fresh genesis, never "history unavailable".
-A legacy activation starts after its final old-profile execution day. -/
-structure ComputeActivation where
-  day : Nat
-  legacyThroughDay : Option Nat
-  history : Digest
-  deriving DecidableEq, Repr
-
-def ComputeActivation.valid (activation : ComputeActivation) : Prop :=
-  match activation.legacyThroughDay with
-  | none => True
-  | some priorDay => priorDay < activation.day
-
-instance (activation : ComputeActivation) : Decidable activation.valid := by
-  unfold ComputeActivation.valid
-  cases activation.legacyThroughDay <;> infer_instance
-
 def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
@@ -167,13 +120,6 @@ def Namespace.Key : Namespace → Type
   | .enrolment => List UInt8
   | .sshIndex => List UInt8
   | .journal => List UInt8
-  | .claim => List UInt8
-  | .claimConsumption => List UInt8
-  | .pendingOwner => List UInt8
-  | .pendingOwnerHistory => List UInt8 × Nat
-  | .chainTip => Unit
-  | .computeUsage => Nat
-  | .computeActivation => Unit
 
 def Namespace.Value : Namespace → Type
   | .tariff => Tariff
@@ -182,13 +128,6 @@ def Namespace.Value : Namespace → Type
   | .enrolment => EnrolRecord
   | .sshIndex => List UInt8
   | .journal => Unattributed
-  | .claim => PayEnrolClaim.Claim
-  | .claimConsumption => PayEnrolClaim.Consumption
-  | .pendingOwner => PayEnrolClaim.PendingOwner
-  | .pendingOwnerHistory => PayEnrolClaim.PendingOwner
-  | .chainTip => ChainTip
-  | .computeUsage => ComputeUsage
-  | .computeActivation => ComputeActivation
 
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .tariff => inferInstanceAs (DecidableEq Unit)
@@ -197,13 +136,6 @@ instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key
   | .enrolment => inferInstanceAs (DecidableEq (List UInt8))
   | .sshIndex => inferInstanceAs (DecidableEq (List UInt8))
   | .journal => inferInstanceAs (DecidableEq (List UInt8))
-  | .claim => inferInstanceAs (DecidableEq (List UInt8))
-  | .claimConsumption => inferInstanceAs (DecidableEq (List UInt8))
-  | .pendingOwner => inferInstanceAs (DecidableEq (List UInt8))
-  | .pendingOwnerHistory => inferInstanceAs (DecidableEq (List UInt8 × Nat))
-  | .chainTip => inferInstanceAs (DecidableEq Unit)
-  | .computeUsage => inferInstanceAs (DecidableEq Nat)
-  | .computeActivation => inferInstanceAs (DecidableEq Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .tariff => inferInstanceAs (DecidableEq Tariff)
@@ -212,13 +144,6 @@ instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.V
   | .enrolment => inferInstanceAs (DecidableEq EnrolRecord)
   | .sshIndex => inferInstanceAs (DecidableEq (List UInt8))
   | .journal => inferInstanceAs (DecidableEq Unattributed)
-  | .claim => inferInstanceAs (DecidableEq PayEnrolClaim.Claim)
-  | .claimConsumption => inferInstanceAs (DecidableEq PayEnrolClaim.Consumption)
-  | .pendingOwner => inferInstanceAs (DecidableEq PayEnrolClaim.PendingOwner)
-  | .pendingOwnerHistory => inferInstanceAs (DecidableEq PayEnrolClaim.PendingOwner)
-  | .chainTip => inferInstanceAs (DecidableEq ChainTip)
-  | .computeUsage => inferInstanceAs (DecidableEq ComputeUsage)
-  | .computeActivation => inferInstanceAs (DecidableEq ComputeActivation)
 
 def Namespace.discipline : Namespace → Discipline
   | .tariff => .ram
@@ -227,13 +152,6 @@ def Namespace.discipline : Namespace → Discipline
   | .enrolment => .ram
   | .sshIndex => .appendOnly
   | .journal => .appendOnly
-  | .claim => .appendOnly
-  | .claimConsumption => .appendOnly
-  | .pendingOwner => .ram
-  | .pendingOwnerHistory => .appendOnly
-  | .chainTip => .ram
-  | .computeUsage => .ram
-  | .computeActivation => .appendOnly
 
 abbrev layout : Layout.{0, 0, 0} where
   Namespace := Namespace
@@ -251,31 +169,6 @@ def assignmentAddress (index : Nat) : Address layout := ⟨.assignment, index⟩
 def enrolmentAddress (miniKey : List UInt8) : Address layout := ⟨.enrolment, miniKey⟩
 def sshIndexAddress (sshBlob : List UInt8) : Address layout := ⟨.sshIndex, sshBlob⟩
 def journalAddress (nullifier : List UInt8) : Address layout := ⟨.journal, nullifier⟩
-
-def claimAddress (id : List UInt8) : Address layout := ⟨.claim, id⟩
-def claimConsumptionAddress (id : List UInt8) : Address layout := ⟨.claimConsumption, id⟩
-def pendingOwnerAddress (identityKey : List UInt8) : Address layout := ⟨.pendingOwner, identityKey⟩
-/-- Immutable provenance of pre-admission custody, never a current-authority
-fallback after the identity has entered the registry. -/
-def pendingOwnerHistoryAddress (identityKey : List UInt8) (epoch : Nat) : Address layout :=
-  ⟨.pendingOwnerHistory, (identityKey, epoch)⟩
-def chainTipAddress : Address layout := ⟨.chainTip, ()⟩
-def claimAt (store : PayStore) (id : List UInt8) : Option PayEnrolClaim.Claim := store (claimAddress id)
-def claimConsumptionAt (store : PayStore) (id : List UInt8) : Option PayEnrolClaim.Consumption :=
-  store (claimConsumptionAddress id)
-def pendingOwnerAt (store : PayStore) (identityKey : List UInt8) : Option PayEnrolClaim.PendingOwner :=
-  store (pendingOwnerAddress identityKey)
-def pendingOwnerHistoryAt (store : PayStore) (identityKey : List UInt8) (epoch : Nat) :
-    Option PayEnrolClaim.PendingOwner :=
-  store (pendingOwnerHistoryAddress identityKey epoch)
-def chainTipOf (store : PayStore) : Option ChainTip := store chainTipAddress
-
-def computeUsageAddress (subject : Nat) : Address layout := ⟨.computeUsage, subject⟩
-def computeActivationAddress : Address layout := ⟨.computeActivation, ()⟩
-def computeUsageAt (store : PayStore) (subject : Nat) : Option ComputeUsage :=
-  store (computeUsageAddress subject)
-def computeActivationOf (store : PayStore) : Option ComputeActivation :=
-  store computeActivationAddress
 
 def tariffOf (store : PayStore) : Option Tariff := store tariffAddress
 /-- The deposit address at book index `index`. -/
@@ -312,36 +205,6 @@ where
 
 /-! ## The cell law -/
 
-/-- Original claim bytes remain bound to the signed v2 identity, amount and pricing.
-Signature verification is the receiver's Checked boundary, not a cell-law oracle. -/
-def claimMemoCoherent (claim : PayEnrolClaim.Claim) : Bool :=
-  match PayEnrolMemoV2.parse claim.rawMemo with
-  | .ok memo => decide (memo.unsigned.enrollmentIdentityKey = claim.ownerIdentityKey ∧
-      memo.unsigned.amountAtomic = claim.original.amountAtomic ∧
-      memo.unsigned.pricingCommitment = claim.originalPricingCommitment)
-  | .error _ => false
-
-/-- Original-memo consumption derives its normalized economic terms from the
-immutable signed bytes, never from a fabricated detached acceptance request. -/
-def originalConsumptionTerms (claim : PayEnrolClaim.Claim) : Option PayEnrolClaim.Terms :=
-  match PayEnrolMemoV2.parse claim.rawMemo with
-  | .error _ => none
-  | .ok memo =>
-    let mode : PayEnrolClaim.Mode := match memo.unsigned.mode with
-      | .enroll => .enroll
-      | .renew | .renewWithoutCommitment => .renew
-    some ⟨mode, claim.id, memo.unsigned.enrollmentIdentityKey,
-      memo.unsigned.pricingCommitment, memo.unsigned.weeks,
-      memo.unsigned.minimumStarterCredit, memo.unsigned.expiresAtProcessingChainHour⟩
-
-def consumptionAuthorizationCoherent (claim : PayEnrolClaim.Claim)
-    (consumed : PayEnrolClaim.Consumption) : Bool :=
-  match consumed.authorization with
-  | .originalMemo => claim.reason.isNone &&
-      decide (originalConsumptionTerms claim = some consumed.terms)
-  | .acceptCurrentQuote request => claim.reason.isSome &&
-      decide (request.terms = consumed.terms)
-
 /-- Every book entry is a 32-byte key; every enrolment row is a 32-byte Mini
 key holding one ssh-ed25519 blob that the ssh index maps back to it; every
 ssh index row points at an enrolment row holding that blob.  A scan of the
@@ -363,43 +226,6 @@ def rowShaped (store : PayStore) : Address layout → Bool
           | some record => decide (record.sshBlob = blob)
           | none => false
       | none => true
-  | ⟨.claim, id⟩ =>
-      match claimAt store id with
-      | some claim => decide (claim.valid ∧ claim.id = id) && claimMemoCoherent claim &&
-          (claim.reason.isSome || (claimConsumptionAt store id).isSome)
-      | none => true
-  | ⟨.claimConsumption, id⟩ =>
-      match claimConsumptionAt store id with
-      | some consumed =>
-          match claimAt store id with
-          | some claim => decide (consumed.valid ∧ consumed.claimId = id ∧ consumed.matchesClaim claim) &&
-              consumptionAuthorizationCoherent claim consumed
-          | none => false
-      | none => true
-  | ⟨.pendingOwner, identity⟩ =>
-      match pendingOwnerAt store identity with
-      | some owner => decide (owner.valid ∧ owner.identityKey = identity ∧
-          pendingOwnerHistoryAt store identity owner.epoch = some owner)
-      | none => true
-  | ⟨.pendingOwnerHistory, (identity, epoch)⟩ =>
-      match pendingOwnerHistoryAt store identity epoch with
-      | some owner => decide (owner.valid ∧ owner.identityKey = identity ∧ owner.epoch = epoch)
-      | none => true
-  | ⟨.chainTip, ()⟩ =>
-      match chainTipOf store with
-      | some tip => decide (0 < tip.slot ∧ tip.slot < 2 ^ 64 ∧
-          0 < tip.blockTime ∧ tip.blockTime < 2 ^ 64)
-      | none => true
-  | ⟨.computeUsage, subject⟩ =>
-      match computeUsageAt store subject with
-      | none => true
-      | some usage => match computeActivationOf store with
-        | none => false
-        | some activation => decide (activation.valid ∧ activation.day ≤ usage.day)
-  | ⟨.computeActivation, ()⟩ =>
-      match computeActivationOf store with
-      | none => true
-      | some activation => decide activation.valid
   | _ => true
 
 /-- A pay cell always holds a tariff, every deposit address is
@@ -413,7 +239,7 @@ instance (store : PayStore) : Decidable (Law store) := by
   unfold Law
   infer_instance
 
-/-! ## Wire `DREGG/PAY/CELL/v5` -/
+/-! ## Wire `DREGG/PAY/CELL/v4` -/
 
 def namespaceStream : StreamCodec Namespace where
   encode
@@ -423,13 +249,6 @@ def namespaceStream : StreamCodec Namespace where
     | .enrolment => [4]
     | .sshIndex => [5]
     | .journal => [6]
-    | .claim => [7]
-    | .claimConsumption => [8]
-    | .pendingOwner => [9]
-    | .pendingOwnerHistory => [11]
-    | .chainTip => [10]
-    | .computeUsage => [12]
-    | .computeActivation => [13]
   decodePrefix
     | 0 :: suffix => some (.tariff, suffix)
     | 1 :: suffix => some (.book, suffix)
@@ -437,13 +256,6 @@ def namespaceStream : StreamCodec Namespace where
     | 4 :: suffix => some (.enrolment, suffix)
     | 5 :: suffix => some (.sshIndex, suffix)
     | 6 :: suffix => some (.journal, suffix)
-    | 7 :: suffix => some (.claim, suffix)
-    | 8 :: suffix => some (.claimConsumption, suffix)
-    | 9 :: suffix => some (.pendingOwner, suffix)
-    | 10 :: suffix => some (.chainTip, suffix)
-    | 11 :: suffix => some (.pendingOwnerHistory, suffix)
-    | 12 :: suffix => some (.computeUsage, suffix)
-    | 13 :: suffix => some (.computeActivation, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
 
@@ -468,20 +280,6 @@ def unattributedStream : StreamCodec Unattributed :=
     (fun (index, amount, slot, reason, memo) => ⟨index, amount, slot, reason, memo⟩)
     (by intro row; cases row; rfl)
 
-def computeUsageStream : StreamCodec ComputeUsage :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat StreamCodec.nat)
-    (fun usage => (usage.day, usage.admittedSteps))
-    (fun (day, steps) => ⟨day, steps⟩)
-    (by intro usage; cases usage; rfl)
-
-def computeActivationStream : StreamCodec ComputeActivation :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product (StreamCodec.option StreamCodec.nat) digestStream))
-    (fun activation => (activation.day, activation.legacyThroughDay, activation.history))
-    (fun (day, prior, history) => ⟨day, prior, history⟩)
-    (by intro activation; cases activation; rfl)
-
 def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .tariff => unitStream
   | .book => StreamCodec.nat
@@ -489,13 +287,6 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .enrolment => bytesStream
   | .sshIndex => bytesStream
   | .journal => bytesStream
-  | .claim => bytesStream
-  | .claimConsumption => bytesStream
-  | .pendingOwner => bytesStream
-  | .pendingOwnerHistory => StreamCodec.product bytesStream StreamCodec.nat
-  | .chainTip => unitStream
-  | .computeUsage => StreamCodec.nat
-  | .computeActivation => unitStream
 
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .tariff => tariffStream
@@ -504,21 +295,12 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .enrolment => enrolRecordStream
   | .sshIndex => bytesStream
   | .journal => unattributedStream
-  | .claim => PayEnrolClaim.claimStream
-  | .claimConsumption => PayEnrolClaim.consumptionStream
-  | .pendingOwner => PayEnrolClaim.pendingOwnerStream
-  | .pendingOwnerHistory => PayEnrolClaim.pendingOwnerStream
-  | .chainTip => chainTipStream
-  | .computeUsage => computeUsageStream
-  | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v5"
+def wireName : String := "DREGG/PAY/CELL/v4"
 
 def wire : Wire layout where
   name := wireName
-  namespaces := [.tariff, .book, .assignment, .enrolment, .sshIndex, .journal,
-    .claim, .claimConsumption, .pendingOwner, .chainTip, .pendingOwnerHistory,
-    .computeUsage, .computeActivation]
+  namespaces := [.tariff, .book, .assignment, .enrolment, .sshIndex, .journal]
   namespaces_complete := by intro space; cases space <;> simp
   namespaceStream := namespaceStream
   keyStream := keyStream
@@ -530,13 +312,6 @@ def wire : Wire layout where
     | .enrolment => "mini-key32/bytes"
     | .sshIndex => "ssh-ed25519-blob/bytes"
     | .journal => "soltx-nullifier/bytes"
-    | .claim => "soltx-nullifier/bytes"
-    | .claimConsumption => "soltx-nullifier/bytes"
-    | .pendingOwner => "mini-key32/bytes"
-    | .pendingOwnerHistory => "mini-key32/bytes+epoch/nat"
-    | .chainTip => "unit"
-    | .computeUsage => "subject-id/nat"
-    | .computeActivation => "unit"
   valueCodecId
     | .tariff => "DREGG/PAY/TARIFF/v3"
     | .book => "address32/bytes"
@@ -544,13 +319,6 @@ def wire : Wire layout where
     | .enrolment => "DREGG/PAY/ENROLMENT/v1"
     | .sshIndex => "mini-key32/bytes"
     | .journal => "DREGG/PAY/UNATTRIBUTED/v1"
-    | .claim => "DREGG/PAY/CLAIM/v2"
-    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v2"
-    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v1"
-    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v1"
-    | .chainTip => "DREGG/PAY/CHAIN-TIP/v1"
-    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v1"
-    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 
@@ -611,56 +379,6 @@ theorem short_address_unlawful :
     ¬ Law (genesisStore.set (bookAddress 0) (some (List.replicate 31 1))) := by
   decide +kernel
 
-theorem pendingOwnerHistory_appendOnly :
-    Namespace.discipline .pendingOwnerHistory = .appendOnly := rfl
-
-/-- No enabled rewrite can replace an already recorded pending epoch. -/
-theorem pendingOwnerHistory_no_rewrite (store : PayStore) (identity : List UInt8) (epoch : Nat)
-    (before after : PayEnrolClaim.PendingOwner)
-    (enabled : (Op.write .pendingOwnerHistory (identity, epoch) before after).Enabled store) : False := by
-  have wrong := enabled.1
-  change Minidregg.Theory.Store.Discipline.appendOnly = .ram at wrong
-  cases wrong
-
-private def historyFixtureOwner : PayEnrolClaim.PendingOwner :=
-  ⟨List.replicate 32 1, List.replicate 32 2, 1, ⟨3⟩⟩
-
-/-- Current custody and its immutable epoch are installed together. -/
-theorem pending_owner_with_history_law :
-    Law ((genesisStore.set
-      (pendingOwnerHistoryAddress historyFixtureOwner.identityKey historyFixtureOwner.epoch)
-      (some historyFixtureOwner)).set (pendingOwnerAddress historyFixtureOwner.identityKey)
-      (some historyFixtureOwner)) := by decide +kernel
-
-theorem current_owner_without_history_unlawful :
-    ¬Law (genesisStore.set (pendingOwnerAddress historyFixtureOwner.identityKey)
-      (some historyFixtureOwner)) := by decide +kernel
-
-theorem history_epoch_mismatch_unlawful :
-    ¬Law (genesisStore.set (pendingOwnerHistoryAddress historyFixtureOwner.identityKey 2)
-      (some historyFixtureOwner)) := by decide +kernel
-
-theorem computeActivation_appendOnly :
-    Namespace.discipline .computeActivation = .appendOnly := rfl
-
-/-- Activation cannot be replaced to mint another free allowance. -/
-theorem computeActivation_no_rewrite (store : PayStore) (before after : ComputeActivation)
-    (enabled : (Op.write .computeActivation () before after).Enabled store) : False := by
-  have wrong := enabled.1
-  change Minidregg.Theory.Store.Discipline.appendOnly = .ram at wrong
-  cases wrong
-
-/-- Neutral genesis is deliberately inactive until its authenticated boot edge. -/
-theorem genesis_compute_inactive : computeActivationOf genesisStore = none := by decide
-
-#assert_axioms computeActivation_appendOnly
-#assert_axioms computeActivation_no_rewrite
-#assert_axioms genesis_compute_inactive
-#assert_axioms pending_owner_with_history_law
-#assert_axioms current_owner_without_history_unlawful
-#assert_axioms history_epoch_mismatch_unlawful
-#assert_axioms pendingOwnerHistory_appendOnly
-#assert_axioms pendingOwnerHistory_no_rewrite
 #assert_axioms cell_roundtrip
 #assert_axioms cell_canonical
 #assert_axioms genesis_law
@@ -672,4 +390,4 @@ theorem genesis_compute_inactive : computeActivationOf genesisStore = none := by
 #assert_axioms unindexed_enrolment_unlawful
 #assert_axioms dangling_ssh_index_unlawful
 
-end Minidregg.Kernel.PayCell
+end Minidregg.Kernel.PayCellLegacyV4

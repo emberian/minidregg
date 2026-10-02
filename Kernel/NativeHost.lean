@@ -97,7 +97,7 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
           return ← DurableReceiverIO.bootstrap config.transport
             ResourceBirthCodec.rootBytes durable.image.seed
 
-private def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
+def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
   .refused reason phase.toUTF8.toList detail.toUTF8.toList
 
 /-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
@@ -886,7 +886,7 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent]
 
-private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
+def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList

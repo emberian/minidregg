@@ -48,6 +48,8 @@ import Kernel.RealmWellReceiver
 import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
+import Kernel.PayEnrolV2Receiver
+import Kernel.PayClaimReceiver
 import Kernel.PurseRefillReceiver
 import Kernel.JobMoneyReceiver
 import Kernel.CertifyReceiver
@@ -767,6 +769,14 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PayEnrolReceiver.AcceptedEnrol config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
       NativeAdmission config opened (PayEnrolReceiver.intent accepted)
+  | payEnrolV2 {ingress : PayEnrolReceiver.DecodedIngress}
+      (accepted : PayEnrolV2Receiver.AcceptedEnrol config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayEnrolV2Receiver.intent accepted)
+  | payClaim {ingress : PayClaimCommand.DecodedIngress}
+      (accepted : PayClaimReceiver.AcceptedClaim config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayClaimReceiver.intent accepted)
   | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
       (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1620,7 +1630,21 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PayObservationReceiver.intent accepted,
           .payObservation accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PayClaimCommand.decodeIngress bytes then
+    match ← PayClaimReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
+    | .error reason => return .error s!"paid claim refused: {repr reason}"
+    | .ok accepted =>
+        return .ok { intent := PayClaimReceiver.intent accepted, admission := .payClaim accepted,
+          issue := none, begin := none, beginV2 := none, claimV2 := none }
   if let some ingress := PayEnrolReceiver.decodeIngress bytes then
+    if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
+      match ← PayEnrolV2Receiver.admitDecodedNative config.deployment config.profile
+          ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
+      | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
+      | .ok accepted =>
+          return .ok { intent := PayEnrolV2Receiver.intent accepted, admission := .payEnrolV2 accepted,
+            issue := none, begin := none, beginV2 := none, claimV2 := none }
     match ← PayEnrolReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
