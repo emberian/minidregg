@@ -1,5 +1,5 @@
 /-
-Historical event22 provenance for an explicitly authorized carried prefix.
+Historical event22 provenance for an explicitly authorized carried custody.
 Old native admission is supplied by the retained capsule audit, never recreated
 under the target profile. Only the stable outer share carrier is decoded here;
 its grain birth bytes and old descriptor remain opaque.
@@ -16,26 +16,26 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-/-- The constructor needs a receiver-minted preserved-prefix token. A bare
+/-- The constructor needs a receiver-minted preserved-custody token. A bare
 record, claimed audit, receipt, or target-profile issue cannot mint this value. -/
 structure CarriedIssue (config : Config) (current : Durable) where
   private mk ::
-  prefix : CarriedSegmentIO.PreservedPrefix config current
+  custody : CarriedSegmentIO.PreservedPrefix config current
   index : Nat
-  beforeCut : index < prefix.edge.body.cut.height
+  beforeCut : index < custody.edge.body.cut.height
   record : DurableReceiver.IntentRecord
-  sourcePresent : prefix.source.durable.image.accepted[index]? = some record
+  sourcePresent : custody.source.durable.image.accepted[index]? = some record
   currentPresent : current.image.accepted[index]? = some record
   ingress : ApplicationShareIssueGrainSource.Ingress
   decoded : ApplicationShareIssueGrainSource.codec.decode record.event.canonicalBytes =
     some ingress
   eventExact : record.event =
-    ApplicationShareIssueGrainReceiver.event prefix.source.capsule.identity.domain ingress
+    ApplicationShareIssueGrainReceiver.event custody.source.capsule.identity.domain ingress
   original : Durable
-  originalLoaded : DurableReceiverIO.loadImage rootBytes prefix.source.durable.logStart
-    (prefix.source.durable.prefixImage (index + 1)) = .ok original
+  originalLoaded : DurableReceiverIO.loadImage rootBytes custody.source.durable.logStart
+    (custody.source.durable.prefixImage (index + 1)) = .ok original
 
-/-- Compute the original receipt with the OLD log start and original prefix.
+/-- Compute the original receipt with the OLD log start and original custody.
 The carry start's root and the target profile never replace this receipt. -/
 def CarriedIssue.receipt {config : Config} {current : Durable}
     (issue : CarriedIssue config current) : NativeHostCodec.Receipt :=
@@ -62,27 +62,27 @@ private theorem current_record_exact (current : Durable) (index : Nat)
 /-- Select by absolute original index, checking exact retained membership on
 both sides. No decoding of the opaque old grain birth is attempted. -/
 def selectIssue {config : Config} {current : Durable}
-    (prefix : CarriedSegmentIO.PreservedPrefix config current) (index : Nat) :
+    (custody : CarriedSegmentIO.PreservedPrefix config current) (index : Nat) :
     Except String (CarriedIssue config current) := do
-  if beforeCut : index < prefix.edge.body.cut.height then
-    match sourcePresent : prefix.source.durable.image.accepted[index]? with
+  if beforeCut : index < custody.edge.body.cut.height then
+    match sourcePresent : custody.source.durable.image.accepted[index]? with
     | none => throw "carried original issue index absent"
     | some record =>
       match decoded : ApplicationShareIssueGrainSource.codec.decode record.event.canonicalBytes with
       | none => throw "carried original is not a canonical outer grain issue"
       | some ingress =>
         if eventExact : record.event =
-            ApplicationShareIssueGrainReceiver.event prefix.source.capsule.identity.domain ingress then
+            ApplicationShareIssueGrainReceiver.event custody.source.capsule.identity.domain ingress then
           if bytes : (current.image.accepted[index]?.map DurableReceiverCodec.intentStream.encode) =
               some (DurableReceiverCodec.intentStream.encode record) then
-            match loaded : DurableReceiverIO.loadImage rootBytes prefix.source.durable.logStart
-                (prefix.source.durable.prefixImage (index + 1)) with
+            match loaded : DurableReceiverIO.loadImage rootBytes custody.source.durable.logStart
+                (custody.source.durable.prefixImage (index + 1)) with
             | .error detail => throw detail
             | .ok original =>
-              return ⟨prefix, index, beforeCut, record, sourcePresent,
+              return ⟨custody, index, beforeCut, record, sourcePresent,
                 current_record_exact current index record bytes, ingress, decoded,
                 eventExact, original, loaded⟩
-          else throw "carried original issue record differs from current preserved prefix"
+          else throw "carried original issue record differs from current preserved custody"
         else throw "carried original event22 identity differs"
   else throw "carried issue index is not before the original cut"
 
