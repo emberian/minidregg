@@ -15,7 +15,7 @@ import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.WorldKindLawDependencies
-import Compiler.WorldKindProjection
+import Kernel.WorldKindProjection
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
 import Compiler.ResourceTargetAdmission
