@@ -52,6 +52,30 @@ def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}
     return some receipt
   else throw .transactionConflict
 
+/-- Positive absence over the full accepted Image, including the retained
+pre-anchor records. No old transaction, unavailable original receipt, malformed
+request or conflicting wrapper can construct this token. -/
+structure RefusalAtTip (config : Config) {anchor : Opened config} {target : Durable}
+    (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) : Type where
+  private mk ::
+  absent : lookupVerified old bytes = .ok none
+
+def refusalAtTip? {config : Config} {anchor : Opened config} {target : Durable}
+    (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
+    Option (RefusalAtTip config old bytes) :=
+  match checked : lookupVerified old bytes with
+  | .ok none => some ⟨checked⟩
+  | _ => none
+
+/-- The exact absence decision is usable only while its same physical record
+and MAC are still the Store tip. No ordinary Verified/token cast is involved. -/
+def RefusalAtTip.withFreshTip {config : Config} {anchor : Opened config} {target : Durable}
+    {old : NativeHostReplay.SuffixVerified config anchor target} {bytes : List UInt8} {α : Type}
+    (_refusal : RefusalAtTip config old bytes) (handoff : List UInt8 → IO α) :
+    IO (Except String α) :=
+  ApplicationStreamContinuity.withOpenedFreshTip old.opened
+    (handoff ApplicationDispatchReceiver.noRecordRefusalBytes)
+
 /-- Computational admission evidence; the ordinary branch is obtained from
 actual suffix provenance, never by eliminating a Prop or forging Verified. -/
 inductive Admitted (config : Config) (opened : Opened config) where
@@ -181,6 +205,10 @@ inductive Result (config : Config) (anchor : Opened config) where
   | committed (committed : Committed config anchor)
   /-- Original receipt only, with no fresh delivery authority. -/
   | historical (receipt : Receipt)
+  /-- May emit the private absence marker only through refusal.withFreshTip. -/
+  | noRecordRefused {target : Durable}
+      {old : NativeHostReplay.SuffixVerified config anchor target} {bytes : List UInt8}
+      (refusal : RefusalAtTip config old bytes)
   | rejected (detail : String)
   | contention
   | unavailable (detail : String)
@@ -189,10 +217,11 @@ inductive Result (config : Config) (anchor : Opened config) where
 private def receiveAdmitted {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target)
     (admitted : Admitted config old.opened)
-    (constraint : Option ApplicationDispatchReceiver.RouteConstraint) :
+    (constraint : Option ApplicationDispatchReceiver.RouteConstraint)
+    {bytes : List UInt8} (refusal : RefusalAtTip config old bytes) :
     IO (Result config anchor) := do
   if constraint.isSome && !(constraint.all (routeMatches admitted)) then
-    return .rejected "dispatch pre-CAS request refused"
+    return .noRecordRefused refusal
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == admitted.intent.transactionId) != none then
     return .rejected "dispatch pre-CAS request refused"
@@ -231,48 +260,50 @@ theorem mismatched_route_never_submits {config : Config} {anchor : Opened config
     {target : Durable} (old : NativeHostReplay.SuffixVerified config anchor target)
     (admitted : Admitted config old.opened)
     (constraint : ApplicationDispatchReceiver.RouteConstraint)
+    {bytes : List UInt8} (refusal : RefusalAtTip config old bytes)
     (mismatch : routeMatches admitted constraint = false) :
-    receiveAdmitted old admitted (some constraint) = pure (.rejected "dispatch pre-CAS request refused") := by
+    receiveAdmitted old admitted (some constraint) refusal = pure (.noRecordRefused refusal) := by
   simp [receiveAdmitted, mismatch]
 
 private def receiveVerifiedWith {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8)
     (constraint : Option ApplicationDispatchReceiver.RouteConstraint) :
     IO (Result config anchor) := do
-  match lookupVerified old bytes with
-  | .ok (some receipt) => return .historical receipt
-  | .error .nativeHistoryUnavailable =>
-      return .uncertain "dispatch original receipt belongs to another segment or is unavailable"
-  | .error .transactionConflict => return .rejected "dispatch transaction has a different original"
-  | .error .malformed => return .rejected "noncanonical dispatch ingress"
-  | .ok none => pure ()
+  let refusal : RefusalAtTip config old bytes ←
+    match checked : lookupVerified old bytes with
+    | .ok (some receipt) => return .historical receipt
+    | .error .nativeHistoryUnavailable =>
+        return .uncertain "dispatch original receipt belongs to another segment or is unavailable"
+    | .error .transactionConflict => return .rejected "dispatch transaction has a different original"
+    | .error .malformed => return .rejected "noncanonical dispatch ingress"
+    | .ok none => pure ⟨checked⟩
   let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
     | return .rejected "dispatch pre-CAS request refused"
   if ingress.canonicalBytes != bytes then return .rejected "dispatch pre-CAS request refused"
   if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
-    return .rejected "dispatch pre-CAS request refused"
-  if ingress.dispatch.dispatch.session.origin != .human then return .rejected "dispatch pre-CAS request refused"
+    return .noRecordRefused refusal
+  if ingress.dispatch.dispatch.session.origin != .human then return .noRecordRefused refusal
   let .ok derived ← NativeHostReplay.deriveSuffixVerified old bytes
-    | return .rejected "dispatch pre-CAS request refused"
+    | return .noRecordRefused refusal
   match derived with
   | .carriedDispatch selected admitted =>
       if selected.canonicalBytes != bytes then return .rejected "dispatch pre-CAS request refused"
-      receiveAdmitted old (.carried selected admitted) constraint
+      receiveAdmitted old (.carried selected admitted) constraint refusal
   | .ordinary _ =>
       -- Derived's admission is a Prop. Obtain computational projection evidence
       -- through the same suffix's real issue cache and checked current image.
       let .ok admitted ← NativeHostReplay.admitDispatchSuffixVerified old ingress
-        | return .rejected "dispatch pre-CAS request refused"
-      receiveAdmitted old (.ordinary ingress admitted) constraint
+        | return .noRecordRefused refusal
+      receiveAdmitted old (.ordinary ingress admitted) constraint refusal
   | .carriedEnrollment _ _ => return .rejected "dispatch pre-CAS request refused"
 
 def receiveVerified (config : Config) {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
     IO (Result config anchor) := receiveVerifiedWith old bytes none
 
-/-- Route-bound failures remain ordinary non-clearing outcomes here until a
-positive-absence token with a physical-tip callback is integrated. Neither a
-parse failure nor a current-policy refusal is evidence for clearing a marker. -/
+/-- Malformed envelopes remain non-clearing. An inner request refusal can
+carry an absence token only after exact full-image lookup; Host must still use
+the token's physical-tip callback to emit the private marker. -/
 def receiveRouteBoundVerified (config : Config) {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
     IO (Result config anchor) := do
