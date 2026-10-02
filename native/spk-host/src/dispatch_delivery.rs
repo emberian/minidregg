@@ -11,7 +11,7 @@ use crate::hostd::Journal;
 use crate::http_entrance::{CustodianPolicy, EntranceKind};
 use crate::http_response;
 use crate::rpc_adapter::RpcDriver;
-use crate::web_socket::{cap_refusal, Limits, OpenSockets};
+use crate::web_socket::{cap_refusal, Limits, OpenSockets, StreamLease};
 use std::os::unix::net::UnixStream;
 use std::io;
 use std::path::Path;
@@ -38,6 +38,7 @@ pub(crate) struct ResidentHuman<'a> {
     /// This generation's open WebSockets and its class caps.
     pub sockets: &'a OpenSockets,
     pub limits: Limits,
+    pub stream_lease_lifetime: Duration,
 }
 
 enum Physical {
@@ -100,13 +101,19 @@ impl ResidentHuman<'_> {
         // authoring refusal consumes this fsynced number across restarts.
         let operation_id = self.journal.allocate_dispatch_operation()?;
         let attempt_dir = attempt_parent.join(format!("dispatch-op-{operation_id}"));
+        // Anchor BEFORE native authoring/admission; late success never renews it.
+        let lease = upgrade.as_ref().map(|_| StreamLease::begin(self.stream_lease_lifetime)).transpose()?;
         let committed = author_and_submit(
             self.operator,
             self.custody,
             http,
             &operation_id,
             &attempt_dir,
-        )?;
+        ).inspect_err(|_| {
+            // A failed current-authority check (including unavailable authority)
+            // ends streams for this exact pinned custody, never another principal.
+            self.rpc.invalidate_custody(&self.custody.app, &self.custody.subject, &self.custody.session);
+        })?;
         let base_path = format!("https://{}", policy.expected_host);
         // Projected before the durable DeliveryRequested, exactly as a GET.
         let physical = match (&upgrade, slot) {
@@ -154,6 +161,7 @@ impl ResidentHuman<'_> {
                     upgrade.accept,
                     self.limits,
                     slot,
+                    lease.ok_or_else(|| invalid("WebSocket lease absent"))?,
                     format!("op {operation_id}"),
                     APP_CALL_TIME,
                 );

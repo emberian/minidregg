@@ -135,6 +135,8 @@ impl PreparedAgent {
     }
 }
 
+fn default_stream_lease_seconds() -> u64 { crate::web_socket::DEFAULT_LEASE_SECONDS }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
@@ -150,6 +152,8 @@ struct ResidentConfig {
     persistent_var_max_bytes: u64,
     /// The app's size class (S, M or L): its WebSocket caps come from here.
     size_class: String,
+    #[serde(default = "default_stream_lease_seconds")]
+    ws_authority_lease_seconds: u64,
     grains_root: PathBuf,
     store: String,
     deployment_id: String,
@@ -750,6 +754,7 @@ impl ResidentConfig {
             || config.agents.len() > 8
             || config.persistent_var_max_bytes == 0
             || crate::broker::class(&config.size_class).is_err()
+            || crate::web_socket::StreamLease::begin(Duration::from_secs(config.ws_authority_lease_seconds)).is_err()
             || !config
                 .completion_semantics
                 .bytes()
@@ -1338,6 +1343,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 preferred_handle: &entry.preferred_handle,
                 sockets: &ws_open,
                 limits: ws_limits,
+                stream_lease_lifetime: Duration::from_secs(config.ws_authority_lease_seconds),
             };
             return deliver_request(
                 &mut human,
@@ -1623,7 +1629,15 @@ mod tests {
         file.write_all(&serde_json::to_vec(&config).unwrap())
             .unwrap();
         file.sync_all().unwrap();
-        assert!(ResidentConfig::load(&path).is_ok());
+        assert_eq!(ResidentConfig::load(&path).unwrap().ws_authority_lease_seconds, 60);
+        let mut lease_config = config.clone();
+        lease_config["wsAuthorityLeaseSeconds"] = json!(300);
+        fs::write(&path, serde_json::to_vec(&lease_config).unwrap()).unwrap();
+        assert_eq!(ResidentConfig::load(&path).unwrap().ws_authority_lease_seconds, 300);
+        lease_config["wsAuthorityLeaseSeconds"] = json!(0);
+        fs::write(&path, serde_json::to_vec(&lease_config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
         assert_eq!(fs::read_dir(&journal).unwrap().count(), 1);
         let mut mixed = config.clone();
         mixed["entrances"].as_array_mut().unwrap().push(json!({

@@ -192,6 +192,8 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    #[serde(default)]
+    ws_authority_lease_seconds: Option<u64>,
     protocol: String,
     state_root: PathBuf,
     mini_host: PathBuf,
@@ -236,6 +238,9 @@ impl Host {
             ));
         }
         let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
+        if let Some(seconds) = profile.ws_authority_lease_seconds {
+            crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
+        }
         let store = profile.mini_config_sha256.get(..16).unwrap_or("").to_owned();
         if profile.protocol != "mini-spk-grain-host-v2"
             || path.parent() != Some(profile.state_root.as_path())
@@ -1004,7 +1009,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
-    let resident = json!({
+    let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
         "journalDir":journal,
         "imageDir":install_config["imageDir"],
@@ -1048,6 +1053,10 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         "entrances":entrances,
         "agents":[],
     });
+    if let Some(seconds) = host.profile.ws_authority_lease_seconds {
+        resident["wsAuthorityLeaseSeconds"] = json!(seconds);
+    }
+
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
     install_unit(host, app, generation)?;
     let started = Instant::now();

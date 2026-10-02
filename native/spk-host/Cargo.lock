@@ -382,6 +382,8 @@ name = "minidregg-spk-host"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "capnp",
+ "capnp-rpc",
  "ed25519-dalek",
  "libc",
  "minidregg-signed-api-path",

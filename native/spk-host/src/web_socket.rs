@@ -1,7 +1,9 @@
 //! WebSockets through a grain route (SPK-HOSTING row 6). A socket is ONE
 //! admitted Mini dispatch, the open (method `WEBSOCKET`, a streamed dispatch);
 //! its frames are opaque bytes inside that admitted session, like a streamed
-//! body, and a close writes nothing to Mini. Frames are unmetered by design,
+//! body, and a close writes nothing to Mini. The stream is physically limited
+//! by an admission-anchored authority lease; it never renews itself. Frames are
+//! unmetered by design,
 //! so the grain's size class bounds them physically: at most `ws_max_open`
 //! sockets per generation (`wsConcurrencyCap`, refused before any Mini write)
 //! and `ws_bytes_per_minute` per socket (`wsByteCap`, the socket is cut).
@@ -14,9 +16,76 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+/// Physical attenuation, not a Mini promise of continuing authority. The clock
+/// starts before admission, so a slow or queued open cannot extend stale access.
+/// The default bounds silent revocation to one minute while permitting today's
+/// ~15s Mini admission. Operators may choose another positive lifetime.
+pub(crate) const DEFAULT_LEASE_SECONDS: u64 = 60;
+
+struct LeaseState {
+    deadline: Instant,
+    revoked: tokio::sync::watch::Sender<bool>,
+}
+
+#[derive(Clone)]
+pub(crate) struct StreamLease(Arc<LeaseState>);
+
+pub(crate) struct WeakStreamLease(Weak<LeaseState>);
+
+impl WeakStreamLease {
+    pub(crate) fn upgrade(&self) -> Option<StreamLease> {
+        self.0.upgrade().map(StreamLease)
+    }
+}
+
+impl StreamLease {
+    pub(crate) fn begin(lifetime: Duration) -> io::Result<Self> {
+        let deadline = Instant::now()
+            .checked_add(lifetime)
+            .filter(|_| !lifetime.is_zero())
+            .ok_or_else(|| refuse("WebSocket lease lifetime must be positive and representable"))?;
+        Ok(Self(Arc::new(LeaseState {
+            deadline,
+            revoked: tokio::sync::watch::channel(false).0,
+        })))
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakStreamLease {
+        WeakStreamLease(Arc::downgrade(&self.0))
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.0.revoked.send_replace(true);
+    }
+
+    pub(crate) fn check(&self) -> io::Result<()> {
+        if *self.0.revoked.borrow() || Instant::now() >= self.0.deadline {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "wsAuthorityLeaseEnded",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) async fn ended(&self) {
+        let mut revoked = self.0.revoked.subscribe();
+        tokio::select! {
+            biased;
+            _ = async {
+                while !*revoked.borrow_and_update() {
+                    if revoked.changed().await.is_err() { break; }
+                }
+            } => {},
+            _ = tokio::time::sleep_until(self.0.deadline.into()) => {},
+        }
+    }
+}
 
 /// RFC 6455 §1.3.
 const ACCEPT_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -214,11 +283,14 @@ enum End {
     Client,
     App,
     Cut,
+    Authority,
     Failed(String),
 }
 
 /// Carry opaque bytes both ways until either side ends or the socket passes
-/// its byte cap. Ends the app side by dropping its `serverStream`; writes
+/// its byte cap or authority lease. Each new byte chunk checks the lease before
+/// forwarding; expiry also cancels stalled reads/writes. Bytes already handed
+/// to the app/OS may finish after cancellation and are not rolled back. Ends the app side by dropping its `serverStream`; writes
 /// nothing to Mini. Runs on the fd3 worker's LocalSet.
 pub(crate) async fn pump(
     client: std::os::unix::net::UnixStream,
@@ -226,6 +298,7 @@ pub(crate) async fn pump(
     limits: Limits,
     slot: Slot,
     label: String,
+    lease: StreamLease,
 ) {
     let _slot = slot;
     let WebSocketSession {
@@ -253,6 +326,7 @@ pub(crate) async fn pump(
         let budget = Rc::clone(&budget);
         let carried = Rc::clone(&carried);
         let to_app = to_app.clone();
+        let lease = lease.clone();
         async move {
             let mut buffer = vec![0_u8; READ_CHUNK];
             loop {
@@ -264,6 +338,7 @@ pub(crate) async fn pump(
                 if !budget.borrow_mut().take(count, Instant::now()) {
                     return End::Cut;
                 }
+                if lease.check().is_err() { return End::Authority; }
                 carried.borrow_mut().0 += count as u64;
                 if let Err(error) = send_to_app(&to_app, &buffer[..count]).await {
                     return End::Failed(format!("app sendBytes: {error}"));
@@ -274,11 +349,13 @@ pub(crate) async fn pump(
     let down = {
         let budget = Rc::clone(&budget);
         let carried = Rc::clone(&carried);
+        let lease = lease.clone();
         async move {
             while let Some(bytes) = from_app.recv().await {
                 if !budget.borrow_mut().take(bytes.len(), Instant::now()) {
                     return End::Cut;
                 }
+                if lease.check().is_err() { return End::Authority; }
                 carried.borrow_mut().1 += bytes.len() as u64;
                 if let Err(error) = writer.write_all(&bytes).await {
                     return End::Failed(format!("client write: {error}"));
@@ -289,12 +366,15 @@ pub(crate) async fn pump(
         }
     };
     let end = tokio::select! {
+        biased;
+        _ = lease.ended() => End::Authority,
         end = up => end,
         end = down => end,
     };
     drop(to_app);
     let (up_bytes, down_bytes) = *carried.borrow();
     match end {
+        End::Authority => eprintln!("spk-host: websocket {label} cut: wsAuthorityLeaseEnded (carried {up_bytes} up, {down_bytes} down)"),
         End::Cut => eprintln!(
             "spk-host: websocket {label} cut: wsByteCap ({} bytes/min, class {}; carried {up_bytes} up, {down_bytes} down)",
             limits.bytes_per_minute, limits.class

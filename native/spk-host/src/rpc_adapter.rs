@@ -7,12 +7,12 @@
 
 use crate::hostd::DispatchIdentity;
 use minidregg_spk_rpc::web_session_capnp;
-use crate::web_socket::{pump, switching_protocols, Limits, Slot};
+use crate::web_socket::{pump, switching_protocols, Limits, Slot, StreamLease, WeakStreamLease};
 use minidregg_spk_rpc::{
     dispatch_web, open_web_socket, SessionParameters, SupervisorConnection, ViewInfo,
     WebRequest, WebResponse, WebSocketOpen,
 };
-use std::io::Write as _;
+use tokio::io::AsyncWriteExt;
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -90,6 +90,47 @@ impl SessionBinding {
             subject: self.subject,
             kind: self.kind,
         }
+    }
+}
+
+/// Only live streams are retained (bounded by the generation socket cap).
+/// Notifications are physical attenuation, never grants of Mini authority.
+#[derive(Default)]
+struct StreamLeases(Vec<(SessionBinding, WeakStreamLease)>);
+
+impl StreamLeases {
+    fn observe(&mut self, binding: &SessionBinding) {
+        self.0.retain(|(prior, weak)| {
+            let Some(lease) = weak.upgrade() else {
+                return false;
+            };
+            if prior.key() == binding.key()
+                && !same_projection(&prior.projection_fingerprint, &prior.params, binding)
+            {
+                lease.revoke();
+            }
+            lease.check().is_ok()
+        });
+    }
+
+    fn register(&mut self, binding: &SessionBinding, lease: &StreamLease) {
+        self.observe(binding);
+        self.0.push((binding.clone(), lease.downgrade()));
+    }
+
+    fn invalidate(&mut self, app: &str, subject: &str, session: &str) {
+        self.0.retain(|(binding, weak)| {
+            let Some(lease) = weak.upgrade() else {
+                return false;
+            };
+            if binding.app.to_string() == app
+                && binding.subject.to_string() == subject
+                && binding.session_resource.to_string() == session
+            {
+                lease.revoke();
+            }
+            lease.check().is_ok()
+        });
     }
 }
 
@@ -202,6 +243,25 @@ async fn session_for(
     Ok(session)
 }
 
+/// Never block the LocalSet: it also owns every stream's expiry timer.
+async fn write_upgrade(
+    client: &UnixStream,
+    head: &[u8],
+    lease: &StreamLease,
+    deadline: Instant,
+) -> io::Result<()> {
+    lease.check()?;
+    client.set_nonblocking(true)?;
+    let mut writer = tokio::net::UnixStream::from_std(client.try_clone()?)?;
+    tokio::select! {
+        biased;
+        _ = lease.ended() => Err(invalid("wsAuthorityLeaseEnded")),
+        result = tokio::time::timeout(remaining(deadline)?, writer.write_all(head)) => {
+            result.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK upgrade write timeout"))?
+        },
+    }
+}
+
 enum Command {
     View {
         deadline: Instant,
@@ -225,6 +285,7 @@ enum Command {
         accept: String,
         limits: Limits,
         slot: Slot,
+        lease: StreamLease,
         label: String,
         deadline: Instant,
         reply: sync_mpsc::SyncSender<io::Result<()>>,
@@ -354,9 +415,16 @@ pub(crate) struct RpcDriver {
     generation: u64,
     sender: mpsc::Sender<Command>,
     uncertain: bool,
+    leases: StreamLeases,
 }
 
 impl RpcDriver {
+    /// Failed current-authority admission invalidates only this fixed custody.
+    /// Synchronous signaling reaches pumps even while the worker awaits fd3.
+    pub(crate) fn invalidate_custody(&mut self, app: &str, subject: &str, session: &str) {
+        self.leases.invalidate(app, subject, session);
+    }
+
     pub(crate) fn prepare_cancellable(
         &mut self,
         identity: DispatchIdentity,
@@ -489,6 +557,7 @@ impl RpcDriver {
                                 accept,
                                 limits,
                                 slot,
+                                lease,
                                 label,
                                 deadline,
                                 reply,
@@ -496,33 +565,40 @@ impl RpcDriver {
                                 let key = binding.key();
                                 let not_cancelled = AtomicBool::new(false);
                                 let result = async {
-                                    let session = session_for(
-                                        &supervisor,
-                                        &mut sessions,
-                                        &mut sessions_created,
-                                        &mut use_clock,
-                                        &binding,
-                                        deadline,
-                                        &not_cancelled,
-                                    )
-                                    .await?;
+                                    lease.check()?;
+                                    let session = tokio::select! {
+                                        biased;
+                                        _ = lease.ended() => return Err(invalid("wsAuthorityLeaseEnded")),
+                                        result = session_for(
+                                            &supervisor,
+                                            &mut sessions,
+                                            &mut sessions_created,
+                                            &mut use_clock,
+                                            &binding,
+                                            deadline,
+                                            &not_cancelled,
+                                        ) => result?,
+                                    };
+                                    lease.check()?;
                                     let left = remaining(deadline)?;
-                                    let opened = open_web_socket(&session, &open, left)
-                                        .await
-                                        .map_err(io::Error::other)?;
+                                    let opened = tokio::select! {
+                                        biased;
+                                        _ = lease.ended() => return Err(invalid("wsAuthorityLeaseEnded")),
+                                        result = open_web_socket(&session, &open, left) => result.map_err(io::Error::other)?,
+                                    };
+                                    lease.check()?;
                                     // The 101 is written here, before any app byte
                                     // can reach the client, and only after the app
                                     // accepted the open.
                                     let head = switching_protocols(&accept, &opened.protocols);
-                                    client.set_nonblocking(false)?;
-                                    (&client).write_all(&head)?;
+                                    write_upgrade(&client, &head, &lease, deadline).await?;
                                     Ok(opened)
                                 }
                                 .await;
                                 match result {
                                     Ok(opened) => {
                                         tokio::task::spawn_local(pump(
-                                            client, opened, limits, slot, label,
+                                            client, opened, limits, slot, label, lease,
                                         ));
                                         let _ = reply.send(Ok(()));
                                     }
@@ -549,6 +625,7 @@ impl RpcDriver {
                 generation,
                 sender,
                 uncertain: false,
+                leases: StreamLeases::default(),
             }),
             Ok(Err(error)) => Err(io::Error::other(error)),
             Err(_) => Err(io::Error::new(
@@ -732,6 +809,7 @@ impl RpcDriver {
             ));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.leases.observe(&binding);
         self.sender
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
@@ -773,6 +851,7 @@ impl RpcDriver {
             return Err(invalid("SPK dispatch response bound refused"));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.leases.observe(&binding);
         self.sender
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
@@ -799,6 +878,7 @@ impl RpcDriver {
         accept: String,
         limits: Limits,
         slot: Slot,
+        lease: StreamLease,
         label: String,
         timeout: Duration,
     ) -> io::Result<()> {
@@ -807,6 +887,8 @@ impl RpcDriver {
             return Err(invalid("SPK WebSocket open identity refused"));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        lease.check()?;
+        self.leases.register(&binding, &lease);
         self.sender
             .try_send(Command::OpenWebSocket {
                 binding: Box::new(binding),
@@ -815,6 +897,7 @@ impl RpcDriver {
                 accept,
                 limits,
                 slot,
+                lease,
                 label,
                 deadline,
                 reply: reply_tx,
@@ -911,6 +994,172 @@ mod tests {
                 acceptable_languages: vec!["en".into()],
             },
         }
+    }
+
+    struct RecordingStream(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    impl web_session_capnp::web_session::web_socket_stream::Server for RecordingStream {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            self.0
+                .send(params.get()?.get_message()?.to_vec())
+                .map_err(|_| capnp::Error::failed("recording stream closed".into()))
+        }
+    }
+
+    type TestStream = (
+        tokio::net::UnixStream,
+        tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+        tokio::sync::mpsc::Sender<Vec<u8>>,
+        tokio::task::JoinHandle<()>,
+    );
+
+    fn test_stream(lease: StreamLease, sockets: &crate::web_socket::OpenSockets) -> TestStream {
+        let (client, host) = UnixStream::pair().unwrap();
+        client.set_nonblocking(true).unwrap();
+        let client = tokio::net::UnixStream::from_std(client).unwrap();
+        let (to_app, app_reads) = tokio::sync::mpsc::unbounded_channel();
+        let (app_writes, from_app) = tokio::sync::mpsc::channel(16);
+        let limits = Limits {
+            class: "S",
+            max_open: 32,
+            bytes_per_minute: 1_000_000,
+        };
+        let slot = sockets.reserve(&limits).unwrap();
+        let session = minidregg_spk_rpc::WebSocketSession {
+            protocols: vec![],
+            to_app: capnp_rpc::new_client(RecordingStream(to_app)),
+            from_app,
+        };
+        let task = tokio::task::spawn_local(pump(
+            host,
+            session,
+            limits,
+            slot,
+            "lease test".into(),
+            lease,
+        ));
+        (client, app_reads, app_writes, task)
+    }
+
+    #[test]
+    fn stream_lease_two_delegates_revocation_and_silent_expiry() {
+        use tokio::io::AsyncReadExt;
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        LocalSet::new().block_on(&runtime, async {
+            let mut leases = StreamLeases::default();
+            let a = binding();
+            let b = SessionBinding {
+                subject: 9,
+                session_resource: 6209,
+                ..binding()
+            };
+            let lease_a = StreamLease::begin(Duration::from_secs(2)).unwrap();
+            let lease_b = StreamLease::begin(Duration::from_secs(1)).unwrap();
+            leases.register(&a, &lease_a);
+            leases.register(&b, &lease_b);
+            let sockets = crate::web_socket::OpenSockets::default();
+            let (mut client_a, mut reads_a, writes_a, task_a) = test_stream(lease_a, &sockets);
+            let (mut client_b, mut reads_b, writes_b, task_b) = test_stream(lease_b, &sockets);
+            client_a.write_all(b"A before").await.unwrap();
+            client_b.write_all(b"B before").await.unwrap();
+            assert_eq!(reads_a.recv().await.unwrap(), b"A before");
+            assert_eq!(reads_b.recv().await.unwrap(), b"B before");
+            // Queue fresh traffic, then notify before either pump can forward it.
+            client_a.write_all(b"A after").await.unwrap();
+            writes_a.send(b"secret after".to_vec()).await.unwrap();
+            leases.invalidate("91", "8", "6208");
+            tokio::time::timeout(Duration::from_millis(500), task_a)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(reads_a.recv().await.is_none());
+            assert!(writes_a.send(b"later".to_vec()).await.is_err());
+            let mut buf = [0; 32];
+            // Linux may report ECONNRESET when unread client ingress is dropped.
+            assert!(!matches!(client_a.read(&mut buf).await, Ok(n) if n > 0));
+            assert_eq!(sockets.open(), 1);
+            client_b.write_all(b"B after").await.unwrap();
+            assert_eq!(reads_b.recv().await.unwrap(), b"B after");
+            writes_b.send(b"B still reads".to_vec()).await.unwrap();
+            let n = client_b.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], b"B still reads");
+            // No authority notifications or HTTP activity: B still expires.
+            tokio::time::timeout(Duration::from_secs(3), task_b)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(sockets.open(), 0);
+            assert_eq!(client_b.read(&mut buf).await.unwrap(), 0);
+            assert!(reads_b.recv().await.is_none());
+        });
+    }
+
+    #[test]
+    fn stream_lease_projection_change_is_exact_and_regrant_does_not_revive() {
+        let mut leases = StreamLeases::default();
+        let a = binding();
+        let b = SessionBinding {
+            subject: 9,
+            ..binding()
+        };
+        let lease_a = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let lease_b = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&a, &lease_a);
+        leases.register(&b, &lease_b);
+        leases.observe(&a);
+        assert!(lease_a.check().is_ok());
+        let changed = SessionBinding {
+            projection_fingerprint: [42; 32],
+            ..a.clone()
+        };
+        leases.observe(&changed);
+        assert!(lease_a.check().is_err());
+        assert!(lease_b.check().is_ok());
+        leases.observe(&a);
+        assert!(lease_a.check().is_err());
+        let fresh = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&a, &fresh);
+        assert!(fresh.check().is_ok());
+    }
+
+    #[test]
+    fn stream_lease_late_open_and_backpressured_upgrade_end_without_polling() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            assert!(StreamLease::begin(Duration::ZERO).is_err());
+            let (host, client) = UnixStream::pair().unwrap();
+            let lease = StreamLease::begin(Duration::from_millis(1)).unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            assert!(write_upgrade(
+                &host,
+                b"101 forbidden",
+                &lease,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .await
+            .is_err());
+            client.set_nonblocking(true).unwrap();
+            let mut out = [0; 32];
+            assert_eq!(
+                std::io::Read::read(&mut &client, &mut out)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::WouldBlock
+            );
+            let lease = StreamLease::begin(Duration::from_millis(25)).unwrap();
+            let start = Instant::now();
+            assert!(write_upgrade(
+                &host,
+                &vec![0; 8 * 1024 * 1024],
+                &lease,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .await
+            .is_err());
+            assert!(start.elapsed() < Duration::from_millis(500));
+        });
     }
 
     #[test]
