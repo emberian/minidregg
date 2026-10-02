@@ -3000,11 +3000,15 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
 
 /// The child capability this workspace delegated on `name` to `recipient`,
 /// from its own retained delegation proposals.
-/// A law that admits nothing, on a cell others hold standing grants under (a
-/// room), freezes its membership forever: every kick and invite is a request
-/// on that cell. Refused unless the founder says `--freeze-roster`.
-fn sealing_a_room(root: &Path, workspace: &Value, name: &str) -> Result<()> {
-    let marked = reference(root, name)?.get("room").is_some();
+/// A law that admits nothing, on a ROOM cell (a reference this workspace
+/// founded or joined as a room, or a chat room the shell names), freezes its
+/// membership forever: every kick and invite is a request on that cell.
+/// Refused unless the founder says `--freeze-roster`. A plain resource keeps
+/// `--allow-unsatisfiable` alone (J8's deny-all).
+fn sealing_a_room(root: &Path, workspace: &Value, name: &str, room_cell: bool) -> Result<()> {
+    if !room_cell && reference(root, name)?.get("room").is_none() {
+        return Ok(());
+    }
     let me = member(workspace, "subject")?;
     let others: Vec<String> = match reference(root, name).and_then(|r| signed_view(root, workspace, &r, "who")) {
         Ok((who, _, _)) => who
@@ -3018,9 +3022,6 @@ fn sealing_a_room(root: &Path, workspace: &Value, name: &str) -> Result<()> {
             .collect(),
         Err(_) => Vec::new(),
     };
-    if !marked && others.is_empty() {
-        return Ok(());
-    }
     let holders = if others.is_empty() { "no one yet".to_owned() } else { others.join(", ") };
     Err(format!(
         "{name} is a room (members now: {holders}): a law that admits nothing freezes its membership forever. \
@@ -3043,20 +3044,48 @@ pub(crate) fn frozen_roster(room: &str, error: String) -> String {
     }
 }
 
-/// The standing grants over room `name` that `subject` holds, by the Host's
-/// signed `who` view: exactly the grants that make `room members` list it.
-pub(crate) fn standing_grants(root: &Path, workspace: &Value, name: &str, subject: &str) -> Result<Vec<String>> {
+/// Every live grant `subject` holds anywhere in room `name` (on the room or
+/// on a cell under it), as (capability, policy), by the Host's signed `who`
+/// view: the founder's invite, a concierge's window, a grant on one cell under
+/// the room, whoever issued it.
+pub(crate) fn standing_grants(root: &Path, workspace: &Value, name: &str, subject: &str) -> Result<Vec<(String, String)>> {
     let reference = reference(root, name)?;
     let (who, _, _) = signed_view(root, workspace, &reference, "who").map_err(|error| frozen_roster(name, error))?;
     let mut held = Vec::new();
-    for entry in who.get("members").and_then(Value::as_array).into_iter().flatten() {
+    for entry in who.get("holders").and_then(Value::as_array).into_iter().flatten() {
         if entry.get("subject").and_then(Value::as_str) == Some(subject) {
-            for capability in entry.get("capabilities").and_then(Value::as_array).into_iter().flatten() {
-                held.push(capability.as_str().ok_or("who view capability is not a decimal")?.to_owned());
+            for grant in entry.get("grants").and_then(Value::as_array).into_iter().flatten() {
+                held.push((member(grant, "capability")?.to_owned(), member(grant, "policy")?.to_owned()));
             }
         }
     }
     Ok(held)
+}
+
+/// The reference through which this workspace revokes a grant whose policy is
+/// `policy`: the room itself, or a cell under it whose control grant this
+/// workspace holds (a cell it bore, such as a private room's keys cell).
+fn controlling_reference(root: &Path, room: &str, room_target: &str, policy: &str) -> Result<String> {
+    if policy == room_target {
+        return Ok(room.to_owned());
+    }
+    let mut found = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("refs")) {
+        for entry in entries.flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let Some(stem) = file.strip_suffix(".json") else { continue };
+            let Ok(value) = bounded_json(&entry.path()) else { continue };
+            if value.get("target").and_then(Value::as_str) == Some(policy)
+                && value.get("controlCapability").and_then(Value::as_str).is_some()
+            {
+                found.push(ref_name_of_file(stem));
+            }
+        }
+    }
+    found.sort();
+    found.into_iter().next().ok_or_else(|| {
+        format!("a grant under {room} is governed by cell {policy}, whose control this workspace does not hold: its owner revokes it")
+    })
 }
 
 /// `room kick`: one revoke proposal per standing grant `subject` holds under
@@ -3080,14 +3109,18 @@ pub(crate) fn room_kick(
     }
     let held = standing_grants(root, workspace, name, subject)?;
     if held.is_empty() {
-        return Err(format!("{subject} holds no standing grant under {name}: there is nothing to kick"));
+        return Err(format!("{subject} holds no live grant in {name}: there is nothing to kick"));
     }
+    let room_target = member(&reference(root, name)?, "target")?.to_owned();
     let mut ids = Vec::new();
-    for (index, capability) in held.iter().enumerate() {
+    let mut named = Vec::new();
+    for (index, (capability, policy)) in held.iter().enumerate() {
         let id = if index == 0 { proposal_id.to_owned() } else { format!("{proposal_id}-c{index}") };
         validate_name(&id)?;
+        let via = controlling_reference(root, name, &room_target, policy)?;
+        named.push(json!({"capability":capability,"policy":policy,"via":via,"proposal":id}));
         let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
-            "name":name,"recipient":subject,"capability":capability});
+            "name":via,"recipient":subject,"capability":capability});
         let source = root.join("sources").join(format!("kick-{id}.json"));
         let mut bytes = serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?;
         bytes.push(b'\n');
@@ -3107,7 +3140,7 @@ pub(crate) fn room_kick(
         )?;
     }
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-kick-v1","room":name,
-        "member":subject,"capabilities":held,"proposals":ids,"submitted":submit_now,
+        "member":subject,"capabilities":named,"proposals":ids,"submitted":submit_now,
         "note":if submit_now { "every standing grant the member held under the room is revoked" }
             else { "submit the first proposal: it submits every one of them" }}))
         .map_err(|error| error.to_string())?);
@@ -3451,13 +3484,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 args.optional("freeze-roster").as_deref().and_then(OsStr::to_str),
                 Some("true")
             );
+            let room_cell = matches!(
+                args.optional("room-cell").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
             args.finish()?;
             let source = bounded_json(&request)?;
             let action = source.get("action").and_then(Value::as_str).unwrap_or("");
             if action == "install-policy" {
                 let unsat = lawsat::install_check(&root, &workspace, &source["predicate"], allow || freeze)?;
                 if unsat && !freeze {
-                    sealing_a_room(&root, &workspace, member(&source, "name")?)?;
+                    sealing_a_room(&root, &workspace, member(&source, "name")?, room_cell)?;
                 }
             }
             let roster_act = action == "revoke" || (action == "delegate" && source.get("room") == Some(&json!(true)));

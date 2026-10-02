@@ -350,17 +350,25 @@ ok kickdoc bob "delegate d-n6 notes6 $D observe 1000"
 handoff kickdoc bob d-n6
 ok kickdoc dave "import n6 $REF"
 ok kickdoc dave "doc show n6"
+# A grant on one cell under the room, not on the room (as a private room's keys
+# cell write): alice's own doc adoc, delegated to bob. The kick reaches it too.
+ok kickdoc alice "doc new adoc --in lab"
+ok kickdoc alice "delegate d-adoc adoc $B observe 1000"
+handoff kickdoc alice d-adoc
+ok kickdoc bob "import adoc $REF"
+ok kickdoc bob "doc show adoc"
 ok kickdoc alice "room kick k-bob lab $B"
 check kickdoc "the kick names every standing grant bob holds under lab (his re-invite), from the Host's who view" \
-  jq -e --arg cap "$(jq -r .operationCapability "$WS/bob/refs/lab2.json")" '.capabilities | index($cap)' "$OUT"
+  jq -e --arg cap "$(jq -r .operationCapability "$WS/bob/refs/lab2.json")" '[.capabilities[].capability] | index($cap)' "$OUT"
+check kickdoc "and alice's own delegation of adoc (a grant on one cell under lab, revoked through adoc's control)" \
+  jq -e --arg cap "$(jq -r .operationCapability "$WS/bob/refs/adoc.json")" '[.capabilities[] | select(.via == "adoc") | .capability] | index($cap)' "$OUT"
 ok kickdoc alice "submit k-bob"
 refused kickdoc bob "read lab2" revoked
 refused kickdoc bob "doc show notes6" revoked
-ok kickdoc bob "doc append b-n6b notes6 written-AFTER-the-kick"
-refused kickdoc bob "submit b-n6b" revoked
-ok kickdoc bob "delegate d-n6b notes6 $C observe 1000"
-refused kickdoc bob "submit d-n6b" revoked
+refused kickdoc bob "doc append b-n6b notes6 written-AFTER-the-kick" revoked
+refused kickdoc bob "delegate d-n6b notes6 $C observe 1000" revoked
 refused kickdoc dave "doc show n6" revoked
+refused kickdoc bob "doc show adoc" revoked
 named kickdoc bob "doc new notes7 --in lab2" notRoomMember
 ok kickdoc alice "import n6a object $(jq -r .target "$WS/bob/refs/notes6.json") $LABCAP"
 ok kickdoc alice "doc show n6a"

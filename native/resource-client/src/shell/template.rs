@@ -251,13 +251,13 @@ mod plan_tests {
         let (_, run) = lines(plan(&s, "room welcome lab 12 --template social").unwrap());
         assert_eq!(run[0].1, "room invite lab-invite-12 lab 12 --verbs observe,place,append");
         assert_eq!(run.last().unwrap().1,
-            "create lab/stream-12 stream 'any [ not (verb in {write, append}), subject == 12 ]' --in lab --owner 12");
+            "create lab/stream-12 stream 'any [ not (verb in {write, append}), subject == 12 ]' --in lab");
         for name in ["social", "story"] {
             let (_, run) = lines(plan(&s, &format!("room new r1 --template {name}")).unwrap());
             assert_eq!(run[0].1, "room new r1 --law open");
         }
         assert!(matches!(plan(&s, "room template list").unwrap(), Plan::Text(t) if t.contains("social\t")));
-        assert!(matches!(plan(&s, "room template show social member").unwrap(), Plan::Text(t) if t.contains("--owner $MEMBER")));
+        assert!(matches!(plan(&s, "room template show social member").unwrap(), Plan::Text(t) if t.contains("subject == $MEMBER")));
         let _ = fs::remove_dir_all(root);
     }
 

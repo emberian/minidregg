@@ -65,7 +65,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "why", usage: "why [ATTEMPT] [--json]", operation: "mini workspace --action inspect --view why [--name ATTEMPT] --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
-    Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [--in ROOM] [--owner SUBJECT]", operation: "mini workspace --action create [--in ROOM] [--owner SUBJECT]" },
+    Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [--in ROOM] [--owner SUBJECT]", operation: "mini workspace --action create [--in ROOM] [--owner SUBJECT] (--owner on a root birth only: a birth into a room is owned by its creator, refused ownerNotCreator otherwise)" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
@@ -464,6 +464,7 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
             let mut plan = proposal(session, &w[2], &request);
             if let Plan::Client { flags, .. } = &mut plan {
                 flags.push(flag("freeze-roster", "true"));
+                flags.push(flag("room-cell", "true"));
             }
             plan
         }
@@ -1761,12 +1762,16 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let request = json!({"type":"minidregg-workspace-proposal-v1",
                 "action":"install-policy","name":w[2],"predicate":predicate});
             let mut plan = proposal(session, &w[1], &request);
+            let chat_room = crate::chat::load_room(session, &w[2]).is_ok();
             if let Plan::Client { flags, .. } = &mut plan {
                 if allow {
                     flags.push(flag("allow-unsatisfiable", "true"));
                 }
                 if freeze {
                     flags.push(flag("freeze-roster", "true"));
+                }
+                if chat_room {
+                    flags.push(flag("room-cell", "true"));
                 }
             }
             plan

@@ -2,11 +2,13 @@
 #
 # `room welcome $ROOM SUBJECT --template social` binds $MEMBER to SUBJECT and
 # runs these lines as you, the founder (PLACE §2.3 (a)). You bear the
-# member's stream into the room and pay for it; its owner grant goes to
-# $MEMBER, and its law lets nobody else write or append to it, you included.
-# Hand the member the invite `publish` prints (export ID shows it again).
+# member's stream into the room, pay for it and own it (a birth into a room is
+# owned by its creator); its law lets nobody but $MEMBER write or append to it,
+# you included. The member speaks in it with the invite (append under the
+# room), so a kick ends that too. Hand the member the invite `publish` prints
+# (export ID shows it again).
 
 room invite $ROOM-invite-$MEMBER $ROOM $MEMBER --verbs observe,place,append
 submit $ROOM-invite-$MEMBER
 publish $ROOM-invite-$MEMBER
-create $ROOM/stream-$MEMBER stream 'any [ not (verb in {write, append}), subject == $MEMBER ]' --in $ROOM --owner $MEMBER
+create $ROOM/stream-$MEMBER stream 'any [ not (verb in {write, append}), subject == $MEMBER ]' --in $ROOM

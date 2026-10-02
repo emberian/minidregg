@@ -1467,13 +1467,12 @@ private def birthParts (path : String)
   -- ancestors (`ResourceBirthPolicyController.Concrete.BornLineage`): a kick
   -- that revokes that grant takes down the born cell's owner and control
   -- grants and every delegation of them. Offline authoring (no loaded
-  -- authority) leaves them empty and the receiver refuses a room birth.
-  let ancestors : Finset CapabilityId ← match placement, lineage with
-    | none, _ => pure ∅
-    | some _, none => pure ∅
-    | some named, some find => match find named with
-      | some above => pure (insert named above)
-      | none => throw s!"{path}.placement: capability {named.value} is not a stored object capability"
+  -- authority) leaves them empty and the receiver refuses a room birth; so
+  -- does a placement that names no stored capability (the room gate refuses
+  -- it first, `notRoomMember … noGrant`).
+  let ancestors : Finset CapabilityId := match placement, lineage with
+    | some named, some find => ((find named).map (insert named)).getD ∅
+    | _, _ => ∅
   let ownerGrant : ResourceBirth.AuthorityGrant := match ownerGrant with
     | ⟨kind, stored⟩ => ⟨kind, { stored with head := { stored.head with ancestors := ancestors } }⟩
   let control : Capability .program := { control with ancestors := ancestors }
@@ -4251,9 +4250,15 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("predicate", predicateJson value.predicate)]
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
-      pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen, held) =>
-        .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null),
-          ("capabilities", .arr <| held.toArray.map decimal)])]
+      let grants := fun (held : List (Nat × Nat)) => Lean.Json.arr <| held.toArray.map fun (cap, policy) =>
+        Lean.Json.mkObj [("capability", decimal cap), ("policy", decimal policy)]
+      pure <| .mkObj [("type", "who"),
+        ("members", .arr <| (value.filter (·.2.2.1)).toArray.map fun (subject, seen, _, held) =>
+          .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null),
+            ("capabilities", .arr <| held.toArray.map fun grant => decimal grant.1)]),
+        ("holders", .arr <| value.toArray.map fun (subject, seen, member, held) =>
+          .mkObj [("subject", decimal subject), ("member", .bool member),
+            ("lastSeen", (seen.map decimal).getD .null), ("grants", grants held)])]
   | "view-since" => do
       let value ← decoded "view-since" NativeObservationController.sinceViewCodec bytes
       pure <| .mkObj [("type", "since"), ("entries", .arr <| value.toArray.map fun entry =>

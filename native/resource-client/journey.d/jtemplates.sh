@@ -379,13 +379,13 @@ ok social alice "doc show pub/index"
 check social "pub's map links pub/wall and pub/intro by name" \
   sh -c "grep -qE -- '-> pub/wall \(object [0-9]+\)' '$OUT' && grep -qE -- '-> pub/intro \(document [0-9]+\)' '$OUT'"
 stderr_says social alice "room welcome pub $C --template social" 0 "template social/member.shell: 4 line(s) done"
-check social "carl's stream: born in pub, owned by carl (the founder pays, holds nothing on it)" \
-  jq -e --arg c "$C" --arg pub "$(jq -r .target "$AW/pub.json")" \
-    '.birth.resources[0].room == $pub and .birth.resources[0].owner == $c and .birth.resources[0].storage == "stream"' \
+check social "carl's stream: born in pub, owned by alice who bore it (a room birth is owned by its creator)" \
+  jq -e --arg a "$A" --arg pub "$(jq -r .target "$AW/pub.json")" \
+    '.birth.resources[0].room == $pub and .birth.resources[0].owner == $a and .birth.resources[0].storage == "stream"' \
     "$WS/alice/sources/create-pub.stream-$C.json"
 ok social alice "export pub-invite-$C"
 ok social carl "import pub $(cat "$OUT")"
-CS=$(jq -r .target "$AW/pub.stream-$C.json"); COWN=$(jq -r .observeCapability "$AW/pub.stream-$C.json")
+CS=$(jq -r .target "$AW/pub.stream-$C.json"); COWN=$(jq -r .observeCapability "$WS/carl/refs/pub.json")
 ok social carl "import mine object $CS $COWN"
 ok social carl "propose s1 {\"type\":\"minidregg-workspace-proposal-v1\",\"action\":\"invoke\",\"targets\":[{\"name\":\"mine\",\"payload\":{\"type\":\"append\",\"topic\":\"hello\",\"text\":\"carl speaks\"}}]}"
 ok social carl "submit s1"
