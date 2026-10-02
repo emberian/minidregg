@@ -47,9 +47,8 @@ const LIBRARIAN_BUDGET: &str = include_str!("../../../deploy/shell/templates/her
 const RUNNER_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/runner/grants.json");
 const RUNNER_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/runner/budget.json");
 
-/// Where the node's Hermes subject is written by the operator (once per node:
-/// enrolling the hosted Hermes key is the operator's, PLACE §6.1). `--hermes
-/// SUBJECT` overrides it.
+/// Legacy operator record, used only when no resident registry is advertised.
+/// Current selection is scoped to the actual source room cell.
 pub(crate) const NODE_FILE: &str = "hermes/node.json";
 
 pub(crate) const VERBS: &[crate::shell::Verb] = &[
@@ -322,17 +321,39 @@ fn put(path: &Path, value: &Value) -> Result<(), Done> {
 fn registration(session: &Session, explicit: Option<String>, room_cell: &str) -> Result<Value, Done> {
     let registry = chat::get_json(&session.home.join("hermes/registry.json")).or_else(||chat::get_json(Path::new("/etc/mini/hermes-residents.json")));
     let default = chat::get_json(&session.home.join(NODE_FILE));
-    let selected = explicit.or_else(|| default.as_ref().and_then(|v|v["subject"].as_str()).map(str::to_owned))
-        .ok_or_else(||err("this node has no registered Hermes"))?;
-    let mut records: Vec<Value> = registry.as_ref().and_then(|v|v["residents"].as_array())
-        .into_iter().flatten().cloned().collect();
-    if records.is_empty() { if let Some(default) = default {records.push(default);} }
-    let matches: Vec<_> = records.into_iter().filter(|v|v["subject"]==selected && v["roomCell"]==room_cell).collect();
-    if matches.len()!=1 {return Err(err("Hermes subject and room must select exactly one registered task"));}
-    let record=matches[0].clone();
-    for k in ["subject","task","roomCell"] {chat::decimal(member(&record,k).map_err(err)?,k).map_err(err)?;}
-    let enc=member(&record,"encryptionKey").map_err(err)?;
-    if enc.len()!=64 || !enc.bytes().all(|b|b.is_ascii_hexdigit()) {return Err(err("registered Hermes encryptionKey must be 64 hex digits"));}
+    select_registration(registry.as_ref(), default.as_ref(), explicit.as_deref(), room_cell).map_err(err)
+}
+
+fn select_registration(
+    registry: Option<&Value>, legacy: Option<&Value>, explicit: Option<&str>, room_cell: &str,
+) -> Result<Value, String> {
+    let records: Vec<&Value> = match registry {
+        Some(registry) => {
+            if registry["type"] != "mini-hermes-registry-v1" {
+                return Err("resident registry type differs".into());
+            }
+            registry["residents"].as_array().ok_or("resident registry entries absent")?
+                .iter().collect()
+        }
+        None => legacy.into_iter().collect(),
+    };
+    let matches: Vec<_> = records.into_iter().filter(|v|
+        v["roomCell"] == room_cell && explicit.is_none_or(|subject| v["subject"] == subject)
+    ).collect();
+    if explicit.is_none() && matches.len() > 1 {
+        return Err("multiple registered Hermes residents for this room; select --hermes SUBJECT".into());
+    }
+    let [record] = matches.as_slice() else {
+        return Err("Hermes subject and room must select exactly one registered task".into());
+    };
+    for k in ["subject", "task", "roomCell"] {
+        chat::decimal(member(record, k)?, k)?;
+    }
+    let enc = member(record, "encryptionKey")?;
+    if enc.len() != 64 || !enc.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("registered Hermes encryptionKey must be 64 hex digits".into());
+    }
+    let record = (**record).clone();
     Ok(record)
 }
 fn room_is_private(session: &Session, room: &str) -> bool {chat::room_is_private(session, room)}
@@ -636,6 +657,34 @@ fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summon_selects_only_the_actual_rooms_sole_registration_without_node_file() {
+        let first = json!({"subject":"8","task":"71","roomCell":"70","encryptionKey":"ab".repeat(32)});
+        let unrelated = json!({"subject":"9","task":"72","roomCell":"80","encryptionKey":"cd".repeat(32)});
+        let registry = json!({"type":"mini-hermes-registry-v1","residents":[first,unrelated]});
+        assert_eq!(select_registration(Some(&registry), None, None, "70").unwrap(), first);
+        assert_eq!(select_registration(Some(&registry), None, None, "80").unwrap(), unrelated);
+        assert!(select_registration(Some(&registry), None, Some("9"), "70").is_err());
+        assert!(select_registration(Some(&registry), None, None, "90").is_err());
+        // A stale node record cannot override a current advertised room choice.
+        assert_eq!(select_registration(Some(&registry), Some(&unrelated), None, "70").unwrap(), first);
+        let empty = json!({"type":"mini-hermes-registry-v1","residents":[]});
+        assert!(select_registration(Some(&empty), Some(&first), None, "70").is_err());
+    }
+
+    #[test]
+    fn summon_requires_explicit_choice_for_multiple_room_residents() {
+        let first = json!({"subject":"8","task":"71","roomCell":"70","encryptionKey":"ab".repeat(32)});
+        let second = json!({"subject":"9","task":"72","roomCell":"70","encryptionKey":"cd".repeat(32)});
+        let registry = json!({"type":"mini-hermes-registry-v1","residents":[first,second]});
+        assert!(select_registration(Some(&registry), Some(&first), None, "70").unwrap_err().contains("select --hermes"));
+        assert_eq!(select_registration(Some(&registry), None, Some("8"), "70").unwrap(), first);
+        assert_eq!(select_registration(Some(&registry), None, Some("9"), "70").unwrap(), second);
+        let duplicate = json!({"type":"mini-hermes-registry-v1","residents":[first,first]});
+        assert!(select_registration(Some(&duplicate), None, Some("8"), "70").is_err());
+        assert_eq!(select_registration(None, Some(&first), None, "70").unwrap(), first);
+    }
 
     #[test]
     fn hermes_lines_parse() {
