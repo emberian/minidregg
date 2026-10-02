@@ -397,7 +397,7 @@ theorem encoded_response_bound (response : Response) (bytes : List UInt8)
 
 theorem malformed_key_refuses (store : PayStore) (clock : ClockCell.Clock) (request : Request)
     (malformed : ¬request.valid) : project store clock request = .error .malformedRequest := by
-  simp [project, malformed, Except.bind, Except.pure, throw, MonadExceptOf.throw]
+  simp [project, malformed, Except.bind, Except.pure, throw, throwThe, MonadExceptOf.throw]
 
 theorem exact_expiry_boundary (hour : Nat) (record : EnrolRecord) (expired : record.leaseUntil ≤ hour) :
     leaseState hour (some record) = .expired := by
@@ -481,7 +481,7 @@ private def sampleRequest : Request :=
   ⟨List.replicate 32 1, some ⟨List.replicate 64 2, List.replicate 32 3⟩⟩
 
 theorem sample_request_fits :
-    (requestCodec.encode sampleRequest).length ≤ maxRequestBytes := by decide
+    (requestCodec.encode sampleRequest).length ≤ maxRequestBytes := by decide +kernel
 
 theorem malformed_recipient_fixture :
     ¬(⟨List.replicate 32 1, some ⟨List.replicate 64 2, [3]⟩⟩ : Request).valid := by decide
@@ -492,7 +492,7 @@ private def sampleResponse : Response :=
     .consumedV2 ⟨1000, 900, 7, .enroll, 2, 1000, 10, 336, 654, ⟨123⟩, .originalMemo, none⟩⟩
 
 theorem sample_response_fits :
-    encodeResponse sampleResponse = .ok (responseCodec.encode sampleResponse) := by decide
+    encodeResponse sampleResponse = .ok (responseCodec.encode sampleResponse) := by decide +kernel
 
 #assert_axioms paymentAt_only_exact_key
 #assert_axioms locator_binds_signature_recipient
