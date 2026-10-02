@@ -730,6 +730,9 @@ cold_early = mini("join", "--wait", "--host", HOST, "--config", PUBLIC_CONFIG,
 # Signature diagnosis is exact and separate from key admission: an already
 # journaled memo-less payment must not look like an unknown payment.
 missing_signature = gen.sig("e4-nomemo")
+# The prior direct status and wait consume this client's two-status burst.
+# Respect the public polling budget before testing a distinct exact refusal.
+time.sleep(10.1)
 cold_refusal, _, _ = http_get(f"/enrollment/{cold_key}?signature={missing_signature.hex()}")
 cold_refusal_wait = mini("join", "--wait", "--host", HOST, "--config", PUBLIC_CONFIG,
                          "--bootstrap-url", BOOTSTRAP_URL, "--dir", path("join", "cold-http"),

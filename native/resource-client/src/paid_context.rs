@@ -259,10 +259,7 @@ fn workspace_snapshot(root: &Path, options: &Options, lookup: bool) -> Result<Co
         // Strict typed projection only: never invoke load/recheck_commitment
         // on historical lookup. The immutable operation record supplies the
         // exact original config/profile/transport binding checked below.
-        for directory in ["refs", "attempts", "sources", "proposals"] {
-            workspace::private_dir(&root.join(directory))?;
-        }
-        workspace::bounded_json(&root.join("workspace.json"))?
+        workspace::load_retained(root)?.snapshot().clone()
     } else {
         workspace::load(root)?
     };

@@ -317,15 +317,34 @@ pub(crate) fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
+/// Structurally validated workspace and physical transport pins, without a
+/// claim that its retained key is still current signing authority.
+/// Read-only historical recovery must not reacquire present-day authority.
+pub(crate) struct RetainedWorkspace {
+    value: Value,
+}
+impl RetainedWorkspace {
+    pub(crate) fn snapshot(&self) -> &Value { &self.value }
+}
+
 pub(crate) fn load(root: &Path) -> Result<Value> {
-    let value = load_for_key_transition(root)?;
-    recheck_commitment(root, &value)?;
-    Ok(value)
+    let retained = load_retained(root)?;
+    recheck_commitment(root, &retained.value)?;
+    Ok(retained.value)
 }
 
 /// Exact key-transition recovery must bind transport even when source acceptance
-/// preceded the local commitment update. Ordinary workspace loads still recheck.
+/// preceded the local commitment update. Its callers separately validate locked
+/// continuity custody and source-owned current-key admission; ordinary loads
+/// still recheck the recorded commitment.
 pub(crate) fn load_for_key_transition(root: &Path) -> Result<Value> {
+    Ok(load_retained(root)?.value)
+}
+
+/// Retained physical custody for exact receipt recovery, offline audit, and the
+/// explicit key-transition adapter. This projection grants no current signing
+/// authority; ordinary fresh signed operations must use the checked loader.
+pub(crate) fn load_retained(root: &Path) -> Result<RetainedWorkspace> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -360,7 +379,7 @@ pub(crate) fn load_for_key_transition(root: &Path) -> Result<Value> {
         (None, Some(_)) => return Err("workspace has no pinned socket".into()),
         _ => {}
     }
-    Ok(value)
+    Ok(RetainedWorkspace { value })
 }
 
 /// The commitment this workspace recorded at init: its next public key, or

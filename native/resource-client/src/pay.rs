@@ -108,8 +108,16 @@ struct Session {
 
 impl Session {
     fn open(root: &Path) -> Result<Self> {
+        Self::open_for_audit(root, false)
+    }
+
+    fn open_for_audit(root: &Path, offline: bool) -> Result<Self> {
         let root = absolute(root)?;
-        let workspace = workspace::load(&root)?;
+        let workspace = if offline {
+            workspace::load_retained(&root)?.snapshot().clone()
+        } else {
+            workspace::load(&root)?
+        };
         let socket = SOCKET
             .get()
             .cloned()
@@ -2032,7 +2040,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "audit" => {
             let offline = args.optional("offline").is_some_and(|value| value == "true");
             args.finish()?;
-            audit(&open(&root)?, offline)
+            let session = if offline { Session::open_for_audit(&root, true)? } else { open(&root)? };
+            audit(&session, offline)
         }
         other => Err(format!(
             "unknown pay action {other}: address|status|book|watch-config|observe|heartbeat|audit|refill"
