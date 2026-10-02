@@ -22,6 +22,7 @@ mod birth_lifecycle_tests;
 mod control;
 mod cgroup_stop;
 mod systemd_manager;
+mod controller_write_scopes;
 // One source shared with `mini key` (resource-client includes it by path):
 // the write verbs are used there, the reserve-time lookups here.
 #[allow(dead_code)]
@@ -17931,6 +17932,12 @@ fn main() -> ExitCode {
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;
+    }
+    if args.len() >= 2 && args[1] == "controller-write-scopes" {
+        return match controller_write_scopes::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
+        };
     }
     if args.len() >= 2 && args[1] == "config-migrate" {
         return match config_migration::client(&args[2..]) {

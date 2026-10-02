@@ -757,8 +757,11 @@ fn decode_config(bytes: &[u8]) -> Result<Config> {
     serde_json::from_slice(bytes).map_err(|e| format!("controller config: {e}"))
 }
 fn read_request(path: &Path) -> Result<Request> {
-    let r: Request = serde_json::from_slice(&private(path, 65536)?)
-        .map_err(|e| format!("migration request: {e}"))?;
+    decode_request(&private(path, 65536)?)
+}
+fn decode_request(bytes: &[u8]) -> Result<Request> {
+    let r: Request =
+        serde_json::from_slice(bytes).map_err(|e| format!("migration request: {e}"))?;
     if r.kind != FORMAT
         || ![
             &r.expected_config_sha256,
@@ -1269,6 +1272,148 @@ fn completed_receipt(
     ))
 }
 
+/// Pure current-config scope description: no Runtime, key read, lock or network.
+pub(crate) fn scope_config(path: &Path) -> Result<(Vec<u8>, Config)> {
+    if !custody::canonical(path) {
+        return Err("scope config path must be canonical absolute".into());
+    }
+    let bytes = private(path, 262144)?;
+    let config = decode_config(&bytes)?;
+    validate(&config)?;
+    Ok((bytes, config))
+}
+fn scope_lock(config: &Config) -> Result<File> {
+    let path = config.state_dir.join("controller.lock");
+    let meta = fs::symlink_metadata(&path).map_err(|e| format!("existing controller lock: {e}"))?;
+    if !meta.file_type().is_file()
+        || meta.uid() != unsafe { libc::geteuid() }
+        || meta.mode() & 0o077 != 0
+        || meta.nlink() != 1
+    {
+        return Err("scope inspection needs existing private owned controller lock".into());
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|e| format!("scope controller lock: {e}"))?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    if opened.dev() != meta.dev()
+        || opened.ino() != meta.ino()
+        || unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
+    {
+        return Err("scope inspection requires stopped exclusive controller custody".into());
+    }
+    Ok(file)
+}
+/// Root orchestrator runs this as the service UID after stopping the controller,
+/// outside its old mount namespace. Scope staging is not migration permission:
+/// the same-unit stopped receiver repeats native authority and closed proof.
+pub(crate) fn scope_preflight(path: &Path, request_path: &Path) -> Result<Value> {
+    if !custody::canonical(request_path) {
+        return Err("scope request path must be canonical absolute".into());
+    }
+    let (initial, old) = scope_config(path)?;
+    let _lock = scope_lock(&old)?;
+    if private(path, 262144)? != initial {
+        return Err("scope config changed acquiring custody".into());
+    }
+    session_failure::ensure_publication_known(&old.state_dir)?;
+    if read_pointer(&old.state_dir)?.is_some_and(|p| p.phase != Phase::Activated) {
+        return Err("scope preflight found pending publication; recover identical migration before requesting receipt".into());
+    }
+    let request_bytes = private(request_path, 65536)?;
+    let r = decode_request(&request_bytes)?;
+    let journal_path = old.state_dir.join("journal.json");
+    let journal_bytes = private(&journal_path, LIMIT)?;
+    let journal: Journal = serde_json::from_slice(&journal_bytes).map_err(|e| e.to_string())?;
+    let (before, after, new, fields) = checked_request(&old, path, &journal.binding, &r)?;
+    if !owner_rotation_shape(&old, &new, &fields)? {
+        return Err("credential scope staging currently supports only exact same-subject owner-key migration".into());
+    }
+    let guard = ResidentGuard::acquire(&old, r.resident_state.as_deref())?;
+    let source = crate::controller_write_scopes::describe_config(path, &before, &old)?;
+    let target = crate::controller_write_scopes::describe_config(path, &after, &new)?;
+    let observation =
+        observe_owner_rotation(&old, &new, &fields)?.ok_or("owner observation missing")?;
+    if observation.grant["tableSha256"] != target["providerTableSha256"]
+        || crate::controller_write_scopes::describe_config(path, &before, &old)? != source
+        || crate::controller_write_scopes::describe_config(path, &after, &new)? != target
+        || private(path, 262144)? != before
+        || private(&journal_path, LIMIT)? != journal_bytes
+        || private(request_path, 65536)? != request_bytes
+        || private(&r.target_config, 262144)? != after
+    {
+        return Err(
+            "scope request/config/journal/provider selection changed during native observation"
+                .into(),
+        );
+    }
+    guard.assert_unchanged()?;
+    Ok(
+        json!({"type":"mini-controller-scope-preflight-v1","requestPath":request_path,
+        "requestSha256":digest(&request_bytes)?,"source":source,"target":target,
+        "sourceJournalSha256":digest(&journal_bytes)?,"changedFields":fields,"quiescenceRequired":true,
+        "ownerEpoch":observation.epoch,"ownerObservationSha256":digest(&serde_json::to_vec(&observation).map_err(|e|e.to_string())?)?}),
+    )
+}
+/// Consume the actual retained typed publication; never accept a caller-supplied
+/// success label or infer migration from changed config bytes. This is read-only.
+pub(crate) fn scope_receipt(path: &Path, request_path: &Path) -> Result<Value> {
+    if !custody::canonical(request_path) {
+        return Err("scope request path must be canonical absolute".into());
+    }
+    let (bytes, config) = scope_config(path)?;
+    let _lock = scope_lock(&config)?;
+    let request_bytes = private(request_path, 65536)?;
+    let r = decode_request(&request_bytes)?;
+    let p = read_pointer(&config.state_dir)?
+        .ok_or("no source migration publication for scope receipt")?;
+    if p.phase == Phase::Prepared {
+        return Err(
+            "scope publication requires exact migration recovery before finalization".into(),
+        );
+    }
+    let (t, old, new) = validate_transaction(&p.transaction, &p, false)?;
+    if t.config_path != path
+        || serde_json::to_value(&t.request).map_err(|e| e.to_string())?
+            != serde_json::to_value(&r).map_err(|e| e.to_string())?
+        || !owner_rotation_shape(&old, &new, &t.changed_fields)?
+        || digest(&bytes)? != r.target_config_sha256
+        || serde_json::to_value(&config).map_err(|e| e.to_string())?
+            != serde_json::to_value(&new).map_err(|e| e.to_string())?
+    {
+        return Err("scope receipt differs from exact owner migration publication".into());
+    }
+    let journal_path = config.state_dir.join("journal.json");
+    let journal_bytes = private(&journal_path, LIMIT)?;
+    let journal: Journal = serde_json::from_slice(&journal_bytes).map_err(|e| e.to_string())?;
+    if journal.binding != json!({"config":new,"configPath":path}) {
+        return Err("scope receipt journal has not received target binding".into());
+    }
+    for change in &t.changes {
+        if change.role == Role::Journal && p.phase == Phase::Activated {
+            continue;
+        }
+        if digest(&private(&change.path, LIMIT)?)? != change.after_sha256 {
+            return Err("scope receipt publication vector is not fully received".into());
+        }
+    }
+    let target = crate::controller_write_scopes::describe_config(path, &bytes, &new)?;
+    if private(path, 262144)? != bytes
+        || private(request_path, 65536)? != request_bytes
+        || private(&journal_path, LIMIT)? != journal_bytes
+    {
+        return Err("scope receipt state changed during inspection".into());
+    }
+    Ok(
+        json!({"type":"mini-controller-scope-receipt-v1","requestPath":request_path,
+        "requestSha256":digest(&request_bytes)?,"archive":p.transaction,
+        "transactionSha256":p.manifest_sha256,"phase":p.phase,"operationId":t.operation_id,"target":target}),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1771,6 +1916,103 @@ mod tests {
             assert_eq!(fs::read(&c.path).unwrap(), b"new");
         }
         assert_eq!(fs::read(&pointer).unwrap(), b"retained-pointer");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scope_staging_requires_stopped_custody_without_changing_the_lock() {
+        let (root, _) = fixture();
+        let mut cfg = config();
+        cfg.state_dir = root.clone();
+        let path = root.join("controller.lock");
+        write_new(&path, b"retained-lock").unwrap();
+        let first = scope_lock(&cfg).unwrap();
+        assert!(scope_lock(&cfg).unwrap_err().contains("stopped exclusive"));
+        assert_eq!(fs::read(&path).unwrap(), b"retained-lock");
+        // Parallel tests spawn digest children. Explicit unlock avoids briefly
+        // retaining this open-file-description in another thread's fork child.
+        assert_eq!(unsafe { libc::flock(first.as_raw_fd(), libc::LOCK_UN) }, 0);
+        drop(first);
+        scope_lock(&cfg).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scope_preflight_refuses_changed_request_binding_before_native_observation() {
+        let (root, mut tx) = fixture();
+        let (mut old, _, _) = rotating_owner();
+        old.state_dir = root.clone();
+        old.control_socket = root.join("control.sock");
+        old.policy_control_capability = Some("76".into());
+        old.commands = vec![serde_json::from_value(json!({"name":"hermes-acp","program":"/private/launcher/bwrap",
+            "args":["--workspace","/private/work","--runtime-root","/private/runtime","--network","none","--","/agent/hermes-acp"],
+            "systemdScope":true,"wallTimeSeconds":180,"reserve":"3","charge":"1"})).unwrap()];
+        validate(&old).expect("complete managed provider fixture must pass ordinary validation");
+        let config_path = root.join("controller.json");
+        let raw = serde_json::to_vec(&old).unwrap();
+        write_new(&config_path, &raw).unwrap();
+        write_new(&root.join("controller.lock"), b"").unwrap();
+        let journal = serde_json::to_vec(&Journal::fresh(
+            json!({"config":old,"configPath":config_path}),
+        ))
+        .unwrap();
+        write_new(&root.join("journal.json"), &journal).unwrap();
+        let mut new = old.clone();
+        new.provider_task
+            .as_mut()
+            .unwrap()
+            .on_behalf_of
+            .as_mut()
+            .unwrap()
+            .public_key = "b".repeat(64);
+        let target_raw = serde_json::to_vec(&new).unwrap();
+        write_new(&tx.request.target_config, &target_raw).unwrap();
+        tx.request.expected_config_sha256 = digest(&raw).unwrap();
+        tx.request.expected_binding_sha256 = "f".repeat(64);
+        tx.request.target_config_sha256 = digest(&target_raw).unwrap();
+        let request_path = root.join("request.json");
+        write_new(&request_path, &serde_json::to_vec(&tx.request).unwrap()).unwrap();
+        let error = scope_preflight(&config_path, &request_path).unwrap_err();
+        assert!(
+            error.contains("exact source configuration/journal binding"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&config_path).unwrap(), raw);
+        assert_eq!(fs::read(root.join("journal.json")).unwrap(), journal);
+        assert!(!root.join("config-migration.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn public_scope_binding_uses_eventual_receiving_path() {
+        let mut cfg = config();
+        cfg.provider_task = None;
+        let raw = serde_json::to_vec(&cfg).unwrap();
+        let path = Path::new("/private/live/controller.json");
+        let scope = crate::controller_write_scopes::describe_config(path, &raw, &cfg).unwrap();
+        assert_eq!(
+            scope["bindingSha256"],
+            value_digest(&json!({"config":cfg,"configPath":path})).unwrap()
+        );
+        assert_eq!(scope["configSha256"], digest(&raw).unwrap());
+        assert_eq!(scope["credentialWriteDirectories"], json!([]));
+        assert!(scope["credentialsRoot"].is_null());
+    }
+    #[test]
+    fn scope_request_hash_and_validation_share_one_snapshot() {
+        let (root, t) = fixture();
+        let captured = serde_json::to_vec(&t.request).unwrap();
+        let mut changed = t.request.clone();
+        changed.expected_binding_sha256 = "e".repeat(64);
+        let path = root.join("request-snapshot.json");
+        write_new(&path, &serde_json::to_vec(&changed).unwrap()).unwrap();
+        let decoded = decode_request(&captured).unwrap();
+        assert_eq!(
+            decoded.expected_binding_sha256,
+            t.request.expected_binding_sha256
+        );
+        assert_ne!(
+            decoded.expected_binding_sha256,
+            read_request(&path).unwrap().expected_binding_sha256
+        );
+        assert!(decode_request(b"{}").is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

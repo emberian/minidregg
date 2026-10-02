@@ -53,6 +53,12 @@ def main():
     if raw.count(begin) != 1 or raw.count(end) != 1:
         parser.error('source jpay6 extraction seam changed; inspect rather than guess')
     code = raw.split(begin, 1)[1].split(end, 1)[0]
+    # Current native genesis declares clock enrollment and retained tail bound.
+    # Keep the source birth/codec path; retain the exact transformed code hash.
+    anchor = 'json.dump(genesis, open(path("genesis.json"), "w"), indent=1)'
+    if code.count(anchor) != 1:
+        parser.error('source genesis publication seam changed; inspect rather than guess')
+    code = code.replace(anchor, 'genesis["clockTickers"] = []\ngenesis["tailBound"] = "256"\n' + anchor, 1)
     artifacts = {name: {'path': str(getattr(a, name)), 'sha256': digest(getattr(a, name))}
                  for name in ('host', 'mini', 'store', 'verifier', 'runtime')}
     for name in artifacts:

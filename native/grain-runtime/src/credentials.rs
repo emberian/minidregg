@@ -493,6 +493,28 @@ pub enum Namespace<'a> {
     Pool,
 }
 
+/// Derive the exact namespace using the same identity parser as credential use.
+/// This is pure: it neither reads the master key nor creates/locks a directory.
+pub fn namespace_path(root: &Path, namespace: Namespace<'_>) -> Result<PathBuf, String> {
+    if !root.is_absolute()
+        || root.components().any(|p| {
+            !matches!(
+                p,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
+    {
+        return Err("credential root must be a canonical absolute path".into());
+    }
+    Ok(match namespace {
+        Namespace::Pool => root.join(POOL_NAMESPACE),
+        Namespace::Owner(owner) => {
+            Owner::new(&owner.subject, &owner.public_key)?;
+            root.join(&owner.subject).join(&owner.public_key)
+        }
+    })
+}
+
 pub struct CredentialStore {
     root: PathBuf,
     key: [u8; 32],
@@ -649,7 +671,7 @@ impl CredentialStore {
     fn directory(&self, namespace: Namespace<'_>, create: bool) -> Result<PathBuf, String> {
         match namespace {
             Namespace::Pool => {
-                let dir = self.root.join(POOL_NAMESPACE);
+                let dir = namespace_path(&self.root, namespace)?;
                 if create {
                     ensure_private_dir(&dir, "pool namespace")?;
                 }
@@ -657,7 +679,7 @@ impl CredentialStore {
             }
             Namespace::Owner(owner) => {
                 let subject = self.root.join(&owner.subject);
-                let dir = subject.join(&owner.public_key);
+                let dir = namespace_path(&self.root, namespace)?;
                 if create {
                     ensure_private_dir(&subject, "subject namespace")?;
                     ensure_private_dir(&dir, "credential namespace")?;
