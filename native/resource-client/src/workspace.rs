@@ -39,6 +39,8 @@ pub(crate) mod private;
 pub(crate) mod roomkey;
 #[path = "content_privacy.rs"]
 pub(crate) mod content_privacy;
+#[path = "protected_format.rs"]
+mod protected_format;
 #[path = "protected_document.rs"]
 pub(crate) mod protected_document;
 
@@ -2677,6 +2679,8 @@ fn propose_summary_once(
                     match (member(payload, "type")?, &sealing) {
                         ("worldNamed", None) => world_kind::named_actions(root, local_name, &view, &payload["actions"], fresh)?,
                         ("scalar", None) => scalar_actions(&payload["actions"], target)?,
+                        ("carryFormatting", None) if protected && entry.get("expectedTargetRoot").is_some() =>
+                            protected_format::lower(&view,target,&payload["actions"])?,
                         ("content", None) => content_actions(&payload["actions"], false)?,
                         ("content", Some((room, key))) => legacy_private_content(
                             content_actions(&payload["actions"], true)?,
@@ -2699,7 +2703,7 @@ fn propose_summary_once(
                     }
                 };
                 let lowered = if let Some(audience) = &audience {
-                    if read_only { lowered } else {
+                    if read_only || payload["type"]=="carryFormatting" { lowered } else {
                         if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
                         protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
                     }
@@ -6124,6 +6128,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "document name")?;
             args.finish()?;
             protected_document::recover(&root, &workspace, &name)
+        }
+        "doc-protect-current" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            args.finish()?;
+            protected_document::protect_current(&root, &workspace, &name)
         }
         "doc-protect" => {
             let name = os_string(args.required("name")?, "document name")?;

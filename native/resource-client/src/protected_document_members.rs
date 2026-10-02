@@ -107,6 +107,7 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
         // emitted exact posts before using revoke to repair its current roster.
         let prior=read(&publication.join("change.json"))?;
         drain_posts(root,workspace,&publication,text(&prior,"namespace")?,"rekey")?;
+        drain_posts(root,workspace,&publication,text(&prior,"namespace")?,"format")?;
         drain_posts(root,workspace,&publication,text(&prior,"namespace")?,"publish")?;
     }
     let previous=current_members(&home)?;
@@ -134,7 +135,7 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
 
 /// Retain each generation before preparing it. An emitted exact call is always
 /// resolved first. Only an unequivocal non-admission permits another generation.
-fn action(root:&Path,workspace:&Value,dir:&Path,change:&str,label:&str,request:Value)->Result<Value> {
+pub(super) fn action(root:&Path,workspace:&Value,dir:&Path,change:&str,label:&str,request:Value)->Result<Value> {
     let done=dir.join(format!("{label}-accepted.json"));
     if done.exists(){return read(&done);}
     for generation in 0..1024 {
@@ -388,7 +389,7 @@ fn recover_locked(root:&Path,workspace:&Value,name:&str,change:&str)->Result<()>
 
 /// Resolve every emitted exact post before scanning or superseding its epoch.
 /// Unemitted drafts and final refusals remain retained but have no admission.
-fn drain_posts(root:&Path,workspace:&Value,dir:&Path,namespace:&str,prefix:&str)->Result<()> {
+pub(super) fn drain_posts(root:&Path,workspace:&Value,dir:&Path,namespace:&str,prefix:&str)->Result<()> {
     for (label,generations) in post_generations(dir,prefix)? {
         if dir.join(format!("{label}-accepted.json")).exists(){continue;}
         for generation in generations {
@@ -416,11 +417,11 @@ fn post_generations(dir:&Path,prefix:&str)->Result<std::collections::BTreeMap<St
     for generations in result.values_mut(){generations.sort_unstable();}
     Ok(result)
 }
-fn next_post(dir:&Path,prefix:&str)->Result<u64> {
+pub(super) fn next_post(dir:&Path,prefix:&str)->Result<u64> {
     let highest=post_generations(dir,prefix)?.keys().filter_map(|label|label.rsplit_once('-')?.1.parse::<u64>().ok()).max();
     highest.map_or(Ok(0),|n|n.checked_add(1).ok_or("membership post counter exhausted".into()))
 }
-fn post_unadmitted(root:&Path,dir:&Path,namespace:&str,label:&str)->Result<bool> {
+pub(super) fn post_unadmitted(root:&Path,dir:&Path,namespace:&str,label:&str)->Result<bool> {
     let prefix=label.split('-').next().ok_or("invalid post label")?;
     for generation in post_generations(dir,prefix)?.get(label).into_iter().flatten() {
         let attempt=root.join("attempts").join(id(namespace,&format!("{label}-{generation}")));
@@ -428,7 +429,7 @@ fn post_unadmitted(root:&Path,dir:&Path,namespace:&str,label:&str)->Result<bool>
     }
     Ok(true)
 }
-fn publish_current(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,resumed:&Value)->Result<()> {
+pub(super) fn publish_current(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,resumed:&Value)->Result<()> {
     let namespace=text(stage,"namespace")?;
     drain_posts(root,workspace,dir,namespace,"rekey")?;
     drain_posts(root,workspace,dir,namespace,"publish")?;
@@ -454,7 +455,7 @@ fn publish_current(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,
     Err("document kept changing during publication; recover this membership change to continue".into())
 }
 
-fn atom_epoch(payload:&str)->Result<u64>{
+pub(super) fn atom_epoch(payload:&str)->Result<u64>{
     let bytes=private::decode_hex(payload)?;
     let offset=FRAME.len()+64+MESSAGE_FRAME.len()+32;
     let epoch=bytes.get(offset..offset+8).ok_or("protected atom has no epoch")?;
@@ -466,31 +467,7 @@ fn visible_atoms(document:&Value)->Result<std::collections::BTreeSet<String>> {
 }
 fn rekey_current(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value)->Result<String> {
     let epoch=text(&read(&dir.join("epoch.json"))?,"epoch")?.parse::<u64>().map_err(|_|"epoch exceeds u64")?;
-    let first=next_post(dir,"rekey")?;
-    for offset in 0..4096u64 {
-        let batch=first.checked_add(offset).ok_or("membership rekey counter exhausted")?;
-        let document=ws::rendered_document(root,workspace,name,None,None)?;
-        let visible=visible_atoms(&document.document)?;
-        let opened=&document.entries;
-        let raw=ws::entries(&document.view)?;
-        let mut edits=Vec::new();
-        for atom in raw.iter().filter(|e| e["type"]=="atom" && e["tombstonedAt"].is_null() && e["id"].as_str().is_some_and(|id|visible.contains(id))) {
-            let display=opened.iter().find(|e|e["type"]=="atom"&&e["id"]==atom["id"]).ok_or("live atom cannot be opened")?;
-            let plain=if let Some(text)=display["private"]["text"].as_str(){crate::hex(text.as_bytes())}
-                else if let Some(bytes)=display["private"]["hex"].as_str(){bytes.to_owned()}
-                else if display["kind"]==json!({"type":"text"}){text(display,"payload")?.to_owned()}
-                else{return Err("current-text sharing requires every live atom to be openable text; prior data remains retained".into());};
-            if is_kind(&atom["kind"]) && atom_epoch(text(atom,"payload")?)?==epoch{continue;}
-            edits.push(json!({"type":"editAtom","atom":atom["id"],"before":ws::atom_record(atom)?,
-                "kind":{"type":"text"},"payload":plain,"tombstone":false}));
-            if edits.len()==64{break;}
-        }
-        if edits.is_empty(){return Ok(text(&document.view["cell"],"root")?.to_owned());}
-        action(root,workspace,dir,text(stage,"namespace")?,&format!("rekey-{batch}"),json!({
-            "type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":name,
-            "expectedTargetRoot":document.view["cell"]["root"],"payload":{"type":"content","actions":edits}}]}))?;
-    }
-    Err("document rekey requires another recovery pass".into())
+    rewriting::current(root,workspace,name,dir,text(stage,"namespace")?,epoch)
 }
 
 pub(crate) fn export_share(root:&Path,workspace:&Value,name:&str,change:&str,output:&Path)->Result<()> {

@@ -11,6 +11,10 @@ use zeroize::Zeroizing;
 
 #[path = "protected_document_members.rs"]
 pub(crate) mod members;
+#[path = "protected_rewrite.rs"]
+mod rewriting;
+#[path = "protected_document_conversion.rs"]
+mod conversion;
 
 const FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM/v1";
 const MESSAGE_FRAME: &[u8] = b"MINI/OBJECT-MESSAGE/v1";
@@ -354,6 +358,12 @@ fn submit_retained(root:&std::path::Path,workspace:&Value,intent:&std::path::Pat
 /// Source-owned owner-only enrollment for a new empty document. A complete
 /// immutable stage is durable before the catalog birth or any source mutation.
 pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) -> Result<()> {
+    protect(root,workspace,name,false)
+}
+pub(crate) fn protect_current(root:&std::path::Path,workspace:&Value,name:&str) -> Result<()> {
+    protect(root,workspace,name,true)
+}
+fn protect(root:&std::path::Path,workspace:&Value,name:&str,current:bool) -> Result<()> {
     use std::path::Path;
     let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?.to_owned();
@@ -361,7 +371,7 @@ pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) ->
     if retained.exists() {return recover(root,workspace,name);}
     if reference.get("protectedDocument").is_some() {return Err("document already has protected custody".into());}
     let (view,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
-    if super::entries(&view)?.iter().any(|entry| entry["type"]=="atom") {
+    if !current && super::entries(&view)?.iter().any(|entry| entry["type"]=="atom") {
         return Err("existing document text is retained; protect-empty requires an empty document, not implicit historical disclosure".into());
     }
     let host=super::workspace_host(workspace)?;
@@ -370,6 +380,8 @@ pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) ->
     crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&supported])?;
     let initial=super::bounded_json(&supported)?;
     if !initial["audienceState"].is_null() {return Err("document audience already enrolled; recover its retained enrollment".into());}
+    let conversion=if current {Some(conversion::snapshot(root,workspace,name,&view,&signed)?)}else{None};
+    if current {eprintln!("{name}: protecting current text prospectively; earlier plaintext/history, links and non-text metadata remain under their existing read law; annotations keep their original revision");}
     ensure_custody(root)?;
     let public=device(root)?;
     let home=root.join("protected-documents").join(&target);
@@ -378,7 +390,7 @@ pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) ->
         "identity":enrollment_identity(&reference,workspace,name)?,
         "catalog":format!("pd-catalog-{}",super::random_nonce()?),
         "transition":super::random_nonce()?,"operation":crate::hex(&nat32(&super::random_nonce()?)?),
-        "catalogNonce":super::random_nonce()?,"catalogQueryNonce":super::random_nonce()?,"device":public});
+        "catalogNonce":super::random_nonce()?,"catalogQueryNonce":super::random_nonce()?,"device":public,"conversion":conversion});
     retain_json(&retained,&stage)?;
     continue_enrollment(root,workspace,name,&stage)
 }
@@ -403,8 +415,10 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         return Err("retained enrollment device differs from durable custody".into());
     }
     drop(store);
-    let (view,_,_)=super::signed_view(root,workspace,&reference,"resource")?;
-    if super::entries(&view)?.iter().any(|entry|entry["type"]=="atom") {
+    let (view,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    if stage.get("conversion").is_some_and(|value|!value.is_null()) {
+        conversion::preflight(root,workspace,name,&home,&view,&signed)?;
+    } else if super::entries(&view)?.iter().any(|entry|entry["type"]=="atom") {
         return Err("document gained text before enrollment; retained empty-document request cannot disclose it".into());
     }
     let host=super::workspace_host(workspace)?;
@@ -462,6 +476,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
     retain_json(&home.join("enrollment.json"),&json!({
         "type":"mini-protected-document-enrollment-v1","name":name,"object":target,"catalog":catalog_name,
         "operation":stage["operation"],"phaseDirectory":phase_dir.strip_prefix(root).map_err(|_|"phase must remain inside participant workspace")?,
+        "mode":if stage.get("conversion").is_some_and(|value|!value.is_null()){"current-text-v1"}else{"empty-v1"},
         "custody":"protected-documents"}))?;
     crate::object_epoch_cli::run(&source,&request_path,&host,&config,&writer,&state,&storage,&phase_dir)?;
     finish_enrollment(root,workspace,name,&home)
@@ -564,6 +579,40 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
     }
     reference["protectedDocument"]=json!({"version":"1","catalog":meta["catalog"]});
     rewrite_reference(root,name,&reference)?;
+    let stage_file=stage_path(root,text(&meta,"object")?)?;
+    if meta.get("mode").is_some_and(|value|!value.is_string()) {
+        return Err("retained enrollment mode must be a string; restore its original custody".into());
+    }
+    let converting=match meta.get("mode").and_then(Value::as_str) {
+        Some("current-text-v1" | "empty-v1") => {
+            let stage=super::bounded_json(&stage_file).map_err(|error|
+                format!("enrollment basis custody is missing or corrupt; restore the complete workspace: {error}"))?;
+            validate_stage(&stage,&enrollment_identity(&reference,workspace,name)?)?;
+            let current=stage.get("conversion").is_some_and(|value|!value.is_null());
+            if stage["operation"]!=meta["operation"] || current!=(meta["mode"]=="current-text-v1") {
+                return Err("enrollment mode or operation differs from its retained basis".into());
+            }
+            current
+        },
+        Some(_) => return Err("unsupported retained enrollment mode".into()),
+        None => {
+            // Original empty-only versions did not record a mode. Positively
+            // identify an empty current source or an already published exact
+            // readiness receipt; missing new custody never implies legacy.
+            if stage_file.exists() && super::bounded_json(&stage_file)?.get("conversion").is_some_and(|v|!v.is_null()) {
+                return Err("conversion metadata lacks its retained mode; restore the complete workspace".into());
+            }
+            let (legacy_view,_,_)=super::signed_view(root,workspace,&reference,"resource")?;
+            let empty=!super::entries(&legacy_view)?.iter().any(|row|row["type"]=="atom");
+            let ready=root.join("attempts").join(text(&meta,"operation")?);
+            let published=home.join("epoch-manifest.bin").exists() && super::accepted_outcome(&ready)?.is_some();
+            if !empty && !published {return Err("legacy empty-enrollment custody cannot complete over existing text; restore its original basis".into());}
+            false
+        }
+    };
+    if converting {
+        conversion::finish(root,workspace,name,home,&source,&meta)?;
+    } else {
     // This retained structural post runs the complete current-entitlement gate.
     // It authorizes only this enrollment's exact empty-document handout.
     let ready_id=text(&meta,"operation")?.to_owned();
@@ -574,11 +623,15 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
                 "type":"createContainer","element":super::random_nonce()?}]}}]});
         super::private_file(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
     }
-    let attempt=root.join("attempts").join(&ready_id);
-    if attempt.join("call.bin").exists() {crate::retry(&attempt,"submit",true)?;} else {
+    let legacy_attempt=root.join("attempts").join(&ready_id);
+    if legacy_attempt.join("call.bin").exists() {crate::retry(&legacy_attempt,"submit",true)?;} else {
         let intent_path=root.join("proposals").join(&ready_id).join("intent.json");
         if !intent_path.exists() {super::propose(root,workspace,&request_path,&ready_id,None)?;}
-        super::submit_intent(root,workspace,&intent_path,"intent",false,Some(&attempt))?;
+        // Catalog attempts already use operation-N. Readiness must have its
+        // own durable namespace, including recovery before its first call.
+        let readiness=crate::hex(&Sha256::digest([b"MINI/DOCUMENT-READINESS/v1".as_slice(),ready_id.as_bytes()].concat()));
+        submit_retained(root,workspace,&intent_path,&readiness)?;
+    }
     }
     let public_manifest=home.join("epoch-manifest.bin");
     if public_manifest.exists() {
@@ -586,7 +639,9 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
             return Err("retained published manifest differs".into());
         }
     } else {super::private_file(&public_manifest,&manifest)?;}
-    println!("{name}: protected audience enrolled; document edits use its admitted object epoch");
+    if converting {
+        println!("{name}: current text protected; carried formatting received. Original marks, annotations, links and earlier disclosures remain in history; future text edits use the admitted epoch");
+    } else {println!("{name}: protected audience enrolled; document edits use its admitted object epoch");}
     Ok(())
 }
 
