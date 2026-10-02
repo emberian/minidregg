@@ -99,7 +99,8 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .declaredProgram => DeclaredEffectCell.wire
   | .policySource => policySourceWire
   | .pay => Kernel.PayCell.wire
-  | .stream => StreamCell.wire
+  | .stream => StreamCell.headWire
+  | .streamEntry => StreamCell.entryWire
   | .nockProgram => nockProgramWire
   | .clock => Kernel.ClockCell.wire
   | .system => Kernel.SystemCell.wire

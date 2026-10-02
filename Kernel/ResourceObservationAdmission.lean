@@ -662,7 +662,9 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
   | .stream, _ => some .body
   -- Exhaustive on purpose: a new registry kind must say whether it has fields.
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _
-  | .nockProgram, _ | .clock, _ | .system, _ => none
+  | .nockProgram, _ | .clock, _ => none
+  -- An entry cell is read through its stream's `tail`, never observed itself.
+  | .streamEntry, _ | .system, _ => none
 
 /-- A read under `fields` keeps an address exactly when its field is named;
 an address with no field is kept only by a scope naming every field. -/

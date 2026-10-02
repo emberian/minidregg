@@ -29,7 +29,8 @@ In one CAS it
   registered account (receiving needs no authority);
 - optionally appends one event to a **topic stream owned by the paying
   account**;
-- consumes its operation marker in the authority cell.
+- consumes its operation marker as the Store's durable nullifier (the
+  authority cell is not written).
 
 The request's `cost` is fee + transferred amount, so a spend grant's
 `maxCost` caps what one turn can move. Operation identity is
@@ -37,18 +38,31 @@ The request's `cost` is fee + transferred amount, so a spend grant's
 receipt; a changed command under the same identity is a transaction conflict,
 never a second effect.
 
-**Topic streams are the tree's causal event log.** A stream is a sequence of
-`eventHistory` cells — the typed append-only four-slot pages already
-registered in `CanonicalCellRegistry` with their own cell law, which no native
-receiver wrote before. The stream id is `H(domain, account, topic bytes)`; the
-page cell id is `H(stream, page number)`; sequence `n` sits at page
-`(n-1)/4`, slot `(n-1)%4`, admitted only as the stream's next position, with
-the previous event's key as its only parent. The `VersionEventRecord` binds
-the payload digest, the turn's transaction id and effect digest, the Book
-roots around the turn, and the typed author (subject, account capability).
-The payload bytes stay in the signed ingress, which the accepted journal
-already retains; a poll reads them back by exact transaction id and returns
-them only when they reproduce the committed digest.
+**Topic streams are the kernel's `stream` kind** (`Compiler/StreamCell.lean`,
+the same shape a room stream has). A stream is one **head** cell — `{binding,
+count, tail}`, where `tail` is the key of the last entry — plus one **entry**
+cell per event at `entryCellId(head, n)`. The stream id is `H(domain, account,
+topic bytes)` and the head cell id is `H(stream)`; the head is bound to its
+stream (registry law), so a room-stream append can never write a topic head and
+a send can never write a room head. A send reads the head only and writes
+exactly two cells: the head (bounded) and one fresh entry at position
+`count + 1`, whose `parent` is the head's tail (`fleet_send_footprint`). Its
+plan, and so every byte it writes, is a function of the head cell alone
+(`fleet_send_cost_independent_of_history`): a send to a topic with 1000 events
+costs what a send to a fresh topic costs. The entry's record binds the payload
+digest, the turn's transaction id, the admission height and the signing
+subject. The payload bytes stay in the signed ingress, which the accepted
+journal already retains; a poll reads them back by exact transaction id and
+returns them only when they reproduce the committed digest.
+
+**One topic, several agents.** Each account's topic is its own stream, so K
+agents posting to the same topic name write K disjoint heads and never re-plan
+for one another (`fleet_disjoint_authors_no_replan`). A reader holding observe
+grants on those accounts reads them as ONE feed, ordered by admission height
+(unique per accepted record): `mini fleet --action feed --accounts A,B,C
+--topic T`. Several keys spending from one shared account share its stream and
+serialise on its head (the second of two sends planned at one position is
+refused `sequenceTaken`; the client re-plans).
 
 Host operations on the public socket (`Host/Main.lean` stdio; allowlisted in
 `native/resource-client/src/transport.rs`):
@@ -65,9 +79,55 @@ Host operations on the public socket (`Host/Main.lean` stdio; allowlisted in
 
 Client (`native/resource-client/src/fleet.rs`, `mini fleet --action …`):
 `join`, `send`/`publish`, `transfer`, `receipt --transaction|--head-of`,
-`lookup --attempt`, `poll`. `workspace::create` gained one birth shape: an
+`lookup --attempt`, `poll`, `feed`. `workspace::create` gained one birth shape: an
 account owned by another admitted subject, funded by one Book posting from
 the sponsor's fee payer under the sponsor's spend grant.
+
+## `mini fleet-sign`: the drop-in for `dregg-client-sign`
+
+A fleet built on Bread's `dregg-client-sign` keeps its harness: `mini
+fleet-sign join|send|transfer` takes the same verbs, the same flags
+(`--profile`, `--topic`, `--to`, `--amount`, `--fund` on join, positional
+payload words) and prints exactly one JSON object with the same keys
+(`joined`/`cell`/`balance`, `sent`/`turn_hash`/`chain_index`/`finality`,
+`transferred`/`committed`). Two verbs are new: `receipt (--turn-hash TX |
+--head)` and `retry --attempt DIR`, the exact resubmission of retained bytes
+(an accepted original answers `replayed` with its original receipt).
+Profiles live under `MINI_FLEET_HOME/profiles/NAME` (key, enrollment,
+workspace). The journey is
+[`native/resource-client/fleet-sign-journey.sh`](../native/resource-client/fleet-sign-journey.sh);
+growth is measured by `fleet-sign-growth.sh`.
+
+**Why a signer, not a gateway for Bread's signed bytes.** A Bread client
+signs `Turn::hash` (`dregg-turn-v3`: BLAKE3 over Bread's agent cell, nonce,
+call forest, computron fee, memo, height deadline and receipt head) with
+Ed25519 and ML-DSA-65. That message names none of what a Mini fleet
+signature binds: the deployment domain, the paying account's law (semantics,
+policy epoch and revision), the spend capability, the signer's key epoch, the
+authority pre-root, a fee equal to the pinned tariff. A second accepted
+signing shape would make admission accept a signature that does not say
+which law it was given under, and would put Bread's turn codec and hash into
+the Host. So the fleet signs Mini's header with Mini's signer.
+
+What a Bread harness sees differently, each refused by name rather than
+ignored: `--node-url http://…` (the profile is pinned to its Host's socket;
+`unix:/ABS/SOCKET` is accepted and checked), `--token`/`--token-file` (no
+bearer), `--accept-tentative` (one commitment level), `--fund` on send or
+transfer (no faucet), a 64-hex `--to` (accounts are the decimal `cell` a join
+printed). `join` runs where the sponsor's workspace is: the sponsor signs the
+admission and the funded birth. `turn_hash` is the Mini transaction id,
+`chain_index` the accepted count, `finality` is `accepted`; there is no
+receipt hash, the four-field receipt is printed as `receipt`.
+
+**Pre-signature staleness re-plans.** A fleet turn's signed observation names
+the Host state it read. When another turn commits between the observation's
+challenge and its query, or between the observation and the plan, the Host
+refuses `stale-root` before the turn is signed. The client reads that reason
+from the Host's own decoding (the retained plan refusal frame, or the
+session's recorded decision for the query) and re-plans in a fresh attempt,
+as it does for submit-time `contention`. Measured on 100 interleaved turns
+from three keys: 100 admitted, 0 submit contentions; 6 stale plans at box
+load ~20, 3 stale observations + 9 stale plans at load ~45.
 
 ## What already existed and was reused
 
@@ -90,7 +150,7 @@ the sponsor's fee payer under the sponsor's spend grant.
 | Bread `dregg-client-sign` | Mini | Differences |
 | --- | --- | --- |
 | `join`: create the named profile on first use; faucet-materialize and fund the canonical cell `derive(ed25519 pk, "default")` | `mini fleet --action join`: sponsor-signed key admission with the new key's proof of possession (`mini enroll`), then a sponsor-authored birth of an **account owned by the new subject**, funded by a Book posting from the sponsor's account under the sponsor's spend grant; the owner and control grants go to the new subject; the agent workspace imports the account reference | No faucet and no keyless materialization: value comes from a real account under a real grant. Identity is admitted by a sponsor's factory grant, not by first use, so there is no trust-on-first-use window and no #91 brick (Bread's cell id is derivable from a public key and claimable by anyone who posts it first; Mini's account id is a reservation the sponsor's signed birth creates). Key and account are distinct resources. |
-| `send`: one hybrid-signed `EmitEvent` on the signer's own cell, `topic = symbol(--topic)`, payload packed into event words and the memo; fee from the computron estimate; `--to` must equal the own cell | `mini fleet --action send --topic T --payload P [--to ACCOUNT --amount N]`: one `FleetTurn` with a topic event on the paying account's stream and, optionally, a payment to a service account in the same CAS | The topic is an append-only stream with an exact sequence and parent, not a symbol on a flat event list. The payload is bound by digest in the page and retained exactly in the journal (no 8-byte-lane packing). The fee is a Book posting to the collector, stated by the signer and required to equal the pinned tariff. `--to` means *pay* that account atomically with the event — the "send with fee to a service cell" Bread cannot express in one turn. There is no coordination-exempt fee class. |
+| `send`: one hybrid-signed `EmitEvent` on the signer's own cell, `topic = symbol(--topic)`, payload packed into event words and the memo; fee from the computron estimate; `--to` must equal the own cell | `mini fleet --action send --topic T --payload P [--to ACCOUNT --amount N]`: one `FleetTurn` with a topic event on the paying account's stream and, optionally, a payment to a service account in the same CAS | The topic is an append-only stream with an exact sequence and parent, not a symbol on a flat event list. The payload is bound by digest in the entry cell and retained exactly in the journal (no 8-byte-lane packing). The fee is a Book posting to the collector, stated by the signer and required to equal the pinned tariff. `--to` means *pay* that account atomically with the event — the "send with fee to a service cell" Bread cannot express in one turn. There is no coordination-exempt fee class. |
 | (no separate publish) | `mini fleet --action publish`: the same primitive without a payment | `send` and `publish` are one receiver; `publish` is a name for the unpaid form. |
 | `transfer --to CELL --amount N`: `Effect::Transfer` from the own cell; exit 0 only when a receipt for exactly this turn hash is on chain at accepted finality | `mini fleet --action transfer --to ACCOUNT --amount N`: one `FleetTurn` with fee + transfer | The payer must hold amount + fee (checked on the Book after the fee posting). Confirmation is the exact receipt of this turn's transaction id, naming the original accepted prefix. There are no finality levels: one Store, and a commit is an accepted journal entry. |
 | receipt by exact turn hash (`/api/starbridge/receipts?turn_hash=`) | `mini fleet --action receipt --transaction ID` (op 102); `mini fleet --action lookup --attempt DIR` (op 99, from the retained ingress) | The transaction id is derived from the signed command's identity, not from the server's answer; `lookup` re-derives it from the exact retained bytes and never resubmits. An unknown id answers `absent`, never a nearest match. |
@@ -149,11 +209,8 @@ the sponsor's fee payer under the sponsor's spend grant.
   system cell (Wave B/C); ops 102 and 100 become exact index reads then. The
   agent head needs an index §3.3 does not list (`payer ↦ newest fleet turn`);
   it should be added with the journal index rather than kept as a scan.
-- **Topic pages are cells, not an index.** They are already the typed
-  append-only namespace §3.3 wants and do not move.
-- **Stream head walk (READ).** Finding the next position walks pages from 0,
-  bounded at 4096 pages (16,384 events per stream); a stream-head field would
-  make it O(1).
+- **Topic entries are cells, not an index.** A stream is a head cell plus one
+  cell per entry; the next position is the head's `count + 1`, read in O(1).
 - **One base fee for every fleet turn.** The fee reuses the pinned
   `tariff.base` (already in the runtime parameters). A separate fleet tariff
   pin would be a `Config` field and a re-pin.

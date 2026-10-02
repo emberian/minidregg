@@ -26,6 +26,8 @@ mod fn_frontier;
 #[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
+mod fleet_sign;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -380,9 +382,11 @@ usage:
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
+  mini fleet --action feed --dir WORKSPACE --accounts NAME[,NAME...] --topic TOPIC   (one topic, several authors: one feed ordered by admission height)
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
   mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
+  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -774,6 +778,20 @@ fn selected_release_sign(
 /// `<public>.escrow`, sealed to the sponsor and bound to the subject
 /// (`DREGG/SEED-ESCROW/v1`), which lets the sponsor sign as this key.
 fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) -> Result<()> {
+    let public_key = generate_key(secret, public, escrow)?;
+    eprintln!("{}", workspace::private::KEYGEN_NOTICE);
+    eprintln!("Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.");
+    println!("{}", hex(&public_key));
+    Ok(())
+}
+
+/// Create a fresh Ed25519 seed at `secret` and its public key at `public`;
+/// returns the public key. Neither file may already exist.
+fn generate_key(
+    secret: &Path,
+    public: &Path,
+    escrow: Option<(OsString, OsString)>,
+) -> Result<[u8; 32]> {
     if secret.exists() {
         return Err(format!("refusing to replace {}", secret.display()));
     }
@@ -817,13 +835,7 @@ fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) ->
         escrow_path.push(".escrow");
         create_private(Path::new(&escrow_path), &wrapped.to_bytes())?;
     }
-    eprintln!("{}", workspace::private::KEYGEN_NOTICE);
-    eprintln!(
-        "Your blinding key is derived from this seed (`mini key --action export-blinding`); it \
-keys the salts that hide each cell's fields from readers you have not named."
-    );
-    println!("{}", hex(&signing.verifying_key().to_bytes()));
-    Ok(())
+    Ok(signing.verifying_key().to_bytes())
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
@@ -3582,7 +3594,16 @@ fn run(mut args: Args) -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    match Args::parse().and_then(run) {
+    #[cfg(unix)]
+    let parsed = match env::args_os().nth(1) {
+        Some(command) if command == OsStr::new("fleet-sign") => {
+            fleet_sign::run(env::args_os().skip(2).collect())
+        }
+        _ => Args::parse().and_then(run),
+    };
+    #[cfg(not(unix))]
+    let parsed = Args::parse().and_then(run);
+    match parsed {
         Ok(()) => ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed)),
         Err(error) if error == USAGE => {
             print!("{error}");

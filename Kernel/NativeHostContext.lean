@@ -383,6 +383,23 @@ theorem servedRoot_eq_worldRoot (config : Config) (image : DurableReceiver.Image
   rw [DurableReceiverIO.RootCache.root_eq, entriesOf_worldEntries config image snapshot chain restored rooted]
   simp only [worldRoot, NativeHostCodec.worldRoot, DurableReceiverIO.RootCache.ofEntries]
 
+/-- **Every root a Loaded serves is C1's specification root of its image** —
+after open, after any number of appends (one cached path each), after any
+rebase: `Loaded.worldRoot_eq` carries the cache's agreement with the served
+entries, so no full rebuild is needed to know it. Premises as above: the
+snapshot is the genesis replay and the chain is rooted at this deployment. -/
+theorem loadedRoot_eq_worldRoot (config : Config) (durable : Durable)
+    (restored : durable.image.restore ResourceBirthCodec.rootBytes = some durable.snapshot)
+    (rooted : durable.chain =
+      NativeHostCodec.logRoot config.deployment.domain config.profile.semantics durable.image) :
+    durable.worldRoot = worldRoot config durable.image := by
+  rw [DurableReceiverIO.Loaded.worldRoot_eq,
+    entriesOf_worldEntries config durable.image durable.snapshot durable.chain restored rooted]
+  simp only [worldRoot, NativeHostCodec.worldRoot]
+
+/-- info: 'Minidregg.Kernel.NativeHost.loadedRoot_eq_worldRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms loadedRoot_eq_worldRoot
+
 /-- The chain of a loaded image validated for this deployment is its log root. -/
 theorem chain_logRoot (config : Config) (durable : Durable)
     (rooted : durable.logStart = config.logStart durable.image.seed) :

@@ -303,7 +303,7 @@ op S "PROVISION (OPERATOR step 6): factory observation + a funded account owned 
 op S "DELIVER (OPERATOR step 6): the birth context into newcomer's HOME/provision/" \
   install -D -m 0600 "$R/sponsor/provisions/newcomer/birth-context.json" "$RUN/homes/newcomer/provision/birth-context.json"
 step S 0 newcomer "init mini.key $B_SUBJ"
-step S 0 sponsor 'create board declared {"type":"all","predicates":[]}'
+step S 0 sponsor 'create board declared {"type":"all","predicates":[]} 2'
 world_ok() { [[ $(world) != read-failed ]]; }
 check S "the differential's signed read of board answers" world_ok
 

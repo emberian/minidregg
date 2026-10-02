@@ -44,6 +44,9 @@ umask 077
 for name in MINI SPONSOR_WS NEWCOMER_WS JOURNEY_WORLD JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jclock: $name is required" >&2; exit 2; fi
 done
+for ws in "$SPONSOR_WS" "$NEWCOMER_WS"; do
+  [ -f "$ws/workspace.json" ] || { echo "jclock: missing participant workspace $ws (run J0-J4 first)" >&2; exit 2; }
+done
 D=$JOURNEY_STEP_DIR/jclock
 [ ! -e "$D" ] || { echo "jclock: refusing to reuse $D" >&2; exit 2; }
 mkdir -p "$D"

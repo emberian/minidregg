@@ -1,5 +1,6 @@
-/- One fleet turn publishes its Book postings, its optional topic page and its
-operation marker in one CAS, with the pinned tariff as the exact fee lane. -/
+/- One fleet turn publishes its Book postings, its optional topic append (the
+stream head and one fresh entry cell) and its operation marker in one CAS, with
+the pinned tariff as the exact fee lane. -/
 import Kernel.FleetTurn
 
 namespace Minidregg.Kernel.FleetTurnReceiver
@@ -45,7 +46,7 @@ def bookWrite (prepared : Prepared deployment profile tariff ambient durable com
 
 def topicWrites (prepared : Prepared deployment profile tariff ambient durable command) :
     List DataWrite :=
-  prepared.topic.toList.map TopicPlan.write
+  prepared.topic.toList.flatMap TopicPlan.writes
 
 def writes (prepared : Prepared deployment profile tariff ambient durable command) : List DataWrite :=
   bookWrite prepared :: topicWrites prepared
@@ -76,8 +77,11 @@ theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambien
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_cons.mp member with rfl | rest
   · rfl
-  · obtain ⟨plan, _, rfl⟩ := List.mem_map.mp rest
-    rfl
+  · obtain ⟨plan, _, inPlan⟩ := List.mem_flatMap.mp rest
+    simp only [TopicPlan.writes, List.mem_cons, List.not_mem_nil, or_false] at inPlan
+    rcases inPlan with rfl | rfl
+    · exact StreamWrite.headWrite_root _ _ _
+    · exact StreamWrite.entryWrite_root _
 
 theorem readGuards_readonly (prepared : Prepared deployment profile tariff ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :

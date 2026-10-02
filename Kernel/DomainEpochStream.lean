@@ -52,13 +52,15 @@ theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capabil
     (object : kind = .object) (current : version = StreamCell.commandVersion) (fresh : root = pre.root)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
-    (admitted : DomainEpoch.admitAppend pre.logical command.subject request = .ok ()) :
+    (admitted : DomainEpoch.admitAppend pre.logical command.subject request = .ok ())
+    (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
+    (room : head.binding = .room) :
     computeTarget snapshot semantics ambient command
         ⟨kind, id, capability, version, root, .append request, observe⟩ pre =
-      .ok ((StreamCell.appendOp pre.logical (streamRecord snapshot semantics ambient command request)).apply
-        pre.logical) := by
+      .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
+        (streamRecord snapshot semantics ambient command request))).apply pre.logical) := by
   subst object current
-  simp [computeTarget, fresh, topic, payload, admitted]
+  simp [computeTarget, fresh, topic, payload, admitted, loaded, room]
   rfl
 
 /-- A well-formed record fits the stream's payload bound (the largest class has `E = 64`: 2,095 bytes). -/
@@ -106,6 +108,15 @@ theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.doma
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.out_of_order_refused wf dom notAfter)
 
+/-- The kernel refuses a different channel domain even when the epoch is next. -/
+theorem kernel_foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.domain) :
+    computeTarget snapshot semantics ambient command
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+      .error (.channel .foreignDomain) :=
+  computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
+    (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
+    (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.foreign_domain_refused wf dom)
+
 /-- The kernel refuses another subject's record `Reject.channel .foreignAuthor`. -/
 theorem kernel_foreign_author_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (next : r.epoch.toNat = p.epoch.toNat + 1) (foreign : command.subject ≠ p.author) :
@@ -129,23 +140,44 @@ theorem kernel_root_count_refused {P : Minidregg.Theory.Channel.Profile}
 
 /-- The well-formed next record by the sequencer is the stream's next position. -/
 theorem kernel_next_admitted (wf : r.WellFormed) (dom : r.domain = p.domain)
-    (next : r.epoch.toNat = p.epoch.toNat + 1) (seq : command.subject = p.author) :
+    (next : r.epoch.toNat = p.epoch.toNat + 1) (seq : command.subject = p.author)
+    (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
+    (room : head.binding = .room) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
-      .ok ((StreamCell.appendOp pre.logical
-        (streamRecord snapshot semantics ambient command (DomainEpoch.recordAppend r))).apply pre.logical) :=
+      .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
+        (streamRecord snapshot semantics ambient command (DomainEpoch.recordAppend r)))).apply pre.logical) :=
   computeTarget_channel_admitted snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.next_record_admitted wf dom next seq)
+    head loaded room
 
 end Record
 
+/-- The receiver's exact derived record extends the admitted history using the
+same admission result and head/entry constructors as `computeTarget`. Combined
+with `admittedHistory_chain`, historical epoch uniqueness is preserved without
+loading the preceding entries. -/
+theorem receiver_extends_admitted_history (id : Nat) (head : StreamCell.Head)
+    (records : List StreamCell.StreamRecord) (request : StreamCell.Append)
+    (history : DomainEpoch.AdmittedHistory id head records)
+    (admitted : DomainEpoch.admitAppend (StreamCell.headStore head)
+      command.subject request = .ok ()) :
+    DomainEpoch.AdmittedHistory id
+      (head.append (StreamCell.appendEntry id head
+        (streamRecord snapshot semantics ambient command request)))
+      (streamRecord snapshot semantics ambient command request :: records) := by
+  exact DomainEpoch.AdmittedHistory.append history command.subject request ambient.height
+    ⟨operationMarker snapshot.domain semantics command⟩ admitted
+
+#assert_axioms receiver_extends_admitted_history
 #assert_axioms computeTarget_channel_refused
 #assert_axioms computeTarget_channel_admitted
 #assert_axioms wellFormed_payload_fits
 #assert_axioms recordAppend_topic_fits
 #assert_axioms kernel_gap_refused
 #assert_axioms kernel_out_of_order_refused
+#assert_axioms kernel_foreign_domain_refused
 #assert_axioms kernel_foreign_author_refused
 #assert_axioms kernel_root_count_refused
 #assert_axioms kernel_next_admitted

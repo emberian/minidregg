@@ -104,6 +104,7 @@ import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
+import Kernel.StreamWrite  -- stream head and immutable entry writes
 import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
 import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)

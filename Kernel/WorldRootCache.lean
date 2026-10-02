@@ -274,6 +274,178 @@ theorem ofEntries_root (hE : ∀ i, E i = empties S i) (es : List (K × V)) :
 
 end Cache
 
+/-! ## Reading the cache, and when an entry list's order does not matter
+
+`Tree.find` walks one index path of the cached tree (no hashing): on a good
+tree it reads the slot map (`find_good`). An entry list whose keys never share
+an index path (`KeysInjective`, checked through `find`, never assumed) has a
+slot map that depends only on the value it last gives each key (`lastVal`):
+`slotsOf_eq_of_lastVal`. That is what lets a cache whose entries were written
+in log order stand for a served entry list written in enumeration order. -/
+
+namespace Tree
+
+variable {K V D : Type}
+
+/-- The slot at the end of `bits`, read down a tree of height `i`. -/
+def find : Nat → List Bool → Tree K V D → Option (K × V)
+  | 0, _, t => t.occupant
+  | _ + 1, [], _ => none
+  | i + 1, b :: bs, t => find i bs (if b then t.children.2 else t.children.1)
+
+end Tree
+
+section Read
+
+variable {K V D : Type} [DecidableEq K] (S : Scheme K V D) (E : Nat → D)
+
+set_option linter.unusedSectionVars false
+
+/-- On a good tree, `find` reads the slot map. -/
+theorem find_good (m : Map K V) :
+    ∀ (i : Nat) (bits p : List Bool) (t : Tree K V D), bits.length = i → Good S E m i p t →
+      t.find i bits = m (p ++ bits)
+  | 0, bits, p, t, hlen, good => by
+      have hnil : bits = [] := List.length_eq_zero_iff.mp hlen
+      subst hnil
+      simpa [Tree.find] using good_occupant S E t good
+  | i + 1, [], _, _, hlen, _ => by simp at hlen
+  | i + 1, b :: bs, p, t, hlen, good => by
+      have hbs : bs.length = i := by simpa using hlen
+      obtain ⟨gl, gr⟩ := good_children S E t good
+      cases b with
+      | false =>
+          simp only [Tree.find, Bool.false_eq_true, if_false]
+          rw [find_good m i bs _ _ hbs gl]
+          simp
+      | true =>
+          simp only [Tree.find, if_true]
+          rw [find_good m i bs _ _ hbs gr]
+          simp
+
+end Read
+
+section Order
+
+variable {K C : Type} [DecidableEq K] (ix : K → List Bool)
+
+/-- The value an entry list last gives key `k`. -/
+def lastVal (es : List (K × C)) (k : K) : Option C :=
+  ((es.filter fun e => decide (e.1 = k)).getLast?).map (·.2)
+
+/-- No two distinct keys of the list share an index path. -/
+def KeysInjective (es : List (K × C)) : Prop :=
+  ∀ e ∈ es, ∀ e' ∈ es, ix e.1 = ix e'.1 → e.1 = e'.1
+
+theorem lastVal_isSome {es : List (K × C)} {k : K} :
+    (lastVal es k).isSome ↔ ∃ e ∈ es, e.1 = k := by
+  unfold lastVal
+  rw [Option.isSome_map]
+  constructor
+  · intro h
+    obtain ⟨x, hx⟩ := Option.isSome_iff_exists.mp h
+    have hm := List.mem_of_getLast? hx
+    rw [List.mem_filter, decide_eq_true_eq] at hm
+    exact ⟨x, hm.1, hm.2⟩
+  · rintro ⟨e, he, hk⟩
+    rw [Option.isSome_iff_ne_none, Ne, List.getLast?_eq_none_iff]
+    exact List.ne_nil_of_mem (List.mem_filter.mpr ⟨he, by simpa using hk⟩)
+
+theorem lastVal_append (es fs : List (K × C)) (k : K) :
+    lastVal (es ++ fs) k = (lastVal fs k).or (lastVal es k) := by
+  unfold lastVal
+  rw [List.filter_append, List.getLast?_append]
+  cases (fs.filter fun e => decide (e.1 = k)).getLast? <;>
+    cases (es.filter fun e => decide (e.1 = k)).getLast? <;> rfl
+
+theorem lastVal_cons (e : K × C) (es : List (K × C)) (k : K) :
+    lastVal (e :: es) k = (lastVal es k).or (if e.1 = k then some e.2 else none) := by
+  have := lastVal_append [e] es k
+  rw [List.singleton_append] at this
+  rw [this]
+  by_cases h : e.1 = k <;> simp [lastVal, h]
+
+/-- Under injective keys a slot-map read is the key's last value. -/
+theorem lookup_slotsOf_injective (es : List (K × C)) (inj : KeysInjective ix es) (k : K) :
+    lookup ix (slotsOf ix es) k = lastVal es k := by
+  by_cases present : ∃ e ∈ es, e.1 = k
+  · obtain ⟨e₀, he₀, hk₀⟩ := present
+    rw [lookup_slotsOf ix es k (fun e he hi => (inj e he e₀ he₀ (hi.trans (by rw [hk₀]))).trans hk₀)]
+    rfl
+  · have absent : ∀ e ∈ es, e.1 ≠ k := fun e he hk => present ⟨e, he, hk⟩
+    rw [lookup_slotsOf_absent ix es k absent]
+    have := (lastVal_isSome (es := es) (k := k)).not.mpr present
+    exact (by simpa using this : lastVal es k = none).symm
+
+/-- Lists that give every key the same last value have the same keys, so
+injectivity transfers. -/
+theorem keysInjective_of_lastVal {es es' : List (K × C)} (inj : KeysInjective ix es)
+    (same : ∀ k, lastVal es k = lastVal es' k) : KeysInjective ix es' := by
+  intro e he e' he' hi
+  have fe : (lastVal es e.1).isSome := by
+    rw [same]; exact lastVal_isSome.mpr ⟨e, he, rfl⟩
+  have fe' : (lastVal es e'.1).isSome := by
+    rw [same]; exact lastVal_isSome.mpr ⟨e', he', rfl⟩
+  obtain ⟨a, ha, hka⟩ := lastVal_isSome.mp fe
+  obtain ⟨b, hb, hkb⟩ := lastVal_isSome.mp fe'
+  rw [← hka, ← hkb]
+  exact inj a ha b hb (by rw [hka, hkb, hi])
+
+/-- **Order does not matter under injective keys**: two entry lists that give
+every key the same last value have one slot map. -/
+theorem slotsOf_eq_of_lastVal {es es' : List (K × C)} (inj : KeysInjective ix es)
+    (same : ∀ k, lastVal es k = lastVal es' k) : slotsOf ix es = slotsOf ix es' :=
+  map_eq_of_lookup ix (slotsOf_wf ix es) (slotsOf_wf ix es') fun k => by
+    rw [lookup_slotsOf_injective ix es inj, lookup_slotsOf_injective ix es'
+      (keysInjective_of_lastVal ix inj same), same k]
+
+omit [DecidableEq K] in
+/-- The slot at a path some entry indexes to is occupied by an entry of the list
+that indexes there. -/
+theorem slotsOf_occupied {es : List (K × C)} {e : K × C} (he : e ∈ es) :
+    ∃ x ∈ es, slotsOf ix es (ix e.1) = some x ∧ ix x.1 = ix e.1 := by
+  unfold slotsOf
+  have ne : (es.filter fun a => decide (ix a.1 = ix e.1)) ≠ [] :=
+    List.ne_nil_of_mem (List.mem_filter.mpr ⟨he, by simp⟩)
+  cases hx : (es.filter fun a => decide (ix a.1 = ix e.1)).getLast? with
+  | none => rw [List.getLast?_eq_none_iff] at hx; exact absurd hx ne
+  | some x =>
+      have hm := List.mem_of_getLast? hx
+      rw [List.mem_filter, decide_eq_true_eq] at hm
+      exact ⟨x, hm.1, rfl, hm.2⟩
+
+omit [DecidableEq K] in
+/-- **The check**: when every entry's own index path holds its key, the keys
+are injective. -/
+theorem keysInjective_of_occupants (es : List (K × C))
+    (occ : ∀ e ∈ es, ∃ x, slotsOf ix es (ix e.1) = some x ∧ x.1 = e.1) : KeysInjective ix es := by
+  intro e he e' he' hi
+  obtain ⟨x, hx, hkx⟩ := occ e he
+  obtain ⟨x', hx', hkx'⟩ := occ e' he'
+  rw [hi, hx'] at hx
+  cases hx
+  rw [← hkx, hkx']
+
+omit [DecidableEq K] in
+/-- Appending an entry whose index path is empty or already holds its key keeps
+the keys injective. -/
+theorem keysInjective_snoc {es : List (K × C)} (inj : KeysInjective ix es) (e : K × C)
+    (free : ∀ x, slotsOf ix es (ix e.1) = some x → x.1 = e.1) : KeysInjective ix (es ++ [e]) := by
+  have toE : ∀ a ∈ es, ix a.1 = ix e.1 → a.1 = e.1 := by
+    intro a ha hi
+    obtain ⟨x, hx, hslot, hxi⟩ := slotsOf_occupied ix ha
+    rw [hi] at hslot
+    rw [inj a ha x hx hxi.symm, free x hslot]
+  intro a ha b hb hi
+  rw [List.mem_append, List.mem_singleton] at ha hb
+  rcases ha with ha | rfl <;> rcases hb with hb | rfl
+  · exact inj a ha b hb hi
+  · exact toE a ha hi
+  · exact (toE b hb hi.symm).symm
+  · rfl
+
+end Order
+
 /-! ## The deployed cache -/
 
 /-- The cached tree under the deployed scheme and its precomputed empty table. -/
@@ -336,6 +508,37 @@ write — no longer has the root. -/
 theorem stale_cache_refuted :
     t0.digest scheme E scheme.depth ≠ scheme.root (write ix m0 6 (some 200)) := by decide
 
+/-- Satisfiable pole: keys 1 and 2 sit at different index paths, and the two
+write orders give one slot map (`slotsOf_eq_of_lastVal`). -/
+theorem order_free_when_injective :
+    slotsOf ix ([(1, 10), (2, 20)] : List (UInt8 × UInt8)) = slotsOf ix [(2, 20), (1, 10)] :=
+  slotsOf_eq_of_lastVal ix (by unfold KeysInjective; decide) (by
+    intro k
+    by_cases h1 : k = 1
+    · subst h1; decide
+    by_cases h2 : k = 2
+    · subst h2; decide
+    simp [lastVal, List.filter, Ne.symm h1, Ne.symm h2])
+
+/-- Refuting pole: keys 1 and 9 share an index path. The two orders give every
+key the same last value, yet their slot maps differ at that path, and the
+injectivity check refuses the list: the premise is load-bearing. -/
+theorem order_matters_on_collision :
+    (∀ k : UInt8, lastVal ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) k =
+        lastVal [(9, 90), (1, 10)] k) ∧
+      slotsOf ix ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) (ix 1) ≠
+        slotsOf ix [(9, 90), (1, 10)] (ix 1) ∧
+      ¬ KeysInjective ix ([(1, 10), (9, 90)] : List (UInt8 × UInt8)) := by
+  refine ⟨?_, by decide, ?_⟩
+  · intro k
+    by_cases h1 : k = 1
+    · subst h1; decide
+    by_cases h9 : k = 9
+    · subst h9; decide
+    simp [lastVal, List.filter, Ne.symm h1, Ne.symm h9]
+  unfold KeysInjective
+  decide
+
 end Toy
 
 end Minidregg.Kernel.WorldRootCache
@@ -350,3 +553,21 @@ end Minidregg.Kernel.WorldRootCache
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.deployedWrite_root
 /-- info: 'Minidregg.Kernel.WorldRootCache.Toy.stale_cache_refuted' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.stale_cache_refuted
+/-- info: 'Minidregg.Kernel.WorldRootCache.find_good' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.find_good
+/-- info: 'Minidregg.Kernel.WorldRootCache.lastVal_append' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.lastVal_append
+/-- info: 'Minidregg.Kernel.WorldRootCache.lookup_slotsOf_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.lookup_slotsOf_injective
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_of_lastVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_of_lastVal
+/-- info: 'Minidregg.Kernel.WorldRootCache.slotsOf_eq_of_lastVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.slotsOf_eq_of_lastVal
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_of_occupants' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_of_occupants
+/-- info: 'Minidregg.Kernel.WorldRootCache.keysInjective_snoc' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.keysInjective_snoc
+/-- info: 'Minidregg.Kernel.WorldRootCache.Toy.order_free_when_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.order_free_when_injective
+/-- info: 'Minidregg.Kernel.WorldRootCache.Toy.order_matters_on_collision' depends on axioms: [propext]  -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.WorldRootCache.Toy.order_matters_on_collision

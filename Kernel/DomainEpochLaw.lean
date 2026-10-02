@@ -9,8 +9,10 @@ the same names it had when both were one file (CH-EPOCH):
   author is a `SubjectId`, which lives in `Theory.TypedAuthorization` (Mathlib);
 * `admitAppend` (run by `computeTarget` at the append) and `recordAppend`, over K-STREAM's
   `StreamCell.Append`;
-* `ChannelStoreLaw` (the registry's stream clause) and the chain inside one Store
-  (`channel_epochs_advance`, `one_record_per_epoch`).
+* `ChannelStoreLaw` (the bounded cached-topic registry clause), and the chain in
+  an admitted stream history (`admittedHistory_chain`, `channel_epochs_advance`,
+  `one_record_per_epoch`). Historical linkage follows from admission transitions;
+  a head alone does not assert arbitrary prior cells form an admitted history.
 
 The split keeps Mathlib out of the runtime library (`channel-lib/build.sh` links the import closure of
 `Kernel.DomainEpochExport`, which no longer reaches this module). Pins: `Kernel.DomainEpochAudit`.
@@ -157,13 +159,16 @@ end Poles
 
 /-! ## §6. The kernel's admission of an append -/
 
-/-- The stream's last record (the one at `nextSeq − 1`). -/
-def lastRecord (store : Store Minidregg.Compiler.StreamCell.layout) :
+/-- Bounded metadata for the previous admitted entry, authenticated by the head's tail.
+`Head.Lawful` binds the cached entry's head, sequence and digest to this head; admission
+updates this cache and the fresh entry together. No historical scan occurs here. -/
+def lastRecord (store : Minidregg.Compiler.StreamCell.HeadStore) :
     Option Minidregg.Compiler.StreamCell.StreamRecord :=
-  store (Minidregg.Compiler.StreamCell.address store.support.card)
+  (Minidregg.Compiler.StreamCell.headOf store).bind fun head =>
+    head.last.map Minidregg.Compiler.StreamCell.Entry.record
 
 /-- What the stream's last record fixes for a channel append: `none` for an empty stream. -/
-def prevOf (store : Store Minidregg.Compiler.StreamCell.layout) : Except Refusal (Option Prev) :=
+def prevOf (store : Minidregg.Compiler.StreamCell.HeadStore) : Except Refusal (Option Prev) :=
   match lastRecord store with
   | none => .ok none
   | some last =>
@@ -175,7 +180,7 @@ def prevOf (store : Store Minidregg.Compiler.StreamCell.layout) : Except Refusal
 payload bytes are). An ordinary topic on an ordinary (or empty) stream is untouched. A channel topic
 must carry the canonical encoding of a record with the topic's (domain, epoch) that satisfies
 `ChannelLaw` against the stream's last record, by `author` (the append's signing subject). -/
-def admitAppend (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
+def admitAppend (store : Minidregg.Compiler.StreamCell.HeadStore) (author : SubjectId)
     (request : Minidregg.Compiler.StreamCell.Append) : Except Refusal Unit :=
   match classifyTopic request.topic with
   | .malformed => .error .malformedTopic
@@ -201,12 +206,12 @@ def recordAppend (r : EpochRecord) : Minidregg.Compiler.StreamCell.Append :=
   ⟨channelTopic r.domain r.epoch, r.encode, none, none⟩
 
 /-- **At the append, the kernel decides `ChannelLaw`** for a sequencer's record. -/
-theorem admitAppend_record (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
+theorem admitAppend_record (store : Minidregg.Compiler.StreamCell.HeadStore) (author : SubjectId)
     (r : EpochRecord) (prev : Option Prev) (last : prevOf store = .ok prev) :
     admitAppend store author (recordAppend r) = checkRecord prev author r := by
   simp [admitAppend, recordAppend, classifyTopic_channelTopic, last, epochRecord_decode_encode]
 
-theorem admitAppend_record_ok_iff (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
+theorem admitAppend_record_ok_iff (store : Minidregg.Compiler.StreamCell.HeadStore) (author : SubjectId)
     (r : EpochRecord) (prev : Option Prev) (last : prevOf store = .ok prev) :
     admitAppend store author (recordAppend r) = .ok () ↔ ChannelLaw prev author r := by
   rw [admitAppend_record store author r prev last, checkRecord_ok_iff]
@@ -229,124 +234,230 @@ def LinkOk (prev cur : Minidregg.Compiler.StreamCell.StreamRecord) : Prop :=
 instance (prev cur : Minidregg.Compiler.StreamCell.StreamRecord) : Decidable (LinkOk prev cur) := by
   unfold LinkOk; split <;> infer_instance
 
-def LinkAt (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Prop :=
-  match store (Minidregg.Compiler.StreamCell.address (k - 1)),
-      store (Minidregg.Compiler.StreamCell.address k) with
-  | some p, some c => LinkOk p c
-  | _, _ => True
-
-instance (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Decidable (LinkAt store k) := by
-  unfold LinkAt; split <;> infer_instance
-
-def EntryAt (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Prop :=
-  match store (Minidregg.Compiler.StreamCell.address k) with
-  | some r => EntryOk r
+/-- The bounded registry check. Historical linkage is an invariant of admitted
+transitions (`AdmittedHistory`), not something a local head can establish by scanning
+absent history. The structural head law separately authenticates the cached entry.
+Fleet-topic heads have their own receiving protocol and are deliberately exempt;
+only room heads can enter the channel admitted-history relation below. -/
+def ChannelStoreLaw (store : Minidregg.Compiler.StreamCell.HeadStore) : Prop :=
+  match Minidregg.Compiler.StreamCell.headOf store with
   | none => True
+  | some head =>
+    match head.binding with
+    | .topic _ => True
+    | .room =>
+      match head.last with
+      | none => True
+      | some entry => EntryOk entry.record
 
-instance (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Decidable (EntryAt store k) := by
-  unfold EntryAt EntryOk; split <;> infer_instance
-
-/-- **`ChannelStoreLaw`**, the registry's stream clause: every entry's topic is well-formed, and
-every entry links to the one before it. On a channel stream that is the chain: one domain, epochs
-consecutive, one author. -/
-def ChannelStoreLaw (store : Store Minidregg.Compiler.StreamCell.layout) : Prop :=
-  ∀ a ∈ store.support, EntryAt store a.2 ∧ LinkAt store a.2
-
-instance (store : Store Minidregg.Compiler.StreamCell.layout) : Decidable (ChannelStoreLaw store) := by
-  unfold ChannelStoreLaw; infer_instance
+instance (store : Minidregg.Compiler.StreamCell.HeadStore) : Decidable (ChannelStoreLaw store) := by
+  unfold ChannelStoreLaw EntryOk
+  split
+  · infer_instance
+  · split <;> first | infer_instance | (split <;> infer_instance)
 
 theorem empty_channel_lawful : ChannelStoreLaw 0 := by
-  intro a member; simp at member
+  simp [ChannelStoreLaw, lastRecord, Minidregg.Compiler.StreamCell.headOf]
 
+open Minidregg.Compiler.StreamCell
 
-/-! ## §10. No equivocation inside one Store -/
+/-- Admission establishes the stored topic and the link to the authenticated cached
+previous record. The record's author and entry are derived from the signing request. -/
+theorem admitAppend_link (store : HeadStore) (author : SubjectId) (request : Append)
+    (height : Nat) (transaction : Minidregg.Theory.TypedAuthorization.Digest)
+    (ok : admitAppend store author request = .ok ()) :
+    EntryOk ⟨author, height, transaction, request.entry⟩ ∧
+      ∀ previous, lastRecord store = some previous →
+        LinkOk previous ⟨author, height, transaction, request.entry⟩ := by
+  cases topic : classifyTopic request.topic with
+  | malformed => simp [admitAppend, topic] at ok
+  | ordinary =>
+    refine ⟨by simp [EntryOk, Append.entry, topic], ?_⟩
+    intro previous last
+    cases prevTopic : classifyTopic previous.entry.topic with
+    | channel d e => simp [admitAppend, topic, last, prevTopic] at ok
+    | ordinary => simp [LinkOk, Append.entry, topic, prevTopic]
+    | malformed => simp [LinkOk, Append.entry, topic, prevTopic]
+  | channel d e =>
+    refine ⟨by simp [EntryOk, Append.entry, topic], ?_⟩
+    intro previous last
+    cases prevTopic : classifyTopic previous.entry.topic with
+    | ordinary => simp [admitAppend, topic, prevOf, last, prevTopic] at ok
+    | malformed => simp [admitAppend, topic, prevOf, last, prevTopic] at ok
+    | channel pd pe =>
+      simp only [admitAppend, topic, prevOf, last, prevTopic] at ok
+      cases decoded : EpochRecord.decode request.payload with
+      | none => simp [decoded] at ok
+      | some record =>
+        simp only [decoded] at ok
+        by_cases mismatch : record.domain ≠ d ∨ record.epoch ≠ e
+        · simp [mismatch] at ok
+        · simp only [if_neg mismatch] at ok
+          have agrees : record.domain = d ∧ record.epoch = e := by
+            simpa only [not_or, not_not] using mismatch
+          have linked := (checkRecord_ok_iff _ _ _).mp ok
+          simp only [ChannelLaw] at linked
+          simp only [LinkOk, Append.entry, topic, prevTopic]
+          exact ⟨agrees.1 ▸ linked.2.1, agrees.2 ▸ linked.2.2.1, linked.2.2.2⟩
 
-/-- Dense keys are exactly `1 … card`: every position up to the count is present. -/
-theorem dense_present (store : Store Minidregg.Compiler.StreamCell.layout)
-    (dense : Minidregg.Compiler.StreamCell.Dense store) {m : Nat} (h1 : 1 ≤ m)
-    (h2 : m ≤ store.support.card) : Minidregg.Compiler.StreamCell.address m ∈ store.support := by
-  classical
-  let f : Minidregg.Theory.Store.Address Minidregg.Compiler.StreamCell.layout → Nat := fun a => a.2
-  have finj : Set.InjOn f store.support := by
-    intro a _ b _ h
-    obtain ⟨sa, ka⟩ := a; obtain ⟨sb, kb⟩ := b
-    cases sa; cases sb
-    simp only [f] at h; subst h; rfl
-  have hsub : store.support.image f ⊆ Finset.Icc 1 store.support.card := by
-    intro k hk
-    obtain ⟨a, ha, rfl⟩ := Finset.mem_image.mp hk
-    exact Finset.mem_Icc.mpr (dense a ha)
-  have hcard : (Finset.Icc 1 store.support.card).card ≤ (store.support.image f).card := by
-    rw [Finset.card_image_of_injOn finj]; simp
-  have heq := Finset.eq_of_subset_of_card_le hsub hcard
-  have hm : m ∈ store.support.image f := heq ▸ Finset.mem_Icc.mpr ⟨h1, h2⟩
-  obtain ⟨a, ha, hfa⟩ := Finset.mem_image.mp hm
-  obtain ⟨sa, ka⟩ := a
-  cases sa
-  simp only [f] at hfa
-  subst hfa
-  exact ha
+/-- An ordinary append cannot change an established channel into an ordinary stream. -/
+theorem ordinary_after_channel_refused (store : HeadStore) (author : SubjectId)
+    (request : Append) (previous : StreamRecord) (d : U16) (e : UInt64)
+    (last : lastRecord store = some previous)
+    (ordinary : classifyTopic request.topic = .ordinary)
+    (channel : classifyTopic previous.entry.topic = .channel d e) :
+    admitAppend store author request = .error .kindMismatch := by
+  simp [admitAppend, ordinary, last, channel]
 
-theorem mem_support_of_some {store : Store Minidregg.Compiler.StreamCell.layout} {k : Nat}
-    {r : Minidregg.Compiler.StreamCell.StreamRecord} (h : store (Minidregg.Compiler.StreamCell.address k) = some r) :
-    Minidregg.Compiler.StreamCell.address k ∈ store.support :=
-  DFinsupp.mem_support_iff.mpr (by rw [h]; exact Option.some_ne_none r)
+/-- Nor can a channel append reinterpret an established ordinary stream. -/
+theorem channel_after_ordinary_refused (store : HeadStore) (author : SubjectId)
+    (request : Append) (previous : StreamRecord) (d : U16) (e : UInt64)
+    (last : lastRecord store = some previous)
+    (ordinary : classifyTopic previous.entry.topic = .ordinary)
+    (channel : classifyTopic request.topic = .channel d e) :
+    admitAppend store author request = .error .kindMismatch := by
+  simp [admitAppend, channel, prevOf, last, ordinary]
 
-/-- **The chain inside one Store.** In a lawful stream, a channel entry `k` places after another is
-exactly `k` epochs later. -/
-theorem channel_epochs_advance (store : Store Minidregg.Compiler.StreamCell.layout)
-    (law : Minidregg.Compiler.StreamCell.StreamLaw store) (chain : ChannelStoreLaw store)
-    {i : Nat} {ri : Minidregg.Compiler.StreamCell.StreamRecord} {di : U16} {ei : UInt64}
-    (hi : store (Minidregg.Compiler.StreamCell.address i) = some ri)
-    (ci : classifyTopic ri.entry.topic = .channel di ei) :
-    ∀ (k : Nat) {rj : Minidregg.Compiler.StreamCell.StreamRecord} {dj : U16} {ej : UInt64},
-      store (Minidregg.Compiler.StreamCell.address (i + k + 1)) = some rj →
-      classifyTopic rj.entry.topic = .channel dj ej → ej.toNat = ei.toNat + (k + 1) := by
-  have hi1 : 1 ≤ i := (law.1 _ (mem_support_of_some hi)).1
+/-- A proof-only history, newest entry first. Unlike an arbitrary collection of
+entry cells, its constructors are the same admission and append operations used by
+the receiver. No caller supplies a free-standing previous channel record. -/
+inductive AdmittedHistory (cellId : Nat) : Head → List StreamRecord → Prop
+  | empty : AdmittedHistory cellId emptyRoomHead []
+  | append {head : Head} {records : List StreamRecord}
+      (history : AdmittedHistory cellId head records)
+      (author : SubjectId) (request : Append) (height : Nat)
+      (transaction : Minidregg.Theory.TypedAuthorization.Digest)
+      (admitted : admitAppend (headStore head) author request = .ok ()) :
+      AdmittedHistory cellId
+        (head.append (appendEntry cellId head ⟨author, height, transaction, request.entry⟩))
+        (⟨author, height, transaction, request.entry⟩ :: records)
+
+/-- The exact cache used at the next admission is the last admitted record. -/
+theorem admittedHistory_last {cellId : Nat} {head : Head} {records : List StreamRecord}
+    (history : AdmittedHistory cellId head records) :
+    lastRecord (headStore head) = records.head? := by
+  cases history <;> simp [lastRecord, emptyRoomHead, Head.append, appendEntry]
+
+/-- History positions agree with the physical head's next-position counter. -/
+theorem admittedHistory_count {cellId : Nat} {head : Head} {records : List StreamRecord}
+    (history : AdmittedHistory cellId head records) : head.count = records.length := by
+  induction history with
+  | empty => rfl
+  | append history author request height transaction admitted ih =>
+    simpa only [Head.append, List.length_cons] using congrArg (fun n => n + 1) ih
+
+/-- Each reachable cache is structurally bound to its exact append entry. -/
+theorem admittedHistory_head_lawful {cellId : Nat} {head : Head} {records : List StreamRecord}
+    (history : AdmittedHistory cellId head records) : head.Lawful cellId := by
+  induction history with
+  | empty => simp [Head.Lawful, emptyRoomHead, Binding.At]
+  | append history author request height transaction admitted ih =>
+    exact append_head_lawful cellId _ _ ih
+
+/-- Historical linkage, separate from the constant-cost registry predicate. -/
+def HistoryLaw : List StreamRecord → Prop
+  | [] => True
+  | [record] => EntryOk record
+  | current :: previous :: rest =>
+      EntryOk current ∧ LinkOk previous current ∧ HistoryLaw (previous :: rest)
+
+theorem historyLaw_tail {record : StreamRecord} {records : List StreamRecord}
+    (law : HistoryLaw (record :: records)) : HistoryLaw records := by
+  cases records with
+  | nil => trivial
+  | cons previous rest => exact law.2.2
+
+/-- The historical chain follows from real append admission and the cache update,
+not from assuming the desired chain as a registry check. -/
+theorem admittedHistory_chain {cellId : Nat} {head : Head} {records : List StreamRecord}
+    (history : AdmittedHistory cellId head records) : HistoryLaw records := by
+  induction history with
+  | empty => trivial
+  | @append head records history author request height transaction admitted ih =>
+    obtain ⟨entry, link⟩ := admitAppend_link (headStore head) author request height transaction admitted
+    cases records with
+    | nil => exact entry
+    | cons previous rest =>
+      exact ⟨entry, link previous (admittedHistory_last history), ih⟩
+
+/-- A channel entry `k` positions before the latest has an epoch exactly `k` lower.
+Positions here are offsets in the newest-first admitted history. -/
+theorem channel_epochs_from_head {first : StreamRecord} {rest : List StreamRecord}
+    (chain : HistoryLaw (first :: rest)) {domain : U16} {epoch : UInt64}
+    (topic : classifyTopic first.entry.topic = .channel domain epoch) :
+    ∀ (k : Nat) {record : StreamRecord} {d : U16} {e : UInt64},
+      (first :: rest)[k]? = some record →
+      classifyTopic record.entry.topic = .channel d e → epoch.toNat = e.toNat + k := by
   intro k
-  induction k with
+  induction k generalizing first rest domain epoch with
   | zero =>
-    intro rj dj ej hj cj
-    have link : LinkAt store (i + 0 + 1) := (chain _ (mem_support_of_some hj)).2
-    unfold LinkAt at link
-    rw [show i + 0 + 1 - 1 = i by omega, hj, hi] at link
-    simp only [LinkOk, ci, cj] at link
-    obtain ⟨_, h, _⟩ := link
+    intro record d e found classified
+    simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+    subst record
+    rw [topic] at classified
+    cases classified
     omega
   | succ k ih =>
-    intro rj dj ej hj cj
-    have link : LinkAt store (i + (k + 1) + 1) := (chain _ (mem_support_of_some hj)).2
-    have hjc : i + (k + 1) + 1 ≤ store.support.card := (law.1 _ (mem_support_of_some hj)).2
-    have hpres := dense_present store law.1 (m := i + k + 1) (by omega) (by omega)
-    have hne : store (Minidregg.Compiler.StreamCell.address (i + k + 1)) ≠ none :=
-      DFinsupp.mem_support_iff.mp hpres
-    obtain ⟨p, hp⟩ := Option.ne_none_iff_exists'.mp hne
-    unfold LinkAt at link
-    rw [show i + (k + 1) + 1 - 1 = i + k + 1 by omega, hj, hp] at link
-    cases cp : classifyTopic p.entry.topic with
-    | channel dp ep =>
-      simp only [LinkOk, cp, cj] at link
-      obtain ⟨_, h, _⟩ := link
-      have := ih hp cp
-      omega
-    | ordinary => simp [LinkOk, cp, cj] at link
-    | malformed => simp [LinkOk, cp, cj] at link
+    intro record d e found classified
+    cases rest with
+    | nil => simp at found
+    | cons previous tail =>
+      have link := chain.2.1
+      cases prevTopic : classifyTopic previous.entry.topic with
+      | ordinary => simp [LinkOk, prevTopic, topic] at link
+      | malformed => simp [LinkOk, prevTopic, topic] at link
+      | channel pd pe =>
+        simp only [LinkOk, prevTopic, topic] at link
+        have advance := ih chain.2.2 prevTopic (by simpa using found) classified
+        omega
 
-/-- **No equivocation inside one Store.** A lawful stream holds at most one channel entry per epoch:
-two channel entries with the same epoch are the same position. -/
-theorem one_record_per_epoch (store : Store Minidregg.Compiler.StreamCell.layout)
-    (law : Minidregg.Compiler.StreamCell.StreamLaw store) (chain : ChannelStoreLaw store)
-    {i j : Nat} {ri rj : Minidregg.Compiler.StreamCell.StreamRecord} {di dj : U16} {e : UInt64}
-    (hi : store (Minidregg.Compiler.StreamCell.address i) = some ri)
-    (hj : store (Minidregg.Compiler.StreamCell.address j) = some rj)
-    (ci : classifyTopic ri.entry.topic = .channel di e) (cj : classifyTopic rj.entry.topic = .channel dj e) :
-    i = j := by
+/-- The chain between any two positions in the admitted history. -/
+theorem channel_epochs_advance (records : List StreamRecord) (chain : HistoryLaw records)
+    (i k : Nat) {ri rj : StreamRecord} {di dj : U16} {ei ej : UInt64}
+    (hi : records[i]? = some ri) (hj : records[i + k]? = some rj)
+    (ci : classifyTopic ri.entry.topic = .channel di ei)
+    (cj : classifyTopic rj.entry.topic = .channel dj ej) :
+    ei.toNat = ej.toNat + k := by
+  induction i generalizing records with
+  | zero =>
+    cases records with
+    | nil => simp at hi
+    | cons first rest =>
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at hi
+      subst first
+      exact channel_epochs_from_head chain ci k (by simpa using hj) cj
+  | succ i ih =>
+    cases records with
+    | nil => simp at hi
+    | cons first rest =>
+      apply ih rest (historyLaw_tail chain) (by simpa using hi)
+      simpa [Nat.succ_add] using hj
+
+/-- No two admitted positions have the same channel epoch. This is a property of
+one admission history; it does not claim to prevent independently admitted forks. -/
+theorem one_record_per_epoch (records : List StreamRecord) (chain : HistoryLaw records)
+    {i j : Nat} {ri rj : StreamRecord} {di dj : U16} {e : UInt64}
+    (hi : records[i]? = some ri) (hj : records[j]? = some rj)
+    (ci : classifyTopic ri.entry.topic = .channel di e)
+    (cj : classifyTopic rj.entry.topic = .channel dj e) : i = j := by
   rcases Nat.lt_trichotomy i j with lt | eq | gt
-  · have := channel_epochs_advance store law chain hi ci (j - i - 1) (by rw [show i + (j - i - 1) + 1 = j by omega]; exact hj) cj
+  · have advance := channel_epochs_advance records chain i (j - i) hi
+      (by simpa [Nat.add_sub_of_le (Nat.le_of_lt lt)] using hj) ci cj
     omega
   · exact eq
-  · have := channel_epochs_advance store law chain hj cj (i - j - 1) (by rw [show j + (i - j - 1) + 1 = i by omega]; exact hi) ci
+  · have advance := channel_epochs_advance records chain j (i - j) hj
+      (by simpa [Nat.add_sub_of_le (Nat.le_of_lt gt)] using hi) cj ci
     omega
+
+/-- Direct receiving-history consequence: no extra historical-chain hypothesis is
+needed once each step was admitted by the actual append checker. -/
+theorem admittedHistory_one_record_per_epoch {cellId : Nat} {head : Head}
+    {records : List StreamRecord} (history : AdmittedHistory cellId head records)
+    {i j : Nat} {ri rj : StreamRecord} {di dj : U16} {e : UInt64}
+    (hi : records[i]? = some ri) (hj : records[j]? = some rj)
+    (ci : classifyTopic ri.entry.topic = .channel di e)
+    (cj : classifyTopic rj.entry.topic = .channel dj e) : i = j :=
+  one_record_per_epoch records (admittedHistory_chain history) hi hj ci cj
 
 /-! ## §11. Instances and poles on concrete values -/
 
@@ -365,6 +476,59 @@ theorem repeat_refused : checkRecord (some after4) sequencer (record 4 16) = .er
 theorem short_refused : checkRecord (some after4) sequencer (record 5 15) = .error .rootCount := rfl
 theorem long_refused : checkRecord (some after4) sequencer (record 5 17) = .error .rootCount := rfl
 theorem stranger_refused : checkRecord (some after4) stranger (record 5 16) = .error .foreignAuthor := rfl
+
+/-- Concrete bounded-cache fixtures exercise the append admission interface,
+including both channel/ordinary type changes, rather than only `checkRecord`. -/
+def cachedEntry : Entry :=
+  ⟨99, 1, none, ⟨sequencer, 1, ⟨0⟩,
+    ⟨channelTopic after4.domain after4.epoch, ⟨0⟩, none, none⟩⟩⟩
+
+def cachedHead : Head := emptyRoomHead.append cachedEntry
+
+theorem cached_next_admitted :
+    admitAppend (headStore cachedHead) sequencer (recordAppend (record 5 16)) = .ok () := by
+  rw [admitAppend_record _ _ _ (some after4) (by rfl)]
+  exact next_admitted
+
+theorem cached_gap_refused :
+    admitAppend (headStore cachedHead) sequencer (recordAppend (record 6 16)) = .error .epochGap := by
+  rw [admitAppend_record _ _ _ (some after4) (by rfl)]
+  exact gap_refused
+
+theorem cached_repeat_refused :
+    admitAppend (headStore cachedHead) sequencer (recordAppend (record 4 16)) = .error .epochNotAfter := by
+  rw [admitAppend_record _ _ _ (some after4) (by rfl)]
+  exact repeat_refused
+
+theorem cached_stranger_refused :
+    admitAppend (headStore cachedHead) stranger (recordAppend (record 5 16)) = .error .foreignAuthor := by
+  rw [admitAppend_record _ _ _ (some after4) (by rfl)]
+  exact stranger_refused
+
+theorem cached_ordinary_refused :
+    admitAppend (headStore cachedHead) sequencer ⟨[], [], none, none⟩ = .error .kindMismatch := by
+  apply ordinary_after_channel_refused _ _ _ cachedEntry.record after4.domain after4.epoch
+  · rfl
+  · rfl
+  · exact classifyTopic_channelTopic _ _
+
+theorem cached_foreign_domain_refused :
+    admitAppend (headStore cachedHead) sequencer
+      (recordAppend { record 5 16 with domain := ⟨8, by decide⟩ }) = .error .foreignDomain := by
+  rw [admitAppend_record _ _ _ (some after4) (by rfl)]
+  rfl
+
+def ordinaryEntry : Entry :=
+  { cachedEntry with record := { cachedEntry.record with entry :=
+      { cachedEntry.record.entry with topic := [] } } }
+
+theorem cached_channel_after_ordinary_refused :
+    admitAppend (headStore (emptyRoomHead.append ordinaryEntry)) sequencer
+      (recordAppend (record 5 16)) = .error .kindMismatch := by
+  apply channel_after_ordinary_refused _ _ _ ordinaryEntry.record (record 5 16).domain (record 5 16).epoch
+  · rfl
+  · rfl
+  · exact classifyTopic_channelTopic _ _
 
 end Example
 

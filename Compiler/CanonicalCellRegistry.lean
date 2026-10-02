@@ -70,9 +70,12 @@ inductive Kind where
   /-- The deployment's pay cell (`Kernel.PayCell`): tariff, deposit address
   book and assignment. Time is the clock cell's. -/
   | pay
-  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. A channel
-  domain's epoch records ride on one (`Kernel.DomainEpoch`): its law adds the channel chain. -/
+  /-- A stream's head (`StreamCell.Head`): its binding, entry count and last
+  entry key. A room stream or a fleet topic. -/
   | stream
+  /-- One stream entry (`StreamCell.Entry`), at the cell its head and position
+  derive. Born by an append, never written again. -/
+  | streamEntry
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
@@ -85,12 +88,10 @@ inductive Kind where
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock,
-    .system]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system]
 
-/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15 are deployment pins. The final table across
-lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock, 15 system (C14's genesis cell; its
-lane called it 13, which is the Nock program cell's).  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
+lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -106,7 +107,8 @@ def Kind.tag : Kind → UInt8
   | .stream => 12
   | .nockProgram => NockProgramCodec.registryTag
   | .clock => 14
-  | .system => 15
+  | .streamEntry => 15
+  | .system => 16
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -121,7 +123,8 @@ def kindAtTag : UInt8 → Option Kind
   | 12 => some .stream
   | 13 => some .nockProgram
   | 14 => some .clock
-  | 15 => some .system
+  | 15 => some .streamEntry
+  | 16 => some .system
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -147,10 +150,11 @@ def schemaRef : Kind → SchemaRef
   | .declaredProgram => ⟨⟨91008⟩, 4⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 3⟩
-  | .stream => ⟨⟨91012⟩, 2⟩
+  | .stream => ⟨⟨91012⟩, 3⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
-  | .system => ⟨⟨91014⟩, 1⟩
+  | .streamEntry => ⟨⟨91014⟩, 1⟩
+  | .system => ⟨⟨91015⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -168,9 +172,10 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .declaredProgram => EffectDeclaration.effectLayout
   | .policySource => PolicySourceCell.layout
   | .pay => Kernel.PayCell.layout
-  | .stream => StreamCell.layout
+  | .stream => StreamCell.headLayout
   | .nockProgram => NockProgramCodec.layout
   | .clock => Kernel.ClockCell.layout
+  | .streamEntry => StreamCell.entryLayout
   | .system => Kernel.SystemCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
@@ -183,9 +188,10 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
   | .pay => Kernel.PayCell.materializer
-  | .stream => StreamCell.materializer
+  | .stream => StreamCell.headMaterializer
   | .nockProgram => NockProgramCodec.materializer
   | .clock => Kernel.ClockCell.materializer
+  | .streamEntry => StreamCell.entryMaterializer
   | .system => Kernel.SystemCell.materializer
 
 /-- The store wire of every kind whose materializer is the generic
@@ -198,7 +204,8 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .accountMetadata => some DeclaredEffectCell.wire
   | .declaredProgram => some DeclaredEffectCell.wire
   | .pay => some Kernel.PayCell.wire
-  | .stream => some StreamCell.wire
+  | .stream => some StreamCell.headWire
+  | .streamEntry => some StreamCell.entryWire
   | .clock => some Kernel.ClockCell.wire
   | .system => some Kernel.SystemCell.wire
   | .resourceBook | .policySource | .nockProgram => none
@@ -265,7 +272,7 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_pay_materializer :
     registry.materializer .pay = Kernel.PayCell.materializer := rfl
 @[simp] theorem registry_stream_materializer :
-    registry.materializer .stream = StreamCell.materializer := rfl
+    registry.materializer .stream = StreamCell.headMaterializer := rfl
 @[simp] theorem registry_nock_program_materializer :
     registry.materializer .nockProgram = NockProgramCodec.materializer := rfl
 @[simp] theorem registry_program_materializer :
@@ -479,7 +486,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v11".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v12".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -497,7 +504,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
   | .pay, state => cellId = Kernel.PayCell.physicalId deployment.domain ∧ Kernel.PayCell.Law state
-  | .stream, state => StreamCell.StreamLaw state ∧ Kernel.DomainEpoch.ChannelStoreLaw state
+  | .stream, state => StreamCell.HeadLaw cellId state ∧ Kernel.DomainEpoch.ChannelStoreLaw state
+  | .streamEntry, state => StreamCell.EntryLaw cellId state
   | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
@@ -555,12 +563,11 @@ balances and policy sources are generated by their semantic controllers, never
 injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
-  -- Empty but for the owner-derived blinding (K-NARROW-HIDE).
   | .content, state => ∀ address ∈ state.support, address = ⟨.blinding, ()⟩
-  | .stream, state => state.support = ∅
+  | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
   | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
-  | .system, _ => False
+  | .streamEntry, _ | .system, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by
