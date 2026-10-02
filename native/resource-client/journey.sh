@@ -28,6 +28,7 @@
 #          and is UNBUILT until then (contract below)
 #   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
 #   JDV    J-DOCUVERSE: DEOS §8 J19-J24 through the shell (journey.d/jdocuverse.sh)
+#   JPD    Protected authored documents on the same JDV Store (journey.d/jprotected-docs.sh)
 #   J12W   DEOS §2.2 #4: doc pull / doc push @FILE, stale by line (journey.d/j12w.sh)
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
@@ -163,7 +164,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JDISCLOSE)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -237,6 +238,7 @@ TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[JNAMES]="J-NAMES: shared room-index lookup, rename, duplicate-law refusal and target authority"
 TITLE[JDV]="J-DOCUVERSE: two friends write a paper in the shell; quotes, marks, history, their editor, can, the web, a cold audit"
+TITLE[JPD]="Protected authored documents: current-member reads, immutable authorship, stable maintenance anchors, genuine edits and revocation on JDV Store"
 TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
 TITLE[JJOB1]="C1 JOB-LAW: every job edge admitted and refused by clause (own Store)"
@@ -909,6 +911,7 @@ step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
 step_JNAMES() { hook jnames "shared room names through signed room/index reads; two clients, renames, current laws, exact recovery and target authority" shell; }
 step_JDV() { hook jdocuverse "J-DOCUVERSE (DEOS §8 J19-J24): two friends write a paper through mini shell: a range of notes transcluded snapshot and live, a reader without the source's grant sees the placeholder; marks, an annotation, a link and its backlink; doc show equals the golden; history, show --at and diff; pull, push, a stale line refused by line; can paper; mini web's page equals doc show --html byte for byte; a cold audit re-admits every record" shell; }
+step_JPD() { hook jprotected-docs "private comments and text on the JDV Store: independent fragment keys, invitations and revocation preserve authored ciphertext and semantic revisions; actual edits stale old anchors; retained custody retries and excluded writes" shell; }
 step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
@@ -1025,6 +1028,7 @@ run_step J12 J0
 run_step J12W J0
 run_step JNAMES J0 J4
 run_step JDV J0
+run_step JPD JDV
 run_step J13 J0
 run_step JJOB1 J0
 run_step JJOB J0
