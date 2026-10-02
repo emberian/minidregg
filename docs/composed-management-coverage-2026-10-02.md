@@ -44,10 +44,10 @@ condition, never an admissible fallback.
 | PayObservationReceiver | Verified observer / chain-tip source authorization | Payment owner and pay_operator_transport own concurrent receiver changes; not migrated here. |
 | ResourceBirthPolicyController | Existing factory/account branches; newborn laws distinct | rooms_native_merge/birth_exports owns current birth export construction. Existing branch legacy configs still require explicit closure migration, not only newborn export gate. |
 | GrainResourceBirthAdmission | Same factory/budgeted grain birth branches | Birth owner; do not treat added newborn gate as evidence that every existing branch is composed. |
-| FnSelectiveReleaseSourceAuthority | Source read/release authority | docuverse_interface owns migration and downstream guard receiving paths. |
-| FnConsumerFrontierGateway | Frontier source authority | docuverse_interface owns migration and exact current/pinned guard custody. |
-| FnSelectiveReleaseAdmission | DRC-backed effect with custom owner portal | docuverse_interface owns composed owner-portal adapter; existing DRC physical guards must remain. |
-| FleetTurn | Payer account transfer and account-owned derived stream metadata | docuverse_interface owns classification/migration; must establish derived metadata invariant before exempting a separate effect target. |
+| FnSelectiveReleaseSourceAuthority | Source read/release authority | Migrated c4b550b7 with full source/history/kind guards in FnSelectiveReleaseSourceReceiver; pending shared check. |
+| FnConsumerFrontierGateway | Frontier source authority | Migrated c4b550b7 with guard custody in empty-poll, selected-poll and namespace receipt paths; pending shared check. |
+| FnSelectiveReleaseAdmission | DRC-backed effect with custom owner portal | Migrated c4b550b7: same composed config for checked owner evidence and law admission; existing DRC PhysicalShape and read guards retained. |
+| FleetTurn | Payer account transfer and account-owned derived stream metadata | Migrated c4b550b7 with composed payer authorization and full FleetTurnReceiver guards; derived metadata evidence below. |
 
 ## Narrow receiving checks still required
 
@@ -72,3 +72,49 @@ condition, never an admissible fallback.
 Rooms' native journey owner was asked to add cases 1–3; integrator receives the
 full compilation queue. No PASS claim is recorded before actual compiler/native
 results arrive. Budget exhaustion remains a refusal rather than truncating laws.
+
+## Fn and Fleet receiving audit
+
+Source audit by Codex /root/docuverse_interface. Checkpoint c4b550b7 is an
+independent source delta on 7f1d3d37; it has not yet passed the shared Lean or
+native receiving check. No additional compiler was started.
+
+Source publication checks the current source's delegate authority for exact
+selected content and the owner packet; its receiver journals that authorization.
+Gateway testimony checks the exact content target and signed canonical proposal;
+empty-poll, selected-poll and namespace receivers also journal the checked result.
+All four journal paths now carry the full authenticated current/pinned source
+history and structural guards, plus authority guards. The source/gateway
+`authorize_requires_sources` statements tie success to complete resolution.
+No `.getD []` can authorize missing source material.
+
+Selective release changes an actual content target. Its custom packet-use
+witness now supplies evidence to the same composed config that checks the law.
+The ordinary DRC prepared tuple, structural dependency success, PhysicalShape,
+and full mutation read guards remain the receiving path.
+
+Fleet's canonical Book postings and topic head/entry writes settle one exact
+signed payer action. These topics are derived account metadata:
+
+- `StreamCell.Binding` distinguishes independently born room streams from fleet
+  topics, and `topicHeadCellId`/`entryCellId` derive their physical IDs.
+- `CanonicalCellRegistry.UserShape` allows user stream births only with
+  `emptyRoomHead` and prohibits user `streamEntry` births.
+- `ResourceTransaction`'s append branch requires `.room`; `FleetTurn.planFrom`
+  instead requires `.topic` of the stream derived from domain, payer and topic.
+- `FleetTurn.fleet_stream_is_payers` ties actual publication planning to the
+  authorized payer, while `fleet_refuses_foreign_head` rejects a foreign binding.
+
+Thus the receiver uses the payer's composed transfer law over the complete
+signed fee/transfer/publication command rather than treating topic indices as
+independent world resources. Fleet's PhysicalShape requires successful complete
+law custody and validates all source/authority roots before filtering guards
+already discharged by writes. Recipient balances require no new recipient
+capability, preserving ordinary transfer semantics.
+
+Receiving obligations: neutral local source plus inherited/kind denial must
+refuse source publication and gateway testimony with no event/nullifier;
+selective-release mutation must refuse inherited object restrictions; Fleet
+must refuse inherited transfer denial without Book/topic writes. Missing pinned
+history must refuse, and changing a dependency between check and commit must
+stale the CAS. Exact previously admitted replay remains receipt lookup.
