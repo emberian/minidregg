@@ -13,6 +13,7 @@
     "legacy private module resolves through workspace",
     "Store::initialize persists initial encrypted journal before custody metadata",
     "combined v6 direct JSON authoring preserves all five source fields and refuses incomplete readback",
-    "receive_epoch retains signed-manifest law catchup semantics; full source commitment separately authenticated"
+    "receive_epoch retains signed-manifest law catchup semantics; full source commitment separately authenticated",
+    "object_cli narrowed to epoch package import; unrelated typed invocation and private-release paths remain with their receiver lane"
   ]
 }
