@@ -14,6 +14,8 @@
 //! start, so another local user or a page in the browser cannot read it.
 
 mod editor;
+#[path = "web/search.rs"]
+mod search;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -311,7 +313,7 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
         "<!doctype html>\n<html lang=en><head><meta charset=utf-8>\
          <meta name=viewport content=\"width=device-width\"><meta name=referrer content=same-origin>\
          <title>{title} | mini</title><style>{CSS}</style></head><body>\n\
-         <header><nav><a href=\"{base}/\">workspace</a></nav><h1>{title}</h1><p class=ctx>{context}</p></header>\n\
+         <header><nav><a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a></nav><h1>{title}</h1><p class=ctx>{context}</p></header>\n\
          <main>\n{body}</main></body></html>\n",
         title = escape(&page.title),
         body = page.body,
@@ -556,6 +558,7 @@ impl Site {
                     _ => simple(405,"Cannot save","this address accepts reads only"),
                 }
             }
+            Gate::Route(segments) if segments == ["search"] => search::page(self, &request.target),
             Gate::Route(segments) => self.route(&segments),
         };
         respond(&mut stream, head_only, &page, &self.base(), &self.subject)
@@ -565,6 +568,7 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
+            ["search-hit", name, target, atom, revision] => search::hit(self,name,target,atom,revision),
             ["doc", name] => self.doc(name, None),
             ["doc",name,"edit"] => editor::open(self,name,None),
             ["doc",name,"edit",id] => editor::open(self,name,Some(id)),

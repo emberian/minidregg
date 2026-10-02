@@ -21,6 +21,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Mutex;
 
+#[path = "doc_search.rs"]
+pub(crate) mod doc_search;
+
 const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
 const MAX_PROGRAM_SOURCE: u64 = 4 * 1024 * 1024;
@@ -5709,6 +5712,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let at = args.optional("at").map(|value| line_number(value, "--at")).transpose()?;
             args.finish()?;
             transclude(&root, &workspace, &host, &source, &from, &to, live, &death, at)
+        }
+        "doc-search" => {
+            let query = os_string(args.required("text")?, "query")?;
+            let scope = os_string(args.required("scope")?, "collection")?;
+            let offset = args.optional("offset").map(|v| os_string(v,"offset").and_then(|s| s.parse::<usize>().map_err(|_| "invalid offset".into()))).transpose()?.unwrap_or(0);
+            let cursor = args.optional("cursor").map(|v| os_string(v,"cursor")).transpose()?;
+            args.finish()?;
+            print_json(&doc_search::search(&root,&workspace,&query,&scope,offset,cursor.as_deref())?)
+        }
+        "doc-search-follow" => {
+            let name = os_string(args.required("name")?,"name")?;
+            let target = os_string(args.required("target")?,"document")?;
+            let atom = os_string(args.required("atom")?,"atom")?;
+            let revision = os_string(args.required("revision")?,"revision")?;
+            args.finish()?;
+            print_json(&doc_search::follow(&root,&workspace,&name,&target,&atom,&revision)?)
         }
         "doc-show" => {
             let name = os_string(args.required("name")?, "document name")?;
