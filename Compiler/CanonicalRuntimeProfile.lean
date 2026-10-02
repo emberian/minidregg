@@ -99,7 +99,7 @@ v3 (the final merge): the store cell (no page), atom revisions, annotate and
 quote with their `content/annotations|quotes|writes/…|tombstones` slots
 (K-CONTENT); v2 named the deleted 16-entry page. -/
 def contentProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.REVISIONED-ATOMS-ANNOTATE-QUOTE.STORE-CELL/v3".toUTF8.toList
+  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.REVISIONED-ATOMS-ANNOTATE-QUOTE.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS/v4".toUTF8.toList
 
 /-- Factory, initial policy, authority grants and resource post-state share one tuple.
 v3 (K-BIRTH-WINDOW): a born grant carries its author's window
