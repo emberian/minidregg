@@ -103,10 +103,14 @@ def prepare (deployment : Deployment) (physical : Physical)
       if supplied.expectedBookRoot != physical.model.roots (bookId deployment) then
         throw .staleBookRoot
       let logical := CanonicalResourceKernel.logicalBook book.cell.logical
-      pure (some ({ payer := supplied.payer, capability := supplied.capability,
-        asset := supplied.asset, credits := supplied.credits,
-        expectedPayerBalance := supplied.expectedPayerBalance,
-        expectedWellBalance := logical.balance supplied.asset supplied.asset } : RunComputeBudget.Funding))
+      let consent : RunComputeBudget.Funding := {
+        payer := supplied.payer
+        capability := supplied.capability
+        asset := supplied.asset
+        credits := supplied.credits
+        expectedPayerBalance := supplied.expectedPayerBalance
+        expectedWellBalance := logical.balance supplied.asset supplied.asset }
+      pure (some consent)
   let budget ← (RunComputeBudget.prepare subject clock pay.cell pay.cell.root book.cell
     steps consent).mapError Reject.budget
   pure ⟨pay, book, budget, funding.map FundingInput.index⟩
