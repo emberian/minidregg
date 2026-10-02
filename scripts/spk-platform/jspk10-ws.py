@@ -11,13 +11,36 @@ artifact); the process exits nonzero when the scenario's expectation fails.
   jspk10-ws.py ethercalc ROUTE JOURNAL ROOM      (b) two sockets co-edit one sheet
   jspk10-ws.py meteor ROUTE JOURNAL              (c) DDP over /websocket, a todo lands
 
+For a browser TLS proxy, set SPK_BROWSER_ORIGIN=https://localhost:18443
+(and optionally SPK_BROWSER_CA; default ROUTE/tls.crt). Both WebSockets and
+HTTP then use verified TLS to that origin, with the same custodian credentials
+and record-count assertions. Without it the original Unix route is used.
+
 ROUTE is the owner route directory (http.sock + api.token or browser.token);
 JOURNAL is the running generation's journal directory, whose dispatch-op-N
 attempt directories are the resident's per-dispatch records.
 """
-import base64, hashlib, json, os, queue, random, socket, struct, sys, threading, time
+import base64, hashlib, json, os, queue, random, socket, ssl, struct, sys, threading, time
+from urllib.parse import urlsplit
 
-HOST = "grain.test"
+BROWSER_ORIGIN = os.environ.get("SPK_BROWSER_ORIGIN")
+BROWSER_URL = urlsplit(BROWSER_ORIGIN) if BROWSER_ORIGIN else None
+if BROWSER_URL and (BROWSER_URL.scheme != "https" or not BROWSER_URL.hostname
+                    or BROWSER_URL.username is not None or BROWSER_URL.password is not None
+                    or BROWSER_URL.path or BROWSER_URL.query or BROWSER_URL.fragment):
+    raise ValueError("SPK_BROWSER_ORIGIN must be an https origin without a path or userinfo")
+HOST = BROWSER_URL.netloc if BROWSER_URL else "grain.test"
+
+
+def connect_route(route, timeout=900):
+    if BROWSER_URL:
+        context = ssl.create_default_context(cafile=os.environ.get("SPK_BROWSER_CA", os.path.join(route, "tls.crt")))
+        raw = socket.create_connection((BROWSER_URL.hostname, BROWSER_URL.port or 443), timeout=timeout)
+        return context.wrap_socket(raw, server_hostname=BROWSER_URL.hostname)
+    stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stream.settimeout(timeout)
+    stream.connect(os.path.join(route, "http.sock"))
+    return stream
 GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -64,9 +87,7 @@ class Refused(Exception):
 
 class WS:
     def __init__(self, route, path, protocols=None, timeout=900):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(timeout)
-        self.sock.connect(os.path.join(route, "http.sock"))
+        self.sock = connect_route(route, timeout)
         key = base64.b64encode(os.urandom(16)).decode()
         lines = ["GET %s HTTP/1.1" % path, "Host: " + HOST, "Connection: Upgrade", "Upgrade: websocket",
                  "Sec-WebSocket-Key: " + key, "Sec-WebSocket-Version: 13", "Sec-Fetch-Site: same-origin",
@@ -204,9 +225,7 @@ class WS:
 
 
 def http(route, method, path, body=b"", ctype="text/plain"):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(900)
-    s.connect(os.path.join(route, "http.sock"))
+    s = connect_route(route)
     lines = ["%s %s HTTP/1.1" % (method, path), "Host: " + HOST, "Content-Length: %d" % len(body)]
     if body:
         lines.append("Content-Type: " + ctype)
@@ -472,7 +491,7 @@ def cmd_ethercalc(route, journal, room):
     time.sleep(2)
     status, body = http(route, "GET", "/_/%s/csv" % room)
     r3 = records(journal)
-    out = {"row": "ethercalc-coedit", "openSeconds": [round(a.open_seconds, 3), round(b.open_seconds, 3)],
+    out = {"row": "ethercalc-coedit", "transport": "tls" if BROWSER_URL else "unix", "openSeconds": [round(a.open_seconds, 3), round(b.open_seconds, 3)],
            "engineIo": {"pingInterval": ia.get("pingInterval"), "upgrades": ia.get("upgrades")},
            "recordsBefore": len(r0), "afterOpens": len(r1), "afterEdit": len(r2), "afterCsvGet": len(r3),
            "editSeenOnOtherSocketSeconds": round(seen, 3), "broadcast": sio_data(msg),
