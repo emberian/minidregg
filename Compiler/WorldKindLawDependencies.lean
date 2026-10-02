@@ -10,7 +10,6 @@ namespace Minidregg.Compiler.WorldKindLawDependencies
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CellRegistry
-open Minidregg.Theory.PermanentCellAllocation
 open Minidregg.Theory.LawComposition
 
 set_option autoImplicit false
