@@ -5195,6 +5195,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let plan ← decoded "subject-key-rotation-plan" SubjectKeyRotation.signingPlanCodec bytes
       let some command := SubjectKeyRotation.commandCodec.decode plan.commandBytes
         | failAt "subject-key-rotation-plan" "noncanonical nested command"
+      if plan.possessionHeader != SubjectKeyRotation.possessionFrame plan.domain plan.semantics command then
+        failAt "subject-key-rotation-plan" "possession header differs from described command"
       pure <| .mkObj
         [("type", "subject-key-rotation-plan-v1"),
          ("canonical", hexJson bytes),
