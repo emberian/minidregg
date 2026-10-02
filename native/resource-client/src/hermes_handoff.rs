@@ -613,8 +613,117 @@ fn publish_dismissal(inbox: &Path, bundle: &Value) -> Result<Value> {
     }
     Ok(json!({"type":"mini-hermes-dismiss-dispatch-v1","id":id,"inbox":inbox}))
 }
+fn check_registration_custody(r: &Value) -> Result<()> {
+    let root = PathBuf::from(text(&r, "workspace")?);
+    let ws = workspace::load(&root)?;
+    if workspace::member(&ws, "subject")? != text(&r, "subject")?
+        || workspace::roomkey::enc_public_hex(&workspace::member_path(&ws, "key")?)?
+            != r["encryptionKey"]
+    {
+        return Err("resident registration differs from custody subject/encryption key".into());
+    }
+    let mut seed: [u8; 32] =
+        crate::agent_reserve::private_bytes(&workspace::member_path(&ws, "key")?, 32)?
+            .try_into()
+            .map_err(|_| "registered key width")?;
+    let key = SigningKey::from_bytes(&seed);
+    seed.fill(0);
+    let host = workspace::workspace_host(&ws)?;
+    let config = workspace::member_path(&ws, "config")?;
+    let socket = crate::SOCKET.get().ok_or("registry socket absent")?;
+    let reply = crate::session_invoke(
+        &host,
+        socket,
+        &config,
+        144,
+        &serde_json::to_vec(
+            &json!({"subject":r["subject"],"publicKey":hex(key.verifying_key().as_bytes())}),
+        )
+        .map_err(|e| e.to_string())?,
+    )?;
+    let [144, body @ ..] = reply.as_slice() else {
+        return Err("registered subject key lookup refused".into());
+    };
+    let status: Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    if status["isCurrent"] != true
+        || status["currentRevoked"] != false
+        || status["subject"] != r["subject"]
+    {
+        return Err("registered resident custody signing key is not current".into());
+    }
+    Ok(())
+}
+fn emit_registration(root: &Path, task: &str, cell: &str, inbox: &Path) -> Result<Value> {
+    workspace::decimal(task, "task")?;
+    workspace::decimal(cell, "room cell")?;
+    if !root.is_absolute() || !inbox.is_absolute() {
+        return Err("registration workspace/inbox must be absolute".into());
+    }
+    workspace::private_dir(root)?;
+    workspace::private_dir(inbox)?;
+    let ws = workspace::load(root)?;
+    let r = json!({"type":"mini-hermes-dispatch-registration-v1","task":task,
+        "subject":workspace::member(&ws,"subject")?,"roomCell":cell,
+        "encryptionKey":workspace::roomkey::enc_public_hex(&workspace::member_path(&ws,"key")?)?,
+        "workspace":root,"inbox":inbox});
+    check_registration_custody(&r)?;
+    Ok(r)
+}
+fn point_current(inbox: &Path, bundle: &Value) -> Result<()> {
+    let (p, id) = decode(bundle)?;
+    let parent = inbox.parent().ok_or("assignment room parent absent")?;
+    // Private routing cache only. Every selector below rechecks accepted source
+    // assignment and current grants before returning an activation.
+    crate::chat::put_json(
+        &parent.join("current.json"),
+        &json!({"type":"mini-hermes-assignment-pointer-v1","task":p["task"],
+            "roomCell":p["roomCell"],"assignment":p["assignment"],"id":id,"inbox":inbox}),
+    )
+}
+fn activation(registration: &Path) -> Result<Value> {
+    let r = registration_file(registration)?;
+    check_registration_custody(&r)?;
+    let root = PathBuf::from(text(&r, "workspace")?);
+    let base = PathBuf::from(text(&r, "inbox")?);
+    if !root.is_absolute() || !base.is_absolute() {
+        return Err("registered paths must be absolute".into());
+    }
+    workspace::private_dir(&base)?;
+    let parent = base.join(format!("room-{}", text(&r, "roomCell")?));
+    workspace::private_dir(&parent)?;
+    let pointer = json_file(&parent.join("current.json"))?;
+    fields(
+        &pointer,
+        &["type", "task", "roomCell", "assignment", "id", "inbox"],
+    )?;
+    if pointer["type"] != "mini-hermes-assignment-pointer-v1"
+        || pointer["task"] != r["task"]
+        || pointer["roomCell"] != r["roomCell"]
+    {
+        return Err("assignment routing pointer differs from registered room/task".into());
+    }
+    workspace::decimal(text(&pointer, "assignment")?, "assignment")?;
+    let inbox = parent.join(format!("assignment-{}", text(&pointer, "assignment")?));
+    if pointer["inbox"] != json!(inbox) {
+        return Err("assignment routing pointer selects a noncanonical inbox".into());
+    }
+    let ready = ready_bundle(&inbox)?;
+    let (_, expected_inbox, _) = registered(registration, &ready["bundle"])?;
+    let (payload, id) = decode(&ready["bundle"])?;
+    if expected_inbox != inbox
+        || pointer["id"] != id
+        || pointer["assignment"] != payload["assignment"]
+    {
+        return Err("assignment routing pointer differs from delivered source identity".into());
+    }
+    let mut result = check_delivery(&root, &inbox, text(&r, "task")?)?;
+    result["type"] = json!("mini-hermes-assignment-activation-v1");
+    result["inbox"] = json!(inbox);
+    Ok(result)
+}
 fn registry(directory: &Path) -> Result<Value> {
     let mut residents = Vec::new();
+    let mut diagnostics = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     let mut paths = fs::read_dir(directory)
         .map_err(|e| e.to_string())?
@@ -638,46 +747,18 @@ fn registry(directory: &Path) -> Result<Value> {
         )) {
             return Err("ambiguous resident subject/room registration".into());
         }
-        let root = PathBuf::from(text(&r, "workspace")?);
-        let ws = workspace::load(&root)?;
-        if workspace::member(&ws, "subject")? != text(&r, "subject")?
-            || workspace::roomkey::enc_public_hex(&workspace::member_path(&ws, "key")?)?
-                != r["encryptionKey"]
-        {
-            return Err("resident registration differs from custody subject/encryption key".into());
+        let eligible = check_registration_custody(&r).is_ok();
+        // Custody/key availability is per recipient. It cannot stop unrelated
+        // controllers. Public diagnostics disclose no workspace/key paths.
+        diagnostics.push(
+            json!({"task":r["task"],"subject":r["subject"],"roomCell":r["roomCell"],
+            "eligible":eligible,"code":if eligible {"verified"} else {"custody_unavailable"}}),
+        );
+        if eligible {
+            residents.push(json!({"subject":r["subject"],"task":r["task"],"roomCell":r["roomCell"],"encryptionKey":r["encryptionKey"]}));
         }
-        let mut seed: [u8; 32] =
-            crate::agent_reserve::private_bytes(&workspace::member_path(&ws, "key")?, 32)?
-                .try_into()
-                .map_err(|_| "registered key width")?;
-        let key = SigningKey::from_bytes(&seed);
-        seed.fill(0);
-        let host = workspace::workspace_host(&ws)?;
-        let config = workspace::member_path(&ws, "config")?;
-        let socket = crate::SOCKET.get().ok_or("registry socket absent")?;
-        let reply = crate::session_invoke(
-            &host,
-            socket,
-            &config,
-            144,
-            &serde_json::to_vec(
-                &json!({"subject":r["subject"],"publicKey":hex(key.verifying_key().as_bytes())}),
-            )
-            .map_err(|e| e.to_string())?,
-        )?;
-        let [144, body @ ..] = reply.as_slice() else {
-            return Err("registered subject key lookup refused".into());
-        };
-        let status: Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-        if status["isCurrent"] != true
-            || status["currentRevoked"] != false
-            || status["subject"] != r["subject"]
-        {
-            return Err("registered resident custody signing key is not current".into());
-        }
-        residents.push(json!({"subject":r["subject"],"task":r["task"],"roomCell":r["roomCell"],"encryptionKey":r["encryptionKey"]}));
     }
-    Ok(json!({"type":"mini-hermes-registry-v1","residents":residents}))
+    Ok(json!({"type":"mini-hermes-registry-v1","residents":residents,"diagnostics":diagnostics}))
 }
 fn registration_file(registration: &Path) -> Result<Value> {
     use std::os::unix::fs::MetadataExt;
@@ -791,6 +872,25 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .into_string()
         .map_err(|_| "invalid action")?;
     match action.as_str() {
+        "registration" => {
+            let root = PathBuf::from(args.required("dir")?);
+            let task = args
+                .required("task")?
+                .into_string()
+                .map_err(|_| "invalid task")?;
+            let cell = args
+                .required("room-cell")?
+                .into_string()
+                .map_err(|_| "invalid room cell")?;
+            let inbox = PathBuf::from(args.required("inbox")?);
+            args.finish()?;
+            crate::print_json(&emit_registration(&root, &task, &cell, &inbox)?)
+        }
+        "activation" => {
+            let registration = PathBuf::from(args.required("registration")?);
+            args.finish()?;
+            crate::print_json(&activation(&registration)?)
+        }
         "registry" => {
             let directory = PathBuf::from(args.required("registrations")?);
             args.finish()?;
@@ -826,7 +926,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 text(&p, "room")?,
                 first_delivery,
             )?;
-            crate::print_json(&publish(&inbox, &bundle)?)
+            let delivered = publish(&inbox, &bundle)?;
+            point_current(&inbox, &bundle)?;
+            crate::print_json(&delivered)
         }
         "verify" => {
             let root = PathBuf::from(args.required("dir")?);
@@ -1023,6 +1125,22 @@ mod tests {
         publish_dismissal(&inbox, &dismiss).unwrap();
         assert_eq!(json_file(&inbox.join("dismissal.json")).unwrap(), dismiss);
         publish_dismissal(&inbox, &dismiss).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn routing_pointer_uses_cell_assignment_and_exact_ready_identity() {
+        let root = scratch();
+        for (cell, assignment) in [("70", "1"), ("71", "1"), ("70", "2")] {
+            let inbox = root.join(format!("room-{cell}/assignment-{assignment}"));
+            let (_, bundle) = fixture(cell, assignment);
+            publish(&inbox, &bundle).unwrap();
+            point_current(&inbox, &bundle).unwrap();
+            let pointer = json_file(&root.join(format!("room-{cell}/current.json"))).unwrap();
+            assert_eq!(pointer["roomCell"], cell);
+            assert_eq!(pointer["assignment"], assignment);
+            assert_eq!(pointer["id"], ready_bundle(&inbox).unwrap()["id"]);
+            assert_eq!(pointer["inbox"], json!(inbox));
+        }
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

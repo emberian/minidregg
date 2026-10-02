@@ -2,7 +2,7 @@
 """Fresh native room receiving; no provider or external paid calls."""
 import argparse, hashlib, json, os, subprocess, threading, time
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--manifest',required=True);p.add_argument('--mini',required=True);p.add_argument('--root',required=True);p.add_argument('--pump',required=True);p.add_argument('--resume-through',type=int,default=0);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--manifest',required=True);p.add_argument('--mini',required=True);p.add_argument('--root',required=True);p.add_argument('--pump',required=True);p.add_argument('--resume-through',type=int,default=0);p.add_argument('--skip-rotation',action='store_true');a=p.parse_args()
 os.umask(0o077);R=Path(a.root);R.mkdir(mode=0o700,exist_ok=bool(a.resume_through));(R/'logs').mkdir(mode=0o700,exist_ok=bool(a.resume_through))
 M=json.loads(Path(a.manifest).read_text());W=R/'world';SOCK=str(W/'public/mini.sock');HOST=M['host'];CONFIG=str(W/'deployment/pinned-config.json');N=0
 
@@ -33,7 +33,8 @@ mini('workspace','--action','init','--host',HOST,'--config',CONFIG,'--socket',SO
 identity=json.loads(mini('shell','--socket',SOCK,'--host',HOST,'--config',CONFIG,'--workspace',R/'resident-ws','--home',R/'resident-home','--line','whoami'))
 shell('chat new lab');cell=json.loads((W/'sponsor/refs/lab.json').read_text())['target']
 reg={'type':'mini-hermes-dispatch-registration-v1','subject':'8','task':'71','roomCell':cell,'encryptionKey':identity['encryptionKey'],'workspace':str(R/'resident-ws'),'inbox':str(R/'inbox')}
-(R/'inbox').mkdir(mode=0o700,exist_ok=True);write(R/'registrations/resident.json',reg)
+(R/'inbox').mkdir(mode=0o700,exist_ok=True)
+reg=json.loads(hh('registration','--dir',R/'resident-ws','--task','71','--room-cell',cell,'--inbox',R/'inbox'));write(R/'registrations/resident.json',reg)
 publicreg=json.loads(hh('registry','--registrations',R/'registrations'));write(R/'member/hermes/registry.json',publicreg)
 shell('tariff lab set open 1');tariff=shell('tariff lab');assert any(line.split()==['open','1'] for line in tariff.splitlines()),tariff
 shell('summon lab as librarian --hermes 8 --budget 20')
@@ -42,6 +43,10 @@ write(R/'pump.json',{'type':'mini-hermes-dispatch-service-v1','mini':a.mini,'soc
 run(['python3',a.pump,'--config',R/'pump.json','--once'],label='real-pump-once')
 assert (inbox/'ready.json').is_file(),'pump did not publish ready'
 ready=json.loads(hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox));assert ready['roomCell']==cell
+active=json.loads(hh('activation','--registration',R/'registrations/resident.json'));assert active['account']==ready['account'] and active['inbox']==str(inbox)
+pointer=inbox.parent/'current.json';saved=pointer.read_bytes();wrong=json.loads(saved);wrong['inbox']=str(R/'substituted-inbox');write(pointer,wrong)
+try:hh('activation','--registration',R/'registrations/resident.json',ok=False,label='refuse-pointer-substitution')
+finally:pointer.write_bytes(saved)
 hh('dispatch','--registration',R/'registrations/resident.json','--bundle',bundle)
 for key,value in [('subject','9'),('task','72'),('roomCell','999'),('encryptionKey','00'*32)]:
  bad=dict(reg);bad[key]=value;write(R/f'bad-{key}.json',bad)
@@ -58,20 +63,23 @@ def writer():
   (R/'logs'/f'writer-{i}.json').write_text(json.dumps({'status':result.returncode,'out':result.stdout,'err':result.stderr}))
   if result.returncode:errors.append(result.stderr)
 t=threading.Thread(target=writer);t.start();hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,label='ready-during-writes');t.join();assert not errors,errors
-mini('workspace','--socket',SOCK,'--action','continuity-init','--dir',W/'sponsor','--name','factory')
-mini('adopt-next-key','--socket',SOCK,'--workspace',W/'sponsor','--next-key',W/'sponsor.key.next')
-mini('rotate-key','--socket',SOCK,'--workspace',W/'sponsor','--next-key',W/'sponsor.key.next')
-hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,label='ready-after-founder-rotation')
-hh('dispatch','--registration',R/'registrations/resident.json','--bundle',bundle,label='exact-retry-after-rotation')
+if not a.skip_rotation:
+ mini('workspace','--socket',SOCK,'--action','continuity-init','--dir',W/'sponsor','--name','factory')
+ mini('adopt-next-key','--socket',SOCK,'--workspace',W/'sponsor','--next-key',W/'sponsor.key.next')
+ mini('rotate-key','--socket',SOCK,'--workspace',W/'sponsor','--next-key',W/'sponsor.key.next')
+ hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,label='ready-after-founder-rotation')
+ hh('dispatch','--registration',R/'registrations/resident.json','--bundle',bundle,label='exact-retry-after-rotation')
 shell('dismiss lab');dismiss=bundle.parent/'dismissal.json'
 run(['python3',a.pump,'--config',R/'pump.json','--once'],label='dismiss-pump-once')
 hh('check-dismissal','--dir',R/'resident-ws','--task','71','--inbox',inbox)
 hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,ok=False,label='refuse-dismissed-assignment')
+hh('activation','--registration',R/'registrations/resident.json',ok=False,label='refuse-dismissed-activation')
 shell('summon lab as librarian --hermes 8 --budget 20')
 second=[x for x in bundle.parent.parent.glob('assignment-*/handoff.json') if x!=bundle][0]
 run(['python3',a.pump,'--config',R/'pump.json','--once'],label='replacement-pump-once')
 newinbox=R/'inbox'/second.parent.parent.name/second.parent.name
-hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',newinbox)
+newready=json.loads(hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',newinbox))
+newactive=json.loads(hh('activation','--registration',R/'registrations/resident.json'));assert newactive['assignment']==newready['assignment'] and newactive['account']==newready['account']
 hh('check-delivery','--dir',R/'resident-ws','--task','71','--inbox',inbox,ok=False,label='refuse-replaced-assignment')
-report={'type':'mini-hermes-native-receiving-evidence-v1','nativeManifest':a.manifest,'mini':a.mini,'miniSha256':hashlib.sha256(Path(a.mini).read_bytes()).hexdigest(),'roomCell':cell,'firstReady':ready,'currentInbox':str(newinbox),'currentBundle':str(second),'registration':reg,'commands':N,'providerCalls':0,'limitations':['Component Host routes, not joined current source family or installed system unit; no actual controller/provider prompt.']}
-write(R/'evidence.json',report);print('PASS fresh native source summon, pump receiving, refusal, concurrent writes, rotation, dismissal, replacement',flush=True)
+report={'type':'mini-hermes-native-receiving-evidence-v1','nativeManifest':a.manifest,'mini':a.mini,'miniSha256':hashlib.sha256(Path(a.mini).read_bytes()).hexdigest(),'roomCell':cell,'firstReady':ready,'currentInbox':str(newinbox),'currentBundle':str(second),'registration':reg,'commands':N,'providerCalls':0,'rotationExercised':not a.skip_rotation,'limitations':['Component Host routes, not joined current source family or installed system unit; no actual controller/provider prompt.']}
+write(R/'evidence.json',report);print('PASS fresh native source summon, pump receiving, refusal, concurrent writes, '+('rotation, ' if not a.skip_rotation else '')+'dismissal, replacement',flush=True)

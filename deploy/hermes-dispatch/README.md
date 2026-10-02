@@ -95,3 +95,32 @@ world binding and dismissal CAS. `test_dispatch.py` covers retained-history
 pagination, inter-member progress and malformed/duplicate JSON hints. Native
 receiving evidence must identify its exact Host/Store/CLI pins; a component pass
 on an older unchanged core does not qualify the final joined runtime or provider.
+
+The canonical operator intent is `roomRouting` on the existing controller
+registration: `{workspace, roomCell, inboxRoot}`. Source creates its private
+routing record without duplicating key derivation in infrastructure:
+
+```
+mini hermes-handoff --socket SOCKET --action registration --dir WORKSPACE \
+  --task TASK --room-cell CELL --inbox INBOX_ROOT
+mini hermes-handoff --socket SOCKET --action activation --registration RECORD
+```
+
+The first command returns `mini-hermes-dispatch-registration-v1` after checking
+actual subject custody and the current native signing key. Infrastructure writes
+this generated projection privately and publishes the eligible public `registry`
+projection. A unavailable custody row appears in `diagnostics` and is omitted
+from advertisement; valid rows continue independently. Structural operator
+configuration errors and ambiguous subject/room destinations remain refusals.
+
+After source verification and durable ready publication, dispatch atomically
+updates `INBOX_ROOT/room-CELL/current.json`. This owner-private pointer is a routing
+cache. `activation` derives the canonical assignment directory from the fixed
+registration, compares the pointer with immutable signed delivery, and rechecks
+accepted origin, current assignment and grants. Its single JSON response is
+`mini-hermes-assignment-activation-v1`, carrying exact `task`, `recipient`,
+`roomCell`, `assignment`, `inbox`, `account`, `world`, `id`, and accepted-height
+binding. Infrastructure creates the resident configuration with that account
+and inbox before starting its controller. Runtime checks the same native delivery
+before prompting or acting. A stale, dismissed or replaced pointer cannot
+activate a worker.
