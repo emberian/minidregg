@@ -540,3 +540,66 @@ mod tests {
         assert!(ReserveAnchor::from_confirmed(&json!({"type":"refused"})).is_err());
     }
 }
+
+#[cfg(test)]
+mod reserve_origin_tests {
+    use super::*;
+
+    fn fixture() -> (Runtime, PathBuf, PathBuf) {
+        // Only native-client receipt bytes are controlled here; exercise the
+        // real reserve marker, journal and continuity descriptor consumers.
+        let (mut runtime, root) = crate::publication_refusal_tests::fixture(false, false, false);
+        runtime.config.provider_task = Some(serde_json::from_value(json!({
+            "task":"7103","subject":"9","capability":"103","queryCapability":"103",
+            "custodyKey":root.join("provider.key"),"parentCapability":"105",
+            "parentObserveCapability":"105","reserve":"3","maxInputTokens":1000,
+            "maxOutputTokens":100,"model":"fixture-model","providers":root.join("providers.json"),
+            "credentialsRoot":root.join("credentials"),"credentialsKey":root.join("credential.key"),
+            "gatewayBind":"127.0.0.1:0","maxRequestBytes":65536,"maxResponseBytes":65536,
+            "timeoutSeconds":60
+        })).unwrap());
+        let attempt = runtime.config.state_dir.join("attempt-0000000000000019");
+        fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("intent.json"), br#"{"source":"native reserve"}"#).unwrap();
+        fs::write(attempt.join("call.bin"), b"exact signed reserve call").unwrap();
+        fs::write(attempt.join("outcome.bin"), b"exact native reserve receipt").unwrap();
+        fs::write(attempt.join("outcome.json"), br#"{"type":"confirmed","confirmation":"installed","transactionId":"11","eventId":"12","acceptedCount":"13","worldRoot":"300"}"#).unwrap();
+        runtime.journal.provider_hold = Some(HeldCharge {
+            reserve:"3".into(), charge:"0".into(), before_generation:"1".into(),
+            before_target_root:"100".into(), reserve_attempt:Some(attempt.clone()),
+            reserve_confirmed:false, reserve_refused:false, reserve_boundary:None,
+            reserve_call_sha256:None, reserve_source_sha256:None, reserve_outcome_path:None,
+            reserve_outcome_sha256:None, reserve_anchor:None,
+        });
+        (runtime, root, attempt)
+    }
+
+    #[test]
+    fn normal_provider_reserve_pins_intent_before_historical_settlement() {
+        let (mut runtime, root, attempt) = fixture();
+        runtime.record_reserve_confirmation(AuthoritySlot::Provider, &attempt, &attempt.join("outcome.json")).unwrap();
+        let source = sha256_file(&attempt.join("intent.json")).unwrap();
+        assert_eq!(runtime.journal.provider_hold.as_ref().unwrap().reserve_source_sha256.as_deref(), Some(source.as_str()));
+        runtime.save().unwrap();
+        let durable: Value = serde_json::from_slice(&fs::read(runtime.config.state_dir.join("journal.json")).unwrap()).unwrap();
+        assert_eq!(durable["providerHold"]["reserveSourceSha256"], source);
+        let descriptor = runtime.provider_continuity_value().unwrap();
+        assert_eq!(descriptor["providerResourceId"], "7103");
+        assert_eq!(descriptor["reserve"]["receipt"]["transactionId"], "11");
+        fs::write(attempt.join("intent.json"), b"tampered after confirmation").unwrap();
+        assert!(runtime.provider_continuity_value().unwrap_err().contains("differs from confirmed source"));
+        drop(runtime); fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn normal_provider_missing_intent_never_publishes_confirmed_marker() {
+        let (mut runtime, root, attempt) = fixture();
+        fs::remove_file(attempt.join("intent.json")).unwrap();
+        assert!(runtime.record_reserve_confirmation(AuthoritySlot::Provider, &attempt, &attempt.join("outcome.json")).is_err());
+        let hold = runtime.journal.provider_hold.as_ref().unwrap();
+        assert!(!hold.reserve_confirmed);
+        assert!(hold.reserve_source_sha256.is_none());
+        assert_eq!(hold.reserve_attempt.as_deref(), Some(attempt.as_path()));
+        drop(runtime); fs::remove_dir_all(root).unwrap();
+    }
+}

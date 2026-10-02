@@ -8107,7 +8107,14 @@ impl Runtime {
         } else {
             None
         };
-        let dispatch_source_hash = if slot == AuthoritySlot::Dispatch {
+        let reserve_source_hash = if slot == AuthoritySlot::Provider {
+            // Every ordinary provider reserve has the same exact retained
+            // intent that historical settlement later verifies. Pin it before
+            // publishing the confirmed marker or permitting provider work.
+            Some(sha256_bytes(&bounded_regular_file(
+                &attempt.join("intent.json"), 131_072,
+            )?)?)
+        } else if slot == AuthoritySlot::Dispatch {
             let name = attempt
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -8139,7 +8146,7 @@ impl Runtime {
         }
         hold.reserve_confirmed = true;
         hold.reserve_boundary = Some(boundary);
-        hold.reserve_source_sha256 = dispatch_source_hash;
+        hold.reserve_source_sha256 = reserve_source_hash;
         if let Some((call_hash, outcome, outcome_hash, anchor)) = provider_evidence {
             hold.reserve_call_sha256 = Some(call_hash);
             hold.reserve_outcome_path = Some(outcome);
