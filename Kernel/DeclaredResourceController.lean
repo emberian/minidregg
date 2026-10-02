@@ -307,7 +307,7 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
   unjoint_append _ _
     (unjoint_append _ _
       (unjoint_append _ _
-        (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; decide)
+        (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
           (clockSlots_unjoint _)) (requestSlots_unjoint _))
       (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
     (runSlots_unjoint _)
@@ -568,7 +568,6 @@ theorem lawLeaf_none_iff_verifies [DecidableEq F]
   have verdict := law.verifies_iff_eval (tuple.request incidence).2 bound supportedExact rangesExact casts
   refine Iff.trans ?_ verdict.symm
   unfold lawLeaf
-  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.of_none_iff _ _ _
 
@@ -808,19 +807,24 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
     cases payload with
     | world actions =>
         exact (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
-    | scalar actions => exact ResourceObservationAdmission.footprintOf
+    | scalar actions =>
+      exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) pre post
-    | content action => exact ResourceObservationAdmission.footprintOf
+    | content action =>
+      exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) pre post
-    | append action => exact ResourceObservationAdmission.footprintOf
+    | append action =>
+      exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
-    | kindDefinition definition => exact ResourceObservationAdmission.footprintOf
+    | kindDefinition definition =>
+      exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) pre post
-    | read => exact ResourceObservationAdmission.footprintOf
+    | read =>
+      exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) pre post
 
@@ -862,7 +866,7 @@ theorem legFootprint_exact (prepared : PreparedInvocation deployment profile amb
     (i : TargetIndex command) :
     legFootprint prepared (some i) = some (targetFullFootprint command.targets[i]
       (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  unfold legFootprint
+  simp only [legFootprint]
   rw [targetFootprint_exact]
   intro address outside
   rw [← (prepared.targets i).postExact]
@@ -1305,7 +1309,7 @@ def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient du
     let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
       prepared.directory.directory profile.semantics (incidenceTarget command incidence).target
       structural.additional
-    pure ((sources ++ structural.readGuards).map fun (id, root) => (⟨⟨id⟩, root⟩ : ReadGuard))
+    pure ((sources ++ structural.readGuards).map fun (cellId, root) => (⟨⟨cellId⟩, root⟩ : ReadGuard))
   pure groups.flatten
 
 /-- The domain reads of every invocation: the authority cell and the clock. -/
@@ -1376,7 +1380,7 @@ this very intent writes that cell under the identical old-root CAS. -/
 def AcceptedInvocation.readGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : List ReadGuard :=
-  readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
+  DeclaredResourceController.readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 theorem AcceptedInvocation.readGuards_readonly [DecidableEq F]
