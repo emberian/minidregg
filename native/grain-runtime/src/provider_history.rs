@@ -55,6 +55,9 @@ fn validate_fence_source(
     route: &str,
     source: &Value,
 ) -> Result<()> {
+    // Metering retains the route name, while the source grain state carries
+    // its declared numeric code. Use the same mapping as reserve/settlement.
+    let route = provider_route_code(route)?;
     let before = source
         .pointer("/grain/before")
         .ok_or("provider fence pre-state absent")?;
@@ -492,9 +495,19 @@ mod tests {
     #[test]
     fn exact_fence_source_rejects_other_controller_provider_or_action() {
         let (authority, hold, source) = source_fixture();
-        assert!(validate_fence_source("101", &authority, 7, &hold, "3", &source).is_ok());
-        assert!(validate_fence_source("102", &authority, 7, &hold, "3", &source).is_err());
-        assert!(validate_fence_source("101", &authority, 8, &hold, "3", &source).is_err());
+        assert!(validate_fence_source("101", &authority, 7, &hold, "homelab", &source).is_ok());
+        // Real metering pins name the route; legacy numeric strings cannot
+        // accidentally bypass the declared route conversion.
+        assert!(validate_fence_source("101", &authority, 7, &hold, "3", &source).is_err());
+        assert!(validate_fence_source("101", &authority, 7, &hold, "pool", &source).is_err());
+        for (name, code) in [("user", "1"), ("pool", "2"), ("homelab", "3")] {
+            let mut observed = source.clone();
+            observed["grain"]["before"]["route"] = json!(code);
+            assert!(validate_fence_source("101", &authority, 7, &hold, name, &observed).is_ok());
+        }
+
+        assert!(validate_fence_source("102", &authority, 7, &hold, "homelab", &source).is_err());
+        assert!(validate_fence_source("101", &authority, 8, &hold, "homelab", &source).is_err());
         for (pointer, value) in [
             ("/grain/task", json!("105")),
             ("/grain/subject", json!("19")),
@@ -510,22 +523,22 @@ mod tests {
             let mut changed = source.clone();
             *changed.pointer_mut(pointer).unwrap() = value;
             assert!(
-                validate_fence_source("101", &authority, 7, &hold, "3", &changed).is_err(),
+                validate_fence_source("101", &authority, 7, &hold, "homelab", &changed).is_err(),
                 "{pointer}"
             );
         }
         let mut changed = source.clone();
         changed["unrecognized"] = json!(true);
-        assert!(validate_fence_source("101", &authority, 7, &hold, "3", &changed).is_err());
+        assert!(validate_fence_source("101", &authority, 7, &hold, "homelab", &changed).is_err());
     }
     #[test]
     fn legacy_fence_identity_requires_both_complete_old_fields() {
         let (authority, hold, mut source) = source_fixture();
         source["intentNonce"] = json!("7");
         source["grain"]["context"]["operationId"] = json!("7");
-        assert!(validate_fence_source("101", &authority, 7, &hold, "3", &source).is_ok());
+        assert!(validate_fence_source("101", &authority, 7, &hold, "homelab", &source).is_ok());
         source["grain"]["context"]["operationId"] = json!("8");
-        assert!(validate_fence_source("101", &authority, 7, &hold, "3", &source).is_err());
+        assert!(validate_fence_source("101", &authority, 7, &hold, "homelab", &source).is_err());
     }
     #[test]
     fn fence_record_schema_rejects_extra_fields_and_bad_receipt() {
