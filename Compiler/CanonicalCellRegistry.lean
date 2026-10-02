@@ -27,6 +27,7 @@ the event id and supplied by the authoring request), so the event-history law
 requires every recorded event to name this deployment's domain
 (`foreign_domain_event_refused`).
 -/
+import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
 import Compiler.CredentialAuthorityCell
 import Compiler.HyperdocumentCell
@@ -84,11 +85,13 @@ inductive Kind where
   /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
   and the tail bound `L`, written only by a certify record. -/
   | system
+  | worldKind
+  | worldInstance
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance]
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority
@@ -109,6 +112,8 @@ def Kind.tag : Kind → UInt8
   | .clock => 14
   | .streamEntry => 15
   | .system => 16
+  | .worldKind => 17
+  | .worldInstance => 18
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -125,6 +130,8 @@ def kindAtTag : UInt8 → Option Kind
   | 14 => some .clock
   | 15 => some .streamEntry
   | 16 => some .system
+  | 17 => some .worldKind
+  | 18 => some .worldInstance
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -155,6 +162,8 @@ def schemaRef : Kind → SchemaRef
   | .clock => ⟨⟨91013⟩, 1⟩
   | .streamEntry => ⟨⟨91014⟩, 1⟩
   | .system => ⟨⟨91015⟩, 1⟩
+  | .worldKind => ⟨⟨91016⟩, 1⟩
+  | .worldInstance => ⟨⟨91017⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -177,6 +186,8 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .clock => Kernel.ClockCell.layout
   | .streamEntry => StreamCell.entryLayout
   | .system => Kernel.SystemCell.layout
+  | .worldKind => WorldKindCell.definitionLayout
+  | .worldInstance => WorldKindCell.instanceLayout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -193,6 +204,8 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .clock => Kernel.ClockCell.materializer
   | .streamEntry => StreamCell.entryMaterializer
   | .system => Kernel.SystemCell.materializer
+  | .worldKind => WorldKindCell.definitionMaterializer
+  | .worldInstance => WorldKindCell.instanceMaterializer
 
 /-- The store wire of every kind whose materializer is the generic
 `StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
@@ -208,6 +221,8 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .streamEntry => some StreamCell.entryWire
   | .clock => some Kernel.ClockCell.wire
   | .system => some Kernel.SystemCell.wire
+  | .worldKind => some WorldKindCell.definitionWire
+  | .worldInstance => some WorldKindCell.instanceWire
   | .resourceBook | .policySource | .nockProgram => none
 
 /-- A kind with a store wire is materialized by it, so its cell root is that
@@ -486,12 +501,14 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v13".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v14".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
 def LogicalLaw (deployment : Deployment) (cellId : Nat) :
     (kind : Kind) → Store (layout kind) → Prop
+  | .worldKind, state => WorldKindCell.definitionLaw cellId state
+  | .worldInstance, state => WorldKindCell.instanceLaw state
   | .declaredObject, state => DeclaredCellLaw .object cellId state
   | .accountMetadata, state => DeclaredCellLaw .account cellId state
   | .declaredProgram, state => DeclaredCellLaw .program cellId state
@@ -546,9 +563,59 @@ def postStateCheck (deployment : Deployment) (cellId : Nat) (kind : Kind)
       deployment.Valid ∧ LogicalLaw deployment cellId kind state := by
   simp [postStateCheck]
 
+/-- The retained descriptor is immutable even for receivers whose outer patch
+is supplied by a semantic family rather than the generic Store patch checker. -/
+def instanceBinding (cell : PackedCell registry) : Option WorldKindCell.Binding :=
+  match cell with
+  | ⟨.worldInstance, payload⟩ => payload.logical WorldKindCell.descriptorAddress
+  | _ => none
+
+def instanceDescriptor (cell : PackedCell registry) : Option WorldKindDescriptor.Descriptor :=
+  (instanceBinding cell).map WorldKindCell.Binding.descriptor
+
+/-- The mandatory kind dependency is derived from the authenticated instance
+payload, never from a command-provided list of extra policy parents. -/
+def instanceKind (cell : PackedCell registry) : Option Nat :=
+  (instanceDescriptor cell).map WorldKindDescriptor.Descriptor.kind
+
+/-- A kind lookup reads a real live kind-definition cell and validates it at its
+actual identity. Retired, absent, malformed and other-role cells return none. -/
+def kindDefinition (deployment : Deployment) (directory : Directory Nat registry)
+    (kindId : Nat) : Option WorldKindCell.Definition :=
+  match directory.slots kindId with
+  | .present cell =>
+      if CellLaw deployment kindId cell then
+        match cell with
+        | ⟨.worldKind, payload⟩ => payload.logical WorldKindCell.definitionAddress
+        | _ => none
+      else none
+  | _ => none
+
+/-- Birth authenticates the chosen kind at the same old directory as the
+allocation. Existing instances do not repeat this old-root comparison: their
+current exported law is resolved separately for every admitted operation. -/
+def kindBirthValid (deployment : Deployment) (directory : Directory Nat registry)
+    (cell : PackedCell registry) : Bool :=
+  match cell with
+  | ⟨.worldInstance, payload⟩ =>
+      match payload.logical WorldKindCell.descriptorAddress with
+      | none => false
+      | some binding =>
+          match directory.slots binding.descriptor.kind with
+          | .present ⟨.worldKind, source⟩ =>
+              if CellLaw deployment binding.descriptor.kind ⟨.worldKind, source⟩ then
+                match source.logical WorldKindCell.definitionAddress with
+                | some definition => binding.kindRoot == source.root &&
+                    WorldKindCell.birthMatches definition payload.logical
+                | none => false
+              else false
+          | _ => false
+  | _ => true
+
 def FinalPostLaw (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Prop :=
   before.kind = after.kind ∧ CellLaw deployment cellId before ∧ CellLaw deployment cellId after ∧
+    instanceBinding before = instanceBinding after ∧
     (before.kind = .policySource ∨ before.kind = .nockProgram →
       PackedCell.bytes registry before = PackedCell.bytes registry after)
 
@@ -562,6 +629,8 @@ hiding key: the cell's identifier is the new document's identity.  Historical pr
 balances and policy sources are generated by their semantic controllers, never
 injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
+  | .worldKind, _ => True
+  | .worldInstance, _ => True -- kindBirthValid is mandatory in concrete birth preparation
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
   | .content, state => ∀ address ∈ state.support, address = ⟨.blinding, ()⟩
   | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
@@ -862,7 +931,7 @@ theorem policy_source_no_user_birth (deployment : Deployment) (cellId : Nat)
 theorem policy_source_final_bytes_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (source : before.kind = .policySource)
     (valid : FinalPostLaw deployment cellId before after) :
-    PackedCell.bytes registry before = PackedCell.bytes registry after := valid.2.2.2 (Or.inl source)
+    PackedCell.bytes registry before = PackedCell.bytes registry after := valid.2.2.2.2 (Or.inl source)
 
 theorem policy_source_final_state_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (source : before.kind = .policySource)
@@ -1143,7 +1212,7 @@ theorem nock_program_final_state_immutable (deployment : Deployment) (cellId : N
     (before after : PackedCell registry) (program : before.kind = .nockProgram)
     (valid : FinalPostLaw deployment cellId before after) : before = after := by
   have bytesExact : cellCodec.encode before = cellCodec.encode after :=
-    valid.2.2.2 (Or.inr program)
+    valid.2.2.2.2 (Or.inr program)
   have same := congrArg cellCodec.decode bytesExact
   rw [cellCodec.decode_encode, cellCodec.decode_encode] at same
   exact Option.some.inj same
