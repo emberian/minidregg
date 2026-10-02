@@ -205,3 +205,46 @@ fn j12r_renders_to_the_journey_golden() {
     assert_eq!(rendered.raw(), b"Docuverse\nbold words\nslanted\nmini serve\nsee the target\nchanged\n");
     assert_eq!(text::outline(&rendered), "  1  Docuverse\n");
 }
+
+// These are explicit legacy-reference carriers, not fabricated range openings.
+#[test]
+fn legacy_reference_renders_current_authorized_bytes_without_inventing_height() {
+    let item = json!({"id":"61","mode":"snapshot",
+        "legacyReference":{"document":"42","atom":"255","revision":"17","mode":"snapshot"},
+        "render":{"view":"snapshot","lines":["68656c6c6f"]}});
+    let names = BTreeMap::from([("42".to_owned(), "notes".to_owned())]);
+    let sources = BTreeMap::from([("42".to_owned(), BTreeMap::from([("255".to_owned(), 1)]))]);
+    let rendered = transcluded(&names, &sources, &item);
+    assert_eq!(rendered.source, "42");
+    assert_eq!(rendered.lines, ["hello"]);
+    assert_eq!(rendered.header, "⟨from notes line 1, retained revision 17⟩");
+    assert!(!rendered.header.contains("snapshot@"));
+}
+
+#[test]
+fn unreadable_legacy_reference_stays_a_meaningful_link_without_payload() {
+    let item = json!({"id":"61","mode":"live",
+        "legacyReference":{"document":"42","atom":"255","revision":"17","mode":"live"},
+        "render":{"view":"unavailable"}});
+    let rendered = transcluded(&BTreeMap::new(), &BTreeMap::new(), &item);
+    assert_eq!(rendered.source, "42");
+    assert!(rendered.lines.is_empty());
+    assert!(rendered.header.contains("atom 255"));
+    assert!(rendered.header.contains("not readable by you"));
+}
+
+#[test]
+fn legacy_mark_is_visible_metadata_not_invented_formatting() {
+    let document = json!({"root":null,"rootRevision":null,"order":[],"transclusions":[]});
+    let entries = vec![json!({"type":"annotation","id":"70","anchor":{"type":"range"},
+        "body":{"type":"inline","bytes":"626164206672616d696e67"},
+        "author":{"subject":"7"},"fresh":false,
+        "legacyMark":{"id":"3","kindDigest":"88","payload":"72656d656d626572",
+            "range":{"start":"1","finish":"2"},"tombstoned":false}})];
+    let rendered = render_with(&document, &entries, &BTreeMap::new());
+    assert_eq!(rendered.document_annotations.len(), 1);
+    assert!(rendered.document_annotations[0].body.contains("retained mark 88"));
+    assert!(rendered.document_annotations[0].body.contains("remember"));
+    assert!(!rendered.document_annotations[0].body.contains("bad framing"));
+    assert!(rendered.lines.is_empty());
+}

@@ -195,13 +195,19 @@ fn author_text(me: &str, author: &Value) -> String {
 
 fn annotation_of(view: &View, entry: &Value) -> Annotation {
     let body = &entry["body"];
-    let body = match body["type"].as_str() {
+    let body = if entry["legacyMark"].is_object() {
+        let mark = &entry["legacyMark"];
+        let payload = String::from_utf8_lossy(&decode_hex(mark["payload"].as_str().unwrap_or(""))).into_owned();
+        format!("[retained mark {}, range {}{}] {}",
+            mark["kindDigest"].as_str().unwrap_or("?"), mark["range"],
+            if mark["tombstoned"] == true { ", retired" } else { "" }, payload)
+    } else { match body["type"].as_str() {
         Some("inline") => {
             String::from_utf8_lossy(&decode_hex(body["bytes"].as_str().unwrap_or(""))).into_owned()
         }
         Some("reference") => format!("→ {}", name_of(view.names, body["document"].as_str().unwrap_or("?"))),
         _ => String::new(),
-    };
+    }};
     Annotation {
         id: entry["id"].as_str().unwrap_or("").to_owned(),
         author: author_text(view.me, &entry["author"]),
@@ -218,7 +224,9 @@ pub fn transcluded(
     item: &Value,
 ) -> Transcluded {
     let opening = &item["opening"];
-    let source = opening["source"].as_str().unwrap_or("?").to_owned();
+    let legacy = &item["legacyReference"];
+    let source = if legacy.is_object() { legacy["document"].as_str() }
+        else { opening["source"].as_str() }.unwrap_or("?").to_owned();
     let source_name = name_of(names, &source);
     let view = item["render"]["view"].as_str().unwrap_or("?").to_owned();
     let lines: Vec<String> = item["render"]["lines"]
@@ -239,7 +247,9 @@ pub fn transcluded(
         atom.and_then(|atom| numbers.and_then(|numbers| numbers.get(atom)))
             .map_or("?".to_owned(), |n| n.to_string())
     };
-    let (first, last) = if item["mode"] == "live" {
+    let (first, last) = if legacy.is_object() {
+        (legacy["atom"].as_str(), legacy["atom"].as_str())
+    } else if item["mode"] == "live" {
         (
             opening["range"]["start"]["neighbor"].as_str(),
             opening["range"]["finish"]["neighbor"].as_str(),
@@ -252,7 +262,16 @@ pub fn transcluded(
         )
     };
     let height = opening["height"].as_str().unwrap_or("?");
-    let header = match view.as_str() {
+    let header = if legacy.is_object() {
+        let revision = legacy["revision"].as_str().unwrap_or("?");
+        match view.as_str() {
+            "unavailable" => format!("[reference to {source_name} atom {}, not readable by you]", legacy["atom"].as_str().unwrap_or("?")),
+            "snapshot" => format!("⟨from {source_name} line {}, retained revision {revision}⟩", place(first)),
+            "live" => format!("⟨from {source_name} line {}, retained live reference⟩", place(first)),
+            "moved" => format!("[reference to {source_name} revision {revision}: current atom has changed]"),
+            other => format!("⟨from {source_name}, retained reference, {other}⟩"),
+        }
+    } else { match view.as_str() {
         "unavailable" => format!(
             "[transclusion: {} atoms of {source_name}, not readable by you]",
             opening["atoms"].as_str().unwrap_or("?")
@@ -271,7 +290,7 @@ pub fn transcluded(
             None => format!("⟨from {source_name}, moved⟩"),
         },
         other => format!("⟨from {source_name}, {other}⟩"),
-    };
+    }};
     Transcluded {
         id: item["id"].as_str().unwrap_or("").to_owned(),
         source,
@@ -301,6 +320,10 @@ pub fn render(view: &View) -> Result<Rendered, String> {
     let mut by_atom = BTreeMap::<String, Vec<Annotation>>::new();
     let mut document_annotations = Vec::new();
     for entry in view.entries.iter().filter(|entry| entry["type"] == "annotation") {
+        if entry["legacyMark"].is_object() {
+            document_annotations.push(annotation_of(view, entry));
+            continue;
+        }
         match entry["anchor"]["type"].as_str() {
             Some("atom") => {
                 if let Some(atom) = entry["anchor"]["atom"].as_str() {

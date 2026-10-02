@@ -1381,7 +1381,11 @@ pub(crate) fn rendered_document(
     let mut source_bins = std::collections::BTreeMap::<String, Vec<u8>>::new();
     let mut readable = std::collections::BTreeMap::new();
     for record in &records {
-        let source = member(&record["opening"], "source")?.to_owned();
+        let source = if record["legacyReference"].is_object() {
+            member(&record["legacyReference"], "document")?
+        } else {
+            member(&record["opening"], "source")?
+        }.to_owned();
         if readable.contains_key(&source) {
             continue;
         }
@@ -1456,8 +1460,12 @@ pub(crate) fn rendered_document(
     let mut resolved = Vec::new();
     for item in items {
         let mut item = item.clone();
-        let source = member(&item["opening"], "source")?.to_owned();
-        if member(&item["render"], "view")? == "moved" {
+        let source = if item["legacyReference"].is_object() {
+            member(&item["legacyReference"], "document")?
+        } else {
+            member(&item["opening"], "source")?
+        }.to_owned();
+        if member(&item["render"], "view")? == "moved" && !item["legacyReference"].is_object() {
             if let Some(Some(reference)) = readable.get(&source) {
                 let height = member(&item["opening"], "height")?.to_owned();
                 // The snapshot is rendered by a read of the source `at` its
