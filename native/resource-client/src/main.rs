@@ -98,6 +98,24 @@ mod web;
 #[cfg(unix)]
 mod workspace;
 #[cfg(unix)]
+#[path="protected_object/object_keys.rs"]
+mod object_keys;
+#[cfg(unix)]
+#[path="protected_object/object_keys_hybrid.rs"]
+mod object_keys_hybrid;
+#[cfg(unix)]
+#[path="protected_object/object_messages.rs"]
+mod object_messages;
+#[cfg(unix)]
+#[path="protected_object/object_cli.rs"]
+mod object_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_cli.rs"]
+mod object_epoch_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_packages.rs"]
+mod object_epoch_packages;
+#[cfg(unix)]
 mod well;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();

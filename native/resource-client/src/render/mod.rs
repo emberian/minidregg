@@ -333,7 +333,17 @@ pub fn render(view: &View) -> Result<Rendered, String> {
                 };
                 let atom = row["atom"].as_str().unwrap_or("");
                 let kind = atom_kinds.get(atom).copied();
-                let body = match kind.and_then(|kind| kind["type"].as_str()) {
+                let opened = view.entries.iter().find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(atom));
+                let private_bytes = opened.and_then(|entry| crate::workspace::private::opened_text(entry).ok().flatten());
+                let body = if let Some(bytes) = private_bytes {
+                    if std::str::from_utf8(&bytes).is_ok() { Body::Text { bytes, struck } }
+                    else { Body::Object { label: format!("[private binary {}]", size_text(bytes.len())), bytes, struck } }
+                } else { match kind.and_then(|kind| kind["type"].as_str()) {
+                    Some("inlineObject") if kind.is_some_and(crate::workspace::private::is_private_kind) => Body::Object {
+                        label: opened.and_then(|entry| entry["private"].as_str()).unwrap_or("[private: locked or unreadable]").to_owned(),
+                        bytes,
+                        struck,
+                    },
                     Some("inlineObject") => Body::Object {
                         label: format!(
                             "[object {} {}]",
@@ -349,7 +359,7 @@ pub fn render(view: &View) -> Result<Rendered, String> {
                         struck,
                     },
                     _ => Body::Text { bytes, struck },
-                };
+                }};
                 (line, body, by_atom.remove(atom).unwrap_or_default())
             }
             Some("embed") => {
