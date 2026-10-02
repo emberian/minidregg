@@ -52,6 +52,8 @@ mod selected_release;
 #[cfg(unix)]
 mod session_enrollment;
 #[cfg(unix)]
+mod session_reenroll;
+#[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
@@ -290,6 +292,7 @@ usage:
   mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
   mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
+  mini session-reenroll --phase capture|resume --contract PRIVATE.json --dir PRIVATE-ATTEMPT --socket PUBLIC-SOCKET [--admission ROOT-ADMISSION.json --new-generation N]
   mini session-enrollment-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini session-enrollment-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini session-enrollment-submit --attempt PRIVATE-DIR
@@ -2782,6 +2785,23 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_lifetime_grant::grant_lookup(&directory)
+        }
+        #[cfg(unix)]
+        "session-reenroll" => {
+            let phase = args.required("phase")?;
+            let phase = phase.to_str().ok_or("reenrollment phase must be UTF-8")?;
+            let contract = path(args.required("contract")?);
+            let directory = path(args.required("dir")?);
+            let admission = args.optional("admission").map(path);
+            let generation = args.optional("new-generation");
+            args.finish()?;
+            session_reenroll::run(
+                phase,
+                &contract,
+                &directory,
+                admission.as_deref(),
+                generation.as_deref().and_then(OsStr::to_str),
+            )
         }
         #[cfg(unix)]
         "session-enrollment-plan" => {
