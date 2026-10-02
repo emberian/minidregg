@@ -230,7 +230,7 @@ fn resolve_with(
     }
     let (room_view, room_at) = read(&room, INDEX_FIELD)?;
     let Some(index) = index_target(&room_view)? else {
-        return local(name);
+        return absent_fallback(local(name)?, &room, leaf, None, &room_at);
     };
     let mut index_ref = room.clone();
     index_ref["name"] = json!(format!("{room_name}/index"));
@@ -246,7 +246,7 @@ fn resolve_with(
     }
     let names = bindings(&index_view)?;
     let Some(binding) = names.get(leaf) else {
-        return local(name);
+        return absent_fallback(local(name)?, &room, leaf, Some(&index), &index_at);
     };
     // The room grant is a candidate capability, not new authority. The target's
     // own signed read and admission still decide whether it covers this target.
@@ -262,6 +262,20 @@ fn resolve_with(
     opened["sharedName"] = json!({"room":member(&room,"target")?,"index":index,
         "name":leaf,"link":binding.link,"worldRoot":member(&index_at,"worldRoot")?,
         "height":member(&index_at,"height")?});
+    Ok(opened)
+}
+
+/// An absence decision is snapshot-bound too: a shared entry appearing before
+/// the target read must not silently leave the client on its old private hint.
+fn absent_fallback(
+    mut opened: Value,
+    room: &Value,
+    name: &str,
+    index: Option<&str>,
+    at: &Value,
+) -> Result<Value> {
+    opened["sharedName"] = json!({"room":member(room,"target")?,"name":name,"index":index,
+        "fallback":"private","worldRoot":member(at,"worldRoot")?,"height":member(at,"height")?});
     Ok(opened)
 }
 
@@ -654,5 +668,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opened["target"], "private-hint");
+        assert_eq!(opened["sharedName"]["fallback"], "private");
+        assert!(check_opened(&opened, &at("99")).is_ok());
+        assert!(check_opened(&opened, &at("100")).is_err());
     }
 }
