@@ -28,6 +28,7 @@ mod linux {
     // HTTP requests and handshakes. Mini still owns per-grain admission/caps.
     const MAX_CONNECTIONS: usize = 136;
     const STREAM_BUFFER: usize = 64 * 1024;
+    const CLOSE_DRAIN_TIME: Duration = Duration::from_secs(5);
     const REQUEST_TIME: Duration = Duration::from_secs(10);
     const RESPONSE_TIME: Duration = Duration::from_secs(30);
 
@@ -215,6 +216,8 @@ mod linux {
         let mut sent = 0;
         let mut upstream_eof = false;
         let mut client_eof = false;
+        let mut client_shutdown = false;
+        let mut close_deadline = None;
         loop {
             // Drain already-decrypted bytes even when the TCP fd isn't readable.
             if sent == pending.len() {
@@ -234,6 +237,9 @@ mod linux {
                     Err(e) => return Err(e),
                 }
             }
+            if client_eof && close_deadline.is_none() {
+                close_deadline = Some(Instant::now() + CLOSE_DRAIN_TIME);
+            }
             while sent < pending.len() {
                 match upstream.write(&pending[sent..]) {
                     Ok(0) => return Err(invalid("TLS upstream stream write ended")),
@@ -246,8 +252,11 @@ mod linux {
                 pending.clear();
                 sent = 0;
             }
-            if client_eof && pending.is_empty() {
-                return Ok(());
+            if client_eof && pending.is_empty() && !client_shutdown {
+                // TLS close-notify closes the sending half. Preserve an app's
+                // final reply/close frame before closing the receiving half.
+                upstream.shutdown(std::net::Shutdown::Write)?;
+                client_shutdown = true;
             }
             while tls.conn.wants_write() {
                 match tls.conn.write_tls(&mut tls.sock) {
@@ -295,7 +304,20 @@ mod linux {
                     fd.fd = -1;
                 }
             }
-            let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, -1) };
+            let timeout = match close_deadline {
+                None => -1,
+                Some(deadline) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "TLS upgraded close drain deadline",
+                        ));
+                    }
+                    left.as_millis().max(1).min(i32::MAX as u128) as i32
+                }
+            };
+            let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout) };
             if ready < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {
@@ -620,6 +642,33 @@ mod linux {
                 .unwrap_err()
                 .to_string()
                 .contains("unexpected upstream upgrade"));
+        }
+
+        #[test]
+        fn client_half_close_keeps_final_upstream_reply() {
+            let (mut client, proxy, app) = harness(|mut upstream| {
+                request(&mut upstream);
+                upstream.write_all(SWITCH).unwrap();
+                let mut received = Vec::new();
+                upstream.read_to_end(&mut received).unwrap();
+                assert_eq!(&received, b"client-close");
+                upstream.write_all(b"server-close").unwrap();
+            });
+            client.write_all(OPEN).unwrap();
+            client.flush().unwrap();
+            let mut head = vec![0; SWITCH.len()];
+            client.read_exact(&mut head).unwrap();
+            client.write_all(b"client-close").unwrap();
+            client.conn.send_close_notify();
+            client.flush().unwrap();
+            let mut reply = [0; 12];
+            client.read_exact(&mut reply).unwrap();
+            assert_eq!(&reply, b"server-close");
+            let mut byte = [0];
+            assert_eq!(client.read(&mut byte).unwrap(), 0);
+            drop(client);
+            app.join().unwrap();
+            proxy.join().unwrap().unwrap();
         }
 
         #[test]
