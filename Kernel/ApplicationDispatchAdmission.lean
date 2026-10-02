@@ -422,11 +422,11 @@ theorem current_app_policy_excludes_v1 (package snapshot : Nat)
   simp [ApplicationGrain.policyV1, ApplicationGrain.policy,
     Minidregg.Pred.Pred.any] at lengthEqual
 
-/-- The wrapper's extra selectors are checked against source-owned current
-policy records. The standard v2 app law admits `.delegateObject` only for its
-current management subject, so an old issuer loses that leg when management
-changes. This deliberately supports the standard application/session/ticket
-policy family, not arbitrary app-revised laws. -/
+/-- Current app/package source laws are matched exactly. The standard family
+binds share issuance to its management subject. The explicit managed family
+retains the member owner as issuer and derives the separate lifecycle manager
+from current law. Issuer delegation lineage is independently checked below;
+arbitrary app-revised laws are not treated as these source families. -/
 def linkedCurrentPolicies {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable)
@@ -458,8 +458,10 @@ def linkedCurrentPolicies {F : Type} [Field F]
   -- law refused every dispatch for a currently born session.
   let sessionManagement := Minidregg.Pred.Pred.eq "request/subject" participant.value
   decide (spec.issuer = ingress.appManagementSubject) &&
-  policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
-  policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management) &&
+  ((policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
+    policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management)) ||
+    ApplicationGrain.managedPoliciesMatchOwner app manifest ingress.appSnapshotManifest
+      ingress.appManagementSubject.value (policyAt app) (policyAt manifest)) &&
   policyAt session == some (ApplicationGrainSession.policy descriptor kind
     participant sessionManagement) &&
   policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind

@@ -144,9 +144,13 @@ def linkedCurrentPolicy {F : Type} [Field F]
       pure policy.record.predicate
     else none
   let management := Minidregg.Pred.Pred.eq "request/subject" source.managementSubject.value
-  appPolicyMatches source.packageManifest source.snapshotManifest management appPolicy &&
-  packagePolicy == some (ApplicationGrain.packageManifestPolicy source.app
-    management)
+  -- A managed claim reuses this capability under the manager identity.
+  -- Refuse another holder's otherwise valid BEGIN before creating pending state.
+  (appPolicyMatches source.packageManifest source.snapshotManifest management appPolicy &&
+    packagePolicy == some (ApplicationGrain.packageManifestPolicy source.app management)) ||
+  (decide (source.subject = source.managementSubject) &&
+    ApplicationGrain.managedPoliciesMatch source.app source.packageManifest
+      source.snapshotManifest source.managementSubject.value appPolicy packagePolicy)
 
 /-- The package observation uses the same signed command identity and current
 policy epoch/revision as the mutation. It is not satisfied by the app's

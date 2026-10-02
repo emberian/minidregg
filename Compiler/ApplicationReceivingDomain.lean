@@ -47,7 +47,7 @@ def routeAdmissionProbeProtocol : List UInt8 :=
 permission to reuse a stopped generation. Runtime consumers still enforce its
 root ownership, exact image/config pins and signed source reenrollment. -/
 def receivingContract : List UInt8 :=
-  ("DREGG.APPLICATION-RECEIVING/v1:" ++
+  ("DREGG.APPLICATION-RECEIVING/v2:" ++
    "physical-permit-fresh-cas-winner-and-installed;" ++
    "confirmed-recovered-historical-receipt-never-redelivers;" ++
    "exact-historical-call-lookup-before-current-admission;" ++
@@ -66,6 +66,11 @@ def receivingContract : List UInt8 :=
    "compatible-upgrade-root-evidence-not-source-authority;" ++
    "immutable-selected-profile-exact-image-config-identity-pins;" ++
    "per-store-runtime-pending-fences-launch-ready-after-unit-reload;" ++
-   "checked-new-generation-start-then-signed-session-reenrollment-and-route-admission").toUTF8.toList
+   "checked-new-generation-start-then-signed-session-reenrollment-and-route-admission;" ++
+   "member-owner-admin-distinct-from-explicit-lifecycle-manager;" ++
+   "owner-signed-policy-install-and-current-revocable-object-delegation-required;" ++
+   "lifecycle-manager-no-program-admin-or-share-issuer-transfer;" ++
+   "managed-app-package-exact-same-owner-manager-source-linkage;" ++
+   "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law").toUTF8.toList
 
 end Minidregg.Compiler.ApplicationReceivingDomain

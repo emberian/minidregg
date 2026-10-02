@@ -109,10 +109,13 @@ def linkedCurrentPolicies {F : Type} [Field F]
     else none
   let begin := source.originalBegin.base.source
   let management := Minidregg.Pred.Pred.eq "request/subject" begin.managementSubject.value
-  load begin.app == some (ApplicationGrain.policy begin.packageManifest
-    begin.snapshotManifest management) &&
-  load begin.packageManifest == some
-    (ApplicationGrain.packageManifestPolicy begin.app management)
+  (load begin.app == some (ApplicationGrain.policy begin.packageManifest
+      begin.snapshotManifest management) &&
+    load begin.packageManifest == some
+      (ApplicationGrain.packageManifestPolicy begin.app management)) ||
+  ApplicationGrain.managedPoliciesMatch begin.app begin.packageManifest
+    begin.snapshotManifest begin.managementSubject.value
+    (load begin.app) (load begin.packageManifest)
 
 private def requirePresent {α : Type} (value : Option α) (detail : String) :
     Except String { selected : α // value = some selected } :=

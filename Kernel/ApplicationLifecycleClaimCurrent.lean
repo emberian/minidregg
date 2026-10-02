@@ -62,10 +62,13 @@ def linkedCurrentPolicy {F : Type} [Field F]
     else none
   let management := Minidregg.Pred.Pred.eq "request/subject"
     source.begin.source.managementSubject.value
-  appPolicy == some (ApplicationGrain.policy source.begin.source.packageManifest
-    source.begin.source.snapshotManifest management) &&
-  packagePolicy == some (ApplicationGrain.packageManifestPolicy source.begin.source.app
-    management)
+  (appPolicy == some (ApplicationGrain.policy source.begin.source.packageManifest
+      source.begin.source.snapshotManifest management) &&
+    packagePolicy == some (ApplicationGrain.packageManifestPolicy source.begin.source.app
+      management)) ||
+  ApplicationGrain.managedPoliciesMatch source.begin.source.app
+    source.begin.source.packageManifest source.begin.source.snapshotManifest
+    source.begin.source.managementSubject.value appPolicy packagePolicy
 
 def observationRequest {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)

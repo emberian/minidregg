@@ -222,6 +222,141 @@ def snapshotManifestPolicy (app : Nat) (management : Pred := .any []) : Pred := 
   .memberOf "request/verb" [1,3],
   .all [.memberOf "request/verb" [4,5], management]]
 
+/-- Explicit lifecycle delegation preserves the owner's administrative law.
+The manager still needs a currently valid delegated object capability; this
+predicate grants no capability and changes no application identity. -/
+def managedPolicy (packageTarget snapshotTarget owner manager : Nat) : Pred := .any [
+  .all [.eq "request/verb" 2, transitionPolicy packageTarget snapshotTarget],
+  .all [.eq "request/verb" 2, claimTransitionPolicy,
+    .eq "request/subject" (Int.ofNat manager)],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5],
+    .eq "request/subject" (Int.ofNat owner)]]
+
+def managedPackagePolicy (app owner manager : Nat) : Pred := .any [
+  .all [.eq "request/verb" 2,
+    .eq (s!"joint/target/{app}/resource/field/2/delta") 1,
+    .eq "request/subject" (Int.ofNat manager)],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5],
+    .eq "request/subject" (Int.ofNat owner)]]
+
+def managedSnapshotPolicy (app owner manager : Nat) : Pred := .any [
+  .all [.eq "request/verb" 2,
+    .eq (s!"joint/target/{app}/resource/field/3/delta") 1,
+    .eq "request/subject" (Int.ofNat manager)],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5],
+    .eq "request/subject" (Int.ofNat owner)]]
+
+private def managementOwnerCandidate (installed : Option Pred) : Option Nat :=
+  match installed with
+  | some (.anyL branches) =>
+      match branches.toList with
+      | [_, _, _, .allL admin] =>
+          match admin.toList with
+          | [_, .eq slot owner] =>
+              if slot = "request/subject" ∧ 0 ≤ owner then some owner.toNat else none
+          | _ => none
+      | _ => none
+  | _ => none
+
+/-- Recover the owner only from the exact authenticated installed app law.
+A caller's managementSubject names the manager, never supplies an owner hint. -/
+def managedPolicyOwner (packageTarget snapshotTarget manager : Nat)
+    (installed : Option Pred) : Option Nat := do
+  let owner ← managementOwnerCandidate installed
+  if installed = some (managedPolicy packageTarget snapshotTarget owner manager)
+    then some owner else none
+
+theorem managedPolicyOwner_exact (packageTarget snapshotTarget manager owner : Nat)
+    (installed : Option Pred)
+    (selected : managedPolicyOwner packageTarget snapshotTarget manager installed = some owner) :
+    installed = some (managedPolicy packageTarget snapshotTarget owner manager) := by
+  unfold managedPolicyOwner at selected
+  cases found : managementOwnerCandidate installed with
+  | none => simp [found] at selected
+  | some candidate =>
+      simp only [found] at selected
+      change (if installed = some (managedPolicy packageTarget snapshotTarget candidate manager)
+        then some candidate else none) = some owner at selected
+      split at selected <;> simp_all
+
+/-- App and package must name the same owner and manager in their exact
+current source laws. Snapshot operations must check the analogous law when
+they actually observe or govern that resource; BEGIN/claim/completion below
+do not modify snapshotVersion or read the snapshot resource. -/
+def managedPoliciesMatch (app packageTarget snapshotTarget manager : Nat)
+    (appPolicy packagePolicy : Option Pred) : Bool :=
+  match managedPolicyOwner packageTarget snapshotTarget manager appPolicy with
+  | none => false
+  | some owner => packagePolicy == some (managedPackagePolicy app owner manager)
+
+theorem managedPoliciesMatch_exact (app packageTarget snapshotTarget manager : Nat)
+    (appPolicy packagePolicy : Option Pred)
+    (accepted : managedPoliciesMatch app packageTarget snapshotTarget manager
+      appPolicy packagePolicy = true) :
+    ∃ owner, appPolicy = some (managedPolicy packageTarget snapshotTarget owner manager) ∧
+      packagePolicy = some (managedPackagePolicy app owner manager) := by
+  unfold managedPoliciesMatch at accepted
+  cases selected : managedPolicyOwner packageTarget snapshotTarget manager appPolicy with
+  | none => simp [selected] at accepted
+  | some owner =>
+      refine ⟨owner, managedPolicyOwner_exact _ _ _ _ _ selected, ?_⟩
+      simpa [selected] using accepted
+
+private def managementManagerCandidate (installed : Option Pred) : Option Nat :=
+  match installed with
+  | some (.anyL branches) =>
+      match branches.toList with
+      | [_, .allL claim, _, _] =>
+          match claim.toList with
+          | [_, _, .eq slot manager] =>
+              if slot = "request/subject" ∧ 0 ≤ manager then some manager.toNat else none
+          | _ => none
+      | _ => none
+  | _ => none
+
+/-- Dispatch retains the member owner as share issuer. Its manager is derived
+from the exact current app law, never from a ticket or caller-supplied hint. -/
+def managedPolicyManager (packageTarget snapshotTarget owner : Nat)
+    (installed : Option Pred) : Option Nat := do
+  let manager ← managementManagerCandidate installed
+  if installed = some (managedPolicy packageTarget snapshotTarget owner manager)
+    then some manager else none
+
+theorem managedPolicyManager_exact (packageTarget snapshotTarget owner manager : Nat)
+    (installed : Option Pred)
+    (selected : managedPolicyManager packageTarget snapshotTarget owner installed = some manager) :
+    installed = some (managedPolicy packageTarget snapshotTarget owner manager) := by
+  unfold managedPolicyManager at selected
+  cases found : managementManagerCandidate installed with
+  | none => simp [found] at selected
+  | some candidate =>
+      simp only [found] at selected
+      change (if installed = some (managedPolicy packageTarget snapshotTarget owner candidate)
+        then some candidate else none) = some manager at selected
+      split at selected <;> simp_all
+
+def managedPoliciesMatchOwner (app packageTarget snapshotTarget owner : Nat)
+    (appPolicy packagePolicy : Option Pred) : Bool :=
+  match managedPolicyManager packageTarget snapshotTarget owner appPolicy with
+  | none => false
+  | some manager => packagePolicy == some (managedPackagePolicy app owner manager)
+
+theorem managedPoliciesMatchOwner_exact (app packageTarget snapshotTarget owner : Nat)
+    (appPolicy packagePolicy : Option Pred)
+    (accepted : managedPoliciesMatchOwner app packageTarget snapshotTarget owner
+      appPolicy packagePolicy = true) :
+    ∃ manager, appPolicy = some (managedPolicy packageTarget snapshotTarget owner manager) ∧
+      packagePolicy = some (managedPackagePolicy app owner manager) := by
+  unfold managedPoliciesMatchOwner at accepted
+  cases selected : managedPolicyManager packageTarget snapshotTarget owner appPolicy with
+  | none => simp [selected] at accepted
+  | some manager =>
+      refine ⟨manager, managedPolicyManager_exact _ _ _ _ _ selected, ?_⟩
+      simpa [selected] using accepted
+
 inductive Operation where
   | beginInstall
   | completeInstall

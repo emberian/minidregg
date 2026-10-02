@@ -2249,6 +2249,24 @@ def applicationSpec (path : String) (json : Lean.Json) :
     snapshotControlCapability := ⟨← nat (path ++ ".snapshotControlCapability")
       (← field path "snapshotControlCapability" obj)⟩ }
 
+/-- Pure closed authoring only. Current owner program authority is still
+required by ordinary policy installation; authoring does not install a law. -/
+def applicationManagedPolicy (path : String) (json : Lean.Json) : Result Minidregg.Pred.Pred := do
+  let obj ← exactObject path ["kind", "app", "packageManifest", "snapshotManifest",
+    "owner", "manager"] json
+  let app ← nat (path ++ ".app") (← field path "app" obj)
+  let package ← nat (path ++ ".packageManifest") (← field path "packageManifest" obj)
+  let snapshot ← nat (path ++ ".snapshotManifest") (← field path "snapshotManifest" obj)
+  unless app ≠ package ∧ app ≠ snapshot ∧ package ≠ snapshot do
+    failAt path "app, packageManifest and snapshotManifest must be distinct"
+  let owner ← nat (path ++ ".owner") (← field path "owner" obj)
+  let manager ← nat (path ++ ".manager") (← field path "manager" obj)
+  match ← string (path ++ ".kind") (← field path "kind" obj) with
+  | "app" => pure (ApplicationGrain.managedPolicy package snapshot owner manager)
+  | "package" => pure (ApplicationGrain.managedPackagePolicy app owner manager)
+  | "snapshot" => pure (ApplicationGrain.managedSnapshotPolicy app owner manager)
+  | _ => failAt (path ++ ".kind") "expected app, package or snapshot"
+
 private def applicationSessionKind (path : String) (json : Lean.Json) :
     Result ApplicationGrainSession.Kind := do
   match ← string path json with
@@ -3411,6 +3429,7 @@ def author (kind : String) (json : Lean.Json)
       pure (draftCodec.encode (.renounce bytes))
   | "birth" => draftCodec.encode <$> birth "$" json none deployed none none providerRoutes
   | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed providerRoutes
+  | "application-managed-policy" => NativeHostGenesis.predicateStream.encode <$> applicationManagedPolicy "$" json
   | "application-birth" => draftCodec.encode <$> applicationBirth "$" json none deployed
   | "application-birth-intent" => intentCodec.encode <$> applicationBirthIntent "$" json deployed
   | "application-session-birth" => draftCodec.encode <$> applicationSessionBirth "$" json none deployed
@@ -3438,7 +3457,7 @@ def author (kind : String) (json : Lean.Json)
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
-      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], application-grain-birth-intent, application-session-grain-birth-intent, application-permission-schema, application-spk-launch-descriptor, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
+      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], application-managed-policy, delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], application-grain-birth-intent, application-session-grain-birth-intent, application-permission-schema, application-spk-launch-descriptor, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
 
 private def authorRefused (kind : String) (value : Lean.Json) : Bool :=
   match author kind value with
@@ -5085,6 +5104,8 @@ private def fleetCommandJson (command : FleetTurn.Command) : Lean.Json := .mkObj
 /-- Inspect bounded public host products. Header/envelope bytes remain exact hex. -/
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
+  | "predicate" => predicateJson <$> decoded "predicate"
+      (ResourceBirthCodec.strictCodec NativeHostGenesis.predicateStream.toLawful) bytes
   | "challenge" => challengeJson <$> decoded "challenge" challengeCodec bytes
   | "plan" => planJson <$> decoded "plan" signingPlanCodec bytes
   | "application-share-issue-plan" => shareIssuePlanJson <$>
