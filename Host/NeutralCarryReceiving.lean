@@ -28,13 +28,15 @@ private def hex32 (value : Json) : Except String (List UInt8) := do
 private def parseCapsule (value : Json) : Except String CarriedSegmentIO.SourceCapsule := do
   let path := fun name => System.FilePath.mk <$> stringField value name
   let pins ← field value "pins"
+  let storageBinary ← path "storageBinary"
+  let storageRoot ← path "storageRoot"
+  let checkpointKey ← path "checkpointKey"
   return {
     host := ← path "host"
     configuration := ← path "configuration"
     profile := ← path "profile"
     signatureVerifier := ← path "signatureVerifier"
-    storage := { binary := ← path "storageBinary", root := ← path "storageRoot",
-      key := ← path "checkpointKey" }
+    storage := { binary := storageBinary, root := storageRoot, key := checkpointKey }
     identity := ← CarryInspection.parseIdentity (← field value "identity")
     pins := {
       host := ← hex32 (← field pins "host")
