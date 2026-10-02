@@ -43,16 +43,48 @@ fn digest(value: &impl Serialize) -> Result<String> {
     sha256_bytes(&serde_json::to_vec(value).map_err(|e|e.to_string())?)
 }
 fn path(state: &Path) -> PathBuf { state.join("requests.json") }
-fn open(state: &Path) -> Result<Queue> {
-    let p=path(state);
-    if !p.exists() { return Ok(Queue::default()); }
-    let q:Queue=serde_json::from_slice(&bounded_regular_file(&p, MAX_STATE_BYTES)?)
-        .map_err(|e|format!("resident request custody: {e}"))?;
+fn decode_queue(bytes:&[u8])->Result<Queue> {
+    let q:Queue=serde_json::from_slice(bytes).map_err(|e|format!("resident request custody: {e}"))?;
     if q.pending.len()+usize::from(q.selected.is_some())>1024 {
         return Err("resident request custody exceeds admission limit".into());
     }
     Ok(q)
 }
+fn open(state: &Path) -> Result<Queue> {
+    let p=path(state);
+    if !p.exists() { return Ok(Queue::default()); }
+    decode_queue(&bounded_regular_file(&p,MAX_STATE_BYTES)?)
+}
+/// Read-only snapshot under the resident driver's lock. This retains exact
+/// bytes, including an absent file, so publication cannot overlook a request
+/// admitted or started between its inspection and restart.
+pub(crate) struct CustodySnapshot {
+    pub bytes:Option<Vec<u8>>,
+    pub queued:bool,
+    pub started:bool,
+    pub maintenance_pending:bool,
+}
+pub(crate) fn custody_snapshot(state:&Path)->Result<CustodySnapshot> {
+    let file=path(state);
+    let bytes=match fs::symlink_metadata(&file) {
+        Err(e) if e.kind()==io::ErrorKind::NotFound=>None,
+        Err(e)=>return Err(format!("resident request custody: {e}")),
+        Ok(meta)=>{
+            if !meta.is_file() || meta.uid()!=unsafe{libc::geteuid()} || meta.mode()&0o077!=0 || meta.nlink()!=1 {
+                return Err("resident request custody must be an owned private regular file".into());
+            }
+            Some(bounded_regular_file(&file,MAX_STATE_BYTES)?)
+        }
+    };
+    let q=bytes.as_deref().map(decode_queue).transpose()?.unwrap_or_default();
+    Ok(CustodySnapshot {
+        bytes,
+        queued:!q.pending.is_empty() || q.selected.as_ref().is_some_and(|r|r.started.is_none()),
+        started:q.selected.as_ref().is_some_and(|r|r.started.is_some()),
+        maintenance_pending:q.maintenance_pending.is_some(),
+    })
+}
+
 fn record(state: &Path, request: &Request, status: &str, evidence: Value) -> Result<()> {
     let receipt=json!({"type":"mini-resident-request-outcome-v1","identity":request.identity,
         "status":status,"evidence":evidence});

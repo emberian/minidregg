@@ -86,3 +86,11 @@ custody. A descriptor naming an operator socket or a filesystem mode cache is
 not enough: public-mode `mini serve` can admit some signed work while refusing
 later private provider settlement. Source controllers use `mini serve-operator`
 and repeat this read-only check before resident work starts.
+
+The protected registration may include optional `roomRouting` operational intent:
+`{"workspace":"/canonical/member/workspace","roomCell":"99","inboxRoot":"/canonical/private/inbox"}`.
+Paths must be canonical absolute paths, and roomCell a nonzero canonical u64
+decimal. `controller-launch` projects it unchanged. It does not assert a current
+assignment, recipient, account custody or controller liveness. Activation must
+still consume the native registration/current-assignment selector and its fresh
+signed room/grant/account evidence; a private advisory pointer is not authority.

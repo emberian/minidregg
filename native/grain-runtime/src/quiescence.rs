@@ -34,6 +34,7 @@ pub(crate) struct Status {
     pub worker_unit: Option<String>,
     pub exact_recovery: Vec<Recovery>,
     pub resident_state: Option<PathBuf>,
+    pub resident_requests_sha256: Option<String>,
     pub resume_evidence_required: Vec<String>,
     pub session_integrity_errors: Vec<String>,
     pub snapshot_only: bool,
@@ -149,6 +150,9 @@ pub(crate) enum ResidentEvidence {
     Stopped {
         prompt_pending: bool,
         return_pending: bool,
+        queued_requests: bool,
+        started_request: bool,
+        maintenance_pending: bool,
     },
 }
 
@@ -243,6 +247,9 @@ pub(crate) fn retained(j: &Journal, resident: ResidentEvidence) -> Vec<&'static 
         ResidentEvidence::Stopped {
             prompt_pending,
             return_pending,
+            queued_requests,
+            started_request,
+            maintenance_pending,
         } => {
             if prompt_pending {
                 out.push("resident_pending_prompt");
@@ -250,6 +257,9 @@ pub(crate) fn retained(j: &Journal, resident: ResidentEvidence) -> Vec<&'static 
             if return_pending {
                 out.push("resident_return_pending");
             }
+            if queued_requests {out.push("resident_queued_requests");}
+            if started_request {out.push("resident_started_request");}
+            if maintenance_pending {out.push("resident_maintenance_pending");}
         }
         ResidentEvidence::Unknown | ResidentEvidence::NotConfigured => {}
     }
@@ -331,6 +341,7 @@ fn project(j: &Journal, active: Vec<&'static str>, evidence: Option<&Evidence>) 
         worker_unit: j.child.as_ref().and_then(|c| c.unit.clone()),
         exact_recovery: exact_recovery(j),
         resident_state: None,
+        resident_requests_sha256: None,
         resume_evidence_required: resume_required,
         session_integrity_errors,
         snapshot_only: true,
@@ -358,6 +369,7 @@ pub(crate) struct ResidentGuard {
     evidence: ResidentEvidence,
     path: Option<PathBuf>,
     bytes: Option<Vec<u8>>,
+    request_bytes: Option<Vec<u8>>,
     config_sha256: String,
 }
 
@@ -402,6 +414,7 @@ impl ResidentGuard {
                 evidence: ResidentEvidence::NotConfigured,
                 path: None,
                 bytes: None,
+                request_bytes: None,
                 config_sha256,
             });
         };
@@ -429,14 +442,19 @@ impl ResidentGuard {
         let bytes = bounded_regular_file(&path.join("resident.json"), 65_536)?;
         let state: ResidentJournal =
             serde_json::from_slice(&bytes).map_err(|e| format!("resident state schema: {e}"))?;
+        let requests=crate::resident_requests::custody_snapshot(path)?;
         Ok(Self {
             _lock: Some(lock),
             evidence: ResidentEvidence::Stopped {
                 prompt_pending: state.pending.is_some(),
                 return_pending: state.return_pending,
+                queued_requests: requests.queued,
+                started_request: requests.started,
+                maintenance_pending: requests.maintenance_pending,
             },
             path: Some(path.to_owned()),
             bytes: Some(bytes),
+            request_bytes: requests.bytes,
             config_sha256,
         })
     }
@@ -453,12 +471,17 @@ impl ResidentGuard {
             .ok_or_else(|| "resident state is not configured".into())
     }
 
+    pub(crate) fn request_bytes(&self)->Option<&[u8]> {self.request_bytes.as_deref()}
+
     pub(crate) fn assert_unchanged(&self) -> Result<()> {
         if let Some(path) = &self.path {
             if bounded_regular_file(&path.join("resident.json"), 65_536)?.as_slice()
                 != self.bytes()?
             {
                 return Err("resident journal changed while its source-owned lock was held".into());
+            }
+            if crate::resident_requests::custody_snapshot(path)?.bytes!=self.request_bytes {
+                return Err("resident request custody changed while its source-owned lock was held".into());
             }
         }
         Ok(())
@@ -664,6 +687,7 @@ impl Runtime {
         resident.assert_unchanged()?;
         let mut status = self.quiescence_project(Some(&evidence))?;
         status.resident_state = resident_path.map(Path::to_path_buf);
+        status.resident_requests_sha256 = resident.request_bytes().map(sha256_bytes).transpose()?;
         Ok(status)
     }
 
@@ -733,6 +757,7 @@ mod tests {
             resident: ResidentEvidence::Stopped {
                 prompt_pending: false,
                 return_pending: false,
+                queued_requests:false,started_request:false,maintenance_pending:false,
             },
             observations: vec![
                 json!({"slot":"parent","state":{"grain":{"status":"0","reserved":"0"}}}),
@@ -776,10 +801,24 @@ mod tests {
             e.resident = ResidentEvidence::Stopped {
                 prompt_pending: p,
                 return_pending: r,
+                queued_requests:false,started_request:false,maintenance_pending:false,
             };
             let s = project(&j, vec![], Some(&e)).unwrap();
             assert!(s.can_restart_retaining_state);
             assert!(!s.closed_checkpoint);
+        }
+    }
+    #[test]
+    fn request_queue_custody_blocks_reassignment_without_a_resident_pending_marker() {
+        let j=fresh();
+        for (queued,started,maintenance) in [(true,false,false),(false,true,false),(false,false,true)] {
+            let mut e=evidence(&j);
+            e.resident=ResidentEvidence::Stopped {prompt_pending:false,return_pending:false,
+                queued_requests:queued,started_request:started,maintenance_pending:maintenance};
+            let status=project(&j,vec![],Some(&e)).unwrap();
+            assert!(status.can_restart_retaining_state);
+            assert!(!status.closed_checkpoint,"request custody cannot disappear on account rebinding");
+            assert_eq!(status.retained.len(),1);
         }
     }
     #[test]
@@ -930,8 +969,18 @@ mod tests {
             }
         ));
         assert!(ResidentGuard::acquire(&rt.config, Some(&dir)).is_err());
+        atomic_json(&dir.join("requests.json"),&json!({"binding":{},"pending":[],"selected":null,"lastAuthor":null,
+            "maintenancePending":{"residentPromptId":"orphan","revision":"revision"}})).unwrap();
+        assert!(guard.assert_unchanged().is_err(),"new request custody must invalidate an absent-file snapshot");
         drop(guard);
-        assert!(ResidentGuard::acquire(&rt.config, Some(&dir)).is_ok());
+        let guard=ResidentGuard::acquire(&rt.config,Some(&dir)).unwrap();
+        assert!(matches!(guard.evidence,ResidentEvidence::Stopped {maintenance_pending:true,..}));
+        assert!(guard.request_bytes().is_some());
+        let before=fs::read(dir.join("requests.json")).unwrap();
+        atomic_json(&dir.join("requests.json"),&json!({"binding":{},"pending":[],"selected":null,"lastAuthor":null})).unwrap();
+        assert!(guard.assert_unchanged().is_err());
+        assert_ne!(fs::read(dir.join("requests.json")).unwrap(),before);
+        drop(guard);
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }

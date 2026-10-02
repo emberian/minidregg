@@ -62,6 +62,8 @@ struct Transaction {
     request: Request,
     changed_fields: Vec<String>,
     resident_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resident_requests_sha256: Option<String>,
     quiescence_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     owner_rotation_sha256: Option<String>,
@@ -856,6 +858,12 @@ fn validate_transaction(
     {
         return Err("migration transaction format/layout refused".into());
     }
+    if let Some(hash)=&t.resident_requests_sha256 {
+        if t.request.resident_state.is_none() || !hex(hash)
+            || digest(&private(&dir.join("resident-requests-before.json"),LIMIT)?)?!=*hash {
+            return Err("resident request checkpoint identity changed".into());
+        }
+    }
     let get = |role| -> Result<&Change> {
         let rows: Vec<_> = t.changes.iter().filter(|c| c.role == role).collect();
         if rows.len() != 1 {
@@ -1013,7 +1021,8 @@ pub(crate) fn recover_startup(config: &Config, path: &Path) -> Result<Option<Sta
     } else {
         None
     };
-    if actual != t.resident_sha256 {
+    if actual != t.resident_sha256
+        || guard.request_bytes().map(digest).transpose()?!=t.resident_requests_sha256 {
         return Err("resident changed after migration checkpoint".into());
     }
     guard.assert_unchanged()?;
@@ -1175,6 +1184,10 @@ impl Runtime {
         } else {
             None
         };
+        let resident_requests_sha256 = guard.request_bytes().map(|bytes|->Result<String> {
+            write_new(&dir.join("resident-requests-before.json"),bytes)?;
+            digest(bytes)
+        }).transpose()?;
         let owner_rotation_sha256 = owner_rotation
             .map(|observation| -> Result<String> {
                 let bytes = serde_json::to_vec_pretty(&observation).map_err(|e| e.to_string())?;
@@ -1190,6 +1203,7 @@ impl Runtime {
             request: r,
             changed_fields: fields,
             resident_sha256,
+            resident_requests_sha256,
             quiescence_sha256: digest(&qbytes)?,
             owner_rotation_sha256,
             changes,
@@ -1534,6 +1548,7 @@ mod tests {
             },
             changed_fields: vec![],
             resident_sha256: None,
+            resident_requests_sha256: None,
             quiescence_sha256: "d".repeat(64),
             owner_rotation_sha256: None,
             changes,

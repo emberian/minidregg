@@ -82,6 +82,19 @@ fields refuse this category. Full transport changes still require the full
 compatible admission. Both admissions together are refused. This is an explicit
 root image admission, not a claim that the new Mini's feature behavior was tested.
 
+The resident lock covers both `resident.json` and the strict `requests.json`
+request queue. Queued requests, a selected request with `started` custody, and
+`maintenancePending` are retained work even if `resident.pending` is absent. They
+permit an unchanged restart retaining evidence, but block a closed checkpoint
+and account/config reassignment. Resolve them through their source completion
+or exact preadmission refusal paths before requesting publication.
+
+A configured queue's exact bytes and digest are retained as
+`resident-requests-before.json` / `residentRequestsSha256`. File absence is also
+pinned: a newly appearing queue invalidates the locked snapshot. Startup refuses
+changed queue custody before replacing any receiving member. This category
+still does not authorize a new room account or assignment inbox.
+
 The source retains config-before/after, journal-before/after, optional
 workspace-before/after, resident-before, quiescence, transaction and previous
 selection under `STATE/config-migrations/migration-OPERATION_ID`. `transaction.json`

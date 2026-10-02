@@ -868,6 +868,7 @@ mod tests {
             worker_unit: None,
             exact_recovery: vec![],
             resident_state: Some(state.into()),
+            resident_requests_sha256: None,
             resume_evidence_required: vec![],
             session_integrity_errors: vec![],
             // Even a fresh locked inspection is a snapshot, not lasting permission.

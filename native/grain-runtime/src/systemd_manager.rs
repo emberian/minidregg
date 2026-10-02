@@ -47,6 +47,17 @@ struct Registration {
     worker_manager: Manager,
     service_uid: u32,
     resident_config: Option<PathBuf>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    room_routing:Option<RoomRouting>,
+}
+/// Root inventory routing intent. Native current assignment/grants still own
+/// activation; this record cannot assert recipient, budget custody or liveness.
+#[derive(Clone,Debug,Serialize,Deserialize,PartialEq,Eq)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+struct RoomRouting {
+    workspace:PathBuf,
+    room_cell:String,
+    inbox_root:PathBuf,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Context {
@@ -87,6 +98,13 @@ fn validate_registration(
             "controller registration task/config/UID/worker-manager binding refused".into(),
         );
     }
+    if let Some(intent)=&r.room_routing {
+        let cell=intent.room_cell.parse::<u64>().map_err(|_|"roomRouting roomCell must be canonical nonzero decimal")?;
+        if cell==0 || cell.to_string()!=intent.room_cell
+            || !custody::canonical(&intent.workspace) || !custody::canonical(&intent.inbox_root) {
+            return Err("roomRouting requires canonical workspace/inboxRoot and nonzero decimal roomCell".into());
+        }
+    }
     Ok(())
 }
 /// The producer shares the exact environment names consumed by load() and
@@ -103,7 +121,7 @@ fn launch_environment(r: &Registration, registration: &Path) -> Value {
 fn projection(r: &Registration, registration: &Path, runtime: &Path) -> Value {
     json!({"protocol":"mini-controller-launch-v1","task":r.task,
         "runtime":runtime,"config":r.config,"residentConfig":r.resident_config,
-        "runtimeRegistry":registration,"manager":r.manager,"workerManager":r.worker_manager,
+        "runtimeRegistry":registration,"roomRouting":r.room_routing,"manager":r.manager,"workerManager":r.worker_manager,
         "serviceUid":r.service_uid,"unit":unit(&r.task),
         "environment":launch_environment(r,registration)})
 }
@@ -410,7 +428,24 @@ mod tests {
             worker_manager: Manager::User,
             service_uid: 1000,
             resident_config: None,
+            room_routing:None,
         }
+    }
+    #[test]
+    fn room_routing_is_typed_inventory_intent_without_an_assignment_claim() {
+        let mut r=registration();
+        r.room_routing=Some(RoomRouting {workspace:"/var/lib/mini/controllers/8781/workspace".into(),
+            room_cell:"99".into(),inbox_root:"/var/lib/mini/controllers/8781/inbox".into()});
+        validate_registration(&r,&r.task,Some(&r.config),1000).unwrap();
+        let launch=projection(&r,Path::new("/etc/mini/controllers/8781.json"),Path::new("/usr/bin/grain-runtime"));
+        assert_eq!(launch["roomRouting"]["roomCell"],"99");
+        assert!(launch["roomRouting"].get("assignment").is_none());
+        r.room_routing.as_mut().unwrap().room_cell="099".into();
+        assert!(validate_registration(&r,&r.task,Some(&r.config),1000).is_err());
+        r.room_routing.as_mut().unwrap().room_cell="99".into();
+        r.room_routing.as_mut().unwrap().inbox_root="/var/lib/mini/../inbox".into();
+        assert!(validate_registration(&r,&r.task,Some(&r.config),1000).is_err());
+        assert!(serde_json::from_value::<RoomRouting>(json!({"workspace":"/ws","roomCell":"99","inboxRoot":"/inbox","assignment":"1"})).is_err());
     }
     #[test]
     fn root_contract_binds_separate_managers_and_exact_identity() {
