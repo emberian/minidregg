@@ -561,7 +561,34 @@ fn copy_resolution_input(
     inputs[name] = json!({"path":absolute(&from)?,"retainedPath":absolute(&to)?,"sha256":hex(&sha2::Sha256::digest(&bytes))});
     Ok(bytes)
 }
+fn protect_native_evidence(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let named = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if !named.file_type().is_file() {
+        return Err("native resolution evidence must be regular".into());
+    }
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    if !opened.is_file() || (opened.dev(), opened.ino()) != (named.dev(), named.ino()) {
+        return Err("native resolution evidence changed while opening".into());
+    }
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .and_then(|()| file.sync_all())
+        .map_err(|e| e.to_string())
+}
+fn inspect_private(
+    host: &Path,
+    config: &Path,
+    kind: &str,
+    input: &Path,
+    output: &Path,
+) -> Result<Value> {
+    let value = inspect(host, config, kind, input, output)?;
+    protect_native_evidence(output)?;
+    Ok(value)
+}
 fn evidence_file(path: &Path) -> Result<Value> {
+    protect_native_evidence(path)?;
     let bytes = bounded_regular(path, 4 * transport::HOST_MAX_FRAME)?;
     Ok(json!({"path":absolute(path)?,"sha256":hex(&sha2::Sha256::digest(&bytes))}))
 }
@@ -695,7 +722,7 @@ pub(crate) fn resolve_attempt(
         &copied_config,
         &[Path::new("lookup"), &kept.join("call.bin"), &lookup_bin],
     )?;
-    let lookup = inspect(host, &copied_config, "outcome", &lookup_bin, &lookup_json)?;
+    let lookup = inspect_private(host, &copied_config, "outcome", &lookup_bin, &lookup_json)?;
     let mut report = json!({"type":"mini-provider-continuity-resolution-v1","attempt":attempt,
         "host":absolute(host)?,"hostSha256":selected_host_sha,"config":absolute(config)?,
         "configSha256":hex(&sha2::Sha256::digest(&config_bytes)),"socket":transport::pinned_address(socket)?,
@@ -747,7 +774,7 @@ pub(crate) fn resolve_attempt(
             copy_resolution_input(&attempt, &kept, name, limit, &mut inputs)?;
         }
     }
-    let native_outcome = inspect(
+    let native_outcome = inspect_private(
         host,
         &copied_config,
         "outcome",
@@ -758,14 +785,14 @@ pub(crate) fn resolve_attempt(
     if native_outcome != read_json("outcome.json")? {
         return Err("retained contention presentation differs from native bytes".into());
     }
-    let original = inspect(
+    let original = inspect_private(
         host,
         &copied_config,
         "plan",
         &kept.join("original-plan.bin"),
         &directory.join("original-plan-inspected.json"),
     )?;
-    let pinned = inspect(
+    let pinned = inspect_private(
         host,
         &copied_config,
         "plan",
@@ -904,6 +931,24 @@ mod tests {
         value["slots"][0]["signing"]["canonical"] = json!("cc");
         value["slots"][0]["signing"]["validUntil"] = json!("7");
         value
+    }
+    #[test]
+    fn native_resolution_outputs_are_private_even_when_created_public() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = rejected_fixture();
+        let native = dir.join("native-output.bin");
+        fs::write(&native, b"native output").unwrap();
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o644)).unwrap();
+        let retained = evidence_file(&native).unwrap();
+        assert_eq!(fs::metadata(&native).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            retained["sha256"],
+            hex(&sha2::Sha256::digest(b"native output"))
+        );
+        let link = dir.join("alias.bin");
+        std::os::unix::fs::symlink(&native, &link).unwrap();
+        assert!(evidence_file(&link).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn resolution_v3_requires_exact_prior_prefix_not_just_larger_count() {
