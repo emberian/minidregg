@@ -84,7 +84,7 @@ fn private_root(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn lock(root: &Path) -> Result<File> {
+fn lock(root: &Path) -> Result<transport::ServiceLock> {
     let path = root.join("namespace.lock");
     for _ in 0..500 {
         match transport::service_lock(&path) {

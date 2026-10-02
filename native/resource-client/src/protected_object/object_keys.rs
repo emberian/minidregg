@@ -32,7 +32,7 @@ pub(crate) struct AdmittedAnchor {
 }
 pub(crate) struct Store {
     path: PathBuf,
-    _lock: File,
+    _lock: crate::transport::ServiceLock,
     storage_key: Zeroizing<[u8; 32]>,
     state: Value,
     healthy: bool,
@@ -720,4 +720,48 @@ mod tests {
         fs::remove_file(path.with_extension("object-lock")).unwrap();
         fs::remove_dir(dir).unwrap();
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn logical_custody_drop_releases_lock_while_fork_child_retains_fd() {
+        let dir = std::env::temp_dir().join(format!("mini-object-fork-lock-{}", crate::workspace::random_nonce().unwrap()));
+        crate::workspace::make_private_dir(&dir).unwrap();
+        let path = dir.join("state");
+        let store = Store::open(&path, [8; 32]).unwrap();
+        let mut ready = [-1; 2];
+        let mut finish = [-1; 2];
+        assert_eq!(unsafe { libc::pipe2(ready.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        assert_eq!(unsafe { libc::pipe2(finish.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        let child = unsafe { libc::fork() };
+        assert!(child >= 0);
+        if child == 0 {
+            // Only async-signal-safe syscalls after fork in the threaded test
+            // process. Keep the inherited custody descriptor until parent ends.
+            unsafe {
+                libc::close(ready[0]); libc::close(finish[1]);
+                store._lock.release();
+                let byte = 1u8;
+                libc::write(ready[1], &byte as *const u8 as *const libc::c_void, 1);
+                let mut byte = 0u8;
+                libc::read(finish[0], &mut byte as *mut u8 as *mut libc::c_void, 1);
+                libc::_exit(0);
+            }
+        }
+        unsafe { libc::close(ready[1]); libc::close(finish[0]); }
+        let mut byte = 0u8;
+        assert_eq!(unsafe { libc::read(ready[0], &mut byte as *mut u8 as *mut libc::c_void, 1) }, 1);
+        let parent_still_exclusive = Store::open(&path, [8; 32]).is_err();
+        drop(store);
+        let reopened = Store::open(&path, [8; 32]);
+        // Always release/reap the child, including when testing the regression
+        // against the old implementation; it must not leave a waiting process.
+        unsafe {
+            libc::write(finish[1], &byte as *const u8 as *const libc::c_void, 1);
+            libc::close(finish[1]); libc::close(ready[0]);
+            libc::waitpid(child, std::ptr::null_mut(), 0);
+        }
+        assert!(parent_still_exclusive, "child release unlocked its parent's active custody");
+        assert!(reopened.is_ok(), "logical custody ended but child retained the lock: {:?}", reopened.err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
 }

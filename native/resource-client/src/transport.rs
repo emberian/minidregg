@@ -584,7 +584,25 @@ unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
 
-pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
+/// Logical process ownership, independent of descriptor aliases inherited
+/// transiently by a concurrent child between fork and exec.
+#[derive(Debug)]
+pub(crate) struct ServiceLock {
+    file: fs::File,
+    owner_pid: libc::pid_t,
+}
+impl ServiceLock {
+    pub(crate) fn release(&self) {
+        // A child dropping inherited scope must not unlock the parent.
+        if unsafe { libc::getpid() } == self.owner_pid {
+            unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN); }
+        }
+    }
+}
+impl Drop for ServiceLock {
+    fn drop(&mut self) { self.release(); }
+}
+pub(crate) fn service_lock(path: &Path) -> Result<ServiceLock, String> {
     let file = match OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -624,7 +642,7 @@ pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
             io::Error::last_os_error()
         ));
     }
-    Ok(file)
+    Ok(ServiceLock { file, owner_pid: unsafe { libc::getpid() } })
 }
 
 pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
