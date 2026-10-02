@@ -35,6 +35,7 @@ use std::process::{Command, Stdio};
 
 pub(crate) mod law;
 mod template;
+mod doc_render;
 
 pub(crate) const EXIT_OK: i32 = 0;
 pub(crate) const EXIT_CLIENT: i32 = 1;
@@ -80,9 +81,9 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
     Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room rotate ID NAME | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | propose (action revoke; private: room-key --op kick = revoke + rotate + rewrap, submitted) | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one)" },
+    Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "job", usage: "job post ROOM PROGRAM --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME] | job claim JOB --room ROOM --bond B --account REF [--name NAME] | job answer NAME [OUTPUT] | job check NAME | job settle NAME | job show NAME | job fund NAME --account REF | job truth NAME", operation: "mini job --action post|claim|answer|check|settle|show|fund|truth --dir WS (the job law, the job-money ops 160-163, the kernel's ran truth turn)" },
     Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
@@ -1106,10 +1107,9 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     };
                     let path = session.home.join("requests").join(format!("create-{}.json", ref_file(&w[2])));
                     let mut flags = vec![
-                        flag("action", "create"),
+                        flag("action", "doc-new"),
                         flag("dir", ws()),
                         flag("name", w[2].clone()),
-                        flag("storage", "content"),
                         flag("predicate", path.clone()),
                     ];
                     if let Some(room) = &room {
@@ -1121,15 +1121,46 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         writes: vec![request_file(path, &law)],
                     }
                 }
-                "show" | "backlinks" => {
-                    arity(&w, 2, 2, u)?;
-                    ref_name(&w[2], "document name")?;
+                "show" | "outline" | "history" | "diff" | "pull" | "range" | "mark" | "unmark" | "insert"
+                | "move" | "remove" | "transclude" | "transclusions" | "follow" | "links" | "backlinks" => {
+                    let mut words = w.clone();
+                    if action == "insert" && words.len() == 5 {
+                        words[4] = text_argument(session, &words[4])?;
+                    }
+                    if let Some(name) = words.get(2) {
+                        workspace_name(name, "document name")?;
+                    }
+                    let mut flags: Vec<(String, OsString)> = doc_render::doc_flags(&words)
+                        .map_err(|message| message.strip_prefix("usage: ").map(str::to_owned).unwrap_or(message))?
+                        .into_iter()
+                        .map(|(name, value)| flag(name, value))
+                        .collect();
+                    flags.insert(1, flag("dir", ws()));
+                    client("workspace", flags)
+                }
+                "push" => {
+                    arity(&w, 4, 4, u)?;
+                    workspace_name(&w[2], "proposal ID")?;
+                    workspace_name(&w[3], "document name")?;
+                    // @FILE is HOME/requests/FILE; @- is standard input
+                    // (`ssh … doc push ID NAME @- < f.md`).
+                    let file = match w[4].strip_prefix('@') {
+                        Some("-") => PathBuf::from("-"),
+                        Some(file) => {
+                            session_file(file, "pushed file")?;
+                            session.home.join("requests").join(file)
+                        }
+                        None => return Err("doc push takes the file as @FILE or @-".into()),
+                    };
                     client(
                         "workspace",
                         vec![
-                            flag("action", format!("doc-{action}")),
+                            flag("action", "doc-push"),
                             flag("dir", ws()),
-                            flag("name", w[2].clone()),
+                            flag("name", w[3].clone()),
+                            flag("file", file),
+                            flag("proposal-id", w[2].clone()),
+                            flag("attempt", ws().join("attempts").join(&w[2])),
                         ],
                     )
                 }
@@ -1167,12 +1198,19 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         json!({"type":"link","to":w[4],"relation":relation}),
                     )
                 }
-                "annotate" => Plan::NotHere(
-                    "doc annotate: this store's content cell has no annotation action (Kernel/ContentResource.lean Action is createDocument, createAtom, editAtom, link, createRun; Theory/HyperdocumentOperations.lean AnnotatePayload and the annotations namespace are not in the page entry grammar); needs K-CONTENT-ACTIONS, and annotate-but-not-edit needs K-FIELDS".into(),
-                ),
-                "quote" => Plan::NotHere(
-                    "doc quote: this store's content cell has no transclusion action (Kernel/ContentResource.lean Action has no transclude; TransclusionRecord with its disclosurePolicy is not in the page entry grammar); needs K-CONTENT-ACTIONS".into(),
-                ),
+                "annotate" => {
+                    arity(&w, 5, 5, u)?;
+                    workspace_name(&w[2], "proposal ID")?;
+                    workspace_name(&w[3], "document name")?;
+                    decimal(&w[4], "line")?;
+                    let text = text_argument(session, &w[5])?;
+                    document_proposal(
+                        session,
+                        &w[2],
+                        &w[3],
+                        json!({"type":"annotate","line":w[4],"text":text}),
+                    )
+                }
                 _ => return Err(u.to_owned()),
             }
         }
@@ -1936,6 +1974,9 @@ pub(crate) enum Ending {
     },
     /// A chat verb's own ending: (exit code, stderr text).
     Rendered(i32, String),
+    /// A refused `doc push` whose pinned lines changed since the pull: the
+    /// line diagnosis, above the Host's own refusal (`host`).
+    LineRefused { lines: String, host: Box<Ending> },
 }
 
 fn hex_text(value: Option<&Value>) -> String {
@@ -1980,6 +2021,10 @@ fn outcome_line(outcome: &Value) -> (i32, String) {
 pub(crate) fn render(ending: &Ending) -> (i32, String) {
     match ending {
         Ending::Done => (EXIT_OK, String::new()),
+        Ending::LineRefused { lines, host } => {
+            let (code, text) = render(host);
+            (code, format!("refused: stale-line: {lines}\n{text}"))
+        }
         Ending::Usage(message) => (EXIT_USAGE, format!("usage: {message}\n")),
         Ending::Client(message) => (EXIT_CLIENT, format!("error: {message}\n")),
         Ending::Rendered(code, text) => (*code, text.clone()),
@@ -2109,6 +2154,7 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     };
     let _ = super::take_host_decision();
     let _ = super::replan::take_count();
+    let _ = super::take_line_refusal();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::run(args)))
         .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
     let _ = io::stdout().flush();
@@ -2129,7 +2175,11 @@ fn execute(session: &Session, plan: Plan) -> Ending {
                 }
                 HostDecision::Outcome(_) => (None, None),
             };
-            Ending::Host { client, decision, decoded, evidence }
+            let host = Ending::Host { client, decision, decoded, evidence };
+            match super::take_line_refusal() {
+                Some(lines) => Ending::LineRefused { lines, host: Box::new(host) },
+                None => host,
+            }
         }
     }
 }
@@ -2439,11 +2489,13 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
         ("revoke" | "renounce", 2) => refs(),
-        ("doc", 1) => ["new", "show", "append", "edit", "link", "backlinks", "annotate", "quote"]
+        ("doc", 1) => ["new", "show", "outline", "history", "diff", "pull", "push", "append", "edit", "insert", "move",
+            "remove", "mark", "unmark", "annotate", "link", "links", "backlinks", "range", "transclude",
+            "transclusions", "follow", "quote"]
             .map(String::from)
             .to_vec(),
-        ("doc", 2) if matches!(w[1].as_str(), "show" | "backlinks") => refs(),
-        ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "link") => refs(),
+        ("doc", 2) if !matches!(w[1].as_str(), "new" | "append" | "edit" | "annotate" | "link" | "push") => refs(),
+        ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "annotate" | "link" | "push" | "transclude") => refs(),
         ("doc", 4) if w[1] == "link" => refs(),
         ("board", 1) => ["new", "add", "move", "take"].map(String::from).to_vec(),
         ("board", 3) if w[1] != "new" => refs(),
@@ -3261,6 +3313,36 @@ mod tests {
     }
 
     #[test]
+    fn doc_push_and_pull_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "doc pull paper").unwrap()).1,
+            pairs(&[("action", "doc-pull"), ("dir", "/w"), ("name", "paper")])
+        );
+        let home_file = s.home.join("requests").join("p.md");
+        let (command, flags, writes) = client(plan(&s, "doc push p1 paper @p.md").unwrap());
+        assert_eq!(command, "workspace");
+        assert!(writes.is_empty());
+        assert_eq!(
+            flags,
+            pairs(&[
+                ("action", "doc-push"),
+                ("dir", "/w"),
+                ("name", "paper"),
+                ("file", home_file.to_str().unwrap()),
+                ("proposal-id", "p1"),
+                ("attempt", "/w/attempts/p1"),
+            ])
+        );
+        assert_eq!(client(plan(&s, "doc push p1 paper @-").unwrap()).1[3], pairs(&[("file", "-")])[0]);
+        for bad in ["doc pull", "doc push p1 paper p.md", "doc push p1 paper @../x", "doc push p1 paper",
+            "doc push ../p paper @p.md"] {
+            assert!(plan(&s, bad).is_err(), "{bad}");
+        }
+        assert_eq!(complete(&s, "doc pu"), ["pull", "push"]);
+    }
+
+    #[test]
     fn doc_verbs_are_one_client_operation_each() {
         let s = session();
         let (command, flags, writes) = client(plan(&s, "doc new paper").unwrap());
@@ -3268,10 +3350,9 @@ mod tests {
         assert_eq!(
             flags,
             pairs(&[
-                ("action", "create"),
+                ("action", "doc-new"),
                 ("dir", "/w"),
                 ("name", "paper"),
-                ("storage", "content"),
                 ("predicate", "/h/requests/create-paper.json"),
             ])
         );
@@ -3306,9 +3387,38 @@ mod tests {
             json!({"type":"link","to":"paper","relation":"0"}));
         let (_, request) = request_of(plan(&s, "doc link l2 index paper 3").unwrap());
         assert_eq!(request["targets"][0]["payload"]["actions"][0]["relation"], "3");
-        for missing in ["doc annotate paper 1 'x'", "doc quote paper wall 1"] {
-            assert!(matches!(plan(&s, missing).unwrap(), Plan::NotHere(t) if t.contains("K-CONTENT-ACTIONS")));
+        let (_, request) = request_of(plan(&s, "doc annotate n1 paper 2 'cite this'").unwrap());
+        assert_eq!(request["targets"][0]["payload"]["actions"][0],
+            json!({"type":"annotate","line":"2","text":"cite this"}));
+        // quote is gone: transclude replaces it (K-TRANSCLUDE)
+        assert!(plan(&s, "doc quote paper wall 1").is_err());
+        // The element-tree, history and rendering verbs: one workspace action each.
+        for (line, want) in [
+            ("doc show paper --at 77 --html", vec![("action", "doc-show"), ("dir", "/w"), ("name", "paper"),
+                ("at", "77"), ("format", "html")]),
+            ("doc history paper", vec![("action", "doc-history"), ("dir", "/w"), ("name", "paper")]),
+            ("doc diff paper 77 81", vec![("action", "doc-diff"), ("dir", "/w"), ("name", "paper"),
+                ("from", "77"), ("to", "81")]),
+            ("doc links paper", vec![("action", "doc-links"), ("dir", "/w"), ("name", "paper")]),
+            ("doc insert paper 2 'a new line'", vec![("action", "doc-insert"), ("dir", "/w"), ("name", "paper"),
+                ("at", "2"), ("text", "a new line")]),
+            ("doc move paper 3 1", vec![("action", "doc-move"), ("dir", "/w"), ("name", "paper"),
+                ("from", "3"), ("to", "1")]),
+            ("doc remove paper 2", vec![("action", "doc-remove"), ("dir", "/w"), ("name", "paper"), ("line", "2")]),
+            ("doc mark paper 2 bold", vec![("action", "mark"), ("dir", "/w"), ("name", "paper"), ("line", "2"),
+                ("kind", "bold")]),
+            ("doc range notes 2 3", vec![("action", "doc-range"), ("dir", "/w"), ("name", "notes"),
+                ("from", "2"), ("to", "3")]),
+            ("doc transclude paper notes 2 3 live at 2", vec![("action", "transclude"), ("dir", "/w"),
+                ("name", "paper"), ("source", "notes"), ("from-line", "2"), ("to-line", "3"), ("mode", "live"),
+                ("at", "2")]),
+            ("doc follow paper 77", vec![("action", "follow"), ("dir", "/w"), ("name", "paper"),
+                ("transclusion", "77")]),
+        ] {
+            assert_eq!(client(plan(&s, line).unwrap()).1, pairs(&want), "{line}");
         }
+        assert!(plan(&s, "doc mark paper 2 underline").unwrap_err().starts_with("unknownKind: underline"));
+        assert!(plan(&s, "doc show ../paper").is_err());
         for bad in ["doc", "doc show", "doc append p1 paper", "doc edit e1 paper x 'y'",
             "doc append p1 ../paper x", "doc append p1 paper @../../etc/passwd", "doc link l1 a b c"] {
             assert!(plan(&s, bad).is_err(), "{bad} should be refused");

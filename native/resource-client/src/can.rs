@@ -23,6 +23,7 @@ const KERNEL_VERB: &[(&str, &str)] = &[
     ("read", "observe"),
     ("write", "mutate"),
     ("edit", "mutate"),
+    ("mark", "mutate"),
     ("link", "mutate"),
     ("transfer", "transfer"),
     ("install", "install"),
@@ -41,7 +42,7 @@ fn kernel_verb(verb: &str) -> &'static str {
 
 fn shell_verbs(kind: &str, document: bool) -> &'static [&'static str] {
     match (kind, document) {
-        ("object", true) => &["read", "write", "edit", "link", "delegate", "law", "revoke"],
+        ("object", true) => &["read", "write", "edit", "mark", "link", "delegate", "law", "revoke"],
         ("object", false) => &["read", "write", "delegate", "law", "revoke"],
         ("account", _) => &["read", "transfer", "delegate", "law", "revoke"],
         _ => &["read", "install", "delegate", "law", "revoke"],
@@ -101,14 +102,7 @@ impl Run<'_> {
             &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         )?;
         take_host_decision();
-        let authored = host_decided(propose_summary(
-            self.root,
-            self.workspace,
-            &source,
-            &id,
-            None,
-            true,
-        ));
+        let authored = host_decided(propose_request(self.root, self.workspace, &request, &id, None, true));
         let verdict = match authored {
             Ok(Err(line)) => Ok(verdict_of(Some(line))),
             Err(error) => Ok(format!("(not probed: {error})")),
@@ -365,35 +359,46 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
                     );
                 }
             }
-            "edit" => {
-                let lines = view
-                    .as_ref()
-                    .ok()
-                    .and_then(|view| content_page(view, name).ok())
-                    .and_then(|page| page_lines(page).ok())
-                    .map(|lines| lines.len())
-                    .unwrap_or(0);
-                if lines == 0 {
-                    row(verb, "(not probed)", "no line to edit");
+            "edit" | "mark" => {
+                // The last live text line of the kernel's order, as this probe's
+                // own read places it (the line `doc show` numbers last).
+                let last = host_document(root, workspace, &reference).ok().and_then(|document| {
+                    let lines = live_lines(&document).ok()?;
+                    let (index, line) = lines.iter().enumerate().rev().find(|(_, line)| line["kind"] == "atom")?;
+                    Some((index + 1, line["atom"].as_str()?.to_owned(), line["payload"].as_str()?.to_owned()))
+                });
+                let Some((number, atom, payload)) = last else {
+                    row(verb, "(not probed)", "no line");
                     continue;
+                };
+                if *verb == "edit" {
+                    let text = String::from_utf8_lossy(&crate::decode_hex(&payload).unwrap_or_default()).into_owned();
+                    let request = invoke(
+                        name,
+                        json!({"type":"document",
+                        "actions":[{"type":"edit","line":number.to_string(),"text":text}]}),
+                    );
+                    row(verb, &run.probe(verb, request)?, &format!("line {number} to its own text"));
+                } else {
+                    // A mark writes the annotations field only (K-MARKS): a reviewer
+                    // scoped to fields={annotations} holds this and not `edit`.
+                    let revision = view
+                        .as_ref()
+                        .ok()
+                        .and_then(|view| content_page(view, name).ok())
+                        .and_then(|page| page_entries(page).ok())
+                        .and_then(|entries| {
+                            entries.iter().find(|entry| entry["type"] == "atom" && entry["id"] == atom.as_str())
+                        })
+                        .and_then(|entry| entry["revision"].as_str().map(str::to_owned))
+                        .unwrap_or_default();
+                    let request = invoke(
+                        name,
+                        json!({"type":"content","actions":[{"type":"mark","mark":random_nonce()?,
+                            "target":{"type":"atom","atom":atom},"revision":revision,"kind":{"type":"bold"}}]}),
+                    );
+                    row(verb, &run.probe(verb, request)?, &format!("bold on line {number}"));
                 }
-                let text = view
-                    .as_ref()
-                    .ok()
-                    .and_then(|view| content_page(view, name).ok())
-                    .and_then(|page| page_lines(page).ok())
-                    .and_then(|lines| lines.last().map(|atom| atom_text(atom)))
-                    .unwrap_or_default();
-                let request = invoke(
-                    name,
-                    json!({"type":"document",
-                    "actions":[{"type":"edit","line":lines.to_string(),"text":text}]}),
-                );
-                row(
-                    verb,
-                    &run.probe(verb, request)?,
-                    &format!("line {lines} to its own text"),
-                );
             }
             "link" => {
                 let request = invoke(

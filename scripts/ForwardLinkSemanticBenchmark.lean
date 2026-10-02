@@ -44,7 +44,7 @@ def documentRecord : DocumentRecord :=
   ⟨rootElement, ⟨14⟩, author, ⟨⟨1300⟩⟩⟩
 
 def elementRecord : ElementRecord :=
-  ⟨sourceDocument, none, .container [], author, ⟨⟨1300⟩⟩, none⟩
+  ⟨sourceDocument, none, .container [], author, ⟨⟨1300⟩⟩, ⟨⟨1300⟩⟩, none⟩
 
 def linkIdAt (nonce : Nat) : LinkId := ⟨⟨102 + nonce⟩⟩
 

@@ -71,6 +71,8 @@ mod selected_release;
 #[cfg(unix)]
 mod session_enrollment;
 #[cfg(unix)]
+mod render;
+#[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
@@ -91,6 +93,8 @@ mod shell;
 mod transport;
 #[cfg(unix)]
 mod worker;
+#[cfg(unix)]
+mod web;
 #[cfg(unix)]
 mod workspace;
 #[cfg(unix)]
@@ -137,6 +141,24 @@ pub(crate) fn note_host_decision(decision: HostDecision) {
 
 pub(crate) fn take_host_decision() -> Option<HostDecision> {
     HOST_DECISION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
+/// A refused `doc push`'s diagnosis: which pulled lines changed since the
+/// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
+/// line, above the Host's own decoding of the same refusal.
+static LINE_REFUSAL: Mutex<Option<String>> = Mutex::new(None);
+
+pub(crate) fn note_line_refusal(lines: String) {
+    *LINE_REFUSAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(lines);
+}
+
+pub(crate) fn take_line_refusal() -> Option<String> {
+    LINE_REFUSAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take()
@@ -388,6 +410,9 @@ usage:
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|rotate|kick|list|open|forget --dir WORKSPACE --name ROOM [op options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
+  mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
+  mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
+  mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
   mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]
   mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIGNATURE.bin
@@ -1784,9 +1809,12 @@ pub(crate) fn observation_stale(host: &Path, config: &Path, generation: &Path) -
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
-        "resource" | "policy" | "capability" | "who" | "since" | "at"
+        "resource" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
     ) {
-        return Err("--view must be resource, policy, capability, who, since, or at".to_owned());
+        return Err(
+            "--view must be resource, policy, capability, who, since, at, backlinks, or links"
+                .to_owned(),
+        );
     }
     match presentation {
         None => Ok(format!("view-{view}")),
@@ -2717,6 +2745,8 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
+        #[cfg(unix)]
+        "web" => web::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),

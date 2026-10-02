@@ -70,7 +70,6 @@ deriving instance Countable for AtomKind
 deriving instance Countable for TransclusionMode
 deriving instance Countable for AtomRecord
 deriving instance Countable for RunRecord
-deriving instance Countable for EmbedRef
 deriving instance Countable for ElementBody
 deriving instance Countable for ElementRecord
 deriving instance Countable for AnchorBias
@@ -97,6 +96,8 @@ deriving instance Countable for StoredTransclusionRef
 deriving instance Countable for LinkTarget
 deriving instance Countable for LinkRecord
 deriving instance Countable for TransclusionRecord
+deriving instance Countable for MarkAnchor
+deriving instance Countable for MarkKind
 deriving instance Countable for MarkRecord
 deriving instance Countable for AnnotationAnchor
 deriving instance Countable for AnnotationBody

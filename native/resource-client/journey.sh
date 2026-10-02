@@ -27,7 +27,8 @@
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
 #   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
-#   J12C   PLACE §2.4: a transclusion across rooms (journey.d/j12c.sh)
+#   JDV    J-DOCUVERSE: DEOS §8 J19-J24 through the shell (journey.d/jdocuverse.sh)
+#   J12W   DEOS §2.2 #4: doc pull / doc push @FILE, stale by line (journey.d/j12w.sh)
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
 #   J13    P-LAW: a law refusal names its clause (journey.d/j13.sh -> law-leaf-journey.sh, its own Store)
@@ -162,7 +163,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -193,6 +194,13 @@ TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[KH]="a narrowed read verifies against a salted root: covered entries open, the rest are sealed leaves"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
 TITLE[JMKT]="the sealed market: bids commit, reveals open, the runner settles on revealed bids"
+TITLE[K12I]="link index: backlinks cut to the reader's standing grants; unlink; a transclusion is a backlink"
+TITLE[K12T]="range transclusion: disclosure at transclusion time, snapshot pinned, live follows, a late joiner sees the placeholder"
+TITLE[K12E]="element tree: order is the tree walk, a transclusion at line 3, 100 nested inserts, cycle and stale refused"
+TITLE[K12M]="marks on lines: bold/italic/code/heading/link, pinned by revision, stale after edit, unmark by author or owner"
+TITLE[K12R]="the rendered document: one renderer, golden text, raw atoms, json, outline, html, the reader's placeholder"
+TITLE[K12H]="document history: history / show --at / diff over the element-tree order, coverage at the asked height"
+TITLE[WEB]="mini web: loopback-only, read-only; view-document pages, index backlinks, history / at / diff pages"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole, leave (renounce), kick, a realm"
 TITLE[J14]="Hermes as librarian: summon with a budget, links and a digest, asks answered from history, a no-grant edit, out of budget, topup, a restart, dismiss returns the rest"
@@ -226,7 +234,8 @@ TITLE[M7]="candidate built from portable interfaces reproduces hashes"
 TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refused"
 TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
-TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
+TITLE[JDV]="J-DOCUVERSE: two friends write a paper in the shell; quotes, marks, history, their editor, can, the web, a cold audit"
+TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
 TITLE[JJOB1]="C1 JOB-LAW: every job edge admitted and refused by clause (own Store)"
 TITLE[JJOB]="the job floor: a Nock job posted, run, checked by re-execution, settled (own Store)"
@@ -895,7 +904,8 @@ step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the cl
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
-step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
+step_JDV() { hook jdocuverse "J-DOCUVERSE (DEOS §8 J19-J24): two friends write a paper through mini shell: a range of notes transcluded snapshot and live, a reader without the source's grant sees the placeholder; marks, an annotation, a link and its backlink; doc show equals the golden; history, show --at and diff; pull, push, a stale line refused by line; can paper; mini web's page equals doc show --html byte for byte; a cold audit re-admits every record" shell; }
+step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
@@ -905,7 +915,6 @@ step_KCHR() { hook jchan-relay "CH-RELAY-1 rows: two runs at P1 n=3 with 0 misse
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves only the root and one leaf, restart and audit replay (lane k-narrow-hide)"; }
-step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) tuples through mini shell; nothing sealed is on the Store or in a signed read before the close, a public price is; the right opening installs, a wrong, partial, replayed or repeated opening and every out-of-phase write are refused by name; the runner settles on revealed bids only (lane sealed-market; supersedes KHQ)" shell; }
 step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a leave renounces the member grant and takes the attenuated invite with it (notHolder for a stranger, alreadyRevoked twice, exact retry replays, re-invite is a new grant), a kick still works, a realm refuses fake wells, restart and audit (lanes k-room-3c, k-renounce)" shell; }
 step_KTPL() { hook jtemplates "P-DOC-TEMPLATES rows: room new --template workroom births lab/index (only the founder writes the map), lab/wall (a stream), lab/notes, lab/tasks with the map's links; the same file piped into mini shell by hand births the same shape; a member reads the map and is refused editing it by its clause while writing notes; a bad template stops at its line; social welcomes a member with their own stream; story; restart and audit (lane p-templates)" shell; }
@@ -913,6 +922,14 @@ step_J14() { hook j14 "P-HERMES-ROOM rows: A summons Hermes into lab as libraria
 step_J15() { hook j15 "P-STORY rows: story new tale --from tale births the room and the table; the author edits before the seal and is refused after it (sealed); players join a sealed story only; legal moves admitted; a skip, a rewind, an absent take, a second take, a conditional exit without the key refused naming the table's clause; one player cannot move another's cell; the author can neither move nor re-law a player's cell; the GM narrates, a player is refused; the Host-decoded law on a cell is law.player.json; restart mid-story keeps each place; both reach an end; cold audits (lane p-story)" shell; }
 step_J17() { hook j17 "P-CREDIT rows: B with 0 credit is refused bookRefused; the sponsor credits 1000; pay lab week lands on the till ledger; the concierge delegates member under lab with notAfter = h + period and journals the entry; B writes; restart; past notAfter B is refused outside-validity; B pays again and writes; an underpayment issues nothing; a free room issues on request; balances conserve; cold audit (lane p-credit; needs GRAIN_RUNTIME)" shell; }
 step_JPRIV1() { hook jpriv1 "J-PRIV-1 rows: a private room founded and keyed, a member invited by its encryption key, sealed lines read by members, the operator's signed view and the Store bytes hold no plaintext while a public control line is found, an outsider refused, the keys law refuses a member's wrap, a kick rotates and rewraps (the kicked member keeps the past and opens nothing new), --past, forget, a hosted invitee refused without --i-know, restart and audit (lane priv-rooms)" shell; }
+step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit (lane k-content; its quote rows moved to K12T with k-transclude)"; }
+step_K12I() { hook j12i-links "K-DOC-INDEX rows: backlinks cut to the reader's standing grants, unlink retires a link, a transclusion is a backlink of its source (lane k-doc-index)"; }
+step_K12T() { hook j12t-kernel "K-TRANSCLUDE rows: disclosure checked at transclusion time, a snapshot pinned by revision, a live transclusion follows, a late joiner sees the moved placeholder (lane k-transclude)"; }
+step_K12E() { hook j12e "K-ELEMENT-TREE rows: the order is the tree walk, a transclusion placed at line 3, 100 nested inserts, a cycle and a stale container refused (lane k-element-tree)"; }
+step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinned by revision, stale after an edit, unmark by author or owner, a reviewer under fields={annotations} marks and cannot edit (lane k-marks)"; }
+step_K12R() { hook j12r "P-DOC-RENDER rows: A's doc show equals the golden byte for byte; raw is the atoms; json agrees with the text; outline; html; a reader without the source's grant sees the placeholder and no bytes; a backlink names its line (lane p-doc-render)"; }
+step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
+step_WEB() { hook jweb "WEB rows: loopback-only, read-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -971,6 +988,13 @@ run_step KF J5
 run_step KH J5
 run_step K12C J5
 run_step JMKT J4
+run_step K12I J5
+run_step K12T J5
+run_step K12E J5
+run_step K12M J5
+run_step K12R J5
+run_step K12H J5
+run_step WEB K12C K12T K12M K12H
 run_step KW J5
 run_step K10C J5
 run_step KTPL J5
@@ -991,7 +1015,8 @@ run_step M7 J0
 run_step M8 J0
 run_step BD J2
 run_step J12 J0
-run_step J12C J0
+run_step J12W J0
+run_step JDV J0
 run_step J13 J0
 run_step JJOB1 J0
 run_step JJOB J0

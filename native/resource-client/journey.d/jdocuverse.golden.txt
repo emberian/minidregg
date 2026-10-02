@@ -1,0 +1,11 @@
+  1  # Mini, a kernel for friends
+  2  _Ben: the kernel checks every turn._
+  3  **Every write is a signed turn.**
+     ↳ subject <B> (fresh): cite the DATAMODEL here
+  4  ⟨from notes lines 2..3, live, revised⟩
+     │ notes two, revised
+     │ notes three
+  5  [see the notes](→ notes)
+  6  ⟨from notes lines 2..3, snapshot@<H>⟩
+     │ notes two
+     │ notes three

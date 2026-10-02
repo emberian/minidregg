@@ -53,7 +53,7 @@ def originOutboxMaxProbe : IO Unit := do
     ⟨[.createAtom (outboxAtom domain semantics prepared) (.inlineObject ⟨10⟩)
       (preparedCodec.encode prepared)]⟩
   let .ok progress := ContentResource.run author operation (ContentResource.documentOf 600)
-      ContentResource.initialStore content
+      .closed ContentResource.initialStore content
     | throw (IO.userError "content cell refused maximal prepared R atom")
   IO.println s!"PASS maximal prepared R outbox: atom={((preparedCodec.encode prepared).length)} command={commandBytes.length} intent={intentBytes.length} cell={ContentResource.contentBytes progress.1} frame={FnEvidenceCodec.maxHostFrameBytes}"
 
