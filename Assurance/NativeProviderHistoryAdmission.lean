@@ -94,4 +94,16 @@ def pinRefused (candidate : SigningPlan) : Bool :=
 #guard pinRefused { plan with slots := [⟨4, 0, []⟩, ⟨1, 0, []⟩] }
 #guard pinRefused { plan with finalizedDraft := .invoke [] }
 
+-- Pure bounds/matching fixtures; only checkPrior supplies a receipt drawn
+-- from the actual verifier-minted history used by API17.
+def priorPoint : NativeProviderHistory.PriorChecked := ⟨23, ⟨42⟩⟩
+def priorReceipt : Receipt := ⟨⟨100⟩, ⟨101⟩, 23, ⟨42⟩⟩
+#guard NativeProviderHistory.priorBounds 19 27 priorPoint
+#guard !NativeProviderHistory.priorBounds 0 27 priorPoint
+#guard !NativeProviderHistory.priorBounds 24 27 priorPoint
+#guard !NativeProviderHistory.priorBounds 19 22 priorPoint
+#guard NativeProviderHistory.priorReceiptMatches priorPoint priorReceipt
+#guard !NativeProviderHistory.priorReceiptMatches priorPoint { priorReceipt with worldRoot := ⟨43⟩ }
+#guard !NativeProviderHistory.priorReceiptMatches priorPoint { priorReceipt with acceptedCount := 24 }
+
 end Minidregg.Assurance.NativeProviderHistoryAdmission

@@ -5109,12 +5109,30 @@ def runProviderContinuitySession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (providerIds : List Nat) (payload : List UInt8) :
     IO (UInt8 × List UInt8) := do
-  -- Legacy API17 request bytes remain compatible. The extended form names
-  -- one exact retained fence, never a wildcard permission for provider writes.
+  -- Legacy/v2 request bytes remain compatible. v3 additionally proves the
+  -- original observation root at its historical index, never just a counter.
   let prefix := "DREGG/PROVIDER-CONTINUITY/v2".toUTF8.toList ++ [0]
-  let (reservePair, fencePair) ← if payload.take prefix.length == prefix then
-      splitPair (payload.drop prefix.length)
-    else pure (payload, [])
+  let prefixV3 := "DREGG/PROVIDER-CONTINUITY/v3".toUTF8.toList ++ [0]
+  let (body, priorChecked) ← if payload.take prefixV3.length == prefixV3 then do
+      let (body, priorBytes) ← splitPair (payload.drop prefixV3.length)
+      unless !priorBytes.isEmpty && priorBytes.length ≤ 1024 do
+        throw (RequestRefusal.malformed "v3 continuity needs a bounded prior checked point")
+      let (countBytes, rootBytes) ← splitPair priorBytes
+      let some countText := String.fromUTF8? countBytes.toByteArray
+        | throw (RequestRefusal.malformed "prior checked count is not UTF-8")
+      let some rootText := String.fromUTF8? rootBytes.toByteArray
+        | throw (RequestRefusal.malformed "prior checked root is not UTF-8")
+      let count ← IO.ofExcept (exactDecimal "prior checked count" countText)
+      let root ← IO.ofExcept (exactDecimal "prior checked root" rootText)
+      pure (some body, some ({ acceptedCount := count, worldRoot := ⟨root⟩ } :
+        NativeProviderHistory.PriorChecked))
+    else if payload.take prefix.length == prefix then
+      pure (some (payload.drop prefix.length), none)
+    else
+      pure (none, none)
+  let (reservePair, fencePair) ← match body with
+    | none => pure (payload, [])
+    | some bytes => splitPair bytes
   let (reserveCall, outcomeBytes) ← splitPair reservePair
   unless !reserveCall.isEmpty && !outcomeBytes.isEmpty &&
       outcomeBytes.length ≤ 1024 do
@@ -5136,11 +5154,14 @@ def runProviderContinuitySession (config : NativeHost.Config)
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
   let checkedWorldRoot := (current.target.worldRoot).value
   let checkedCount := current.target.image.accepted.length
-  let verdict : Except String Unit := match allowedFence with
+  let continuity : Except String Unit := match allowedFence with
     | none => (NativeReserveContinuity.check current anchor reserveCall providerCell).map (fun _ => ())
     | some (fenceCall, fenceReceipt) =>
         (NativeProviderHistory.check current anchor fenceReceipt reserveCall fenceCall providerCell).map
           (fun _ => ())
+  let verdict := continuity.bind fun _ => match priorChecked with
+    | none => Except.ok ()
+    | some point => (NativeProviderHistory.checkPrior current anchor.acceptedCount point).map (fun _ => ())
   let (continuous, reason) := match verdict with
     | .ok _ => (true, "")
     | .error detail => (false, detail)
@@ -5153,6 +5174,11 @@ def runProviderContinuitySession (config : NativeHost.Config)
      ("allowedFence", match allowedFence with
        | none => Lean.Json.null
        | some (_, receipt) => evidenceReceiptJson receipt),
+     ("priorChecked", match priorChecked with
+       | none => Lean.Json.null
+       | some point => Lean.Json.mkObj
+           [("acceptedCount", toJson (toString point.acceptedCount)),
+            ("worldRoot", toJson (toString point.worldRoot.value))]),
      ("checkedWorldRoot", toJson (toString checkedWorldRoot)),
      ("checkedAcceptedCount", toJson (toString checkedCount)),
      ("reason", toJson reason)]).compress.toUTF8.toList)

@@ -19,6 +19,49 @@ open Minidregg.Kernel.NativeReserveContinuity
 
 set_option autoImplicit false
 
+/-- A retained API17 observation's historical position and world root. The
+root binds the deployed world's seed/log/cells under its existing digest
+binding premise; a counter alone is deliberately insufficient. -/
+structure PriorChecked where
+  acceptedCount : Nat
+  worldRoot : Digest
+  deriving DecidableEq, Repr
+
+def priorBounds (reserveCount currentCount : Nat) (point : PriorChecked) : Bool :=
+  decide (0 < reserveCount ∧ reserveCount ≤ point.acceptedCount ∧
+    point.acceptedCount ≤ currentCount)
+
+def priorReceiptMatches (point : PriorChecked) (receipt : NativeHostCodec.Receipt) : Bool :=
+  decide (receipt.acceptedCount = point.acceptedCount ∧ receipt.worldRoot = point.worldRoot)
+
+/-- This receipt comes from the semantic walk at precisely the old observation
+index. Its world root is recomputed there; it is not a client receipt decoder. -/
+structure PriorInPrefix {config : Config} (session : NativeHostSession.Walked config)
+    (reserveCount : Nat) (point : PriorChecked) where
+  bounds : priorBounds reserveCount session.target.image.accepted.length point = true
+  receipt : NativeHostCodec.Receipt
+  receiptAt : session.verified.receipts[point.acceptedCount - 1]? = some receipt
+  exactPoint : priorReceiptMatches point receipt = true
+
+theorem PriorInPrefix.exact_root {config : Config}
+    {session : NativeHostSession.Walked config} {reserveCount : Nat} {point : PriorChecked}
+    (checked : PriorInPrefix session reserveCount point) :
+    checked.receipt.acceptedCount = point.acceptedCount ∧
+    checked.receipt.worldRoot = point.worldRoot := by
+  simpa only [priorReceiptMatches, decide_eq_true_eq] using checked.exactPoint
+
+def checkPrior {config : Config} (session : NativeHostSession.Walked config)
+    (reserveCount : Nat) (point : PriorChecked) :
+    Except String (PriorInPrefix session reserveCount point) := do
+  if bounds : priorBounds reserveCount session.target.image.accepted.length point = true then
+    match receiptAt : session.verified.receipts[point.acceptedCount - 1]? with
+    | none => .error "prior checked prefix receipt is absent from verified history"
+    | some receipt =>
+        if exactPoint : priorReceiptMatches point receipt = true then
+          return ⟨bounds, receipt, receiptAt, exactPoint⟩
+        else .error "prior checked root differs from verified historical prefix"
+  else .error "prior checked count is outside reserve and current prefix bounds"
+
 /-- Exact evidence for one already admitted provider write. -/
 structure ExactWrite {config : Config} (session : NativeHostSession.Walked config)
     (receipt : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId) where
