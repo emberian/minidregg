@@ -159,6 +159,35 @@ pub(crate) fn resolve(root: &Path, workspace: &Value, name: &str) -> Result<Valu
     existing_authority(root, &opened)
 }
 
+/// Resolve a listing with one immutable discovery snapshot per room chain.
+/// Repeated aliases reuse only that chain's admitted reads. Independent rooms
+/// may observe different heads; no retained read survives this command.
+pub(crate) fn resolve_many(root: &Path, workspace: &Value, names: &[String]) -> Result<Vec<Value>> {
+    resolve_many_with(names, |name| super::local_reference(root, name),
+        |reference, field| discovery_read(root, workspace, reference, field))?
+        .into_iter().map(|opened| existing_authority(root, &opened)).collect()
+}
+
+fn resolve_many_with(
+    names: &[String],
+    mut local: impl FnMut(&str) -> Result<Value>,
+    mut read: impl FnMut(&Value, &str) -> Result<(Value, Value)>,
+) -> Result<Vec<Value>> {
+    let mut reads = BTreeMap::<(String, String, String, String, String), (Value, Value)>::new();
+    names.iter().map(|name| {
+        let chain = name.rsplit_once('/').map(|(room, _)| room).unwrap_or(name);
+        resolve_with(name, &mut local, |reference, field| {
+            let key = (chain.to_owned(), member(reference, "kind")?.to_owned(),
+                member(reference, "target")?.to_owned(),
+                member(reference, "observeCapability")?.to_owned(), field.to_owned());
+            if let Some(retained) = reads.get(&key) { return Ok(retained.clone()); }
+            let result = read(reference, field)?;
+            reads.insert(key, result.clone());
+            Ok(result)
+        })
+    }).collect()
+}
+
 /// Signed entries may be narrowed. Only an authenticated capability scope
 /// that includes the discovery field can establish absence in that field.
 fn visible_field(capability: &Value, reference: &Value, field: &str) -> Result<()> {
@@ -170,13 +199,31 @@ fn visible_field(capability: &Value, reference: &Value, field: &str) -> Result<(
     {
         return Err("shared-name capability identity differs from signed query".into());
     }
-    if let Some(fields) = head.get("fields") {
+    if let Some(fields) = head.get("fields").filter(|value| !value.is_null()) {
         let fields = fields.as_array().ok_or("capability fields are malformed")?;
         if !fields.iter().any(|value| value.as_str() == Some(field)) {
             return Err(format!("shared-name discovery does not cover {field}; a narrowed view cannot prove absence"));
         }
     }
     Ok(())
+}
+
+/// One native result binds coverage and narrowed payload to the same admitted
+/// observation. Missing metadata refuses rather than implying an unrestricted grant.
+fn scoped_resource(scoped: &Value, reference: &Value, field: &str) -> Result<Value> {
+    if scoped.get("type").and_then(Value::as_str) != Some("resource-scope") {
+        return Err("expected a source-owned resource scope view".into());
+    }
+    let capability = scoped.get("capability").ok_or("resource scope lacks its invoked capability")?;
+    if capability.pointer("/head/fields").is_none() {
+        return Err("resource scope lacks explicit field coverage".into());
+    }
+    visible_field(capability, reference, field)?;
+    let view = scoped.get("resource").ok_or("resource scope lacks its narrowed resource")?;
+    if view.get("type").and_then(Value::as_str) != Some("resource") {
+        return Err("resource scope lacks a canonical narrowed resource view".into());
+    }
+    Ok(view.clone())
 }
 
 fn discovery_read(
@@ -186,11 +233,8 @@ fn discovery_read(
     field: &str,
 ) -> Result<(Value, Value)> {
     let reference = existing_authority(root, reference)?;
-    let (capability, cap_at, _) = super::signed_view(root, workspace, &reference, "capability")?;
-    visible_field(&capability, &reference, field)?;
-    let (view, at, _) = super::signed_view(root, workspace, &reference, "resource")?;
-    same_snapshot(&cap_at, &at)?;
-    Ok((view, at))
+    let (scoped, at, _) = super::signed_view(root, workspace, &reference, "resource-scope")?;
+    Ok((scoped_resource(&scoped, &reference, field)?, at))
 }
 
 /// A participant may hold a direct grant in addition to a room grant. Reuse
@@ -556,6 +600,23 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn same_snapshot_scope_requires_exact_grant_and_explicit_coverage() {
+        let reference = room();
+        let mut scoped = json!({"type":"resource-scope",
+            "capability":{"kind":"object","head":{"id":"7","fields":["1010"]}},
+            "resource":{"type":"resource","cell":{"entries":[]}}});
+        assert!(scoped_resource(&scoped, &reference, INDEX_FIELD).is_ok());
+        assert!(scoped_resource(&scoped, &reference, "annotations").is_err());
+        scoped["capability"]["head"]["fields"] = Value::Null;
+        assert!(scoped_resource(&scoped, &reference, "annotations").is_ok());
+        scoped["capability"]["head"]["id"] = json!("8");
+        assert!(scoped_resource(&scoped, &reference, INDEX_FIELD).is_err());
+        scoped["capability"]["head"]["id"] = json!("7");
+        scoped["capability"]["head"].as_object_mut().unwrap().remove("fields");
+        assert!(scoped_resource(&scoped, &reference, INDEX_FIELD).is_err());
+    }
+
+    #[test]
     fn narrowed_signed_view_cannot_prove_absence() {
         let reference = room();
         let mut cap = json!({"kind":"object","head":{"id":"7","fields":["2"]}});
@@ -620,6 +681,53 @@ mod tests {
         bad.as_object_mut().unwrap().remove("tombstonedAt");
         assert!(bindings(&view(vec![bad])).is_err());
     }
+    #[test]
+    fn independent_room_chains_accept_different_heads_without_cross_reusing_index() {
+        let names = ["lab/board", "other/board", "lab/notes", "other/notes"].map(str::to_owned);
+        let mut reads = 0;
+        let opened = resolve_many_with(&names, |name| {
+            let mut value = room();
+            if name == "other" { value["target"] = json!("20"); }
+            Ok(value)
+        }, |reference, _| {
+            reads += 1;
+            // The rooms deliberately share an index ID and grant: its cached
+            // head from lab must not be paired with other's later room head.
+            Ok((if reference["target"] == "10" || reference["target"] == "20" {
+                view(vec![json!({"key":{"field":"1010"},"value":"11"})])
+            } else { view(vec![link("board", "1"), link("notes", "2")]) },
+                at(if reads <= 2 { "99" } else { "100" })))
+        }).unwrap();
+        assert_eq!(reads, 4);
+        assert_eq!(opened[0]["sharedName"]["worldRoot"], "99");
+        assert_eq!(opened[1]["sharedName"]["worldRoot"], "100");
+        assert_eq!(opened[2]["sharedName"]["worldRoot"], "99");
+        assert_eq!(opened[3]["sharedName"]["worldRoot"], "100");
+    }
+
+    #[test]
+    fn listing_reuses_one_snapshot_and_refuses_moved_or_revoked_discovery() {
+        let names = ["lab/board", "lab/notes", "lab/index"].map(str::to_owned);
+        let mut reads = 0;
+        let opened = resolve_many_with(&names, |_| Ok(room()), |reference, _| {
+            reads += 1;
+            Ok((if reference["target"] == "10" {
+                view(vec![json!({"key":{"field":"1010"},"value":"11"})])
+            } else { view(vec![link("board", "1"), link("notes", "2")]) }, at("99")))
+        }).unwrap();
+        assert_eq!(reads, 2);
+        assert_eq!(opened.len(), 3);
+        assert!(opened.iter().all(|value| value["sharedName"]["worldRoot"] == "99"));
+        assert!(resolve_many_with(&names, |_| Ok(room()), |_, _| Err("revoked".into())).is_err());
+        let mut reads = 0;
+        assert!(resolve_many_with(&names, |_| Ok(room()), |reference, _| {
+            reads += 1;
+            Ok((if reference["target"] == "10" {
+                view(vec![json!({"key":{"field":"1010"},"value":"11"})])
+            } else { view(vec![link("board", "1")]) }, at(if reads == 1 { "99" } else { "100" })))
+        }).is_err());
+    }
+
     #[test]
     fn shared_entry_wins_without_local_child_and_keeps_target_authority() {
         let mut reads = 0;

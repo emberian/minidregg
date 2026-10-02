@@ -910,7 +910,7 @@ fn private_room_name(root: &Path, target: &str) -> Result<String> {
 }
 
 fn list(root: &Path) -> Result<()> {
-    let mut values = Vec::new();
+    let mut names = Vec::new();
     for entry in fs::read_dir(root.join("refs")).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let file = entry.file_name();
@@ -920,8 +920,9 @@ fn list(root: &Path) -> Result<()> {
         let Some(stem) = file.strip_suffix(".json") else {
             return Err("unknown file in references".into());
         };
-        values.push(reference(root, &ref_name_of_file(stem))?);
+        names.push(ref_name_of_file(stem));
     }
+    let mut values = shared_names::resolve_many(root, &load(root)?, &names)?;
     values.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     println!(
         "{}",

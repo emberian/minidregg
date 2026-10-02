@@ -713,6 +713,24 @@ def resourceViewStream : StreamCodec ResourceView :=
     (StreamCodec.product bytesStream (StreamCodec.product balanceStream
       (StreamCodec.product openingStream (StreamCodec.option RunComputeView.computeQuoteStream))))
 
+/-- Field coverage is projected from the very grant that admitted this resource
+view. No second snapshot or authority lookup is accepted from the client. -/
+abbrev ResourceScopeView := ResourceKind × Nat × Option (Finset CellField) × ResourceView
+
+def resourceScopeViewStream : StreamCodec ResourceScopeView :=
+  StreamCodec.product ResourceBirthCodec.resourceKindStream
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.option CredentialAuthorityEntryCodec.fieldSetStream)
+        resourceViewStream))
+
+def resourceScopeViewCodec : IndexedProgram.LawfulCodec ResourceScopeView :=
+  NativeHostCodec.framed "DREGG/NATIVE-HOST/RESOURCE-SCOPE-VIEW/v1".toUTF8.toList
+    resourceScopeViewStream
+
+theorem resourceScopeView_roundtrip (view : ResourceScopeView) :
+    resourceScopeViewCodec.decode (resourceScopeViewCodec.encode view) = some view :=
+  resourceScopeViewCodec.decode_encode view
+
 /-- Version 6 retains salted openings and appends the authenticated reader's
 optional compute quote. Version 5 has no quote and refuses at this frame gate. -/
 def resourceViewFrame : List UInt8 := WorldExecutionContract.resourceViewFrame
@@ -1554,6 +1572,13 @@ def AuthorizedIntent.queryResult
           checked.selected.packed checked.selected.accountBalances
           (if query.kind = .account then
             RunComputeView.load deployment durable.snapshot intent.subject else none)))
+    | .resourceScope => do
+        let some stored := reader | throw .malformed
+        pure (resourceScopeViewCodec.encode (grant.kind, grant.capability.value,
+          stored.head.scope.fields, resourceView stored.head.scope.fields
+            checked.selected.packed checked.selected.accountBalances
+            (if query.kind = .account then
+              RunComputeView.load deployment durable.snapshot intent.subject else none)))
     | .policy => do
         let address := state.policyAddress ⟨grant.target⟩ (state.policyRevision ⟨grant.target⟩)
         let some source := CanonicalCellRegistry.loadPolicySource deployment.domain
@@ -1615,6 +1640,31 @@ def AuthorizedIntent.queryResult
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_current_eq_read
 /-- info: 'Minidregg.Kernel.NativeObservationController.presence_views_share_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.presence_views_share_footprint
+
+/-- The scope and narrowed payload come from the exact selected grant in the
+admitted current observation context, rather than two separately read heads. -/
+theorem AuthorizedIntent.queryResult_resourceScope
+    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    (query : Query) (purpose : intent.purpose = .query query)
+    (view : query.view = .resourceScope) (present : 0 < intent.grants.length)
+    (stored : CredentialAuthorityState.StoredCapability (intent.grants.get ⟨0, present⟩).kind)
+    (read : CredentialAuthorityState.readCapability context.authority.snapshot.cell
+      (intent.grants.get ⟨0, present⟩).kind
+      (intent.grants.get ⟨0, present⟩).capability = some stored) :
+    accepted.queryResult = .ok (resourceScopeViewCodec.encode
+      ((intent.grants.get ⟨0, present⟩).kind,
+       (intent.grants.get ⟨0, present⟩).capability.value,
+       stored.head.scope.fields,
+       resourceView stored.head.scope.fields
+         (accepted.grants ⟨0, present⟩).selected.packed
+         (accepted.grants ⟨0, present⟩).selected.accountBalances
+         (if query.kind = .account then
+           RunComputeView.load deployment durable.snapshot intent.subject else none))) := by
+  unfold AuthorizedIntent.queryResult
+  simp only [purpose, view, dif_pos present, read]
+  rfl
 
 /-- The `at` view of a signed query is `atCovered` over the query's first grant. -/
 theorem AuthorizedIntent.queryResult_at
@@ -1862,6 +1912,8 @@ theorem read_judged_at_named_clock {context : Context deployment durable}
   rw [same, now, slot]
   exact ⟨rfl, rfl⟩
 
+#assert_axioms resourceScopeView_roundtrip
+#assert_axioms AuthorizedIntent.queryResult_resourceScope
 #assert_axioms challenge_names_clock
 #assert_axioms read_judged_at_named_clock
 

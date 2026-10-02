@@ -1298,6 +1298,7 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
           purposeJson
         let view ← match ← string (at_ ++ ".view") (← field at_ "view" p), hasHeight, windowed with
           | "resource", false, false => pure QueryView.resource
+          | "resource-scope", false, false => pure .resourceScope
           | "policy", false, false => pure .policy
           | "capability", false, false => pure .capability
           | "who", false, false => pure .who
@@ -4359,7 +4360,7 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
        ("kind", match q.kind with | .object => "object" | .account => "account" | .program => "program"),
        ("target", decimal q.target),
        ("view", match q.view with
-         | .resource => "resource" | .policy => "policy" | .capability => "capability"
+         | .resource => "resource" | .resourceScope => "resource-scope" | .policy => "policy" | .capability => "capability"
          | .who => "who" | .since _ => "since" | .atHeight _ => "at"
          | .tail _ _ => "tail" | .backlinks => "backlinks" | .links => "links")] : List (String × Lean.Json)) ++
        (match q.view with
@@ -5389,6 +5390,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-resource" => do
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
+  | "view-resource-scope" => do
+      let (kind, capability, fields, resource) ← decoded "view-resource-scope"
+        NativeObservationController.resourceScopeViewCodec bytes
+      pure <| .mkObj [("type", "resource-scope"), ("resource", ← resourceJson resource),
+        ("capability", .mkObj [("kind", match kind with | .object => "object" | .account => "account" | .program => "program"),
+          ("head", .mkObj [("id", decimal capability),
+            ("fields", (fields.map fun values => .arr <| values.toList.toArray.map (fun field => .str (CredentialAuthorityEntryCodec.cellFieldName field))).getD .null)])])]
   | "view-tail" => do
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),

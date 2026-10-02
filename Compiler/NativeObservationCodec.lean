@@ -24,6 +24,8 @@ structure GrantRef where
 
 inductive QueryView where
   | resource
+  /-- The same admitted resource read, with its invoked grant field scope. -/
+  | resourceScope
   | policy
   /-- Only the exact observation grant used to authorize this query. -/
   | capability
@@ -97,35 +99,71 @@ def grantStream : StreamCodec GrantRef :=
     (fun grant => (grant.kind, grant.target, grant.capability))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩) (by intro grant; cases grant; rfl)
 
+/-- Add a third tag without changing the bytes of any existing observation.
+The existing branches retain tags 0/1; the new branch uses tag 2. -/
+private def queryViewTags {α β : Type} (left : StreamCodec α) (right : StreamCodec β) :
+    StreamCodec (Sum (Sum α β) Unit) where
+  encode
+    | .inl (.inl value) => 0 :: left.encode value
+    | .inl (.inr value) => 1 :: right.encode value
+    | .inr () => [2]
+  decodePrefix
+    | 0 :: bytes => do
+        let (value, suffix) ← left.decodePrefix bytes
+        some (.inl (.inl value), suffix)
+    | 1 :: bytes => do
+        let (value, suffix) ← right.decodePrefix bytes
+        some (.inl (.inr value), suffix)
+    | 2 :: suffix => some (.inr (), suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value with
+    | inl value =>
+        cases value with
+        | inl value => simp [left.decodePrefix_encode]
+        | inr value => simp [right.decodePrefix_encode]
+    | inr value => cases value; rfl
+
 /-- The view tag: the six fixed views as three booleans, then `since`, `at`
 (each with its height) and a stream `tail` window (start, count). -/
 def queryViewStream : StreamCodec QueryView :=
   StreamCodec.xmap
-    (StreamCodec.sum
+    (queryViewTags
       (StreamCodec.sum (StreamCodec.sum StreamCodec.bool StreamCodec.bool) StreamCodec.bool)
       (StreamCodec.sum StreamCodec.nat
         (StreamCodec.sum StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))
     (fun view => match view with
-      | .resource => .inl (.inl (.inl false))
-      | .policy => .inl (.inl (.inl true))
-      | .capability => .inl (.inl (.inr false))
-      | .who => .inl (.inl (.inr true))
-      | .backlinks => .inl (.inr false)
-      | .links => .inl (.inr true)
-      | .since height => .inr (.inl height)
-      | .atHeight height => .inr (.inr (.inl height))
-      | .tail start count => .inr (.inr (.inr (start, count))))
+      | .resourceScope => .inr ()
+      | .resource => .inl (.inl (.inl (.inl false)))
+      | .policy => .inl (.inl (.inl (.inl true)))
+      | .capability => .inl (.inl (.inl (.inr false)))
+      | .who => .inl (.inl (.inl (.inr true)))
+      | .backlinks => .inl (.inl (.inr false))
+      | .links => .inl (.inl (.inr true))
+      | .since height => .inl (.inr (.inl height))
+      | .atHeight height => .inl (.inr (.inr (.inl height)))
+      | .tail start count => .inl (.inr (.inr (.inr (start, count)))))
     (fun wire => match wire with
-      | .inl (.inl (.inl false)) => .resource
-      | .inl (.inl (.inl true)) => .policy
-      | .inl (.inl (.inr false)) => .capability
-      | .inl (.inl (.inr true)) => .who
-      | .inl (.inr false) => .backlinks
-      | .inl (.inr true) => .links
-      | .inr (.inl height) => .since height
-      | .inr (.inr (.inl height)) => .atHeight height
-      | .inr (.inr (.inr (start, count))) => .tail start count)
+      | .inl (.inl (.inl (.inl false))) => .resource
+      | .inl (.inl (.inl (.inl true))) => .policy
+      | .inl (.inl (.inl (.inr false))) => .capability
+      | .inl (.inl (.inl (.inr true))) => .who
+      | .inl (.inl (.inr false)) => .backlinks
+      | .inl (.inl (.inr true)) => .links
+      | .inl (.inr (.inl height)) => .since height
+      | .inl (.inr (.inr (.inl height))) => .atHeight height
+      | .inl (.inr (.inr (.inr (start, count)))) => .tail start count
+      | .inr () => .resourceScope)
     (by intro view; cases view <;> rfl)
+
+/-- Existing resource/capability observation bytes stay usable for retained
+birth preparation and historical exact recovery. -/
+theorem queryView_resource_bytes : queryViewStream.encode .resource = [0, 0, 0, 0] := rfl
+theorem queryView_capability_bytes : queryViewStream.encode .capability = [0, 0, 1, 0] := rfl
+theorem queryView_scope_bytes : queryViewStream.encode .resourceScope = [2] := rfl
+theorem queryView_scope_roundtrip (suffix : List UInt8) :
+    queryViewStream.decodePrefix ([2] ++ suffix) = some (.resourceScope, suffix) := rfl
 
 def queryStream : StreamCodec Query :=
   StreamCodec.xmap (StreamCodec.product ResourceBirthCodec.resourceKindStream
