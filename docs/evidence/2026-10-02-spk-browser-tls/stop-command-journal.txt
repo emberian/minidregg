@@ -1,0 +1,7 @@
+Oct 02 01:34:06 persvati systemd[1]: Started mini-spk-svc-stop1.service - [systemd-run] /bin/sh -c "/var/lib/minidregg/grains/spk-service-bin/spk-host grain stop /var/lib/minidregg/grains/spk-service-root/5f59b1449ee347d6/host/grain-host.json 4501 > /var/lib/minidregg/grains/spk-service-run/stop1.json 2>/var/lib/minidregg/grains/spk-service-run/stop1.err".
+Oct 02 01:41:41 persvati systemd[1]: mini-spk-svc-stop1.service: Deactivated successfully.
+Oct 02 01:41:41 persvati systemd[1]: mini-spk-svc-stop1.service: Consumed 5min 9.363s CPU time, 517.4M memory peak.
+Oct 02 01:41:41 persvati systemd[1]: mini-spk-svc-stop1.service: Failed to open /run/systemd/transient/mini-spk-svc-stop1.service: No such file or directory
+Oct 02 01:41:41 persvati systemd[1]: mini-spk-svc-stop1.service: Failed to open /run/systemd/transient/mini-spk-svc-stop1.service: No such file or directory
+Oct 02 01:41:41 persvati systemd[1]: mini-spk-svc-stop1.service: Failed to open /run/systemd/transient/mini-spk-svc-stop1.service: No such file or directory
+Oct 02 01:41:59 persvati systemd[1]: mini-spk-svc-stop1.service: Failed to open /run/systemd/transient/mini-spk-svc-stop1.service: No such file or directory
