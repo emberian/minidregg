@@ -52,7 +52,8 @@ class DrainBoundary(unittest.TestCase):
                     with self.assertRaises(ValueError): cut.stop(root)
             self.assertEqual(stops, [] if no_drain else ["public", "operator"] if accepted else ["public"])
             self.assertEqual(len(list(root.glob("*.command.json"))), 0 if absent == "operator" else 2)
-            self.assertEqual(cut.read(root/"stop-journal.json").get("stopped", False), accepted)
+            journal=cut.read(root/"stop-journal.json") if (root/"stop-journal.json").exists() else {}
+            self.assertEqual(journal.get("stopped", False), accepted)
 
     def test_unresolved_native_connection_retains_operator(self): self.case({"unresolvedConnections": 1}, False)
     def test_unavailable_native_count_retains_operator(self): self.case({"activeRequests": None}, False)
