@@ -25,6 +25,8 @@ open Minidregg.Kernel.PayClaimCommand (Command DecodedIngress Checked marker dec
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
+open Minidregg.Theory.CredentialAuthorityEffects
+open Minidregg.Theory.PolicyInstall
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.Store (Patch)
 open Minidregg.Theory.TypedAuthorization
@@ -246,7 +248,7 @@ def step (prepared : Prepared deployment profile ambient durable ingress checked
 
 /-- The witness is only available for this private, checked source preparation.
 It retains the actual native-checked decision equality, not a caller boolean. -/
-structure SourceWitness (prepared : Prepared deployment profile ambient durable ingress checked) where
+structure SourceWitness (prepared : Prepared deployment profile ambient durable ingress checked) : Type where
   private mk ::
   admitted : PayClaimDecision.decide prepared.pay.cell.logical prepared.authority.snapshot
     prepared.clock.clock (pricingAt deployment profile ambient prepared.expectedSeed

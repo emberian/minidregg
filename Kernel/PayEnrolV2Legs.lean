@@ -45,6 +45,7 @@ abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
+abbrev Ambient := PayEnrolReceiver.Ambient
 abbrev BookCell (deployment : Deployment) (directory : Directory Nat Registry) :=
   PayEnrolReceiver.BookCell deployment directory
 abbrev FactoryCell (deployment : Deployment) (directory : Directory Nat Registry) :=
@@ -296,7 +297,7 @@ def EnrolLegs.authorityPost {directory : LoadedDirectory durable}
 
 structure RenewLegs (directory : LoadedDirectory durable)
     (pay : PayCellDomain.Loaded deployment durable.snapshot)
-    (book : BookCell deployment directory.directory) (tariff : Tariff) (input : RenewInput) where
+    (book : BookCell deployment directory.directory) (tariff : Tariff) (input : RenewInput) : Type where
   private mk ::
   economics : EconomicReady pay.cell.logical tariff input.economic
   mode : input.economic.consumption.terms.mode = .renew

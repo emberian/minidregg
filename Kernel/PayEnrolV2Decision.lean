@@ -504,30 +504,30 @@ theorem classifyTerms_success_quote (store : PayStore) (pricing : Pricing) (tari
     (accepted : (classifyTerms store pricing tariff tip o memo custody float).quote = some quote) :
     ∃ birth, PayEnrolClaim.quoteFixed o.amount tariff birth memo.unsigned.weeks
       memo.unsigned.minimumStarterCredit = .ok quote := by
-  unfold classifyTerms at accepted
-  dsimp only at accepted
-  split at accepted
-  · cases accepted
-  split at accepted
-  · cases accepted
-  split at accepted
-  · cases accepted
-  split at accepted
-  · cases accepted
-  split at accepted
-  · cases accepted
-  split at accepted
-  · cases accepted
-  next actual quoted =>
+  -- Resolve the actual enrollment once before splitting gates. Otherwise `split`
+  -- also branches on the let-bound mode/birth tests and loses the quote equation.
+  cases record : enrolmentAt store memo.unsigned.enrollmentIdentityKey <;>
+    simp only [classifyTerms, record, Option.isSome, Bool.false_eq_true,
+      ite_false, ite_true] at accepted
+  all_goals
     split at accepted
     · cases accepted
     split at accepted
-    · simp only [Decision.quote, enrolPlan, Option.some.injEq] at accepted
-      subst quote
-      exact ⟨_, quoted⟩
-    · simp only [Decision.quote, renewPlan, Option.some.injEq] at accepted
-      subst quote
-      exact ⟨_, quoted⟩
+    · cases accepted
+    split at accepted
+    · cases accepted
+    split at accepted
+    · cases accepted
+    split at accepted
+    · cases accepted
+    split at accepted
+    · cases accepted
+    rename_i quotedQuote quoted
+    split at accepted
+    · cases accepted
+    simp only [Decision.quote, enrolPlan, renewPlan, Option.some.injEq] at accepted
+    subst quote
+    exact ⟨_, quoted⟩
 
 theorem classifyTerms_success_partition (store : PayStore) (pricing : Pricing) (tariff : Tariff)
     (tip : ChainTip) (o : Observation) (memo : Memo) (custody : Custody) (float : Nat)

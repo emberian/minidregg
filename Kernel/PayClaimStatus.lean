@@ -397,7 +397,8 @@ theorem encoded_response_bound (response : Response) (bytes : List UInt8)
 
 theorem malformed_key_refuses (store : PayStore) (clock : ClockCell.Clock) (request : Request)
     (malformed : ¬request.valid) : project store clock request = .error .malformedRequest := by
-  simp [project, malformed, Except.bind, Except.pure, throw, throwThe, MonadExceptOf.throw]
+  simp only [project, malformed, if_true]
+  rfl
 
 theorem exact_expiry_boundary (hour : Nat) (record : EnrolRecord) (expired : record.leaseUntil ≤ hour) :
     leaseState hour (some record) = .expired := by

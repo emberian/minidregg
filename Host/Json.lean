@@ -4940,7 +4940,7 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
           | some opening =>
               let source := (sources.find? (fun pair => pair.1 = opening.source)).map Prod.snd
               .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson record.reference.mode),
-                ("opening", rootOpeningJson opening),
+                ("opening", openingJson opening),
                 ("render", transclusionViewJson
                   (ContentResource.renderTransclusion source opening record.reference.mode))]
     | _ => none

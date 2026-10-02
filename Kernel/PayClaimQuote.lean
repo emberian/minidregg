@@ -85,7 +85,9 @@ def Request.valid : Request → Prop
   | .inr claim => claim.claimId.length = 102 ∧ claim.terms.valid ∧ claim.nonce < 2 ^ 64
 instance (request : Request) : Decidable request.valid := by
   cases request with
-  | inl purchase => unfold Request.valid; cases purchase.freshNext <;> infer_instance
+  | inl purchase =>
+      simp only [Request.valid]
+      cases next : purchase.freshNext <;> simp only [next] <;> infer_instance
   | inr claim => unfold Request.valid; infer_instance
 
 def requestFrame : List UInt8 := PayReceivingContract.quoteRequestFrame
@@ -249,12 +251,12 @@ def existingCustody (pay : PayStore) (authority : Authority) (identity : List UI
     Except Reject Custody := do
   let current ← (PayClaimDecision.resolveOwner pay authority identity).mapError Reject.owner
   match current with
-  | .pending owner => return ⟨CurrentOwner.ofPending owner, none⟩
+  | .pending owner => return ⟨PayEnrolV2Decision.CurrentOwner.ofPending owner, none⟩
   | .admitted _ before =>
     match currentSigningKey authority.logical ⟨PayEnrolMemo.subjectOf identity⟩ with
     | none => throw .invalidOwner
     | some key =>
-      let owner := CurrentOwner.ofRegistry identity key
+      let owner := PayEnrolV2Decision.CurrentOwner.ofRegistry identity key
       if ¬owner.valid then throw .invalidOwner
       return ⟨owner, some before⟩
 
@@ -430,7 +432,8 @@ theorem encoded_response_bound (value : Response) (bytes : List UInt8)
 
 theorem oversized_request_refuses (bytes : List UInt8) (large : maxRequestBytes < bytes.length) :
     decodeRequest bytes = .error .requestTooLarge := by
-  simp [decodeRequest, large]
+  simp only [decodeRequest, large, if_true]
+  rfl
 
 theorem no_reservation (value : Response) : value.priceReserved = false := rfl
 

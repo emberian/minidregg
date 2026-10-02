@@ -100,10 +100,10 @@ private def terms (obj : Object) : Result PayClaimQuote.Terms := do
 def statusRequest (json : Json) : Result PayClaimStatus.Request := do
   let obj ← object ["identityKey"] ["signature", "originalRecipient"] json
   let identity ← bytes "identityKey" 32 (← field obj "identityKey")
-  let locator ← match obj.get? "signature", obj.get? "originalRecipient" with
+  let locator : Option PayClaimStatus.Locator ← match obj.get? "signature", obj.get? "originalRecipient" with
     | none, none => .ok none
     | some signature, some recipient => do
-      return some ⟨← bytes "signature" 64 signature, ← bytes "originalRecipient" 32 recipient⟩
+      pure (some (⟨← bytes "signature" 64 signature, ← bytes "originalRecipient" 32 recipient⟩ : PayClaimStatus.Locator))
     | _, _ => .error "signature and originalRecipient must be supplied together"
   let request : PayClaimStatus.Request := ⟨identity, locator⟩
   (PayClaimStatus.decodeRequest (PayClaimStatus.requestCodec.encode request)).mapError
@@ -118,11 +118,11 @@ def quoteRequest (json : Json) : Result PayClaimQuote.Request := do
         ["freshNext"] json
       let identity ← bytes "identityKey" 32 (← field obj "identityKey")
       let ssh ← bytes "sshKey" 32 (← field obj "sshKey")
-      let next ← match obj.get? "freshNext" with
+      let next : Option Digest ← match obj.get? "freshNext" with
         | none => .ok none
         | some value => do
           let raw ← bytes "freshNext" 32 value
-          return some (⟨PayEnrolMemoV2.decodeLE raw⟩ : Digest)
+          pure (some (⟨PayEnrolMemoV2.decodeLE raw⟩ : Digest))
       return Sum.inl (⟨identity, ssh, next, ← terms obj⟩ : PayClaimQuote.Purchase)
     | "claim" => do
       let obj ← object ["kind", "claimId", "mode", "weeks", "starter", "expiryHour", "nonce"] [] json
@@ -357,11 +357,11 @@ def purchaseContext (config : NativeHost.Config) (json : Json) : Result Json := 
   let mint ← bytes "mint" 32 (← field obj "mint")
   let program ← bytes "tokenProgram" 32 (← field obj "tokenProgram")
   let recipient ← bytes "recipient" 32 (← field obj "recipient")
-  let next ← match obj.get? "nextPublic" with
+  let next : Option Digest ← match obj.get? "nextPublic" with
     | none => pure none
     | some value => do
-      let public ← bytes "nextPublic" 32 value
-      pure (some (SigningKeyCommitment.digest public))
+      let publicKey ← bytes "nextPublic" 32 value
+      pure (some (SigningKeyCommitment.digest publicKey))
   boundedJson (.mkObj [("type", "payPurchaseContext"),
     ("deploymentCommitment", digest (PayEnrolPricing.deploymentContextCommitment
       config.deployment.domain config.expectedSeed mint program recipient)),

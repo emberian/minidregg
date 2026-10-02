@@ -310,8 +310,8 @@ theorem enrol_patch_preserves_origin (pay : PayStore) (plan : EnrolPlan)
     (account : Nat) (id : List UInt8) :
     claimAt (Patch.run pay (plan.patch account)) id = claimAt pay id := by
   apply Patch.run_frame
-  cases plan.index <;>
-    simp [EnrolPlan.patch, consumptionPatch, Patch.writeFootprint,
+  cases indexed : plan.index <;>
+    simp [EnrolPlan.patch, indexed, consumptionPatch, Patch.writeFootprint,
       Store.Op.writeAddress?, Store.Op.address, claimAddress]
 
 theorem renew_patch_preserves_origin (pay : PayStore) (plan : RenewPlan) (id : List UInt8) :

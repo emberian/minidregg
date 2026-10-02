@@ -128,3 +128,5 @@ import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every p
 import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 and the blinding ratchet the field-3 reader's opened entries are unchanged by a write to field 4, the root moves, and every sealed leaf moves (narrowed_view_hides_field_four)
 
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge
+
+import Kernel.WorldKindChecks -- descriptor/instance preparation refusals for shipped world methods

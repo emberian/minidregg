@@ -5139,7 +5139,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
     IO (UInt8 × List UInt8) := do
   -- Legacy/v2 request bytes remain compatible. v3 additionally proves the
   -- original observation root at its historical index, never just a counter.
-  let prefix := "DREGG/PROVIDER-CONTINUITY/v2".toUTF8.toList ++ [0]
+  let continuityPrefix := "DREGG/PROVIDER-CONTINUITY/v2".toUTF8.toList ++ [0]
   let prefixV3 := "DREGG/PROVIDER-CONTINUITY/v3".toUTF8.toList ++ [0]
   let (body, priorChecked) ← if payload.take prefixV3.length == prefixV3 then do
       let (body, priorBytes) ← splitPair (payload.drop prefixV3.length)
@@ -5154,8 +5154,8 @@ def runProviderContinuitySession (config : NativeHost.Config)
       let root ← IO.ofExcept (exactDecimal "prior checked root" rootText)
       pure (some body, some ({ acceptedCount := count, worldRoot := ⟨root⟩ } :
         NativeProviderHistory.PriorChecked))
-    else if payload.take prefix.length == prefix then
-      pure (some (payload.drop prefix.length), none)
+    else if payload.take continuityPrefix.length == continuityPrefix then
+      pure (some (payload.drop continuityPrefix.length), none)
     else
       pure (none, none)
   let (reservePair, fencePair) ← match body with

@@ -34,6 +34,7 @@ open Minidregg.Kernel.PayObservation (Observation nullifier tickNullifier nullif
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
+open Minidregg.Theory.PolicyInstall
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.Store (Store Patch Op Address)
 open Minidregg.Theory.TypedAuthorization

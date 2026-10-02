@@ -3,6 +3,8 @@ Shared accepted histories and the bridge from a checked resource leg to its
 committed law. Sheet, item and story laws use this one kernel-level contract.
 -/
 import Kernel.LawView
+import Kernel.MultiCellHyperedge
+import Kernel.DeclaredResourceController
 
 namespace Minidregg.Kernel.LawHistory
 

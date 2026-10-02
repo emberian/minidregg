@@ -129,6 +129,11 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
         [("type", toJson "kindDefinition"), ("kind", number definition.descriptor.kind),
          ("revision", number definition.descriptor.revision),
          ("exactDefinitionHex", hex (WorldKindCell.definitionStream.encode definition))]
+    | .computeFunding funding => .mkObj
+        [("type", toJson "computeFunding"), ("asset", number funding.asset),
+         ("credits", number funding.credits),
+         ("expectedPayerBalance", signed funding.expectedPayerBalance),
+         ("expectedBookRoot", number funding.expectedBookRoot.value)]
     | .read => .mkObj [("type", toJson "read")]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]

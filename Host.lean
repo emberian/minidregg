@@ -11,3 +11,6 @@ import Host.ApplicationPermissionSchemaAuthoringCheck
 import Host.ApplicationPermissionSchemaRouteCheck
 import Host.CapabilityInspectionCheck
 import Host.ProviderUsageAudit
+
+import Host.KeyRotationInspectionChecks
+import Host.ReceiptContinuityCheck

@@ -1649,16 +1649,16 @@ private def derive (config : Config) (opened : Opened config)
         ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
     | .error reason => return .error s!"paid claim refused: {repr reason}"
     | .ok accepted =>
-        return .ok { intent := PayClaimReceiver.intent accepted, admission := .payClaim accepted,
-          issue := none, begin := none, beginV2 := none, claimV2 := none }
+        return .ok ⟨PayClaimReceiver.intent accepted,
+          .payClaim accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayEnrolReceiver.decodeIngress bytes then
     if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
       match ← PayEnrolV2Receiver.admitDecodedNative config.deployment config.profile
           ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
       | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
       | .ok accepted =>
-          return .ok { intent := PayEnrolV2Receiver.intent accepted, admission := .payEnrolV2 accepted,
-            issue := none, begin := none, beginV2 := none, claimV2 := none }
+          return .ok ⟨PayEnrolV2Receiver.intent accepted,
+            .payEnrolV2 accepted, none, none, none, none, none, none, none, none, none⟩
     match ← PayEnrolReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
