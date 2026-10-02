@@ -33,27 +33,40 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-/-- First-order factory parameters are part of the one compatible runtime identity. -/
+/-- The admission lag a birth may carry, in heights: the longest honest
+authoring-to-admission gap the deployment tolerates. Every admission advances
+the height (`nativeClockVersion`), so this counts other admissions, not
+seconds: a birth authored at `H0` stays admissible through the next 64
+admissions anyone makes. The deployed clock ticks once a minute and a busy
+room adds a handful more per birth window (10-40 s measured), so 64 is an
+order of magnitude over the honest gap and far under every owner grant
+`lifetime`. -/
+def defaultBirthSlack : Nat := 64
+
+/-- First-order factory parameters are part of the one compatible runtime identity.
+`birthSlack` is how many heights after its authored `notBefore` a birth may
+still be admitted (`ResourceBirthPolicyController.Concrete.BirthWindow`). -/
 structure FactoryTemplate where
   issuer : IssuerId
   ownerBudget : Nat
   lifetime : Nat
+  birthSlack : Nat := defaultBirthSlack
   deriving DecidableEq, Repr
 
-def FactoryTemplate.tuple (template : FactoryTemplate) : Nat × (Nat × Nat) :=
-  (template.issuer.value, template.ownerBudget, template.lifetime)
+def FactoryTemplate.tuple (template : FactoryTemplate) : Nat × (Nat × (Nat × Nat)) :=
+  (template.issuer.value, template.ownerBudget, template.lifetime, template.birthSlack)
 
-def FactoryTemplate.ofTuple (tuple : Nat × (Nat × Nat)) : FactoryTemplate :=
-  ⟨⟨tuple.1⟩, tuple.2.1, tuple.2.2⟩
+def FactoryTemplate.ofTuple (tuple : Nat × (Nat × (Nat × Nat))) : FactoryTemplate :=
+  ⟨⟨tuple.1⟩, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩
 
 @[simp] theorem FactoryTemplate.ofTuple_tuple (template : FactoryTemplate) :
     ofTuple template.tuple = template := by
   cases template with
-  | mk issuer budget lifetime => cases issuer; rfl
+  | mk issuer budget lifetime slack => cases issuer; rfl
 
 def factoryTemplateStream : StreamCodec FactoryTemplate :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
     FactoryTemplate.tuple FactoryTemplate.ofTuple FactoryTemplate.ofTuple_tuple
 
 def FactoryTemplate.encode (template : FactoryTemplate) : List UInt8 :=
@@ -88,9 +101,12 @@ quote with their `content/annotations|quotes|writes/…|tombstones` slots
 def contentProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.REVISIONED-ATOMS-ANNOTATE-QUOTE.STORE-CELL/v3".toUTF8.toList
 
-/-- Factory, initial policy, authority grants and resource post-state share one tuple. -/
+/-- Factory, initial policy, authority grants and resource post-state share one tuple.
+v3 (K-BIRTH-WINDOW): a born grant carries its author's window
+(`notBefore` = the authored height) and is admitted within the template's
+`birthSlack`; v2 pinned `notBefore` to the admission height. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND/v2".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG/v3".toUTF8.toList
 
 def delegationProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY/v2".toUTF8.toList

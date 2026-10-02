@@ -162,7 +162,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -182,6 +182,7 @@ TITLE[J12X]="malformed requests refused by name; the same Host answers on; a kil
 TITLE[J4]="newcomer signed read, writes field to 1, reads back 1"
 TITLE[JSERVE]="a hostile client (trickle, long request, 50 silent, route-mismatch through op 7) stalls no honest read and stops nothing"
 TITLE[J5]="a key with no grant: read and write refused"
+TITLE[KBW]="births under concurrent admissions: authored window, bounded lag, a stale birth refused by name, its name created again"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[KCH]="a channel domain's epoch records: delta exactly 1, E roots, the sequencer only, openings checked"
@@ -286,6 +287,10 @@ count_of() { jq -r '.acceptedCount' "$1"; }
 # JOURNEY_TIMER_COUNTS names the file the timers append each accepted count to (one per
 # line); unset means no timer runs and the count must be exactly LAST + 1. Every record
 # between is accounted for either way: a stranger's record still fails the step.
+# Each count is the acceptedCount of the Host's own confirmed receipt to the timer
+# (journey-timers/ticker.sh, journey-timers/hostile.sh write it), so a count is never a
+# stranger's; a timer whose reply was lost leaves its record uncounted and the step FAILS
+# (a lost receipt can make a step red, never green).
 timer_between() {  # timer_between LOW HIGH -> how many timer records have LOW < count < HIGH
   [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ -f "$JOURNEY_TIMER_COUNTS" ] || { echo 0; return; }
   awk -v lo="$1" -v hi="$2" '$1 > lo && $1 < hi { n++ } END { print n + 0 }' "$JOURNEY_TIMER_COUNTS"
@@ -881,6 +886,7 @@ hook() {
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
 step_KT() { hook jtail "a fresh Store with L=8 admits writes up to certified+L, refuses the next naming tail-bound, resumes after the operator certifies, holds the bound across a restart, and audits clean (C14)"; }
+step_KBW() { hook jbirthwin "KBW_BIRTHS births by workspace create while a second workspace writes every KBW_WRITE_PERIOD s are all installed; a birth held past birthSlack admissions is refused birthStale (operator log) and its name is then created again (lane k-birth-window)"; }
 step_KC() { hook jclock "the one clock ticks forward only, under the clock subject's C_tick (the sponsor's is refused), a law over clock/now admits after the tick and refuses before on writes and signed reads, and 200 ephemeral ticks leave no attempt behind (MUD item 3, K-CLOCK; CLOCK-SUBJECT)"; }
 step_J12X() { hook j12x "each malformed request (number for a decimal string, missing/extra field, negative index, NaN, truncated, non-UTF-8, 100k nesting, 10 MB, bad frames) is refused by name by the same Host process, which answers on; a Host killed by PID is restarted under the same socket (lane host-malformed)"; }
 step_JSERVE() { hook jserve "under each attack (3 bytes then silence; a long Host request; 50 silent connections; the J-PAY-6 route-mismatch intent through op 7) the newcomer signed read is answered (< 2 s where the Host is free), every refusal is named, the same Host answers on, and the malformed table still holds (lane serve-robust)"; }
@@ -951,6 +957,7 @@ run_step G J4
 run_step J7 J4
 run_step J8 J7
 run_step K4 J2
+run_step KBW J4
 run_step KC J4
 run_step KT J0
 run_step JJ J2

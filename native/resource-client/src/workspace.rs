@@ -976,6 +976,15 @@ fn sealing_room(explicit: Option<&str>, reference: &Value) -> Option<String> {
         .or_else(|| reference.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
 }
 
+/// The client's own observations of one plan named different world or
+/// authority roots: another admission landed between them. Nothing was
+/// authored or sent; the plan is made again from fresh reads (`replan`).
+const OBSERVATIONS_MOVED: &str =
+    "the plan's signed reads saw the Host state move between them (another admission landed)";
+
+/// Author a proposal from fresh signed reads. A Host `stale-root` on one read
+/// is re-observed inside that read; reads that disagree with each other are
+/// re-planned here, all of them, under the same `--replan-max` bound.
 pub(crate) fn propose(
     root: &Path,
     workspace: &Value,
@@ -995,6 +1004,22 @@ pub(crate) fn propose(
 /// name its line from this proposal's own signed read instead of the last
 /// `doc show` (`can`'s probes; `doc edit` keeps the read the friend saw).
 fn propose_summary(
+    root: &Path,
+    workspace: &Value,
+    request_path: &Path,
+    proposal_id: &str,
+    private_room_name: Option<&str>,
+    fresh: bool,
+) -> Result<Value> {
+    crate::replan::replan(
+        "propose",
+        || propose_summary_once(root, workspace, request_path, proposal_id, private_room_name, fresh),
+        |error, _| error == OBSERVATIONS_MOVED,
+        |_| Ok(()),
+    )
+}
+
+fn propose_summary_once(
     root: &Path,
     workspace: &Value,
     request_path: &Path,
@@ -1070,7 +1095,7 @@ fn propose_summary(
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
-                        return Err("target reads have different image boundaries".into());
+                        return Err(OBSERVATIONS_MOVED.into());
                     }
                 }
                 image = Some(current_image);
@@ -1269,9 +1294,7 @@ fn propose_summary(
                 if member(challenge, "worldRoot")? != image
                     || signed_authority_root(challenge)? != authority
                 {
-                    return Err(
-                        "delegation observations disagree on current image or authority".into(),
-                    );
+                    return Err(OBSERVATIONS_MOVED.into());
                 }
             }
             let head = capability
@@ -1963,73 +1986,182 @@ fn authoring_refused(generation: &Path) -> Result<bool> {
     Ok(bytes.first() == Some(&255))
 }
 
+/// A generation whose intent belonged to an attempt that was definitely
+/// unadmitted and released (`release_unadmitted_attempt`). Like a refusal, it
+/// is superseded by a fresh generation; unlike a refusal, it holds an intent.
+fn authoring_released(generation: &Path) -> bool {
+    generation.join("released.json").exists()
+}
+
+/// Whether a retained exact-custody attempt is DEFINITELY unadmitted: it never
+/// assembled an exact call (so nothing was ever submitted), or the newest Host
+/// outcome for its exact call is a final `refused`. A confirmed, uncertain,
+/// unavailable, contended or absent outcome is not definite and keeps custody.
+fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
+    if !attempt.join("call.bin").is_file() {
+        return Ok(true);
+    }
+    if accepted_outcome(attempt)?.is_some() {
+        return Ok(false);
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file = entry.file_name();
+        let Some(file) = file.to_str() else { continue };
+        if file == "outcome.json" || (file.starts_with("retry-") && file.ends_with(".json")) {
+            names.push(file.to_owned());
+        }
+    }
+    names.sort();
+    let Some(newest) = names.last() else {
+        return Ok(false);
+    };
+    let value = bounded_json(&attempt.join(newest))?;
+    Ok(value.get("type").and_then(Value::as_str) == Some("refused"))
+}
+
+/// Release a definitely unadmitted birth attempt so the same name can be
+/// authored again: mark the generation that authored its intent released,
+/// release the namespace binding, and retire the attempt directory (kept as
+/// `NAME.released-N` with all its evidence). Each step is idempotent and the
+/// retirement, which removes the trigger, is last.
+fn release_unadmitted_attempt(
+    authoring: &Path,
+    attempt: &Path,
+    reservation: &participant_namespace::Reservation,
+) -> Result<PathBuf> {
+    if authoring.exists() {
+        if let Some(generation) = authoring_generations(authoring)?.last() {
+            if !authoring_released(generation) && !authoring_refused(generation)? {
+                let marker = json!({"type":"minidregg-birth-generation-released-v1",
+                    "attempt":attempt});
+                private_file(
+                    &generation.join("released.json"),
+                    &serde_json::to_vec(&marker).map_err(|error| error.to_string())?,
+                )?;
+            }
+        }
+    }
+    participant_namespace::release_attempt(reservation, attempt)?;
+    retire_attempt_dir(attempt)
+}
+
+/// Move an attempt directory aside as `NAME.released-N`, keeping every byte of
+/// its evidence, so the attempt path can hold a new attempt.
+fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
+    let name = attempt
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("birth attempt lacks a UTF-8 filename")?;
+    let mut index = 1u32;
+    let retired = loop {
+        let candidate = attempt.with_file_name(format!("{name}.released-{index:04}"));
+        if !candidate.exists() {
+            break candidate;
+        }
+        index += 1;
+        if index >= 10_000 {
+            return Err("released birth attempts exhausted for this name".into());
+        }
+    };
+    fs::rename(attempt, &retired).map_err(|error| error.to_string())?;
+    File::open(attempt.parent().ok_or("birth attempt lacks parent")?)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| error.to_string())?;
+    Ok(retired)
+}
+
 /// Author the reserved source through op91 in versioned generations.
 ///
 /// A generation retains exactly one signed factory observation and at most one
-/// Host reply; it is never rewritten. When the latest generation's retained
-/// reply is a refusal, and no custody attempt is bound for this request, a new
-/// generation authors the SAME source with a fresh observation. At most one
-/// generation is superseded per call, and never one whose observation was
-/// taken in this same call. Once a generation holds an intent, it is final.
+/// Host reply; it is never rewritten. Once a generation holds an intent, it is
+/// final. A refused generation (or one whose attempt was released as definitely
+/// unadmitted, `release_unadmitted_attempt`) is superseded by a new generation that authors
+/// the SAME source with a fresh observation, and only while no custody attempt
+/// is bound for this request: a refusal retained from an earlier call, or a
+/// retained observation from an earlier call refused now, is superseded once;
+/// a generation observed in this call is superseded only when `stale` finds
+/// the Host answering its own `stale-root` to that observation (the timer race
+/// at birth), at most `replan::max()` times (the shared `replan` loop).
 fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
     mut observe: impl FnMut() -> Result<PathBuf>,
     mut author_one: impl FnMut(&Path, Option<&Path>) -> Result<()>,
+    mut stale: impl FnMut(&Path) -> bool,
 ) -> Result<PathBuf> {
     if !base.exists() {
         make_private_dir(base)?;
     }
     private_dir(base)?;
-    let mut superseded = false;
-    let mut observed_now = false;
-    loop {
-        let generations = authoring_generations(base)?;
-        let current = match generations.last() {
-            Some(current) => current.clone(),
+    let latest = || -> Result<PathBuf> {
+        match authoring_generations(base)?.last() {
+            Some(current) => Ok(current.clone()),
             None => {
                 let first = base.join("g0001");
                 make_private_dir(&first)?;
-                first
+                Ok(first)
             }
-        };
-        private_dir(&current)?;
-        if authoring_refused(&current)? {
-            if observed_now || superseded {
-                return Err(format!(
-                    "current birth authoring refused with a fresh factory observation; retained {}",
-                    current.join("reply.frame").display()
-                ));
-            }
-            if participant_namespace::is_bound(reservation)? {
-                return Err(
-                    "refused authoring generation has a bound attempt; exact custody only".into(),
-                );
-            }
-            make_private_dir(&base.join(format!("g{:04}", generations.len() + 1)))?;
-            superseded = true;
-            continue;
         }
-        if current.join("reply.frame").exists() {
-            return Ok(current);
+    };
+    let supersede = || -> Result<()> {
+        if participant_namespace::is_bound(reservation)? {
+            return Err(
+                "refused authoring generation has a bound attempt; exact custody only".into(),
+            );
         }
-        let observation = if current.join("factory-observation.bin").exists() {
-            None
-        } else {
-            observed_now = true;
-            Some(observe()?)
-        };
-        match author_one(&current, observation.as_deref()) {
-            Ok(()) => return Ok(current),
-            Err(error) if authoring_refused(&current)? => {
-                eprintln!(
-                    "workspace birth authoring refused in {}: {error}",
-                    current.display()
-                );
-            }
-            Err(error) => return Err(error),
-        }
+        let next = authoring_generations(base)?.len() + 1;
+        make_private_dir(&base.join(format!("g{next:04}")))
+    };
+    let current = latest()?;
+    if authoring_refused(&current)? || authoring_released(&current) {
+        supersede()?;
     }
+    let observed_now = std::cell::Cell::new(false);
+    let authored = crate::replan::replan(
+        "birth authoring",
+        || {
+            let current = latest()?;
+            private_dir(&current)?;
+            if current.join("reply.frame").exists() && !authoring_refused(&current)? {
+                return Ok(current);
+            }
+            let observation = if current.join("factory-observation.bin").exists() {
+                observed_now.set(false);
+                None
+            } else {
+                observed_now.set(true);
+                Some(observe()?)
+            };
+            match author_one(&current, observation.as_deref()) {
+                Ok(()) => Ok(current),
+                Err(error) => {
+                    if authoring_refused(&current)? {
+                        eprintln!(
+                            "workspace birth authoring refused in {}: {error}",
+                            current.display()
+                        );
+                    }
+                    Err(error)
+                }
+            }
+        },
+        |_, _| match latest() {
+            Ok(current) if authoring_refused(&current).unwrap_or(false) => {
+                !observed_now.get() || stale(&current)
+            }
+            _ => false,
+        },
+        |_| supersede(),
+    );
+    authored.map_err(|error| match latest() {
+        Ok(current) if authoring_refused(&current).unwrap_or(false) => format!(
+            "current birth authoring refused with a fresh factory observation ({error}); retained {}",
+            current.join("reply.frame").display()
+        ),
+        _ => error,
+    })
 }
 
 /// Reserve, author and submit one birth under a workspace name. Returns the
@@ -2262,6 +2394,16 @@ fn birth(
     let attempt = root.join("attempts").join(format!("create-{}", ref_file(name_value)));
     let host = workspace_host(workspace)?;
     let config = member_path(workspace, "config")?;
+    // A definitely unadmitted attempt (no exact call, or a final refusal)
+    // holds nothing that can install: release it, and this call authors the
+    // same name afresh. An uncertain attempt keeps exact custody below.
+    if attempt.exists() && attempt_definitely_unadmitted(&attempt)? {
+        let retired = release_unadmitted_attempt(&authoring, &attempt, &reservation)?;
+        eprintln!(
+            "workspace birth attempt definitely unadmitted; retained as {}",
+            retired.display()
+        );
+    }
     let author_dir = if attempt.exists() {
         authoring_generations(&authoring)?
             .last()
@@ -2300,6 +2442,7 @@ fn birth(
                     current_birth::Route::Resource,
                 )
             },
+            |generation| crate::observation_stale(&host, &config, generation),
         )?
     };
     let intent_path = current_birth::retained_intent(&author_dir, current_birth::Route::Resource)?;
@@ -2338,6 +2481,10 @@ fn birth(
         return Ok((source, receipt, reservation));
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
+    // A Host `stale-root` between the signed observation and prepare (or a
+    // signed plan the state moved under) is re-planned inside `submit`: the
+    // authored window (`notBefore` + birthSlack) is still open, so the SAME
+    // intent is planned again in the same bound attempt path.
     submit(
         &host,
         &config,
@@ -3800,6 +3947,7 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"stale"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
@@ -3816,6 +3964,7 @@ mod tests {
             &reservation,
             || panic!("no observation after an intent"),
             |_, _| panic!("no authoring after an intent"),
+            |_| panic!("no probe after an intent"),
         )
         .unwrap();
         assert_eq!(again, base.join("g0002"));
@@ -3845,6 +3994,7 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"stale"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
@@ -3864,7 +4014,10 @@ mod tests {
                 fs::write(generation.join("reply.frame"), [255, 3]).unwrap();
                 Err("refused".into())
             },
+            |_| false,
         );
+        // A refusal the Host does not answer stale-root is reported after one
+        // observation (the race is re-planned: replan_birth_authoring_*).
         assert!(refused.is_err());
         assert_eq!(observed.get(), 1);
         assert_eq!(authoring_generations(&base).unwrap().len(), 1);
@@ -3874,10 +4027,202 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"never"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn released_generation_is_superseded_with_a_fresh_observation() {
+        let (root, base, reservation) = generation_fixture("released");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        fs::write(base.join("g0001/factory-observation.bin"), b"old").unwrap();
+        fs::write(base.join("g0001/reply.frame"), [91, 7]).unwrap();
+        // An intent is final until its attempt is released.
+        let kept = author_generations(
+            &base,
+            &reservation,
+            || panic!("no observation for a final intent"),
+            |_, _| panic!("no authoring for a final intent"),
+            |_| panic!("no probe for a final intent"),
+        )
+        .unwrap();
+        assert_eq!(kept, base.join("g0001"));
+        fs::write(base.join("g0001/released.json"), b"{}").unwrap();
+        let observed = std::cell::Cell::new(0);
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"never"),
+            |_| false,
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(observed.get(), 1);
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [91, 7]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_a_definite_refusal_or_a_missing_call_is_unadmitted() {
+        let (root, _, _) = generation_fixture("definite");
+        let attempt = root.join("create-x");
+        make_private_dir(&attempt).unwrap();
+        // No exact call: nothing was submitted.
+        assert!(attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(attempt.join("call.bin"), b"call").unwrap();
+        // A call with no outcome is uncertain.
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(
+            attempt.join("outcome.json"),
+            br#"{"type":"refused","reason":"undisclosed"}"#,
+        )
+        .unwrap();
+        assert!(attempt_definitely_unadmitted(&attempt).unwrap());
+        // A newer uncertain retry outranks the older refusal.
+        fs::write(attempt.join("retry-0001.json"), br#"{"type":"uncertain"}"#).unwrap();
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        // An installed confirmation is never unadmitted.
+        fs::write(
+            attempt.join("retry-0002.json"),
+            br#"{"type":"confirmed","confirmation":"installed"}"#,
+        )
+        .unwrap();
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_raced_fresh_observation_is_reobserved_within_the_call() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        let (root, base, reservation) = generation_fixture("raced");
+        let observed = std::cell::Cell::new(0);
+        // The first fresh observation is raced by another admission (the Host
+        // answers the probe stale-root); the second is not.
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"signed observation 1"),
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(observed.get(), 2);
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replan_propose_reads_that_disagree_are_made_again_and_nothing_else_is() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let race = |error: &str, _: Option<&crate::HostDecision>| error == OBSERVATIONS_MOVED;
+        let calls = std::cell::Cell::new(0);
+        let made = crate::replan::replan(
+            "propose",
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() < 3 { Err(OBSERVATIONS_MOVED.to_owned()) } else { Ok(calls.get()) }
+            },
+            race,
+            |_| Ok(()),
+        );
+        assert_eq!(made, Ok(3));
+        calls.set(0);
+        let refused = crate::replan::replan(
+            "propose",
+            || {
+                calls.set(calls.get() + 1);
+                Err::<(), _>("parent capability lacks delegation verb".to_owned())
+            },
+            race,
+            |_| Ok(()),
+        );
+        assert_eq!(refused, Err("parent capability lacks delegation verb".into()));
+        assert_eq!(calls.get(), 1);
+        let _ = crate::take_host_decision();
+    }
+
+    #[test]
+    fn replan_birth_authoring_stale_observation_reobserves_until_it_lands() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let (root, base, reservation) = generation_fixture("stale-race");
+        let observed = std::cell::Cell::new(0);
+        let probed = std::cell::Cell::new(0);
+        // The first two fresh observations are raced (the Host refuses them and
+        // answers stale-root to a probe); the third lands.
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| {
+                fake_author(generation, observation, b"never")?;
+                if observed.get() <= 2 {
+                    fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                    return Err("current resource birth authoring refused".into());
+                }
+                Ok(())
+            },
+            |_| {
+                probed.set(probed.get() + 1);
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0003"));
+        assert_eq!((observed.get(), probed.get()), (3, 2));
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
+        assert_eq!(fs::read(base.join("g0003/reply.frame")).unwrap(), [91, 7]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replan_birth_authoring_is_bounded_and_names_the_attempts() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let (root, base, reservation) = generation_fixture("stale-bound");
+        let observed = std::cell::Cell::new(0);
+        let refused = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"never").and_then(|()| {
+                fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                Err("current resource birth authoring refused".into())
+            }),
+            |_| true,
+        )
+        .unwrap_err();
+        assert_eq!(observed.get(), 6);
+        assert_eq!(authoring_generations(&base).unwrap().len(), 6);
+        assert!(refused.contains("all 6 attempts (5 re-plans"), "{refused}");
+        assert!(refused.contains("g0006/reply.frame"), "{refused}");
+        // --replan-max 0: one observation, reported, the old behaviour.
+        crate::replan::set_max(0);
+        let (root0, base0, reservation0) = generation_fixture("stale-zero");
+        let observed0 = std::cell::Cell::new(0);
+        assert!(author_generations(
+            &base0,
+            &reservation0,
+            || observation_file(&root0, &observed0),
+            |generation, _| {
+                fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                Err("refused".into())
+            },
+            |_| true,
+        )
+        .is_err());
+        assert_eq!(observed0.get(), 1);
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(root0).unwrap();
     }
 
     #[test]
@@ -3900,6 +4245,7 @@ mod tests {
             &reservation,
             || panic!("no observation under bound custody"),
             |_, _| panic!("no authoring under bound custody"),
+            |_| panic!("no probe under bound custody"),
         );
         assert!(refused.is_err());
         assert_eq!(authoring_generations(&base).unwrap().len(), 1);
