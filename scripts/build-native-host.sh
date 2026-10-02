@@ -59,6 +59,7 @@ Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
   MINIDREGG_NATIVE_JOBS=1|2        concurrent C compiler processes (default: 2)
   MINIDREGG_LEAN_THREADS=1|2       threads in each serialized Lean process (default: 2)
+  MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          seat/evidence parent (default below /tmp)
 EOF
 }
@@ -1187,7 +1188,7 @@ if [[ "$build_umbrella" == 0 ]]; then
     source=${module//./\/}.lean
     stem=${module//./\/}
     mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
-    if env LEAN_NUM_THREADS="$lean_threads" lake env lean "$source" \
+    if env LEAN_NUM_THREADS="$lean_threads" lake env lean -j "$lean_threads" "$source" \
         -o ".lake/build/lib/lean/$stem.olean" \
         -i ".lake/build/lib/lean/$stem.ilean" \
         -c ".lake/build/ir/$stem.c" --json > "$log" 2>&1; then
@@ -1255,7 +1256,7 @@ trap 'forward_signal TERM' TERM
 printf 'START\t%s\t%s\t' "$(date +%s)" "$$" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 printf '%q ' "$@" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 printf '\n' >> "$MINIDREGG_LEAN_WRAPPER_LOG"
-"$MINIDREGG_REAL_LEAN" "$@" &
+"$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
 child=$!
 set +e
 wait "$child"
@@ -1276,7 +1277,7 @@ EOF
   if env \
       LAKE_OVERRIDE_LEAN=true \
       LEAN_SYSROOT="$wrapper_root" \
-      LEAN_CC="$toolchain/bin/clang" \
+      LEAN_CC="${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}" \
       LEAN_AR="$toolchain/bin/llvm-ar" \
       LEAN_NUM_THREADS="$lean_threads" \
       MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
@@ -1305,7 +1306,7 @@ EOF
   if env \
       LAKE_OVERRIDE_LEAN=true \
       LEAN_SYSROOT="$wrapper_root" \
-      LEAN_CC="$toolchain/bin/clang" \
+      LEAN_CC="${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}" \
       LEAN_AR="$toolchain/bin/llvm-ar" \
       LEAN_NUM_THREADS="$lean_threads" \
       MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
