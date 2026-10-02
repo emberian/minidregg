@@ -315,8 +315,8 @@ theorem PreparedLaw.admit_eq {F : Type} [Field F] [DecidableEq F]
     (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
     (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
     law.admit request evidence witness membership epochExact revisionExact =
-      admit config request evidence witness membership epochExact revisionExact := by
-  simp only [PreparedLaw.admit, admit, PreparedLaw.verifies_eq]
+      ComposedPolicyAdmission.admit config request evidence witness membership epochExact revisionExact := by
+  simp only [PreparedLaw.admit, ComposedPolicyAdmission.admit, PreparedLaw.verifies_eq]
 
 theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)
@@ -352,5 +352,10 @@ theorem authorized_effective_law {F : Type} [Field F] [DecidableEq F]
   obtain ⟨graph, loaded, _, _, _, _, law⟩ :=
     verifies_sound config request authorized.policyWitness accepted
   exact ⟨graph, loaded, law⟩
+
+/-- info: 'Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw.verifies_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedLaw.verifies_eq
+/-- info: 'Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw.admit_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedLaw.admit_eq
 
 end Minidregg.Compiler.ComposedPolicyAdmission

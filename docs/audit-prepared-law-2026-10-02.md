@@ -1,6 +1,6 @@
 # Cold audit: retained composed-law admission
 
-The matched source6075eff2 JLI run2 retained two different accepted histories. Its first normal cold audit passed19 records; after successful law exports/pins/updates, a second normal cold audit passed30 records. These are full signed-ingress re-admission audits, not cached opens. No oldc29 or duplicate audit was run for this investigation.
+The matched source 6075eff2 JLI run2 retained two different accepted histories. Its first normal cold audit passed 19 records; after successful law exports/pins/updates, a second normal cold audit passed 30 records. These are full signed-ingress re-admission audits, not cached opens. No old c29 or duplicate audit was run for this investigation.
 
 Final cumulative phase totals (earlier progress snapshots are not added):
 
@@ -13,7 +13,7 @@ Final cumulative phase totals (earlier progress snapshots are not added):
 | Advance | 0.1829s | 0.8740s | 3.9350s |
 | Post-validation | 0.0377s | 0.3726s | 0.7281s |
 
-The measured totals omit some bookkeeping and are not wall time. The six births dominate the richer runs (79.3% and57.3%). Both record16 progress snapshots already include all six births. Later law records therefore cannot explain a change in those original-prefix birth contexts; the timings are not controlled A/B measurements. Neither the five-record smoke nor this table establishes252- or1000-record scaling.
+The measured totals omit some bookkeeping and are not wall time. The six births dominate the richer runs (79.3% and 57.3%). Both record 16 progress snapshots already include all six births. Later law records therefore cannot explain a change in those original-prefix birth contexts; the timings are not controlled A/B measurements. Neither the five-record smoke nor this table establishes252- or1000-record scaling.
 
 Evidence: `/home/ember/build/codex-world/core-smoke-6075eff2/cold-audit.err` and `/home/ember/build/codex-world/jli-core-6075eff2-run2/{audit.err,audit-after-law.err}` on persvati. Matching source/binaries are recorded in `bin-core-6075eff2/manifest.json`.
 
@@ -21,4 +21,4 @@ Source and generated C both show birth `Pending.admitBranch` calling `branchRead
 
 The focused repair introduces `PreparedLaw.verifies` with exact Boolean equality to `Config.verifies` for any supplied witness, using the existing `headExact` and `graphExact` equations. `PreparedLaw.admit` and ordinary `admit` share one internal gate. A thunk preserves address, membership, then policy evaluation order. The complete Option Authorized equality retains failures, evidence and witness values, not merely success equivalence. Birth and DRC consumers pass their existing resolved law. Physical source guards, dependency checks, source loading for that retained law, signatures, compiler compatibility, witness binding, range/cast checks and effective-law evaluation remain mandatory.
 
-Qualification pending: scoped shared-module proof/axiom check, consumer closure, and generated-C confirmation that retained verification invokes no head/graph load. Any speedup requires a future matched normal receiving/audit run; the18.0552s birth time is not claimed as recoverable savings. No existing native pin or active Store is changed by this source repair.
+Scoped shared-module compilation passes; both exactness theorems have guarded axiom sets containing only propext, Classical.choice and Quot.sound. Generated C for ordinary Config.verifies calls loadPolicy and PolicyComponentResolution.loadTarget; PreparedLaw.verifies calls neither, retaining the same step binding, compiler compatibility, closure digest and ResolvedLawCompilation.checks. PreparedLaw.admit dispatches through the shared gate with the retained verifier thunk. Logs and generated C are in this clone under .lane-artifacts. Consumer closure remains pending. Any speedup requires a future matched normal receiving/audit run; the 18.0552s birth time is not claimed as recoverable savings. No existing native pin or active Store is changed by this source repair.
