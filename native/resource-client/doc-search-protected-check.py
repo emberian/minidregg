@@ -40,13 +40,10 @@ completed = False
 
 def fingerprint():
     files = {}
-    for sub in ("attempts", "sources"):
-        directory = args.workspace / sub
-        if directory.exists():
-            for file in directory.rglob("*"):
-                if file.is_file() and not file.is_symlink():
-                    stat = file.stat()
-                    files[str(file)] = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    for file in args.workspace.rglob("*"):
+        if file.is_file() and not file.is_symlink():
+            stat = file.stat()
+            files[str(file)] = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
     return files
 before = fingerprint()
 
@@ -132,9 +129,17 @@ try:
     changed = [Path(path) for path, digest in after.items() if before.get(path) != digest]
     challenges = [path for path in changed if path.name == "challenge.json"]
     record("fresh-read-attempts-created", bool(challenges), challenges=len(challenges))
-    leaks = [str(path.relative_to(args.workspace)) for path in changed
-             if any(pattern in path.read_bytes() for pattern in patterns)]
-    record("read-attempts-retain-no-plaintext-marker", not leaks, files_checked=len(changed), unexpected_paths=leaks)
+    def carries_marker(path):
+        overlap = b""
+        with path.open("rb") as stream:
+            while chunk := stream.read(65536):
+                window = overlap + chunk
+                if any(pattern in window for pattern in patterns):
+                    return True
+                overlap = window[-max(map(len, patterns)):]
+        return False
+    leaks = [str(path.relative_to(args.workspace)) for path in changed if carries_marker(path)]
+    record("workspace-changes-retain-no-plaintext-marker", not leaks, files_checked=len(changed), unexpected_paths=leaks)
     completed = True
     print("Protected search phase passed", args.expect, len(rows), flush=True)
 finally:
