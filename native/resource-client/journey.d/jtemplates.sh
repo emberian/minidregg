@@ -217,8 +217,7 @@ for f in alice bob carl; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/ktpl-$f.key"
-    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/ktpl-$f.key.next.pub"  # K-PREROTATE: the record commits to the next key
-  ok setup sponsor "enroll plan ktpl-$f ktpl-$f.key"
+  ok setup sponsor "enroll plan ktpl-$f ktpl-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal ktpl-$f"
   ok setup sponsor "enroll submit ktpl-$f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")

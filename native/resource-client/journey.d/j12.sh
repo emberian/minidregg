@@ -127,8 +127,7 @@ for f in alice bob rev eve; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
-    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/$f.key.next.pub"
-  ok setup sponsor "enroll plan $f $f.key"
+  ok setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")

@@ -3256,7 +3256,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     roomkey::check_invitee(&member_subject, i_know)?;
                     // The grant: K-ROOM's delegation proposal, spelled by the
                     // caller and proposed here (submit and publish as ever).
-                    if let Some(request) = request {
+                    if let Some(request) = &request {
                         let value = roomkey::request(&request)?;
                         if member(&value, "action")? != "delegate"
                             || member(&value, "name")? != name
@@ -3264,10 +3264,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                         {
                             return Err("the invite request must delegate this room to this invitee".into());
                         }
+                    }
+                    // The keys write (and, for a new member, the keys grant) lands
+                    // first: a delegation proposed before it would carry a stale
+                    // authority root.
+                    roomkey::invite(&root, &workspace, &name, &member_subject, &enc, past, i_know,
+                        &format!("{proposal_id}-keys"))?;
+                    if let Some(request) = request {
                         propose(&root, &workspace, &request, &proposal_id, None)?;
                     }
-                    roomkey::invite(&root, &workspace, &name, &member_subject, &enc, past, i_know,
-                        &format!("{proposal_id}-keys"))
+                    Ok(())
                 }
                 "rotate" => {
                     let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;

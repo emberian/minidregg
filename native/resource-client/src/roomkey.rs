@@ -862,8 +862,13 @@ pub(crate) fn invite(
         vec![epoch]
     };
     let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
+    // Only the founder (whose keys reference carries the cell's control) can
+    // delegate the keys grant; anyone else's wrap write is the law's to refuse.
+    let founder = reference(root, &keys_ref)?
+        .get("controlCapability")
+        .is_some_and(|control| !control.is_null());
     let grant = match grant_of(&synced.wraps, invitee_number) {
-        0 => keys_grant(root, workspace, &keys_ref, invitee, &format!("{proposal_id}-grant"))?,
+        0 if founder => keys_grant(root, workspace, &keys_ref, invitee, &format!("{proposal_id}-grant"))?,
         known => known,
     };
     let mut wraps = Vec::new();
