@@ -1689,11 +1689,20 @@ fn project_transclusion_source(item: &mut Value, source: &str,
     const UNSUPPORTED: &str = "[source fragment: unsupported content]";
     if !matches!(item["render"]["view"].as_str(), Some("snapshot" | "live")) { return; }
     let Some(lines)=item["render"]["lines"].as_array() else { return; };
-    let selected=item["render"]["selected"].as_array();
+    let selected=item["render"]["selected"].as_array().or_else(|| {
+        // Host9ae already exposes exact snapshot pins. Use them only after
+        // the source-at-opening-height rerender, never for live ranges or a
+        // snapshot rendered with current source custody.
+        (item["render"]["view"]=="snapshot" && item["mode"]=="snapshot"
+            && item["at"].is_string() && item["opening"]["source"].as_str()==Some(source))
+            .then(||item["opening"]["pins"].as_array()).flatten()
+    });
     let projected: Vec<Value>=lines.iter().enumerate().map(|(index, _)| {
         let text = (|| -> Option<String> {
             let selected=selected.filter(|pins|pins.len()==lines.len())?;
             let pin=&selected[index];
+            let object=pin.as_object()?;
+            if object.len()!=2 || !object.contains_key("atom") || !object.contains_key("revision") { return None; }
             let id=pin["atom"].as_str()?;
             let revision=pin["revision"].as_str()?;
             let matching: Vec<_>=raw.iter().filter(|entry|entry["type"]=="atom"
@@ -8208,6 +8217,27 @@ mod source_transclusion_projection_tests {
         let raw=source();let mut current=raw.clone();current["payload"]=json!("cafe");current["private"]=json!({"text":"secret"});
         let mut item=reference();project_transclusion_source(&mut item,"10",&[raw],Some(&[current]));
         assert!(line(&item).contains("locked"));
+    }
+    #[test]
+    fn older_host_snapshot_pins_need_independent_historical_projection() {
+        let raw=source();let mut opened=raw.clone();opened["private"]=json!({"text":"historical quote"});
+        let mut old=reference();old["mode"]=json!("snapshot");old["at"]=json!("5");
+        old["opening"]["pins"]=old["render"]["selected"].clone();
+        old["render"].as_object_mut().unwrap().remove("selected");
+        let mut item=old.clone();
+        project_transclusion_source(&mut item,"10",&[raw.clone()],Some(&[opened.clone()]));
+        assert_eq!(line(&item),"historical quote");
+        for pointer in ["/at","/opening/pins"] {
+            let mut item=old.clone();*item.pointer_mut(pointer).unwrap()=Value::Null;
+            project_transclusion_source(&mut item,"10",&[raw.clone()],Some(&[opened.clone()]));
+            assert!(line(&item).contains("locked"));
+        }
+        for (pointer,value) in [("/render/view","live"),("/opening/source","20"),
+            ("/opening/pins/0/revision","99")] {
+            let mut item=old.clone();*item.pointer_mut(pointer).unwrap()=json!(value);
+            project_transclusion_source(&mut item,"10",&[raw.clone()],Some(&[opened.clone()]));
+            assert!(line(&item).contains("locked"));
+        }
     }
     #[test]
     fn authored_source_fragment_matches_its_exact_historical_wrapper() {
