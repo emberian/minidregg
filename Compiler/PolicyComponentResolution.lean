@@ -117,6 +117,7 @@ inductive Refusal where
   | unavailable (ref : PolicyRef)
   | cycle (path : List Key)
   | resolutionBudget
+  | rootsUnavailable
   | graph (reason : ResolutionError)
   deriving Repr
 
@@ -138,29 +139,38 @@ private def collect (snapshot : Snapshot) (store : PayloadStore) (semantics : Di
         complete
       return prior ++ [loaded]
 
-/-- Actual target roots are local + mandatory containing-room export. This is
-not used when resolving an explicit local library reference. -/
-def targetRoots (snapshot : Snapshot) (target : Nat) : List PolicyRef :=
-  ⟨⟨target⟩, .local, .head⟩ :: ambient snapshot target
+/-- Actual target roots are local + mandatory containing-room export + any
+source-owned structural exports (e.g. an immutable instance descriptor's kind).
+The receiver derives `additional` and guards its source; it is not a request field.
+This function is not used when resolving an explicit local library reference. -/
+def targetRoots (snapshot : Snapshot) (target : Nat)
+    (additional : List PolicyRef := []) : List PolicyRef :=
+  ⟨⟨target⟩, .local, .head⟩ :: (ambient snapshot target ++ additional)
 
-structure LoadedGraph (snapshot : Snapshot) (store : PayloadStore)
-    (semantics : Digest) (target : Nat) where
+/-- Authenticated current-snapshot roots also serve room/kind export checks at
+birth, before the allocated target has a local policy head. Root selection is
+receiving-source owned; candidate local-source validation remains separate. -/
+structure LoadedRoots (snapshot : Snapshot) (store : PayloadStore)
+    (semantics : Digest) (refs : List PolicyRef) where
   sources : List (LoadedNode snapshot store semantics)
   roots : List Edge
   rootsExact : loadEdges snapshot store semantics
-    ((targetRoots snapshot target).map (fun ref => (.targetAmbient, ref))) = some roots
+    (refs.map (fun ref => (.targetAmbient, ref))) = some roots
   resolved : ResolvedDAG
     { snapshot := ⟨snapshot.domain, semantics, snapshot.cell.root, snapshot.cell.root⟩
       nodes := sources.map LoadedNode.node
       roots := roots.map Edge.target }
 
-def loadTarget (snapshot : Snapshot) (store : PayloadStore)
-    (semantics : Digest) (target budget : Nat) :
-    Except Refusal (LoadedGraph snapshot store semantics target) := do
-  let refs := targetRoots snapshot target
+abbrev LoadedGraph (snapshot : Snapshot) (store : PayloadStore)
+    (semantics : Digest) (target : Nat) (additional : List PolicyRef := []) :=
+  LoadedRoots snapshot store semantics (targetRoots snapshot target additional)
+
+def loadRoots (snapshot : Snapshot) (store : PayloadStore)
+    (semantics : Digest) (refs : List PolicyRef) (budget : Nat) :
+    Except Refusal (LoadedRoots snapshot store semantics refs) := do
   let sources ← refs.foldlM (fun done ref => collect snapshot store semantics budget [] ref done) []
   match exact : loadEdges snapshot store semantics (refs.map (fun ref => (.targetAmbient, ref))) with
-  | none => throw (.unavailable ⟨⟨target⟩, .local, .head⟩)
+  | none => throw .rootsUnavailable
   | some roots =>
       let input : GraphInput :=
         { snapshot := ⟨snapshot.domain, semantics, snapshot.cell.root, snapshot.cell.root⟩
@@ -169,5 +179,10 @@ def loadTarget (snapshot : Snapshot) (store : PayloadStore)
       match resolve input with
       | .error reason => throw (.graph reason)
       | .ok resolved => pure ⟨sources, roots, exact, resolved⟩
+
+def loadTarget (snapshot : Snapshot) (store : PayloadStore)
+    (semantics : Digest) (target budget : Nat) (additional : List PolicyRef := []) :
+    Except Refusal (LoadedGraph snapshot store semantics target additional) :=
+  loadRoots snapshot store semantics (targetRoots snapshot target additional) budget
 
 end Minidregg.Compiler.PolicyComponentResolution

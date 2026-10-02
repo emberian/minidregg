@@ -498,7 +498,7 @@ theorem verifies_iff_verified {F : Type} [Field F] [DecidableEq F]
   cases hresolve : config.registry.resolve request.policyId request.policyRevision with
   | none => simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
   | some committed =>
-      simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
+      simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, Verified, hresolve]
       all_goals tauto
 
 /-- Soundness is inherited from the GENERAL `PredCompile.lower_sound`: every
