@@ -124,6 +124,8 @@ import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
+import Host.CarryInspection
+import Host.RetainedSegmentInspection
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -509,6 +511,10 @@ def AgentLifetimeDispatchFixedSettings.selectors
     grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
 
 structure Settings where
+  /-- Operator-local carry registry and independently authorized handoff key.
+  Neither value can be selected by a network frame. -/
+  carryRegistry : Option String := none
+  carryOperatorKey : Option String := none
   domain : Nat
   federation : Nat
   factoryId : Nat
@@ -1682,10 +1688,16 @@ def dispatchSession (config : NativeHost.Config)
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
   | 151 =>
-      let opened ← sessionOpened config state
-      match ← ReceiptContinuity.serve config opened.durable payload with
-      | .ok response => return (151, response)
-      | .error detail => return (255, failure .operationRejected "receipt-continuity" detail)
+      let some text := String.fromUTF8? payload.toByteArray
+        | throw (RequestRefusal.malformed "receipt continuity request is not UTF-8")
+      let request ← IO.ofExcept (Lean.Json.parse text >>= ReceiptContinuity.parseRequest)
+      if request.query.identity != ReceiptContinuity.identityOf config then
+        fnDispatch 151 payload
+      else
+        let opened ← sessionOpened config state
+        match ← ReceiptContinuity.serve config opened.durable payload with
+        | .ok response => return (151, response)
+        | .error detail => return (255, failure .operationRejected "receipt-continuity" detail)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -2133,15 +2145,22 @@ partial def serveSession (config : NativeHost.Config)
   if length == 0 then
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native host frame"))
-  else if length > maxFrame then
+  else if length > RetainedSegmentInspection.maxLookupFrame then
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "native host frame exceeds frame bound"))
   else
-    match (← readExactly input length).toList with
-    | [] => pure ()
-    | operation :: payload =>
-        serveFrame config state meteringProfile providerRoutes fnDispatch operation payload output
+    let opcode ← readExactly input 1
+    let operation := opcode[0]!
+    -- Only carried exact-call recovery needs the bounded identity-header
+    -- overhead. Refuse other oversized operations before allocating payload.
+    if length > maxFrame && operation != 153 then
+      discardExactly input (length - 1)
+      writeSessionFrame output 255 (RequestRefusal.frame operation
+        (RequestRefusal.malformed "native host frame exceeds operation bound"))
+    else
+      let payload ← readExactly input (length - 1)
+      serveFrame config state meteringProfile providerRoutes fnDispatch operation payload.toList output
   serveSession config state meteringProfile providerRoutes fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
@@ -5051,6 +5070,11 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "carry-edge-verify", [requestPath, outputPath] =>
+          let request ← readJson requestPath
+          let result ← IO.ofExcept (← CarryInspection.verifyRequest config request)
+          writeJson outputPath result
+          pure 0
       | "continuity-point", [challengePath, outputPath] =>
           let challenge ← readJson challengePath
           let result ← IO.ofExcept (ReceiptContinuity.challengePointJson config challenge)
@@ -5271,6 +5295,26 @@ def run (arguments : List String) : IO UInt32 := do
                               return ((255 : UInt8), failure .operationRejected "fn-origin-outbox"
                                 "A origin outbox service is not configured")
                             runFnOriginOutboxExportSession pinnedConfig state payload
+                        | 151 | 153 =>
+                            let some registryPath := settings.carryRegistry
+                              | return ((255 : UInt8), failure .operationRejected "carried-history"
+                                  "retained carry registry is not configured")
+                            let some operatorText := settings.carryOperatorKey
+                              | return ((255 : UInt8), failure .operationRejected "carried-history"
+                                  "retained carry authority is not configured")
+                            let operator ← IO.ofExcept (Minidregg.Host.Json.decodeHex
+                              "carryOperatorKey" (.str operatorText))
+                            let registryJson ← readJson registryPath
+                            let registry ← IO.ofExcept
+                              (RetainedSegmentInspection.parseRegistry registryJson operator)
+                            let opened ← sessionOpened pinnedConfig state
+                            let result ← if operation == 151 then
+                              RetainedSegmentInspection.serveContinuity pinnedConfig opened.durable registry payload
+                            else RetainedSegmentInspection.serveLookup pinnedConfig opened.durable registry payload
+                            match result with
+                            | .ok response => return (operation, response)
+                            | .error _ => return ((255 : UInt8), failure .operationRejected "carried-history"
+                                "retained historical request refused")
                         | 19 =>
                             let services ← IO.ofExcept settings.providerServicePins
                             let legacy ← IO.ofExcept settings.providerMeteringPin
