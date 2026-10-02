@@ -234,6 +234,13 @@ fn source_entry(assignment: &Value, room: &str, subject: &str) -> Result<Option<
     if entries.len() > 20 {
         return Err("delivery assignment exceeds source inbox bound".into());
     }
+    if let Some(identity) = assignment.get("selectedRequest") {
+        if entries.len()!=1 || identity["binding"] != assignment["requestBinding"]
+            || identity["cell"] != entries[0]["cell"] || identity["sequence"] != entries[0]["sequence"]
+            || identity["author"] != entries[0]["author"] || entries[0]["to"] != subject {
+            return Err("delivery selected request identity differs from source prompt".into());
+        }
+    }
     let mut selected: Option<&Value> = None;
     for entry in entries.iter().filter(|e| e["to"] == subject) {
         let author = entry["author"].as_str().ok_or("delivery author absent")?;
@@ -734,10 +741,10 @@ impl Runtime {
     }
 
     fn current_reply_entry(&mut self, record: &FinalRecord) -> Result<u64> {
-        let tail = self.room_call("mini_stream_tail", &json!({"n":"100"}))?;
+        let tail = self.room_call("mini_stream_entry", &json!({"cell":record.source_entry["cell"], "sequence":record.source_entry["sequence"].as_u64().ok_or("source sequence absent")?.to_string()}))?;
         let entries = tail["entries"]
             .as_array()
-            .ok_or("fresh signed room tail entries absent")?;
+            .ok_or("fresh signed room history entries absent")?;
         let matches: Vec<&Value> = entries
             .iter()
             .filter(|entry| {
@@ -748,7 +755,7 @@ impl Runtime {
             .collect();
         if matches.len() != 1 {
             return Err(
-                "original addressed entry absent or ambiguous in fresh signed room tail".into(),
+                "original addressed entry absent or ambiguous in fresh signed room history".into(),
             );
         }
         matches[0]["n"]

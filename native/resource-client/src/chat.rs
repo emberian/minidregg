@@ -152,7 +152,7 @@ pub(crate) enum Text {
 #[derive(Debug, PartialEq)]
 pub(crate) enum Line {
     Say { room: Option<String>, to: Option<String>, re: Option<u64>, text: Text, via: Option<Via> },
-    Tail { room: Option<String>, count: usize, since: Option<u64>, follow: bool, json: bool, held: bool },
+    Tail { room: Option<String>, count: usize, since: Option<u64>, follow: bool, json: bool, held: bool, entry: Option<(String, u64)>, discovery: Option<String> },
     Topic(Option<String>),
     Pin(u64),
     Unpin,
@@ -334,9 +334,24 @@ fn parse_tail(rest: &str) -> Result<Line, String> {
     let words: Vec<&str> = rest.split_whitespace().collect();
     let (mut count, mut since, mut follow, mut json, mut held) = (20usize, None, false, false, false);
     let mut room = None;
+    let mut entry = None;
+    let mut discovery = None;
     let mut i = 0;
     while i < words.len() {
         match words[i] {
+            "--discover" => {
+                let file=words.get(i+1).ok_or("--discover takes a cursor file")?;
+                if discovery.replace((*file).to_owned()).is_some() {return Err("duplicate --discover".into());}
+                i+=1;
+            }
+            "--entry" => {
+                let value = words.get(i + 1).ok_or("--entry takes CELL:SEQUENCE")?;
+                let (cell, sequence) = value.split_once(':').ok_or("--entry takes CELL:SEQUENCE")?;
+                decimal(cell, "entry cell")?;
+                let sequence = sequence.parse::<u64>().ok().filter(|n| *n > 0).ok_or("entry sequence must be positive")?;
+                if entry.replace((cell.to_owned(), sequence)).is_some() { return Err("duplicate --entry".into()); }
+                i += 1;
+            }
             "-n" => {
                 count = words
                     .get(i + 1)
@@ -365,7 +380,9 @@ fn parse_tail(rest: &str) -> Result<Line, String> {
     if follow && held {
         return Err("--held renders what this session already holds; it cannot --follow".into());
     }
-    Ok(Line::Tail { room, count, since, follow, json, held })
+    if entry.is_some() && (follow || held || since.is_some()) { return Err("--entry requires a fresh finite signed read without --since".into()); }
+    if discovery.is_some() && (entry.is_some() || follow || held || since.is_some() || count>256) {return Err("--discover requires finite fresh pages of at most256 entries per stream".into());}
+    Ok(Line::Tail { room, count, since, follow, json, held, entry, discovery })
 }
 
 fn parse_ls(rest: &str) -> Result<Line, String> {
@@ -993,6 +1010,69 @@ fn current_members(session: &Session, room: &Room, roster: Roster) -> Result<(Ro
     Ok((Roster { founder: roster.founder, members }, former))
 }
 
+fn cache_feed(session:&Session,room:&Room,feed:&Feed)->Result<(),Done> {
+    put_json(&chat_dir(session).join("rooms").join(format!("{}.cache.json",room.name)),
+        &json!({"topic":feed.topic.as_ref().map(|t|t.0.clone()),"feed":feed.feed.iter().map(|e|json!([e.cell,e.sequence.to_string()])).collect::<Vec<_>>(),"height":feed.feed.last().map(|e|e.height)})).map_err(error)
+}
+fn stream_window(session:&Session,room:&Room,held:&Held,subject:&str,cell:&str,start:u64,count:usize)->Result<Value,Done> {
+    let synthetic=json!({"kind":"object","target":cell,"observeCapability":held.capability});
+    let mut view=signed_read(session,&held.ws,&room.name,&format!("resident-{cell}-{start}-{count}"),&synthetic,"tail",
+        &[("start",start.to_string()),("count",count.to_string())])?;
+    let _=subject;
+    open_sealed(&mut view,&held.keys,cell);
+    Ok(view)
+}
+fn read_exact_entry(session:&Session,room:&Room,reference:&(String,u64))->Result<(Feed,Roster,Vec<String>),Done> {
+    let mut held=Held::open(session,room)?;held.roster(session,room)?;
+    let subject=held.roster.members.iter().find(|(_,cell)|cell==&reference.0).map(|(subject,_)|subject.clone())
+        .ok_or_else(||error("stable reply stream absent from signed roster"))?;
+    let view=stream_window(session,room,&held,&subject,&reference.0,reference.1,1)?;
+    let feed=merge(entries_of(&view,&reference.0,&subject),held.roster.founder.clone());
+    cache_feed(session,room,&feed)?;
+    Ok((feed,held.roster,Vec::new()))
+}
+/// Source-only per-stream cursor pages. Retained refs are re-read separately,
+/// so a held old request cannot pin discovery to that old stream prefix.
+fn read_discovery(session:&Session,room:&Room,file:&str,count:usize)->Result<(Feed,Roster,Vec<String>,Value),Done> {
+    let bytes=fs::read(file).map_err(error)?;
+    if bytes.len()>262144 {return Err(error("discovery cursor file exceeds bound"));}
+    let request:Value=serde_json::from_slice(&bytes).map_err(error)?;
+    if request["type"]!="mini-resident-discovery-v1" {return Err(error("discovery type differs"));}
+    let cursors=request["cursors"].as_object().ok_or_else(||error("discovery cursors absent"))?;
+    let retained=request["retained"].as_array().ok_or_else(||error("discovery retained refs absent"))?;
+    if cursors.len()>1024 || retained.len()>1024 {return Err(error("discovery stream/retained bound exceeded"));}
+    for (cell,seq) in cursors {decimal(cell,"discovery stream").map_err(error)?;if seq.as_u64().is_none(){return Err(error("discovery cursor invalid"));}}
+    let mut held=Held::open(session,room)?;held.roster(session,room)?;
+    let (roster,_)=current_members(session,room,held.roster.clone())?;
+    let mut entries=Vec::new();let mut progressed=serde_json::Map::new();let mut missing=Vec::new();
+    for (subject,cell) in &roster.members {
+        let cursor=cursors.get(cell).and_then(Value::as_u64).unwrap_or(0);
+        let start=cursor.checked_add(1).ok_or_else(||error("discovery sequence exhausted"))?;
+        match stream_window(session,room,&held,subject,cell,start,count) {
+            Ok(view)=>{
+                let rows=entries_of(&view,cell,subject);
+                if view["entries"].as_array().into_iter().flatten().any(|e|e["payloadState"]!="verified") {
+                    missing.push(format!("stream of {subject} ({cell}): payload unavailable; cursor retained"));
+                    progressed.insert(cell.clone(),json!(cursor));
+                } else {
+                    progressed.insert(cell.clone(),json!(rows.iter().map(|e|e.sequence).max().unwrap_or(cursor)));
+                    entries.extend(rows);
+                }
+            },
+            Err((_,line))=>{missing.push(format!("stream of {subject} ({cell}): {line}"));progressed.insert(cell.clone(),json!(cursor));}
+        }
+        for reference in retained.iter().filter(|r|r[0]==*cell) {
+            let seq=reference[1].as_u64().filter(|n|*n>0).ok_or_else(||error("retained sequence invalid"))?;
+            match stream_window(session,room,&held,subject,cell,seq,1) {
+                Ok(view)=>entries.extend(entries_of(&view,cell,subject)),
+                Err((_,line))=>missing.push(format!("retained stream of {subject} ({cell}): {line}")),
+            }
+        }
+    }
+    let feed=merge(entries,roster.founder.clone());cache_feed(session,room,&feed)?;
+    Ok((feed,roster,missing,Value::Object(progressed)))
+}
+
 fn read_room(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String>), Done> {
     let mut held = Held::open(session, room)?;
     held.roster(session, room)?;
@@ -1481,13 +1561,13 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             said(&room, &format!("reacted to #{number}"), &result);
             Ok(())
         }
-        Line::Tail { room, count, since, follow, json: as_json, held } => {
+        Line::Tail { room, count, since, follow, json: as_json, held, entry, discovery } => {
             let room = match room {
                 Some(name) => load_room(session, &name),
                 None => current_room(session),
             }
             .map_err(error)?;
-            tail(session, &room, count, since, follow, as_json, held)
+            tail(session, &room, count, since, follow, as_json, held, entry.as_ref(), discovery.as_deref())
         }
         Line::New { room, private } => chat_new(session, &room, private),
         Line::Invite { room, subject, name, enc, verbs } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs),
@@ -1550,23 +1630,35 @@ fn founder_note(session: &Session, room: &Room) {
     }
 }
 
-fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow: bool, as_json: bool, held: bool) -> Result<(), Done> {
+fn shown_entries(feed:&Feed,since:Option<u64>,entry:Option<&(String,u64)>)->Vec<usize> {
+    (1..=feed.feed.len())
+        .filter(|n|since.is_none_or(|h|feed.feed[n-1].height>h))
+        .filter(|n|entry.is_none_or(|(cell,seq)|feed.feed[n-1].cell==*cell && feed.feed[n-1].sequence==*seq))
+        .collect()
+}
+fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow: bool, as_json: bool, held: bool, entry: Option<&(String, u64)>, discovery: Option<&str>) -> Result<(), Done> {
     let names = names(session);
-    let (feed, roster, missing) = if held { read_held(session, room)? } else { read_room(session, room)? };
+    let (feed, roster, missing, cursors) = if let Some(file)=discovery {
+        read_discovery(session,room,file,count)?
+    } else if let Some(reference)=entry {
+        let (feed,roster,missing)=read_exact_entry(session,room,reference)?;
+        (feed,roster,missing,Value::Null)
+    } else {
+        let (feed,roster,missing)=if held {read_held(session,room)?} else {read_room(session,room)?};
+        (feed,roster,missing,Value::Null)
+    };
     // The roster keeps a row for everyone ever invited; who is a member NOW is
     // the Host's `who` view (the subjects whose capability covers the room), so a
     // kicked or departed member is not counted (AUDIT-ROOMS, client defect 7).
     let (roster, former) = if held { (roster, Vec::new()) } else { current_members(session, room, roster)? };
     let mut out = std::io::stdout();
-    let shown: Vec<usize> = (1..=feed.feed.len())
-        .filter(|n| since.is_none_or(|h| feed.feed[n - 1].height > h))
-        .collect();
-    let start = shown.len().saturating_sub(count);
+    let shown = shown_entries(&feed, since, entry);
+    let start = if discovery.is_some() {0} else {shown.len().saturating_sub(count)};
     if as_json {
         let state = json!({"type":"mini-chat-room-v1","room":room.name,"founder":roster.founder,
             "members":roster.members.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>(),
             "topic":feed.topic.as_ref().map(|t| t.0.clone()),"pin":feed.pin.map(|p| p.0),
-            "entries":feed.feed.len(),"unreadable":missing,
+            "entries":feed.feed.len(),"selectedEntries":shown.len(),"discoveryCursors":cursors,"unreadable":missing,
             "former":former.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>()});
         let _ = writeln!(out, "{state}");
         for n in &shown[start..] {
@@ -2029,11 +2121,11 @@ mod tests {
         assert!(plan("say --re zero hi").unwrap().is_err());
         assert_eq!(
             plan("tail -n 5 --since 30 --follow").unwrap().unwrap(),
-            Line::Tail { room: None, count: 5, since: Some(30), follow: true, json: false, held: false }
+            Line::Tail { room: None, count: 5, since: Some(30), follow: true, json: false, held: false, entry: None, discovery: None }
         );
         assert_eq!(
             plan("tail --in commons --json --held").unwrap().unwrap(),
-            Line::Tail { room: Some("commons".into()), count: 20, since: None, follow: false, json: true, held: true }
+            Line::Tail { room: Some("commons".into()), count: 20, since: None, follow: false, json: true, held: true, entry: None, discovery: None }
         );
         assert!(plan("tail --held --follow").unwrap().is_err());
         assert!(plan("tail --bogus").unwrap().is_err());
@@ -2110,6 +2202,17 @@ mod tests {
         assert!(render_entry(&feed, 3, &names).contains("ignored: only me, the founder, sets the topic"));
         assert!(render_entry(&feed, 4, &names).contains("ignored: only me, the founder, pins"));
         assert_eq!(render_entry(&feed, 2, &names), "#2 h2 bob: hi\n      +1 s…3");
+    }
+
+    #[test]
+    fn exact_signed_history_selection_survives_over_hundred_intervening_entries() {
+        let feed=merge((1..=140).map(|n|entry(n,"20","99",n,r#"{"type":"say","text":"message"}"#)).collect(),None);
+        assert_eq!(shown_entries(&feed,None,Some(&("99".into(),1))),vec![1]);
+        assert!(shown_entries(&feed,None,Some(&("98".into(),1))).is_empty());
+        assert_eq!(shown_entries(&feed,Some(130),None).len(),10);
+        assert!(parse_tail("--entry 99:1 --since 5").is_err());
+        assert!(parse_tail("--entry 99:0").is_err());
+        assert!(matches!(parse_tail("--entry 99:1 --json").unwrap(),Line::Tail {entry:Some(_),..}));
     }
 
     #[test]

@@ -507,32 +507,42 @@ impl Runner<'_> {
 /// Read a room assignment for the durable ACP controller. No provider call
 /// or room write occurs here. The existing ordinary participant adoption is
 /// shared with the legacy runner; the worker receives only the signed text.
-pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Path) -> Result<Value> {
-    let dismissal = inbox.join(format!("dismiss-{}.json", tools.room));
-    if dismissal.exists() {
-        let notice = read_json(&dismissal).ok_or("dismissal notice is not readable JSON")?;
-        let manifest = read_json(&inbox.join(format!("summon-{}.json", tools.room)))
-            .ok_or("dismissal has no retained summon manifest")?;
-        let to = notice["returnTo"].as_str().ok_or("dismissal lacks return destination")?;
-        if notice["type"] != "mini-hermes-dismiss-v1" || notice["room"] != tools.room
-            || notice["hermes"] != manifest["hermes"] || notice["founder"] != manifest["founder"]
-            || notice["account"] != manifest["account"] || manifest["founderAccount"] != to
-            || notice["account"]["name"].as_str() != tools.account.as_deref()
-        { return Err("dismissal differs from this room's retained summon assignment".into()); }
-        return Ok(json!({"dismissed":true,"returnTo":to}));
-    }
+pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Path, task: &str, page_size:u64) -> Result<Value> {
     let config = Config { kind:"mini-hermes-room-runner-v1".into(),tools:tools.clone(),
-        inbox:inbox.to_owned(),state:state.to_owned(),
-        provider:None,max_rounds:1 };
+        inbox:inbox.to_owned(),state:state.to_owned(),provider:None,max_rounds:1 };
     let journal = Journal::open(&state.join("adoption.jsonl"))?;
     let mut runner = Runner { config:&config,tools:RoomTools { config:tools },journal };
+    if inbox.join("dismissal.json").exists() {
+        let text=runner.mini(&["hermes-handoff","--action","check-dismissal","--dir",&runner.ws(),
+            "--task",task,"--inbox",&inbox.display().to_string()])?;
+        let notice:Value=serde_json::from_str(text.trim()).map_err(|e|format!("resident accepted dismissal: {e}"))?;
+        if notice["type"]!="mini-hermes-dismiss-ready-v1" || notice["task"]!=task
+            || notice["room"]!=tools.room || notice["account"]["name"].as_str()!=tools.account.as_deref()
+            || notice["returnTo"].as_str().is_none() {
+            return Err("accepted dismissal differs from configured resident".into());
+        }
+        return Ok(json!({"dismissed":true,"returnTo":notice["returnTo"],"dismissal":notice}));
+    }
+    let ready_text = runner.mini(&["hermes-handoff", "--action", "check-delivery", "--dir", &runner.ws(),
+        "--task", task, "--inbox", &inbox.display().to_string()])?;
+    let ready: Value = serde_json::from_str(ready_text.trim()).map_err(|e|format!("resident accepted handoff: {e}"))?;
+    if ready["type"] != "mini-hermes-handoff-ready-v1" || ready["task"] != task || ready["room"] != tools.room {
+        return Err("resident accepted handoff differs from configured task/room".into());
+    }
     let manifest = runner.adopt()?;
+    if manifest["account"]["name"].as_str()!=tools.account.as_deref() {
+        return Err("resident budget account differs from accepted assignment; provision matching controller config before prompting".into());
+    }
     let name = manifest["program"]["name"].as_str().ok_or("resident program name absent")?;
     let program = runner.tools.read("mini_doc_show", &json!({"doc":name}))?;
     let me = runner.me()?;
-    let tail = runner.tools.read("mini_stream_tail", &json!({"n":"100"}))?;
-    let entries: Vec<Value> = tail["entries"].as_array().into_iter().flatten()
-        .filter(|entry| entry["author"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
+    let binding = json!({"world":ready["world"],
+        "roomCell":ready["roomCell"],"assignment":ready["assignment"],"task":task,"handoff":ready["id"],"resident":manifest["hermes"]});
+    let cursor_file=state.join("discovery.json");
+    crate::atomic_json(&cursor_file,&crate::resident_requests::discovery(state,&binding)?)?;
+    let tail=runner.tools.read("mini_stream_discovery",&json!({"cursorFile":cursor_file,"n":page_size.to_string()}))?;
+    let entries:Vec<Value>=tail["entries"].as_array().into_iter().flatten()
+        .filter(|entry|entry["author"].as_str()!=Some(me.as_str())).cloned().collect();
     let room = runner.tools.read("mini_room_ls", &json!({}))?;
     let member_changes: Vec<Value> = room["entries"].as_array().into_iter().flatten()
         .filter(|entry| entry["subject"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
@@ -540,7 +550,8 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
     Ok(json!({"type":"mini-hermes-resident-assignment-v1","room":tools.room,"me":me,
         "role":manifest["role"],"programName":name,"program":program["text"],
         "docs":manifest["docs"],"every":manifest["every"],"account":tools.account,
-        "recentMemberEntries":entries,"recentMemberChanges":member_changes,"roomStatus":room_status}))
+        "acceptedHeight":ready["acceptedHeight"],"recentMemberEntries":[],"sourceRequests":entries,"sourceRoom":tail["room"],"requestBinding":binding,
+        "recentMemberChanges":member_changes,"roomStatus":room_status}))
 }
 
 /// One attach: recover, adopt, return the budget when dismissed, else run the

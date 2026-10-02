@@ -13,13 +13,21 @@ struct ResidentConfig {
     controller: PathBuf,
     inbox: PathBuf,
     state: PathBuf,
-    #[serde(default = "one")]
-    max_prompts: u64,
+    #[serde(default)]
+    max_prompts: Option<u64>,
     #[serde(default = "interval")]
     interval_seconds: u64,
+    #[serde(default="pending_limit")]
+    max_pending_requests: usize,
+    #[serde(default="author_limit")]
+    max_requests_per_author: usize,
+    #[serde(default="page_size")]
+    discovery_page_size: u64,
 }
-fn one() -> u64 { 1 }
 fn interval() -> u64 { 30 }
+fn pending_limit()->usize {64}
+fn author_limit()->usize {8}
+fn page_size()->u64 {64}
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -119,7 +127,10 @@ fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState,
     let command = format!("terminal hermes-resident {attachment} 2 {resident_prompt_id} {prompt_sha256} {instruction}");
     if command.len() > 16_384 { return Err("resident program/brief exceeds controller prompt bound".into()); }
     let input = assignment_fingerprint(prepared)?;
-    journal.pending = Some(json!({"residentPromptId":resident_prompt_id,
+    if prepared.get("selectedRequest").is_some() {
+        resident_requests::started(state.parent().ok_or("resident state parent absent")?, &resident_prompt_id, &input)?;
+    }
+    journal.pending = Some(json!({"selectedRequest":prepared["selectedRequest"],"residentPromptId":resident_prompt_id,
         "inputSha256":input,"promptSha256":prompt_sha256, "attachmentId":attachment,"requestId":2}));
     // Attachment/request counters may repeat across controller restarts.
     // Never let a previous completion stand in for this new unique prompt.
@@ -201,8 +212,10 @@ fn validate_resident_origin(frame: &Value, prompt_id: &str, prompt_sha256: &str)
 pub(crate) fn main(path: &Path) -> Result<()> {
     let bytes = bounded_regular_file(path, 65_536)?;
     let options: ResidentConfig = serde_json::from_slice(&bytes).map_err(|e| format!("resident config: {e}"))?;
-    if options.kind != "mini-hermes-room-resident-v1" || !(1..=1000).contains(&options.max_prompts)
-        || !(5..=3600).contains(&options.interval_seconds) { return Err("resident config requires its v1 type, maxPrompts 1..1000 and intervalSeconds 5..3600".into()); }
+    if options.kind != "mini-hermes-room-resident-v1" || options.max_prompts.is_some_and(|limit|!(1..=1000).contains(&limit))
+        || !(5..=3600).contains(&options.interval_seconds) { return Err("resident config requires its v1 type, maxPrompts null (continuous) or1..1000 and intervalSeconds 5..3600".into()); }
+    let limits=resident_requests::Limits {pending:options.max_pending_requests,per_author:options.max_requests_per_author,page_size:options.discovery_page_size};
+    limits.validate()?;
     let config: crate::Config = serde_json::from_slice(&bounded_regular_file(&options.controller, 262_144)?)
         .map_err(|e| format!("resident controller config: {e}"))?;
     if options.state.parent() != Some(config.state_dir.as_path()) { return Err("resident state must be a direct child of controller stateDir".into()); }
@@ -230,13 +243,26 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed".into()); }
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
-    while resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts || journal.return_pending {
-        let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state)?;
+    resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+    while (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) || journal.return_pending {
+        let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
         if prepared["dismissed"] == true {
+            resident_requests::dismiss(&options.state)?;
             return_budget(&room, &prepared, &mut journal, &state)?;
             println!("{}", json!({"type":"resident-dismissed","room":room.room,"budgetReturn":journal.returned}));
             return Ok(());
         }
+        let prepared = match resident_requests::select(&prepared,&options.state,limits)? {
+            Some(selected) => selected,
+            None => {
+                // A summoned program can still maintain documents when no
+                // addressed request is waiting. It has no fabricated recipient.
+                let mut maintenance=prepared;
+                maintenance.as_object_mut().unwrap().remove("sourceRequests");
+                maintenance.as_object_mut().unwrap().remove("sourceRoom");
+                maintenance
+            }
+        };
         let input = assignment_fingerprint(&prepared)?;
         if journal.last_input.as_ref() != Some(&input) {
             prompt(&config, &prepared, &mut journal, &state)?;
@@ -245,9 +271,10 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
             println!("{}", json!({"type":"resident-completed","completed":resident_outcomes::qualified_count(&options.state,journal.completed)?,"recordedCompletions":journal.completed}));
+            resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
             // Prompt count and final delivery are separate durable states.
         }
-        if resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts { thread::sleep(Duration::from_secs(options.interval_seconds)); }
+        if (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
     }
     Ok(())
 }

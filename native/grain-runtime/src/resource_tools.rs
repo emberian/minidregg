@@ -961,6 +961,25 @@ impl RoomTools<'_> {
                 };
                 Ok(json!({"status":status.stdout,"budget":budget.trim()}))
             }
+            "mini_stream_discovery" => {
+                only_keys(arguments,&["cursorFile","n"])?;
+                let cursor=arguments["cursorFile"].as_str().ok_or("discovery cursor file absent")?;
+                if cursor.contains(char::is_whitespace) {return Err("discovery cursor path contains whitespace".into());}
+                let n=bounded_decimal(arguments,"n",3)?.ok_or("discovery page size absent")?;
+                let run=Self::ok_or_ending(self.line(&format!("tail --in {room} --json --discover {cursor} -n {n}"))?)?;
+                let mut docs=run.stdout.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok());
+                let state=docs.next().ok_or("discovery printed no room state")?;
+                Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
+            }
+            "mini_stream_entry" => {
+                only_keys(arguments, &["cell", "sequence"])?;
+                let cell = bounded_decimal(arguments, "cell", 78)?.ok_or("source cell absent")?;
+                let sequence = bounded_decimal(arguments, "sequence", 20)?.ok_or("source sequence absent")?;
+                let run = Self::ok_or_ending(self.line(&format!("tail --in {room} --json --entry {cell}:{sequence}"))?)?;
+                let mut docs = run.stdout.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+                let state = docs.next().ok_or("entry lookup printed no room state")?;
+                Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
+            }
             "mini_stream_tail" => {
                 only_keys(arguments, &["n", "since"])?;
                 let n = bounded_decimal(arguments, "n", 6)?.unwrap_or_else(|| "100".into());

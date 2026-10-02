@@ -15,6 +15,7 @@ mod hermes_session_verify;
 mod session_failure;
 mod resident_outcomes;
 mod resident_origin;
+mod resident_requests;
 mod resident_delivery;
 mod resident_completion;
 #[cfg(test)]
