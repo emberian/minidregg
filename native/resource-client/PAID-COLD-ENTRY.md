@@ -146,3 +146,32 @@ before acknowledging onboarding. Existing explicitly legacy setup records
 remain legacy. Source-owned v2 Lean qualification and the composed runtime
 journeys are still required before this after-core service is deployed;
 synthetic native tests are not substitutes for that qualification.
+
+
+### Measured cold HTTP service budget
+
+`journey.d/jpay-bootstrap-budget.py` exercises an existing stopped, isolated
+`jpay-e4` fixture through its actual operator/public relay and a temporary user
+systemd HTTP service with `MemoryMax=128M` and `TasksMax=16`. Optional growth
+uses two synthetic RPC fixtures and the normal verified observer; retained
+origins, cursor, attempts and tick bundles survive interruption. The same
+`--growth-label` and `--growth-base-tip`, with a later `--start-tip`, resume the
+same signatures. The final source view must contain each origin exactly once.
+Never point this fixture utility at a deployment store.
+
+Qualification on core Host `6075eff2`, with client `cbcbc460`, grew the actual
+source journal from seven to 71 rows by recovering 64 missing-memo decisions.
+The repeated run retained all 64 exactly once. Sequential status and quote
+returned 200; 24 concurrent status/quote/metadata requests returned ten 200s
+and fourteen bounded 503 busy responses. Worst response was 0.113 seconds;
+HTTP service peak memory was 4,771,840 bytes and five tasks. The earlier growth
+run peaked at 4,837,376 bytes and 0.130 seconds. Every response remained below
+16KiB and the six-second proxy budget.
+
+Evidence is retained on persvati at
+`/home/ember/build/pay-bootstrap-budget-6075-{8,9}/`; run 9 includes exact Host,
+client and config hashes, the source enrollment view, and per-request outcomes.
+This is a finite 71-row qualification. The HTTP unit limit does not include the
+separate operator Host process. V1 still has an explicitly bounded full-view
+scan and may refuse larger histories; v2 exact status needs its own matched
+receiving qualification. No public service settings changed.
