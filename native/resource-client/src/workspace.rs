@@ -415,6 +415,22 @@ pub(crate) fn init(
     birth_context: Option<&Path>,
     namespace_root: Option<&Path>,
 ) -> Result<()> {
+    init_impl(root, host, config, identity, birth_context, namespace_root, None)
+}
+
+/// Fresh product onboarding only: the directory must not already exist.
+pub(crate) fn init_fresh(
+    root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
+    birth_context: Option<&Path>, namespace_root: Option<&Path>,
+    first_ref: &Value, verifier: Option<&Path>,
+) -> Result<()> {
+    init_impl(root, host, config, identity, birth_context, namespace_root, Some((first_ref, verifier)))
+}
+fn init_impl(
+    root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
+    birth_context: Option<&Path>, namespace_root: Option<&Path>,
+    fresh: Option<(&Value, Option<&Path>)>,
+) -> Result<()> {
     let InitIdentity {
         key,
         subject,
@@ -569,11 +585,22 @@ pub(crate) fn init(
     if let Some(sha) = host_sha {
         value["hostSha256"] = json!(sha);
     }
+    if let Some((first_ref, verifier)) = fresh {
+        receipt_continuity::fresh::prepare(&root, &mut value, first_ref, verifier)?;
+    }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(&root.join("workspace.json"), &bytes)?;
     println!("{}", root.display());
     Ok(())
+}
+
+/// Completes or resumes only a pin created by `init_fresh`; never upgrades legacy.
+pub(crate) fn complete_fresh_onboarding(root: &Path) -> Result<Value> {
+    let workspace = load(root)?;
+    receipt_continuity::fresh::complete(root, &workspace, |reference| {
+        Ok(signed_view_unchecked(root, &workspace, reference, "resource")?.1)
+    })
 }
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
@@ -974,7 +1001,7 @@ pub(crate) fn signed_view(
     Ok((result, challenge, signed))
 }
 
-// Only continuity-init may bypass the pre-read baseline to establish explicit first trust.
+// Only explicit legacy init or durably pinned fresh onboarding may establish first trust.
 fn signed_view_unchecked(
     root: &Path,
     workspace: &Value,
@@ -5244,24 +5271,29 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         let namespace = args.optional("namespace-root").map(path);
         let next_public = args.optional("next-pub").map(path);
         let without_prerotation = args.optional("no-prerotation").is_some();
+        let first_ref = args.optional("continuity-ref").map(|value| {
+            serde_json::from_str::<Value>(&os_string(value, "continuity reference")?)
+                .map_err(|error| error.to_string())
+        }).transpose()?;
+        let verifier = args.optional("verifier").map(path);
+        if verifier.is_some() && first_ref.is_none() {
+            return Err("init --verifier requires --continuity-ref".into());
+        }
         args.finish()?;
-        return init(
-            &root,
-            host.as_deref(),
-            &config,
-            InitIdentity {
-                key: key.as_deref(),
-                subject: subject.as_deref(),
-                enrollment: enrollment.as_deref(),
-                next_public: next_public.as_deref(),
-                without_prerotation,
-            },
-            context.as_deref(),
-            namespace.as_deref(),
-        );
+        let identity = InitIdentity { key: key.as_deref(), subject: subject.as_deref(), enrollment: enrollment.as_deref(), next_public: next_public.as_deref(), without_prerotation };
+        return match first_ref.as_ref() {
+            Some(reference) => init_fresh(&root, host.as_deref(), &config, identity,
+                context.as_deref(), namespace.as_deref(), reference, verifier.as_deref()),
+            None => init(&root, host.as_deref(), &config, identity,
+                context.as_deref(), namespace.as_deref()),
+        };
     }
     let workspace = load(&root)?;
     match action.as_str() {
+        "onboard" => {
+            args.finish()?;
+            print_json(&complete_fresh_onboarding(&root)?)
+        }
         "continuity-init" => {
             let name = os_string(args.required("name")?, "reference name")?;
             let verifier = args.optional("verifier").map(path);
@@ -5938,7 +5970,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             crate::market::show(&root, &workspace, &name)
         }
         _ => Err(
-            "workspace action must be init, continuity-init, continuity-verifier, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
+            "workspace action must be init, onboard, continuity-init, continuity-verifier, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }

@@ -428,6 +428,8 @@ usage:
   mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
   mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini workspace --action init ... --continuity-ref '{"name":"account","kind":"account","target":"ID","observeCapability":"CAP"}' [--verifier LOCAL-HOST]
+  mini workspace --action onboard --dir WORKSPACE
   mini workspace --action continuity-init --dir WORKSPACE --name REF [--verifier LOCAL-HOST]
   mini workspace --action continuity-verifier --dir WORKSPACE --verifier LOCAL-HOST
   mini workspace --action continuity-check --dir WORKSPACE --attempt RETAINED [--historical true|false]
