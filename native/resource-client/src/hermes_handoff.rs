@@ -288,6 +288,57 @@ fn consistent(previous: &mut Option<Value>, challenge: &Value) -> Result<()> {
     *previous = Some(image);
     Ok(())
 }
+/// The admitted capability query proves current observe access to this exact
+/// account. Its head describes custody and verbs, not admission of a transfer.
+fn account_evidence(
+    recipient: &Value,
+    bound_world: &Value,
+    account: &Value,
+    view: &Value,
+    challenge: &Value,
+    challenge_bytes: &[u8],
+    signed_bytes: &[u8],
+) -> Result<Value> {
+    let observe = text(account, "observeCapability")?;
+    let operation = text(account, "operationCapability")?;
+    let target = text(account, "target")?;
+    let head = &view["head"];
+    let intent = &challenge["intent"];
+    if account["kind"] != "account"
+        || view["type"] != "capability"
+        || view["kind"] != "account"
+        || head["id"] != observe
+        || head["holder"]["type"] != "subject"
+        || head["holder"]["subject"] != *recipient
+        || intent["subject"] != *recipient
+        || intent["purpose"]
+            != json!({"type":"query","kind":"account","target":target,"view":"capability"})
+        || intent["grants"] != json!([{"kind":"account","target":target,"capability":observe}])
+        || challenge["domain"] != bound_world["domain"]
+    {
+        return Err("native account capability differs from handoff recipient/target/grant".into());
+    }
+    for key in ["height", "worldRoot", "authorityRoot"] {
+        crate::chat::decimal(text(challenge, key)?, "account observation identity")?;
+    }
+    let verbs = head["verbs"]
+        .as_array()
+        .ok_or("account capability verbs absent")?;
+    if !verbs.iter().any(|v| v == "observe") {
+        return Err("native account capability lacks observe verb".into());
+    }
+    let operation_verified = operation == observe;
+    Ok(
+        json!({"type":"mini-hermes-account-custody-v1","target":target,
+        "recipient":recipient,"observedCapability":observe,"operationCapability":operation,
+        "operationVerified":operation_verified,
+        "transferGranted":operation_verified && verbs.iter().any(|v| v == "transfer"),
+        "world":bound_world,"head":head,"grant":intent["grants"][0],
+        "observation":{"height":challenge["height"],"worldRoot":challenge["worldRoot"],
+            "authorityRoot":challenge["authorityRoot"],
+            "challengeSha256":digest(challenge_bytes),"signedSha256":digest(signed_bytes)}}),
+    )
+}
 fn verify(
     root: &Path,
     bundle: &Value,
@@ -428,13 +479,27 @@ fn verify(
     {
         return Err("current native summon assignment differs (dismissed or superseded)".into());
     }
+    let account_name = file_name(text(&manifest["account"], "name")?);
+    let mut custody = None;
     for (n, _) in p["files"].as_object().unwrap() {
         if n.starts_with("summon-") {
             continue;
         }
         let v = file(&p, n)?;
-        let (_, c, _) = workspace::signed_view(root, &ws, &reference(&v)?, "capability")?;
+        let (capability, c, signed) =
+            workspace::signed_view(root, &ws, &reference(&v)?, "capability")?;
         consistent(&mut image, &c)?;
+        if n == &account_name {
+            custody = Some(account_evidence(
+                &p["recipient"],
+                &p["world"],
+                &v,
+                &capability,
+                &c,
+                &read(&signed.with_file_name("challenge.bin"))?,
+                &read(&signed)?,
+            )?);
+        }
     }
     let program = json!({"kind":"object","target":manifest["program"]["target"],"observeCapability":invitation["capability"]});
     let (_, c, _) = workspace::signed_view(root, &ws, &program, "resource")?;
@@ -460,7 +525,7 @@ fn verify(
     }
 
     Ok(
-        json!({"type":"mini-hermes-handoff-verified-v1","id":id,"task":task,"recipient":p["recipient"],"room":room,"roomCell":p["roomCell"],"assignment":p["assignment"],"founder":p["founder"],"keyEpoch":owner["keyEpoch"],"world":p["world"],"originHeight":presentation["height"],"acceptedHeight":accepted_height,"acceptedCount":receipt["acceptedCount"],"origin":receipt,"image":image,"files":p["files"]}),
+        json!({"type":"mini-hermes-handoff-verified-v1","id":id,"task":task,"recipient":p["recipient"],"room":room,"roomCell":p["roomCell"],"assignment":p["assignment"],"founder":p["founder"],"keyEpoch":owner["keyEpoch"],"world":p["world"],"originHeight":presentation["height"],"acceptedHeight":accepted_height,"acceptedCount":receipt["acceptedCount"],"origin":receipt,"image":image,"files":p["files"],"accountEvidence":custody.ok_or("native account custody absent")?}),
     )
 }
 /// The accepted call must be exactly the founder's assignment transition.
@@ -536,7 +601,7 @@ fn check_delivery(root: &Path, inbox: &Path, task: &str) -> Result<Value> {
         }
     }
     Ok(
-        json!({"type":"mini-hermes-handoff-ready-v1","id":id,"task":task,"recipient":p["recipient"],"room":room,"roomCell":p["roomCell"],"assignment":p["assignment"],"account":file(&p,&format!("summon-{room}.json"))?["account"],"world":verified["world"],"originHeight":verified["originHeight"],"acceptedHeight":verified["acceptedHeight"],"acceptedCount":verified["acceptedCount"],"image":verified["image"]}),
+        json!({"type":"mini-hermes-handoff-ready-v1","id":id,"task":task,"recipient":p["recipient"],"room":room,"roomCell":p["roomCell"],"assignment":p["assignment"],"account":file(&p,&format!("summon-{room}.json"))?["account"],"world":verified["world"],"originHeight":verified["originHeight"],"acceptedHeight":verified["acceptedHeight"],"acceptedCount":verified["acceptedCount"],"image":verified["image"],"accountEvidence":verified["accountEvidence"]}),
     )
 }
 pub(crate) fn seal_dismiss(ws: &Value, out: &Path, origin: &Path) -> Result<()> {
@@ -1246,5 +1311,99 @@ mod tests {
             &json!({"worldRoot":"4","authorityRoot":"5","height":"6","domain":"32"})
         )
         .is_err());
+    }
+    #[test]
+    fn account_custody_binds_native_query_and_distinguishes_operation_grant() {
+        let recipient = json!("8");
+        let world = json!({"domain":"31","expectedSeed":"99"});
+        let mut account = json!({"kind":"account","target":"70",
+            "observeCapability":"80","operationCapability":"80"});
+        let view = json!({"type":"capability","kind":"account","head":{
+            "id":"80","holder":{"type":"subject","subject":"8"},
+            "room":"70","verbs":["observe","transfer"]}});
+        let challenge = json!({"height":"3","worldRoot":"4","authorityRoot":"5",
+            "domain":"31","intent":{"subject":"8","nonce":"1",
+            "purpose":{"type":"query","kind":"account","target":"70","view":"capability"},
+            "grants":[{"kind":"account","target":"70","capability":"80"}]}});
+        let evidence = account_evidence(
+            &recipient,
+            &world,
+            &account,
+            &view,
+            &challenge,
+            b"challenge",
+            b"signed",
+        )
+        .unwrap();
+        assert_eq!(evidence["operationVerified"], true);
+        assert_eq!(evidence["transferGranted"], true);
+        assert_eq!(
+            evidence["observation"]["challengeSha256"],
+            digest(b"challenge")
+        );
+        assert_eq!(evidence["observation"]["signedSha256"], digest(b"signed"));
+        assert!(evidence.get("owner").is_none());
+        account["operationCapability"] = json!("81");
+        let separate = account_evidence(
+            &recipient,
+            &world,
+            &account,
+            &view,
+            &challenge,
+            b"challenge",
+            b"signed",
+        )
+        .unwrap();
+        assert_eq!(separate["operationVerified"], false);
+        assert_eq!(separate["transferGranted"], false);
+        for pointer in ["/head/id", "/head/holder/subject", "/kind"] {
+            let mut changed = view.clone();
+            *changed.pointer_mut(pointer).unwrap() = json!("wrong");
+            assert!(account_evidence(
+                &recipient,
+                &world,
+                &account,
+                &changed,
+                &challenge,
+                b"challenge",
+                b"signed"
+            )
+            .is_err());
+        }
+        for pointer in [
+            "/intent/subject",
+            "/intent/purpose/target",
+            "/intent/grants/0/capability",
+            "/domain",
+        ] {
+            let mut changed = challenge.clone();
+            *changed.pointer_mut(pointer).unwrap() = json!("wrong");
+            assert!(account_evidence(
+                &recipient,
+                &world,
+                &account,
+                &view,
+                &changed,
+                b"challenge",
+                b"signed"
+            )
+            .is_err());
+        }
+        let mut no_transfer = view.clone();
+        no_transfer["head"]["verbs"] = json!(["observe"]);
+        account["operationCapability"] = json!("80");
+        assert_eq!(
+            account_evidence(
+                &recipient,
+                &world,
+                &account,
+                &no_transfer,
+                &challenge,
+                b"challenge",
+                b"signed"
+            )
+            .unwrap()["transferGranted"],
+            false
+        );
     }
 }
