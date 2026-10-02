@@ -551,6 +551,14 @@ theorem rootGrantShape_window (template : CanonicalRuntimeProfile.FactoryTemplat
       grant.capability.head.notAfter = grant.capability.head.notBefore + template.lifetime :=
   ⟨shape.2.2.2.2.2.2.1.1, shape.2.2.2.2.2.2.1.2, shape.2.2.2.2.2.2.2.1⟩
 
+/-- A named projection keeps callers independent of the grant-shape tuple's
+other fields. -/
+theorem rootGrantShape_birthWindow (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (grant : AuthorityGrant)
+    (shape : RootGrantShape template authority height grant) : BirthWindow template height grant :=
+  ⟨(rootGrantShape_window template authority height grant shape).1,
+    (rootGrantShape_window template authority height grant shape).2.1⟩
+
 /-- The admission height enters a root grant's shape only through its window. -/
 theorem rootGrantShape_height_move (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) {height height' : Height} (grant : AuthorityGrant)
@@ -575,7 +583,7 @@ theorem outside_window_not_templateBound (template : CanonicalRuntimeProfile.Fac
     (grant : AuthorityGrant) (member : grant ∈ descriptor.grants)
     (outside : ¬BirthWindow template height grant) :
     ¬TemplateBound template authority height descriptor :=
-  fun bound => outside (bound.1 grant member).2.2.2.2.2.2.2.1
+  fun bound => outside (rootGrantShape_birthWindow template authority height grant (bound.1 grant member))
 
 /-- An honest descriptor authored at `authored`: it satisfies the template at
 its own height, and every grant names that height as its `notBefore`. -/
@@ -590,11 +598,13 @@ theorem checkTemplateAt_of_bound (template : CanonicalRuntimeProfile.FactoryTemp
     checkTemplateAt template authority height descriptor = .ok ⟨bound⟩ := by
   have notFuture : ¬∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore := by
     rintro ⟨grant, member, early⟩
-    exact Nat.not_le.mpr early (bound.1 grant member).2.2.2.2.2.2.2.1.1
+    exact Nat.not_le.mpr early
+      (rootGrantShape_birthWindow template authority height grant (bound.1 grant member)).1
   have notStale : ¬∃ grant ∈ descriptor.grants,
       grant.capability.head.notBefore + template.birthSlack < height := by
     rintro ⟨grant, member, late⟩
-    exact Nat.not_le.mpr late (bound.1 grant member).2.2.2.2.2.2.2.1.2
+    exact Nat.not_le.mpr late
+      (rootGrantShape_birthWindow template authority height grant (bound.1 grant member)).2
   unfold checkTemplateAt
   rw [if_neg notFuture, if_neg notStale]
   unfold require
@@ -716,9 +726,13 @@ def authority : AuthState where
 
 def target : Nat := 7001
 
-def item : BirthItem Registry :=
-  ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent,
-    CanonicalCellRegistry.Witness.emptyContent⟩, .object, ⟨8⟩, none⟩
+def item : BirthItem Registry where
+  create := ⟨target, CellSlot.root CanonicalCellRegistry.registry .absent,
+    CanonicalCellRegistry.Witness.emptyContent⟩
+  resourceKind := .object
+  owner := ⟨8⟩
+  parent := none
+  placement := none
 
 def ownerCapability (authored : Height) : Capability .object where
   id := ⟨71⟩
