@@ -16,6 +16,7 @@ generation. Every later use checks the newly selected source. The current source
 still governs its own replacement, so a deliberately restrictive new law may
 refuse future installations even though the control grant remains current.
 -/
+import Kernel.ObjectAudienceInstall
 import Kernel.PolicyInstallController
 import Kernel.ResourceBirthController
 import Compiler.DurableReceiverIO
@@ -52,19 +53,20 @@ structure Ingress where
   controlCapability : CapabilityId
   declarationBytes : List UInt8
   envelopeBytes : List UInt8
+  rosterBytes : Option (List UInt8) := none
   deriving DecidableEq, Repr
 
 def ingressStream : StreamCodec Ingress :=
   StreamCodec.xmap
     (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
       (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-        (StreamCodec.product bytesStream bytesStream)))
+        (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.option bytesStream)))))
     (fun ingress => (ingress.subject, ingress.controlCapability,
-      ingress.declarationBytes, ingress.envelopeBytes))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+      ingress.declarationBytes, ingress.envelopeBytes, ingress.rosterBytes))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [1]
+def ingressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [2]
 
 def ingressRawCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress
@@ -77,6 +79,14 @@ def ingressRawCodec : LawfulCodec Ingress where
     simp [decoded]
 
 def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+
+def retiredIngressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [1]
+
+theorem retired_ingress_refused (payload : List UInt8) :
+    ingressCodec.decode (retiredIngressFrame ++ payload) = none := by
+  have lengthExact : ingressFrame.length = retiredIngressFrame.length := by decide +kernel
+  have different : retiredIngressFrame ≠ ingressFrame := by decide +kernel
+  simp [ingressCodec, strictCodec, ingressRawCodec, lengthExact, different]
 
 structure DecodedIngress where
   private mk ::
@@ -180,6 +190,7 @@ inductive Reject where
   | markerMismatch
   | structuralDependencies
   | lawDependencies
+  | audience (reason : ObjectAudienceInstall.Reject)
   | oldSourceUnavailable
   | physicalLowering
   | allocation (reason : CellRegistry.RejectReason)
@@ -219,6 +230,9 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   source : CanonicalCellRegistry.LoadedPolicySource deployment.domain directory.directory
     (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId
       (context federation height authority.snapshot ingress).policyRevision)
+  audience : ObjectAudienceInstall.Prepared deployment durable directory authority ingress.declaration.source.policyId.value
+    source.record.audience semantic.declaration.source.audience
+    (ObjectAudienceInstall.objectMetadataRequired source.record semantic.declaration.source)
   allocated : Directory Nat Registry
   allocationExact : ResourceBirth.allocate Registry directory.directory
     (representationCreates deployment semantic.declaration) = .ok allocated
@@ -257,6 +271,10 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
   let source ← fromOption (CanonicalCellRegistry.loadPolicySource deployment.domain directory.directory
     (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId requestContext.policyRevision))
     .oldSourceUnavailable
+  let audience ← (ObjectAudienceInstall.prepare deployment durable directory authority
+    ingress.declaration.source.policyId.value source.record.audience semantic.declaration.source.audience
+    ingress.ingress.rosterBytes
+    (ObjectAudienceInstall.objectMetadataRequired source.record semantic.declaration.source)).mapError Reject.audience
   let creates := representationCreates deployment semantic.declaration
   match allocationExact : ResourceBirth.allocate Registry directory.directory creates with
   | .error reason => .error (.allocation reason)
@@ -265,7 +283,7 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
         (planWrites creates (authority.writes semantic.update.validated.apply))) .physicalShape
       .ok ⟨deploymentValid.down, directory, authority, structural, structuralChecked.property,
         storageKind, storageKindExact.down, semantic, additionalExact.down, storageKindBound.down, declarationExact.down,
-        markerExact.down, source, allocated, allocationExact, shape.down⟩
+        markerExact.down, source, audience, allocated, allocationExact, shape.down⟩
 
 variable {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment} {durable : Durable}
     {federation : FederationId} {height : Height} {ingress : DecodedIngress}
@@ -284,7 +302,7 @@ def Prepared.writes (prepared : Prepared profile deployment durable federation h
 
 def Prepared.readGuards (prepared : Prepared profile deployment durable federation height ingress) : List ReadGuard :=
   (prepared.authority.readGuards ++
-      ([⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩] : List ReadGuard)).filter
+      (([⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩] : List ReadGuard) ++ prepared.audience.readGuards)).filter
     fun guard => guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 theorem Prepared.creates_source_owned
@@ -320,10 +338,12 @@ theorem Prepared.readGuards_exact (prepared : Prepared profile deployment durabl
   have present := (List.mem_filter.mp member).1
   rcases List.mem_append.mp present with authority | source
   · exact prepared.authority.readGuards_exact guard authority
-  · simp only [List.mem_singleton] at source
-    subst guard
-    exact prepared.source.readGuard_exact.trans
-      ((congrArg rootBytes (prepared.directory.bytes_exact _)).trans (durable.snapshot.coherent _))
+  · rcases List.mem_append.mp source with source | audience
+    · simp only [List.mem_singleton] at source
+      subst guard
+      exact prepared.source.readGuard_exact.trans
+        ((congrArg rootBytes (prepared.directory.bytes_exact _)).trans (durable.snapshot.coherent _))
+    · exact prepared.audience.readGuardsExact guard audience
 
 theorem Prepared.readGuards_readonly (prepared : Prepared profile deployment durable federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
