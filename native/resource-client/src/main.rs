@@ -501,6 +501,8 @@ usage:
   mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIGNATURE.bin
   mini enroll --action seal --dir ATTEMPT [--possession-signature SIGNATURE.bin]
   mini enroll --action submit|lookup --dir ATTEMPT
+  mini key-service-config --host HOST --host-config CONFIG --host-socket SOCKET --providers TABLE --credentials ROOT --credentials-key KEY --namespace-helper HELPER
+  mini key-namespace --config SERVICE --subject SUBJECT --public-key HEX
   mini key --action providers|choose|set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT --model MODEL] [--task TASK] [--providers TABLE] [--credentials ROOT --credentials-key KEY]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
@@ -3030,6 +3032,10 @@ fn run(mut args: Args) -> Result<()> {
         ) => keys::run(args),
         #[cfg(unix)]
         "key-service" => keys::serve(args),
+        #[cfg(unix)]
+        "key-service-config" => keys::service_config(args),
+        #[cfg(unix)]
+        "key-namespace" => keys::namespace(args),
         "fleet" => fleet::run(args),
         #[cfg(unix)]
         "relay" => relay::run_relay(args),

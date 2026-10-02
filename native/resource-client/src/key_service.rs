@@ -50,6 +50,76 @@ fn ready(fd: i32, events: i16, end: Instant) -> Result<()> {
         return Ok(());
     }
 }
+// Unix backlog admission can block too; keep connection inside the SSH deadline.
+fn connect(socket: &Path, end: Instant) -> Result<std::os::unix::net::UnixStream> {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = socket.as_os_str().as_bytes();
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
+        return Err("native credential authority socket refused".into());
+    }
+    address.sun_family = libc::AF_UNIX as _;
+    for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
+        *dst = *src as _;
+    }
+    loop {
+        if Instant::now() >= end {
+            return Err("native credential authority admission timed out".into());
+        }
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err("native credential authority unavailable".into());
+        }
+        let stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+        let rc = unsafe {
+            libc::connect(
+                fd,
+                &address as *const _ as *const libc::sockaddr,
+                std::mem::size_of_val(&address) as _,
+            )
+        };
+        if rc == 0 {
+            return Ok(stream);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EINPROGRESS) {
+            ready(fd, libc::POLLOUT, end)?;
+            let mut result: libc::c_int = 0;
+            let mut length = std::mem::size_of_val(&result) as libc::socklen_t;
+            if unsafe {
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_ERROR,
+                    &mut result as *mut _ as *mut libc::c_void,
+                    &mut length,
+                )
+            } == 0
+                && result == 0
+            {
+                return Ok(stream);
+            }
+            return Err("native credential authority unavailable".into());
+        }
+        if !matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+        ) {
+            return Err("native credential authority unavailable".into());
+        }
+        drop(stream);
+        std::thread::sleep(
+            Duration::from_millis(5).min(end.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 // poll only promises some capacity. Nonblocking syscalls preserve the same
 // deadline when a peer stops reading midway through a larger frame.
 struct Nonblocking {
@@ -210,6 +280,105 @@ fn operator_config(path: &Path) -> Result<Vec<u8>> {
     }
     std::fs::read(path).map_err(|_| "credential service config unavailable".into())
 }
+/// Emit the same public service policy consumed by the authenticated endpoint.
+/// No seal or provider secret is read while generating operator configuration.
+pub(super) fn service_configuration(paths: &[PathBuf]) -> Result<Value> {
+    if paths.len() != 7 || paths.iter().any(|p| !p.is_absolute()) {
+        return Err("credential service paths must be pinned absolute paths".into());
+    }
+    crate::host_image_sha256(&paths[0])?;
+    transport::read_config(&paths[1])?;
+    ProviderTable::load(&paths[3], 0)?;
+    credentials::namespace_path(&paths[4], Namespace::Pool)?;
+    if paths[5].starts_with(&paths[4]) {
+        return Err("credential seal must remain outside credential root".into());
+    }
+    let helper_hash = hash(&operator_config(&paths[6])?);
+    let value = json!({"type":"mini-member-provider-service-v1", "host":paths[0],
+        "hostConfig":paths[1],"socket":paths[2],"providers":paths[3],
+        "credentials":paths[4],"credentialsKey":paths[5],
+        "namespaceHelper":paths[6],"namespaceHelperSha256":helper_hash});
+    namespace_helper(&value)?;
+    Ok(value)
+}
+
+/// Public metadata only. The root allocator calls this using its fixed service
+/// config; this does not read a master key or assert native member authority.
+pub(super) fn namespace_description(service_path: &Path, owner: &Owner) -> Result<Value> {
+    let bytes = operator_config(service_path)?;
+    let cfg = json(&bytes)?;
+    if cfg["type"] != "mini-member-provider-service-v1" {
+        return Err("credential service config version refused".into());
+    }
+    let root = PathBuf::from(required(&cfg, "credentials")?);
+    let namespace = credentials::namespace_path(&root, Namespace::Owner(owner))?;
+    Ok(
+        json!({"type":"mini-credential-namespace-v1", "owner":{"subject":owner.subject,"publicKey":owner.public_key},
+        "serviceConfigSha256":hash(&bytes),"credentialsRoot":root,
+        "subjectDirectory":namespace.parent(),"namespace":namespace,
+        "serviceLockDirectory":root.join("_service")}),
+    )
+}
+fn namespace_helper(cfg: &Value) -> Result<Option<(PathBuf, String)>> {
+    match (cfg.get("namespaceHelper"), cfg.get("namespaceHelperSha256")) {
+        (None, None) => Ok(None),
+        (Some(path), Some(expected)) => {
+            let path = PathBuf::from(
+                path.as_str()
+                    .ok_or("namespace helper path must be a string")?,
+            );
+            let expected = expected
+                .as_str()
+                .ok_or("namespace helper hash must be a string")?
+                .to_owned();
+            unhex(&expected, 32)?;
+            if hash(&operator_config(&path)?) != expected
+                || std::fs::metadata(&path)
+                    .map_err(|_| "namespace helper unavailable")?
+                    .permissions()
+                    .mode()
+                    & 0o111
+                    == 0
+            {
+                return Err("namespace helper root custody or image pin refused".into());
+            }
+            Ok(Some((path, expected)))
+        }
+        _ => Err("namespace helper path and hash must be pinned together".into()),
+    }
+}
+fn provision_namespace(helper: &Path, owner: &Owner, end: Instant) -> Result<()> {
+    let mut child = Command::new("/usr/bin/sudo")
+        .args(["-n", "--"])
+        .arg(helper)
+        .arg(&owner.subject)
+        .arg(&owner.public_key)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| "credential namespace provisioning unavailable")?;
+    loop {
+        match child
+            .try_wait()
+            .map_err(|_| "credential namespace provisioning unavailable")?
+        {
+            Some(status) => {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err("credential namespace provisioning refused".into())
+                }
+            }
+            None if Instant::now() >= end => {
+                let _ = child.kill();
+                let _ = child.try_wait();
+                return Err("credential namespace provisioning timed out".into());
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
 struct Binding {
     service_path: PathBuf,
     service: Vec<u8>,
@@ -221,9 +390,15 @@ struct Binding {
     table_sha: String,
     key_path: PathBuf,
     key_sha: String,
+    namespace_helper: Option<(PathBuf, String)>,
 }
 impl Binding {
     fn current(&self) -> Result<()> {
+        if let Some((path, expected)) = &self.namespace_helper {
+            if hash(&operator_config(path)?) != *expected {
+                return Err("credential namespace helper binding changed during exchange".into());
+            }
+        }
         if operator_config(&self.service_path)? != self.service
             || crate::host_image_sha256(&self.host)? != self.host_sha
             || transport::read_config(&self.config_path)? != self.config
@@ -236,7 +411,7 @@ impl Binding {
         }
         Ok(())
     }
-    fn current_owner(&self, socket: &Path, owner: &Owner) -> Result<Value> {
+    fn current_owner(&self, socket: &Path, owner: &Owner, end: Instant) -> Result<Value> {
         // Send the captured bytes, never reread a possibly upgraded config into
         // an envelope authorized by an earlier challenge.
         let mut frame = vec![2];
@@ -248,7 +423,11 @@ impl Binding {
             &serde_json::to_vec(&json!({"subject":owner.subject,"publicKey":owner.public_key}))
                 .unwrap(),
         );
-        let reply = transport::exchange_unix(socket, &frame)?;
+        // The credential endpoint has one deadline; do not inherit the generic
+        // transport's ten-minute execution wait while holding member custody.
+        let mut stream = connect(socket, end)?;
+        write(&mut stream, &frame, end)?;
+        let reply = read(&mut stream, end)?;
         match reply.split_first() {
             Some((144, body)) => json(body),
             _ => Err("native key-status query refused credential action".into()),
@@ -268,6 +447,8 @@ pub(super) fn serve(service_path: &Path) -> Result<()> {
             "providers",
             "credentials",
             "credentialsKey",
+            "namespaceHelper",
+            "namespaceHelperSha256",
         ],
     )?;
     if cfg["type"] != "mini-member-provider-service-v1" {
@@ -299,6 +480,7 @@ pub(super) fn serve(service_path: &Path) -> Result<()> {
         table_path,
         key_sha: hash(&std::fs::read(&key_path).map_err(|_| "credential service key unavailable")?),
         key_path,
+        namespace_helper: namespace_helper(&cfg)?,
     };
     let mut nonce = [0u8; 32];
     std::fs::File::open("/dev/urandom")
@@ -326,12 +508,21 @@ pub(super) fn serve(service_path: &Path) -> Result<()> {
     let answer: Result<Value> = (|| {
         let (owner, mut action, digest) = authenticate(&challenge, &request)?;
         let response: Result<Value> = (|| {
-            // Serialize service mutations, including the final binding check.
+            // Serialize each authenticated member independently, including the final binding check.
             // This is a native authority snapshot, not an atomic kernel custody
             // transaction; provider use must independently recheck current owner.
-            let _custody = store.member_service_lock()?;
+            let _custody = store.member_service_lock_until(&owner, end)?;
             binding.current()?;
-            let view = binding.current_owner(&socket, &owner)?;
+            let view = binding.current_owner(&socket, &owner, end)?;
+            verify_current(&view, &owner)?;
+            binding.current()?;
+            if let Some((helper, _)) = &binding.namespace_helper {
+                provision_namespace(helper, &owner, end)?;
+                binding.current()?;
+            }
+            // Provisioning creates metadata only; recheck native signing-key
+            // authority immediately before any credential mutation.
+            let view = binding.current_owner(&socket, &owner, end)?;
             verify_current(&view, &owner)?;
             binding.current()?;
             let result = super::member_action(
@@ -341,6 +532,7 @@ pub(super) fn serve(service_path: &Path) -> Result<()> {
                 &action,
                 required(&view, "keyEpoch")?,
             )?;
+            binding.current()?;
             Ok(
                 json!({"type":"mini-member-provider-result-v1","result":result,
                 "authentication":{"requestSha256":digest,"keyEpoch":view["keyEpoch"],"subject":owner.subject,"publicKey":owner.public_key}}),
@@ -489,6 +681,40 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn native_authority_backlog_obeys_exchange_deadline() {
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let path = std::env::temp_dir().join(format!("mini-key-backlog-{}", std::process::id()));
+        let listener = UnixListener::bind(&path).unwrap();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
+        let a = UnixStream::connect(&path).unwrap();
+        let b = UnixStream::connect(&path).unwrap();
+        let start = Instant::now();
+        assert!(connect(&path, start + Duration::from_millis(40)).is_err());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(a);
+        drop(b);
+        drop(listener);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn namespace_allocator_requires_complete_root_image_pin() {
+        assert!(namespace_helper(&json!({})).unwrap().is_none());
+        assert!(
+            namespace_helper(&json!({"namespaceHelper":"/usr/local/lib/mini/helper"})).is_err()
+        );
+        assert!(namespace_helper(&json!({"namespaceHelperSha256":"00".repeat(32)})).is_err());
+        assert!(namespace_helper(
+            &json!({"namespaceHelper":"../helper","namespaceHelperSha256":"00".repeat(32)})
+        )
+        .is_err());
+        assert!(namespace_helper(
+            &json!({"namespaceHelper":"/not-present/helper","namespaceHelperSha256":"bad"})
+        )
+        .is_err());
     }
 
     #[test]

@@ -508,6 +508,35 @@ fn member_action(
     }
 }
 
+pub(crate) fn service_config(mut args: Args) -> Result<()> {
+    let fields = [
+        "host",
+        "host-config",
+        "host-socket",
+        "providers",
+        "credentials",
+        "credentials-key",
+        "namespace-helper",
+    ];
+    let mut paths = Vec::new();
+    for field in fields {
+        paths.push(PathBuf::from(args.required(field)?));
+    }
+    args.finish()?;
+    println!("{}", service::service_configuration(&paths)?);
+    Ok(())
+}
+
+pub(crate) fn namespace(mut args: Args) -> Result<()> {
+    let config = PathBuf::from(args.required("config")?);
+    let subject = text(args.required("subject")?, "subject")?;
+    let public_key = text(args.required("public-key")?, "public key")?;
+    args.finish()?;
+    let owner = Owner::new(&subject, &public_key)?;
+    println!("{}", service::namespace_description(&config, &owner)?);
+    Ok(())
+}
+
 pub(crate) fn serve(mut args: Args) -> Result<()> {
     let config = PathBuf::from(args.required("config")?);
     args.finish()?;

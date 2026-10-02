@@ -36,6 +36,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_TABLE: &str = "/etc/mini/providers.json";
 pub const DEFAULT_ROOT: &str = "/var/lib/mini/credentials";
@@ -59,6 +60,7 @@ extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
 const LOCK_EX: i32 = 2;
+const LOCK_NB: i32 = 4;
 
 fn euid() -> u32 {
     unsafe { geteuid() }
@@ -518,6 +520,7 @@ pub fn namespace_path(root: &Path, namespace: Namespace<'_>) -> Result<PathBuf, 
 pub struct CredentialStore {
     root: PathBuf,
     key: [u8; 32],
+    rooted_namespaces: bool,
 }
 
 fn private_dir_check(path: &Path, label: &str) -> Result<(), String> {
@@ -525,6 +528,21 @@ fn private_dir_check(path: &Path, label: &str) -> Result<(), String> {
     if !meta.file_type().is_dir() || meta.uid() != euid() || meta.permissions().mode() & 0o077 != 0
     {
         return Err(format!("{label} must be an owned 0700 directory"));
+    }
+    Ok(())
+}
+
+/// Every ancestor is immutable to the service UID. In particular the subject
+/// parent cannot be swapped after source scope admission but before systemd mounts.
+fn root_directory_chain(path: &Path, label: &str) -> Result<(), String> {
+    namespace_path(path, Namespace::Pool)?; // shared canonical lexical validation
+    for entry in path.ancestors() {
+        let meta = fs::symlink_metadata(entry).map_err(|e| format!("{label}: {e}"))?;
+        if !meta.file_type().is_dir() || meta.uid() != 0 || meta.permissions().mode() & 0o022 != 0 {
+            return Err(format!(
+                "{label} requires root-owned immutable directory ancestry"
+            ));
+        }
     }
     Ok(())
 }
@@ -582,7 +600,32 @@ fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 // One provider-wide lock orders key replacement, grant changes, revocation
 // and reserve-time authorization. Usage retains its separate counter lock.
+fn lock_until(lock: &File, end: Instant) -> Result<(), String> {
+    loop {
+        if Instant::now() >= end {
+            return Err("credential authority busy; retry the same action".into());
+        }
+        if unsafe { flock(lock.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+        ) {
+            return Err("credential authority lock unavailable".into());
+        }
+        std::thread::sleep(
+            Duration::from_millis(5).min(end.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 fn provider_lock(dir: &Path, provider: &str) -> Result<File, String> {
+    provider_lock_until(dir, provider, Instant::now() + Duration::from_secs(2))
+}
+
+fn provider_lock_until(dir: &Path, provider: &str, end: Instant) -> Result<File, String> {
     let path = dir.join(format!("{provider}.authority.lock"));
     let lock = OpenOptions::new()
         .create(true)
@@ -593,9 +636,7 @@ fn provider_lock(dir: &Path, provider: &str) -> Result<File, String> {
         .open(&path)
         .map_err(|_| "credential authority lock unavailable".to_owned())?;
     private_file_check(&path, "credential authority lock", 0)?;
-    if unsafe { flock(lock.as_raw_fd(), LOCK_EX) } != 0 {
-        return Err("credential authority lock unavailable".into());
-    }
+    lock_until(&lock, end)?;
     Ok(lock)
 }
 
@@ -642,18 +683,38 @@ pub fn utc_day() -> u64 {
 }
 
 impl CredentialStore {
-    /// Serialize authenticated service actions and their final operator pin check.
-    pub fn member_service_lock(&self) -> Result<File, String> {
-        provider_lock(&self.root, "member-service")
+    /// Serialize one member's actions; unrelated members never share its wait.
+    pub fn member_service_lock_until(&self, owner: &Owner, end: Instant) -> Result<File, String> {
+        Owner::new(&owner.subject, &owner.public_key)?;
+        let dir = if self.rooted_namespaces {
+            root_directory_chain(&self.root, "credential root")?;
+            let dir = self.root.join("_service");
+            private_dir_check(&dir, "credential service lock namespace")?;
+            dir
+        } else {
+            self.root.clone()
+        };
+        provider_lock_until(
+            &dir,
+            &format!("member-{}-{}", owner.subject, owner.public_key),
+            end,
+        )
     }
 
-    /// Opens an existing store. The operator creates ROOT (0700) and KEY
-    /// (32 bytes, 0600), both owned by the service user.
+    /// Local stores may use an owned 0700 root. Hosted stores use immutable
+    /// root-owned ancestry and preallocated service-owned 0700 namespace leaves.
+    /// KEY remains service-owned 0600, outside ROOT.
     pub fn open(root: &Path, key_path: &Path) -> Result<Self, String> {
         if !root.is_absolute() || !key_path.is_absolute() || key_path.starts_with(root) {
             return Err("credential root and key must be distinct absolute paths".into());
         }
-        private_dir_check(root, "credential root")?;
+        let root_meta = fs::symlink_metadata(root).map_err(|e| format!("credential root: {e}"))?;
+        let rooted_namespaces = root_meta.uid() == 0 && euid() != 0;
+        if rooted_namespaces {
+            root_directory_chain(root, "credential root")?;
+        } else {
+            private_dir_check(root, "credential root")?;
+        }
         private_file_check(key_path, "credential key", 32)?;
         let mut key = [0u8; 32];
         let mut file = File::open(key_path).map_err(|e| format!("credential key: {e}"))?;
@@ -665,10 +726,25 @@ impl CredentialStore {
         Ok(Self {
             root: root.to_owned(),
             key,
+            rooted_namespaces,
         })
     }
 
     fn directory(&self, namespace: Namespace<'_>, create: bool) -> Result<PathBuf, String> {
+        if self.rooted_namespaces {
+            root_directory_chain(&self.root, "credential root")?;
+            let dir = namespace_path(&self.root, namespace)?;
+            if let Namespace::Owner(owner) = namespace {
+                let subject = self.root.join(&owner.subject);
+                if create || subject.exists() {
+                    root_directory_chain(&subject, "subject namespace")?;
+                }
+            }
+            if create {
+                private_dir_check(&dir, "root-provisioned credential namespace")?;
+            }
+            return Ok(dir);
+        }
         match namespace {
             Namespace::Pool => {
                 let dir = namespace_path(&self.root, namespace)?;
@@ -1072,9 +1148,7 @@ impl CredentialStore {
             .mode(0o600)
             .open(&lock_path)
             .map_err(|e| format!("usage lock: {e}"))?;
-        if unsafe { flock(lock.as_raw_fd(), LOCK_EX) } != 0 {
-            return Err("usage lock unavailable".into());
-        }
+        lock_until(&lock, Instant::now() + Duration::from_secs(2))?;
         let path = dir.join(format!("{provider}.usage.json"));
         let mut usage = match read_record(&path, "usage")? {
             Some(record) => {
@@ -1132,6 +1206,52 @@ pub fn secret_from_input(bytes: &[u8]) -> Result<Secret, String> {
 
 #[cfg(test)]
 mod credential_tests {
+    #[test]
+    fn immutable_namespace_parents_refuse_traversal_and_symlink() {
+        assert!(super::root_directory_chain(
+            std::path::Path::new("/var/lib/mini/../other"),
+            "test"
+        )
+        .is_err());
+        let dir = std::env::temp_dir().join(format!(
+            "mini-credential-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let link = dir.join("subject");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        assert!(super::root_directory_chain(&link, "test").is_err());
+        std::fs::remove_file(link).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn held_member_is_bounded_and_other_member_advances() {
+        let dir = std::env::temp_dir().join(format!("mini-member-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let held = super::provider_lock(&dir, "member-a").unwrap();
+        let start = Instant::now();
+        assert!(
+            super::provider_lock_until(&dir, "member-a", start + Duration::from_millis(40))
+                .unwrap_err()
+                .contains("busy")
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let independent = super::provider_lock_until(
+            &dir,
+            "member-b",
+            Instant::now() + Duration::from_millis(40),
+        )
+        .unwrap();
+        drop(independent);
+        drop(held);
+        super::provider_lock(&dir, "member-a").unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
 
