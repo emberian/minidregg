@@ -357,8 +357,18 @@ theorem initialBook_conserved (config : Config) (asset : Nat) :
     exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
 
 def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
-    (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord :=
-  ⟨⟨identifier⟩, 0, config.deployment.domain, profile.semantics, none, predicate⟩
+    (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord where
+  policyId := ⟨identifier⟩
+  version := 0
+  domain := config.deployment.domain
+  semantics := profile.semantics
+  previous := none
+  predicate := predicate
+  localSelector := {}
+  parents := []
+  descendants := none
+  audience := none
+  objectDescriptor := none
 
 /-- The law slot that only `PayEnrolReceiver` projects (as `1`). -/
 def selfEnrolSlot : String := "authority/operation/pay-self-enrol"

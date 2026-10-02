@@ -29,7 +29,8 @@ variable {profile : CanonicalRuntimeProfile.Profile F}
 
 /-- Typed canonical device data must be present in a current authenticated
 content resource; matching protected-object roots is not device validation. -/
-abbrev devicePayload := AudienceRosterBinding.catalogPayload
+abbrev devicePayload (context : Context deployment durable) (source : Nat) :=
+  AudienceRosterBinding.catalogPayload context source
 
 /-- Pure physical guards derived from signed roster source identifiers. Admission
 checks each source's actual typed canonical payload before this list is used. -/
@@ -71,26 +72,34 @@ abbrev One (context : Context deployment durable) (ambient : DeclaredResourceCon
 silently filtered out. Offline principals need no live query signature. -/
 def checkOne (context : Context deployment durable) (ambient : DeclaredResourceController.Ambient)
     (object : Nat) (preRoot : Digest) (roster : Roster) (entry : Entry)
-    (view : PackedCell Registry) (disclosure : List UInt8) : Option (One (profile := profile) context ambient object preRoot roster entry view disclosure) := do
+    (view : PackedCell Registry) (disclosure : List UInt8) : Option (One (profile := profile) context ambient object preRoot roster entry view disclosure) :=
   let wanted := recipientRequest context profile.semantics ambient object preRoot roster entry disclosure
-  let prepared ← (ResourceObservationAdmission.prepare context profile wanted roster.transition
-    ⟨entry.capability⟩ disclosure).toOption
-  let checked ← RecipientReadEntitlement.checkView (ambient.height - durable.height) prepared entry view
-  pure ⟨prepared, checked⟩
+  match ResourceObservationAdmission.prepare context profile wanted roster.transition
+      ⟨entry.capability⟩ disclosure with
+  | .error _ => none
+  | .ok prepared =>
+    match RecipientReadEntitlement.checkView (profile := profile) (context := context)
+      (wanted := wanted) (marker := roster.transition) (capability := ⟨entry.capability⟩)
+      (contextBytes := disclosure) (ambient.height - durable.height) prepared entry view with
+    | none => none
+    | some checked => some ⟨prepared, checked⟩
 
 def checkAll (context : Context deployment durable) (ambient : DeclaredResourceController.Ambient)
     (object : Nat) (preRoot : Digest) (roster : Roster) (view : PackedCell Registry) (disclosure : List UInt8) :
     (entries : List Entry) → Option ((entry : Entry) → entry ∈ entries →
       One (profile := profile) context ambient object preRoot roster entry view disclosure)
-  | [] => some (by intro entry member; cases member)
+  | [] => some (by
+      intro entry member
+      have impossible : False := by simpa using member
+      exact False.elim impossible)
   | head :: tail => do
       let here ← checkOne (profile := profile) context ambient object preRoot roster head view disclosure
       let later ← checkAll context ambient object preRoot roster view disclosure tail
       pure (by
         intro entry member
-        rcases List.mem_cons.mp member with same | rest
+        by_cases same : entry = head
         · subst entry; exact here
-        · exact later entry rest)
+        · exact later entry ((List.mem_cons.mp member).resolve_left same))
 
 structure Checked (context : Context deployment durable) (ambient : DeclaredResourceController.Ambient)
     (object : Nat) (preRoot : Digest) (state : Minidregg.Theory.ObjectAudience.State) (roster : Roster)
@@ -127,23 +136,27 @@ def Checked.readGuards {context : Context deployment durable} {ambient : Declare
 Its accepted result retains a witness for every entry, not an arbitrary Boolean. -/
 def check (context : Context deployment durable) (ambient : DeclaredResourceController.Ambient)
     (object : Nat) (preRoot : Digest) (state : Minidregg.Theory.ObjectAudience.State) (roster : Roster)
-    (view : PackedCell Registry) (disclosure : List UInt8) : Option (Checked (profile := profile) context ambient object preRoot state roster view disclosure) := do
+    (view : PackedCell Registry) (disclosure : List UInt8) : Option (Checked (profile := profile) context ambient object preRoot state roster view disclosure) :=
   if active : Minidregg.Theory.ObjectAudience.Fresh state object (some roster.epoch) then
     if bound : ObjectAudienceRoster.Bound state roster roster.entries then
-      let entry ← roster.entries.head?
-      let source := entry.deviceSource
-      if separate : source ≠ object then
-        match registryExact : devicePayload context source with
-        | none => none
-        | some registryPayload =>
-          if recordsExact : registryPayload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries then
-           if sourcesExact : ∀ entry ∈ roster.entries, entry.deviceSource = source then
-            let all ← checkAll (profile := profile) context ambient object preRoot roster view disclosure roster.entries
-            some ⟨active, bound, source, separate, registryPayload, registryExact, recordsExact, sourcesExact,
-              fun entry => all entry.val entry.property⟩
-           else none
-          else none
-      else none
+      match roster.entries.head? with
+      | none => none
+      | some entry =>
+        let source := entry.deviceSource
+        if separate : source ≠ object then
+          match registryExact : devicePayload context source with
+          | none => none
+          | some registryPayload =>
+            if recordsExact : registryPayload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries then
+             if sourcesExact : ∀ entry ∈ roster.entries, entry.deviceSource = source then
+              match checkAll (profile := profile) context ambient object preRoot roster view disclosure roster.entries with
+              | none => none
+              | some all =>
+                some ⟨active, bound, source, separate, registryPayload, registryExact, recordsExact, sourcesExact,
+                  fun entry => all entry.val entry.property⟩
+             else none
+            else none
+        else none
     else none
   else none
 end Minidregg.Kernel.ConfidentialAudienceAdmission
