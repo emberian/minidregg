@@ -68,6 +68,20 @@ def unit(argv, user, description, cwd):
             + "\nKillMode=control-group\nTimeoutStopSec=30\nRestart=no\n")
 
 
+def owned_alive(retained, cwd):
+    process = Path("/proc", str(retained["pid"]))
+    try:
+        current = provision.proc_identity(retained["pid"])
+        require(all(current[key] == retained[key] for key in current), "owned process identity changed")
+        require(str((process / "cwd").resolve(strict=True)) == cwd, "owned process working directory changed")
+        return True
+    except FileNotFoundError:
+        # A deleted cwd or missing exe on an existing/reused process is not a
+        # completed stop. Only an absent PID may take the publication recovery.
+        require(not process.exists(), "live owned process lost identity metadata")
+        return False
+
+
 def prepare(request, output):
     require(request["protocol"] == "mini-platform-service-cut-input-v1", "unknown cut input")
     runtime_path = canonical(request["runtime"])
@@ -178,15 +192,17 @@ def stop(output):
     for command in deployment["memberCommands"]:
         protected(command["launcher"]["path"])
         pin(command["launcher"]["path"], command["launcher"]["sha256"])
+    alive = {}
     for name in ("public", "operator"):
         if name in state["services"]:
             require(state["services"][name] == proposal["ownedServices"][name], "owned process binding changed")
-            cwd = Path("/proc", str(state["services"][name]["pid"]), "cwd").resolve(strict=True)
-            require(str(cwd) == proposal["ownedCwds"][name], "owned process working directory changed")
+            alive[name] = owned_alive(state["services"][name], proposal["ownedCwds"][name])
+    if "operator" in alive and not alive["operator"]:
+        require("drain" in journal, "operator absent without retained native drain")
     world = provision.World(Path(state["root"]), state)
     world.stop(["public"])
     journal["publicStopped"] = True; write(journal_path, journal)
-    if "operator" in state["services"]:
+    if "operator" in state["services"] and alive["operator"]:
         common = ["--socket", state["privateSocket"], "--host", deployment["rolePaths"]["host"],
                   "--config", deployment["config"]["path"]]
         def native(label, args):
@@ -221,6 +237,7 @@ def stop(output):
         world.stop(["operator"])
     else:
         require("drain" in journal, "operator absent without retained native drain")
+        world.stop(["operator"])
     journal["stopped"] = True; write(journal_path, journal)
 
 
