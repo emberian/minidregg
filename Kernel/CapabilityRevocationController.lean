@@ -292,10 +292,26 @@ def step (prepared : Prepared deployment profile ambient durable command) : Poli
 def sourceStore (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyRegistry.PayloadStore :=
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain prepared.directory.directory⟩
 
-def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot (sourceStore prepared)
+/-- Management uses the same current structural roots as edits and reads. -/
+def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.target.value
+
+def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) :
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot (operationMarker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) command.target.value
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+/-- Missing kind/history dependencies refuse at both semantic and CAS boundaries. -/
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics command.target.value structural.additional
+  pure (sources ++ structural.readGuards)
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
@@ -317,17 +333,17 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
     Except Reject prepared.SemanticAccepted := do
   let wanted := request prepared.authority.snapshot profile.semantics ambient command
   let config := policyConfig prepared
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot (sourceStore prepared)
-      (operationMarker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.controlCapability receipt)
-  let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.controlCapability () receipt () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
-  if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
+  if !decide (castInjOn F (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted evidence witness
+  match ComposedPolicyAdmission.admit config wanted evidence witness
       (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization => .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
@@ -425,20 +441,19 @@ authority view. It may refuse its own management, including owner revocation. -/
 theorem Accepted.current_policy_evaluated [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
-    ∃ committed,
-      (policyConfig prepared).registry.resolve ⟨command.target.value⟩
-        (prepared.authority.snapshot.authState.policyRevision ⟨command.target.value⟩) = some committed ∧
-      Minidregg.Pred.eval committed.record.predicate
-        (project prepared prepared.authority.snapshot.logical)
-        (project prepared prepared.authorityPost.logical) = true := by
-  have verified : (policyConfig prepared).verifies
-      (request prepared.authority.snapshot profile.semantics ambient command)
-      accepted.semantic.authorization.policyWitness = true :=
-    (Bool.and_eq_true_iff.mp accepted.semantic.authorization.policyVerified).2
-  obtain ⟨committed, resolved, evaluated⟩ :=
-    (canonical_context_verifies_sound (step prepared) rfl verified).2.2.2
-  refine ⟨committed, resolved, ?_⟩
-  exact evaluated
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request prepared.authority.snapshot profile.semantics ambient command)
+    accepted.semantic.authorization
 
 /-- info: 'Minidregg.Kernel.CapabilityRevocationController.Accepted.revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.revoked
