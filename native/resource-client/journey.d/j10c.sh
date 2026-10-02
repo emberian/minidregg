@@ -29,7 +29,15 @@
 #             the exact retry returns the original receipt. alice re-invites bob:
 #             a NEW grant, which reads and places.
 #   kick      alice kicks carl (the founder's revocation still works): carl's read
-#             is refused.
+#             is refused. Then the tooth PLACE names (J10): bob bears notes6
+#             into lab with his new grant, writes it, and delegates it to dave;
+#             alice kicks bob (`room kick` revokes every standing grant he holds
+#             under lab). bob's own doc is refused `revoked` (show, append,
+#             delegate), and so is dave's delegation of it: a born grant carries
+#             the creator's room-grant lineage (`RoomKick.kick_revokes_room_born_
+#             authority`). alice still reads and writes it through her room grant
+#             (`founder_keeps_room_after_kick`); `room members` drops bob. After
+#             the leave, bob's first doc (`notes`) was already refused the same way.
 #   realm     alice founds `tide` (--law realm): bob, invited with `place`, is refused
 #             bearing a well by the realm's law; carl is refused as a non-member;
 #             alice's well is admitted (`fake_realm_asset_refused`).
@@ -297,6 +305,9 @@ ok leave bob "submit l-bob"
 check leave "the leave says what ended with it" grep -q "renounced capability $BOBCAP (object); ended with it: $DAVECAP" "$ERR"
 refused leave bob "read lab" revoked
 refused leave dave "read lab" revoked
+# The tooth for `ancestors`: the doc bob bore with the grant he renounced falls with it.
+refused leave bob "doc show notes" revoked
+ok leave alice "doc show notes-via-lab"
 named leave bob "doc new notes4 --in lab" notRoomMember
 ok leave alice "read lab"
 ok leave alice "doc new anotes2 --in lab"
@@ -331,6 +342,34 @@ ok kick alice "room kick k-carl lab $C"
 ok kick alice "submit k-carl"
 refused kick carl "read labc" revoked
 ok kick bob "read lab2"
+
+# ------------------------------------------------ kick: a doc bob bore falls with him (PLACE J10)
+ok kickdoc bob "doc append b-n6 notes6 written-before-the-kick"
+ok kickdoc bob "submit b-n6"
+ok kickdoc bob "delegate d-n6 notes6 $D observe 1000"
+handoff kickdoc bob d-n6
+ok kickdoc dave "import n6 $REF"
+ok kickdoc dave "doc show n6"
+ok kickdoc alice "room kick k-bob lab $B"
+check kickdoc "the kick names every standing grant bob holds under lab (his re-invite), from the Host's who view" \
+  jq -e --arg cap "$(jq -r .operationCapability "$WS/bob/refs/lab2.json")" '.capabilities | index($cap)' "$OUT"
+ok kickdoc alice "submit k-bob"
+refused kickdoc bob "read lab2" revoked
+refused kickdoc bob "doc show notes6" revoked
+ok kickdoc bob "doc append b-n6b notes6 written-AFTER-the-kick"
+refused kickdoc bob "submit b-n6b" revoked
+ok kickdoc bob "delegate d-n6b notes6 $C observe 1000"
+refused kickdoc bob "submit d-n6b" revoked
+refused kickdoc dave "doc show n6" revoked
+named kickdoc bob "doc new notes7 --in lab2" notRoomMember
+ok kickdoc alice "import n6a object $(jq -r .target "$WS/bob/refs/notes6.json") $LABCAP"
+ok kickdoc alice "doc show n6a"
+check kickdoc "the founder reads the line bob wrote before the kick" grep -q written-before-the-kick "$OUT"
+ok kickdoc alice "doc append a-n6 n6a the-founder-keeps-the-room"
+ok kickdoc alice "submit a-n6"
+ok kickdoc alice "room members lab"
+check kickdoc "room members no longer lists bob" \
+  jq -e --arg b "$B" '[.members[].subject] | index($b) | not' "$OUT"
 
 # ------------------------------------------------ a realm
 ok realm alice "room new tide --law realm"
@@ -367,7 +406,9 @@ check restart "audit re-admitted the Store (exit 0)" test "$(cat "$SD/audit-r1.r
 ok restart alice "read lab"
 refused restart bob "read lab" revoked
 refused restart dave "read lab" revoked
-ok restart bob "read lab2"
+refused restart bob "read lab2" revoked
+refused restart bob "doc show notes6" revoked
+refused restart dave "doc show n6" revoked
 refused restart carl "read labc" revoked
 ok restart alice "doc show notes-via-lab"
 named restart carl "doc new spam3 --in lab" notRoomMember

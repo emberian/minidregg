@@ -28,7 +28,18 @@
 #             `room status` says ENDED.
 #   week 2    B pays again; the concierge re-issues; B writes.
 #   carl      carl (50 credit) `pay lab week` refused bookRefused; carl pays 40:
-#             the concierge journals underpaid and issues nothing.
+#             the concierge refunds it (underpaid) and issues nothing.
+#   race      eve (a guest) pays a week at 100; alice raises the week to 200
+#             before the concierge runs: the payment names the price and the
+#             height it read, and the concierge decides against the tariff AT
+#             that height: issued. A memo quoting a price the tariff never had
+#             is refunded (quote-differs). No decision depends on when the
+#             concierge runs (01a0f9e1-c59a).
+#   kick      alice kicks eve: `room kick` revokes eve's guest grant AND the
+#             concierge's window (every standing grant, from the who view); eve
+#             is refused, `room members` drops her; eve pays the till directly:
+#             refunded (not-admitted). dave, never invited, pays the till:
+#             refunded (01a0f9e1-50ef).
 #   free      `commons` with week 0: B's `pay commons week` files a request;
 #             the concierge issues on request after a signed who read; a forged
 #             request for carl (no grant in commons) is journaled not-a-member.
@@ -163,8 +174,8 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends: enroll, provision, init
 declare -A SUBJ FUND
-FUND[alice]=5000; FUND[bob]=0; FUND[carl]=50; FUND[con]=10
-for f in alice bob carl con; do
+FUND[alice]=5000; FUND[bob]=0; FUND[carl]=50; FUND[con]=10; FUND[eve]=1000; FUND[dave]=500
+for f in alice bob carl con eve dave; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
@@ -183,7 +194,7 @@ for f in alice bob carl con; do
     install -D -m 0600 "$SPONSOR_WS/provisions/j17-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
-A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} CON=${SUBJ[con]}
+A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} CON=${SUBJ[con]} E=${SUBJ[eve]} D=${SUBJ[dave]}
 BACCT=$(jq -r .feePayer "$WS/bob/birth-context.json")
 FEE=$(jq -r '.tariffBase' "$CONFIG"); BIRTH=$(jq -r '.tariffPerBirth' "$CONFIG"); GRANT=$(jq -r '.tariffPerGrant' "$CONFIG")
 
@@ -247,7 +258,8 @@ ok week1 bob "pay lab week"
 cp "$OUT" "$SD/pay-1.txt"
 operator week1 "B's renew topic carries the payment (B's receipt)" \
   "$MINI" fleet --action poll --dir "$WS/bob" --account account --topic renew
-checkp week1 "renew #1 on B's topic names lab" jq -e --arg r "room $LAB" '.events | length == 1 and .[0].payloadText == $r' "$OUT"
+checkp week1 "renew #1 on B's topic names lab, the price and the height it read" \
+  jq -e --arg r "room $LAB week $WEEK at " '.events | length == 1 and (.[0].payloadText | startswith($r))' "$OUT"
 operator week1 "lab's till ledger (op 180, read by the founder)" \
   "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till
 checkp week1 "the till's renew ledger holds B's 100 at one height" \
@@ -337,9 +349,64 @@ ok carl carl "import lab $REF"
 named carl carl "pay lab week" bookRefused
 ok carl carl "pay lab 40"
 concierge carl lab "an underpayment"
-check carl "the concierge journals underpaid and issues nothing" "underpaid $C" \
-  "$(jq -r '.decisions[0] | "\(.decision) \(.subject)"' "$PASS" 2>/dev/null)"
+check carl "the concierge refunds the underpayment and issues nothing" "refunded underpaid $C" \
+  "$(jq -r '.decisions[0] | "\(.decision) \(.reason) \(.subject)"' "$PASS" 2>/dev/null)"
 checkp carl "no reference was left for carl" test ! -e "$H/con/outbox/$C"
+
+TILL=$(jq -r .target "$WS/alice/refs/lab-till.json")
+# ------------------------------------------------ the price race (01a0f9e1-c59a)
+ok race alice "room invite i-eve lab $E --verbs observe"
+ok race alice "submit i-eve"
+ok race alice "publish i-eve"
+ok race alice "export i-eve"
+REF=$(cat "$OUT")
+ok race eve "import lab $REF"
+ok race eve "pay lab week"
+checkp race "eve's payment says the price and the height it read" grep -q "at the price $WEEK read at height" "$OUT"
+ok race alice "tariff lab set week 200"
+concierge race lab "the founder raised the price between the payment and the pass"
+check race "eve's payment is honoured at the price it read" "issued $E" \
+  "$(jq -r '.decisions[0] | "\(.decision) \(.subject)"' "$PASS" 2>/dev/null)"
+checkp race "the decision names the height the price was read at" jq -e '.decisions[0].priceReadAt != null' "$PASS"
+operator race "DELIVER: the concierge's reference into eve's inbox" deliver "$H/con/outbox/$E" "$H/eve/inbox"
+ok race eve "room status lab"
+checkp race "room status: eve holds a member window" grep -q "my window: member until height" "$OUT"
+ok race alice "tariff lab set week $WEEK"
+HQ=$(room_height lab)
+operator race "eve pays with a memo quoting a price the tariff never had (50 at $HQ)" \
+  "$MINI" fleet --action send --dir "$WS/eve" --account account --topic renew \
+    --payload "room $LAB week 50 at $HQ" --to "$TILL" --amount "$WEEK"
+concierge race lab "a quote that disagrees with the tariff at its height"
+check race "refunded, never kept" "refunded quote-differs $E" \
+  "$(jq -r '.decisions[0] | "\(.decision) \(.reason) \(.subject)"' "$PASS" 2>/dev/null)"
+
+# ------------------------------------------------ kick and the concierge (01a0f9e1-50ef)
+ok kick alice "room kick k-eve lab $E"
+check kick "the kick names both of eve's standing grants: the guest invite and the concierge's window" 2 \
+  "$(jq '.capabilities | length' "$OUT" 2>/dev/null)"
+ok kick alice "submit k-eve"
+named kick eve "read lab" "revoked"
+named kick eve "doc new evedoc --in lab" "notRoomMember"
+ok kick alice "room members lab"
+checkp kick "room members does not list eve" jq -e --arg e "$E" '[.members[].subject] | index($e) | not' "$OUT"
+EBEFORE=$(credit_of eve)
+operator kick "kicked eve pays the till directly, quoting the current price" \
+  "$MINI" fleet --action send --dir "$WS/eve" --account account --topic renew \
+    --payload "room $LAB week $WEEK at $(room_height lab)" --to "$TILL" --amount "$WEEK"
+concierge kick lab "a kicked subject's payment"
+check kick "refunded: the room does not admit eve" "refunded not-admitted $E" \
+  "$(jq -r '.decisions[0] | "\(.decision) \(.reason) \(.subject)"' "$PASS" 2>/dev/null)"
+checkp kick "no window was left for eve" sh -c "test \$(ls '$H/con/outbox/$E' | wc -l) = 1"
+check kick "eve is down only her payment's fee" "$((EBEFORE - FEE))" "$(credit_of eve)"
+DBEFORE=$(credit_of dave)
+operator never "dave, never invited, pays the till" \
+  "$MINI" fleet --action send --dir "$WS/dave" --account account --topic renew \
+    --payload "room $LAB week $WEEK at $(room_height lab)" --to "$TILL" --amount "$WEEK"
+concierge never lab "a never-invited subject's payment"
+check never "refunded: the room does not admit dave" "refunded not-admitted $D" \
+  "$(jq -r '.decisions[0] | "\(.decision) \(.reason) \(.subject)"' "$PASS" 2>/dev/null)"
+checkp never "no window for dave" test ! -e "$H/con/outbox/$D"
+check never "dave is down only his payment's fee" "$((DBEFORE - FEE))" "$(credit_of dave)"
 
 # ------------------------------------------------ a free room
 ok free alice "room new commons --concierge $CON --period $PERIOD"
@@ -381,8 +448,10 @@ BFINAL=$(credit_of bob)
 check balances "B = 1000 - 2*$WEEK - 2*fee($FEE) - 4 births*(base $FEE + birth $BIRTH + 2 grants*$GRANT)" \
   "$((1000 - 2 * WEEK - 2 * FEE - 4 * (FEE + BIRTH + 2 * GRANT)))" "$BFINAL"
 operator balances "lab's till, read by the founder" "$MINI" credit --action balance --dir "$WS/alice" --account lab-till
-check balances "lab's till = 2*$WEEK + carl's 40" "$((2 * WEEK + 40))" "$(sed -n 's/^credit \([0-9]*\) .*/\1/p' "$OUT")"
-check balances "carl = 50 - 40 - fee($FEE)" "$((50 - 40 - FEE))" "$(credit_of carl)"
+# The till keeps exactly the weeks it honoured (bob's two, eve's one) and pays
+# the fee of each of its four refunds (carl, eve's bad quote, eve kicked, dave).
+check balances "lab's till = 3*$WEEK - 4 refund fees" "$((3 * WEEK - 4 * FEE))" "$(sed -n 's/^credit \([0-9]*\) .*/\1/p' "$OUT")"
+check balances "carl = 50 - fee($FEE): his 40 came back" "$((50 - FEE))" "$(credit_of carl)"
 ok balances bob "room status lab"
 cp "$OUT" "$SD/status-after.txt"
 HB=$(room_height lab)
