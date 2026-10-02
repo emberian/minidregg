@@ -128,6 +128,7 @@ import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
 import Host.CarryInspection
+import Host.NeutralCarryReceiving
 import Host.RetainedSegmentInspection
 import Kernel.CarriedNativeHostSession
 import Kernel.CarriedSessionEnrollmentReceiver
@@ -3289,20 +3290,30 @@ def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
 def readJson (path : String) : IO Lean.Json :=
   return ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile path))
 
+/-- Carry administration has bounded local inputs and independent configured
+operator authority. The request or target capsule cannot introduce that key. -/
+def readCarryJson (path : String) : IO Lean.Json := do
+  let bytes ← readBoundedBytes path (1024 * 1024)
+  let some source := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "carry input is not UTF-8")
+  IO.ofExcept (Minidregg.Host.Json.parse source)
+
+def carryOperator (settings : Settings) : IO (List UInt8) := do
+  let some text := settings.carryOperatorKey
+    | throw (IO.userError "carry requires independently configured operator authority")
+  let key ← IO.ofExcept (Minidregg.Host.Json.decodeHex "carryOperatorKey" (.str text))
+  if key.length != 32 || CarryInspection.encodeHex key != text then
+    throw (IO.userError "carry operator key must be canonical lowercase 32-byte hexadecimal")
+  pure key
+
 /-- The registry is operator-local custody. Never send private paths or audit
 process diagnostics through a public protocol failure. -/
 def loadCarryRegistry (settings : Settings) : IO RetainedSegmentInspection.Registry := do
   try
     let some path := settings.carryRegistry
       | throw (IO.userError "missing registry")
-    let some operatorText := settings.carryOperatorKey
-      | throw (IO.userError "missing independent authority")
-    let operator ← IO.ofExcept (Minidregg.Host.Json.decodeHex
-      "carryOperatorKey" (.str operatorText))
-    let bytes ← readBoundedBytes path (1024 * 1024)
-    let some source := String.fromUTF8? bytes.toByteArray
-      | throw (IO.userError "registry encoding")
-    let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
+    let operator ← carryOperator settings
+    let json ← readCarryJson path
     IO.ofExcept (RetainedSegmentInspection.parseRegistry json operator)
   catch _ => throw (IO.userError "retained carry custody unavailable")
 
@@ -5314,6 +5325,19 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "carry-plan", [requestPath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.plan config configPath operator request)
+          writeJson outputPath result
+          pure 0
+      | "carry-receive", [requestPath, edgePath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let edge ← readCarryJson edgePath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.receive config configPath operator request edge)
+          writeJson outputPath result
+          pure 0
       | "carry-edge-verify", [requestPath, outputPath] =>
           let request ← readJson requestPath
           let result ← IO.ofExcept (← CarryInspection.verifyRequest config request)

@@ -52,9 +52,12 @@ private def request (value : Json) : Except String
 
 /-- Reviewable exact endpoints and detached signing bytes. The unsigned edge
 is not a receiving certificate until its signature is installed and verified. -/
-def plan (config : NativeHost.Config) (trustedOperator : List UInt8) (value : Json) :
+def plan (config : NativeHost.Config) (currentConfiguration : System.FilePath)
+    (trustedOperator : List UInt8) (value : Json) :
     IO (Except String Json) := do
   let .ok (source, target, nonce) := request value | return .error "invalid carry request"
+  if target.configuration != currentConfiguration then
+    return .error "carry target must be the configuration running this receiver"
   match ← NeutralCarriedSegmentIO.prepare config source target trustedOperator nonce with
   | .error detail => return .error detail
   | .ok prepared =>
@@ -66,9 +69,11 @@ def plan (config : NativeHost.Config) (trustedOperator : List UInt8) (value : Js
 
 /-- Re-derive against actual retained state, verify the independent authority,
 and stage one exact carry. Its registry is operator-private output. -/
-def receive (config : NativeHost.Config) (trustedOperator : List UInt8)
-    (value edgeValue : Json) : IO (Except String Json) := do
+def receive (config : NativeHost.Config) (currentConfiguration : System.FilePath)
+    (trustedOperator : List UInt8) (value edgeValue : Json) : IO (Except String Json) := do
   let .ok (source, target, nonce) := request value | return .error "invalid carry request"
+  if target.configuration != currentConfiguration then
+    return .error "carry target must be the configuration running this receiver"
   let .ok edge := CarryInspection.parseSeal edgeValue | return .error "invalid carry edge"
   if edge.body.nonce != nonce then return .error "carry nonce differs from prepared request"
   match ← NeutralCarriedSegmentIO.receive config source target trustedOperator edge with
