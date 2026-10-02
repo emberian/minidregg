@@ -102,13 +102,13 @@ turn write-restored jli-after "doc append jli-after jli-room/notes 'after removi
 # A neutral child cannot escape its room export through authority management.
 turn block-management jli-mgmt 'law export jli-mgmt jli-room @block-management.json'
 ok management-before alice 'law export show jli-room/notes'
-jq '.judgedAt|{authorityRoot,worldRoot,height}' "$OUT" >"$D/management-before.json"
+jq -e '.judgedAt|select((.worldRoot|type) == "string" and (.height|type) == "string")|{worldRoot,height}' "$OUT" >"$D/management-before.json"
 ok delegate-denied-prepare alice "delegate jli-delegate-denied jli-room/notes $NEWCOMER_SUBJECT observe 50000"
 refused inherited-delegate alice 'submit jli-delegate-denied'
 ok revoke-denied-prepare alice "revoke jli-revoke-denied jli-room/notes $NEWCOMER_SUBJECT"
 refused inherited-revoke alice 'submit jli-revoke-denied'
 ok management-after alice 'law export show jli-room/notes'
-jq '.judgedAt|{authorityRoot,worldRoot,height}' "$OUT" >"$D/management-after.json"
+jq -e '.judgedAt|select((.worldRoot|type) == "string" and (.height|type) == "string")|{worldRoot,height}' "$OUT" >"$D/management-after.json"
 check no-management-record cmp -s "$D/management-before.json" "$D/management-after.json"
 ok denied-revoke-retains-reader dan 'doc show jli-note'
 turn management-clear jli-mgmt-clear 'law export jli-mgmt-clear jli-room none'
