@@ -155,7 +155,7 @@ def prepare(request, output):
     write(output / store_unit, unit(store, user, "Mini supplied Store operator", cwds["operator"]))
     write(output / public_unit, unit(ingress, user, "Mini supplied Store public ingress", cwds["public"]))
     descriptor = {"protocol": "mini-service-deployment-binding-v1", "dataRoot": str(root),
-        "nodeRoot": str(root / "world"), "operatorSocket": state["privateSocket"],
+        "nodeRoot": state.get("nodeRoot", str(root / "world")), "operatorSocket": state["privateSocket"],
         "publicSocket": state["publicSocket"], "storeUnit": store_unit, "ingressUnit": public_unit,
         "unitManager": "system", "authorizedKeys": str(roster), "memberHomes":
         [row["home"] for row in journey["members"].values()], "serviceUid": uid,

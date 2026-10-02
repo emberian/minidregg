@@ -13,6 +13,15 @@ Run on the designated Linux build/deployment host as the unprivileged operator.
 from a pinned manifest, and source recipes that support policy before genesis.
 It leaves all prior roots intact. Logs, seeds and authorized keys are private.
 
+For a fresh root-custodied service frame, the service owner may prepare an empty
+0700 directory owned by the Store operator beneath the immutable frame. Set
+`preparedEmptyRoot: true` to accept that directory; the constructor refuses any
+contents, symlink, other owner, or broader mode. It rechecks before its first
+publication. `nodeDirectory: "node"` places the single native Node there instead
+of the default `world`. The retained runtime records its actual `nodeRoot`, and
+the service descriptor consumes that path. This mutable Store subtree does not
+provide authority for the root-owned candidate or controller registration.
+
 Example plan (paths and SHA must refer to the supplied candidate family):
 
 ```json

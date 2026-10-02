@@ -32,6 +32,29 @@ class ProvisioningContract(unittest.TestCase):
         root,_,_=p.validate(self.plan)
         self.assertFalse(root.exists())
         self.assertEqual(len(self.plan['members']),5)
+    def test_prepared_private_root_and_explicit_node(self):
+        root=Path(self.plan['root']);root.mkdir(mode=0o700)
+        self.plan.update(preparedEmptyRoot=True,nodeDirectory='node')
+        self.assertEqual(p.root_layout(self.plan),(root,root/'node'))
+        p.validate(self.plan)
+        self.assertEqual(list(root.iterdir()),[])
+        (root/'retained').write_text('an earlier receiving attempt')
+        with self.assertRaisesRegex(ValueError,'must be empty'):p.validate(self.plan)
+        self.assertEqual((root/'retained').read_text(),'an earlier receiving attempt')
+    def test_prepared_root_refuses_public_or_symlink_custody(self):
+        root=Path(self.plan['root']);root.mkdir(mode=0o755)
+        self.plan['preparedEmptyRoot']=True
+        with self.assertRaisesRegex(ValueError,'private'):p.validate(self.plan)
+        root.chmod(0o700)
+        link=self.root/'linked';link.symlink_to(root)
+        plan=dict(self.plan,root=str(link))
+        with self.assertRaisesRegex(ValueError,'canonical'):p.validate(plan)
+        with self.assertRaisesRegex(ValueError,'fresh provisioning'):p.validate(dict(self.plan,preparedEmptyRoot=False))
+        with self.assertRaisesRegex(ValueError,'boolean'):p.validate(dict(self.plan,preparedEmptyRoot='true'))
+    def test_node_directory_cannot_escape_or_replace_custody(self):
+        for name in ('../other','a/b','sock','custody','hooks'):
+            with self.assertRaisesRegex(ValueError,'nodeDirectory'):p.validate(dict(self.plan,nodeDirectory=name))
+        self.assertFalse(Path(self.plan['root']).exists())
     def test_selected_names_map_to_actual_subjects_and_keep_concurrency(self):
         self.plan['workload']={'members':['member-0','member-1'],'concurrency':8}
         p.validate(self.plan)

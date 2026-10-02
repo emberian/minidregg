@@ -47,12 +47,32 @@ def observer_allocation(plan):
     return observer
 
 
+def root_layout(plan):
+    declared = Path(plan["root"]).absolute()
+    root = simple(declared, False)
+    require(declared == root, "provisioning root must be canonical")
+    prepared = plan.get("preparedEmptyRoot", False)
+    require(type(prepared) is bool, "preparedEmptyRoot must be boolean")
+    if prepared:
+        require(root.is_dir() and not root.is_symlink(), "prepared root must be a real directory")
+        metadata = root.stat()
+        require(metadata.st_uid == os.getuid() and metadata.st_mode & 0o777 == 0o700,
+                "prepared root must be private and owned by the Store operator")
+        require(not any(root.iterdir()), "prepared root must be empty")
+    else:
+        require(not root.exists() and not root.is_symlink(), "fresh provisioning root required")
+    require(root.parent.is_dir(), "provisioning root parent must already exist")
+    name = plan.get("nodeDirectory", "world")
+    require(type(name) is str and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", name)
+            and name not in {"logs", "custody", "sock", "members", "ssh", "namespace", "operator-home", "hooks", "paid-entry", "operator-workspace", "pay-observer-workspace"},
+            "nodeDirectory must be a distinct simple directory name")
+    require(len(os.fsencode(root / name / "session/host.sock")) <= 100, "root is too deep for native Unix sockets")
+    return root, root / name
+
+
 def validate(plan):
     require(plan["type"] == "mini-platform-provision-v1", "unknown provisioning plan")
-    root = simple(plan["root"], False)
-    require(not root.exists() and not root.is_symlink(), "fresh provisioning root required")
-    require(root.parent.is_dir(), "provisioning root parent must already exist")
-    require(len(os.fsencode(root / "world/session/host.sock")) <= 100, "root is too deep for native Unix sockets")
+    root, _ = root_layout(plan)
     source = simple(plan["sourceRepo"])
     manifest_path = simple(plan["manifest"])
     require(digest(manifest_path) == plan["manifestSha256"], "manifest changed")
@@ -228,19 +248,24 @@ class World:
 def start(plan):
     require(os.getuid() != 0, "run as the isolated Store operator, not root")
     root, source, manifest = validate(plan)
+    _, node = root_layout(plan)
     # Refuse a used port before creating any Store or output directory.
     probe = socket.socket()
     try:
         probe.bind(("127.0.0.1", plan["sshPort"]))
     finally:
         probe.close()
-    root.mkdir(mode=0o700)
+    if plan.get("preparedEmptyRoot", False):
+        # Recheck after the port probe before publishing the first artifact.
+        root_layout(plan)
+    else:
+        root.mkdir(mode=0o700)
     for name in ("logs", "custody", "sock", "members", "ssh", "namespace", "operator-home"):
         (root / name).mkdir(mode=0o700)
     hooks_root = retain_hooks(root)
     save(root / "plan.json", plan)
     world = World(root)
-    world.state.update(manifest=manifest, manifestPath=plan["manifest"], manifestSha256=plan["manifestSha256"], timeoutSeconds=plan.get("timeoutSeconds", 600))
+    world.state.update(manifest=manifest, manifestPath=plan["manifest"], manifestSha256=plan["manifestSha256"], timeoutSeconds=plan.get("timeoutSeconds", 600), nodeRoot=str(node))
     world.persist()
     world.run("completion-key", [manifest["mini"], "keygen", "--secret", root / "custody/completion.seed", "--public", root / "custody/completion.pub"])
     policy = dict({"grainBirthTariff": {"base": 2, "perBirth": 1}}, **plan.get("operatorPolicy", {}))
@@ -259,13 +284,13 @@ def start(plan):
     if observer:
         save(root/'pay-observer-allocation.json',observer)
         env['WORKROOM_PAY_OBSERVER']=str(root/'pay-observer-allocation.json')
-    world.run("single-native-world", ["/bin/sh", recipe, manifest["host"], root / "world"], env)
-    config = root / "world/deployment/pinned-config.json"
+    world.run("single-native-world", ["/bin/sh", recipe, manifest["host"], node], env)
+    config = node / "deployment/pinned-config.json"
     configured = load(config)
     require(configured["lifecycleManagement"] == policy["lifecycleManagement"] and configured["completionCustodianKey"] == policy["completionCustodianKey"], "lifecycle policy missing from genesis-pinned configuration")
     world.state.update(config=str(config), publicSocket=str(root / "sock/public.sock"), privateSocket=str(root / "sock/operator.sock"))
     world.persist(); world.start_store()
-    genesis = load(root / "world/genesis.json")
+    genesis = load(node / "genesis.json")
     birth = {"type": "minidregg-participant-birth-context-v1", "genesis": genesis,
              "template": {"issuer": str(configured["issuer"]), "ownerBudget": str(configured["ownerBudget"]), "lifetime": str(configured["lifetime"])},
              "sourceCapabilities": ["41"], "funding": [], "feePayer": "7",
@@ -274,7 +299,7 @@ def start(plan):
     save(root / "operator-birth-context.json", birth)
     sponsor = root / "operator-workspace"
     world.run("sponsor-init", [manifest["mini"], "workspace", "--action", "init", "--host", manifest["host"], "--config", config,
-                               "--socket", world.state["publicSocket"], "--key", root / "world/controller.key", "--subject", "7",
+                               "--socket", world.state["publicSocket"], "--key", node / "controller.key", "--subject", "7",
                                "--birth-context", root / "operator-birth-context.json", "--namespace-root", root / "namespace", "--dir", sponsor, "--no-prerotation"])
     world.run("sponsor-factory", [manifest["mini"], "workspace", "--action", "import", "--dir", sponsor, "--name", "factory", "--kind", "object",
                                   "--target", str(configured["factoryId"]), "--observe-capability", "54", "--control-capability", "53"])
@@ -282,7 +307,7 @@ def start(plan):
     if any(row.get('entry')=='paid' for row in plan['members']):
         observer_workspace=root/'pay-observer-workspace'
         world.run('pay-observer-init',[manifest['mini'],'workspace','--action','init','--host',manifest['host'],'--config',config,
-                  '--socket',world.state['publicSocket'],'--key',root/'world/pay-observer.key','--subject',observer['subject'],
+                  '--socket',world.state['publicSocket'],'--key',node/'pay-observer.key','--subject',observer['subject'],
                   '--dir',observer_workspace,'--no-prerotation'])
         world.run('pay-observer-account',[manifest['mini'],'workspace','--action','import','--dir',observer_workspace,'--name','account',
                   '--kind','account','--target',observer['account'],'--operation-capability',observer['spendCapability'],'--observe-capability',observer['spendCapability']])
@@ -295,7 +320,7 @@ def start(plan):
         require(digest(adapter)==plan['paidEntryAdapter']['sha256'],'paid entry adapter changed before retention')
         paid_request=root/'paid-entry-request.json';paid_state=root/'paid-entry-result.json'
         save(paid_request,{'type':'mini-paid-entry-provision-v1','manifest':plan['manifest'],'manifestSha256':plan['manifestSha256'],'sourceRepo':str(source),
-          'deployment':{'config':str(config),'configSha256':digest(config),'socket':world.state['publicSocket'],'operatorSocket':world.state['privateSocket'],'genesis':str(root/'world/genesis.json')},
+          'deployment':{'config':str(config),'configSha256':digest(config),'socket':world.state['publicSocket'],'operatorSocket':world.state['privateSocket'],'genesis':str(node/'genesis.json')},
           'operatorWorkspace':str(sponsor),'observerWorkspace':str(observer_workspace),'observer':{'capability':observer['capability'],'enrolCapability':observer['enrolCapability']},
           'factoryControl':'53','evidenceDirectory':str(paid_root),
           'members':[{'name':row['name'],'joinDir':str(root/'members'/row['name']/'join'),'weeks':row.get('weeks',2),'starterCredit':str(row.get('funding',1000))} for row in paid_rows]})
@@ -391,11 +416,11 @@ LogLevel VERBOSE
         require(load(paid_state)['identity']==identity,'paid entry artifact belongs to another supplied Store')
     world.state.update(journey=str(root / "journey.json"), identity=identity, allocationNames=names)
     world.persist()
-    save(root / "platform-inputs.json", {"identity": identity, "config": str(config), "genesis": str(root / "world/genesis.json"), "manifest": plan["manifest"],
+    save(root / "platform-inputs.json", {"identity": identity, "config": str(config), "genesis": str(node / "genesis.json"), "manifest": plan["manifest"],
          "publicSocket": world.state["publicSocket"], "privateSocket": world.state["privateSocket"], "operatorWorkspace": str(sponsor), "memberInventory": inventory,
          "custody": {"completionSeed": str(root / "custody/completion.seed"), "completionPublic": str(root / "custody/completion.pub"),
-                    "owner": {"subject": "7", "keyId": "7007", "keyEpoch": "2", "seed": str(root / "world/controller.key"), "publicKey": str(root / "world/controller.pub")},
-                    "management": {"subject": "8", "keyId": "8008", "keyEpoch": "2", "seed": str(root / "world/tool.key"), "publicKey": str(root / "world/tool.pub")}},
+                    "owner": {"subject": "7", "keyId": "7007", "keyEpoch": "2", "seed": str(node / "controller.key"), "publicKey": str(node / "controller.pub")},
+                    "management": {"subject": "8", "keyId": "8008", "keyEpoch": "2", "seed": str(node / "tool.key"), "publicKey": str(node / "tool.pub")}},
          "authority": {"factory": {"target": str(configured["factoryId"]), "ownerCapability": "54", "managementCapability": "55"},
                        "parent": {"task": str(plan.get("parentTask", 7901)), "ownerCapability": "71", "managementCapability": "73"},
                        "tool": {"task": str(plan.get("toolTask", 7902)), "managementCapability": "81"}}})
