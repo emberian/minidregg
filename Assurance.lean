@@ -13,6 +13,7 @@ SheetLaw and ItemLaw live here, not in Theory: they judge a law by
 -/
 import Assurance.CapabilityRevocationAudit
 import Assurance.RenounceAudit
+import Assurance.EvaluatorAudit  -- required evaluator admission poles, outside Host runtime imports
 import Assurance.NockDoorAudit  -- required concrete Nock door poles, outside the Host runtime closure
 import Assurance.StoryLaw  -- P-STORY: the story law for every table; no skip, no rewind, never re-lawed (also in Deployed)
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)

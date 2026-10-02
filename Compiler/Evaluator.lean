@@ -644,30 +644,12 @@ theorem admitRecord_resolved {disabled : List Digest} {program : Program} {E : E
   simp only
   cases h : E.admit program <;> simp [Except.map]
 
-/-! ## Poles: the NUL rule, decided -/
-
-/-- A one-slot ABI whose slot key is `key`. -/
-def nulPoleAbi (key : String) : Abi :=
-  { version := abiVersion, fuel := 100, libraries := [], outputs := [],
-    sample := [{ target := 0, slot := "f/2", key := key, type := .nat }] }
-
-def nulPoleProgram (key : String) : Program :=
-  ⟨⟨0⟩, Noun.jam (Nock.op 0 (.atom 1)), nulPoleAbi key, Kernel.NockEntry.encodeParams ⟨2⟩⟩
+-- Concrete admission fixtures and their kernel-decided poles live in
+-- `Assurance.EvaluatorAudit`, required by Deployed and Assurance.
 
 def refusalOf {α : Type} : Except NockProgramCodec.Refusal α → Option NockProgramCodec.Refusal
   | .error reason => some reason
   | .ok _ => none
-
-/-- Refused: the key `"a\u0000"`. -/
-theorem pole_nulInName : refusalOf (Machine.nock.admit (nulPoleProgram "a\u0000")) = some .nulInName := by
-  decide +kernel
-/-- Admitted: the key `"a"`, with Nock's params decoded to arm 2. -/
-theorem pole_nulFree_admitted : (Machine.nock.admit (nulPoleProgram "a")).toOption = some ⟨2⟩ := by
-  decide +kernel
-/-- Params that do not decode are refused by name. -/
-theorem pole_paramsMalformed :
-    refusalOf (Machine.nock.admit { nulPoleProgram "a" with params := [1, 2, 3] }) =
-      some .paramsMalformed := by decide +kernel
 
 /-! ## Axiom pins -/
 
@@ -693,12 +675,6 @@ theorem pole_paramsMalformed :
 #guard_msgs (whitespace := lax) in #print axioms admitRecord_unknownEvaluator
 /-- info: 'Minidregg.Compiler.Evaluator.admitRecord_evaluatorDisabled' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms admitRecord_evaluatorDisabled
-/-- info: 'Minidregg.Compiler.Evaluator.pole_nulInName' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms pole_nulInName
-/-- info: 'Minidregg.Compiler.Evaluator.pole_nulFree_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms pole_nulFree_admitted
-/-- info: 'Minidregg.Compiler.Evaluator.pole_paramsMalformed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms pole_paramsMalformed
 /-- info: 'Minidregg.Compiler.Evaluator.sampleOf_injective' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sampleOf_injective
 
