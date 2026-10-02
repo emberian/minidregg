@@ -394,11 +394,15 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
             "subject":entry.subject,"payer":entry.payer,"asset":entry.asset,
             "amount":entry.amount.to_string(),"payload":raw.get("payloadText"),
             "ledgerTip":ledger_tip.to_string()});
-        if journal.refunding.contains(&key) {
-            // A refund begun and not recorded: never sent twice. The operator
-            // reads the till's `refund` topic and settles it by hand.
-            let line = json!({"key":key,"decision":"refund-unresolved","entry":basis,"subject":entry.subject,
-                "note":"a refund for this payment was begun and its result was not journaled; it is not re-sent: check the till's refund topic"});
+        // A refund is a transfer, not an exact lookup: before sending one, the
+        // till's own `refund` topic is read (a signed poll); a refund already
+        // published for this ledger entry (a crash after the send, a lost
+        // journal) is journaled from there and never sent twice.
+        let refund_prefix = format!("refund room {} ledger:{} ", program.room, entry.height);
+        if let Some(found) = published_refund(&run, &dir, &program.refs.till, &refund_prefix)? {
+            let line = json!({"key":key,"decision":"refunded","recovered":true,"entry":basis,
+                "subject":entry.subject,"published":found,
+                "resumed":journal.refunding.contains(&key)});
             journal.append(line.clone())?;
             decisions.push(line);
             continue;
@@ -536,6 +540,19 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
         }
     }
     Ok(decisions)
+}
+
+/// The refund the till already published for one ledger entry (its memo
+/// starts with `prefix`), read from the till's `refund` topic.
+fn published_refund(run: &Runner<'_>, dir: &str, till: &str, prefix: &str) -> Result<Option<Value>> {
+    let (events, _) = run.mini(&["fleet", "--action", "poll", "--dir", dir, "--account", till, "--topic", "refund"])?;
+    Ok(events
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|event| event.get("payloadText").and_then(Value::as_str).is_some_and(|text| text.starts_with(prefix)))
+        .cloned())
 }
 
 #[allow(clippy::too_many_arguments)]
