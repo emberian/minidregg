@@ -171,6 +171,7 @@ theorem preparePolicyLeg_rangeRefusal [DecidableEq F]
   split <;> simp_all [PreparedPolicyLeg.rangeRefusal, PreparedPolicyLeg.range,
     ComposedPolicyAdmission.PreparedLaw.witness, ResolvedLawCompilation.witness,
     config_step, Option.map_eq_bind]
+  all_goals rfl
 
 theorem preparePolicyLeg_castRefusal [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -185,6 +186,7 @@ theorem preparePolicyLeg_castRefusal [DecidableEq F]
   split <;> simp_all [PreparedPolicyLeg.castRefusal, PreparedPolicyLeg.cast,
     ComposedPolicyAdmission.PreparedLaw.witness, ResolvedLawCompilation.witness,
     config_step, Option.map_eq_bind]
+  all_goals rfl
 
 theorem preparePolicyLeg_lawRefusal [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -197,6 +199,7 @@ theorem preparePolicyLeg_lawRefusal [DecidableEq F]
   simp only [policyConfigFromStep_exact]
   split <;> simp_all [PreparedPolicyLeg.lawRefusal,
     ComposedPolicyAdmission.PreparedLaw.witness, ResolvedLawCompilation.witness, config_step]
+  all_goals rfl
 
 theorem preparePolicyLegs_rangeRefusal [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
