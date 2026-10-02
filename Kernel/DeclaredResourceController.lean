@@ -334,7 +334,7 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
     (unjoint_append _ _
       (unjoint_append _ _
         (unjoint_append _ _
-          (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; decide)
+          (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
             (clockSlots_unjoint _)) (requestSlots_unjoint _))
         (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
       (runSlots_unjoint _))
@@ -596,7 +596,6 @@ theorem lawLeaf_none_iff_verifies [DecidableEq F]
   have verdict := law.verifies_iff_eval (tuple.request incidence).2 bound supportedExact rangesExact casts
   refine Iff.trans ?_ verdict.symm
   unfold lawLeaf
-  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.of_none_iff _ _ _
 
@@ -1138,11 +1137,16 @@ def checkTargetAudience [DecidableEq F]
     match signedRoster : command.targets[i].audienceRoster with
     | none => .error (.audience .malformed)
     | some roster =>
-      match ConfidentialAudienceAdmission.check (profile := profile) (audienceContext prepared)
+      let checked? : Option (ConfidentialAudienceAdmission.Checked (profile := profile)
+          (audienceContext prepared) ambient command.targets[i].target
+          (prepared.targets i).pre.root state roster (audienceView prepared i)
+          (audienceDisclosure prepared i)) :=
+        ConfidentialAudienceAdmission.check (profile := profile) (audienceContext prepared)
           ambient command.targets[i].target (prepared.targets i).pre.root state roster
-          (audienceView prepared i) (audienceDisclosure prepared i) with
-      | none => .error (.audience .transition)
-      | some checked => .ok (.protectedView state present roster signedRoster checked)
+          (audienceView prepared i) (audienceDisclosure prepared i)
+      match checked? with
+      | .none => .error (.audience .transition)
+      | .some checked => .ok (.protectedView state present roster signedRoster checked)
 
 def audienceGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command}
@@ -1352,7 +1356,7 @@ def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient du
     let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
       prepared.directory.directory profile.semantics (incidenceTarget command incidence).target
       structural.additional
-    pure ((sources ++ structural.readGuards).map fun (id, root) => (⟨⟨id⟩, root⟩ : ReadGuard))
+    pure ((sources ++ structural.readGuards).map fun (cellId, root) => (⟨⟨cellId⟩, root⟩ : ReadGuard))
   pure groups.flatten
 
 /-- The domain reads of every invocation: the authority cell and the clock. -/
@@ -1430,7 +1434,7 @@ this very intent writes that cell under the identical old-root CAS. -/
 def AcceptedInvocation.readGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : List ReadGuard :=
-  readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
+  DeclaredResourceController.readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 theorem AcceptedInvocation.readGuards_readonly [DecidableEq F]

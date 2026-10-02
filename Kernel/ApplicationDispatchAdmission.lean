@@ -162,7 +162,7 @@ def observationRequest {F : Type} [Field F]
       (command ingress.dispatch selection ingress.parent))
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
-    ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none⟩
+    ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none, none, none⟩
   { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
       ambient (command ingress.dispatch selection ingress.parent) target root with
     verb := .observeObject }

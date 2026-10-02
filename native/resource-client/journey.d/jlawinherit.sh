@@ -105,7 +105,9 @@ ok management-before alice 'law export show jli-room/notes'
 jq -e '.judgedAt|select((.worldRoot|type) == "string" and (.height|type) == "string")|{worldRoot,height}' "$OUT" >"$D/management-before.json"
 ok delegate-denied-prepare alice "delegate jli-delegate-denied jli-room/notes $NEWCOMER_SUBJECT observe 50000"
 refused inherited-delegate alice 'submit jli-delegate-denied'
-ok revoke-denied-prepare alice "revoke jli-revoke-denied jli-room/notes $NEWCOMER_SUBJECT"
+READER_CAPABILITY=$(jq -er .observeCapability "$NEWCOMER_WS/refs/jli-note.json")
+jq -n --arg recipient "$NEWCOMER_SUBJECT" --arg capability "$READER_CAPABILITY" '{type:"minidregg-workspace-proposal-v1",action:"revoke",name:"jli-room/notes",recipient:$recipient,capability:$capability}' >"$D/alice/requests/revoke-reader.json"
+ok revoke-denied-prepare alice 'propose jli-revoke-denied @revoke-reader.json'
 refused inherited-revoke alice 'submit jli-revoke-denied'
 ok management-after alice 'law export show jli-room/notes'
 jq -e '.judgedAt|select((.worldRoot|type) == "string" and (.height|type) == "string")|{worldRoot,height}' "$OUT" >"$D/management-after.json"

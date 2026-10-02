@@ -255,7 +255,7 @@ check list "room template show social member prints member.shell" cmp -s "$OUT" 
 
 # ------------------------------------------------ a workroom
 stderr_says workroom alice "room new lab --template workroom" 0 \
-  "template workroom/template.shell: 15 line(s) done"
+  "template workroom/template.shell: 19 line(s) done"
 for leaf in lab lab.index lab.wall lab.notes lab.tasks; do
   check workroom "alice holds a reference $leaf" test -f "$AW/$leaf.json"
 done
@@ -369,7 +369,7 @@ check bad "nothing after line 8 was born: no bad2/after" test ! -e "$AW/bad2.aft
 check bad "nothing after line 8 was even planned: no request for bad2/after" test ! -e "$H/alice/requests/create-bad2.after.json"
 
 # ------------------------------------------------ social: a stream per member
-stderr_says social alice "room new pub --template social" 0 "template social/template.shell: 10 line(s) done"
+stderr_says social alice "room new pub --template social" 0 "template social/template.shell: 13 line(s) done"
 for leaf in pub pub.index pub.wall pub.intro; do
   check social "alice holds a reference $leaf" test -f "$AW/$leaf.json"
 done
@@ -400,7 +400,7 @@ refused social alice "submit s2" law-denied
 check social "the refusal names carl's stream's clause (subject == carl)" grep -q "$C" "$ERR"
 
 # ------------------------------------------------ story
-stderr_says story alice "room new tale --template story" 0 "template story/template.shell: 15 line(s) done"
+stderr_says story alice "room new tale --template story" 0 "template story/template.shell: 19 line(s) done"
 for leaf in tale tale.index tale.chapters tale.scenes tale.cast; do
   check story "alice holds a reference $leaf" test -f "$AW/$leaf.json"
 done

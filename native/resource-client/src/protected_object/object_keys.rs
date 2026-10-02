@@ -376,6 +376,13 @@ impl Store {
         if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
         Ok(self.state["pending"].get(hex(operation)).is_some())
     }
+    /// Distinguish a retained rejection from a pending or confirmed phase.
+    /// Callers must not infer settlement from an unrelated decoding failure.
+    pub(crate) fn operation_settlement(&self,operation:&[u8;32])->Result<Option<bool>> {
+        if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
+        let row=self.state["pending"].get(hex(operation)).ok_or("unknown staged operation")?;
+        row.get("settled").map(|value|value.as_bool().ok_or("invalid operation settlement".into())).transpose()
+    }
     /// Outward artifacts are recoverable even after confirmed settlement. This
     /// returns no key and does not authorize either replacement or resubmission.
     pub(crate) fn phase_artifacts(&self,operation:&[u8;32])->Result<(Vec<u8>,Vec<u8>,Option<Vec<u8>>)> {
@@ -642,6 +649,8 @@ mod tests {
         };
         let mut store = Store::open(&path, [8; 32]).unwrap();
         store.reconcile_anchor(&active).unwrap();
+        store.stage_control(&frozen, &[3;32], b"rejected earlier generation").unwrap();
+        store.settle(&[3;32], false).unwrap();
         store
             .stage_control(&frozen, &[4; 32], b"exact source phase command")
             .unwrap();
@@ -656,6 +665,9 @@ mod tests {
         let mut store = Store::open(&path, [8; 32]).unwrap();
         assert!(store.reconcile_anchor(&active).is_err());
         assert!(store.pending_epoch(&[4; 32]).is_err());
+        assert_eq!(store.operation_settlement(&[3;32]).unwrap(),Some(false));
+        assert_eq!(store.operation_settlement(&[4;32]).unwrap(),Some(true));
+        assert!(store.operation_settlement(&[99;32]).is_err());
         drop(store);
         fs::remove_file(path).unwrap();
         fs::remove_file(dir.join("state.object-lock")).unwrap();

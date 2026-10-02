@@ -56,6 +56,7 @@ pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
 pub(crate) fn room_declared_fields() -> String {
     std::iter::once(format!("2-{}", ROOM_FIELDS_START - 1))
         .chain(TARIFF_FIELDS.iter().map(|(_, key)| (*key).to_owned()))
+        .chain(std::iter::once(crate::workspace::shared_names::INDEX_FIELD.to_owned()))
         .collect::<Vec<_>>()
         .join(",")
 }

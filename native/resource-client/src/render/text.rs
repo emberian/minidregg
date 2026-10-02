@@ -69,6 +69,9 @@ fn annotation(indent: &str, a: &Annotation) -> String {
 
 pub fn document(rendered: &Rendered) -> String {
     let mut out = Vec::new();
+    for binding in &rendered.shared_names {
+        out.push(format!("  {} → {}:{}", binding.name, binding.kind, binding.target));
+    }
     for a in &rendered.document_annotations {
         out.push(annotation("", a).replacen("     ↳", "  ¶  ↳", 1));
     }

@@ -74,7 +74,7 @@ def observationRequest {F : Type} [Field F]
       (command deployment.domain profile.semantics source))
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
-    ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none⟩
+    ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none, none, none⟩
   { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
       ambient (command deployment.domain profile.semantics source) target root with
     verb := .observeObject }

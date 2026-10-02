@@ -129,7 +129,7 @@ private def item (kind : ResourceKind) (index : Nat) (json : Json) : Result (Ite
   | "delegated" =>
       let proposal ← str path json "proposal"
       let plan ← unhex s!"{path}.plan" (← str path json "plan")
-      let some signing := signingPlanCodec.decode plan | throw s!"{path}.plan: not a SIGNING-PLAN/v4 frame"
+      let some signing := signingPlanCodec.decode plan | throw s!"{path}.plan: not a canonical signing-plan frame"
       let .delegate command := signing.finalizedDraft
         | throw s!"{path}.plan: not a delegation plan"
       let some ⟨commandKind, decoded⟩ := CapabilityDelegationController.commandCodec.decode command
@@ -412,8 +412,10 @@ private def draftLines : Draft → List String
     | none => ["  invoke: noncanonical command"]
     | some command => s!"  invoke by subject {command.subject.value}, nonce {command.nonce}" ::
         command.targets.flatMap fun target =>
-          s!"  writes cell {kindName target.kind} {target.target} (via capability {target.capability.value}; read at root {target.expectedTargetRoot.value})" ::
+          let access := match target.payload with | .read => "reads" | _ => "writes"
+          s!"  {access} cell {kindName target.kind} {target.target} (via capability {target.capability.value}; read at root {target.expectedTargetRoot.value})" ::
             match target.payload with
+            | .read => ["    authenticated read; no resource write"]
             | .scalar actions => actions.map (fun a => "    " ++ actionText a)
             | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
@@ -428,6 +430,9 @@ private def draftLines : Draft → List String
          s!"  writes the authority cell: capability {child.id.value} for {holderText child.holder}, verbs {braces (verbNames child.scope.verbs)}, maxCost {child.scope.maxCost}, parent {child.parent.map (·.value) |>.getD 0}"]
   | .install subject control bytes =>
       [s!"  install a law by subject {subject.value} under control capability {control.value} ({bytes.length}-byte declaration)",
+       "  writes the authority cell: the resource's policy revision"]
+  | .installWithRoster subject control bytes rosterBytes =>
+      [s!"  install a law by subject {subject.value} under control capability {control.value} ({bytes.length}-byte declaration, {rosterBytes.length}-byte audience roster)",
        "  writes the authority cell: the resource's policy revision"]
   | .revoke bytes => [s!"  revoke ({bytes.length}-byte command); writes the authority cell's revocation plane"]
   | .renounce bytes => [s!"  renounce ({bytes.length}-byte command): the holder gives up its own capability; writes the authority cell's revocation plane"]
@@ -458,7 +463,7 @@ def turnView (mode : String) (bytes : List UInt8) : Result Json := do
   let json ← input bytes
   let label ← str "input" json "label"
   let planBytes ← unhex "plan" (← str "input" json "plan")
-  let some plan := signingPlanCodec.decode planBytes | throw "plan: not a SIGNING-PLAN/v4 frame"
+  let some plan := signingPlanCodec.decode planBytes | throw "plan: not a canonical signing-plan frame"
   let outcome ← match ← optHex "input" json "outcome" with
     | none => pure none
     | some frame => some <$> decodeOutcome "outcome" frame

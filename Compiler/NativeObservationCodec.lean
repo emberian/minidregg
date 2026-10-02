@@ -225,10 +225,10 @@ private theorem framed_refuses_prefix {A : Type} (frame old : List UInt8)
     (NativeHostCodec.framed frame stream).decode (old ++ payload) = none := by
   have mismatch : (old ++ payload).take frame.length ≠ frame := by
     intro equal
-    have prefix := congrArg (List.take old.length) equal
-    have exact : old = frame.take old.length := by
-      simpa [List.take_take, Nat.min_eq_left shorter] using prefix
-    exact different exact.symm
+    have prefixEquality := congrArg (List.take old.length) equal
+    have recoveredPrefix : old = frame.take old.length := by
+      simpa [List.take_take, Nat.min_eq_left shorter] using prefixEquality
+    exact different recoveredPrefix.symm
   have raw : (NativeHostCodec.framedRaw frame stream).decode (old ++ payload) = none := by
     simp [NativeHostCodec.framedRaw, mismatch]
   simp [NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]

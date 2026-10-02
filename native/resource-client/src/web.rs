@@ -7,11 +7,15 @@
 //! the Host's `inspect view-document`: the kernel's element-tree order, with
 //! transclusions inline as this reader's own source reads render them; links
 //! and backlinks are the Host's link-index views; history, a page at a past
-//! height and a diff are K-DOC-HISTORY's `at`-height reads. There is no write route: the router
-//! answers GET and HEAD and nothing else. It binds 127.0.0.1 only, accepts only
+//! height and a diff are K-DOC-HISTORY's `at`-height reads. Document POST forms
+//! use the native client's pinned diff and durable attempt. It binds 127.0.0.1 only, accepts only
 //! `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard), refuses a
 //! foreign `Origin`, and every path sits under a per-launch secret printed at
 //! start, so another local user or a page in the browser cannot read it.
+
+mod editor;
+#[path = "web/search.rs"]
+mod search;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -60,10 +64,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         port: bound.port(),
     };
     println!(
-        "mini web: read-only view for subject {} at http://127.0.0.1:{}/{}/",
+        "mini web: workspace for subject {} at http://127.0.0.1:{}/{}/",
         site.subject, site.port, site.token
     );
-    println!("mini web: the path secret changes every launch; no write route exists");
+    println!("mini web: the path secret changes every launch; document forms use your current authority");
     std::io::stdout().flush().map_err(|error| error.to_string())?;
     for stream in listener.incoming() {
         match stream {
@@ -160,10 +164,10 @@ fn token_equal(left: &str, right: &str) -> bool {
 
 /// Method, Host, Origin, fetch-site and path-secret checks. Pure, so tested.
 pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
-    if request.method != "GET" && request.method != "HEAD" {
+    if !matches!(request.method.as_str(), "GET" | "HEAD" | "POST") {
         return Gate::Refuse(
             405,
-            format!("{}: this server has no write route; it answers GET and HEAD only", request.method),
+            format!("{}: this server answers GET, HEAD and document POST forms only", request.method),
         );
     }
     let hosts: Vec<&str> = request
@@ -213,6 +217,12 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }) {
         return Gate::Refuse(404, "not found".into());
     }
+    if request.method == "POST" {
+        let parts: Vec<_> = segments.iter().map(String::as_str).collect();
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"]) {
+            return Gate::Refuse(405,"this address accepts reads only".into());
+        }
+    }
     Gate::Route(segments)
 }
 
@@ -229,6 +239,10 @@ pub(crate) enum Stamp {
     /// No signed read: workspace references only, or a refusal before any read.
     None,
     Read(ReadContext),
+    /// A retained editing base; sidebar observations may be newer.
+    EditBase(ReadContext),
+    /// Search results use independent current authorized reads, not one shared head.
+    CurrentReads(usize),
     /// A signed read was made and the Host refused it.
     Refused,
 }
@@ -278,14 +292,19 @@ fn short(id: &str) -> String {
 
 pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
     let context = match &page.stamp {
-        Stamp::Read(read) => format!(
-            "read as subject <span class=id>{}</span> at height <span class=id data-height=\"{}\">{}</span> \
+        Stamp::Read(read) | Stamp::EditBase(read) => format!(
+            "{}read as subject <span class=id>{}</span> at height <span class=id data-height=\"{}\">{}</span> \
              | authority root {} | cell root {}",
+            if matches!(&page.stamp,Stamp::EditBase(_)) {"Editor base snapshot: "} else {""},
             escape(subject),
             escape(&read.height),
             escape(&read.height),
             short(&read.authority_root),
             short(&read.cell_root)
+        ),
+        Stamp::CurrentReads(0) => "No readable documents in this search page".into(),
+        Stamp::CurrentReads(count) => format!(
+            "Current authorized {}", if *count == 1 { "document read".to_owned() } else { format!("reads of {count} documents") }
         ),
         Stamp::Refused => format!(
             "subject <span class=id>{}</span> | the Host refused this page's signed read",
@@ -298,9 +317,9 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
     };
     format!(
         "<!doctype html>\n<html lang=en><head><meta charset=utf-8>\
-         <meta name=viewport content=\"width=device-width\"><meta name=referrer content=no-referrer>\
+         <meta name=viewport content=\"width=device-width\"><meta name=referrer content=same-origin>\
          <title>{title} | mini</title><style>{CSS}</style></head><body>\n\
-         <header><nav><a href=\"{base}/\">workspace</a></nav><h1>{title}</h1><p class=ctx>{context}</p></header>\n\
+         <header><nav><a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a></nav><h1>{title}</h1><p class=ctx>{context}</p></header>\n\
          <main>\n{body}</main></body></html>\n",
         title = escape(&page.title),
         body = page.body,
@@ -524,6 +543,28 @@ impl Site {
         let head_only = request.method == "HEAD";
         let page = match gate(&request, self.port, &self.token) {
             Gate::Refuse(status, text) => simple(status, "Refused", &text),
+            Gate::Route(segments) if request.method == "POST" => {
+                let length = match editor::body_length(&request) {
+                    Ok(length) => length,
+                    Err(error) => return respond(&mut stream,false,&simple(400,"Cannot save",&error),&self.base(),&self.subject),
+                };
+                let end = head.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                let mut body = head[end..].to_vec();
+                if body.len() > length { return respond(&mut stream,false,&simple(400,"Cannot save","unexpected bytes after the form"),&self.base(),&self.subject); }
+                while body.len() < length {
+                    let remaining = (length-body.len()).min(buffer.len());
+                    let read = stream.read(&mut buffer[..remaining]).map_err(|e|e.to_string())?;
+                    if read == 0 { return respond(&mut stream,false,&simple(400,"Cannot save","incomplete document form"),&self.base(),&self.subject); }
+                    body.extend_from_slice(&buffer[..read]);
+                }
+                let parts: Vec<_> = segments.iter().map(String::as_str).collect();
+                match parts.as_slice() {
+                    ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
+                    ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
+                    _ => simple(405,"Cannot save","this address accepts reads only"),
+                }
+            }
+            Gate::Route(segments) if segments == ["search"] => search::page(self, &request.target),
             Gate::Route(segments) => self.route(&segments),
         };
         respond(&mut stream, head_only, &page, &self.base(), &self.subject)
@@ -533,7 +574,10 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
+            ["search-hit", name, target, atom, revision] => search::hit(self,name,target,atom,revision),
             ["doc", name] => self.doc(name, None),
+            ["doc",name,"edit"] => editor::open(self,name,None),
+            ["doc",name,"edit",id] => editor::open(self,name,Some(id)),
             ["doc", name, "history"] => self.history(name),
             ["doc", name, "diff", from, to] => self.diff(name, from, to),
             ["at", height, "doc", name] => self.doc(name, Some(height)),
@@ -712,7 +756,7 @@ impl Site {
             ));
         } else {
             body.push_str(&format!(
-                "<p class=note><a href=\"{base}/doc/{n}/history\">history</a></p>\n",
+                "<p class=note><a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | <a href=\"{base}/doc/{n}/history\">history</a></p>\n",
                 n = escape(name)
             ));
         }
@@ -883,13 +927,13 @@ fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, sub
     let mut response = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
          Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
-         Referrer-Policy: no-referrer\r\n\
-         Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'\r\n\
+         Referrer-Policy: same-origin\r\n\
+         Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'\r\n\
          {}Connection: close\r\n\r\n",
         page.status,
         reason(page.status),
         body.len(),
-        if page.status == 405 { "Allow: GET, HEAD\r\n" } else { "" },
+        if page.status == 405 { "Allow: GET, HEAD, POST\r\n" } else { "" },
     )
     .into_bytes();
     if !head_only {
@@ -1125,7 +1169,7 @@ moved 1002: after the start -> after 1001
     }
 
     #[test]
-    fn router_source_names_no_write_route() {
+    fn get_router_calls_no_submit_path() {
         let source = include_str!("web.rs");
         let router = &source[source.find("fn route(").unwrap()..source.find("fn names(").unwrap()];
         for word in ["POST", "PUT", "DELETE", "PATCH", "propose", "submit"] {

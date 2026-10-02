@@ -323,8 +323,9 @@ open Minidregg.Theory.CredentialAuthorityState (layout)
 variable {F : Type} [Field F]
 
 theorem install_view_verb (profile : RuntimeProfile F) (snapshot : Snapshot)
-    (context : RequestContext) (declaration : Declaration) (logical : Store layout) :
-    (project (request profile snapshot context declaration) declaration logical).get "request/verb" =
+    (context : RequestContext) (declaration : Declaration) (logical : Store layout)
+    (storageKind : Nat := 0) :
+    (project (request profile snapshot context declaration) declaration logical storageKind).get "request/verb" =
       some 4 := by
   simp [project, State.get, CanonicalRuntimeProfile.requestSlots, request,
     CredentialAuthorityEntryCodec.verbTag]
@@ -334,21 +335,22 @@ theorem never_relawed [DecidableEq F] (L : Pred)
     (refuses : ∀ o n : State, eval L o n = true → n.get "request/verb" ≠ some 4)
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     {store : PayloadStore} (installed : Installed profile snapshot context store)
-    (current : ∀ committed, (policyRegistry snapshot store).resolve
-        installed.prepared.declaration.source.policyId context.policyRevision = some committed →
-      committed.record.predicate = L) : False := by
-  obtain ⟨committed, resolved, holds⟩ := installed.old_policy_evaluated
-  rw [current committed resolved] at holds
-  exact refuses _ _ holds (install_view_verb _ _ _ _ _)
+    (current : Minidregg.Kernel.LawHistory.ActiveComponent
+      (installed.prepared.policyConfig store) (L)) : False := by
+  have holds := Minidregg.Kernel.LawHistory.authorized_component_eval
+    (installed.prepared.policyConfig store)
+    (request profile snapshot context installed.prepared.declaration)
+    installed.accepted.authorization L current
+  exact refuses _ _ holds (install_view_verb profile snapshot context
+    installed.prepared.declaration installed.post.logical installed.prepared.storageKind)
 
 /-- **The author cannot change a sealed story under a player**: no accepted installation exists
 on a player's cell whose current law is the sealed story law. -/
 theorem sealed_story_never_relawed [DecidableEq F] (t : Table) (S : Int)
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     {store : PayloadStore} (installed : Installed profile snapshot context store)
-    (current : ∀ committed, (policyRegistry snapshot store).resolve
-        installed.prepared.declaration.source.policyId context.policyRevision = some committed →
-      committed.record.predicate = law t S) : False :=
+    (current : Minidregg.Kernel.LawHistory.ActiveComponent
+      (installed.prepared.policyConfig store) (law t S)) : False :=
   never_relawed (law t S) (fun _ _ h => law_no_install t S h) installed current
 
 /-! ## §7. The table document's sealed law
@@ -381,9 +383,8 @@ theorem table_no_install {o n : State} (h : eval tableSealed o n = true) :
 theorem sealed_table_never_relawed [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     {store : PayloadStore} (installed : Installed profile snapshot context store)
-    (current : ∀ committed, (policyRegistry snapshot store).resolve
-        installed.prepared.declaration.source.policyId context.policyRevision = some committed →
-      committed.record.predicate = tableSealed) : False :=
+    (current : Minidregg.Kernel.LawHistory.ActiveComponent
+      (installed.prepared.policyConfig store) (tableSealed)) : False :=
   never_relawed tableSealed (fun _ _ h => table_no_install h) installed current
 
 /-- The Host's explanation of a refused table edit is `any []`, which renders `sealed`. -/
@@ -553,13 +554,22 @@ variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
   {durable : Durable} {command : Command}
 
-/-- The leg's installed law is the sealed story law of `t` for player `S`. -/
+/-- The authenticated effective closure includes the sealed story law of `t` for player `S` as an active component. -/
 def StoryInstalled (t : Table) (S : Int)
     {prepared : PreparedInvocation deployment profile ambient durable command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
-  ∀ committed, (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed →
-    committed.record.predicate = law t S
+  Minidregg.Kernel.LawHistory.ActiveComponent
+    (policyConfig prepared tuple incidence) (law t S)
+
+/-- Derive the installed-law assurance premise from the receiver's cached,
+authenticated effective graph; no caller assertion or second resolver is used. -/
+def checkInstalled (t : Table) (S : Int)
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
+      (policyConfig prepared tuple incidence)) :
+    Option (PLift (StoryInstalled t S tuple incidence)) :=
+  Minidregg.Kernel.LawHistory.checkActiveComponent resolved (law t S)
 
 /-- **Kernel form.** Every write leg the controller admitted on a player's cell under the sealed
 story law is the player's, one turn on, and a stay or a table edge. -/
@@ -569,8 +579,8 @@ theorem kernel_story_step (t : Table) (S : Int)
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : StoryInstalled t S tuple incidence)
     (w : (step prepared tuple incidence).newState.get "request/verb" = some 2) :
     Step t S (step prepared tuple incidence).newState := by
-  obtain ⟨committed, resolved, holds⟩ := Minidregg.Kernel.LawHistory.checked_leg_policy_eval leg
-  rw [installed committed resolved] at holds
+  have holds := Minidregg.Kernel.LawHistory.checked_leg_component_eval leg
+    (law t S) installed
   exact law_step t S holds w
 
 end Kernel

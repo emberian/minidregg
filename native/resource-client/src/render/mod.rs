@@ -109,6 +109,8 @@ pub struct Backlink {
 
 #[derive(Clone, Debug)]
 pub struct Rendered {
+    /// Explicit shared names from signed index links, not outbound URLs.
+    pub shared_names: Vec<crate::workspace::shared_names::Binding>,
     pub root: Value,
     pub root_revision: Value,
     pub lines: Vec<RenderedLine>,
@@ -396,7 +398,15 @@ pub fn render(view: &View) -> Result<Rendered, String> {
             Some(OutlineEntry { line: n, level, text: line.plain() })
         })
         .collect();
+    let mut shared_names = Vec::new();
+    for entry in view.entries {
+        if let Some(binding) = crate::workspace::shared_names::binding(entry)? {
+            shared_names.push(binding);
+        }
+    }
+    shared_names.sort_by(|a,b| a.name.cmp(&b.name).then(a.link.cmp(&b.link)));
     Ok(Rendered {
+        shared_names,
         root: document["root"].clone(),
         root_revision: document["rootRevision"].clone(),
         lines,
@@ -466,6 +476,8 @@ impl Rendered {
             .collect();
         json!({"type":"document","host":host,"root":self.root,"rootRevision":self.root_revision,
             "lines":lines,
+            "sharedNames":self.shared_names.iter().map(|b|json!({"name":b.name,"kind":b.kind,
+                "target":b.target,"link":b.link})).collect::<Vec<_>>(),
             "documentAnnotations":self.document_annotations.iter().map(annotation_json).collect::<Vec<_>>(),
             "outline":self.outline.iter().map(|o| json!({"line":o.line,"level":o.level,"text":o.text})).collect::<Vec<_>>(),
             "backlinks":self.backlinks.iter().map(|b| json!({"source":b.source,"link":b.link,

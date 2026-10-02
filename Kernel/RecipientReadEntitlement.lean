@@ -106,7 +106,7 @@ def viewConfig (prepared : Preparation (context := context) (profile := profile)
 
 structure CheckedView (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
-    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) where
+    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : Type where
   private mk ::
   heightExact : wanted.height = genesisHeight + durable.height
   objectRole : view.1 = .content ∨ view.1 = .declaredObject ∨ view.1 = .stream ∨ view.1 = .worldInstance
@@ -116,10 +116,12 @@ structure CheckedView (genesisHeight : Nat) (prepared : Preparation (context := 
   lineage : storedLineageCheck context.authority.snapshot.cell context.authority.snapshot.authState.parent stored = true
   admissible : capabilityAdmissibleCheck stored.head context.authority.snapshot.authState
     (viewRequest (wanted := wanted) view) = true
-  config : ComposedPolicyAdmission.Config F
-  configExact : viewConfig prepared view = some config
   witness : ComposedPolicyAdmission.Witness F
-  law : config.verifies (viewRequest (wanted := wanted) view) witness = true
+  /-- The composed portal is reconstructed from the indexed physical view.
+  Keep its exact acceptance as proof, not a Type-1 runtime portal value. -/
+  law : ∃ config : ComposedPolicyAdmission.Config F,
+    viewConfig prepared view = some config ∧
+    config.verifies (viewRequest (wanted := wanted) view) witness = true
   guards : List ReadGuard
   guardsExact : readGuards prepared = some guards
 
@@ -147,7 +149,7 @@ def checkView (genesisHeight : Nat) (prepared : Preparation (context := context)
             | none => none
             | some guards =>
               some ⟨heightExact, role, stored, selected, principal, lineage, admissible,
-                config, configExact, witness, law, guards, guardsExact⟩
+                witness, ⟨config, configExact, law⟩, guards, guardsExact⟩
            else none
         else none
        else none

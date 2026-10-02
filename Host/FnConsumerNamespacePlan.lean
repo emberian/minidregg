@@ -111,7 +111,7 @@ def currentRoots (config : NativeHost.Config) (opened : NativeHost.Opened config
   let authorityRoot := opened.durable.snapshot.model.roots
     (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)
   let probe : DeclaredResourceController.Target :=
-    ⟨.object, pin.target, pin.capability, 1, ⟨0⟩, .content ⟨[]⟩, none⟩
+    ⟨.object, pin.target, pin.capability, 1, ⟨0⟩, .content ⟨[]⟩, none, none, none⟩
   let .present cell := opened.directory.directory.slots pin.target
     | throw "fn consumer namespace target is absent"
   let some pre := DeclaredResourceController.selectTarget config.deployment probe cell

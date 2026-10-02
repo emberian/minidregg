@@ -230,9 +230,18 @@ def accountPredicate (subject : Nat) : Minidregg.Pred.Pred :=
   .all [.eq "request/subject" (Int.ofNat subject)]
 
 def accountPolicy (deployment : Deployment) (semantics : Digest) (identities : Ids) :
-    PolicyRecord :=
-  ⟨⟨identities.account⟩, 0, deployment.domain, semantics, none,
-    accountPredicate identities.subject⟩
+    PolicyRecord where
+  policyId := ⟨identities.account⟩
+  version := 0
+  domain := deployment.domain
+  semantics := semantics
+  previous := none
+  predicate := accountPredicate identities.subject
+  localSelector := {}
+  parents := []
+  descendants := none
+  audience := none
+  objectDescriptor := none
 
 /-- A root capability exactly as genesis and birth authoring build one: the
 template's issuer, budget and lifetime, the issuer and policy epochs current in
@@ -1013,7 +1022,7 @@ def readGuards (prepared : Prepared deployment profile ambient durable command v
     List ReadGuard :=
   policyGuard prepared ::
     (prepared.authority.readGuards ++
-      (lawReadGuards prepared).map (fun (id, root) => ⟨⟨id⟩, root⟩)).filter fun guard =>
+      (lawReadGuards prepared).map (fun (cellIdentifier, expectedRoot) => (⟨⟨cellIdentifier⟩, expectedRoot⟩ : ReadGuard))).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command verified) : Prop :=

@@ -163,7 +163,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JDISCLOSE)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -235,6 +235,7 @@ TITLE[M7]="candidate built from portable interfaces reproduces hashes"
 TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refused"
 TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
+TITLE[JNAMES]="J-NAMES: shared room-index lookup, rename, duplicate-law refusal and target authority"
 TITLE[JDV]="J-DOCUVERSE: two friends write a paper in the shell; quotes, marks, history, their editor, can, the web, a cold audit"
 TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
@@ -906,6 +907,7 @@ step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the cl
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
+step_JNAMES() { hook jnames "shared room names through signed room/index reads; two clients, renames, current laws, exact recovery and target authority" shell; }
 step_JDV() { hook jdocuverse "J-DOCUVERSE (DEOS §8 J19-J24): two friends write a paper through mini shell: a range of notes transcluded snapshot and live, a reader without the source's grant sees the placeholder; marks, an annotation, a link and its backlink; doc show equals the golden; history, show --at and diff; pull, push, a stale line refused by line; can paper; mini web's page equals doc show --html byte for byte; a cold audit re-admits every record" shell; }
 step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
@@ -1021,6 +1023,7 @@ run_step M8 J0
 run_step BD J2
 run_step J12 J0
 run_step J12W J0
+run_step JNAMES J0 J4
 run_step JDV J0
 run_step J13 J0
 run_step JJOB1 J0

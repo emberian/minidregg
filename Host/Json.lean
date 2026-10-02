@@ -367,8 +367,10 @@ private def lawSelector (path : String) (json : Lean.Json) : Result LawCompositi
   let values (key : String) : Result (Option (List Nat)) :=
     match obj.get? key with
     | none => pure none
-    | some value => optional (path ++ "." ++ key) (fun at => list at nat) value
-  pure { physicalKinds := ← values "physicalKinds", requestKinds := ← values "requestKinds",
+    | some value => optional (path ++ "." ++ key) (fun valuePath => list valuePath nat) value
+  pure {
+    physicalKinds := ← values "physicalKinds"
+    requestKinds := ← values "requestKinds"
     verbs := ← values "verbs" }
 
 private def lawReference (path : String) (json : Lean.Json) : Result LawComposition.PolicyRef := do
@@ -378,22 +380,25 @@ private def lawReference (path : String) (json : Lean.Json) : Result LawComposit
     | "descendants" => pure LawComposition.Facet.descendants
     | _ => failAt (path ++ ".facet") "expected local or descendants"
   let raw ← field path "selection" obj
-  let at := path ++ ".selection"
-  let (tag, _) ← tagged at raw
+  let valuePath := path ++ ".selection"
+  let (tag, _) ← tagged valuePath raw
   let selection ← match tag with
-    | "head" => exactObject at ["type"] raw *> pure LawComposition.Selection.head
+    | "head" => exactObject valuePath ["type"] raw *> pure LawComposition.Selection.head
     | "pinned" => do
-        let selected ← exactObject at ["type", "revision", "sourceDigest"] raw
-        pure (.pinned (← nat (at ++ ".revision") (← field at "revision" selected))
-          ⟨← nat (at ++ ".sourceDigest") (← field at "sourceDigest" selected)⟩)
-    | _ => failAt (at ++ ".type") "expected head or pinned"
-  pure { policyId := ⟨← nat (path ++ ".policyId") (← field path "policyId" obj)⟩,
-    facet := facet, selection := selection }
+        let selected ← exactObject valuePath ["type", "revision", "sourceDigest"] raw
+        pure (.pinned (← nat (valuePath ++ ".revision") (← field valuePath "revision" selected))
+          ⟨← nat (valuePath ++ ".sourceDigest") (← field valuePath "sourceDigest" selected)⟩)
+    | _ => failAt (valuePath ++ ".type") "expected head or pinned"
+  pure {
+    policyId := ⟨← nat (path ++ ".policyId") (← field path "policyId" obj)⟩
+    facet := facet
+    selection := selection }
 
 private def lawComponent (path : String) (json : Lean.Json) : Result LawComposition.Component := do
   let obj ← exactObject path ["selector", "predicate", "parents"] json
-  pure { selector := ← lawSelector (path ++ ".selector") (← field path "selector" obj),
-    predicate := ← predicate (path ++ ".predicate") (← field path "predicate" obj),
+  pure {
+    selector := ← lawSelector (path ++ ".selector") (← field path "selector" obj)
+    predicate := ← predicate (path ++ ".predicate") (← field path "predicate" obj)
     parents := ← list (path ++ ".parents") lawReference (← field path "parents" obj) }
 
 private def lawSelectorJson (value : LawComposition.Selector) : Lean.Json :=
@@ -977,28 +982,28 @@ private def worldDefinition (path : String) (json : Lean.Json) :
   let defaults ← array (path ++ ".defaults") (← field path "defaults" obj)
   let mut store : Store.Store (WorldKindDescriptor.layout descriptor) := 0
   for i in [:defaults.size] do
-    let at := s!"{path}.defaults[{i}]"
-    let entry ← exactObject at ["field", "key", "value"] defaults[i]!
-    let id ← nat (at ++ ".field") (← field at "field" entry)
+    let entryPath := s!"{path}.defaults[{i}]"
+    let entry ← exactObject entryPath ["field", "key", "value"] defaults[i]!
+    let id ← nat (entryPath ++ ".field") (← field entryPath "field" entry)
     let space ← match WorldKindInstance.findField descriptor id with
       | some space => pure space
-      | none => failAt (at ++ ".field") "unknown descriptor field"
-    let key ← nat (at ++ ".key") (← field at "key" entry)
+      | none => failAt (entryPath ++ ".field") "unknown descriptor field"
+    let key ← nat (entryPath ++ ".key") (← field entryPath "key" entry)
     let address : Store.Address (WorldKindDescriptor.layout descriptor) := ⟨space, key⟩
-    if (store address).isSome then failAt at "duplicate default field/key"
-    let raw ← field at "value" entry
+    if (store address).isSome then failAt entryPath "duplicate default field/key"
+    let raw ← field entryPath "value" entry
     let definition := descriptor.fields.get space
     let value ← if definition.meaning = WorldKindMethods.tableMeaning && raw.getArr?.isOk then do
         unless definition.codec = .bytes ∧ definition.discipline = .rom ∧ key = 0 do
-          failAt at "method table must be ROM bytes at key zero"
-        let methods ← list (at ++ ".value") worldMethod raw
+          failAt entryPath "method table must be ROM bytes entryPath key zero"
+        let methods ← list (entryPath ++ ".value") worldMethod raw
         unless WorldKindMethods.valid descriptor methods do
-          failAt at "ambiguous or invalid method output bindings"
+          failAt entryPath "ambiguous or invalid method output bindings"
         match WorldKindInstance.decodeValue descriptor space
             (WorldKindDescriptor.ScalarCodec.bytes.stream.encode (WorldKindMethods.encode methods)) with
         | some value => pure value
-        | none => failAt at "method table field is not bytes"
-      else worldValue definition.codec (at ++ ".value") raw
+        | none => failAt entryPath "method table field is not bytes"
+      else worldValue definition.codec (entryPath ++ ".value") raw
     store := store.set address (some value)
   let definition : WorldKindCell.Definition :=
     ⟨descriptor, StoreCodec.encode (WorldKindDescriptor.wire descriptor) store⟩
@@ -2525,8 +2530,11 @@ private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
     .prepare (.invoke (DeclaredResourceController.commandCodec.encode source.1)), grants⟩
 
 /-- Re-pin a worker's no-op witness to a newly attached generation through
-the ordinary signed policy-install receiver. The caller supplies the observed
-current head and authority root; neither is trusted without native checks. -/
+the ordinary signed policy-install receiver. Canonical currentSourceHex must
+match every supplied source pin; the update retains composition, audience and
+program descriptor metadata. Current authority/head admission still belongs to
+the receiver: authoring neither authenticates a caller's snapshot nor asserts
+cryptographic digest injectivity. -/
 private def grainPolicyInstallIntent (path : String) (json : Lean.Json)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Intent := do
   let raw ← object path json
@@ -2534,20 +2542,37 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json)
     | failAt path "worker subject and generation required"
   let obj ← exactObject path (["subject", "intentNonce", "declarationNonce", "task",
     "owner", "control", "domain", "semantics", "expectedPreRoot", "expectedVersion",
-    "expectedAddress", "grants"] ++ grainWorkerFields raw) json
+    "expectedAddress", "currentSourceHex", "grants"] ++ grainWorkerFields raw) json
   let subject := SubjectId.mk (← nat (path ++ ".subject") (← field path "subject" obj))
   let owner ← nat (path ++ ".owner") (← field path "owner" obj)
   let task ← nat (path ++ ".task") (← field path "task" obj)
   let version ← nat (path ++ ".expectedVersion") (← field path "expectedVersion" obj)
   let address := Digest.mk (← nat (path ++ ".expectedAddress")
     (← field path "expectedAddress" obj))
+  let domain := Digest.mk (← nat (path ++ ".domain") (← field path "domain" obj))
+  let semantics := Digest.mk (← nat (path ++ ".semantics") (← field path "semantics" obj))
+  let currentBytes ← decodeHex (path ++ ".currentSourceHex")
+    (← field path "currentSourceHex" obj)
+  let some current := PolicyRecordCodec.decode currentBytes
+    | failAt (path ++ ".currentSourceHex") "expected canonical current policy source"
+  unless PolicyRecordCodec.digest current = address do
+    failAt (path ++ ".expectedAddress") "does not match current policy source"
+  unless current.policyId.value = task do
+    failAt (path ++ ".task") "does not match current policy source"
+  unless current.version = version do
+    failAt (path ++ ".expectedVersion") "does not match current policy source"
+  unless current.domain = domain do
+    failAt (path ++ ".domain") "does not match current policy source"
+  unless current.semantics = semantics do
+    failAt (path ++ ".semantics") "does not match current policy source"
+  let nextPredicate := match providerRoutes.lookup task with
+    | some routes => ProviderRoute.policy routes (grainPolicy owner (some worker))
+    | none => grainPolicy owner (some worker)
   let source : PolicyRecord :=
-    ⟨⟨task⟩, version + 1,
-      ⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
-      ⟨← nat (path ++ ".semantics") (← field path "semantics" obj)⟩,
-      some address, match providerRoutes.lookup task with
-        | some routes => ProviderRoute.policy routes (grainPolicy owner (some worker))
-        | none => grainPolicy owner (some worker)⟩
+    { current with
+      version := version + 1
+      previous := some address
+      predicate := nextPredicate }
   let declaration : PolicyInstallController.Declaration :=
     ⟨⟨← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj)⟩,
       some ⟨version, address⟩,
@@ -3392,6 +3417,90 @@ private def authorRefused (kind : String) (value : Lean.Json) : Bool :=
   match author kind value with
   | .error _ => true
   | .ok _ => false
+
+/-- A deliberately extended source: every new facet is nonneutral, so an
+accidental six-field reconstruction cannot pass the authoring round trip. -/
+private def grainRepinFixture : PolicyRecord where
+  policyId := ⟨41⟩
+  version := 5
+  domain := ⟨31⟩
+  semantics := ⟨37⟩
+  previous := some ⟨23⟩
+  predicate := grainPolicy 7 (some ([8], 1))
+  localSelector := {
+    physicalKinds := some [1, 2]
+    requestKinds := some [0]
+    verbs := some [2] }
+  parents := [⟨⟨43⟩, .local, .pinned 3 ⟨47⟩⟩]
+  descendants := some {
+    selector := { verbs := some [1, 2] }
+    predicate := .eq "request/subject" 7
+    parents := [⟨⟨53⟩, .descendants, .head⟩] }
+  audience := some {
+    object := 41
+    epoch := 2
+    parent := 3
+    transition := 5
+    audience := 7
+    devices := 11
+    history := 13
+    manifest := 17
+    mode := .active
+    authoritySnapshot := 19
+    deviceSnapshot := 23 }
+  objectDescriptor := some ⟨59⟩
+
+private def grainRepinFixtureFields : List (String × Lean.Json) :=
+  [("subject", .str "7"), ("intentNonce", .str "61"),
+   ("declarationNonce", .str "67"), ("task", .str "41"), ("owner", .str "7"),
+   ("control", .str "71"), ("domain", .str "31"), ("semantics", .str "37"),
+   ("expectedPreRoot", .str "73"), ("expectedVersion", .str "5"),
+   ("expectedAddress", decimal (PolicyRecordCodec.digest grainRepinFixture).value),
+   ("currentSourceHex", hexJson (PolicyRecordCodec.encode grainRepinFixture)),
+   ("grants", .arr #[]), ("workerSubject", .str "8"), ("workerGeneration", .str "2")]
+
+private def grainRepinFixtureJson (replacements : List (String × Lean.Json) := []) : Lean.Json :=
+  .mkObj (grainRepinFixtureFields.map fun (key, value) =>
+    (key, (replacements.lookup key).getD value))
+
+/-- Decode the output of the public authoring dispatch, including its actual
+intent and policy-install codecs, to inspect the resulting source. -/
+private def grainRepinAuthoredSource (json : Lean.Json) : Option PolicyRecord := do
+  let bytes ← match author "grain-policy-install-intent" json with
+    | .ok bytes => some bytes | .error _ => none
+  let intent ← intentCodec.decode bytes
+  let .prepare (.install _ _ declarationBytes) := intent.purpose | none
+  let declaration ← PolicyInstallController.declarationCodec.decode declarationBytes
+  some declaration.source
+
+/-- The worker generation changes while the complete v6 extension metadata
+survives the actual JSON author → intent → install-source round trip. -/
+theorem grainPolicy_repin_preserves_extensions :
+    grainRepinAuthoredSource (grainRepinFixtureJson []) =
+      some { grainRepinFixture with
+        version := 6
+        previous := some (PolicyRecordCodec.digest grainRepinFixture)
+        predicate := grainPolicy 7 (some ([8], 2)) } := by native_decide
+
+/-- Wrong/stale source pins, malformed/trailing source bytes, absent canonical
+source, and unknown JSON fields refuse before an intent can be authored. -/
+theorem grainPolicy_repin_wrong_pins_refused :
+    (([("expectedAddress", decimal ((PolicyRecordCodec.digest grainRepinFixture).value + 1)),
+       ("expectedVersion", .str "4"), ("task", .str "42"),
+       ("domain", .str "32"), ("semantics", .str "38"),
+       ("currentSourceHex", .str "00"),
+       ("currentSourceHex", hexJson (PolicyRecordCodec.encode grainRepinFixture ++ [0]))] :
+        List (String × Lean.Json)).all fun replacement =>
+      authorRefused "grain-policy-install-intent" (grainRepinFixtureJson [replacement])) = true ∧
+    authorRefused "grain-policy-install-intent"
+      (.mkObj (grainRepinFixtureFields.filter fun field => field.1 != "currentSourceHex")) = true ∧
+    authorRefused "grain-policy-install-intent"
+      (.mkObj (grainRepinFixtureFields ++ [("unexpected", .null)])) = true := by native_decide
+
+/-- info: 'Minidregg.Host.Json.grainPolicy_repin_preserves_extensions' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_repin_preserves_extensions._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_repin_preserves_extensions
+/-- info: 'Minidregg.Host.Json.grainPolicy_repin_wrong_pins_refused' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_repin_wrong_pins_refused._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_repin_wrong_pins_refused
 
 /-- Negative authoring checks run through the same exact JSON parser used by
 native requests. Duplicate and overbound examples use the compiled evaluator;
@@ -4619,7 +4728,7 @@ private def streamCellJson (root : Digest) (store : StreamCell.HeadStore) : Lean
 per entry in canonical order — `{salt, entry}` where the reader may see the
 entry, `{leaf}` where it may not.  The client recomputes every opened leaf and
 the root from these alone. -/
-private def openingJson (opening : NativeObservationController.OpeningView) : Lean.Json :=
+private def rootOpeningJson (opening : NativeObservationController.OpeningView) : Lean.Json :=
   .mkObj [("frame", hexJson opening.1),
     ("items", .arr <| opening.2.toArray.map fun
       | .inl opened => .mkObj [("salt", hexJson opened.salt), ("entry", hexJson opened.entry)]
@@ -4642,7 +4751,7 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
     | _ => pure (.mkObj [("root", decimal root.value), ("canonical", hexJson bytes)])
   pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2]),
-    ("opening", openingJson opening),
+    ("opening", rootOpeningJson opening),
     ("computeQuote", (computeQuote.map fun quote => .mkObj
       [("subject", decimal quote.subject), ("bookRoot", decimal quote.bookRoot.value),
        ("day", decimal quote.day), ("usedSteps", decimal quote.usedSteps),
@@ -4699,7 +4808,7 @@ private def pageOfView (path : String) (bytes : List UInt8) :
       | some ⟨.content, payload⟩ => pure (none, "live", some value.1, payload.logical)
       | _ => failAt path "not a content cell"
   | none =>
-      let (height, root, lifecycle) ← decoded path NativeObservationController.atViewCodec bytes
+      let (height, root, lifecycle, _opening) ← decoded path NativeObservationController.atViewCodec bytes
       match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
       | some .fresh => pure (some height, "fresh", none, ContentResource.initialStore)
       | some .retired => pure (some height, "retired", none, ContentResource.initialStore)
@@ -4823,12 +4932,22 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
           | some opening =>
               let source := (sources.find? (fun pair => pair.1 = opening.source)).map Prod.snd
               .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson record.reference.mode),
-                ("opening", openingJson opening),
+                ("opening", rootOpeningJson opening),
                 ("render", transclusionViewJson
                   (ContentResource.renderTransclusion source opening record.reference.mode))]
     | _ => none
   pure <| .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
     [("transclusions", .arr rendered.toArray)])
+
+/-- Compatibility spelling for quoted ranges. The atom-embed renderer was
+superseded by range transclusion: reuse the current document renderer and its
+reader-supplied narrowed source pages instead of maintaining another fetch path. -/
+private def quotesJson (bytes : List UInt8) : Result Lean.Json := do
+  let document ← documentJson bytes
+  let quotes ← match document.getObjVal? "transclusions" with
+    | .ok value => pure value
+    | .error _ => failAt "view-quotes" "document rendering lacks transclusions"
+  pure <| .mkObj [("type", "quotes"), ("quotes", quotes)]
 
 private def changeJson (left right : ContentResource.ContentStore) :
     DocumentHistory.Change Hyperdocument.ElementId DocumentHistory.Line → Lean.Json

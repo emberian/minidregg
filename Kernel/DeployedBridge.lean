@@ -104,6 +104,8 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .nockProgram => nockProgramWire
   | .clock => Kernel.ClockCell.wire
   | .system => Kernel.SystemCell.wire
+  | .worldKind => WorldKindCell.definitionWire
+  | .worldInstance => WorldKindCell.instanceWire
 
 /-! ## The cell decoder -/
 

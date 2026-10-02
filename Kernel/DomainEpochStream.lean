@@ -26,20 +26,21 @@ set_option autoImplicit false
 
 variable (snapshot : AuthoritySnapshot) (semantics : Digest)
   (ambient : Ambient) (command : Command)
+  {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
 
 /-- **A channel refusal is the kernel's refusal**, by name: when the law refuses, the append's target
 computation is `.error (.channel reason)`. -/
 theorem computeTarget_channel_refused (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (object : kind = .object) (current : version = StreamCell.commandVersion) (fresh : root = pre.root)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
     {reason : DomainEpoch.Refusal}
     (refused : DomainEpoch.admitAppend pre.logical command.subject request = .error reason) :
     computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre = .error (.channel reason) := by
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error (.channel reason) := by
   subst object current
   simp [computeTarget, fresh, topic, payload, refused]
   rfl
@@ -48,7 +49,7 @@ theorem computeTarget_channel_refused (kind : ResourceKind) (id : Nat) (capabili
 theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (object : kind = .object) (current : version = StreamCell.commandVersion) (fresh : root = pre.root)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
@@ -56,7 +57,7 @@ theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capabil
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
     (room : head.binding = .room) :
     computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre =
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
       .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
         (streamRecord snapshot semantics ambient command request))).apply pre.logical) := by
   subst object current
@@ -83,7 +84,7 @@ section Record
 variable (id : Nat) (capability : CapabilityId) (observe : Option CapabilityId)
   (r : DomainEpoch.EpochRecord)
   (root : Digest)
-  (pre : TargetCell ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩)
+  (pre : TargetCell ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩)
   (fresh : root = pre.root)
   {p : DomainEpoch.Prev} (last : DomainEpoch.prevOf pre.logical = .ok (some p))
 include fresh last
@@ -92,7 +93,7 @@ include fresh last
 theorem kernel_gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (gap : p.epoch.toNat + 1 < r.epoch.toNat) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .epochGap) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
@@ -102,7 +103,7 @@ theorem kernel_gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
 theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (notAfter : r.epoch.toNat ≤ p.epoch.toNat) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .epochNotAfter) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
@@ -111,7 +112,7 @@ theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.doma
 /-- The kernel refuses a different channel domain even when the epoch is next. -/
 theorem kernel_foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.domain) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .foreignDomain) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
@@ -121,7 +122,7 @@ theorem kernel_foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.
 theorem kernel_foreign_author_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (next : r.epoch.toNat = p.epoch.toNat + 1) (foreign : command.subject ≠ p.author) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .foreignAuthor) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
@@ -132,7 +133,7 @@ theorem kernel_root_count_refused {P : Minidregg.Theory.Channel.Profile}
     (cls : Minidregg.Theory.Channel.profileOfId r.classId = some P) (count : r.tickRoots.length ≠ P.E)
     (fits : r.encode.length ≤ StreamCell.maxPayloadBytes) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .error (.channel .rootCount) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh
     (recordAppend_topic_fits r) fits
@@ -144,7 +145,7 @@ theorem kernel_next_admitted (wf : r.WellFormed) (dom : r.domain = p.domain)
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
     (room : head.binding = .room) :
     computeTarget snapshot semantics ambient command
-        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe⟩ pre =
+        ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
       .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
         (streamRecord snapshot semantics ambient command (DomainEpoch.recordAppend r)))).apply pre.logical) :=
   computeTarget_channel_admitted snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl fresh

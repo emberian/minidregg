@@ -2,6 +2,8 @@
 //! A reference is a discovery hint. Every read and operation still goes through
 //! the signed observation, current Plan, and Lean admission in `main`.
 
+pub(crate) mod web_author;
+
 use crate::current_birth;
 use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
@@ -18,6 +20,9 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Mutex;
+
+#[path = "doc_search.rs"]
+pub(crate) mod doc_search;
 
 const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
@@ -133,8 +138,8 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
 
 /// A reference name: one segment (`lab`) or a path of segments under a room
 /// (`lab/index`), each segment a `validate_name` word, at most 128 bytes in
-/// all. The name is the friend's own local handle; nothing on the wire carries
-/// it, and the Host never sees it.
+/// all. A single segment is a private handle; a path resolves through the
+/// room index before an authenticated-absence fallback to a private hint.
 pub(crate) fn validate_ref_name(value: &str) -> Result<()> {
     if value.is_empty() || value.len() > 128 || value.split('/').any(|segment| validate_name(segment).is_err()) {
         return Err("a reference name is 1..128 bytes of segments separated by '/', each 1..64 ASCII letters, digits or hyphens".into());
@@ -618,8 +623,16 @@ pub(crate) fn complete_fresh_onboarding(root: &Path) -> Result<Value> {
         Ok(signed_view_unchecked(root, &workspace, reference, "resource")?.1)
     })
 }
+#[path = "shared_names.rs"]
+pub(crate) mod shared_names;
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
+    if !name.contains('/') { return local_reference(root, name); }
+    shared_names::resolve(root, &load(root)?, name)
+}
+
+/// Private address-book lookup only; never an authenticated shared discovery.
+pub(crate) fn local_reference(root: &Path, name: &str) -> Result<Value> {
     validate_ref_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{}.json", ref_file(name))))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -922,6 +935,9 @@ pub(crate) fn read(
             .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
     }
     let mut answered = answered?;
+    if reference.get("sharedName").is_some() {
+        shared_names::check_opened(&reference, judged.as_ref().ok_or("shared-name target read lacks its challenge")?)?;
+    }
     if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
         object.insert("judgedAt".to_owned(), judged);
     }
@@ -937,7 +953,7 @@ fn cell_label(root: &Path, cell: &str) -> String {
         .filter_map(|entry| {
             let file = entry.file_name().to_string_lossy().into_owned();
             let stem = ref_name_of_file(file.strip_suffix(".json")?);
-            let value = reference(root, &stem).ok()?;
+            let value = local_reference(root, &stem).ok()?;
             (value.get("target").and_then(Value::as_str) == Some(cell)).then_some(stem)
         })
         .collect();
@@ -1050,6 +1066,7 @@ fn signed_view_unchecked(
         &attempt,
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    shared_names::check_opened(reference, &challenge)?;
     Ok((result, challenge, attempt.join("signed-observation.bin")))
 }
 
@@ -1091,6 +1108,9 @@ fn doc_query(
         &attempt,
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    if reference.get("sharedName").is_some() {
+        shared_names::check_opened(reference, &challenge)?;
+    }
     let mode = if view == "at" { ContinuityMode::Historical } else { ContinuityMode::Ordinary };
     receipt_continuity::finish(root, workspace, ticket, &challenge, mode)?;
     Ok((value, attempt))
@@ -1176,7 +1196,7 @@ fn reference_for_target(root: &Path, target: &str) -> Result<Option<Value>> {
         .collect();
     names.sort();
     for name in names {
-        if let Ok(value) = reference(root, &name) {
+        if let Ok(value) = local_reference(root, &name) {
             if member(&value, "target")? == target {
                 return Ok(Some(value));
             }
@@ -1880,7 +1900,7 @@ fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
     stems.sort();
     let mut names = std::collections::BTreeMap::new();
     for stem in stems {
-        if let Ok(value) = reference(root, &stem) {
+        if let Ok(value) = local_reference(root, &stem) {
             if let Some(target) = value["target"].as_str() {
                 names.entry(target.to_owned()).or_insert(stem);
             }
@@ -2324,7 +2344,7 @@ fn sealing_room(explicit: Option<&str>, root: &Path, reference: &Value) -> Resul
     // Room aliases are equivalent only when they resolve to the same cell.
     let mut identity = None;
     for room in &rooms {
-        let id = member(&self::reference(root, room)?, "target")?.to_owned();
+        let id = member(&self::local_reference(root, room)?, "target")?.to_owned();
         if identity.as_ref().is_some_and(|other| other != &id) {
             return Err("conflicting private rooms for the same document reference".into());
         }
@@ -2368,7 +2388,7 @@ pub(crate) fn sealed_room(root: &Path, reference: &Value) -> Option<String> {
         .collect();
     names.sort();
     names.into_iter().find_map(|name| {
-        let other = crate::workspace::reference(root, &name).ok()?;
+        let other = crate::workspace::local_reference(root, &name).ok()?;
         (other.get("target").and_then(Value::as_str) == Some(target)
             && other.get("kind").and_then(Value::as_str) == kind)
             .then(|| other.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
@@ -2388,6 +2408,19 @@ fn holds_sealed(view: &Value, target: &str) -> bool {
 /// authored or sent; the plan is made again from fresh reads (`replan`).
 const OBSERVATIONS_MOVED: &str =
     "the plan's signed reads saw the Host state move between them (another admission landed)";
+
+/// An explicit caller pin is semantic input. Replanning may refresh other
+/// observations but never substitutes another resource image for this pin.
+fn check_requested_root(target: &Value, actual: &str) -> Result<()> {
+    if let Some(value) = target.get("expectedTargetRoot") {
+        let expected = value.as_str().ok_or("expectedTargetRoot must be a decimal string")?;
+        field_decimal(expected, "expectedTargetRoot")?;
+        if expected != actual {
+            return Err("the pinned document changed before proposal authoring".into());
+        }
+    }
+    Ok(())
+}
 
 /// Author a proposal from fresh signed reads. A Host `stale-root` on one read
 /// is re-observed inside that read; reads that disagree with each other are
@@ -2503,14 +2536,15 @@ fn propose_summary_once(
                 let obj = entry
                     .as_object()
                     .ok_or("proposal target must be an object")?;
-                if obj.len() != 2 || !obj.contains_key("name") || !obj.contains_key("payload") {
-                    return Err("proposal target may contain only name and payload".into());
+                if !obj.contains_key("name") || !obj.contains_key("payload")
+                    || obj.keys().any(|key| !matches!(key.as_str(), "name" | "payload" | "expectedTargetRoot")) {
+                    return Err("proposal target may contain only name, payload and optional expectedTargetRoot".into());
                 }
                 let local_name = member(entry, "name")?;
                 if !seen.insert(local_name.to_owned()) {
                     return Err("duplicate named target".into());
                 }
-                let reference = reference(root, local_name)?;
+                let reference = protected_document::reference_context(root, reference(root, local_name)?)?;
                 let protected = reference.get("protectedDocument").is_some();
                 let (view, challenge, signed) = signed_view(root, workspace, &reference, "resource")?;
                 let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
@@ -2529,6 +2563,7 @@ fn propose_summary_once(
                     .and_then(Value::as_str)
                     .ok_or("signed resource view lacks page root")?;
                 field_decimal(root_value, "signed resource root")?;
+                check_requested_root(entry, root_value)?;
                 let payload = entry.get("payload").ok_or("target payload absent")?;
                 let payload_obj = payload
                     .as_object()
@@ -2624,8 +2659,10 @@ fn propose_summary_once(
                     }
                 };
                 let lowered = if let Some(audience) = &audience {
-                    if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
-                    protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
+                    if read_only { lowered } else {
+                        if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
+                        protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
+                    }
                 } else { lowered };
                 // A read target's authorization leg is checked under the observe
                 // verb, so it carries the observe capability.
@@ -4564,7 +4601,7 @@ pub(crate) fn names_for_target(root: &Path, document: &str) -> Vec<String> {
             let file = entry.file_name().to_string_lossy().into_owned();
             if let Some(stem) = file.strip_suffix(".json") {
                 let name = ref_name_of_file(stem);
-                if let Ok(value) = reference(root, &name) {
+                if let Ok(value) = local_reference(root, &name) {
                     if value.get("target").and_then(Value::as_str) == Some(document) { names.push(name); }
                 }
             }
@@ -5357,6 +5394,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             print_json(&receipt_continuity::check_retained(&root, &workspace, &attempt, historical)?)
         }
+        "shared-name" => {
+            let op = os_string(args.required("op")?, "name operation")?;
+            let room = os_string(args.required("room")?, "room")?;
+            let name = args.optional("name").map(|v| os_string(v,"name")).transpose()?;
+            let to = args.optional("to").map(|v| os_string(v,"target")).transpose()?;
+            let id = args.optional("id").map(|v| os_string(v,"operation ID")).transpose()?;
+            args.finish()?;
+            shared_names::command(&root,&workspace,&op,&room,name.as_deref(),to.as_deref(),id.as_deref())
+        }
+        "index-law" => { args.finish()?; print_json(&shared_names::index_law()) }
         "import" => {
             if let Some(from) = args.optional("from-ref") {
                 let name = os_string(args.required("name")?, "reference name")?;
@@ -5670,6 +5717,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             transclude(&root, &workspace, &host, &source, &from, &to, live, &death, at)
         }
+        "doc-search" => {
+            let query = os_string(args.required("text")?, "query")?;
+            let scope = os_string(args.required("scope")?, "collection")?;
+            let offset = args.optional("offset").map(|v| os_string(v,"offset").and_then(|s| s.parse::<usize>().map_err(|_| "invalid offset".into()))).transpose()?.unwrap_or(0);
+            let cursor = args.optional("cursor").map(|v| os_string(v,"cursor")).transpose()?;
+            args.finish()?;
+            print_json(&doc_search::search(&root,&workspace,&query,&scope,offset,cursor.as_deref())?)
+        }
+        "doc-search-follow" => {
+            let name = os_string(args.required("name")?,"name")?;
+            let target = os_string(args.required("target")?,"document")?;
+            let atom = os_string(args.required("atom")?,"atom")?;
+            let revision = os_string(args.required("revision")?,"revision")?;
+            args.finish()?;
+            print_json(&doc_search::follow(&root,&workspace,&name,&target,&atom,&revision)?)
+        }
         "doc-show" => {
             let name = os_string(args.required("name")?, "document name")?;
             let at = args
@@ -5945,6 +6008,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
+        }
+        "doc-share" | "doc-revoke" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let change=os_string(args.required("change")?,"membership change")?;
+            let subject=os_string(args.required("subject")?,"member subject")?;
+            let device=args.optional("device").map(path);
+            let output=args.optional("output").map(path);
+            args.finish()?;
+            if (action=="doc-share")!=device.is_some(){return Err("doc-share requires --device; doc-revoke omits it".into());}
+            protected_document::members::change(&root,&workspace,&name,&change,&subject,device.as_deref())?;
+            if let Some(output)=output {protected_document::members::export_share(&root,&workspace,&name,&change,&output)?;}
+            Ok(())
+        }
+        "doc-membership-recover" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let change=os_string(args.required("change")?,"membership change")?;
+            let output=args.optional("output").map(path);args.finish()?;
+            protected_document::members::recover(&root,&workspace,&name,&change)?;
+            if let Some(output)=output {protected_document::members::export_share(&root,&workspace,&name,&change,&output)?;}
+            Ok(())
+        }
+        "doc-accept" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let catalog=os_string(args.required("catalog")?,"catalog name")?;
+            let bundle=path(args.required("bundle")?);args.finish()?;
+            protected_document::members::accept(&root,&workspace,&name,&catalog,&bundle)
         }
         "doc-device" => {
             args.finish()?;

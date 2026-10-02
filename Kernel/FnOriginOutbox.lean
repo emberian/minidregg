@@ -151,13 +151,13 @@ def outboxCommand (domain semantics : Digest) (report : Report) :
     outboxNonce domain semantics report.prepared,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (outboxAtom domain semantics report.prepared)
-        (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none⟩], none⟩
+        (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none, none, none⟩], none⟩
 
 theorem outboxCommand_exact_action (domain semantics : Digest) (report : Report) :
     (outboxCommand domain semantics report).targets =
       [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
         .content ⟨[.createAtom (outboxAtom domain semantics report.prepared)
-          (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none⟩] := rfl
+          (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none, none, none⟩] := rfl
 
 /-- Reopen only a complete previously accepted signed outbox command. The
 original signed roots are retained, and a later grant/policy revision does

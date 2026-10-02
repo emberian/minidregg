@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+#[path = "protected_document_members.rs"]
+pub(crate) mod members;
+
 const FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM/v1";
 const MESSAGE_FRAME: &[u8] = b"MINI/OBJECT-MESSAGE/v1";
 const OP_FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM-OP/v1";
@@ -179,6 +182,32 @@ pub(crate) fn ensure_custody(root: &std::path::Path) -> Result<(std::path::PathB
     Ok((state,key))
 }
 
+/// Join custody hints by exact target, without replacing the selected shared
+/// reference's authority or snapshot pin. Hints are read only from local files;
+/// current source/catalog authorization still validates their meaning later.
+pub(crate) fn reference_context(root:&std::path::Path,mut reference:Value)->Result<Value> {
+    let mut hints=Vec::new();
+    if let Some(hint)=reference.get("protectedDocument") {hints.push(hint.clone());}
+    for file in std::fs::read_dir(root.join("refs")).map_err(|e|e.to_string())? {
+        let file=file.map_err(|e|e.to_string())?;
+        if file.path().extension().is_none_or(|ext|ext!="json") {continue;}
+        let Ok(other)=super::bounded_json(&file.path()) else {continue};
+        if other["type"]=="minidregg-participant-reference-v1" && other["target"]==reference["target"] && other["kind"]==reference["kind"] {
+            if let Some(hint)=other.get("protectedDocument") {hints.push(hint.clone());}
+        }
+    }
+    let mut identity=None;
+    for hint in hints {
+        if hint["version"]!="1" {return Err("unsupported protected document custody hint".into());}
+        let catalog=super::local_reference(root,text(&hint,"catalog")?)?;
+        let target=super::member(&catalog,"target")?.to_owned();
+        if identity.as_ref().is_some_and(|old|old!=&target) {return Err("local protected document aliases disagree on their device catalog".into());}
+        identity=Some(target);
+        if reference.get("protectedDocument").is_none() {reference["protectedDocument"]=hint;}
+    }
+    Ok(reference)
+}
+
 /// Join a current document observation to its separately authorized catalog.
 /// Importing a path, room name, roster JSON, or epoch never calls this constructor
 /// by itself. The Host validates the canonical roster and current catalog bytes.
@@ -195,9 +224,9 @@ pub(crate) fn observe(root:&std::path::Path, workspace:&Value, reference:&Value,
     crate::host_files(&host,&config,&[Path::new("object-audience"),signed,&source_path])?;
     let source=super::bounded_json(&source_path)?;
     if source["active"] != true { return Err("protected document is frozen; finish its recorded audience transition".into()); }
-    let catalog=super::reference(root,text(hint,"catalog")?)?;
+    let catalog=super::local_reference(root,text(hint,"catalog")?)?;
     let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog,"resource")?;
-    let roster=root.join("protected-documents").join(target).join("roster.bin");
+    let roster=members::active_home(&root.join("protected-documents").join(target))?.join("roster.bin");
     let state=dir.join("current-audience-state.json");
     super::private_file(&state,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
     let checked_path=dir.join("checked-document-roster.json");
@@ -326,7 +355,7 @@ fn submit_retained(root:&std::path::Path,workspace:&Value,intent:&std::path::Pat
 /// immutable stage is durable before the catalog birth or any source mutation.
 pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) -> Result<()> {
     use std::path::Path;
-    let reference=super::reference(root,name)?;
+    let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?.to_owned();
     let retained=stage_path(root,&target)?;
     if retained.exists() {return recover(root,workspace,name);}
@@ -386,7 +415,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
     retain_record(&predicate,br#"{"type":"all","predicates":[]}"#)?;
     // create reopens the same namespace reservation, birth source and exact call.
     super::create(root,workspace,catalog_name,"content",&predicate,None,"object",None,None,None)?;
-    let catalog=super::reference(root,catalog_name)?;
+    let catalog=super::local_reference(root,catalog_name)?;
     let catalog_id=super::member(&catalog,"target")?;
     let me=super::member(workspace,"subject")?;
     let roster=json!({"object":target,"epoch":"0","transition":stage["transition"],"entries":[{
@@ -441,7 +470,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
 /// Pre-phase recovery reuses retained catalog identities and writes. Once epoch
 /// custody exists, only its exact phase command and package manifest may proceed.
 pub(crate) fn recover(root:&std::path::Path,workspace:&Value,name:&str)->Result<()> {
-    let reference=super::reference(root,name)?;
+    let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?;
     let home=root.join("protected-documents").join(target);
     if home.join("enrollment.json").exists() {return recover_phase(root,workspace,name,&home);}
@@ -449,7 +478,7 @@ pub(crate) fn recover(root:&std::path::Path,workspace:&Value,name:&str)->Result<
     continue_enrollment(root,workspace,name,&stage)
 }
 fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::path::Path)->Result<()> {
-    let reference=super::reference(root,name)?;
+    let reference=super::local_reference(root,name)?;
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
     if meta["object"]!=reference["target"] {return Err("retained enrollment names another document".into());}
     let phase=retained_phase(root,&meta)?;
@@ -522,7 +551,7 @@ fn audience_source(workspace:&Value,signed:&std::path::Path)->Result<Value> {
 fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std::path::Path)->Result<()> {
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
     let phase=retained_phase(root,&meta)?;
-    let mut reference=super::reference(root,name)?;
+    let mut reference=super::local_reference(root,name)?;
     if reference["target"]!=meta["object"] {return Err("retained enrollment names another document".into());}
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
     let source=audience_source(workspace,&signed)?;
@@ -565,22 +594,31 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
 /// protected readiness transaction. Current source and catalog reads are still
 /// required; this command never exports content keys or device private material.
 pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,output:&std::path::Path)->Result<()> {
-    let reference=super::reference(root,name)?;
+    let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?;
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
     let audience=observe(root,workspace,&reference,&signed)?;
     let source=audience_source(workspace,&signed)?;
     let home=root.join("protected-documents").join(target);
-    let meta=super::bounded_json(&home.join("enrollment.json"))?;
-    let manifest=std::fs::read(home.join("epoch-manifest.bin")).map_err(|_|"document has no admitted manifest handout; finish protected enrollment first")?;
+    let publication=members::active_home(&home)?;
+    let meta=if publication==home {super::bounded_json(&home.join("enrollment.json"))?}else {
+        if !publication.join("published.json").exists(){return Err("membership packages remain private until current-text admission finishes".into());}
+        super::bounded_json(&publication.join("epoch.json"))?
+    };
+    let manifest=std::fs::read(publication.join("epoch-manifest.bin")).map_err(|_|"document has no admitted manifest handout; finish protected enrollment first")?;
     if source["audienceState"]["manifest"]!=decimal(&Sha256::digest(&manifest)) {
         return Err("retained manifest is not this source's current committed epoch".into());
     }
-    let writer=crate::read_secret(&super::member_path(workspace,"key")?)?;
+    if manifest.len()<72{return Err("retained manifest frame is incomplete".into());}
+    let length=u64::from_be_bytes(manifest[..8].try_into().map_err(|_|"invalid manifest length")?);
+    if length!=(manifest.len()-72) as u64{return Err("retained manifest length differs".into());}
+    let signed_manifest:Value=serde_json::from_slice(&manifest[8..manifest.len()-64]).map_err(|e|e.to_string())?;
+    let writer=text(&signed_manifest,"writer")?;
+    if private::decode_hex(writer)?.len()!=32{return Err("retained manifest writer is invalid".into());}
     let bundle=json!({"type":"mini-protected-document-epoch-v1","object":target,
         "epoch":audience.anchor.epoch.to_string(),"manifest":crate::hex(&manifest),
-        "operation":meta["operation"],"writer":crate::hex(&writer.verifying_key().to_bytes()),
-        "rosterBytes":crate::hex(&std::fs::read(home.join("roster.bin")).map_err(|e|e.to_string())?)});
+        "operation":meta["operation"],"writer":writer,
+        "rosterBytes":crate::hex(&std::fs::read(publication.join("roster.bin")).map_err(|e|e.to_string())?)});
     super::private_file(output,&serde_json::to_vec_pretty(&bundle).map_err(|e|e.to_string())?)
 }
 
@@ -589,14 +627,14 @@ pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,outp
 /// imported bundle metadata cannot create either authority grant.
 pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,catalog:&str,input:&std::path::Path)->Result<()> {
     let bundle=super::bounded_json(input)?;
-    let mut reference=super::reference(root,name)?;
+    let mut reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?.to_owned();
     if bundle["type"]!="mini-protected-document-epoch-v1" || bundle["object"]!=target {
         return Err("epoch bundle names another document or format".into());
     }
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
     let source=audience_source(workspace,&signed)?;
-    let catalog_ref=super::reference(root,catalog)?;
+    let catalog_ref=super::local_reference(root,catalog)?;
     let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
     let attempt=signed.parent().ok_or("missing import observation directory")?;
     let roster_bytes=crate::decode_hex(text(&bundle,"rosterBytes")?)?;
@@ -902,6 +940,28 @@ mod tests {
         let reopened=custody(&root).unwrap();
         assert_eq!(*reopened.historical_key(&audience.anchor).unwrap(),*prepared.key);
         drop(reopened);std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn shared_alias_joins_only_custody_hints_without_replacing_authority() {
+        let root=std::env::temp_dir().join(format!("mini-protected-alias-{}",super::super::random_nonce().unwrap()));
+        super::super::make_private_dir(&root).unwrap();
+        super::super::make_private_dir(&root.join("refs")).unwrap();
+        let put=|name:&str,target:&str,hint:Option<&str>| {
+            let mut value=json!({"type":"minidregg-participant-reference-v1","name":name,"kind":"object",
+                "target":target,"observeCapability":"8","operationCapability":"9","controlCapability":null});
+            if let Some(catalog)=hint {value["protectedDocument"]=json!({"version":"1","catalog":catalog});}
+            super::super::private_file(&root.join("refs").join(format!("{name}.json")),&serde_json::to_vec(&value).unwrap()).unwrap();
+        };
+        put("catalog","99",None);put("local-paper","72",Some("catalog"));
+        let selected=json!({"type":"minidregg-participant-reference-v1","name":"commons/paper","kind":"object",
+            "target":"72","observeCapability":"123","operationCapability":"124","sharedName":{"worldRoot":"555"}});
+        let joined=reference_context(&root,selected.clone()).unwrap();
+        assert_eq!(joined["protectedDocument"]["catalog"],"catalog");
+        assert_eq!(joined["observeCapability"],"123");assert_eq!(joined["operationCapability"],"124");
+        assert_eq!(joined["sharedName"],selected["sharedName"]);
+        put("wrong-catalog","100",None);put("conflicting-paper","72",Some("wrong-catalog"));
+        assert!(reference_context(&root,selected).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
 }

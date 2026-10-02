@@ -7877,6 +7877,8 @@ impl Runtime {
             "expectedPreRoot":policy.get("authorityRoot").ok_or("policy authority root absent")?,
             "expectedVersion":view.get("version").ok_or("policy version absent")?,
             "expectedAddress":view.get("address").ok_or("policy address absent")?,
+            "currentSourceHex":view.get("canonical").and_then(Value::as_str)
+                .ok_or("signed policy canonical source absent")?,
             "grants":[{"kind":"object","target":self.config.task,
                 "capability":self.config.query_capability}]});
         if workers.len() == 1 {
