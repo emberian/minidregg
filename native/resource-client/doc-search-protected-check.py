@@ -125,6 +125,13 @@ try:
             record("browser-protected-hit", status == 200 and needle.lower() in html.unescape(page).lower())
         else:
             record("browser-no-protected-results", status == 200 and not links and not snippets)
+            if args.prior_hit:
+                prior = json.loads(args.prior_hit.read_text())
+                route = "search-hit/{}/{}/{}/{}".format(prior["name"].encode().hex(), prior["target"], prior["atom"], prior["revision"])
+                status, page = get(route)
+                (args.out / "refused-hit.html").write_text(page)
+                record("browser-retained-hit-fresh-refusal", status == 403 and needle.lower() not in html.unescape(page).lower()
+                       and "Current authorized document read" not in page)
     after = fingerprint()
     changed = [Path(path) for path, digest in after.items() if before.get(path) != digest]
     challenges = [path for path in changed if path.name == "challenge.json"]

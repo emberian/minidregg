@@ -243,6 +243,8 @@ pub(crate) enum Stamp {
     EditBase(ReadContext),
     /// Search results use independent current authorized reads, not one shared head.
     CurrentReads(usize),
+    /// Fresh content could not be obtained; never label a retained hit current.
+    Unavailable,
     /// A signed read was made and the Host refused it.
     Refused,
 }
@@ -306,6 +308,7 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
         Stamp::CurrentReads(count) => format!(
             "Current authorized {}", if *count == 1 { "document read".to_owned() } else { format!("reads of {count} documents") }
         ),
+        Stamp::Unavailable => "Current text unavailable".into(),
         Stamp::Refused => format!(
             "subject <span class=id>{}</span> | the Host refused this page's signed read",
             escape(subject)
