@@ -1138,6 +1138,8 @@ fn socket_process(
         "lookup" if arguments.len() == 3 => (3, read(1)?, Some(arguments[2])),
         "challenge" if arguments.len() == 4 => (4, pair(read(1)?, read(2)?)?, Some(arguments[3])),
         "query" if arguments.len() == 3 => (5, read(1)?, Some(arguments[2])),
+        "challenge-batch" if arguments.len() == 3 => (4, read(1)?, Some(arguments[2])),
+        "query-batch" if arguments.len() == 3 => (5, read(1)?, Some(arguments[2])),
         "author" if arguments.len() == 4 => {
             (7, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
         }
@@ -1187,7 +1189,7 @@ fn socket_process(
             let destination = Path::new(arguments[2]);
             prepare_refusal::retain(destination, &payload, config, &reply)?;
         }
-        if command == "query" {
+        if command == "query" || command == "query-batch" {
             query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
         }
         return Err(match line {
@@ -2109,6 +2111,11 @@ fn query_once(
         &view_bin,
         &view_json,
     )?;
+    let presented = verify_query_presentation(presented, inspection_kind)?;
+    Ok(presented)
+}
+
+fn verify_query_presentation(presented: Value, inspection_kind: &str) -> Result<Value> {
     // K-NARROW-HIDE: a resource or at-height view is checked against its own
     // root before it is shown; a view whose opening does not recompute the root
     // is refused, with the signed view retained for inspection.
@@ -2138,6 +2145,118 @@ fn query_once(
         );
     }
     Ok(presented)
+}
+
+/// A transport collection retains ordinary individually signed observations.
+/// All challenges use one native image; all answers use one native image.
+/// Any stale-root replans the whole read-only collection, preserving its targets.
+fn query_batch_retained(
+    host: &Path, config: &Path, intents: &[(PathBuf, String)], key: &Path,
+    directory: &Path,
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    if intents.is_empty() || intents.len() > 16 {
+        return Err("signed read batch requires 1 through 16 reads".into());
+    }
+    create_dir(directory)?;
+    replan::replan("signed read batch",
+        || query_batch_once(host, config, intents, key, directory),
+        replan::stale_root, |n| replan::retire_attempt(directory, n))
+}
+
+fn batch_author(host: &Path, config: &Path, directory: &Path, stem: &str,
+    values: &[Vec<u8>]) -> Result<PathBuf> {
+    let source = directory.join(format!("{stem}.json"));
+    let encoded = serde_json::to_vec(&values.iter().map(|b| hex(b)).collect::<Vec<_>>())
+        .map_err(|e| e.to_string())?;
+    write_new(&source, &encoded)?;
+    let binary = directory.join(format!("{stem}.bin"));
+    author(host, config, OsStr::new("observation-batch"), &source, &binary)?;
+    Ok(binary)
+}
+
+fn batch_inspect(host: &Path, config: &Path, directory: &Path, stem: &str,
+    binary: &Path, count: usize) -> Result<Vec<Vec<u8>>> {
+    let value = inspect(host, config, "observation-batch", binary,
+        &directory.join(format!("{stem}.json")))?;
+    let rows = value.as_array().ok_or("Host batch is not a collection")?;
+    if rows.len() != count { return Err("Host batch count differs from signed intents".into()); }
+    rows.iter().map(|row| decode_hex(row.as_str().ok_or("Host batch item is not hex")?))
+        .collect()
+}
+
+fn query_batch_once(
+    host: &Path, config: &Path, intents: &[(PathBuf, String)], key: &Path,
+    directory: &Path,
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    let retained_config = directory.join("config.json");
+    copy_new(config, &retained_config)?;
+    write_manifest(directory, host, &retained_config, "query")?;
+    let signing = read_secret(key)?;
+    let mut requests = Vec::new();
+    for (n, (intent, _)) in intents.iter().enumerate() {
+        let child = directory.join(n.to_string());
+        create_dir(&child)?;
+        let source = child.join("intent.json");
+        copy_new(intent, &source)?;
+        let binary = child.join("intent.bin");
+        author(host, &retained_config, OsStr::new("intent"), &source, &binary)?;
+        let bytes = fs::read(&binary).map_err(|e| e.to_string())?;
+        let signature = signing.sign(&bytes).to_bytes();
+        write_new(&child.join("intent-signature.bin"), &signature)?;
+        let width: u32 = bytes.len().try_into().map_err(|_| "batch intent too large")?;
+        let mut request = width.to_le_bytes().to_vec();
+        request.extend(bytes);
+        request.extend(signature);
+        requests.push(request);
+    }
+    let request = batch_author(host, &retained_config, directory, "batch-request", &requests)?;
+    let challenges = directory.join("batch-challenges.bin");
+    host_files(host, &retained_config,
+        &[Path::new("challenge-batch"), &request, &challenges])?;
+    let challenges = batch_inspect(host, &retained_config, directory,
+        "batch-challenges", &challenges, intents.len())?;
+    let mut signed_bytes = Vec::new();
+    let mut presentations = Vec::new();
+    for (n, challenge) in challenges.iter().enumerate() {
+        let child = directory.join(n.to_string());
+        let binary = child.join("challenge.bin");
+        write_new(&binary, challenge)?;
+        let presented = inspect(host, &retained_config, "challenge", &binary,
+            &child.join("challenge.json"))?;
+        // All source-created singleton challenges must have exactly one image.
+        if let Some(first) = presentations.first() {
+            let first: &Value = first;
+            for field in ["domain", "semantics", "worldRoot", "height", "authorityRoot"] {
+                if first.get(field) != presented.get(field) || presented.get(field).is_none() {
+                    return Err("Host batch challenges have inconsistent coordinates".into());
+                }
+            }
+        }
+        encode_signatures(host, &retained_config, &signing,
+            challenge_headers(&presented)?, &child.join("observation-signatures.json"),
+            &child.join("observation-signatures.bin"))?;
+        let signed = child.join("signed-observation.bin");
+        host_files(host, &retained_config, &[Path::new("observe-assemble"), &binary,
+            &child.join("observation-signatures.bin"), &signed])?;
+        signed_bytes.push(fs::read(&signed).map_err(|e| e.to_string())?);
+        presentations.push(presented);
+    }
+    let signed = batch_author(host, &retained_config, directory, "batch-signed", &signed_bytes)?;
+    // The parent query refusal artifact binds the whole exact collection.
+    copy_new(&signed, &directory.join("signed-observation.bin"))?;
+    let views = directory.join("view.bin");
+    host_files(host, &retained_config, &[Path::new("query-batch"), &signed, &views])?;
+    let views = batch_inspect(host, &retained_config, directory, "batch-views", &views, intents.len())?;
+    let mut result = Vec::new();
+    for (n, ((_, inspection), bytes)) in intents.iter().zip(views).enumerate() {
+        let child = directory.join(n.to_string());
+        let binary = child.join("view.bin");
+        write_new(&binary, &bytes)?;
+        let presented = inspect(host, &retained_config, inspection, &binary, &child.join("view.json"))?;
+        result.push((verify_query_presentation(presented, inspection)?,
+            presentations[n].clone(), child.join("signed-observation.bin")));
+    }
+    Ok(result)
 }
 
 fn query(

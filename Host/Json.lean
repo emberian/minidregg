@@ -3405,6 +3405,14 @@ def author (kind : String) (json : Lean.Json)
   | "application-share-issue-grain-request" => grainShareIssueRequest json
   | "application-agent-lifetime-grant-request" => agentLifetimeGrantRequest json
   | "application-session-enrollment-request" => sessionEnrollmentRequest json
+  | "observation-batch" => do
+      let reads ← list "$" decodeHex json
+      unless NativeObservationCodec.validBatch reads do
+        failAt "$" "observation batch requires 1 through 16 reads"
+      let bytes := NativeObservationCodec.batchCodec.encode reads
+      unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
+        failAt "$" "observation batch exceeds its bounded presentation size"
+      pure bytes
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
       -- With `task`, the policy a birth at that task installs: a provider
@@ -5127,6 +5135,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
   | "predicate" => predicateJson <$> decoded "predicate"
       (ResourceBirthCodec.strictCodec NativeHostGenesis.predicateStream.toLawful) bytes
+  | "observation-batch" => do
+      unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
+        failAt "observation-batch" "observation batch exceeds its bounded presentation size"
+      let reads ← decoded "observation-batch" NativeObservationCodec.batchCodec bytes
+      unless NativeObservationCodec.validBatch reads do
+        failAt "observation-batch" "observation batch requires 1 through 16 reads"
+      pure (.arr (reads.map hexJson).toArray)
   | "challenge" => challengeJson <$> decoded "challenge" challengeCodec bytes
   | "plan" => planJson <$> decoded "plan" signingPlanCodec bytes
   | "application-share-issue-plan" => shareIssuePlanJson <$>

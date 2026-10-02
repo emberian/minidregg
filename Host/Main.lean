@@ -1729,15 +1729,15 @@ def dispatchSession (config : NativeHost.Config)
   | 4 =>
       let opened ← sessionOpened config state
       ReceiptContinuity.remember config opened.durable
-      match ← NativeHost.challengeRequestLoaded config opened payload with
-      | .ok challenge => return (4, NativeObservationCodec.challengeCodec.encode challenge)
+      match ← NativeHost.challengeWireLoaded config opened payload with
+      | .ok challenges => return (4, challenges)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
       let t0 ← IO.monoMsNow
       let opened ← sessionOpened config state
       ReceiptContinuity.remember config opened.durable
       phaseTrace "op5 refresh" t0
-      match ← NativeHost.queryLoaded config opened payload with
+      match ← NativeHost.queryWireLoaded config opened payload with
       | .ok view => return (5, view)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>
@@ -7155,6 +7155,16 @@ def run (arguments : List String) : IO UInt32 := do
           unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
             throw (IO.userError "grain share issue ingress exceeds host frame bound")
           writeBytes output ingress
+          pure 0
+      | "challenge-batch", [input, output] =>
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          writeBytes output (← IO.ofExcept
+            (← NativeHost.challengeBatchLoaded config opened (← readBoundedBytes input maxFrame)))
+          pure 0
+      | "query-batch", [input, output] =>
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          writeBytes output (← IO.ofExcept
+            (← NativeHost.queryBatchLoaded config opened (← readBoundedBytes input maxFrame)))
           pure 0
       | "challenge", [input, signature, output] =>
           let challenge ← IO.ofExcept

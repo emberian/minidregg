@@ -975,8 +975,11 @@ pub(crate) fn read(
     window: Option<(&str, &str)>,
     ephemeral: bool,
 ) -> Result<()> {
-    let ticket = receipt_continuity::begin(root, workspace)?;
     let reference = reference(root, resource_name)?;
+    if reference.get("sharedName").is_some() {
+        return read_opened(root,workspace,&reference,resource_name,view,window,ephemeral);
+    }
+    let ticket = receipt_continuity::begin(root, workspace)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(&reference,"kind")?,
@@ -997,19 +1000,13 @@ pub(crate) fn read(
     if !ephemeral {
         eprintln!("workspace read attempt: {}", attempt.display());
     }
-    let answered = query_retained(
-        &workspace_host(workspace)?,
-        &member_path(workspace, "config")?,
-        &source,
-        OsStr::new("intent"),
-        &member_path(workspace, "key")?,
-        &format!("view-{view}"),
-        &attempt,
-    );
+    let answered = query_retained(&workspace_host(workspace)?,
+        &member_path(workspace,"config")?, &source, OsStr::new("intent"),
+        &member_path(workspace,"key")?, &format!("view-{view}"), &attempt);
     let judged = judged_at(&attempt).ok();
     if answered.is_ok() {
         let challenge = bounded_json(&attempt.join("challenge.json"))?;
-        receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+        receipt_continuity::finish(root,workspace,ticket,&challenge,ContinuityMode::Ordinary)?;
     }
     if ephemeral {
         // A read commits nothing: once its answer (or refusal) is in hand the attempt
@@ -1038,13 +1035,59 @@ pub(crate) fn read(
             .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
     }
     let mut answered = answered?;
-    if reference.get("sharedName").is_some() {
-        shared_names::check_opened(&reference, judged.as_ref().ok_or("shared-name target read lacks its challenge")?)?;
-    }
     if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
         object.insert("judgedAt".to_owned(), judged);
     }
     print_json(&answered)
+}
+
+/// Shared reads use the batch's actual custody directly, including ephemeral
+/// cleanup of every source and retained child; no redundant outer observation.
+fn read_opened(
+    root: &Path, workspace: &Value, reference: &Value, resource_name: &str,
+    view: &str, window: Option<(&str,&str)>, ephemeral: bool,
+) -> Result<()> {
+    let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
+        "target":member(reference,"target")?,"view":view});
+    if let Some((start,count)) = window {
+        field_decimal(start,"tail start")?;
+        field_decimal(count,"tail count")?;
+        purpose["start"] = json!(start);
+        purpose["count"] = json!(count);
+    }
+    let mut custody = BatchReadCustody::default();
+    let answered = signed_opened_view_custody(root,workspace,reference,purpose,
+        &format!("view-{view}"),Some(&mut custody));
+    if !ephemeral {
+        if let Some(attempt) = &custody.attempt {
+            eprintln!("workspace read attempt: {}",attempt.display());
+        }
+    }
+    let challenge = answered.as_ref().ok().map(|(_,challenge,_)| challenge.clone())
+        .or_else(|| custody.attempt.as_ref()
+            .and_then(|attempt| bounded_json(&attempt.join("0/challenge.json")).ok()));
+    let judged = challenge.as_ref().map(|challenge| json!({
+        "worldRoot":challenge.get("worldRoot"),"height":challenge.get("height"),
+        "clock":challenge.get("clock")}));
+    if ephemeral {
+        let at = |key| judged.as_ref().and_then(|v| v.get(key))
+            .and_then(Value::as_str).unwrap_or("-");
+        read_journal(root,at("height"),if answered.is_ok() { "answered" } else { "refused" },
+            judged.as_ref().and_then(|v| v.pointer("/clock/now"))
+                .and_then(Value::as_str).unwrap_or("-"),resource_name)?;
+        if let Some(attempt) = custody.attempt.filter(|p| p.exists()) {
+            fs::remove_dir_all(&attempt)
+                .map_err(|e| format!("cannot remove {}: {e}",attempt.display()))?;
+        }
+        for source in custody.sources {
+            fs::remove_file(&source).map_err(|e| format!("cannot remove {}: {e}",source.display()))?;
+        }
+    }
+    let (mut value,_,_) = answered?;
+    if let (Some(object),Some(judged)) = (value.as_object_mut(),judged) {
+        object.insert("judgedAt".to_owned(),judged);
+    }
+    print_json(&value)
 }
 
 /// The workspace's own reference names for a cell, else the cell id.
@@ -1124,12 +1167,130 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
     Ok(())
 }
 
+/// Individually authenticated ordinary reads answered against one current
+/// native image. Retained singleton envelopes remain usable by source consumers.
+pub(crate) fn signed_views(
+    root: &Path, workspace: &Value, references: &[Value], view: &str,
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    let mut expanded = Vec::<Value>::new();
+    let mut purposes = Vec::<Value>::new();
+    let mut inspections = Vec::<String>::new();
+    let mut guards_by_identity = std::collections::BTreeMap::<(String,String,String),usize>::new();
+    let mut requested = Vec::<(usize,Vec<Value>,Vec<usize>)>::new();
+    for reference in references {
+        let guards = if reference.get("sharedName").is_some() {
+            shared_names::guard_references(reference)?
+        } else { Vec::new() };
+        let mut guard_indices = Vec::new();
+        for guard in &guards {
+            let key = (member(guard,"kind")?.to_owned(),member(guard,"target")?.to_owned(),
+                member(guard,"observeCapability")?.to_owned());
+            let index = if let Some(index) = guards_by_identity.get(&key) { *index } else {
+                let index = expanded.len();
+                expanded.push(guard.clone());
+                purposes.push(json!({"type":"query","kind":member(guard,"kind")?,
+                    "target":member(guard,"target")?,"view":"resource-scope"}));
+                inspections.push("view-resource-scope".to_owned());
+                guards_by_identity.insert(key,index);
+                index
+            };
+            guard_indices.push(index);
+        }
+        let index = expanded.len();
+        expanded.push(reference.clone());
+        purposes.push(json!({"type":"query","kind":member(reference,"kind")?,
+            "target":member(reference,"target")?,"view":view}));
+        inspections.push(if view == "capability" {
+            format!("view-{}-capability",member(reference,"kind")?)
+        } else { format!("view-{view}") });
+        requested.push((index,guards,guard_indices));
+    }
+    let batch = signed_views_purposes(root,workspace,&expanded,&purposes,&inspections,None)?;
+    references.iter().zip(requested).map(|(reference,(target,guards,indices))| {
+        if !guards.is_empty() {
+            shared_names::check_opened_views(reference,&guards,
+                &indices.iter().map(|i| batch[*i].0.clone()).collect::<Vec<_>>())?;
+        }
+        Ok(batch[target].clone())
+    }).collect()
+}
+
+#[derive(Default)]
+struct BatchReadCustody {
+    attempt: Option<PathBuf>,
+    sources: Vec<PathBuf>,
+}
+
+fn signed_views_purposes(
+    root: &Path, workspace: &Value, references: &[Value], purposes: &[Value],
+    inspections: &[String], mut custody: Option<&mut BatchReadCustody>,
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    if references.is_empty() || references.len() > 16 {
+        return Err("signed read batch requires 1 through 16 reads including discovery guards".into());
+    }
+    if references.len() != purposes.len() || references.len() != inspections.len() {
+        return Err("signed read batch shape differs".into());
+    }
+    let ticket = receipt_continuity::begin(root, workspace)?;
+    let (attempt, nonce) = new_attempt(root)?;
+    if let Some(custody) = custody.as_deref_mut() {
+        custody.attempt = Some(attempt.clone());
+    }
+    let mut intents = Vec::new();
+    for (n, ((reference, purpose), inspection)) in
+        references.iter().zip(purposes).zip(inspections).enumerate() {
+        let intent = json!({"subject":member(workspace,"subject")?,
+            "nonce":nonce, "purpose":purpose,
+            "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
+                "capability":member(reference,"observeCapability")?}]});
+        let source = root.join("sources").join(format!("qb-{nonce}-{n}.json"));
+        private_file(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
+        if let Some(custody) = custody.as_deref_mut() { custody.sources.push(source.clone()); }
+        intents.push((source, inspection.clone()));
+    }
+    let result = crate::query_batch_retained(&workspace_host(workspace)?,
+        &member_path(workspace,"config")?, &intents, &member_path(workspace,"key")?, &attempt)?;
+    let challenge = &result.first().ok_or("signed read batch returned no observations")?.1;
+    receipt_continuity::finish(root, workspace, ticket, challenge, ContinuityMode::Ordinary)?;
+    Ok(result)
+}
+
+/// Read the pinned target together with the current discovery dependencies.
+/// A name changing refuses; unrelated writes cannot invalidate the chain.
+fn signed_opened_view(
+    root: &Path, workspace: &Value, reference: &Value, purpose: Value, inspection: &str,
+) -> Result<(Value, Value, PathBuf)> {
+    signed_opened_view_custody(root,workspace,reference,purpose,inspection,None)
+}
+
+fn signed_opened_view_custody(
+    root: &Path, workspace: &Value, reference: &Value, purpose: Value, inspection: &str,
+    custody: Option<&mut BatchReadCustody>,
+) -> Result<(Value, Value, PathBuf)> {
+    let guards = shared_names::guard_references(reference)?;
+    let mut references = guards;
+    references.push(reference.clone());
+    let mut purposes: Vec<Value> = references.iter().map(|r| json!({
+        "type":"query", "kind":r["kind"], "target":r["target"], "view":"resource-scope"})).collect();
+    let last = purposes.len() - 1;
+    purposes[last] = purpose;
+    let mut inspections = vec!["view-resource-scope".to_owned(); references.len()];
+    inspections[last] = inspection.to_owned();
+    let mut results = signed_views_purposes(root, workspace, &references, &purposes, &inspections, custody)?;
+    shared_names::check_opened_views(reference, &references[..last],
+        &results[..last].iter().map(|(view,_,_)| view.clone()).collect::<Vec<_>>())?;
+    Ok(results.pop().unwrap())
+}
+
 pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
     reference: &Value,
     view: &str,
 ) -> Result<(Value, Value, PathBuf)> {
+    if reference.get("sharedName").is_some() {
+        return signed_view_unchecked(root,workspace,reference,view);
+    }
     let ticket = receipt_continuity::begin(root, workspace)?;
     let (result, challenge, signed) = signed_view_unchecked(root, workspace, reference, view)?;
     receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
@@ -1143,6 +1304,14 @@ fn signed_view_unchecked(
     reference: &Value,
     view: &str,
 ) -> Result<(Value, Value, PathBuf)> {
+    if reference.get("sharedName").is_some() {
+        let purpose = json!({"type":"query","kind":member(reference,"kind")?,
+            "target":member(reference,"target")?,"view":view});
+        let inspection = if view == "capability" {
+            format!("view-{}-capability", member(reference,"kind")?)
+        } else { format!("view-{view}") };
+        return signed_opened_view(root, workspace, reference, purpose, &inspection);
+    }
     let (attempt, nonce) = new_attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
@@ -1184,6 +1353,13 @@ fn doc_query(
     height: Option<&str>,
     inspection: &str,
 ) -> Result<(Value, PathBuf)> {
+    if reference.get("sharedName").is_some() {
+        let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
+            "target":member(reference,"target")?,"view":view});
+        if let Some(height) = height { decimal(height,"height")?; purpose["height"] = json!(height); }
+        let (value, _, signed) = signed_opened_view(root,workspace,reference,purpose,inspection)?;
+        return Ok((value,signed.parent().ok_or("signed query lacks attempt")?.to_owned()));
+    }
     let ticket = receipt_continuity::begin(root, workspace)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,

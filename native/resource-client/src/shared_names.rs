@@ -151,21 +151,66 @@ fn same_snapshot(a: &Value, b: &Value) -> Result<()> {
 /// This adapter calls the ordinary signed observation receiver. No unsigned
 /// discovery endpoint or cached index is accepted as evidence of absence.
 pub(crate) fn resolve(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
-    let opened = resolve_with(
-        name,
-        |name| super::local_reference(root, name),
-        |reference, field| discovery_read(root, workspace, reference, field),
-    )?;
-    existing_authority(root, &opened)
+    let mut opened = resolve_many(root, workspace, &[name.to_owned()])?;
+    Ok(opened.remove(0))
 }
 
-/// Resolve a listing with one immutable discovery snapshot per room chain.
-/// Repeated aliases reuse only that chain's admitted reads. Independent rooms
-/// may observe different heads; no retained read survives this command.
+/// Keep one coherent admitted room/index chain per room within this command.
+/// A bootstrap read supplies only an index candidate; the paired batch checks
+/// the room's pointer again in the same image that admits the index read.
 pub(crate) fn resolve_many(root: &Path, workspace: &Value, names: &[String]) -> Result<Vec<Value>> {
-    resolve_many_with(names, |name| super::local_reference(root, name),
-        |reference, field| discovery_read(root, workspace, reference, field))?
-        .into_iter().map(|opened| existing_authority(root, &opened)).collect()
+    let mut chains = BTreeMap::<String, Vec<(Value, String, Value, Value)>>::new();
+    names.iter().map(|name| {
+        let chain = name.rsplit_once('/').map(|(room, _)| room).unwrap_or(name);
+        let mut opened = resolve_with(name, |n| super::local_reference(root,n), |reference,field| {
+            if !chains.contains_key(chain) {
+                chains.insert(chain.to_owned(), coherent_discovery(root,workspace,reference)?);
+            }
+            chains[chain].iter().find(|(r,f,_,_)|
+                f == field && r["kind"] == reference["kind"] && r["target"] == reference["target"])
+                .map(|(_,_,view,at)| (view.clone(),at.clone()))
+                .ok_or("coherent discovery lacks the requested dependency".into())
+        })?;
+        // Preserve the actually invoked discovery candidates, including an
+        // existing direct index capability selected by exact target identity.
+        if let Some(reads) = chains.get(chain) {
+            opened["sharedName"]["roomRef"] = reads[0].0.clone();
+            opened["sharedName"]["indexRef"] = reads.get(1)
+                .map(|read| read.0.clone()).unwrap_or(Value::Null);
+        }
+        existing_authority(root,&opened)
+    }).collect()
+}
+
+fn coherent_discovery(root: &Path, workspace: &Value, room: &Value)
+    -> Result<Vec<(Value,String,Value,Value)>> {
+    let room = existing_authority(root,room)?;
+    let (room_view, room_at) = discovery_read(root,workspace,&room,INDEX_FIELD)?;
+    let Some(mut index) = index_target(&room_view)? else {
+        return Ok(vec![(room,INDEX_FIELD.to_owned(),room_view,room_at)]);
+    };
+    // Replan only a changed room pointer, never a different unrelated world head.
+    for _ in 0..3 {
+        let mut index_ref = room.clone();
+        index_ref["target"] = json!(index);
+        index_ref.as_object_mut().unwrap().remove("room");
+        let index_ref = existing_authority(root,&index_ref)?;
+        let references = vec![room.clone(),index_ref.clone()];
+        let result = super::signed_views(root,workspace,&references,"resource-scope")?;
+        let current_room = scoped_resource(&result[0].0,&room,INDEX_FIELD)?;
+        let current_index = index_target(&current_room)?;
+        if current_index.as_deref() != Some(&index) {
+            let Some(next) = current_index else {
+                return Ok(vec![(room,INDEX_FIELD.to_owned(),current_room,result[0].1.clone())]);
+            };
+            index = next;
+            continue;
+        }
+        let index_view = scoped_resource(&result[1].0,&index_ref,"annotations")?;
+        return Ok(vec![(room,INDEX_FIELD.to_owned(),current_room,result[0].1.clone()),
+            (index_ref,"annotations".to_owned(),index_view,result[1].1.clone())]);
+    }
+    Err("shared-name room pointer changed repeatedly; reopen the name".into())
 }
 
 fn resolve_many_with(
@@ -287,7 +332,7 @@ fn resolve_with(
     // `index` is the room's canonical map, not a mutable entry in itself.
     if leaf == "index" {
         index_ref["sharedName"] = json!({"room":member(&room,"target")?,"index":index,
-            "name":"index","worldRoot":member(&index_at,"worldRoot")?,"height":member(&index_at,"height")?});
+            "name":"index","roomRef":room,"indexRef":index_ref.clone(),"worldRoot":member(&index_at,"worldRoot")?,"height":member(&index_at,"height")?});
         return Ok(index_ref);
     }
     let names = bindings(&index_view)?;
@@ -306,7 +351,7 @@ fn resolve_with(
         opened["sealedIn"] = json!(room_name);
     }
     opened["sharedName"] = json!({"room":member(&room,"target")?,"index":index,
-        "name":leaf,"link":binding.link,"worldRoot":member(&index_at,"worldRoot")?,
+        "name":leaf,"link":binding.link,"roomRef":room,"indexRef":index_ref,"worldRoot":member(&index_at,"worldRoot")?,
         "height":member(&index_at,"height")?});
     Ok(opened)
 }
@@ -320,7 +365,14 @@ fn absent_fallback(
     index: Option<&str>,
     at: &Value,
 ) -> Result<Value> {
+    let index_ref = index.map(|id| {
+        let mut reference = room.clone();
+        reference["target"] = json!(id);
+        reference.as_object_mut().unwrap().remove("room");
+        reference
+    });
     opened["sharedName"] = json!({"room":member(room,"target")?,"name":name,"index":index,
+        "roomRef":room,"indexRef":index_ref,
         "fallback":"private","worldRoot":member(at,"worldRoot")?,"height":member(at,"height")?});
     Ok(opened)
 }
@@ -330,6 +382,68 @@ fn absent_fallback(
 pub(crate) fn check_opened(reference: &Value, challenge: &Value) -> Result<()> {
     if let Some(discovery) = reference.get("sharedName") {
         same_snapshot(discovery, challenge)?;
+    }
+    Ok(())
+}
+
+/// These are candidates only: the batch independently admits their current
+/// invoked capabilities. Retained discovery is never authority for later use.
+pub(crate) fn guard_references(reference: &Value) -> Result<Vec<Value>> {
+    let discovery = reference.get("sharedName").ok_or("reference lacks shared discovery")?;
+    let room = discovery.get("roomRef").ok_or("shared-name guard lacks its room reference")?;
+    if member(room,"kind")? != "object" || member(room,"target")? != member(discovery,"room")? {
+        return Err("shared-name room guard differs from discovery".into());
+    }
+    let mut guards = vec![room.clone()];
+    if let Some(index) = discovery.get("index").filter(|v| !v.is_null()) {
+        let index_ref = discovery.get("indexRef").ok_or("shared-name guard lacks its index reference")?;
+        if member(index_ref,"kind")? != "object" || index_ref.get("target") != Some(index) {
+            return Err("shared-name index guard differs from discovery".into());
+        }
+        guards.push(index_ref.clone());
+    }
+    for guard in &guards {
+        if guard.get("sharedName").is_some() {
+            return Err("shared-name guard cannot recursively claim discovery".into());
+        }
+    }
+    Ok(guards)
+}
+
+/// Validate the exact pinned name/absence decision against dependencies read
+/// in the same current native batch as the opened target. Only the discovery
+/// projections are compared; unrelated accepted writes need not stand still.
+pub(crate) fn check_opened_views(reference: &Value, guards: &[Value], views: &[Value]) -> Result<()> {
+    let expected = guard_references(reference)?;
+    if guards != expected || views.len() != guards.len() {
+        return Err("shared-name read lacks its exact discovery guards".into());
+    }
+    let discovery = &reference["sharedName"];
+    let room = scoped_resource(&views[0],&guards[0],INDEX_FIELD)?;
+    let index = index_target(&room)?;
+    if index.as_deref() != discovery.get("index").and_then(Value::as_str) {
+        return Err("shared-name room pointer changed; reopen the name".into());
+    }
+    let leaf = member(discovery,"name")?;
+    let Some(index) = index else {
+        if member(discovery,"fallback")? == "private" { return Ok(()); }
+        return Err("shared-name index disappeared; reopen the name".into());
+    };
+    let names = bindings(&scoped_resource(&views[1],&guards[1],"annotations")?)?;
+    if discovery.get("fallback").and_then(Value::as_str) == Some("private") {
+        if !names.contains_key(leaf) { return Ok(()); }
+        return Err("shared name now exists; reopen the name".into());
+    }
+    if leaf == "index" {
+        if member(reference,"kind")? == "object" && member(reference,"target")? == index {
+            return Ok(());
+        }
+        return Err("shared-name index target differs".into());
+    }
+    let binding = names.get(leaf).ok_or("shared name disappeared; reopen the name")?;
+    if binding.kind != member(reference,"kind")? || binding.target != member(reference,"target")?
+        || binding.link != member(discovery,"link")? {
+        return Err("shared name changed; reopen the name".into());
     }
     Ok(())
 }
@@ -553,6 +667,67 @@ mod tests {
     }
     fn at(root: &str) -> Value {
         json!({"worldRoot":root,"height":"50"})
+    }
+    fn scope(reference: &Value, mut resource: Value) -> Value {
+        resource["type"] = json!("resource");
+        json!({"type":"resource-scope","capability":{"kind":reference["kind"],
+            "head":{"id":reference["observeCapability"],"fields":null}},
+            "resource":resource})
+    }
+    fn opened_guard(leaf: &str, entries: Vec<Value>) -> (Value,Vec<Value>,Vec<Value>) {
+        let opened = resolve_with(&format!("lab/{leaf}"), |_| Ok(room()), |reference,_| {
+            Ok((if reference["target"] == "10" {
+                view(vec![json!({"key":{"field":INDEX_FIELD},"value":"11"})])
+            } else { view(entries.clone()) },at("99")))
+        }).unwrap();
+        let guards = guard_references(&opened).unwrap();
+        let views = vec![scope(&guards[0],view(vec![
+            json!({"key":{"field":INDEX_FIELD},"value":"11"})])),
+            scope(&guards[1],view(entries))];
+        (opened,guards,views)
+    }
+    #[test]
+    fn opened_target_accepts_current_unchanged_projection_after_unrelated_writes() {
+        let (mut opened,guards,views) = opened_guard("board",vec![link("board","1")]);
+        // Historic discovery coordinates are deliberately different; only the
+        // current same-batch admitted dependency projections establish binding.
+        opened["sharedName"]["worldRoot"] = json!("old-head");
+        opened["sharedName"]["height"] = json!("1");
+        assert!(check_opened_views(&opened,&guards,&views).is_ok());
+    }
+    #[test]
+    fn opened_target_refuses_retarget_rename_removal_pointer_or_narrow_scope() {
+        let (opened,guards,views) = opened_guard("board",vec![link("board","1")]);
+        let mut changed = views.clone();
+        changed[1]["resource"]["cell"]["entries"][0]["target"] = target("board","object","43").unwrap();
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        changed = views.clone();
+        changed[1]["resource"]["cell"]["entries"][0]["id"] = json!("2");
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        changed = views.clone();
+        changed[1]["resource"]["cell"]["entries"] = json!([]);
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        changed = views.clone();
+        changed[0]["resource"]["cell"]["entries"][0]["value"] = json!("12");
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        changed = views.clone();
+        changed[1]["capability"]["head"]["fields"] = json!(["1010"]);
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        changed = views.clone();
+        changed[1]["capability"]["head"]["id"] = json!("99");
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+    }
+    #[test]
+    fn current_absence_guard_refuses_new_shared_binding_and_missing_guard() {
+        let (opened,guards,views) = opened_guard("board",vec![]);
+        assert!(check_opened_views(&opened,&guards,&views).is_ok());
+        let mut changed = views.clone();
+        changed[1]["resource"]["cell"]["entries"] = json!([link("board","1")]);
+        assert!(check_opened_views(&opened,&guards,&changed).is_err());
+        assert!(check_opened_views(&opened,&guards[..1],&views[..1]).is_err());
+        let mut legacy = opened.clone();
+        legacy["sharedName"].as_object_mut().unwrap().remove("roomRef");
+        assert!(guard_references(&legacy).is_err());
     }
     #[test]
     fn naming_id_cannot_recover_another_workspace_operation() {

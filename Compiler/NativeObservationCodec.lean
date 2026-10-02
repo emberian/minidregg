@@ -6,6 +6,7 @@ payloads are released only by the source-owned observation controller.
 -/
 import Compiler.NativeProtocolFrames
 import Compiler.NativeHostCodec
+import Compiler.FnEvidenceCodec
 
 namespace Minidregg.Compiler.NativeObservationCodec
 
@@ -371,5 +372,27 @@ theorem v6_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredV6IntentFrame ++ payload) = none := by
   exact framed_refuses_prefix intentFrame retiredV6IntentFrame intentStream payload
     (by decide +kernel) (by decide +kernel)
+
+
+/-- A bounded transport collection of ordinary signed observations. Singleton
+intent/challenge/signed bytes retain their existing source-owned codecs. -/
+def batchFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-BATCH/v1".toUTF8.toList
+def batchCodec : LawfulCodec (List (List UInt8)) :=
+  NativeHostCodec.framed batchFrame (StreamCodec.list bytesStream)
+def maxBatchReads : Nat := 16
+/-- Leave room for the bounded hex-JSON author/inspection representation. -/
+def maxBatchBytes : Nat := (FnEvidenceCodec.maxHostFrameBytes - 256) / 2
+def validBatch (reads : List (List UInt8)) : Bool :=
+  !reads.isEmpty && decide (reads.length ≤ maxBatchReads)
+def isBatch (bytes : List UInt8) : Bool := bytes.take batchFrame.length == batchFrame
+
+#guard validBatch [] = false
+#guard validBatch [[]] = true
+#guard validBatch (List.replicate 16 []) = true
+#guard validBatch (List.replicate 17 []) = false
+
+theorem batch_roundtrip (reads : List (List UInt8)) :
+    batchCodec.decode (batchCodec.encode reads) = some reads :=
+  batchCodec.decode_encode reads
 
 end Minidregg.Compiler.NativeObservationCodec

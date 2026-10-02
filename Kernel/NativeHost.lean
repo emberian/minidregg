@@ -735,6 +735,64 @@ def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt
   let opened ← IO.ofExcept (← openExisting config)
   queryLoaded config opened bytes
 
+
+/-- Map ordinary intent authentication and challenge creation over one opened
+image. No target is read before that singleton's intent authentication. A
+refusal discards the entire collection. -/
+def challengeBatchLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
+    return .error (.of .malformed)
+  let some requests := NativeObservationCodec.batchCodec.decode bytes
+    | return .error (.of .malformed)
+  unless NativeObservationCodec.validBatch requests do return .error (.of .malformed)
+  let mut challenges : List (List UInt8) := []
+  for request in requests do
+    let some (intentBytes, _) := challengeRequestParts request
+      | return .error (.of .malformed)
+    let some intent := NativeObservationCodec.intentCodec.decode intentBytes
+      | return .error (.of .malformed)
+    let .query _ := intent.purpose | return .error (.of .malformed)
+    match ← challengeRequestLoaded config opened request with
+    | .error refusal => return .error refusal
+    | .ok challenge =>
+        challenges := challenges ++ [NativeObservationCodec.challengeCodec.encode challenge]
+  let encoded := NativeObservationCodec.batchCodec.encode challenges
+  if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
+  else return .error (.of .malformed)
+
+/-- Every answer invokes ordinary current observation admission against the
+same opened image. It never reopens between elements, releases partial results,
+or promotes the batch envelope to authority. -/
+def queryBatchLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
+    return .error (.of .malformed)
+  let some observations := NativeObservationCodec.batchCodec.decode bytes
+    | return .error (.of .malformed)
+  unless NativeObservationCodec.validBatch observations do return .error (.of .malformed)
+  let mut views : List (List UInt8) := []
+  for observation in observations do
+    match ← queryLoaded config opened observation with
+    | .error refusal => return .error refusal
+    | .ok view => views := views ++ [view]
+  let encoded := NativeObservationCodec.batchCodec.encode views
+  if encoded.length ≤ NativeObservationCodec.maxBatchBytes then return .ok encoded
+  else return .error (.of .malformed)
+
+def challengeWireLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  if NativeObservationCodec.isBatch bytes then
+    challengeBatchLoaded config opened bytes
+  else
+    return (← challengeRequestLoaded config opened bytes).map
+      NativeObservationCodec.challengeCodec.encode
+
+def queryWireLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
+  if NativeObservationCodec.isBatch bytes then queryBatchLoaded config opened bytes
+  else queryLoaded config opened bytes
+
 /-- Custody signs each exact canonical header outside the host. Assembly only
 places signatures into the source-owned ingress; submission checks them anew. -/
 def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except String SignedCall := do
