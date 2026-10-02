@@ -225,8 +225,15 @@ def provision(request, result_path):
             for until in [None] + [signature for signature, slot in newest]:
                 listing = newest if until is None else newest[:[signature for signature, slot in newest].index(until)]
                 suffix = '.until.' + gen.b58(until) if until else ''
-                endpoint.put('getSignaturesForAddress/' + gen.ENROL_TA + suffix + '.json',
-                             gen.envelope(gen.listing(*[(signature, slot, None) for signature, slot in listing])))
+                chunks = [listing[start:start + 25] for start in range(0, len(listing), 25)] or [[]]
+                if len(chunks[-1]) == 25:
+                    chunks.append([])
+                before = None
+                for chunk in chunks:
+                    cursor = '.before.' + gen.b58(before) if before else ''
+                    endpoint.put('getSignaturesForAddress/' + gen.ENROL_TA + cursor + suffix + '.json',
+                                 gen.envelope(gen.listing(*[(signature, slot, None) for signature, slot in chunk])))
+                    before = chunk[-1][0] if chunk else None
             for signature, slot, body in history:
                 endpoint.tx(signature, body)
             for relative, value in endpoint.files.items():
