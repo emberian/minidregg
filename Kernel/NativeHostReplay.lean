@@ -2336,9 +2336,14 @@ private def walk (config : Config) (opened : Opened config)
           match advanced : advance opened derived with
           | .error detail => return .error ⟨index, detail⟩
           | .ok next =>
-            match validated : validateLoaded config next with
+            -- The prior prefix was just validated. Reuse unchanged decoded
+            -- rows and cell laws; the existing equality theorem preserves the
+            -- complete Opened value and every refusal of full validation.
+            match incremental : validateLoadedFrom config opened next with
             | .error detail => return .error ⟨index, s!"native post image: {detail}"⟩
             | .ok after =>
+              have validated : validateLoaded config next = .ok after :=
+                (validateLoadedFrom_eq config opened next).symm.trans incremental
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
                   index + 1, next.worldRoot⟩
@@ -2626,9 +2631,12 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       match judged : old.opened.durable.judge config.transport derived.intent with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok () =>
-        match validated : validateLoaded config (exactCandidate old derived ready) with
+        match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready) with
         | .error detail => .error s!"post-image validation: {detail}"
-        | .ok after => .ok ⟨⟨derived, ready, prepared, judged, appended, after, validated⟩, rfl⟩
+        | .ok after =>
+          have validated : validateLoaded config (exactCandidate old derived ready) = .ok after :=
+            (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready)).symm.trans incremental
+          .ok ⟨⟨derived, ready, prepared, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact
 readback gives one new accepted step and its *original-prefix* receipt. -/
