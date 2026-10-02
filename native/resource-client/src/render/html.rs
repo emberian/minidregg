@@ -35,13 +35,20 @@ fn decorate(body: &str, decos: &[Deco]) -> String {
             Deco::Code { stale } => strike(*stale, format!("<code>{html}</code>")),
             Deco::Italic { stale } => strike(*stale, format!("<em>{html}</em>")),
             Deco::Bold { stale } => strike(*stale, format!("<strong>{html}</strong>")),
-            Deco::Link { target: Some(target), stale } => strike(
+            Deco::Link {
+                target: Some(target),
+                stale,
+            } => strike(
                 *stale,
-                format!("<a class=\"link\" data-target=\"{}\">{html}</a>", escape(target)),
+                format!(
+                    "<a class=\"link\" data-target=\"{}\">{html}</a>",
+                    escape(target)
+                ),
             ),
-            Deco::Link { target: None, stale } => {
-                strike(*stale, format!("<a class=\"link dead\">{html}</a>"))
-            }
+            Deco::Link {
+                target: None,
+                stale,
+            } => strike(*stale, format!("<a class=\"link dead\">{html}</a>")),
             Deco::Heading { level, stale } => format!(
                 "<span class=\"heading{}\" role=\"heading\" aria-level=\"{level}\">{html}</span>",
                 if *stale { " stale" } else { "" }
@@ -124,12 +131,19 @@ fn row_attrs(line: &RenderedLine) -> String {
 }
 
 pub fn document(rendered: &Rendered, title: &str) -> String {
-    let mut out = vec![format!("<article class=\"doc\" data-name=\"{}\">", escape(title))];
+    let mut out = vec![format!(
+        "<article class=\"doc\" data-name=\"{}\">",
+        escape(title)
+    )];
     if !rendered.shared_names.is_empty() {
         out.push("<section class=\"shared-names\"><h2>Shared names</h2><dl>".to_owned());
         for binding in &rendered.shared_names {
-            out.push(format!("<dt>{}</dt><dd>{}:{}</dd>",escape(&binding.name),
-                escape(&binding.kind),escape(&binding.target)));
+            out.push(format!(
+                "<dt>{}</dt><dd>{}:{}</dd>",
+                escape(&binding.name),
+                escape(&binding.kind),
+                escape(&binding.target)
+            ));
         }
         out.push("</dl></section>".to_owned());
     }
@@ -150,8 +164,19 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
     }
     out.push("<ol class=\"lines\">".to_owned());
     for line in &rendered.lines {
+        // Containers participate in the source tree, but an empty structural
+        // row is not a displayed line and must not consume an HTML list marker.
+        if matches!(line.body, Body::Section)
+            && line.annotations.is_empty()
+            && line.decos.is_empty()
+        {
+            continue;
+        }
         let mut classes = vec!["line"];
-        let number = line.line.map_or(String::new(), |n| format!(" value=\"{n}\""));
+        let number = line.line.map_or_else(
+            || " style=\"list-style:none\"".to_owned(),
+            |n| format!(" value=\"{n}\""),
+        );
         let content = match &line.body {
             Body::Text { struck, .. } | Body::Object { struck, .. } => {
                 if matches!(line.body, Body::Object { .. }) {
@@ -211,4 +236,65 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
     let mut html = out.join("\n");
     html.push('\n');
     html
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    fn row(body: Body, number: Option<usize>) -> RenderedLine {
+        RenderedLine {
+            row: json!({"element":"1","kind":"atom","atom":"9","revision":"2","createdBy":{"subject":"7"}}),
+            line: number,
+            depth: 1,
+            body,
+            decos: vec![],
+            annotations: vec![],
+        }
+    }
+    #[test]
+    fn structural_rows_do_not_produce_blank_or_duplicate_line_numbers() {
+        let mut note = row(Body::Section, None);
+        note.annotations.push(Annotation {
+            id: "3".into(),
+            author: "you".into(),
+            fresh: true,
+            body: "Section note".into(),
+        });
+        let rendered = Rendered {
+            shared_names: vec![],
+            root: json!("1"),
+            root_revision: json!("2"),
+            lines: vec![
+                row(Body::Section, None),
+                row(
+                    Body::Text {
+                        bytes: b"first current line".to_vec(),
+                        struck: false,
+                    },
+                    Some(1),
+                ),
+                row(Body::Section, None),
+                note,
+                row(
+                    Body::Text {
+                        bytes: b"second current line".to_vec(),
+                        struck: false,
+                    },
+                    Some(2),
+                ),
+            ],
+            document_annotations: vec![],
+            outline: vec![],
+            backlinks: vec![],
+        };
+        let html = document(&rendered, "paper");
+        assert_eq!(html.matches("<li ").count(), 3);
+        assert_eq!(html.matches("value=\"1\"").count(), 1);
+        assert_eq!(html.matches("value=\"2\"").count(), 1);
+        assert!(html.contains("class=\"line section\" style=\"list-style:none\""));
+        assert!(html.contains("Section note"));
+        assert!(html.contains("first current line") && html.contains("second current line"));
+        assert!(!html.contains("data-depth=\"1\"></li>"));
+    }
 }
