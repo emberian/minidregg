@@ -28,7 +28,7 @@ mkdir -p "$JOURNEY_STEP_DIR"
 DIR=$(mktemp -d /tmp/jpay-v2.XXXXXX)
 ln -s "$DIR" "$JOURNEY_STEP_DIR/jpay-v2"
 exec python3 - "$DIR" <<'PY'
-import atexit, base64, hashlib, json, os, shutil, signal, socket, struct, subprocess, sys, threading, time
+import atexit, base64, glob, hashlib, json, os, shutil, signal, socket, struct, subprocess, sys, threading, time
 import nacl.signing
 
 DIR = sys.argv[1]
@@ -487,6 +487,7 @@ BP=after["payment"];bob_ids=ids(JB,"bob")
 require("current quote consumes once: exact weeks, spendable extra-week remainder, rotated authority",
         BP["state"]=="consumedV2" and BP["authorization"]=="acceptCurrentQuote"
         and BP["amountAtomic"]==JB["amountAtomic"]
+        and isinstance(BP["acceptedRequest"],str) and len(BP["acceptedRequest"])>0
         and int(BP["weeks"])==WEEKS
         and well_pending-well_after==int(QC["split"]["mintedCredit"])
         and bal_after[bob_ids["account"]]==int(QC["split"]["creditedRemainder"])
@@ -514,6 +515,28 @@ require("fault relay generated no result and observed only fixed public paid ope
 stop_server();start_server()
 cold=status(JB,B,"bob-cold-reopen")
 require("cold Store reopen preserves exact consumed origin and enrollment",cold==after,cold)
+online_audit=mini("pay","audit","--dir",OBS,"--operator-socket",OPSOCK)
+require("online audit attributes original observer and independent claim mint once",
+        online_audit.returncode==0 and f"observer credit {AP['mintedCredit']}" in online_audit.stdout
+        and f"independent claim credit {BP['mintedCredit']}" in online_audit.stdout,
+        online_audit.stderr[-350:] or online_audit.stdout[-500:])
+retained=[json.load(open(p)) for p in glob.glob(os.path.join(OBS,"attempts","pay-enrol-*","enrol-status-v2.json"))]
+require("later claim mint preserves original pending observer evidence",
+        any(v["paymentLocator"]["claimId"]==original_id(JB,B) and v["payment"]["state"]=="pendingV2" for v in retained),retained)
+stop_server()
+offline_audit=mini("pay","audit","--dir",OBS,"--offline","true")
+require("offline audit fully readmits once and conserves observer plus independent claim mint",
+        offline_audit.returncode==0 and "fully re-admitted" in offline_audit.stdout
+        and "identity holds on fully audited image" in offline_audit.stdout
+        and f"independent claim credit {BP['mintedCredit']}" in offline_audit.stdout,
+        offline_audit.stderr[-350:] or offline_audit.stdout[-700:])
+provenance_paths=glob.glob(os.path.join(OBS,"pay","audit-*","provenance.json"))
+require("offline audit retains source image and executable/config provenance",len(provenance_paths)==1,provenance_paths)
+provenance=json.load(open(provenance_paths[0]))
+require("offline accounting binds the exact source image and retained outputs",
+        provenance["hostSha256"]==hashlib.sha256(open(HOST,"rb").read()).hexdigest()
+        and provenance["configSha256"]==hashlib.sha256(open(CONFIG,"rb").read()).hexdigest()
+        and all(provenance[k].isdigit() for k in ("domain","semantics","expectedSeed","auditedHeight","worldRoot")),provenance)
 COMPLETED=True
 sys.exit(0 if all(r[0]=="PASS" for r in ROWS) else 1)
 PY

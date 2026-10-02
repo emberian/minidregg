@@ -2355,6 +2355,43 @@ mod tests {
     }
 
     #[test]
+    fn offline_stream_has_no_1024_origin_ceiling_and_bounds_every_row() {
+        let bytes = b"{\"state\":\"pendingV2\"}\n".repeat(1025);
+        let mut reader = std::io::BufReader::with_capacity(7, std::io::Cursor::new(&bytes));
+        let mut hash = sha2::Sha256::new();
+        for _ in 0..1025 {
+            assert_eq!(audit_json_line(&mut reader, &mut hash).unwrap(), Some(json!({"state":"pendingV2"})));
+        }
+        assert!(audit_json_line(&mut reader, &mut hash).unwrap().is_none());
+        assert_eq!(hex(&hash.finalize()), hex(&sha2::Sha256::digest(&bytes)));
+        for bytes in [vec![b'x'; 8194], b"{}".to_vec(), b"not json\n".to_vec()] {
+            let mut reader = std::io::BufReader::with_capacity(3, std::io::Cursor::new(bytes));
+            assert!(audit_json_line(&mut reader, &mut sha2::Sha256::new()).is_err());
+        }
+    }
+
+    #[test]
+    fn consumed_accounting_charges_only_the_original_or_independent_claim() {
+        let payment = json!({"state":"consumedV2","amountAtomic":"522","slot":"99","index":"0",
+            "mode":"enrol","weeks":"1","mintedCredit":"522","birthFee":"7",
+            "membershipCredit":"168","creditedRemainder":"347","pricingCommitment":hex(&[4;32]),
+            "authorization":"originalMemo","acceptedRequest":null});
+        let (record, status) = source_status_fixture(payment.clone());
+        assert_eq!(consumed_origin_credit(&record, &status).unwrap(), (522,0));
+        let mut claim = payment;
+        claim["authorization"] = json!("acceptCurrentQuote");
+        claim["acceptedRequest"] = json!("01");
+        let (_, status) = source_status_fixture(claim);
+        assert_eq!(consumed_origin_credit(&record, &status).unwrap(), (0,522));
+        let (record, pending) = source_status_fixture(json!({"state":"pendingV2",
+            "amountAtomic":"522","slot":"99","index":"0","reason":"termsStale"}));
+        assert_eq!(consumed_origin_credit(&record, &pending).unwrap(), (0,0));
+        let mut changed = record.value.clone();
+        changed["amount"] = json!("521");
+        assert!(consumed_origin_credit(&Record::parse(&changed).unwrap(), &pending).is_err());
+    }
+
+    #[test]
     fn exact_pending_origin_is_decided_without_mint_or_membership_inference() {
         let (record, status) = source_status_fixture(json!({"state":"pendingV2",
             "amountAtomic":"522","slot":"99","index":"0","reason":"termsStale"}));
