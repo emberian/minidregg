@@ -734,13 +734,22 @@ variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
   {durable : Durable} {command : Command}
 
-/-- The leg's installed law is the sheet law at `p`. -/
+/-- The authenticated effective closure includes the sheet law at `p` as an active component. -/
 def SheetInstalled (p : Params)
     {prepared : PreparedInvocation deployment profile ambient durable command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
-  ∀ committed, (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed →
-    committed.record.predicate = sheetLaw p
+  Minidregg.Kernel.LawHistory.ActiveComponent
+    (policyConfig prepared tuple incidence) (sheetLaw p)
+
+/-- Derive the installed-law assurance premise from the receiver's cached,
+authenticated effective graph; no caller assertion or second resolver is used. -/
+def checkInstalled (p : Params)
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
+      (policyConfig prepared tuple incidence)) :
+    Option (PLift (SheetInstalled p tuple incidence)) :=
+  Minidregg.Kernel.LawHistory.checkActiveComponent resolved (sheetLaw p)
 
 theorem sheet_leg_admitted (p : Params)
     {prepared : PreparedInvocation deployment profile ambient durable command}
@@ -748,8 +757,8 @@ theorem sheet_leg_admitted (p : Params)
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : SheetInstalled p tuple incidence) :
     eval (sheetLaw p) (step prepared tuple incidence).oldState
       (step prepared tuple incidence).newState = true := by
-  obtain ⟨committed, resolved, holds⟩ := checked_leg_policy_eval leg
-  rw [installed committed resolved] at holds
+  have holds := Minidregg.Kernel.LawHistory.checked_leg_component_eval leg
+    (sheetLaw p) installed
   exact holds
 
 /-- **`stranger_write_bounded`, kernel form.** On a leg the controller admitted under the sheet law,

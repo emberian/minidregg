@@ -696,6 +696,20 @@ fn fields_of(view: &Value) -> BTreeMap<u64, i64> {
         .collect()
 }
 
+/// A sealed story needs this local law on every step, including policy
+/// replacement. Additional parents and exports may restrict it further.
+fn carries_unconditional_local_law(policy: &Value, expected: &Value) -> bool {
+    if policy.get("predicate") != Some(expected) {
+        return false;
+    }
+    let Some(selector) = policy.get("localSelector").and_then(Value::as_object) else {
+        return false;
+    };
+    selector.iter().all(|(key, value)| {
+        matches!(key.as_str(), "physicalKinds" | "requestKinds" | "verbs") && value.is_null()
+    })
+}
+
 /// The sealed table, read and checked: its rows parse, and its law is the
 /// sealed table law.
 fn sealed_table(session: &Session, story: &Value) -> Result<Table, Done> {
@@ -703,9 +717,9 @@ fn sealed_table(session: &Session, story: &Value) -> Result<Table, Done> {
     let rows = table_rows(&read(session, story, "table", target, "resource")?)?;
     let table = table_of(&rows).map_err(|e| error(format!("the table does not parse: {e}")))?;
     let policy = read(session, story, "table-law", target, "policy")?;
-    if policy.get("predicate") != Some(&table_sealed_law()) {
+    if !carries_unconditional_local_law(&policy, &table_sealed_law()) {
         return Err(error(format!(
-            "the table of {} is not sealed (its law is not the sealed table law); a story is played only once sealed",
+            "the table of {} is not sealed (its sealed table law must apply to every step); a story is played only once sealed",
             field(story, "story")?
         )));
     }
@@ -974,9 +988,9 @@ fn my_cell(session: &Session, story: &Value, table: &Table) -> Result<BTreeMap<u
     let me = me(session)?;
     let cell = field(story, "cell")?;
     let policy = read(session, story, "cell-law", cell, "policy")?;
-    if policy.get("predicate") != Some(&player_law(table, &me)) {
+    if !carries_unconditional_local_law(&policy, &player_law(table, &me)) {
         return Err(error(format!(
-            "your cell {cell} does not carry the law the sealed table gives you; do not play it (story law {} {me} prints that law)",
+            "your cell {cell} does not carry the unconditional law the sealed table gives you; do not play it (story law {} {me} prints that law)",
             field(story, "story")?
         )));
     }
@@ -1133,6 +1147,36 @@ mod tests {
 
     fn tale() -> Table {
         table_of(&rows(TALE)).expect("the tale parses")
+    }
+
+    #[test]
+    fn sealed_law_recognition_rejects_selector_bypasses() {
+        let expected = table_sealed_law();
+        let mut policy = json!({"predicate": expected.clone(), "localSelector": {
+            "physicalKinds": null, "requestKinds": null, "verbs": null}});
+        assert!(carries_unconditional_local_law(&policy, &expected));
+        for field in ["physicalKinds", "requestKinds", "verbs"] {
+            policy["localSelector"][field] = json!(["1", "2"]);
+            assert!(!carries_unconditional_local_law(&policy, &expected));
+            policy["localSelector"][field] = json!([]);
+            assert!(!carries_unconditional_local_law(&policy, &expected));
+            policy["localSelector"][field] = Value::Null;
+        }
+        policy.as_object_mut().unwrap().remove("localSelector");
+        assert!(!carries_unconditional_local_law(&policy, &expected));
+    }
+
+    #[test]
+    fn sealed_law_recognition_keeps_additional_inherited_restrictions() {
+        let expected = player_law(&tale(), "7");
+        let policy = json!({"predicate": expected.clone(), "localSelector": {
+            "physicalKinds": null, "requestKinds": null, "verbs": null},
+            "parents": [{"policyId": "99", "facet": "descendants",
+                "selection": {"type": "head"}}],
+            "descendants": {"selector": {}, "predicate": {"type": "any", "predicates": []},
+                "parents": []}});
+        assert!(carries_unconditional_local_law(&policy, &expected));
+        assert!(!carries_unconditional_local_law(&policy, &table_sealed_law()));
     }
 
     #[test]
