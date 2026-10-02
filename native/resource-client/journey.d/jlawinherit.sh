@@ -121,6 +121,15 @@ check hidden-parent-id bash -c '! grep -q "$1" "$2"' _ "$POLICY" "$WORDS"
 turn hidden-range jli-range 'law export jli-range jli-room @hidden-range.json'
 refused inherited-range-read dan 'doc show jli-note'
 check hidden-range-value bash -c '! grep -q "$1" "$2"' _ "$SECRET" "$WORDS"
+
+# The native field is ZMod (2^127 - 1): 1 and 2^127 collide. The first
+# equality makes this law semantically true on a read; only cast injectivity
+# refuses it. Both literals belong to the hidden export, not the child law.
+CAST_SECRET=170141183460469231731687303715884105728
+jq -n --arg secret "$CAST_SECRET" '{selector:{physicalKinds:["1"],verbs:["1"]},parents:[],predicate:{type:"any",predicates:[{type:"eq",slot:"request/verb",value:"1"},{type:"eq",slot:"request/verb",value:$secret}]}}' >"$D/alice/requests/hidden-cast.json"
+turn hidden-cast jli-cast 'law export jli-cast jli-room @hidden-cast.json'
+refused inherited-cast-read dan 'doc show jli-note'
+check hidden-cast-value bash -c '! grep -q "$1" "$2"' _ "$CAST_SECRET" "$WORDS"
 turn read-restored jli-read-clear 'law export jli-read-clear jli-room none'
 ok restored-signed-read dan 'doc show jli-note'
 check restored-content grep -q 'after removing export' "$OUT"
