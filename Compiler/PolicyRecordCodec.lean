@@ -1,7 +1,7 @@
 /-
 # Compiler.PolicyRecordCodec -- executable, canonical policy source
 
-Version 4 encodes the complete `PolicyRecord`, including every `Pred`
+Version 5 encodes the complete `PolicyRecord`, its component metadata and every `Pred`
 constructor. Naturals use the shared compact base-255 stream codec; integers
 use the one integer codec, `Compiler.IntStream.intStream` (zigzag base-255,
 no tag byte); strings retain their exact Unicode
@@ -239,7 +239,96 @@ def decodePred (tokens : List Token) : Option Pred := do
     decodePred (encodePred predicate) = some predicate := by
   simp [decodePred, encodePred, runTokens_tokensInto, runTokens]
 
-abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token
+/-! Component metadata is first-order source, using the existing Pred token
+stream and stream-codec combinators. Lists retain authored order in source;
+resolved graph order is canonical and confers no method precedence. -/
+
+abbrev SelectorTuple := Option (List Nat) × Option (List Nat) × Option (List Nat)
+abbrev RefTuple := Nat × Nat × Option (Nat × Digest)
+abbrev ComponentTuple := SelectorTuple × List Token × List RefTuple
+
+def selectorTupleStream : StreamCodec SelectorTuple :=
+  StreamCodec.product (StreamCodec.option (StreamCodec.list StreamCodec.nat))
+    (StreamCodec.product (StreamCodec.option (StreamCodec.list StreamCodec.nat))
+      (StreamCodec.option (StreamCodec.list StreamCodec.nat)))
+
+def refTupleStream : StreamCodec RefTuple :=
+  StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.option (StreamCodec.product StreamCodec.nat digestStream)))
+
+def componentTupleStream : StreamCodec ComponentTuple :=
+  StreamCodec.product selectorTupleStream
+    (StreamCodec.product (StreamCodec.list tokenStream) (StreamCodec.list refTupleStream))
+
+def selectorTuple (selector : Minidregg.Theory.LawComposition.Selector) : SelectorTuple :=
+  (selector.physicalKinds, selector.requestKinds, selector.verbs)
+
+def selectorOfTuple (tuple : SelectorTuple) : Minidregg.Theory.LawComposition.Selector :=
+  ⟨tuple.1, tuple.2.1, tuple.2.2⟩
+
+@[simp] theorem selectorOfTuple_tuple (selector : Minidregg.Theory.LawComposition.Selector) :
+    selectorOfTuple (selectorTuple selector) = selector := by cases selector; rfl
+
+def refTuple (reference : Minidregg.Theory.LawComposition.PolicyRef) : RefTuple :=
+  (reference.policyId.value, reference.facet.tag,
+    match reference.selection with
+    | .head => none
+    | .pinned revision digest => some (revision, digest))
+
+def refOfTuple (tuple : RefTuple) : Option Minidregg.Theory.LawComposition.PolicyRef := do
+  let facet ← match tuple.2.1 with
+    | 0 => some Minidregg.Theory.LawComposition.Facet.local
+    | 1 => some Minidregg.Theory.LawComposition.Facet.descendants
+    | _ => none
+  let selection := match tuple.2.2 with
+    | none => Minidregg.Theory.LawComposition.Selection.head
+    | some (revision, digest) => .pinned revision digest
+  some ⟨⟨tuple.1⟩, facet, selection⟩
+
+@[simp] theorem refOfTuple_tuple (reference : Minidregg.Theory.LawComposition.PolicyRef) :
+    refOfTuple (refTuple reference) = some reference := by
+  rcases reference with ⟨⟨policy⟩, facet, selection⟩
+  cases facet <;> cases selection <;> rfl
+
+def refsOfTuples : List RefTuple → Option (List Minidregg.Theory.LawComposition.PolicyRef)
+  | [] => some []
+  | first :: rest => do
+      let first ← refOfTuple first
+      let rest ← refsOfTuples rest
+      some (first :: rest)
+
+@[simp] theorem refsOfTuples_tuples (references : List Minidregg.Theory.LawComposition.PolicyRef) :
+    refsOfTuples (references.map refTuple) = some references := by
+  induction references with
+  | nil => rfl
+  | cons first rest ih => simp [refsOfTuples, ih]
+
+def componentTuple (component : Minidregg.Theory.LawComposition.Component) : ComponentTuple :=
+  (selectorTuple component.selector, encodePred component.predicate, component.parents.map refTuple)
+
+def componentOfTuple (tuple : ComponentTuple) : Option Minidregg.Theory.LawComposition.Component := do
+  let predicate ← decodePred tuple.2.1
+  let parents ← refsOfTuples tuple.2.2
+  some ⟨selectorOfTuple tuple.1, predicate, parents⟩
+
+@[simp] theorem componentOfTuple_tuple (component : Minidregg.Theory.LawComposition.Component) :
+    componentOfTuple (componentTuple component) = some component := by
+  cases component
+  simp [componentOfTuple, componentTuple]
+
+def exportOfTuple : Option ComponentTuple → Option (Option Minidregg.Theory.LawComposition.Component)
+  | none => some none
+  | some tuple => do
+      let component ← componentOfTuple tuple
+      some (some component)
+
+@[simp] theorem exportOfTuple_tuple (component : Option Minidregg.Theory.LawComposition.Component) :
+    exportOfTuple (component.map componentTuple) = some component := by
+  cases component <;> simp [exportOfTuple]
+
+abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token ×
+  SelectorTuple × List RefTuple × Option ComponentTuple
 
 def recordTupleStream : StreamCodec RecordTuple :=
   StreamCodec.product StreamCodec.nat
@@ -247,32 +336,42 @@ def recordTupleStream : StreamCodec RecordTuple :=
       (StreamCodec.product digestStream
         (StreamCodec.product digestStream
           (StreamCodec.product (StreamCodec.option digestStream)
-            (StreamCodec.list tokenStream)))))
+            (StreamCodec.product (StreamCodec.list tokenStream)
+              (StreamCodec.product selectorTupleStream
+                (StreamCodec.product (StreamCodec.list refTupleStream)
+                  (StreamCodec.option componentTupleStream))))))))
 
 def recordTuple (record : PolicyRecord) : RecordTuple :=
   (record.policyId.value, record.version, record.domain, record.semantics,
-    record.previous, encodePred record.predicate)
+    record.previous, encodePred record.predicate, selectorTuple record.localSelector,
+    record.parents.map refTuple, record.descendants.map componentTuple)
 
 def recordOfTuple (tuple : RecordTuple) : Option PolicyRecord := do
-  let predicate ← decodePred tuple.2.2.2.2.2
+  let (policyId, version, domain, semantics, previous, tokens, selector, refs, exported) := tuple
+  let predicate ← decodePred tokens
+  let parents ← refsOfTuples refs
+  let descendants ← exportOfTuple exported
   some
-    { policyId := ⟨tuple.1⟩
-      version := tuple.2.1
-      domain := tuple.2.2.1
-      semantics := tuple.2.2.2.1
-      previous := tuple.2.2.2.2.1
-      predicate := predicate }
+    { policyId := ⟨policyId⟩
+      version := version
+      domain := domain
+      semantics := semantics
+      previous := previous
+      predicate := predicate
+      localSelector := selectorOfTuple selector
+      parents := parents
+      descendants := descendants }
 
 @[simp] theorem recordOfTuple_tuple (record : PolicyRecord) :
     recordOfTuple (recordTuple record) = some record := by
   cases record
   simp [recordOfTuple, recordTuple]
 
-def sourceVersion : Nat := 4
+def sourceVersion : Nat := 5
 
 def framePrefix : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList
 
-def wireFrame : List UInt8 := framePrefix ++ [4]
+def wireFrame : List UInt8 := framePrefix ++ [5]
 
 def encode (record : PolicyRecord) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
@@ -400,8 +499,26 @@ theorem v3_frame_refused (rest : List UInt8) :
   rw [raw]
   rfl
 
-/-- Conversely every version-4 encoding carries frame byte 4, so a version-3 decoder, whose first
-check is `take wireFrame.length = framePrefix ++ [3]`, refuses every version-4 record — including
+/-- Version 4 records (the single-predicate source without law components) refuse to decode:
+their frame byte is 4. -/
+theorem v4_frame_refused (rest : List UInt8) :
+    decode ((framePrefix ++ [4]) ++ rest) = none := by
+  have taken : ((framePrefix ++ [4]) ++ rest).take wireFrame.length = framePrefix ++ [4] := by
+    rw [wireFrame, List.append_assoc, List.length_append, List.take_length_add_append]
+    rfl
+  have differs : framePrefix ++ [4] ≠ wireFrame := by
+    intro same
+    have := List.append_cancel_left same
+    simp at this
+  have raw : decodeRaw ((framePrefix ++ [4]) ++ rest) = none := by
+    unfold decodeRaw
+    rw [if_neg (by rw [taken]; exact differs)]
+  unfold decode
+  rw [raw]
+  rfl
+
+/-- Conversely every version-5 encoding carries frame byte 5, so a version-3 decoder, whose first
+check is `take wireFrame.length = framePrefix ++ [3]`, refuses every version-5 record — including
 one whose predicate uses a slot-to-slot atom — before reading a token. -/
 theorem encode_not_v3_frame (record : PolicyRecord) :
     (encode record).take (framePrefix ++ [3]).length ≠ framePrefix ++ [3] := by
@@ -453,7 +570,7 @@ theorem decodeToken_unknown_tag (tag : UInt8) (htag : 17 ≤ tag.toNat ∨ tag.t
     | (rename_i heq; simp only [List.cons.injEq] at heq; obtain ⟨rfl, -⟩ := heq
        simp at htag)
 
-def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v4".toUTF8.toList
+def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v5".toUTF8.toList
 
 def hashBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash customization bytes).digest
