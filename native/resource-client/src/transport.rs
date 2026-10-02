@@ -207,6 +207,28 @@ fn continuity_request(payload: &[u8]) -> bool {
         && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object())
 }
 
+// API17's source producer carries a legacy reserve pair or a v2 reserve pair
+// plus an optional exact fence pair. Only framing is judged here; the native
+// Host still authenticates both receipts and their history.
+fn provider_continuity_request(payload: &[u8]) -> bool {
+    if payload.is_empty() || payload.len() >= HOST_MAX_FRAME {
+        return false;
+    }
+    let receipt_pair = |bytes: &[u8]| exact_pair(bytes).is_some_and(|(call, outcome)| {
+        !call.is_empty() && call.len() < HOST_MAX_FRAME && !outcome.is_empty() && outcome.len() <= 1024
+    });
+    if let Some(body) = payload.strip_prefix(crate::provider_continuity::V2) {
+        let Some(prefix) = body.get(..4) else { return false; };
+        let length = u32::from_le_bytes(prefix.try_into().expect("four-byte prefix")) as usize;
+        let Some(end) = length.checked_add(4).filter(|end| *end <= body.len()) else { return false; };
+        let reserve = &body[4..end];
+        let fence = &body[end..];
+        receipt_pair(reserve) && (fence.is_empty() || receipt_pair(fence))
+    } else {
+        receipt_pair(payload)
+    }
+}
+
 // Public, read-only carried SignedCall lookup: bounded JSON header and raw call.
 fn carried_lookup_request(payload: &[u8]) -> bool {
     if payload.len() < 6 || payload.len() >= CARRIED_LOOKUP_MAX_FRAME {
@@ -257,10 +279,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && (digits.len() == 1 || digits[0] != b'0')
         }
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
-        [17, pair @ ..] if pair.len() >= 6 => {
-            let call_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
-            call_length > 0 && call_length < pair.len() - 4 && pair.len() - 4 - call_length <= 1024
-        }
+        [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
             catalog_enabled
                 && !digits.is_empty()
@@ -2199,6 +2218,25 @@ done"#;
             assert!(!allowed_operation(&bad, false));
             assert!(!allowed_operator_operation(&bad));
         }
+    }
+
+    #[test]
+    fn provider_continuity_source_frames_reach_native_api17() {
+        for (fence, v2) in [(None, false), (None, true), (Some((&b"fence-call"[..], &b"fence-outcome"[..])), true)] {
+            let payload = crate::provider_continuity::request_payload(b"reserve-call", b"reserve-outcome", fence, v2).unwrap();
+            let frame = [vec![17], payload.clone()].concat();
+            assert!(allowed_operation(&frame, false));
+            // Removing the final fence/outcome or truncating the v2 envelope
+            // cannot become a generic allowed operation.
+            assert!(!allowed_operation(&frame[..5], false));
+        }
+        let oversized = crate::provider_continuity::request_payload(b"call", &vec![0; 1025], None, true).unwrap();
+        assert!(!allowed_operation(&[vec![17], oversized].concat(), false));
+        let empty = crate::provider_continuity::request_payload(b"", b"outcome", None, true).unwrap();
+        assert!(!allowed_operation(&[vec![17], empty].concat(), false));
+        let mut malformed = crate::provider_continuity::request_payload(b"call", b"outcome", None, true).unwrap();
+        malformed.extend_from_slice(&[1, 0, 0, 0, 1]);
+        assert!(!allowed_operation(&[vec![17], malformed].concat(), false));
     }
 
     #[test]

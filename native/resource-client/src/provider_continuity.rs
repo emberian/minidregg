@@ -4,7 +4,7 @@ use crate::*;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
 const DESCRIPTOR_MAX: usize = 16_384;
-const V2: &[u8] = b"DREGG/PROVIDER-CONTINUITY/v2\0";
+pub(crate) const V2: &[u8] = b"DREGG/PROVIDER-CONTINUITY/v2\0";
 
 /// Reject duplicate keys, including escaped aliases, before using a descriptor.
 /// serde_json validates grammar; this scan only tracks object-key uniqueness.
