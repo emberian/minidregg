@@ -60,3 +60,14 @@ feed is transient; the native stable reply guard remains mandatory.
 When no addressed request is waiting, the summoned program can still perform
 maintenance on changed role/document inputs. Such work has no invented addressed
 recipient. A separate maintenance revision is committed from the matching source completion, including addressed turns, so an unchanged empty queue does not buy a second model turn solely because the last turn addressed a request. Native tools continue to enforce grants, budgets and exact effects.
+
+Before marking a selected request started, the driver asks the live controller
+for `resident preflight`. This read-only response binds the exact parsed
+configuration and journal binding, refuses active or retained controller work,
+and verifies the configured confined command, actual controller unit and worker
+launcher protocols. A service configuration refusal leaves selection durable and
+unstarted, with no prompt dispatched. The prompt receiver repeats admission
+checks; preflight is a snapshot, not a reservation. A failure or lost reply after
+the started boundary remains retained for exact recovery. This preflight cannot
+clear an older started request or substitute a zero local provider count for
+source completion evidence.

@@ -60,3 +60,20 @@ journals, change worker identities or grant native authority.
 Receiving checks must include the joined runtime, root registration, exact system
 unit, fresh signed quiescence and worker lifetime gate. Module tests and isolated
 launcher crash probes do not alone qualify the complete service deployment.
+
+The root launcher obtains its launch descriptor from `grain-runtime
+controller-launch CONFIG ROOT_REGISTRATION`, run as the registered service UID.
+The read-only command validates the actual root record and private configuration,
+and returns `mini-controller-launch-v1` with exact task, unit, manager, worker
+manager, service UID, runtime, configuration, transport and file hashes. Consumers
+pass `environment` unchanged; the registry variable is
+`MINI_GRAIN_CONTROLLER_REGISTRATION`. Producer and runtime consumer share the
+same source constants. A projection launches nothing and grants no native room,
+account or allowance authority.
+
+Qualify the actual service scope after registration. On the receiving host, a
+user-manager filesystem namespace activated by credential `ReadWritePaths`
+remapped root-owned archive metadata; a direct registrar check did not qualify
+that launch. The joined protected controller uses an actual system service with
+its registered service UID and separately managed user workers. Both launcher
+components must expose the exact controller lifetime protocol used by the runtime.

@@ -101,7 +101,7 @@ fn next_frame(reader: &mut impl BufRead, attachment: u64) -> Result<Value> {
 
 /// The controller's source-owned completion event, never model text, decides
 /// completion. A lost connection leaves pending durable and is not replayed.
-fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState, state: &Path, maintenance_revision:Option<&str>) -> Result<()> {
+fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal: &mut ResidentState, state: &Path, maintenance_revision:Option<&str>) -> Result<()> {
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; inspect the controller before another invocation".into()); }
     let mut socket = UnixStream::connect(&config.control_socket).map_err(|e| format!("resident connect: {e}"))?;
     socket.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
@@ -121,6 +121,9 @@ fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState,
             break;
         }
     }
+    // Static service/launcher refusal must happen before marking a source
+    // request started. Dispatch uncertainty after that boundary stays retained.
+    resident_preflight::require(config,config_path)?;
     let instruction = format!("{ASSIGNMENT_PREFIX}{}", prompt_assignment(prepared));
     let resident_prompt_id = provider_profile::random_token()?;
     let prompt_sha256 = sha256_bytes(instruction.as_bytes())?;
@@ -276,7 +279,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
                 resident_requests::refuse_selected(&options.state,json!({"basis":"prompt-frame-byte-bound","promptBytes":prompt_bytes,"frameBytes":16384,"metadataReserve":256}))?;
                 continue;
             }
-            prompt(&config, &prepared, &mut journal, &state, Some(&maintenance_input))?;
+            prompt(&config, &options.controller, &prepared, &mut journal, &state, Some(&maintenance_input))?;
             resident_completion::drain(&config, &options.state, &lock)?;
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
@@ -318,7 +321,7 @@ mod tests {
     fn pending_resident_prompt_is_not_replayed_on_new_attachment() {
         let (root, rt) = crate::tests::restart_resolution_fixture("resident-pending");
         let mut state = ResidentState { pending:Some(json!({"requestId":2})), ..ResidentState::default() };
-        assert!(prompt(&rt.config, &json!({}), &mut state, &root.join("journal.json"),None).unwrap_err().contains("uncertain"));
+        assert!(prompt(&rt.config, &rt.config_path, &json!({}), &mut state, &root.join("journal.json"),None).unwrap_err().contains("uncertain"));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -332,6 +335,13 @@ mod tests {
     }
     fn controller_fixture(lose_reply: bool) {
         let (root, rt) = crate::tests::restart_resolution_fixture(if lose_reply {"resident-drop"} else {"resident-done"});
+        let admin=std::os::unix::net::UnixListener::bind(rt.config.state_dir.join("admin.sock")).unwrap();
+        let ready=resident_preflight::fixture_response(&rt.config,&rt.config_path);
+        let preflight=thread::spawn(move||{
+            let (mut socket,_)=admin.accept().unwrap();
+            let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim(),"resident preflight");writeln!(socket,"{ready}").unwrap();
+        });
         let listener = std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let journal_path = root.join("resident.json");
         let observed = journal_path.clone();
@@ -362,8 +372,8 @@ mod tests {
         });
         let mut journal = ResidentState { last_completion:Some(json!({"type":"prompt-complete",
             "attachmentId":7,"requestId":2,"outcome":"failed"})), ..ResidentState::default() };
-        let result = prompt(&rt.config, &json!({"room":"lab"}), &mut journal, &journal_path,None);
-        server.join().unwrap();
+        let result = prompt(&rt.config, &rt.config_path, &json!({"room":"lab"}), &mut journal, &journal_path,None);
+        server.join().unwrap();preflight.join().unwrap();
         if lose_reply {
             assert!(result.is_err()); assert!(journal.pending.is_some()); assert_eq!(journal.completed,0);
             assert!(journal.last_completion.is_none(), "old same-counter completion cannot resolve a lost reply");
@@ -372,6 +382,38 @@ mod tests {
             result.unwrap(); assert!(journal.pending.is_some()); assert_eq!(journal.completed,0);
             assert_eq!(journal.last_completion.as_ref().unwrap()["outcome"], "completed", "source frame is retained; only the receiver may count it");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn source_preflight_failure_leaves_selected_request_unstarted_without_dispatch() {
+        let (root,rt)=crate::tests::restart_resolution_fixture("resident-preflight-declined");
+        let resident_dir=root.join("resident");fs::create_dir(&resident_dir).unwrap();
+        let prepared=json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":rt.config.task},
+            "sourceRoom":{"members":[{"subject":"20","stream":"201"}]},"acceptedHeight":"0","me":"8",
+            "sourceRequests":[{"author":"20","cell":"201","height":1,"sequence":1,"n":1,"kind":"say","text":"question","to":"8"}]});
+        let selected=resident_requests::select(&prepared,&resident_dir,resident_requests::Limits::default()).unwrap().unwrap();
+        let custody_before=fs::read(resident_dir.join("requests.json")).unwrap();
+        let admin=std::os::unix::net::UnixListener::bind(rt.config.state_dir.join("admin.sock")).unwrap();
+        let control=std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
+        let preflight=thread::spawn(move||{
+            let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());
+            let mut line=String::new();reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),"resident preflight");
+            writeln!(socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
+        });
+        let server=thread::spawn(move||{
+            let (mut socket,_)=control.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();
+            reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),"attach terminal-v1 soft");
+            writeln!(socket,"{}",json!({"v":1,"type":"socket-attached","attachmentId":7,"mode":"soft"})).unwrap();
+            line.clear();reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),"terminal status 7 1");
+            writeln!(socket,"{}",json!({"v":1,"type":"state","attachmentId":7,"requestId":1,"activity":"ready","reviewNeeded":false})).unwrap();
+            line.clear();assert_eq!(reader.read_line(&mut line).unwrap(),0,"no model prompt is dispatched after source preflight refusal");
+        });
+        let mut state=ResidentState::default();let state_path=resident_dir.join("resident.json");
+        assert!(prompt(&rt.config,&rt.config_path,&selected,&mut state,&state_path,None).unwrap_err().contains("preflight refused"));
+        preflight.join().unwrap();server.join().unwrap();
+        assert!(state.pending.is_none());assert_eq!(state.completed,0);assert!(!state_path.exists());
+        assert_eq!(fs::read(resident_dir.join("requests.json")).unwrap(),custody_before);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -16,6 +16,7 @@ mod session_failure;
 mod resident_outcomes;
 mod resident_origin;
 mod resident_requests;
+mod resident_preflight;
 mod resident_delivery;
 mod resident_completion;
 #[cfg(test)]
@@ -17709,6 +17710,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if request.command == "resident preflight" {
+                    let result = rt.preflight_resident_prompt();
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
                 if let Some(path) = request.command.strip_prefix("resident completion-plan ") {
                     let result = rt.plan_resident_completion(Path::new(path));
                     request.phase.store(2, Ordering::SeqCst);
@@ -17940,6 +17947,12 @@ fn main() -> ExitCode {
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;
+    }
+    if args.len() >= 2 && args[1] == "controller-launch" {
+        return match systemd_manager::launch_client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime controller-launch: {error}"); ExitCode::FAILURE }
+        };
     }
     if args.len() >= 2 && args[1] == "controller-write-scopes" {
         return match controller_write_scopes::client(&args[2..]) {

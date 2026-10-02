@@ -6,6 +6,10 @@ use minidregg_compatible_upgrade_custody as custody;
 use std::sync::OnceLock;
 
 pub(crate) const PROTOCOL: &str = "mini-controller-manager-v1";
+const REGISTRATION_ENV: &str = "MINI_GRAIN_CONTROLLER_REGISTRATION";
+const CONTROLLER_ENV: &str = "MINI_GRAIN_CONTROLLER_MANAGER";
+const WORKER_ENV: &str = "MINI_GRAIN_WORKER_MANAGER";
+const UNIT_ENV: &str = "MINI_GRAIN_CONTROLLER_UNIT";
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Manager {
@@ -85,6 +89,53 @@ fn validate_registration(
     }
     Ok(())
 }
+/// The producer shares the exact environment names consumed by load() and
+/// lifetime_environment(). This projection launches nothing and grants no
+/// native budget, grant or room authority.
+fn launch_environment(r: &Registration, registration: &Path) -> Value {
+    let mut env = serde_json::Map::new();
+    env.insert(REGISTRATION_ENV.into(), json!(registration));
+    env.insert(CONTROLLER_ENV.into(), json!(r.manager.name()));
+    env.insert(WORKER_ENV.into(), json!(r.worker_manager.name()));
+    env.insert(UNIT_ENV.into(), json!(unit(&r.task)));
+    Value::Object(env)
+}
+fn projection(r: &Registration, registration: &Path, runtime: &Path) -> Value {
+    json!({"protocol":"mini-controller-launch-v1","task":r.task,
+        "runtime":runtime,"config":r.config,"residentConfig":r.resident_config,
+        "runtimeRegistry":registration,"manager":r.manager,"workerManager":r.worker_manager,
+        "serviceUid":r.service_uid,"unit":unit(&r.task),
+        "environment":launch_environment(r,registration)})
+}
+fn require_launchers(config:&Config,controller:Manager,worker:Manager)->Result<()> {
+    for spec in config.commands.iter().filter(|spec|spec.systemd_scope) {
+        Runtime::prove_launcher_gate(&spec.program)?;
+        require_launcher_protocol(controller,worker,&spec.program)?;
+    }
+    Ok(())
+}
+pub(crate) fn launch_client(args: &[std::ffi::OsString]) -> Result<()> {
+    let [config_path, registration] = args else {
+        return Err("usage: grain-runtime controller-launch CONFIG ROOT_REGISTRATION".into());
+    };
+    let config_path=Path::new(config_path);let registration=Path::new(registration);
+    let (bytes,config)=config_migration::scope_config(config_path)?;
+    if !custody::canonical(registration)
+        || registration.file_name().and_then(|v|v.to_str())!=Some(format!("{}.json",config.task).as_str()) {
+        return Err("launch registry must canonically name exactly TASK.json".into());
+    }
+    let rbytes=custody::root_bytes(registration,65_536).map_err(|e|e.to_string())?;
+    let r:Registration=serde_json::from_slice(&rbytes).map_err(|e|e.to_string())?;
+    validate_registration(&r,&config.task,Some(config_path),unsafe {libc::geteuid()})?;
+    require_launchers(&config,r.manager,r.worker_manager)?;
+    let mut result=projection(&r,registration,&std::env::current_exe().map_err(|e|e.to_string())?);
+    result["configSha256"]=json!(sha256_bytes(&bytes)?);
+    result["registrationSha256"]=json!(sha256_bytes(&rbytes)?);
+    result["bindingSha256"]=json!(sha256_bytes(&serde_json::to_vec(&json!({"config":config,"configPath":config_path})).map_err(|e|e.to_string())?)?);
+    result["transport"]=json!({"mini":config.mini,"host":config.host,
+        "hostConfig":config.host_config,"hostSocket":config.host_socket});
+    println!("{result}");Ok(())
+}
 fn fixture(
     task: &str,
     config: Option<&Path>,
@@ -113,7 +164,7 @@ fn fixture(
 }
 fn load(task: &str, config: Option<&Path>) -> Result<Option<Context>> {
     decimal(task, "controller task")?;
-    let explicit = variable("MINI_GRAIN_CONTROLLER_REGISTRATION")?;
+    let explicit = variable(REGISTRATION_ENV)?;
     let path = explicit
         .as_ref()
         .map(PathBuf::from)
@@ -124,9 +175,9 @@ fn load(task: &str, config: Option<&Path>) -> Result<Option<Context>> {
         return Err("controller registry path must be canonical and name exactly TASK.json".into());
     }
     let uid = unsafe { libc::geteuid() };
-    let controller = variable("MINI_GRAIN_CONTROLLER_MANAGER")?;
-    let worker = variable("MINI_GRAIN_WORKER_MANAGER")?;
-    let declared = variable("MINI_GRAIN_CONTROLLER_UNIT")?;
+    let controller = variable(CONTROLLER_ENV)?;
+    let worker = variable(WORKER_ENV)?;
+    let declared = variable(UNIT_ENV)?;
     // Unit tests construct many unscoped Runtime fixtures in one process. They
     // must not depend on an unrelated machine's production registry. Explicit
     // test selections still exercise the real strict root/fixture resolver.
@@ -306,9 +357,9 @@ pub(crate) fn lifetime_environment(task: &str, target: &mut Command) -> Result<(
         return Err("controller admission changed during lifetime observation".into());
     }
     target
-        .env("MINI_GRAIN_CONTROLLER_MANAGER", context.controller.name())
-        .env("MINI_GRAIN_WORKER_MANAGER", context.worker.name())
-        .env("MINI_GRAIN_CONTROLLER_UNIT", unit(task))
+        .env(CONTROLLER_ENV, context.controller.name())
+        .env(WORKER_ENV, context.worker.name())
+        .env(UNIT_ENV, unit(task))
         .env("MINI_GRAIN_CONTROLLER_PID", std::process::id().to_string())
         .env("MINI_GRAIN_CONTROLLER_INVOCATION_ID", invocation)
         .env("XDG_RUNTIME_DIR", format!("/run/user/{}", context.uid))
@@ -317,7 +368,7 @@ pub(crate) fn lifetime_environment(task: &str, target: &mut Command) -> Result<(
             format!("unix:path=/run/user/{}/bus", context.uid),
         );
     if let Some((path, _)) = context.registration {
-        target.env("MINI_GRAIN_CONTROLLER_REGISTRATION", path);
+        target.env(REGISTRATION_ENV, path);
     }
     Ok(())
 }
@@ -329,7 +380,10 @@ pub(crate) fn gate_environment(unit: &str, action: &str, command: &mut Command) 
 }
 pub(crate) fn verify_launcher(task: &str, program: &Path) -> Result<()> {
     let context = current(task)?;
-    if context.controller != context.worker {
+    require_launcher_protocol(context.controller,context.worker,program)
+}
+fn require_launcher_protocol(controller:Manager,worker:Manager,program:&Path)->Result<()> {
+    if controller != worker {
         let output = Command::new(program)
             .arg("--controller-manager-protocol")
             .output()
@@ -419,6 +473,49 @@ mod tests {
         assert!(incarnation(&text.replace("active", "inactive"), 42).is_err());
         assert!(incarnation(&text.replace(&"a".repeat(32), "absent"), 42).is_err());
         assert!(incarnation(&format!("{text}MainPID=42\n"), 42).is_err());
+    }
+    #[test]
+    fn root_launch_projection_uses_native_consumer_environment_and_exact_identity() {
+        let r=registration();let path=Path::new("/etc/mini/controllers/8781.json");
+        let v=projection(&r,path,Path::new("/root/archive/grain-runtime"));
+        assert_eq!(v["environment"][REGISTRATION_ENV],json!(path));
+        assert_eq!(v["environment"][CONTROLLER_ENV],"system");
+        assert_eq!(v["environment"][WORKER_ENV],"user");
+        assert_eq!(v["environment"][UNIT_ENV],unit("8781"));
+        assert!(v["environment"].get("MINI_GRAIN_REGISTRY").is_none());
+        assert_eq!(v["serviceUid"],1000);assert_eq!(v["runtimeRegistry"],json!(path));
+        assert_eq!(v["config"],json!(r.config));
+    }
+    #[test]
+    fn cross_manager_probe_refuses_old_or_wrong_launcher_without_work() {
+        let root=std::env::temp_dir().join(format!("manager-protocol-probe-{}",std::process::id()));
+        fs::create_dir_all(&root).unwrap();let launcher=root.join("bwrap");
+        fs::write(&launcher,"#!/bin/sh\nexit 64\n").unwrap();fs::set_permissions(&launcher,fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(require_launcher_protocol(Manager::System,Manager::User,&launcher).is_err());
+        fs::write(&launcher,"#!/bin/sh\nprintf 'wrong-protocol\\n'\n").unwrap();
+        assert!(require_launcher_protocol(Manager::System,Manager::User,&launcher).is_err());
+        fs::write(&launcher,format!("#!/bin/sh\ntest \"$1\" = --controller-manager-protocol || exit 64\nprintf '{}\\n'\n",PROTOCOL)).unwrap();
+        require_launcher_protocol(Manager::System,Manager::User,&launcher).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn complete_launch_preflight_checks_gate_and_manager_for_each_scoped_command() {
+        let (root,mut rt)=crate::tests::restart_resolution_fixture("complete-launch-probe");
+        let launcher=root.join("bwrap");
+        fs::write(&launcher,format!("#!/bin/sh\ntest \"$1\" = --controller-manager-protocol || exit 64\nprintf '{}\\n'\n",PROTOCOL)).unwrap();
+        fs::set_permissions(&launcher,fs::Permissions::from_mode(0o700)).unwrap();
+        rt.config.commands=vec![serde_json::from_value(json!({"name":"hermes-acp","program":launcher,
+            "args":["/agent/hermes-acp"],"reserve":"1","charge":"1","systemdScope":true})).unwrap()];
+        assert!(require_launchers(&rt.config,Manager::System,Manager::User).unwrap_err().contains("launch-gate"));
+        fs::write(&launcher,format!("#!/bin/sh\ncase \"$1\" in\n--launch-gate-protocol) printf 'mini-grain-launch-gate-v1\\n';;\n--controller-manager-protocol) printf '{}\\n';;\n*) exit 64;;\nesac\n",PROTOCOL)).unwrap();
+        require_launchers(&rt.config,Manager::System,Manager::User).unwrap();
+        fs::write(&launcher,"#!/bin/sh\nprintf 'mini-grain-launch-gate-v1\\n'\n").unwrap();
+        assert!(require_launchers(&rt.config,Manager::System,Manager::User).unwrap_err().contains("controller lifetime"));
+        require_launchers(&rt.config,Manager::User,Manager::User).unwrap();
+        fs::remove_file(&launcher).unwrap();
+        rt.config.commands[0].systemd_scope=false;
+        require_launchers(&rt.config,Manager::System,Manager::User).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn worker_names_cannot_choose_unrelated_units() {
