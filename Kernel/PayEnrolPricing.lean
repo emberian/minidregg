@@ -51,7 +51,7 @@ def pricingCommitment (semantics : Digest) (tariff : Tariff)
     (digestStream.encode semantics ++ tariffStream.encode tariff ++
       (StreamCodec.list StreamCodec.nat).encode (creationTerms creation) ++
       CanonicalRuntimeProfile.factoryTemplateStream.encode template ++
-      [match mode with | .enroll => 1 | .renew => 2] ++
+      ([match mode with | .enroll => 1 | .renew => 2] : List UInt8) ++
       (StreamCodec.list StreamCodec.nat).encode (quoteTerms quote))).digest
 
 /-- A new purchase chooses the smallest atomic transfer covering the requested
@@ -71,13 +71,18 @@ theorem quotePurchase_split (tariff : Tariff) (birthFee weeks starter : Nat)
   exact ⟨split.2.2.2.2.2.1, split.2.2.2.2.2.2⟩
 
 private def fixtureTariff : Tariff :=
-  { exampleTariff with creditPerAtomic := 1, maxPerObservation := 100000,
-    nodeHourRate := 1, enrolIndex := some 0, journalFloor := 1 }
+  { exampleTariff with
+    creditPerAtomic := 1
+    maxPerObservation := 100000
+    nodeHourRate := 1
+    enrolIndex := some 0
+    journalFloor := 1 }
 
 /-- The intended useful starting bundle is one week plus 347 spendable credits;
 those credits are not silently converted into additional membership. -/
 theorem useful_starter_survives :
-    quotePurchase fixtureTariff 7 1 347 = .ok ⟨522, 522, 7, 1, 168, 347, 347⟩ := by decide
+    quotePurchase fixtureTariff 7 1 347 = .ok ⟨522, 522, 7, 1, 168, 347, 347⟩ := by
+  set_option maxRecDepth 2048 in decide
 
 #assert_axioms quotePurchase_split
 #assert_axioms useful_starter_survives

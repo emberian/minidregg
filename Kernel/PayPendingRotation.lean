@@ -30,7 +30,9 @@ def ownerAuthority (owner : PendingOwner) : Store CredentialAuthorityState.layou
     ⟨.subjectKey, (subject, owner.epoch)⟩ (some (ownerRecord owner))
 
 def successorRecord (owner : PendingOwner) (rotation : PayClaimCommand.RotatePendingOwner) : KeyRecord :=
-  { ownerRecord owner with publicKey := rotation.successorKey, keyEpoch := owner.epoch + 1,
+  { ownerRecord owner with
+    publicKey := rotation.successorKey
+    keyEpoch := owner.epoch + 1
     nextKeyDigest := some rotation.successorNextKeyDigest }
 
 def rotationOf (owner : PendingOwner) (rotation : PayClaimCommand.RotatePendingOwner) :
@@ -72,7 +74,7 @@ def decide (pay : PayCell.PayStore) (authority : Store CredentialAuthorityState.
       else
         match KeyPreRotation.gate SubjectKeyRotation.nextKeyDigest (ownerAuthority owner)
             (rotationOf owner rotation)
-            (fun key => _root_.decide (key = rotation.successorKey) && checked.valid) with
+            (fun key => if key = rotation.successorKey then checked.valid else false) with
         | .error reason => .error (.gate reason)
         | .ok _ => .ok (PayEnrolClaim.rotatedOwner owner rotation.successorKey
             rotation.successorNextKeyDigest)
@@ -135,8 +137,11 @@ theorem patch_preserves_previous_history (pay : PayCell.PayStore) (before after 
       before.identityKey before.epoch =
       PayCell.pendingOwnerHistoryAt pay before.identityKey before.epoch := by
   apply Patch.run_frame
-  simp [patch, Patch.writeFootprint, Op.writeAddress?, Op.address,
-    PayCell.pendingOwnerHistoryAddress, different]
+  simp only [patch, Patch.writeFootprint, Op.writeAddress?, Op.address,
+    PayCell.pendingOwnerHistoryAddress]
+  simp
+  intro same
+  exact different (congrArg Prod.snd same)
 
 /-- The source gate, rather than an alternative custody-specific crypto recipe,
 requires the exact previously committed successor and its possession signature. -/

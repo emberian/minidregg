@@ -12,6 +12,7 @@ same canonical cell laws and the one-cell authority loader used by turns.
 Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
+import Compiler.WorldExecutionContract
 import Kernel.ResourceBirthPolicyController
 import Kernel.PayClaimLaw
 import Theory.AssertAxioms

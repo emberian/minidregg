@@ -84,7 +84,10 @@ theorem fresh_exact (clock : ClockCell.Clock) (evidence : Option ChainTip)
   cases evidence with
   | none => cases accepted
   | some seen =>
-    unfold fresh at accepted
+    change (if ¬valid seen then Except.error FreshnessReject.malformed
+      else if clock.now < seen.blockTime then Except.error FreshnessReject.future
+      else if seen.blockTime + maxLagSeconds < clock.now then Except.error FreshnessReject.stale
+      else Except.ok seen) = Except.ok tip at accepted
     split at accepted
     · cases accepted
     rename_i shaped
