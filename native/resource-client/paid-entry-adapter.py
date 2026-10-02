@@ -146,9 +146,10 @@ def consumed(status, record, subject=None):
     return status['entry']['subject']
 
 
-def artifacts(root):
+def artifacts(root, exclude=()):
     # Custody keys remain private in member homes, not copied into hook evidence.
-    return [dict(path=str(path), sha256=digest(path)) for path in sorted(root.rglob('*')) if path.is_file()]
+    return [dict(path=str(path), sha256=digest(path)) for path in sorted(root.rglob('*'))
+            if path.is_file() and not any(path.is_relative_to(directory) for directory in exclude)]
 
 
 def provision(request, result_path):
@@ -246,6 +247,14 @@ def provision(request, result_path):
                    PAY_MIN_ENDPOINTS='2', PAY_ENROL_ROUNDS='0')
         env.pop('PAY_RPC_ENDPOINTS', None)
         source.run(label, ['sh', tick_script], env)
+        # The running watcher's cursor/spool can advance on later payments.
+        # Freeze this tick's evidence instead of pinning its mutable state.
+        received = root / 'ticks' / label / 'received'
+        received.mkdir(mode=0o700)
+        for name in ('observations.json', 'events.json', 'watcher.stdout', 'watcher.stderr', 'observe.stdout'):
+            retained = state / 'tick' / name
+            require(retained.is_file(), 'native watcher omitted tick evidence: ' + name)
+            (received / name).write_bytes(retained.read_bytes())
 
     tick('empty-heartbeat')
     members = []
@@ -289,7 +298,7 @@ def provision(request, result_path):
                             observerArtifacts=observer_artifacts))
     require(len({member['subject'] for member in members}) == len(members), 'duplicate paid source subjects')
     save(result_path, dict(type='mini-paid-entry-provision-result-v1', status='pass', rail='synthetic-rpc', identity=source.identity,
-                          request=request, members=members, artifacts=artifacts(root)))
+                          request=request, members=members, artifacts=artifacts(root, exclude=(state,))))
 
 
 def hook(request, state_path, result_path):
