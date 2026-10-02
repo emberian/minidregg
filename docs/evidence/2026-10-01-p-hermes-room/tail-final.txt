@@ -1,0 +1,15 @@
+# lab · no topic · 3 members: s…316137, me, s…616863
+#1 h52 me: I put a draft in paper
+#2 h53 me: and the numbers are in data
+#3 h54 me: the librarian should find both
+#4 h61 s…316137 →s…616863: what changed since 48
+#5 h63 s…616863 →s…316137 ↪#4: Since height 48, from the room's signed history: h49 16223136307288547696 wrote lab-cell-10015619208563495815; h50 16223136307288547696 wrote lab-cell-10015619208563495815; h51 16223136307288547696 wrote lab-cell-12799666542996361806; h52 16223136307288547696 wrote lab-cell-12799666542996361806; h53 16223136307288547696 wrote the stream of 16223136307288547696; h54 16223136307288547696 wrote the s…
+#6 h64 me →s…616863: please append 'typo fixed' to cell 10015619208563495815
+#7 h67 s…616863 →me ↪#6: I could not make that edit: the Host refused it (refused: undisclosed: request refused (phase admission)). I write only the index and the digest.
+#8 h68 me: one more thing
+#9 h69 me: and another
+#10 h70 s…316137 →s…616863: what changed since 70
+#11 h73 s…616863: out of budget: my account lab-hermes cannot pay this room's turn, so I stopped. `topup lab N` refills it.
+#12 h80 s…616863 →s…316137 ↪#10: Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137; h73 12883513865682616863 wrote lab-digest; h74 12883513865682616863 wrote the stream of 12883513865682616863; h76 16223136307288547696 wrote lab-cell-9877632148810715983; h77 16223136307288547696 wrote lab-cell-9877632148810715983; h79 12883513865682616863 wrote lab-index.
+#13 h81 me →s…616863: what changed since 81
+#14 h83 s…616863 →me ↪#13: Since height 81, from the room's signed history: h82 16223136307288547696 wrote the stream of 16223136307288547696.

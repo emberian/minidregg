@@ -1,18 +1,21 @@
 # Shell templates
 
 These are the files that `mini shell` verbs load without changing them. Lane
-P-STORY builds the story verbs on `story/`, and lane P-HERMES-ROOM builds
+P-STORY built the story verbs on `story/`, and lane P-HERMES-ROOM builds
 `summon`, `ask` and `dismiss` on `hermes/`. Each directory's README gives the
 order in which its verb reads its files.
 
 | verb | reads | contract |
 |---|---|---|
-| `story new NAME --from story/DIR` | `DIR/story.json`, `DIR/scene/*.md`, `DIR/init.state.json`, `DIR/law.management.open*`, `DIR/law.state*`, `DIR/law.scene*` | `story/README.md` |
-| `room invite STORY S player` | `DIR/init.player.json`, `DIR/law.management.open*`, `DIR/law.player*`, `story.json` `grants.player` | `story/README.md` |
-| `look` / `go N` / `take ITEM` | `story.json` `fields`, `items`, `scenes` | `story/README.md` ("The moves, as writes") |
-| `story seal STORY` | `DIR/law.management.sealed*`, plus each cell's `law.*` | `story/README.md` |
-| `summon ROOM as librarian\|gm\|runner [--budget N]` | `hermes/ROLE/budget.json`, `grants.json`, `program.md` | `hermes/README.md` |
-| `dismiss ROOM` | `hermes/ROLE/grants.json` (the grants to revoke) | `hermes/README.md` |
+| `story new NAME --from tale\|@FILE` | `story/tale/table` (compiled into `mini`) or `HOME/requests/FILE`; runs `room/story/template.shell` | `story/README.md` |
+| `story seal NAME` / `story invite NAME S` / `look` / `go` / `take` / `act` / `narrate` | the table document; the law each player's cell carries is generated from it (`story/tale/law.player*`, `scripts/gen-storylaw.py`) | `story/README.md` |
+| `summon ROOM as librarian\|runner [--budget N]` (gm: marked for MUD-GM) | `hermes/ROLE/budget.json`, `grants.json`, `program.md` (compiled into `mini`) | `hermes/README.md` |
+| `ask ROOM TEXT` | the room cell's `hermes` field (a signed read) | `hermes/README.md` |
+| `dismiss ROOM` | the summon record `HOME/hermes/ROOM.json` (the grants it made) | `hermes/README.md` |
+| `room new NAME --template workroom\|social\|story` | `room/T/template.shell` (compiled into `mini`; `room template show T` prints it) | `room/README.md` |
+| `room welcome NAME SUBJECT --template social` | `room/social/member.shell` | `room/README.md` |
+| `chat new ROOM` / `chat invite ROOM S` | `room/chat/law.author.json` (compiled into `mini`; `@SUBJECT` = the founder, or S) | `room/chat/README.md` |
+| `room new NAME --private` | `room/private/law.room.json` (the room), `room/private/law.keys.json` (its keys cell, `@FOUNDER` replaced) — compiled into the client with `include_str!` | `room/private/README.md` |
 | `market open NAME CLOSE REVEAL-END SUPPLY` | `market/sealed/law.market` (bound in the client, `market.rs`), `market/sealed/fields.json` | `Kernel/SealedMarket.lean` (the law's source; `law.market` is its rendering, `scripts/SealedMarketTemplate.lean`) |
 
 `law.X` is the §2.6 one-line grammar. `law.X.json` is the same predicate as
@@ -75,13 +78,11 @@ artifacts), or ASSUMED (my choice or inference, not checked).
    with newlines treated as whitespace. One form is extrapolated: `verb in {…}`
    (from `field N in {…}`). It renders to `memberOf "request/verb"`.
    `field N monotone|writeOnce` renders to the `/after` slot (item 1).
-8. **ASSUMED: names.** `R/x` is not a valid workspace name, because names allow
-   only letters, digits and hyphens (`workspace.rs:68-77`). The templates spell
-   `R/state` as `{STORY}-state`, `R/scene/n` as `{STORY}-scene-{N}`,
-   `R/player/S` as `{STORY}-player-{S}`, `R/index` as `{ROOM}-index`, and a
-   stream as `{ROOM}-stream-{S}`. K-ROOM may choose other names; then the
-   `cells` object in `story.json` and the names in `grants.json` change, and
-   nothing else does.
+8. **READ: names.** A reference name is a word (letters, digits, hyphens) or
+   words joined by `/` under a room (`lab/index`; `workspace.rs`
+   `validate_ref_name`, stored as `refs/lab.index.json`). These story
+   templates still spell their cells `{STORY}-state`, `{STORY}-scene-{N}`,
+   `{STORY}-player-{S}`; the room templates (`room/`) use `$ROOM/index`.
 9. **ASSUMED: scene docs are content cells.** They are written by whatever
    doc verb the room lanes build: the client accepts content
    `createAtom`/`createDocument`/`createRun` only (`workspace.rs:580-605`), and

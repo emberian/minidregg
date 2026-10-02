@@ -44,8 +44,11 @@ implies of an (old, new) pair holds of every admitted leg whose installed law is
 import Pred.Core
 import Kernel.DeclaredResourceController
 import Kernel.LawView
+import Kernel.LawHistory
 
 namespace Minidregg.Assurance.SheetLaw
+
+open Minidregg.Kernel.LawHistory (stepsOf final Accepted authorized_policy_eval checked_leg_policy_eval)
 
 open Minidregg.Pred (Pred State eval)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName pairName scalarSlots)
@@ -611,34 +614,6 @@ theorem owner_cannot_raise_alive (p : Params) (o n : State) (distinct : p.S ≠ 
 section History
 open Minidregg.Kernel.DeclaredResourceProjection (get)
 
-/-- The (pre, turn) pairs of a log started at `v`: each turn's pre-state is the previous post. -/
-def stepsOf : Values → List Turn → List (Values × Turn)
-  | _, [] => []
-  | v, t :: ts => (v, t) :: stepsOf t.post ts
-
-/-- The field store after the whole log. -/
-def final : Values → List Turn → Values
-  | v, [] => v
-  | _, t :: ts => final t.post ts
-
-/-- A cell's write history: every step is a mutate (verb 2) the law admits from the state the
-previous step left. (The durable CAS is what makes each step's pre the previous post; a turn
-prepared against an older root is refused `staleReadGuard` before the law is read,
-`DurableDataIntent.stale_read_guard_rejected`.) -/
-def Accepted (law : Pred) (v : Values) (ts : List Turn) : Prop :=
-  ∀ s ∈ stepsOf v ts, s.2.verb = 2 ∧ admits law s.1 s.2 = true
-
-instance (law : Pred) (v : Values) (ts : List Turn) : Decidable (Accepted law v ts) := by
-  unfold Accepted; infer_instance
-
-theorem Accepted.tail {law : Pred} {v : Values} {t : Turn} {ts : List Turn}
-    (h : Accepted law v (t :: ts)) : Accepted law t.post ts :=
-  fun s hs => h s (by simp [stepsOf, hs])
-
-theorem Accepted.head {law : Pred} {v : Values} {t : Turn} {ts : List Turn}
-    (h : Accepted law v (t :: ts)) : t.verb = 2 ∧ admits law v t = true :=
-  h (v, t) (by simp [stepsOf])
-
 /-- **`deaths` never falls along an accepted history** (clause 4, by induction over the log). -/
 theorem deaths_monotone_over_history (p : Params) :
     ∀ (v : Values) (ts : List Turn), Accepted (sheetLaw p) v ts →
@@ -755,36 +730,9 @@ open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Theory.TypedAuthorization
 
-/-- Any value of the canonical `Authorized` type forces the resolved committed predicate to hold on
-the bound step context. -/
-theorem authorized_policy_eval {F : Type} [Field F] [DecidableEq F]
-    (config : CanonicalPolicyConfig F) (context : PolicyStepContext)
-    (canonical : config.stepBinding = .canonical context)
-    {state : AuthState} {kind : ResourceKind} {request : Request kind}
-    (authorized : Authorized config.portal state request) :
-    ∃ committed, config.registry.resolve request.policyId request.policyRevision = some committed ∧
-      eval committed.record.predicate context.oldState context.newState = true := by
-  have verified := authorized.policyVerified
-  rw [portal_verifyCommittedPolicy, Bool.and_eq_true] at verified
-  exact (canonical_context_verifies_sound context canonical verified.2).2.2.2
-
 variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
   {durable : Durable} {command : Command}
-
-/-- **Every checked leg satisfies its installed law** on the controller's own step context. -/
-theorem checked_leg_policy_eval
-    {prepared : PreparedInvocation deployment profile ambient durable command}
-    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
-    (leg : CheckedLeg prepared tuple incidence envelope) :
-    ∃ committed, (policyConfig prepared tuple incidence).registry.resolve
-        (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed ∧
-      eval committed.record.predicate (step prepared tuple incidence).oldState
-        (step prepared tuple incidence).newState = true := by
-  have authorized : Authorized (policyConfig prepared tuple incidence).portal
-      prepared.authority.snapshot.authState (tuple.request incidence).2 := by
-    with_unfolding_all exact leg.authorization
-  exact authorized_policy_eval _ _ rfl authorized
 
 /-- The leg's installed law is the sheet law at `p`. -/
 def SheetInstalled (p : Params)
@@ -1018,10 +966,6 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms dead_stays_dead_without_clock
 /-- info: 'Minidregg.Assurance.SheetLaw.owner_alive_monotone_over_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_alive_monotone_over_history
-/-- info: 'Minidregg.Assurance.SheetLaw.authorized_policy_eval' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms authorized_policy_eval
-/-- info: 'Minidregg.Assurance.SheetLaw.checked_leg_policy_eval' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms checked_leg_policy_eval
 /-- info: 'Minidregg.Assurance.SheetLaw.sheet_leg_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sheet_leg_admitted
 /-- info: 'Minidregg.Assurance.SheetLaw.kernel_stranger_write_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/

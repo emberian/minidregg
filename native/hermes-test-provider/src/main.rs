@@ -44,6 +44,9 @@ enum Mode {
     ContentReceipt8801,
     ContentStale8901,
     ContentBirth9301,
+    /// `--room-librarian`: the librarian program, deterministically, over
+    /// the room tools (PLACE §2.7, J14).
+    RoomLibrarian,
 }
 
 fn decimal(value: &str) -> bool {
@@ -779,6 +782,269 @@ fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str,
         "tool_calls", "peer read workroom".into()))
 }
 
+// ---------------------------------------------------------------- the room librarian
+
+/// The advertised tool whose name is `base`, bare (the room runner) or with
+/// Hermes's MCP prefix (`mcp__mini_grain__base`).
+fn room_tool(request: &Value, base: &str) -> Option<String> {
+    request.get("tools")?.as_array()?.iter().find_map(|tool| {
+        let name = tool.pointer("/function/name")?.as_str()?;
+        (name == base || name.ends_with(&format!("__{base}"))).then(|| name.to_owned())
+    })
+}
+
+/// A tool message's content as JSON (`{"ok":…}` or `{"error":…}`).
+fn room_result(messages: &[Value], id: &str) -> Option<Value> {
+    let content = tool_result(messages, id)?.get("content")?;
+    match content {
+        Value::String(text) => nested_json(text),
+        other => Some(other.clone()),
+    }
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let cut: String = text.chars().take(max).collect();
+    format!("{cut}…")
+}
+
+/// The digits after `word ` in `text` (`since 12`, `cell 501`).
+fn number_after(text: &str, word: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let at = lower.find(&format!("{word} "))? + word.len() + 1;
+    let digits: String = lower[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    (!digits.is_empty()).then_some(digits)
+}
+
+/// The text between the first pair of matching quotes.
+fn quoted(text: &str) -> Option<String> {
+    for q in ['\'', '"'] {
+        if let Some(start) = text.find(q) {
+            if let Some(len) = text[start + 1..].find(q) {
+                return Some(text[start + 1..start + 1 + len].to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// The highest entry number a digest's sections cover (`entries #A-#B:`).
+fn digest_covered(text: &str) -> u64 {
+    text.match_indices("entries #")
+        .filter_map(|(at, _)| {
+            let rest = &text[at + "entries #".len()..];
+            let (_, after) = rest.split_once("-#")?;
+            after.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// A deterministic librarian that follows the librarian program document: it
+/// decides only from the signed reads in this attach's tool results (no
+/// memory between attaches), so a restarted controller gets the same plan.
+/// Round 1 reads (room ls, index, digest, tail); round 2 reads the history
+/// for each unanswered "since H" question; round 3 writes (index links for
+/// unlinked documents, a digest section every N entries, answers, an edit a
+/// member asked for); round 4 reports each refused edit in the stream.
+fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
+    let model = request.get("model").and_then(Value::as_str).ok_or("model absent")?;
+    if model != MODEL {
+        return Err(format!("unexpected model {model}"));
+    }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let user = messages
+        .iter()
+        .rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("attach brief absent")?;
+    let brief: Value = messages[user]
+        .get("content")
+        .and_then(Value::as_str)
+        .and_then(|t| serde_json::from_str(t).ok())
+        .ok_or("the attach brief is not JSON")?;
+    let me = brief.get("me").and_then(Value::as_str).ok_or("brief.me absent")?.to_owned();
+    let docs: Vec<String> = brief["docs"].as_array().into_iter().flatten().filter_map(|d| d.as_str().map(str::to_owned)).collect();
+    let index = docs.iter().find(|d| d.ends_with("-index")).cloned().ok_or("brief names no index")?;
+    let digest = docs.iter().find(|d| d.ends_with("-digest")).cloned().ok_or("brief names no digest")?;
+    let program = brief.get("program").and_then(Value::as_str).unwrap_or("").to_owned();
+    let every: usize = brief.get("every").and_then(Value::as_str).and_then(|e| e.parse().ok()).unwrap_or(3);
+    let current = &messages[user..];
+    let issued: Vec<String> = current
+        .iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .flat_map(|m| m.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default())
+        .filter_map(|c| c.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let tool = |base: &str| room_tool(request, base).ok_or_else(|| format!("{base} is not advertised"));
+    let calls = |list: Vec<Value>, stage: String| -> Result<(Value, &'static str, String), String> {
+        Ok((json!({"role":"assistant","content":null,"tool_calls":list}), "tool_calls", stage))
+    };
+    let done = |text: String, stage: &str| -> Result<(Value, &'static str, String), String> {
+        Ok((json!({"role":"assistant","content":text}), "stop", stage.to_owned()))
+    };
+    // Round 1: read the room.
+    if !issued.iter().any(|id| id == "ls") {
+        return calls(
+            vec![
+                call(tool("mini_room_ls")?, "ls", json!({})),
+                call(tool("mini_doc_show")?, "index", json!({"doc":index})),
+                call(tool("mini_doc_show")?, "digest", json!({"doc":digest})),
+                call(tool("mini_stream_tail")?, "tail", json!({"n":"100"})),
+            ],
+            "read".into(),
+        );
+    }
+    let ok = |id: &str| -> Result<Value, String> {
+        let result = room_result(current, id).ok_or_else(|| format!("no result for {id}"))?;
+        result.get("ok").cloned().ok_or_else(|| format!("{id} failed: {}", result.get("error").unwrap_or(&Value::Null)))
+    };
+    let ls = ok("ls")?;
+    let tail = ok("tail")?;
+    let index_links: Vec<String> = ok("index")?["links"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_owned)).collect();
+    let digest_text = ok("digest")?["text"].as_str().unwrap_or("").to_owned();
+    let entries: Vec<Value> = tail["entries"].as_array().cloned().unwrap_or_default();
+    let cells: Vec<Value> = ls["cells"].as_array().cloned().unwrap_or_default();
+    let name_of_cell = |cell: &str| -> String {
+        cells
+            .iter()
+            .find(|c| c["cell"] == cell)
+            .map(|c| {
+                if c["room"] == json!(true) {
+                    "the room".to_owned()
+                } else if let Some(owner) = c["streamOf"].as_str() {
+                    format!("the stream of {owner}")
+                } else {
+                    c["names"].get(0).and_then(Value::as_str).unwrap_or(cell).to_owned()
+                }
+            })
+            .unwrap_or_else(|| cell.to_owned())
+    };
+    let n_of = |e: &Value| e["n"].as_u64().unwrap_or(0);
+    let answered = |n: u64| entries.iter().any(|e| e["author"].as_str() == Some(me.as_str()) && e["re"].as_u64() == Some(n));
+    let asks: Vec<&Value> = entries
+        .iter()
+        .filter(|e| e["kind"] == "say" && e["to"].as_str() == Some(me.as_str()) && e["author"].as_str() != Some(me.as_str()))
+        .filter(|e| !answered(n_of(e)))
+        .collect();
+    // Round 2: the history each "since H" question needs.
+    let mut history = Vec::new();
+    for ask in &asks {
+        if let Some(height) = number_after(ask["text"].as_str().unwrap_or(""), "since") {
+            let id = format!("hist-{}", n_of(ask));
+            if !issued.contains(&id) {
+                history.push(call(tool("mini_room_ls")?, &id, json!({"since":height})));
+            }
+        }
+    }
+    if !history.is_empty() {
+        return calls(history, "history".into());
+    }
+    let wrote = issued.iter().any(|id| ["link-", "digest-", "answer-", "edit-", "other-"].iter().any(|p| id.starts_with(p)));
+    if !wrote {
+        let mut writes = Vec::new();
+        // The index: every document under the room, linked once.
+        for cell in &cells {
+            let names: Vec<&str> = cell["names"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            let target = cell["cell"].as_str().unwrap_or("");
+            if cell["room"] == json!(true) || cell["stream"] == json!(true) || names.is_empty() {
+                continue;
+            }
+            if names.iter().any(|n| *n == index || *n == digest || *n == program) || index_links.iter().any(|l| l == target) {
+                continue;
+            }
+            writes.push(call(tool("mini_doc_link")?, &format!("link-{target}"), json!({"from":index,"to":names[0]})));
+        }
+        // The digest: a section every `every` entries by others.
+        let covered = digest_covered(&digest_text);
+        let fresh: Vec<&Value> = entries
+            .iter()
+            .filter(|e| e["kind"] == "say" && e["author"].as_str() != Some(me.as_str()) && n_of(e) > covered)
+            .collect();
+        if fresh.len() >= every {
+            let first = n_of(fresh[0]);
+            let last = n_of(fresh[fresh.len() - 1]);
+            let items: Vec<String> = fresh
+                .iter()
+                .map(|e| format!("{} said \"{}\" (#{})", e["name"].as_str().or(e["author"].as_str()).unwrap_or("?"), clip(e["text"].as_str().unwrap_or(""), 60), n_of(e)))
+                .collect();
+            writes.push(call(tool("mini_doc_append")?, &format!("digest-{last}"),
+                json!({"doc":digest,"text":format!("entries #{first}-#{last}: {}", items.join("; "))})));
+        }
+        // Questions.
+        for ask in &asks {
+            let n = n_of(ask);
+            let asker = ask["author"].as_str().unwrap_or("").to_owned();
+            let text = ask["text"].as_str().unwrap_or("");
+            if let Some(height) = number_after(text, "since") {
+                let hist = ok(&format!("hist-{n}"))?;
+                let lines: Vec<String> = hist["entries"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|e| {
+                        let wrote: Vec<String> = e["cells"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|c| name_of_cell(c)).collect();
+                        format!("h{} {} wrote {}", e["height"].as_str().unwrap_or("?"), e["subject"].as_str().unwrap_or("?"), wrote.join(", "))
+                    })
+                    .collect();
+                let answer = if lines.is_empty() {
+                    format!("Nothing was written in this room above height {height}.")
+                } else {
+                    clip(&format!("Since height {height}, from the room's signed history: {}.", lines.join("; ")), 2500)
+                };
+                writes.push(call(tool("mini_say")?, &format!("answer-{n}"), json!({"text":answer,"to":asker,"re":n.to_string()})));
+            } else if let Some(cell) = number_after(text, "cell") {
+                let doc = cells
+                    .iter()
+                    .find(|c| c["cell"] == cell.as_str())
+                    .and_then(|c| c["names"].get(0).and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("cell-{cell}"));
+                let line = quoted(text).unwrap_or_else(|| format!("edit asked for by {asker}"));
+                writes.push(call(tool("mini_doc_append")?, &format!("edit-{n}"), json!({"doc":doc,"text":line})));
+            } else {
+                writes.push(call(tool("mini_say")?, &format!("other-{n}"), json!({"to":asker,"re":n.to_string(),
+                    "text":"I answer \"what changed since HEIGHT\" from this room's signed history, and I keep the index and the digest."})));
+            }
+        }
+        if writes.is_empty() {
+            return done("Nothing to do: the index links every document, the digest is current, and no question is open.".into(), "idle");
+        }
+        let stage = format!("write {}", writes.iter().filter_map(|c| c["id"].as_str()).collect::<Vec<_>>().join(","));
+        return calls(writes, stage);
+    }
+    // After the writes: out of budget stops the attach; a refused edit is reported.
+    let out_of_budget = issued.iter().any(|id| {
+        room_result(current, id)
+            .and_then(|r| r.get("error").and_then(Value::as_str).map(|e| e.contains("out of budget")))
+            .unwrap_or(false)
+    });
+    if out_of_budget {
+        return done("Out of budget: I stopped; `topup` refills my account.".into(), "out-of-budget");
+    }
+    let mut reports = Vec::new();
+    for id in issued.iter().filter(|id| id.starts_with("edit-")) {
+        let n = id.trim_start_matches("edit-").to_owned();
+        let report = format!("refusal-{n}");
+        if issued.contains(&report) {
+            continue;
+        }
+        if let Some(error) = room_result(current, id).and_then(|r| r.get("error").and_then(Value::as_str).map(str::to_owned)) {
+            let asker = entries.iter().find(|e| e["n"].as_u64().map(|v| v.to_string()) == Some(n.clone()))
+                .and_then(|e| e["author"].as_str()).unwrap_or("").to_owned();
+            let first = error.lines().next().unwrap_or("").to_owned();
+            reports.push(call(tool("mini_say")?, &report, json!({"to":asker,"re":n,
+                "text":format!("I could not make that edit: the Host refused it ({}). I write only the index and the digest.", clip(&first, 300))})));
+        }
+    }
+    if !reports.is_empty() {
+        return calls(reports, "report".into());
+    }
+    let writes = issued.iter().filter(|id| !["ls", "index", "digest", "tail"].contains(&id.as_str()) && !id.starts_with("hist-")).count();
+    done(format!("Attach done: {writes} writes."), "done")
+}
+
 fn write_http(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) -> io::Result<()> {
     write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())?;
     stream.write_all(body)?;
@@ -899,6 +1165,12 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
         None => "none".to_owned(),
         Some(value) => format!("sha256:{}", sha256_hex(value.as_bytes())),
     };
+    if matches!(mode, Mode::RoomLibrarian) {
+        // The request's own id, logged as it arrives (before any reply is
+        // written): the count a controller's "never resent" is checked against.
+        let id = request.get("user").and_then(Value::as_str).unwrap_or("-");
+        log_event(log, &format!("received id={id} bytes={size}")).map_err(|e| e.to_string())?;
+    }
     if matches!(mode, Mode::RouteProbe) {
         let id = format!("chatcmpl-mini-route-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
         let body = json!({"id":id,"object":"chat.completion","created":1,"model":request.get("model"),
@@ -929,6 +1201,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
         }),
         Mode::ContentStale8901 => stale_8901_reply_for(&request),
         Mode::ContentBirth9301 => birth_reply_for(&request),
+        Mode::RoomLibrarian => room_reply_for(&request),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -967,7 +1240,8 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     // A metered fixture also names the bearer it was paid with (as a digest),
     // so a journey can prove which payer a route used.
     let paid = if matches!(mode, Mode::MeteredUsage) { format!(" auth={auth}") } else { String::new() };
-    log_event(log, &format!("completion bytes={size} stream={streaming} stage={stage}{paid}"))
+    let id = request.get("user").and_then(Value::as_str).unwrap_or("-");
+    log_event(log, &format!("completion id={id} bytes={size} stream={streaming} stage={stage}{paid}"))
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -999,6 +1273,7 @@ fn main() -> Result<(), String> {
         Some("--content-receipt-8801") => Mode::ContentReceipt8801,
         Some("--content-stale-8901") => Mode::ContentStale8901,
         Some("--content-birth-9301") => Mode::ContentBirth9301,
+        Some("--room-librarian") => Mode::RoomLibrarian,
         Some(_) => return Err("unknown fixture mode".into()),
     };
     let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {
@@ -1401,5 +1676,102 @@ mod tests {
              "content":"{\"grain\":{\"task\":\"7804\"},\"targetRoot\":\"789\"}"}
         ]));
         assert_eq!(peer_reply_for(&correct_receipt, false).unwrap().1, "stop");
+    }
+
+    fn room_request(messages: Value) -> Value {
+        let tools: Vec<Value> = ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_show", "mini_doc_link", "mini_doc_append"]
+            .iter().map(|n| json!({"type":"function","function":{"name":n}})).collect();
+        json!({"model":MODEL,"messages":messages,"tools":tools,"user":"hermes-room-1"})
+    }
+
+    fn brief() -> Value {
+        json!({"role":"user","content":json!({"me":"42","docs":["lab-index","lab-digest"],"program":"lab-hermes-librarian","every":"3"}).to_string()})
+    }
+
+    fn tool_msg(id: &str, value: Value) -> Value {
+        json!({"role":"tool","tool_call_id":id,"content":value.to_string()})
+    }
+
+    fn calls_of(reply: &Value) -> Vec<(String, String, Value)> {
+        reply["tool_calls"].as_array().unwrap().iter().map(|c| (
+            c["id"].as_str().unwrap().to_owned(),
+            c["function"]["name"].as_str().unwrap().to_owned(),
+            serde_json::from_str(c["function"]["arguments"].as_str().unwrap()).unwrap())).collect()
+    }
+
+    #[test]
+    fn the_librarian_reads_then_links_digests_answers_and_reports_a_refused_edit() {
+        let first = room_reply_for(&room_request(json!([{"role":"system","content":"program"}, brief()]))).unwrap();
+        let reads: Vec<String> = calls_of(&first.0).into_iter().map(|c| c.0).collect();
+        assert_eq!(reads, ["ls", "index", "digest", "tail"]);
+        let assistant = first.0.clone();
+        let ls = json!({"ok":{"cells":[
+            {"cell":"500","names":["lab"],"room":true,"stream":false},
+            {"cell":"501","names":["lab-cell-501"],"room":false,"stream":false},
+            {"cell":"502","names":["lab-cell-502"],"room":false,"stream":false},
+            {"cell":"503","names":["lab-index"],"room":false,"stream":false},
+            {"cell":"504","names":["lab-cell-504"],"room":false,"stream":true,"streamOf":"7"}]}});
+        let tail = json!({"ok":{"entries":[
+            {"n":1,"author":"7","name":"7","kind":"say","text":"one","to":null,"re":null},
+            {"n":2,"author":"7","kind":"say","text":"two","to":null,"re":null},
+            {"n":3,"author":"7","kind":"say","text":"what changed since 12","to":"42","re":null},
+            {"n":4,"author":"8","kind":"say","text":"please append 'typo fixed' to cell 501","to":"42","re":null}]}});
+        let mut messages = vec![json!({"role":"system","content":"program"}), brief(), assistant,
+            tool_msg("ls", ls), tool_msg("index", json!({"ok":{"links":["502"],"text":""}})),
+            tool_msg("digest", json!({"ok":{"links":[],"text":"entries #1-#0: none"}})), tool_msg("tail", tail)];
+        let second = room_reply_for(&room_request(json!(messages.clone()))).unwrap();
+        let hist = calls_of(&second.0);
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].0, "hist-3");
+        assert_eq!(hist[0].2, json!({"since":"12"}));
+        messages.push(second.0.clone());
+        messages.push(tool_msg("hist-3", json!({"ok":{"entries":[{"height":"13","subject":"7","cells":["501"]}]}})));
+        let third = room_reply_for(&room_request(json!(messages.clone()))).unwrap();
+        let writes = calls_of(&third.0);
+        let ids: Vec<&str> = writes.iter().map(|w| w.0.as_str()).collect();
+        // 501 is unlinked, 502 already linked; the room, the index and a stream are not documents.
+        assert_eq!(ids, ["link-501", "digest-4", "answer-3", "edit-4"]);
+        assert_eq!(writes[0].2, json!({"from":"lab-index","to":"lab-cell-501"}));
+        assert!(writes[1].2["text"].as_str().unwrap().starts_with("entries #1-#4: "));
+        assert!(writes[2].2["text"].as_str().unwrap().contains("h13 7 wrote lab-cell-501"));
+        assert_eq!(writes[2].2["to"], "7");
+        assert_eq!(writes[3].2, json!({"doc":"lab-cell-501","text":"typo fixed"}));
+        messages.push(third.0.clone());
+        for (id, _, _) in &writes {
+            let result = if id == "edit-4" { json!({"error":"refused: no-grant: the request presents no capability that covers it"}) } else { json!({"ok":{}}) };
+            messages.push(tool_msg(id, result));
+        }
+        let fourth = room_reply_for(&room_request(json!(messages.clone()))).unwrap();
+        let reports = calls_of(&fourth.0);
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, "refusal-4");
+        assert!(reports[0].2["text"].as_str().unwrap().contains("no-grant"));
+        assert_eq!(reports[0].2["to"], "8");
+        messages.push(fourth.0.clone());
+        messages.push(tool_msg("refusal-4", json!({"ok":{}})));
+        let fifth = room_reply_for(&room_request(json!(messages))).unwrap();
+        assert_eq!(fifth.1, "stop");
+    }
+
+    #[test]
+    fn out_of_budget_ends_the_attach() {
+        let tail = json!({"ok":{"entries":[{"n":1,"author":"7","kind":"say","text":"what changed since 3","to":"42","re":null}]}});
+        let calls = json!({"role":"assistant","tool_calls":[{"id":"answer-1","type":"function","function":{"name":"mini_say","arguments":"{}"}}]});
+        let reads = json!({"role":"assistant","tool_calls":[{"id":"ls"},{"id":"index"},{"id":"digest"},{"id":"tail"},{"id":"hist-1"}]});
+        let messages = json!([brief(), reads,
+            tool_msg("ls", json!({"ok":{"cells":[]}})), tool_msg("index", json!({"ok":{"links":[]}})),
+            tool_msg("digest", json!({"ok":{"text":""}})), tool_msg("tail", tail), tool_msg("hist-1", json!({"ok":{"entries":[]}})),
+            calls, tool_msg("answer-1", json!({"error":"out of budget: refused: … bookRefused"}))]);
+        let reply = room_reply_for(&room_request(messages)).unwrap();
+        assert_eq!(reply.2, "out-of-budget");
+    }
+
+    #[test]
+    fn digest_coverage_and_numbers_are_read_from_text() {
+        assert_eq!(digest_covered("x\n  1  created-by 7  entries #1-#3: a; b\n  2  created-by 7  entries #4-#9: c\n"), 9);
+        assert_eq!(digest_covered(""), 0);
+        assert_eq!(number_after("What changed since 120?", "since").as_deref(), Some("120"));
+        assert_eq!(number_after("please fix cell 77", "cell").as_deref(), Some("77"));
+        assert_eq!(quoted("append 'typo fixed' to cell 1").as_deref(), Some("typo fixed"));
     }
 }

@@ -168,17 +168,25 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
 variable {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
   {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
 
-def project (prepared : Prepared context profile wanted marker capability contextBytes)
-    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
-  ⟨Kernel.ClockCell.slots prepared.clock.clock ++
-    CanonicalRuntimeProfile.requestSlots wanted ++
+/-- The law's view of one cell for a request that writes nothing to it: the
+request's slots, the context bytes, the cell's bytes, the account view and the
+cell's resource slots. Observation admission and the room birth gate
+(`Kernel.RoomBirthGate`) read a cell's law through this one projection. -/
+def projectWith (clock : Kernel.ClockCell.Clock) {kind : ResourceKind} (wanted : Request kind) (contextBytes : List UInt8)
+    (physical : CanonicalCellRegistry.Kind) (accountBalances : List (Nat × Int))
+    (logical : Store (CanonicalCellRegistry.layout physical)) : Minidregg.Pred.State :=
+  ⟨Kernel.ClockCell.slots clock ++ CanonicalRuntimeProfile.requestSlots wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 contextBytes ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
-      ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
+      ((CanonicalCellRegistry.materializer physical).codec.encode logical) ++
     ResourceAuthorityProjection.bytesSlots "account/bytes" 0
-      (CanonicalAccountView.balanceStream.encode prepared.accountBalances) ++
-    prepared.accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2)) ++
-    resourceSlots wanted.target.value prepared.observed.before.kind logical⟩
+      (CanonicalAccountView.balanceStream.encode accountBalances) ++
+    accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2)) ++
+    resourceSlots wanted.target.value physical logical⟩
+
+def project (prepared : Prepared context profile wanted marker capability contextBytes)
+    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
+  projectWith prepared.clock.clock wanted contextBytes prepared.observed.before.kind prepared.accountBalances logical
 
 def step (prepared : Prepared context profile wanted marker capability contextBytes) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (project prepared) profile.semantics
@@ -446,9 +454,9 @@ theorem read_law_sees_clock (prepared : Prepared context profile wanted marker c
       Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock ∧
       Kernel.ClockCellDomain.load deployment durable.snapshot = some prepared.clock := by
   refine ⟨?_, ?_, ?_, prepared.clock.clockExact, ?_⟩
-  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
-  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
-  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
   · exact prepared.clockLoaded
 
 /-- **`read_now_slot_exact`** (K-CLOCK's `now_slot_exact` on the read path):

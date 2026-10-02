@@ -6,6 +6,7 @@ their canonical codecs. All unbounded integers are decimal strings.
 import Kernel.NativeHost
 import Host.BirthRuntimeProfile
 import Host.CapabilityInspection
+import Host.InspectRender
 import Kernel.NativeHostGenesis
 import Kernel.AgentGrain
 import Kernel.ProviderRoute
@@ -31,6 +32,7 @@ import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
+import Kernel.SubjectKeyRotation
 import Kernel.ParticipantFactoryProvisioning
 import Kernel.FleetTurn
 import Kernel.PayBookReceiver
@@ -380,6 +382,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .object, "mutate" => pure .mutateObject
   | .object, "delegate" => pure .delegateObject
   | .object, "append" => pure .appendObject
+  | .object, "place" => pure .placeObject
   | .account, "observe" => pure .observeAccount
   | .account, "transfer" => pure .transfer
   | .account, "delegate" => pure .delegateAccount
@@ -516,6 +519,16 @@ private def revocation (path : String) (json : Lean.Json) : Result (List UInt8) 
   let obj ← exactObject path names json
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   revocationFor kind path obj
+
+/-- K-RENOUNCE: `{"subject","nonce","kind","capability"}`. -/
+private def renunciation (path : String) (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject path ["subject", "nonce", "kind", "capability"] json
+  let command : CapabilityRenounce.Command :=
+    { subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+      nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
+      kind := ← resourceKind (path ++ ".kind") (← field path "kind" obj)
+      capability := ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩ }
+  pure (CapabilityRenounce.commandCodec.encode command)
 
 private def action (path : String) (json : Lean.Json) : Result Action := do
   let (tag, _) ← tagged path json
@@ -825,6 +838,15 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
   | "revoke-source" =>
       let obj ← exactObject path ["type", "command"] json
       pure (.revoke (← revocation (path ++ ".command") (← field path "command" obj)))
+  | "renounce" =>
+      let obj ← exactObject path ["type", "command"] json
+      let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
+      match CapabilityRenounce.commandCodec.decode bytes with
+      | some value => pure (.renounce (CapabilityRenounce.commandCodec.encode value))
+      | none => failAt (path ++ ".command") "noncanonical renounce command"
+  | "renounce-source" =>
+      let obj ← exactObject path ["type", "command"] json
+      pure (.renounce (← renunciation (path ++ ".command") (← field path "command" obj)))
   | _ => failAt (path ++ ".type") "unknown draft constructor"
 
 private def grant (path : String) (json : Lean.Json) : Result GrantRef := do
@@ -870,14 +892,18 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
 
 private def keyRecord (path : String) (json : Lean.Json) : Result KeyRecord := do
   let obj ← exactObject path ["keyId", "keyEpoch", "algorithm", "subject", "publicKey",
-    "activeFrom", "activeUntil"] json
+    "activeFrom", "activeUntil", "nextKeyDigest"] json
+  let nextKeyDigest ← match ← field path "nextKeyDigest" obj with
+    | .null => pure none
+    | value => pure (some ⟨← nat (path ++ ".nextKeyDigest") value⟩)
   pure ⟨← nat (path ++ ".keyId") (← field path "keyId" obj),
     ← nat (path ++ ".keyEpoch") (← field path "keyEpoch" obj),
     ← nat (path ++ ".algorithm") (← field path "algorithm" obj),
     ← nat (path ++ ".subject") (← field path "subject" obj),
     ← decodeHex (path ++ ".publicKey") (← field path "publicKey" obj),
     ← nat (path ++ ".activeFrom") (← field path "activeFrom" obj),
-    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj)⟩
+    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj),
+    nextKeyDigest⟩
 
 private def enrollment (path : String) (json : Lean.Json) : Result NativeHostGenesis.Enrollment := do
   let obj ← exactObject path ["key", "accountId", "spendCapabilityId", "controlCapabilityId",
@@ -1449,7 +1475,7 @@ private def birthParts (path : String)
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
-  let roomField := if (raw.get? "room").isSome then ["room"] else []
+  let roomField := if (raw.get? "room").isSome then ["room", "placement"] else []
   let blindingField := if (raw.get? "blinding").isSome then ["blinding"] else []
   -- K-FIELD-CLOSURE: a declared resource names the fields it may hold, or
   -- `"open"`; absent, it declares none and holds none.
@@ -1470,6 +1496,9 @@ private def birthParts (path : String)
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
+  let placement ← match obj.get? "placement" with
+    | none => pure none
+    | some value => (some ∘ CapabilityId.mk) <$> nat (path ++ ".placement") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
       storage = "nock" ∨ storage = "job" do
@@ -1520,7 +1549,7 @@ private def birthParts (path : String)
     | some value => some <$> nat (path ++ ".blinding") value
   let cell ← withBlinding path blinding cell
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
-    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
+    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room, placement⟩
   -- A workspace resource's owner holds it as a room: `under target`, the
   -- resource and everything later born into it.
   let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=
@@ -2487,6 +2516,25 @@ private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) :=
       key := ← keyRecord "$.key" (← field "$" "key" obj) }
   return ParticipantKeyEnrollment.commandCodec.encode command
 
+/-- Source-owned authoring of a subject key rotation command.  These bytes
+claim nothing: admission checks the commitment and the new key's signature. -/
+private def subjectKeyRotation (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "nonce", "key"] json
+  let command : SubjectKeyRotation.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      key := ← keyRecord "$.key" (← field "$" "key" obj) }
+  return SubjectKeyRotation.commandCodec.encode command
+
+/-- The pre-rotation commitment to one public key, as the canonical decimal of
+`SubjectKeyRotation.nextKeyDigest` (UTF-8).  The client never hashes; this is
+the one place the digest is computed for it. -/
+private def signingKeyNextDigest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["publicKey"] json
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  return (toString (SubjectKeyRotation.nextKeyDigest publicKey).value).toUTF8.toList
+
 /-- Source-owned authoring for a factory-observation provisioning request.
 These bytes name a holder and a fresh identifier; they do not claim that the
 holder is enrolled, that the identifier is fresh, or that the sponsor may act. -/
@@ -2770,6 +2818,8 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
+  | "subject-key-rotation" => subjectKeyRotation json
+  | "signing-key-next-digest" => signingKeyNextDigest json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "fleet-turn" => fleetTurnCommand json
   | "pay-book" => payBook json
@@ -2824,6 +2874,10 @@ def author (kind : String) (json : Lean.Json)
   | "revocation-draft" => do
       let bytes ← revocation "$" json
       pure (draftCodec.encode (.revoke bytes))
+  | "renunciation" => renunciation "$" json
+  | "renunciation-draft" => do
+      let bytes ← renunciation "$" json
+      pure (draftCodec.encode (.renounce bytes))
   | "birth" => draftCodec.encode <$> birth "$" json none deployed none none providerRoutes
   | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed providerRoutes
   | "application-birth" => draftCodec.encode <$> applicationBirth "$" json none deployed
@@ -2927,6 +2981,7 @@ private def draftJson : Draft → Lean.Json
       ("control", decimal control.value), ("declaration", hexJson bytes)]
   | .delegate bytes => .mkObj [("type", "delegate"), ("command", hexJson bytes)]
   | .revoke bytes => .mkObj [("type", "revoke"), ("command", hexJson bytes)]
+  | .renounce bytes => .mkObj [("type", "renounce"), ("command", hexJson bytes)]
 
 /-- The plan's authority footprint as (address, value) pairs, both as canonical
 hex (value `null` = absent): the values the signature binds. -/
@@ -2956,7 +3011,10 @@ private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
    ("algorithm", decimal key.algorithm), ("subject", decimal key.subject),
    ("publicKey", hexJson key.publicKey),
    ("activeFrom", decimal key.activeFrom),
-   ("activeUntil", decimal key.activeUntil)]
+   ("activeUntil", decimal key.activeUntil),
+   ("nextKeyDigest", match key.nextKeyDigest with
+      | none => .null
+      | some digest => decimal digest.value)]
 
 private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
   [("version", decimal tariff.version), ("asset", decimal tariff.asset),
@@ -3228,6 +3286,24 @@ def payEnrolDecisionJson (verified : Option PayEnrolDecision.Verified)
 
 /-- The public pay view: roots to pin, tariff, next free index and the
 published deposit book (index order, lowercase hex). -/
+def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
+  [("type", "subject-key-status-v1"),
+   ("subject", decimal subject),
+   ("keyEpoch", decimal status.epoch),
+   ("keyId", decimal status.keyId),
+   ("prerotated", .bool status.prerotated),
+   ("isCurrent", .bool status.isCurrent),
+   ("isCommittedNext", .bool status.isCommittedNext),
+   ("currentRevoked", .bool status.currentRevoked)]
+
+/-- The status query: a subject and one public key the asker holds. -/
+def subjectKeyStatusQuery (json : Lean.Json) : Result (Nat × List UInt8) := do
+  let obj ← exactObject "$" ["subject", "publicKey"] json
+  let subject ← nat "$.subject" (← field "$" "subject" obj)
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  pure (subject, publicKey)
+
 def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
   [("type", "pay-view-v2"),
    ("payRoot", decimal view.payRoot.value),
@@ -3282,6 +3358,14 @@ def payPurseJson (purse : NativeHost.PayPurse) : Lean.Json := .mkObj
    ("status", .str (toString purse.state.status)),
    ("remaining", .str (toString purse.state.remaining)),
    ("reserved", .str (toString purse.state.reserved))]
+
+private def subjectKeyRotationJson
+    (command : SubjectKeyRotation.Command) : Lean.Json := .mkObj
+  [("type", "subject-key-rotation-v1"),
+   ("canonical", hexJson (SubjectKeyRotation.commandCodec.encode command)),
+   ("subject", decimal command.subject.value),
+   ("nonce", decimal command.nonce),
+   ("key", participantKeyRecordJson command.key)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -3879,6 +3963,25 @@ private def streamRecordJson (sequence : Nat) (record : StreamCell.StreamRecord)
     ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
       [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null)]
 
+/-- A tail entry with its text. The reader's own check, over the bytes it holds:
+`payload` is shown only when it reproduces the digest the cell committed
+(`payloadState` "verified"); a payload the view did not carry is "absent", and
+one that does not reproduce the digest is "mismatch" and is not shown. -/
+private def streamTailEntryJson (sequence : Nat) (record : StreamCell.StreamRecord)
+    (payload : Option (List UInt8)) : Lean.Json :=
+  let (state, shown) : String × Lean.Json := match payload with
+    | none => ("absent", .null)
+    | some bytes =>
+        if StreamCell.payloadDigest bytes = record.entry.payloadDigest then ("verified", hexJson bytes)
+        else ("mismatch", .null)
+  .mkObj [("sequence", decimal sequence), ("author", decimal record.author.value),
+    ("height", decimal record.height), ("transaction", decimal record.transaction.value),
+    ("topic", hexJson record.entry.topic), ("payloadDigest", decimal record.entry.payloadDigest.value),
+    ("to", record.entry.recipient.map (fun s => decimal s.value) |>.getD .null),
+    ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
+      [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null),
+    ("payload", shown), ("payloadState", .str state)]
+
 /-- A stream read shows its head; the entries are read by position with `tail`. -/
 private def streamCellJson (root : Digest) (store : StreamCell.HeadStore) : Lean.Json :=
   match StreamCell.headOf store with
@@ -4228,6 +4331,29 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("commandBytes", hexJson plan.commandBytes),
          ("command", payCommandJson plan.commandBytes),
          ("header", signedHeaderJson plan.header)]
+  | "subject-key-rotation" => do
+      let command ← decoded "subject-key-rotation" SubjectKeyRotation.commandCodec bytes
+      pure (subjectKeyRotationJson command)
+  | "subject-key-rotation-plan" => do
+      let plan ← decoded "subject-key-rotation-plan" SubjectKeyRotation.signingPlanCodec bytes
+      let some command := SubjectKeyRotation.commandCodec.decode plan.commandBytes
+        | failAt "subject-key-rotation-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "subject-key-rotation-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", subjectKeyRotationJson command),
+         ("possessionHeader", hexJson plan.possessionHeader)]
+  | "subject-key-rotation-ingress" => do
+      let some parsed := SubjectKeyRotation.decodeIngress bytes
+        | failAt "subject-key-rotation-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "subject-key-rotation-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("command", subjectKeyRotationJson parsed.command),
+         ("possessionSignature", hexJson parsed.ingress.possessionSignature)]
   | "participant-key-enrollment-plan" => do
       let plan ← decoded "participant-key-enrollment-plan"
         ParticipantKeyEnrollment.signingPlanCodec bytes
@@ -4346,7 +4472,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-tail" => do
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
-        ("entries", .arr <| entries.toArray.map fun (k, r) => streamRecordJson k r)]
+        ("entries", .arr <| entries.toArray.map fun (k, r, p) => streamTailEntryJson k r p)]
   | "view-quotes" => quotesJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
@@ -4389,7 +4515,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-tail, view-policy, view-capability, view-who, view-since, or view-at"
+  -- K-INSPECT-VIEWS: renderers over bytes the client holds (Host/InspectRender).
+  | "cap-tree" => InspectRender.capTreeView bytes
+  | "law" => InspectRender.lawView bytes
+  | "why" => InspectRender.whyView bytes
+  | "turn" => InspectRender.turnView "turn" bytes
+  | "receipt" => InspectRender.turnView "receipt" bytes
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-tail, view-policy, view-capability, view-who, view-since, view-at, cap-tree, law, why, turn, or receipt"
 
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
@@ -4424,6 +4556,18 @@ def fleetReceiptLookupJson (transactionId : Nat) (receipt : Option Receipt) : Le
   match receipt with
   | none => .mkObj [("type", "absent"), ("transactionId", decimal transactionId)]
   | some r => .mkObj [("type", "confirmed"), ("receipt", fleetReceiptJson r)]
+
+/-- The incoming ledger view (op 180): fleet turns that paid the observed
+account. Payload bytes are the turn's own signed publication. -/
+def fleetIncomingJson (view : NativeHost.FleetIncomingView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-incoming-v1"), ("subject", decimal view.subject.value),
+   ("account", decimal view.account), ("topic", hexJson view.topic),
+   ("cursor", decimal view.cursor), ("tip", decimal view.tip),
+   ("entries", .arr <| view.entries.toArray.map fun entry => .mkObj
+     [("height", decimal entry.height), ("transactionId", decimal entry.transactionId.value),
+      ("subject", decimal entry.subject.value), ("payer", decimal entry.payer),
+      ("asset", decimal entry.asset), ("amount", decimal entry.amount),
+      ("topic", hexJson entry.topic), ("payload", hexJson entry.payload)])]
 
 /-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
 def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do

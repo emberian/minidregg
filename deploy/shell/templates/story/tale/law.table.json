@@ -1,0 +1,30 @@
+{
+ "predicates": [
+  {
+   "predicates": [
+    {
+     "predicates": [],
+     "type": "any"
+    },
+    {
+     "predicate": {
+      "slot": "request/verb",
+      "type": "eq",
+      "value": "2"
+     },
+     "type": "not"
+    }
+   ],
+   "type": "any"
+  },
+  {
+   "slot": "request/verb",
+   "type": "memberOf",
+   "values": [
+    "1",
+    "2"
+   ]
+  }
+ ],
+ "type": "all"
+}

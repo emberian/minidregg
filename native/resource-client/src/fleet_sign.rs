@@ -20,7 +20,7 @@
 //! else `MINI_PROFILE`, else the `HOME/profiles/ACTIVE` file.
 
 use crate::fleet::{self, field, read_json};
-use crate::{absolute, generate_key, Args, Result, SOCKET};
+use crate::{absolute, generate_key, Args, NextKey, Result, SOCKET};
 use serde_json::{json, Value};
 use std::env;
 use std::ffi::OsString;
@@ -301,7 +301,10 @@ fn join(flags: &Flags) -> Result<Value> {
         .ok_or("join needs the sponsor's workspace: --sponsor-workspace or MINI_FLEET_SPONSOR")?;
     private_dir(&profile.dir)?;
     if !profile.key().exists() {
-        generate_key(&profile.key(), &profile.public(), None)?;
+        // K-PREROTATE: the agent key commits to a next key made beside it
+        // (hosted: the notice says to move it off the box); fleet join's
+        // enrollment plan finds it by the KEY.next.pub convention.
+        generate_key(&profile.key(), &profile.public(), None, NextKey::Beside, true)?;
     }
     let args = Args {
         command: OsString::from("fleet"),

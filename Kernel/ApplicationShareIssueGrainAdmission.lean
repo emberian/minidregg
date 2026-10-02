@@ -94,7 +94,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     let .ok tariff := config.grainBirthTariffValue | return .error refused
     let .ok birth := GrainResourceBirthController.prepareSourceBirth
         profile.compilerProfile profile.disabledEvaluators config.deployment specialPins durable profile.semantics
-        tariff decoded.source | return .error refused
+        tariff decoded.source ambient.height | return .error refused
     if sourceDescriptorBytes :
         CanonicalCellRegistry.sourceEncoding.codec.encode decoded.source.birth =
           CanonicalCellRegistry.sourceEncoding.codec.encode

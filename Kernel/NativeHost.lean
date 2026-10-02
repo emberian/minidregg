@@ -124,7 +124,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           let descriptor ← need "noncanonical birth draft"
             (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
           let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-            profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor).mapError
+            profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor height).mapError
               (fun reason => s!"birth preparation: {repr reason}")
           check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
             "birth source capability count mismatch"
@@ -189,6 +189,16 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
+    | .renounce bytes => do
+        -- The plan reads nothing about the named capability: the signer's key
+        -- record (public) is the only state it consults. The gate runs at
+        -- submission, after the signature verifies.
+        let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
+        let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
+        let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
+          opened.durable command).mapError (fun reason => s!"renounce preparation: {repr reason}")
+        let signature ← slot prepared.authority.snapshot prepared.marker 9 0 ⟨.program, prepared.request⟩
+        pure (.renounce bytes, [signature])
   pure ⟨config.deployment.domain, profile.semantics, opened.durable.worldRoot,
     height, finalized, slots⟩
 
@@ -271,6 +281,44 @@ def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
     ⟨header, sponsorSignature⟩
   pure (ParticipantKeyEnrollment.ingressCodec.encode
     ⟨plan.commandBytes, envelope, possessionSignature⟩)
+
+/-! ## Subject key rotation (pre-rotation)
+
+Public: a rotation needs no capability and no current-key signature, only the
+commitment the subject's current record holds and possession of the committed
+key.  So plan, assembly, submit, lookup and status are open to the friend who
+holds only the next key. -/
+
+/-- Host-authored rotation plan: the exact possession frame the new key signs.
+It prepares the rotation first, assuming that signature, so a rotation the gate
+refuses (a key whose digest is not the commitment, a subject without one) is
+refused here by name. -/
+def rotationPlanLoaded (config : Config) (opened : Opened config)
+    (commandBytes : List UInt8) : Except String SubjectKeyRotation.SigningPlan := do
+  let command ← need "noncanonical subject key rotation command"
+    (SubjectKeyRotation.commandCodec.decode commandBytes)
+  let _ ← (SubjectKeyRotation.prepare config.deployment config.profile.semantics
+    opened.durable command).mapError (fun reason => s!"rotation preparation: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    SubjectKeyRotation.possessionFrame config.deployment.domain config.profile.semantics command⟩
+
+/-- Assembly transports the new key's detached possession signature. -/
+def rotationAssemble (plan : SubjectKeyRotation.SigningPlan)
+    (possessionSignature : List UInt8) : Except String (List UInt8) := do
+  check (decide (possessionSignature.length = 64)) "possession signature must be 64 bytes"
+  let command ← need "noncanonical rotation plan command"
+    (SubjectKeyRotation.commandCodec.decode plan.commandBytes)
+  check (decide (plan.possessionHeader = SubjectKeyRotation.possessionFrame
+    plan.domain plan.semantics command)) "rotation possession frame differs"
+  pure (SubjectKeyRotation.ingressCodec.encode ⟨plan.commandBytes, possessionSignature⟩)
+
+/-- The current key status of `subject` as seen by the holder of `publicKey`. -/
+def keyStatusLoaded (config : Config) (opened : Opened config) (subject : SubjectId)
+    (publicKey : List UInt8) : Except String SubjectKeyRotation.Status := do
+  let authority ← need "authority cell unavailable"
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  need "subject has no current signing key"
+    (SubjectKeyRotation.status authority.snapshot.logical subject publicKey)
 
 /-- Source-authored factory-observation provisioning plan on one verified
 image. The single slot is the sponsor's ordinary current-authority header for
@@ -584,6 +632,10 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       match envelopes with
       | [envelope] => pure (.revoke (CapabilityRevocationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))
       | _ => .error "revocation signing slots mismatch"
+  | .renounce bytes =>
+      match envelopes with
+      | [envelope] => pure (.renounce (CapabilityRenounce.ingressCodec.encode ⟨bytes, envelope⟩))
+      | _ => .error "renounce signing slots mismatch"
 
 /-- The world root after accepted record `index`: at the head it is the served
 image's cached root (one read); an earlier prefix is evaluated from its image
@@ -695,6 +747,33 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
+
+def rotationSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← SubjectKeyRotation.receiveLoaded config.deployment config.profile.semantics
+      config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "rotate-key" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of one rotation ingress. -/
+def rotationLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match SubjectKeyRotation.decodeIngress bytes with
+  | none => refused .malformed "rotate-key" "noncanonical signed ingress"
+  | some ingress =>
+    match SubjectKeyRotation.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+    | none => .absent
 
 def provisionSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
@@ -925,6 +1004,179 @@ def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
         (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
           fun receipt => (record.transactionId, receipt)
       return .ok ⟨subject, payer, paid.length, head⟩
+/-! ## The incoming ledger of an account (op 180)
+
+A fleet turn's topic belongs to the PAYING account (`FleetTurn`, module doc),
+so a payee cannot read who paid it from any topic of its own. Its ledger is a
+read of the accepted journal: every fleet turn whose transfer names the
+observed account as its destination, at the height that record took, released
+behind a current signed observation of that account (the same gate as poll and
+head). A room's concierge renews member windows from this view (PLACE §2.10:
+the room account's `renew` ledger). It is a read; nothing is admitted here. -/
+
+/-- One accepted fleet turn that paid the observed account. `topic` and
+`payload` are the turn's own signed publication (empty when it published
+nothing). -/
+structure FleetIncomingEntry where
+  height : Nat
+  transactionId : Digest
+  subject : SubjectId
+  payer : Nat
+  asset : Nat
+  amount : Nat
+  topic : List UInt8
+  payload : List UInt8
+
+/-- An empty `topic` matches every paying turn; otherwise only turns that
+published on exactly that topic. -/
+def fleetTopicMatches (topic : List UInt8) : Option FleetTurn.Publication → Bool
+  | some publication => topic.isEmpty || publication.topic == topic
+  | none => topic.isEmpty
+
+/-- The ledger entry an accepted record contributes at `height`, if it is a
+fleet turn paying `account` on `topic`. -/
+def fleetIncomingEntry? (account : Nat) (topic : List UInt8) (height : Nat)
+    (record : DurableReceiver.IntentRecord) : Option FleetIncomingEntry :=
+  match FleetTurn.decodeIngress record.event.canonicalBytes with
+  | none => none
+  | some ingress =>
+      match ingress.command.transfer with
+      | none => none
+      | some transfer =>
+          if transfer.destination = account ∧
+              fleetTopicMatches topic ingress.command.publication = true then
+            some ⟨height, record.transactionId, ingress.command.subject, ingress.command.payer,
+              transfer.asset, transfer.amount,
+              (ingress.command.publication.map (·.topic)).getD [],
+              (ingress.command.publication.map (·.payload)).getD []⟩
+          else none
+
+/-- Entries strictly above `after`, the record at list position `i` taking
+height `start + i` (the journal's own height assignment: `sinceFrom`). -/
+def fleetIncomingFrom (account : Nat) (topic : List UInt8) (after : Nat) :
+    Nat → List DurableReceiver.IntentRecord → List FleetIncomingEntry
+  | _, [] => []
+  | height, record :: rest =>
+      (if after < height then (fleetIncomingEntry? account topic height record).toList else []) ++
+        fleetIncomingFrom account topic after (height + 1) rest
+
+/-- **An entry is a payment to the account.** Every entry the record yields
+decodes as a fleet turn whose transfer names `account` as destination, and
+the entry repeats that turn's signer, payer, asset and amount exactly. -/
+theorem fleetIncomingEntry?_sound {account : Nat} {topic : List UInt8} {height : Nat}
+    {record : DurableReceiver.IntentRecord} {entry : FleetIncomingEntry}
+    (found : fleetIncomingEntry? account topic height record = some entry) :
+    ∃ ingress transfer, FleetTurn.decodeIngress record.event.canonicalBytes = some ingress ∧
+      ingress.command.transfer = some transfer ∧ transfer.destination = account ∧
+      entry.height = height ∧ entry.transactionId = record.transactionId ∧
+      entry.subject = ingress.command.subject ∧ entry.payer = ingress.command.payer ∧
+      entry.asset = transfer.asset ∧ entry.amount = transfer.amount := by
+  unfold fleetIncomingEntry? at found
+  split at found
+  · cases found
+  · rename_i ingress decoded
+    split at found
+    · cases found
+    · rename_i transfer paid
+      split at found
+      · rename_i matched
+        cases found
+        exact ⟨ingress, transfer, decoded, paid, matched.1, rfl, rfl, rfl, rfl, rfl, rfl⟩
+      · cases found
+
+/-- **A payment to another account is never listed** (the refuting pole):
+a record whose decoded transfer names a different destination yields nothing. -/
+theorem fleetIncomingEntry?_other_destination {account : Nat} {topic : List UInt8}
+    {height : Nat} {record : DurableReceiver.IntentRecord} {ingress : FleetTurn.DecodedIngress}
+    {transfer : FleetTurn.Transfer}
+    (decoded : FleetTurn.decodeIngress record.event.canonicalBytes = some ingress)
+    (paid : ingress.command.transfer = some transfer) (other : transfer.destination ≠ account) :
+    fleetIncomingEntry? account topic height record = none := by
+  unfold fleetIncomingEntry?
+  rw [decoded]
+  simp only [paid]
+  rw [if_neg (fun both => other both.1)]
+
+/-- **The ledger is exact about what it names**: every entry is above
+`after`, at the height of a record in the log, and is that record's own
+payment to the account. -/
+theorem fleetIncomingFrom_sound {account : Nat} {topic : List UInt8} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {entry : FleetIncomingEntry},
+      entry ∈ fleetIncomingFrom account topic after start log →
+        after < entry.height ∧ ∃ index record, log[index]? = some record ∧
+          entry.height = start + index ∧
+          fleetIncomingEntry? account topic entry.height record = some entry
+  | _, [], _, member => by simp [fleetIncomingFrom] at member
+  | start, record :: rest, entry, member => by
+      simp only [fleetIncomingFrom, List.mem_append] at member
+      rcases member with here | later
+      · split at here
+        next above =>
+          rcases found : fleetIncomingEntry? account topic start record with _ | yielded
+          · rw [found] at here; simp at here
+          · rw [found] at here
+            simp only [Option.toList, List.mem_singleton] at here
+            subst here
+            obtain ⟨_, _, _, _, _, atHeight, _⟩ := fleetIncomingEntry?_sound found
+            refine ⟨atHeight ▸ above, 0, record, rfl, by rw [atHeight]; simp, ?_⟩
+            rw [atHeight]; exact found
+        next => simp at here
+      · obtain ⟨above, index, record', found, height, yields⟩ := fleetIncomingFrom_sound later
+        exact ⟨above, index + 1, record', by simpa using found, by rw [height]; omega, yields⟩
+
+/-- **The ledger misses no payment**: a record of the log above `after` that
+yields an entry at its height is listed. -/
+theorem fleetIncomingFrom_complete {account : Nat} {topic : List UInt8} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {index : Nat}
+      {record : DurableReceiver.IntentRecord} {entry : FleetIncomingEntry},
+      log[index]? = some record → after < start + index →
+      fleetIncomingEntry? account topic (start + index) record = some entry →
+      entry ∈ fleetIncomingFrom account topic after start log
+  | _, [], _, _, _, found, _, _ => by simp at found
+  | start, head :: rest, 0, record, entry, found, above, yields => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst found
+      simp only [Nat.add_zero] at above yields
+      simp [fleetIncomingFrom, above, yields]
+  | start, head :: rest, index + 1, record, entry, found, above, yields => by
+      simp only [List.getElem?_cons_succ] at found
+      have lifted : after < start + 1 + index := by omega
+      have shifted : fleetIncomingEntry? account topic (start + 1 + index) record = some entry := by
+        rw [show start + 1 + index = start + (index + 1) by omega]; exact yields
+      have next := fleetIncomingFrom_complete found lifted shifted
+      simp only [fleetIncomingFrom, List.mem_append]
+      exact Or.inr next
+
+structure FleetIncomingView where
+  subject : SubjectId
+  account : Nat
+  topic : List UInt8
+  cursor : Nat
+  /-- The current logical height (`logicalHeight`): the next record takes `tip + 1`. -/
+  tip : Nat
+  entries : List FleetIncomingEntry
+
+/-- Payments to the observed account above `cursor`, at most `limit`
+(bounded by `fleetPollMax`), behind a current signed observation of that
+account by its reader. -/
+def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+    IO (Except Refusal FleetIncomingView) := do
+  if topic.length > FleetTurn.maxTopicBytes then
+    return .error { reason := .malformed, detail := "fleet topic must be 0..64 bytes" }
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error refusal => return .error refusal
+  | .ok (subject, account) =>
+      let entries := fleetIncomingFrom account topic cursor (config.genesisHeight + 1)
+        opened.durable.image.accepted
+      return .ok ⟨subject, account, topic, cursor, logicalHeight config opened.durable,
+        entries.take (min limit fleetPollMax)⟩
+
+#assert_axioms fleetIncomingEntry?_sound
+#assert_axioms fleetIncomingEntry?_other_destination
+#assert_axioms fleetIncomingFrom_sound
+#assert_axioms fleetIncomingFrom_complete
+
 /-! ## The pay cell (lane P2): session operations 103–107
 
 One plan/assembly/submission/lookup quartet serves both pay command families;
@@ -1544,6 +1796,39 @@ def certifyViewLoaded (config : Config) (opened : Opened config) :
     | .absent => .error "factory unavailable"
   pure ⟨system.cell.root, opened.authority.snapshot.cell.root, factoryRoot, system.system,
     opened.durable.height, opened.durable.chain⟩
+/-- Who may read a submission's refusal. Every refusal is uniform
+(`publicSubmissionOutcome`) except a renounce's gate refusal, which exists only
+after the signer's signature verified (`CapabilityRenounce.HolderRefusal`) and
+concerns only the signer's own holding. -/
+inductive Disclosure where
+  | uniform
+  | toSigner
+  deriving DecidableEq, Repr
+
+def submitRenounceVia (transport : DurableReceiverIO.Transport) (config : Config)
+    (opened : Opened config) (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO (Outcome × Disclosure) := do
+  let height := logicalHeight config opened.durable
+  match ← CapabilityRenounce.receiveLoaded config.deployment config.profile.semantics
+      ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
+  | .confirmed kind receipt => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
+  | .refusedToHolder reason =>
+      return (refused .operationRejected "renounce" s!"{repr reason}", .toSigner)
+  | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
+  | .transactionConflict =>
+      return (refused .conflict "replay" "transaction identity conflict", .uniform)
+  | .durableRejected reason =>
+      return (refused .operationRejected "durable" s!"{repr reason}", .uniform)
+  | .contention => return (.contention, .uniform)
+  | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
+  | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
+
+/-- The served renounce: `submitRenounceVia` over the Store's own writer. -/
+def submitRenounceWith (config : Config) (opened : Opened config) (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO (Outcome × Disclosure) :=
+  submitRenounceVia config.transport config opened bytes confirm
 
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
@@ -1553,6 +1838,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
+  | .renounce bytes => return (← submitRenounceVia transport config opened bytes confirm).1
   | .revoke bytes =>
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
@@ -1683,15 +1969,33 @@ theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UIn
       refused .undisclosed "admission" "request refused" := by
   cases reason <;> first | rfl | exact absurd rfl notTail
 
+/-- The submitter's view of a submission: uniform, except a renounce's gate
+refusal to its authenticated signer. -/
+def disclose : Outcome × Disclosure → Outcome
+  | (result, .toSigner) => result
+  | (result, .uniform) => publicSubmissionOutcome result
+
+theorem disclose_uniform (result : Outcome) :
+    disclose (result, .uniform) = publicSubmissionOutcome result := rfl
+
+/-- The one signed-submission path: a renounce is disclosed by its own rule,
+every other call uniformly. -/
+def submitDisclosedWith (config : Config) (opened : Opened config) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO (Outcome × Disclosure) := do
+  match call with
+  | .renounce bytes => submitRenounceWith config opened bytes confirm
+  | _ => return (← submitLoadedWith config opened call confirm, .uniform)
+
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
-    | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call")
+    | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call", .uniform)
     | some call =>
         match ← openExisting config with
-        | .error detail => pure (.unavailable detail.toUTF8.toList)
-        | .ok opened => submitLoaded config opened call
-  logOperatorRefusal result
-  return publicSubmissionOutcome result
+        | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
+        | .ok opened => submitDisclosedWith config opened call (confirmed config)
+  logOperatorRefusal result.1
+  return disclose result
 
 /-- Lookup is read-only exact-ingress replay. It cannot submit an absent call. -/
 def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) : Outcome :=
@@ -1700,6 +2004,15 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
     | none => .uncertain "historical receipt prefix unavailable".toUTF8.toList
     | some receipt => .confirmed .replayed receipt
   match call with
+  | .renounce bytes =>
+      match CapabilityRenounce.decodeIngress bytes with
+      | none => refused .malformed "renounce" "noncanonical ingress"
+      | some ingress =>
+          match CapabilityRenounce.replay config.deployment.domain config.profile.semantics
+              opened.durable ingress with
+          | none => .absent
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .revoke bytes =>
       match CapabilityRevocationReceiver.decodeIngress bytes with
       | none => refused .malformed "revoke" "noncanonical ingress"

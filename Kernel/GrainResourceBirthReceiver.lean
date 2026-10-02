@@ -200,7 +200,7 @@ def receiveLoaded {F : Type} [Field F] [DecidableEq F]
           let some tariff := tariff
             | return .rejected .tariffUnavailable
           match GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
-              profile.disabledEvaluators deployment pins durable profile.semantics tariff source with
+              profile.disabledEvaluators deployment pins durable profile.semantics tariff source ambient.height with
           | .error reason => return .rejected (.birthPreparation reason)
           | .ok birth =>
               match GrainResourceBirthTransaction.prepareTargets profile deployment pins

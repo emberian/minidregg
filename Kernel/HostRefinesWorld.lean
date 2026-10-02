@@ -854,10 +854,8 @@ theorem rebase_agrees {p p' : Loaded rootBytes} (honest : BaseHonest p) (h : p.r
     dsimp only at h
     split at h
     · cases h
-    · split at h
-      · cases h
-      · cases h
-        exact ⟨rfl, rfl, rfl⟩
+    · cases h
+      exact ⟨rfl, rfl, rfl⟩
   obtain ⟨himg, hbh, hbase⟩ := fields
   have resumed := p'.resumed
   rw [himg, hbh, hbase] at resumed

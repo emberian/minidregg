@@ -167,7 +167,7 @@ def valueCodecId : AuthorityPlane → String
   | .policyRevision => "nat/base255"
   | .policyAddress => "digest/nat"
   | .subjectKeyEpoch => "nat/base255"
-  | .subjectKey => "signing-key-record/v2"
+  | .subjectKey => "signing-key-record/v3"
   | .revoked => "unit/presence"
   | .registered => "unit/presence"
   | .parent => "cell-id/nat"
@@ -179,7 +179,7 @@ def planes : List AuthorityPlane :=
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v5"
+  name := "minidregg/credential-authority/v6"
   namespaces := planes
   namespaces_complete := by
     intro plane
@@ -421,6 +421,7 @@ def retiredCapabilityWireV2 : Wire layout :=
     valueCodecId := fun plane =>
       match plane with
       | .capability _ => "stored-capability/v2"
+      | .subjectKey => "signing-key-record/v2"
       | other => valueCodecId other }
 
 /-- The retired descriptor is a different descriptor, decided on its bytes. -/
@@ -440,12 +441,41 @@ theorem retired_capability_v2_frame_refused
     (by rw [frame_length, frame_length])
     (by simp [frame, separated])
 
+/-- The `minidregg/credential-authority/v5` header (K-FIELDS .. K-PREROTATE): the
+v5 name and `signing-key-record/v2` key values, which commit to no next key. -/
+def retiredKeyRecordWireV2 : Wire layout :=
+  { wire with
+    name := "minidregg/credential-authority/v5"
+    valueCodecId := fun plane =>
+      match plane with
+      | .subjectKey => "signing-key-record/v2"
+      | other => valueCodecId other }
+
+theorem retired_key_record_v2_descriptor_differs :
+    descriptor retiredKeyRecordWireV2 ≠ descriptor wire := by
+  decide +kernel
+
+/-- Every authority cell written under the v5 wire (key records without a
+committed next key) refuses to decode, whatever its payload: the same one
+cryptographic premise as `retired_capability_v2_frame_refused`. -/
+theorem retired_key_record_v2_frame_refused
+    (separated : layoutDigest retiredKeyRecordWireV2 ≠ layoutDigest wire)
+    (payload : List UInt8) :
+    materializer.codec.decode (frame retiredKeyRecordWireV2 ++ payload) = none :=
+  decode_other_header wire (frame retiredKeyRecordWireV2) payload
+    (by rw [frame_length, frame_length])
+    (by simp [frame, separated])
+
 /-! ## Axiom audit -/
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v2_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms retired_capability_v2_descriptor_differs
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms retired_capability_v2_frame_refused
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_key_record_v2_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_key_record_v2_descriptor_differs
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_key_record_v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_key_record_v2_frame_refused
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.unrevoke_rejected_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected_at_cell

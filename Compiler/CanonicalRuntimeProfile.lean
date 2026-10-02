@@ -100,6 +100,12 @@ law and exact stored control grant against the same complete old authority. -/
 def revocationProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY/v2".toUTF8.toList
 
+/-- K-RENOUNCE: the holder a capability names revokes it, signed by its
+current key; no management grant and no policy participate; the holder gate
+runs after the signature, and only its refusal is disclosed to the signer. -/
+def renounceVersion : List UInt8 :=
+  "DREGG.RUNTIME.CAPABILITY-RENOUNCE.HOLDER-SIGNED-NO-POLICY-GATE-AFTER-SIGNATURE/v1".toUTF8.toList
+
 /-- Signed snapshot observation uses the actual resource page and only the
 selected account's sparse balance cut; the deployment clock's `clock/now`,
 `clock/day` and `clock/slot` come first (v4), as on every invocation. Preparation must cover every private
@@ -225,13 +231,14 @@ def sourceComponents : List (List UInt8) :=
         requestKindTag (CanonicalCellRegistry.resourceKindOf kind)]),
    StreamCodec.nat.encode CanonicalCellRegistry.factoryKind.tag.toNat,
    installProjectionVersion, invocationProjectionVersion, birthProjectionVersion,
-   delegationProjectionVersion, revocationProjectionVersion, contentProjectionVersion,
+   delegationProjectionVersion, revocationProjectionVersion, renounceVersion, contentProjectionVersion,
    (StreamCodec.list (StreamCodec.list StreamCodec.nat)).encode
      [[requestKindTag .object,
        CredentialAuthorityEntryCodec.verbTag (.observeObject),
        CredentialAuthorityEntryCodec.verbTag (.mutateObject),
        CredentialAuthorityEntryCodec.verbTag (.delegateObject),
-       CredentialAuthorityEntryCodec.verbTag (.appendObject)],
+       CredentialAuthorityEntryCodec.verbTag (.appendObject),
+       CredentialAuthorityEntryCodec.verbTag (.placeObject)],
       [requestKindTag .account,
        CredentialAuthorityEntryCodec.verbTag (.observeAccount),
        CredentialAuthorityEntryCodec.verbTag (.transfer),

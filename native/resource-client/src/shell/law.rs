@@ -20,12 +20,12 @@
 //!         | 'pair' A ',' B 'delta'            resource/pair/A/B/delta
 //!         | 'subject' | 'verb' | 'cost'       request/*
 //!         | 'slot' STRING                     any other projected slot
-//! value  := integer | read | write | delegate | install | revoke   (names on `verb` only)
+//! value  := integer | read | write | delegate | install | revoke | append | place   (names on `verb` only)
 //! ```
 //!
 //! Verb names are the tags `request/verb` carries
 //! (`CredentialAuthorityEntryCodec.verbTag`): read 1, write 2, delegate 3,
-//! install 4, revoke 5. `monotone` and `writeOnce` compare the old and new
+//! install 4, revoke 5, append 7, place 10 (bearing a cell into a room). `monotone` and `writeOnce` compare the old and new
 //! views of one slot; they take only a field's `after` view, because the old
 //! and new views of `before` and `delta` coincide and the atom could never
 //! refuse. The Host renders a refused clause in this same grammar.
@@ -56,7 +56,15 @@
 
 use serde_json::{json, Value};
 
-const VERBS: [(&str, i64); 5] = [("read", 1), ("write", 2), ("delegate", 3), ("install", 4), ("revoke", 5)];
+const VERBS: [(&str, i64); 7] = [
+    ("read", 1),
+    ("write", 2),
+    ("delegate", 3),
+    ("install", 4),
+    ("revoke", 5),
+    ("append", 7),
+    ("place", 10),
+];
 
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
@@ -304,7 +312,7 @@ impl Parser {
                 .iter()
                 .find(|(name, _)| *name == w)
                 .map(|(_, tag)| tag.to_string())
-                .ok_or_else(|| format!("unknown verb `{w}` (read, write, delegate, install, revoke)")),
+                .ok_or_else(|| format!("unknown verb `{w}` (read, write, delegate, install, revoke, append, place)")),
             other => Err(format!("expected a number, found {}", show(other.as_ref()))),
         }
     }
@@ -628,9 +636,9 @@ mod tests {
         assert_eq!(parsed, json);
     }
 
-    /// `deploy/shell/templates/story/tale/law.state` (branch p-templates) with
-    /// `{GM}` = 11: the grammar text and the JSON rendered from it by the
-    /// templates lane agree.
+    /// A state law of the shape p-templates wrote for the first tale (since
+    /// replaced by the story table, P-STORY), with `{GM}` = 11: the grammar
+    /// text and the JSON rendered from it agree.
     #[test]
     fn templates_law_state_agrees() {
         let text = "any [ subject == 11, not (verb == 2) ];\n\

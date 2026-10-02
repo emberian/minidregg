@@ -45,8 +45,14 @@ says `mode=closed`, every friend gets `mini-closed` and exit 69.
    `seal` sign with the sponsor's key and the newcomer's key in one process:
    ```
    ssh $BOX "install -d -o mini -g mini -m 0700 $S/ember/keys && \
-             install -o mini -g mini -m 0600 $S/NAME/keys/mini.key $S/ember/keys/NAME.key"
+             install -o mini -g mini -m 0600 $S/NAME/keys/mini.key $S/ember/keys/NAME.key && \
+             install -o mini -g mini -m 0644 $S/NAME/keys/mini.key.next.pub $S/ember/keys/NAME.key.next.pub"
    ```
+   The second file is the friend's NEXT public key (K-PREROTATE): enrollment commits to its
+   digest, and `enroll plan` refuses without it. Only the public half travels; the next
+   secret (`mini.key.next`) stays with the friend, who should move it off the box. A key
+   made before pre-rotation has no `mini.key.next.pub`: the friend runs `keygen` again
+   under a new name (keygen never overwrites), and you enroll that one.
 5. **Enroll, from the sponsor session.**
    ```
    mini> enroll plan NAME NAME.key

@@ -569,6 +569,39 @@ fn plan(mut args: Args) -> Result<()> {
             )
         }
     };
+    // Pre-rotation is the default: the enrolled record commits to the digest of
+    // the principal's NEXT public key (keygen writes it at KEY.next.pub). Only
+    // an explicit --no-prerotation enrolls a key that can never rotate.
+    let next_public_arg = args
+        .optional("next-public-key")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let without_prerotation = args.optional("no-prerotation").is_some();
+    let next_public_path = match (next_public_arg, without_prerotation, &new_key) {
+        (Some(_), true, _) => {
+            return Err("--next-public-key and --no-prerotation exclude each other".into())
+        }
+        (Some(explicit), false, _) => Some(explicit),
+        (None, true, _) => None,
+        (None, false, Some(secret)) => {
+            let conventional = crate::key_rotation::conventional_next_public(secret);
+            if !conventional.is_file() {
+                return Err(format!(
+                    "enrollment commits to a next key by default: {} is missing (make keys with `mini keygen`), pass --next-public-key, or --no-prerotation to enroll a key that can never rotate",
+                    conventional.display()
+                ));
+            }
+            Some(conventional)
+        }
+        (None, false, None) => {
+            return Err("a home-identity enrollment needs --next-public-key or --no-prerotation".into())
+        }
+    };
+    let next_public = next_public_path
+        .as_deref()
+        .map(public_key_file)
+        .transpose()?
+        .map(|key| key.to_bytes());
     let operator_override = args
         .optional("operator-socket")
         .map(path)
@@ -675,6 +708,12 @@ fn plan(mut args: Args) -> Result<()> {
         }
         expected_request["homeSubject"] = json!(subject);
     }
+    if let Some(next) = &next_public {
+        if hex(next) == public_key {
+            return Err("the next key must differ from the key being enrolled".into());
+        }
+        expected_request["nextPublicKey"] = json!(hex(next));
+    }
     let request = retained_request(&directory, &expected_request)?;
     let roles = enrollment_roles(home);
     let request_bytes = private_bytes(&directory.join("request.json"), 256 * 1024)?;
@@ -707,12 +746,22 @@ fn plan(mut args: Args) -> Result<()> {
     )?;
     let factory_root = factory_root.as_str();
     let authority_root = authority_root.as_str();
+    let next_key_digest = match &next_public {
+        Some(next) => json!(crate::key_rotation::next_key_digest(
+            &host,
+            &public_socket,
+            &retained_config,
+            next
+        )?),
+        None => Value::Null,
+    };
     let command_source = json!({"sponsor":sponsor,"control":control,
         "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
         "expectedAuthorityRoot":authority_root,
         "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
             "subject":subject,"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
+            "activeFrom":"0","activeUntil":u64::MAX.to_string(),
+            "nextKeyDigest":next_key_digest}});
     save_json_staged(&directory.join("source.json"), &command_source)?;
     transform(
         &host,
@@ -909,8 +958,10 @@ fn join_dir(path: &Path) -> Result<()> {
 }
 
 /// `mini join`, run by the participant on their own machine.
-///   --key KEY                      make the key here (or show it); send the
-///                                  printed public key to the sponsor
+///   --key KEY                      make the key and its NEXT key here (or
+///                                  show them); send both printed public keys
+///                                  to the sponsor (K-PREROTATE: the record
+///                                  commits to the next one)
 ///   --sponsor-plan OFFER --dir R   check the offer against the Host over
 ///                                  --remote, sign possession; send the
 ///                                  printed signature to the sponsor
@@ -926,17 +977,35 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
         (None, None, None) => {
             if key_path.exists() {
                 println!("{}", hex(&key(&key_path)?.verifying_key().to_bytes()));
-                Ok(())
             } else {
                 let parent = key_path.parent().ok_or("key path lacks a parent")?;
                 join_dir(parent)?;
-                keygen(&key_path, &key_path.with_extension("pub"), None)
+                keygen(&key_path, &key_path.with_extension("pub"), None, NextKey::Beside, false)?;
             }
+            // The second line: the next key's public half, which the sponsor's
+            // plan commits to (absent for a key made with --no-prerotation).
+            if let Some(next) = own_next_public(&key_path)? {
+                println!("{}", hex(&next));
+            }
+            Ok(())
         }
         (Some(offer), None, Some(root)) => join_possess(&key_path, &absolute(&offer)?, &root),
         (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root),
         _ => Err("join takes --key alone, or --key with --sponsor-plan or --welcome and --dir".into()),
     }
+}
+
+/// The next public key `mini keygen` wrote beside KEY, if any.
+fn own_next_public(key_path: &Path) -> Result<Option<[u8; 32]>> {
+    let path = crate::key_rotation::conventional_next_public(key_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let next: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| format!("{} must hold exactly 32 raw bytes", path.display()))?;
+    Ok(Some(next))
 }
 
 fn join_remote() -> Result<PathBuf> {
@@ -991,6 +1060,30 @@ fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
         if &decoded != view {
             return Err(format!("the Host decodes the sponsor's {kind} differently from the plan"));
         }
+    }
+    // K-PREROTATE: the record commits to the key that may later replace this
+    // one, and a rotation needs only that key's signature. The plan must commit
+    // to MY next key (computed by the Host from my next public half), or to none
+    // when I hold none: a sponsor committing a key it holds could rotate my
+    // identity to itself.
+    let offered = command_view
+        .get("key")
+        .and_then(|key| key.get("nextKeyDigest"))
+        .ok_or("the sponsor's command names no nextKeyDigest")?;
+    match (own_next_public(key_path)?, offered.as_str()) {
+        (Some(next), Some(digest)) => {
+            let mine = crate::key_rotation::next_key_digest(host, &socket, &root.join("config.json"), &next)?;
+            if mine != digest {
+                return Err("the sponsor's plan commits to a next key that is not yours (KEY.next.pub): refuse it".into());
+            }
+        }
+        (Some(_), None) => {
+            return Err("the sponsor's plan commits to no next key, but you hold one (KEY.next.pub): ask for a plan with your next public key".into())
+        }
+        (None, Some(_)) => {
+            return Err("the sponsor's plan commits to a next key, and you hold none: a key you do not hold could replace yours; refuse it".into())
+        }
+        (None, None) => {}
     }
     let signature_path = state.join("possession-signature.bin");
     let summary = if signature_path.exists() {

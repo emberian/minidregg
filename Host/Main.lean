@@ -42,6 +42,7 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 assembly, 98=checked fleet turn submit, 99=receipt-only fleet lookup, 100=topic
 poll since a cursor behind a signed account observation, 101=agent fleet head
 behind a signed account observation, 102=exact receipt by transaction id,
+180=incoming ledger: fleet turns that paid the observed account (P-CREDIT),
 103=pay command signing plan (either pay family), 104=pay detached assembly,
 105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view,
 108=payment observation signing plan, 109=observation detached assembly,
@@ -71,6 +72,9 @@ atom or null and event number, wire and cause jams) -> JSON with the sample,
 Lean steps, output and the writes a claim names; 136=door peek (JSON with a path
 jam) -> the peek arm's answer; 137=door state (JSON) -> the instance's state now
 (stored, or the booted trap's). 131-137 only read the Store.
+140=public subject key rotation plan, 141=rotation detached assembly,
+142=rotation submit, 143=rotation receipt-only lookup, 144=public key status
+(JSON query of a subject and one public key the asker holds; JSON reply).
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -128,6 +132,7 @@ import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.DryRun
 import Host.RequestRefusal
+import Host.LawSatWire
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimAuthoring
@@ -797,7 +802,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson
-       ((["birth", "invoke", "install", "delegate", "revoke",
+       ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
          if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
@@ -1604,12 +1609,12 @@ def dispatchSession (config : NativeHost.Config)
       phaseTrace "op2 refresh" t0
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
-            "noncanonical or unsupported native host call".toUTF8.toList)
+            "noncanonical or unsupported native host call".toUTF8.toList, NativeHost.Disclosure.uniform)
         | some call =>
-            NativeHost.submitLoadedWith config session.opened call
+            NativeHost.submitDisclosedWith config session.opened call
               (sessionConfirmed config state)
-      NativeHost.logOperatorRefusal result
-      return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
+      NativeHost.logOperatorRefusal result.1
+      return (2, outcomeCodec.encode (NativeHost.disclose result))
   | 3 =>
       let opened ← sessionOpened config state
       let result := match callCodec.decode payload with
@@ -1669,6 +1674,9 @@ def dispatchSession (config : NativeHost.Config)
       match ← DryRun.dryRunLoaded config session.opened observation signatures with
       | .admitted plan => return (130, signingPlanCodec.encode plan)
       | .stopped outcome => return (255, outcomeCodec.encode outcome)
+  | 150 =>
+      -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
+      LawSatWire.lawSatSession payload
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -5026,7 +5034,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
-"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|checkpoint-differential HEIGHT|well-ledger LEDGER.json|pay-ledger LEDGER.json|pay-purse TASK PURSE.json|pay-job JOB JOB.json|job-money-explain COMMAND.bin|pay-enrol-probe INPUT.json OUTPUT.json|pay-enrol-ids MINI-KEY-HEX OUTPUT.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|law-sat REQUEST.json RESULT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|checkpoint-differential HEIGHT|well-ledger LEDGER.json|pay-ledger LEDGER.json|pay-purse TASK PURSE.json|pay-job JOB JOB.json|job-money-explain COMMAND.bin|pay-enrol-probe INPUT.json OUTPUT.json|pay-enrol-ids MINI-KEY-HEX OUTPUT.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -5355,6 +5363,19 @@ def run (arguments : List String) : IO UInt32 := do
                             | .ok view => return ((101 : UInt8),
                                 (Minidregg.Host.Json.fleetHeadJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-head" refusal)
+                        | 180 =>
+                            let (observationBytes, requestBytes) ← splitPair payload
+                            let some text := String.fromUTF8? requestBytes.toByteArray
+                              | throw (IO.userError "fleet incoming request is not UTF-8")
+                            let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let (topic, cursor, limit) ← IO.ofExcept
+                              (Minidregg.Host.Json.fleetPollRequest request)
+                            let opened ← sessionOpened pinnedConfig state
+                            match ← NativeHost.fleetIncomingAuthorizedLoaded pinnedConfig opened
+                                observationBytes topic cursor limit with
+                            | .ok view => return ((180 : UInt8),
+                                (Minidregg.Host.Json.fleetIncomingJson view).compress.toUTF8.toList)
+                            | .error refusal => return ((255 : UInt8), refusalFrame "fleet-incoming" refusal)
                         | 102 =>
                             let some text := String.fromUTF8? payload.toByteArray
                               | throw (IO.userError "transaction id is not UTF-8")
@@ -5394,6 +5415,45 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 140 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            match NativeHost.rotationPlanLoaded pinnedConfig opened payload with
+                            | .error detail =>
+                                return ((255 : UInt8), failure .operationRejected "rotate-key-plan" detail)
+                            | .ok plan =>
+                                let bytes := SubjectKeyRotation.signingPlanCodec.encode plan
+                                unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                                  throw (IO.userError "rotation plan exceeds host frame bound")
+                                return ((140 : UInt8), bytes)
+                        | 141 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := SubjectKeyRotation.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical subject key rotation plan")
+                            let ingress ← IO.ofExcept (NativeHost.rotationAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "rotation ingress exceeds host frame bound")
+                            return ((141 : UInt8), ingress)
+                        | 142 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.rotationSubmitLoaded pinnedConfig opened payload
+                            return ((142 : UInt8), outcomeCodec.encode outcome)
+                        | 143 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.rotationLookupLoaded pinnedConfig opened payload
+                            return ((143 : UInt8), outcomeCodec.encode outcome)
+                        | 144 =>
+                            let some text := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "key status query is not UTF-8")
+                            let query ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let (subject, publicKey) ← IO.ofExcept
+                              (Minidregg.Host.Json.subjectKeyStatusQuery query)
+                            let opened ← sessionOpened pinnedConfig state
+                            match NativeHost.keyStatusLoaded pinnedConfig opened ⟨subject⟩ publicKey with
+                            | .error detail =>
+                                return ((255 : UInt8), failure .operationRejected "key-status" detail)
+                            | .ok status =>
+                                return ((144 : UInt8),
+                                  (Minidregg.Host.Json.subjectKeyStatusJson subject status).compress.toUTF8.toList)
                         | 107 =>
                             let opened ← sessionOpened pinnedConfig state
                             let view ← IO.ofExcept (NativeHost.payViewLoaded pinnedConfig opened)
@@ -6293,6 +6353,10 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "submit", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
+          pure 0
+      | "law-sat", [input, output] =>
+          let value ← IO.ofExcept (LawSatWire.lawSatReply (← readBytes input))
+          writeBytes output value.compress.toUTF8.toList
           pure 0
       | "dry-run", [observationPath, signaturesPath, output] =>
           let signatures ← decodeSignatures (← readBytes signaturesPath)

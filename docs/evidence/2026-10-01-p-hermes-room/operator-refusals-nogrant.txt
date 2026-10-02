@@ -1,0 +1,1 @@
+host: submission refused (operator log): Minidregg.Compiler.RefusalReason.operationRejected: invoke: Minidregg.Kernel.DeclaredResourceController.Reject.capabilityRejected

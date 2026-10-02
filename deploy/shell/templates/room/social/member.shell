@@ -1,0 +1,12 @@
+# social, one member: an invite that reads, bears cells and speaks, and the member's own stream
+#
+# `room welcome $ROOM SUBJECT --template social` binds $MEMBER to SUBJECT and
+# runs these lines as you, the founder (PLACE §2.3 (a)). You bear the
+# member's stream into the room and pay for it; its owner grant goes to
+# $MEMBER, and its law lets nobody else write or append to it, you included.
+# Hand the member the invite `publish` prints (export ID shows it again).
+
+room invite $ROOM-invite-$MEMBER $ROOM $MEMBER --verbs observe,place,append
+submit $ROOM-invite-$MEMBER
+publish $ROOM-invite-$MEMBER
+create $ROOM/stream-$MEMBER stream 'any [ not (verb in {write, append}), subject == $MEMBER ]' --in $ROOM --owner $MEMBER

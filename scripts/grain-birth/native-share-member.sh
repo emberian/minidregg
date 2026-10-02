@@ -52,7 +52,7 @@ cat >"$STAGE/member-preboot" <<'EOF'
 MEMBER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/member.pub" | tr -d ' \n')
 jq --arg public "$MEMBER_PUBLIC" '.enrollments += [{
   key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-    publicKey:$public,activeFrom:"0",activeUntil:"1000000"},
+    publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
   accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
   factoryObserveCapabilityId:"57",initialBalance:"100",
   accountPredicate:{type:"all",predicates:[]}}]' \

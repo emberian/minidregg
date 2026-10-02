@@ -1,0 +1,33 @@
+# story: a map (index), chapters (a text that only grows), scenes (a stream the story is told in) and a cast the room writes
+#
+# The same shape as every room template: the lines you would type, run in
+# order as you with $ROOM and $ME bound (room template show workroom says
+# more). `story new NAME --from tale` runs these lines and then adds the
+# story's table, which `story seal` makes the law of every player's cell
+# (deploy/shell/templates/story/README.md).
+
+room new $ROOM --law open
+
+# The map: everyone reads it, only you write it, and it only grows.
+doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]' --in $ROOM
+
+# The chapters, as written: no line edited, none struck.
+doc new $ROOM/chapters note --in $ROOM
+
+# Where the story is told, one entry at a time, and only by its teller: you
+# (`story new NAME --gm S` hands it to a GM).
+create $ROOM/scenes stream 'any [ not (verb in {write, append}), subject == $ME ]' --in $ROOM
+
+# Who is in it: a draft anyone holding write in the room edits.
+doc new $ROOM/cast draft --in $ROOM
+
+doc append $ROOM-map $ROOM/index 'story $ROOM: chapters only grow, scenes is where it is told, cast is who is in it'
+submit $ROOM-map
+doc link $ROOM-map-chapters $ROOM/index $ROOM/chapters
+submit $ROOM-map-chapters
+doc link $ROOM-map-scenes $ROOM/index $ROOM/scenes
+submit $ROOM-map-scenes
+doc link $ROOM-map-cast $ROOM/index $ROOM/cast
+submit $ROOM-map-cast
+doc link $ROOM-chapters-cast $ROOM/chapters $ROOM/cast
+submit $ROOM-chapters-cast

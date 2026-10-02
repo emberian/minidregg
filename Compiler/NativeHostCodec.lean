@@ -154,33 +154,41 @@ inductive SignedCall where
   | install (ingress : List UInt8)
   | delegate (ingress : List UInt8)
   | revoke (ingress : List UInt8)
+  /-- K-RENOUNCE: a holder revokes a capability it holds. -/
+  | renounce (ingress : List UInt8)
 
 abbrev CallWire := Sum (List UInt8)
   (Sum DeclaredResourceController.SignedCommand
-    (Sum (List UInt8) (Sum (List UInt8) (List UInt8))))
+    (Sum (List UInt8) (Sum (List UInt8) (Sum (List UInt8) (List UInt8)))))
 
 def SignedCall.toWire : SignedCall → CallWire
   | .birth bytes => .inl bytes
   | .invoke signed => .inr (.inl signed)
   | .install bytes => .inr (.inr (.inl bytes))
   | .delegate bytes => .inr (.inr (.inr (.inl bytes)))
-  | .revoke bytes => .inr (.inr (.inr (.inr bytes)))
+  | .revoke bytes => .inr (.inr (.inr (.inr (.inl bytes))))
+  | .renounce bytes => .inr (.inr (.inr (.inr (.inr bytes))))
 
 def SignedCall.ofWire : CallWire → SignedCall
   | .inl bytes => .birth bytes
   | .inr (.inl signed) => .invoke signed
   | .inr (.inr (.inl bytes)) => .install bytes
   | .inr (.inr (.inr (.inl bytes))) => .delegate bytes
-  | .inr (.inr (.inr (.inr bytes))) => .revoke bytes
+  | .inr (.inr (.inr (.inr (.inl bytes)))) => .revoke bytes
+  | .inr (.inr (.inr (.inr (.inr bytes)))) => .renounce bytes
 
 def callStream : StreamCodec SignedCall :=
   StreamCodec.xmap (StreamCodec.sum bytesStream
     (StreamCodec.sum signedInvocationStream
-      (StreamCodec.sum bytesStream (StreamCodec.sum bytesStream bytesStream))))
+      (StreamCodec.sum bytesStream (StreamCodec.sum bytesStream
+        (StreamCodec.sum bytesStream bytesStream)))))
     SignedCall.toWire SignedCall.ofWire (by intro value; cases value <;> rfl)
 
+/-- Version 4 (K-RENOUNCE): the call gains `renounce`; a v3 call refuses. -/
+def callFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNED-CALL/v4".toUTF8.toList
+
 def callCodec : LawfulCodec SignedCall :=
-  framed "DREGG/NATIVE-HOST/SIGNED-CALL/v3".toUTF8.toList callStream
+  framed callFrame callStream
 
 /-- The capability choices are supplied for the ordered conserved debit legs;
 all request coordinates and physical auxiliary allocations are source-derived. -/
@@ -190,25 +198,29 @@ inductive Draft where
   | install (subject : SubjectId) (control : CapabilityId) (declaration : List UInt8)
   | delegate (command : List UInt8)
   | revoke (command : List UInt8)
+  /-- K-RENOUNCE: the renounce command (`CapabilityRenounce.commandCodec`). -/
+  | renounce (command : List UInt8)
   deriving DecidableEq, Repr
 
 abbrev DraftWire := Sum (List UInt8 × List CapabilityId)
   (Sum (List UInt8)
-    (Sum (SubjectId × CapabilityId × List UInt8) (Sum (List UInt8) (List UInt8))))
+    (Sum (SubjectId × CapabilityId × List UInt8) (Sum (List UInt8) (Sum (List UInt8) (List UInt8)))))
 
 def Draft.toWire : Draft → DraftWire
   | .birth bytes capabilities => .inl (bytes, capabilities)
   | .invoke bytes => .inr (.inl bytes)
   | .install subject control bytes => .inr (.inr (.inl (subject, control, bytes)))
   | .delegate bytes => .inr (.inr (.inr (.inl bytes)))
-  | .revoke bytes => .inr (.inr (.inr (.inr bytes)))
+  | .revoke bytes => .inr (.inr (.inr (.inr (.inl bytes))))
+  | .renounce bytes => .inr (.inr (.inr (.inr (.inr bytes))))
 
 def Draft.ofWire : DraftWire → Draft
   | .inl (bytes, capabilities) => .birth bytes capabilities
   | .inr (.inl bytes) => .invoke bytes
   | .inr (.inr (.inl (subject, control, bytes))) => .install subject control bytes
   | .inr (.inr (.inr (.inl bytes))) => .delegate bytes
-  | .inr (.inr (.inr (.inr bytes))) => .revoke bytes
+  | .inr (.inr (.inr (.inr (.inl bytes)))) => .revoke bytes
+  | .inr (.inr (.inr (.inr (.inr bytes)))) => .renounce bytes
 
 def draftStream : StreamCodec Draft :=
   StreamCodec.xmap
@@ -217,11 +229,14 @@ def draftStream : StreamCodec Draft :=
       (StreamCodec.sum bytesStream
         (StreamCodec.sum (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
           (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream bytesStream))
-          (StreamCodec.sum bytesStream bytesStream))))
+          (StreamCodec.sum bytesStream (StreamCodec.sum bytesStream bytesStream)))))
     Draft.toWire Draft.ofWire (by intro value; cases value <;> rfl)
 
+/-- Version 4 (K-RENOUNCE): the draft gains `renounce`; a v3 draft refuses. -/
+def draftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v4".toUTF8.toList
+
 def draftCodec : LawfulCodec Draft :=
-  framed "DREGG/NATIVE-HOST/DRAFT/v3".toUTF8.toList draftStream
+  framed draftFrame draftStream
 
 /-- `role,index` is an ordered incidence label, not a user-selected authority.
 The exact canonical header names the chosen key and full typed request. -/
@@ -255,13 +270,14 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
       wire.2.2.2.2.1, wire.2.2.2.2.2⟩) (by intro value; cases value; rfl)
 
-/-- Version 4: the plan binds the world root, not the whole-image boundary. -/
-def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v4".toUTF8.toList
+/-- Version 5 (K-RENOUNCE): the finalized draft it carries gained `renounce`.
+Version 4 bound the world root, not the whole-image boundary. -/
+def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v5".toUTF8.toList
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
   framed signingPlanFrame signingPlanStream
 
-def retiredSigningPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v3".toUTF8.toList
+def retiredSigningPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v4".toUTF8.toList
 
 structure Receipt where
   transactionId : Digest
@@ -379,9 +395,8 @@ theorem v3_outcome_refused (payload : List UInt8) :
     simp [framedRaw, lengthExact, different]
   simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
-/-- A version-3 signing plan (binding the whole-image boundary) refuses to
-decode. -/
-theorem v3_signingPlan_refused (payload : List UInt8) :
+/-- A version-4 signing plan (its draft without `renounce`) refuses to decode. -/
+theorem v4_signingPlan_refused (payload : List UInt8) :
     signingPlanCodec.decode (retiredSigningPlanFrame ++ payload) = none := by
   have lengthExact : signingPlanFrame.length = retiredSigningPlanFrame.length := by decide +kernel
   have different : retiredSigningPlanFrame ≠ signingPlanFrame := by decide +kernel
@@ -389,6 +404,32 @@ theorem v3_signingPlan_refused (payload : List UInt8) :
       (retiredSigningPlanFrame ++ payload) = none := by
     simp [framedRaw, lengthExact, different]
   simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+
+def retiredDraftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v3".toUTF8.toList
+def retiredCallFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNED-CALL/v3".toUTF8.toList
+
+/-- A version-3 draft (without `renounce`) refuses to decode. -/
+theorem v3_draft_refused (payload : List UInt8) :
+    draftCodec.decode (retiredDraftFrame ++ payload) = none := by
+  have lengthExact : draftFrame.length = retiredDraftFrame.length := by
+    decide +kernel
+  have different : retiredDraftFrame ≠ draftFrame := by decide +kernel
+  have raw : (framedRaw draftFrame draftStream).decode
+      (retiredDraftFrame ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [draftCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+/-- A version-3 signed call (without `renounce`) refuses to decode. -/
+theorem v3_call_refused (payload : List UInt8) :
+    callCodec.decode (retiredCallFrame ++ payload) = none := by
+  have lengthExact : callFrame.length = retiredCallFrame.length := by
+    decide +kernel
+  have different : retiredCallFrame ≠ callFrame := by decide +kernel
+  have raw : (framedRaw callFrame callStream).decode
+      (retiredCallFrame ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [callCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
 @[simp] theorem call_roundtrip (value : SignedCall) :
     callCodec.decode (callCodec.encode value) = some value := callCodec.decode_encode value
@@ -430,8 +471,12 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 #guard_msgs (whitespace := lax) in #print axioms v2_outcome_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v3_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_outcome_refused
-/-- info: 'Minidregg.Compiler.NativeHostCodec.v3_signingPlan_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v3_signingPlan_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v4_signingPlan_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v4_signingPlan_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v3_draft_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_draft_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v3_call_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_call_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.worldRoot_eq_entryRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms worldRoot_eq_entryRoot
 /-- info: 'Minidregg.Compiler.NativeHostCodec.cell_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/

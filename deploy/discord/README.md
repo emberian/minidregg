@@ -103,13 +103,15 @@ Steps 1–4 happen on the workhorse. Step 5 is in `dregg-infra`, on the anchor. 
 
 A friend without an ssh key can still be given a session: create the home (`install -d -m 0700 -o mini -g mini /var/lib/mini/sessions/NAME`) and add the roster line. Their first lines are `/mini keygen mini.key` and then `/mini init mini.key SUBJECT` after enrollment, exactly as over ssh.
 
-## The mirror runner (optional)
+## The mirror runner (optional): one room <-> one channel
 
-`mini-discord-mirror` mirrors one reference into one channel webhook. It is a **runner**, not part of the entrance:
+`mini-discord-mirror` bridges one chat room and one Discord channel, both ways. It is a **runner**, not part of the entrance:
 
-- It holds its own session (key, workspace, and the observe grant someone delegated to it).
-- Every poll is one `read REF` through the same forced command, so every poll is a signed, metered Host observation by the runner's key.
-- New or changed fields are posted to the channel.
-- The environment is `MINI_MIRROR_REF`, `MINI_MIRROR_WEBHOOK_URL` (a secret: in a 0600 EnvironmentFile), `MINI_MIRROR_HOME`, `MINI_MIRROR_WORKSPACE`, `MINI_MIRROR_INTERVAL_S`, plus the `MINI_SHELL_WRAPPER`… deployment variables above.
+- It holds its own session (its own key and workspace) and is a **member of the room**: the founder runs `chat invite ROOM SUBJECT bridge` for its subject and the bridge session runs the printed `chat join` line, like any friend. It has its own stream.
+- **Room -> channel:** every poll is one `tail --in ROOM --json --since H` through the same forced command, a signed, metered Host read by the bridge's key. Each new `say` is posted to the channel webhook as `**name**: text` (`allowed_mentions` empty; `@` is broken with a zero-width space).
+- **Channel -> room:** the channel's messages after the last one seen (`GET /channels/ID/messages`, the bot token). Each person's message becomes `say --in ROOM --via discord --via-id ID --via-name NAME --file F`: the **bridge** says it, signed by the bridge's key; the payload names the Discord author. It never signs as a friend. Readers see `bridge via discord NAME#ID: text`.
+- **No loop:** an entry that carries `via`, or that the bridge's subject signed, is never posted up; a channel message with `webhook_id` (what the mirror posted) or from a bot is never said down.
+- The environment is `MINI_MIRROR_ROOM`, `MINI_MIRROR_WEBHOOK_URL` and `MINI_MIRROR_BOT_TOKEN` (secrets: a 0600 EnvironmentFile), `MINI_MIRROR_CHANNEL_URL` (`https://discord.com/api/v10/channels/ID/messages`), `MINI_MIRROR_HOME`, `MINI_MIRROR_WORKSPACE`, `MINI_MIRROR_INTERVAL_S`, `MINI_DISCORD_SPOOL`, plus the `MINI_SHELL_WRAPPER`... deployment variables above. The bot token travels to curl in its config on stdin, never argv.
+- **ember's step:** a bot user in the application, invited to the server with Read Message History on that channel, and the **Message Content** privileged intent enabled (without it Discord returns empty `content` and nothing is said). This is a new secret on the box; the entrance itself still holds none.
 
-It only goes from stream to channel. Nothing goes from the channel back into Mini as `say`, because the shell has no `say`/`tail` until PLACE §4.4 K-STREAM lands. Until then, the "stream" is a cell's fields. When `tail ROOM --since H` exists, the poll line changes and nothing else does.
+The old field-diff mode (`MINI_MIRROR_REF`, one cell's fields to a channel) is gone: it stood in for a stream until K-STREAM, and the room is the stream now. A unit configured with `MINI_MIRROR_REF` refuses to start (`MINI_MIRROR_ROOM is not set`).

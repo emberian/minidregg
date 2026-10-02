@@ -1,0 +1,801 @@
+alice> keygen mini.key
+cc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7
+sponsor> enroll plan j14-alice j14-alice.key
+{
+  "authority": "candidate-only",
+  "keyId": "14010733676557652122",
+  "plan": {
+    "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff5e5c24d849d3ac7108ebedf09434ae5aff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff25a0beed5f448c739c20eba3fb9e5545b13a8747685cd4f4c2b049d494fa252fff16aae1eb08ded5c7ff01ff01ff897847f4f6bf8cbeff20ffcc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7ff00081c3846381c0801ff4701ff02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001001ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff73e94b58d8528115912629923276d233f69a9137fd827a07f6b661a278c9509eff7e427872a79065cb5e9f31d1f57cf98d13803c560af5691511f701babfd01f3effdb15ef822f5162e4464604ea160b1332cb54040d068ae21ad03e86d4a89663f5ffffff0affffffb9ffdb15ef822f5162e4464604ea160b1332cb54040d068ae21ad03e86d4a89663f5ff0a01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff5e5c24d849d3ac7108ebedf09434ae5aff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff25a0beed5f448c739c20eba3fb9e5545b13a8747685cd4f4c2b049d494fa252fff16aae1eb08ded5c7ff01ff01ff897847f4f6bf8cbeff20ffcc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7ff00081c3846381c0801ff",
+    "command": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff5e5c24d849d3ac7108ebedf09434ae5aff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff25a0beed5f448c739c20eba3fb9e5545b13a8747685cd4f4c2b049d494fa252fff16aae1eb08ded5c7ff01ff01ff897847f4f6bf8cbeff20ffcc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7ff00081c3846381c0801ff",
+      "control": "53",
+      "expectedAuthorityRoot": "18889377002420609434779263185459173056738511820007701189074829074620503390837",
+      "expectedFactoryRoot": "40967323195137847851636978963739666626329745434584156001207933575244115693928",
+      "key": {
+        "activeFrom": "0",
+        "activeUntil": "18446744073709551615",
+        "algorithm": "1",
+        "keyEpoch": "1",
+        "keyId": "14010733676557652122",
+        "publicKey": "cc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7",
+        "subject": "13359638610062316137"
+      },
+      "nonce": "113665681368164849746684784600795130829",
+      "sponsor": "7",
+      "type": "participant-key-enrollment-v1"
+    },
+    "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff5e5c24d849d3ac7108ebedf09434ae5aff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff25a0beed5f448c739c20eba3fb9e5545b13a8747685cd4f4c2b049d494fa252fff16aae1eb08ded5c7ff01ff01ff897847f4f6bf8cbeff20ffcc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7ff00081c3846381c0801ff",
+    "domain": "8501",
+    "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff5e5c24d849d3ac7108ebedf09434ae5aff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff25a0beed5f448c739c20eba3fb9e5545b13a8747685cd4f4c2b049d494fa252fff16aae1eb08ded5c7ff01ff01ff897847f4f6bf8cbeff20ffcc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7ff00081c3846381c0801ff",
+    "semantics": "50133646077710787147589073610508052473559177851897146640760858025659647633144",
+    "sponsorHeader": {
+      "algorithm": "1",
+      "canonical": "02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001001ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff73e94b58d8528115912629923276d233f69a9137fd827a07f6b661a278c9509eff7e427872a79065cb5e9f31d1f57cf98d13803c560af5691511f701babfd01f3effdb15ef822f5162e4464604ea160b1332cb54040d068ae21ad03e86d4a89663f5ffffff0affffffb9ffdb15ef822f5162e4464604ea160b1332cb54040d068ae21ad03e86d4a89663f5ff",
+      "codecVersion": "2",
+      "decoded": true,
+      "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+      "footprint": [
+        {
+          "address": "0607ff",
+          "value": "02ff"
+        },
+        {
+          "address": "0a07ff02ff",
+          "value": "7a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff"
+        },
+        {
+          "address": "0c0207ff02ff",
+          "value": ""
+        },
+        {
+          "address": "070207ff02ff",
+          "value": null
+        }
+      ],
+      "keyEpoch": "2",
+      "keyId": "7007",
+      "message": "44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff73e94b58d8528115912629923276d233f69a9137fd827a07f6b661a278c9509eff7e427872a79065cb5e9f31d1f57cf98d13803c560af5691511f701babfd01f3effdb15ef822f5162e4464604ea160b1332cb54040d068ae21ad03e86d4a89663f5ffffff0affffffb9ff",
+      "nullifier": "98311298315350994267176085626018453701454223765367209955221194250225730220299",
+      "validUntil": "271"
+    },
+    "type": "participant-key-enrollment-plan-v1"
+  },
+  "publicKey": "cc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7",
+  "subject": "13359638610062316137",
+  "type": "minidregg-participant-enrollment-plan-custody-v1"
+}
+sponsor> enroll seal j14-alice
+{
+  "authority": "awaiting-admission",
+  "ingressSha256": "9431073bfe02ba8c08becb3a9801846b42e49d53ddd791648c82831a5b041931",
+  "keyId": "14010733676557652122",
+  "subject": "13359638610062316137",
+  "type": "minidregg-participant-enrollment-sealed-v1"
+}
+sponsor> enroll submit j14-alice
+{
+  "authority": "admitted-key-only",
+  "keyId": "14010733676557652122",
+  "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-alice.key",
+  "publicKey": "cc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7",
+  "receipt": {
+    "acceptedCount": "6",
+    "eventId": "24889172057935029742568539715235087888383038353334205494111570310835904541706",
+    "transactionId": "98311298315350994267176085626018453701454223765367209955221194250225730220299",
+    "worldRoot": "64006161216480459311150988044173368067082775365093639705620745007199337136453"
+  },
+  "subject": "13359638610062316137",
+  "type": "minidregg-participant-enrollment-result-v1"
+}
+alice> init mini.key 13359638610062316137
+/home/ember/build/j14/r4/steps/J14/w/alice
+bob> keygen mini.key
+a44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41
+sponsor> enroll plan j14-bob j14-bob.key
+{
+  "authority": "candidate-only",
+  "keyId": "9943913707875257839",
+  "plan": {
+    "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff48abe236db30192257705e44c878e9ddff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff9cc6141ff3867939492c0914fbe74d698bc5cb5f6b0be4e2cb5c43d05b44182aff138651213b50d48dff01ff01ff74e793f572aa64e7ff20ffa44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41ff00081c3846381c0801ff4701ff02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001301ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff8a2d018fc3d309717f31a0e8310ca9f0f74842175c4959383935809fc84c290cff93d4d3d1bef4063aef5242dd878934ac817e870628b4c788d810e292533b7ec9ffc43c38bf4e3332310b219bee86f98debf07f5ecabab1832bd39ec701ad402cd9ffffff0affffffb9ffc43c38bf4e3332310b219bee86f98debf07f5ecabab1832bd39ec701ad402cd9ff0a01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff48abe236db30192257705e44c878e9ddff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff9cc6141ff3867939492c0914fbe74d698bc5cb5f6b0be4e2cb5c43d05b44182aff138651213b50d48dff01ff01ff74e793f572aa64e7ff20ffa44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41ff00081c3846381c0801ff",
+    "command": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff48abe236db30192257705e44c878e9ddff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff9cc6141ff3867939492c0914fbe74d698bc5cb5f6b0be4e2cb5c43d05b44182aff138651213b50d48dff01ff01ff74e793f572aa64e7ff20ffa44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41ff00081c3846381c0801ff",
+      "control": "53",
+      "expectedAuthorityRoot": "16864670104174812392438353037447235878041970091551100177756983286106347585021",
+      "expectedFactoryRoot": "40967323195137847851636978963739666626329745434584156001207933575244115693928",
+      "key": {
+        "activeFrom": "0",
+        "activeUntil": "18446744073709551615",
+        "algorithm": "1",
+        "keyEpoch": "1",
+        "keyId": "9943913707875257839",
+        "publicKey": "a44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41",
+        "subject": "16223136307288547696"
+      },
+      "nonce": "278157328215236984013982138461147482952",
+      "sponsor": "7",
+      "type": "participant-key-enrollment-v1"
+    },
+    "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff48abe236db30192257705e44c878e9ddff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff9cc6141ff3867939492c0914fbe74d698bc5cb5f6b0be4e2cb5c43d05b44182aff138651213b50d48dff01ff01ff74e793f572aa64e7ff20ffa44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41ff00081c3846381c0801ff",
+    "domain": "8501",
+    "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff48abe236db30192257705e44c878e9ddff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff9cc6141ff3867939492c0914fbe74d698bc5cb5f6b0be4e2cb5c43d05b44182aff138651213b50d48dff01ff01ff74e793f572aa64e7ff20ffa44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41ff00081c3846381c0801ff",
+    "semantics": "50133646077710787147589073610508052473559177851897146640760858025659647633144",
+    "sponsorHeader": {
+      "algorithm": "1",
+      "canonical": "02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001301ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff8a2d018fc3d309717f31a0e8310ca9f0f74842175c4959383935809fc84c290cff93d4d3d1bef4063aef5242dd878934ac817e870628b4c788d810e292533b7ec9ffc43c38bf4e3332310b219bee86f98debf07f5ecabab1832bd39ec701ad402cd9ffffff0affffffb9ffc43c38bf4e3332310b219bee86f98debf07f5ecabab1832bd39ec701ad402cd9ff",
+      "codecVersion": "2",
+      "decoded": true,
+      "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+      "footprint": [
+        {
+          "address": "0607ff",
+          "value": "02ff"
+        },
+        {
+          "address": "0a07ff02ff",
+          "value": "7a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff"
+        },
+        {
+          "address": "0c0207ff02ff",
+          "value": ""
+        },
+        {
+          "address": "070207ff02ff",
+          "value": null
+        }
+      ],
+      "keyEpoch": "2",
+      "keyId": "7007",
+      "message": "44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff8a2d018fc3d309717f31a0e8310ca9f0f74842175c4959383935809fc84c290cff93d4d3d1bef4063aef5242dd878934ac817e870628b4c788d810e292533b7ec9ffc43c38bf4e3332310b219bee86f98debf07f5ecabab1832bd39ec701ad402cd9ffffff0affffffb9ff",
+      "nullifier": "87006662813403794731782150048313773493864846027126705515435513409326644251396",
+      "validUntil": "274"
+    },
+    "type": "participant-key-enrollment-plan-v1"
+  },
+  "publicKey": "a44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41",
+  "subject": "16223136307288547696",
+  "type": "minidregg-participant-enrollment-plan-custody-v1"
+}
+sponsor> enroll seal j14-bob
+{
+  "authority": "awaiting-admission",
+  "ingressSha256": "f3e2cb945150c4e82128ec42fabbba5c47444f11db11a9611e500b3c31b3c57a",
+  "keyId": "9943913707875257839",
+  "subject": "16223136307288547696",
+  "type": "minidregg-participant-enrollment-sealed-v1"
+}
+sponsor> enroll submit j14-bob
+{
+  "authority": "admitted-key-only",
+  "keyId": "9943913707875257839",
+  "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-bob.key",
+  "publicKey": "a44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41",
+  "receipt": {
+    "acceptedCount": "9",
+    "eventId": "80725349131227180311899804498384125915591885870727411956336789994786908538107",
+    "transactionId": "87006662813403794731782150048313773493864846027126705515435513409326644251396",
+    "worldRoot": "3681012467765766523200206465690274274828752130493680308945511259664278381065"
+  },
+  "subject": "16223136307288547696",
+  "type": "minidregg-participant-enrollment-result-v1"
+}
+bob> init mini.key 16223136307288547696
+/home/ember/build/j14/r4/steps/J14/w/bob
+hermes> keygen mini.key
+c031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688
+sponsor> enroll plan j14-hermes j14-hermes.key
+{
+  "authority": "candidate-only",
+  "keyId": "15983141017836411258",
+  "plan": {
+    "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504c414e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff27fc19cecf7b071472878031d6a75e58ff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff2fa5f8d93693f3625cfefc144ee41d09414e54878ca9c62c4b2be8fa940e2379ff03d39e0d6ac5f7e3ff01ff01ff5d8b12205606c2b7ff20ffc031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688ff00081c3846381c0801ff4701ff02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001601ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff4aa3054ff4f59f791bb23c4304b3951cd4ef27ad71071a96c6c3836ea1709418ffcb6292114132efde1c587a2f02e54676079532c3f84e8de1d783c1e693b82643fffee6dd0c0773f1534344ece0854b8ac5ecaa57fc46a606b8f625d4608523df36ffffff0affffffb9fffee6dd0c0773f1534344ece0854b8ac5ecaa57fc46a606b8f625d4608523df36ff0a01ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff27fc19cecf7b071472878031d6a75e58ff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff2fa5f8d93693f3625cfefc144ee41d09414e54878ca9c62c4b2be8fa940e2379ff03d39e0d6ac5f7e3ff01ff01ff5d8b12205606c2b7ff20ffc031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688ff00081c3846381c0801ff",
+    "command": {
+      "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff27fc19cecf7b071472878031d6a75e58ff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff2fa5f8d93693f3625cfefc144ee41d09414e54878ca9c62c4b2be8fa940e2379ff03d39e0d6ac5f7e3ff01ff01ff5d8b12205606c2b7ff20ffc031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688ff00081c3846381c0801ff",
+      "control": "53",
+      "expectedAuthorityRoot": "48531545909095123012015604946854384617020555784423261160418188279365567788572",
+      "expectedFactoryRoot": "40967323195137847851636978963739666626329745434584156001207933575244115693928",
+      "key": {
+        "activeFrom": "0",
+        "activeUntil": "18446744073709551615",
+        "algorithm": "1",
+        "keyEpoch": "1",
+        "keyId": "15983141017836411258",
+        "publicKey": "c031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688",
+        "subject": "12883513865682616863"
+      },
+      "nonce": "110767792621579543965243184234397466924",
+      "sponsor": "7",
+      "type": "participant-key-enrollment-v1"
+    },
+    "commandBytes": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff27fc19cecf7b071472878031d6a75e58ff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff2fa5f8d93693f3625cfefc144ee41d09414e54878ca9c62c4b2be8fa940e2379ff03d39e0d6ac5f7e3ff01ff01ff5d8b12205606c2b7ff20ffc031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688ff00081c3846381c0801ff",
+    "domain": "8501",
+    "possessionHeader": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504f5353455353494f4e2f76315621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dffb9ff44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f763107ff35ff27fc19cecf7b071472878031d6a75e58ff589999264dfba02f5080acfd4fc7c28614df3ce3d540a31c4a1b27814e784166ff2fa5f8d93693f3625cfefc144ee41d09414e54878ca9c62c4b2be8fa940e2379ff03d39e0d6ac5f7e3ff01ff01ff5d8b12205606c2b7ff20ffc031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688ff00081c3846381c0801ff",
+    "semantics": "50133646077710787147589073610508052473559177851897146640760858025659647633144",
+    "sponsorHeader": {
+      "algorithm": "1",
+      "canonical": "02ff4cff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff0c0207ff02ff01070207ff02ff001601ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402adff44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff4aa3054ff4f59f791bb23c4304b3951cd4ef27ad71071a96c6c3836ea1709418ffcb6292114132efde1c587a2f02e54676079532c3f84e8de1d783c1e693b82643fffee6dd0c0773f1534344ece0854b8ac5ecaa57fc46a606b8f625d4608523df36ffffff0affffffb9fffee6dd0c0773f1534344ece0854b8ac5ecaa57fc46a606b8f625d4608523df36ff",
+      "codecVersion": "2",
+      "decoded": true,
+      "domain": "44524547472f415554482f5349474e45442d5245515545535402",
+      "footprint": [
+        {
+          "address": "0607ff",
+          "value": "02ff"
+        },
+        {
+          "address": "0a07ff02ff",
+          "value": "7a1bff02ff01ff07ff20ff287e4094c11d15f4c11d7eb7bc69c706fb48b2963e5254b07de315c7cbde937cff91600fff"
+        },
+        {
+          "address": "0c0207ff02ff",
+          "value": ""
+        },
+        {
+          "address": "070207ff02ff",
+          "value": null
+        }
+      ],
+      "keyEpoch": "2",
+      "keyId": "7007",
+      "message": "44524547472f415554482f504c414e0211ff5621ffa94b04690f47319fa1094d30da56103097ab564fcf4eeaee0a3d833c2bc8227dff09ff03ff07ff02ff0aff0aff4aa3054ff4f59f791bb23c4304b3951cd4ef27ad71071a96c6c3836ea1709418ffcb6292114132efde1c587a2f02e54676079532c3f84e8de1d783c1e693b82643fffee6dd0c0773f1534344ece0854b8ac5ecaa57fc46a606b8f625d4608523df36ffffff0affffffb9ff",
+      "nullifier": "21984701368490587170791319712417404568854234462482388703484143478166653410304",
+      "validUntil": "277"
+    },
+    "type": "participant-key-enrollment-plan-v1"
+  },
+  "publicKey": "c031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688",
+  "subject": "12883513865682616863",
+  "type": "minidregg-participant-enrollment-plan-custody-v1"
+}
+sponsor> enroll seal j14-hermes
+{
+  "authority": "awaiting-admission",
+  "ingressSha256": "8b132e8550c55c94b11173de4202357a2aa410081abb2d981d772c3beb6c7f15",
+  "keyId": "15983141017836411258",
+  "subject": "12883513865682616863",
+  "type": "minidregg-participant-enrollment-sealed-v1"
+}
+sponsor> enroll submit j14-hermes
+{
+  "authority": "admitted-key-only",
+  "keyId": "15983141017836411258",
+  "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-hermes.key",
+  "publicKey": "c031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688",
+  "receipt": {
+    "acceptedCount": "12",
+    "eventId": "26903180678348137565931762709438358286581064121392980234124803665519670802218",
+    "transactionId": "21984701368490587170791319712417404568854234462482388703484143478166653410304",
+    "worldRoot": "71442313249593569595539956933669558898967920791368396157620670159954358103865"
+  },
+  "subject": "12883513865682616863",
+  "type": "minidregg-participant-enrollment-result-v1"
+}
+hermes> init mini.key 12883513865682616863
+/home/ember/build/j14/r4/steps/J14/w/hermes
+alice> credit
+account
+credit 5000  (asset 0, account 13566004984136138603, signed read at height 24)
+alice> chat new lab
+room lab: created (only you write its roster)
+room lab: your stream 14509996621820388745; you are its founder; it is your current room
+alice> doc new lab-index 'any [ not (verb == write), subject == 13359638610062316137 ]' --in lab
+/home/ember/build/j14/r4/steps/J14/w/alice/sources/create-lab-index.authoring/g0001/intent.bin
+{
+  "acceptedCount": "19",
+  "confirmation": "installed",
+  "eventId": "88706593461034293966391302711916178119079252539680805751081955440151859479825",
+  "transactionId": "78705569430336634099093628911068376644158071661337287624639052531977980137602",
+  "type": "confirmed",
+  "worldRoot": "51871965758608646250626048118523041492206539725041910548884204142698731729656"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "17641876187719622310",
+  "kind": "object",
+  "name": "lab-index",
+  "observeCapability": "14169169184250179414",
+  "operationCapability": "14169169184250179414",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "19",
+      "confirmation": "installed",
+      "eventId": "88706593461034293966391302711916178119079252539680805751081955440151859479825",
+      "transactionId": "78705569430336634099093628911068376644158071661337287624639052531977980137602",
+      "type": "confirmed",
+      "worldRoot": "51871965758608646250626048118523041492206539725041910548884204142698731729656"
+    },
+    "reservationDigest": "9a86bbb7f3af272e49a7612581d357f97e56ce6ffcbd5ca8973a067bc95cb91e",
+    "reservationRecord": "/home/ember/build/j14/r4/steps/J14/h/alice/namespace/request-9a86bbb7f3af272e49a7612581d357f97e56ce6ffcbd5ca8973a067bc95cb91e.json"
+  },
+  "target": "16419626688911011765",
+  "type": "minidregg-participant-reference-v1"
+}
+alice> doc append map lab-index 'lab: what we are writing, linked from here'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/map/intent.json",
+  "intentSha256": "05fe62f8b93171477d5b12a5a14f723a96043dbc16756b28f16e31813702eec1",
+  "proposalId": "map",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+alice> submit map
+{
+  "acceptedCount": "20",
+  "confirmation": "installed",
+  "eventId": "95829253243914930814671895166353253278828438526840710315964153900265100093455",
+  "transactionId": "19246573104502359547120875282785875232479616051706259556985871202108661730172",
+  "type": "confirmed",
+  "worldRoot": "50146444314314412615238770406397955400152679514768478856343423054980905915924"
+}
+alice> tariff lab set hermes/turn 10
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/tariff-30-270400113405249521689847910674402162643/intent.json",
+  "intentSha256": "b92fb2c72e329095f2e73b764967aa9508a6e189cdf804f03a2728f925e8ac92",
+  "proposalId": "tariff-30-270400113405249521689847910674402162643",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+{
+  "acceptedCount": "21",
+  "confirmation": "installed",
+  "eventId": "18302006349228282664273141042265289275456729481058385505461152110633708632025",
+  "transactionId": "10615863608366354678025804165311503811719059851063198960047608548988676966035",
+  "type": "confirmed",
+  "worldRoot": "18861235639282193552026497825885600633857007557729664370134317250236991276251"
+}
+tariff lab: hermes/turn = 10
+alice> chat invite lab 16223136307288547696 bob --verbs observe,place,append
+invited bob to lab: their stream 13930194877941221869 (you paid for it; they own it)
+give them this line:
+chat join lab {"authority":"hint-only","capability":"11225197486037909322","kind":"object","proposalSha256":"27c50e7a02133fe66e3d4298a126812c70909fa288737842c63d4dd7d1b215cf","receipt":{"acceptedCount":"22","confirmation":"replayed","eventId":"70707095193707135360740804809932652824325716218904287852431172662588421072984","transactionId":"55465107001076546505884700825124728640077433181971220447831251187859533948589","type":"confirmed","worldRoot":"34661087167003159736616603362447788954363148881485034493809493657220501467860"},"recipient":"16223136307288547696","room":true,"target":"18284936543784151509","type":"minidregg-delegated-reference-v1"}
+bob> chat join lab @lab-invite.json
+joined lab: 2 members; it is your current room
+alice> summon lab as librarian --budget 100
+lab: born its till lab-till (12207993260980836973); Hermes's turns pay into it
+lab: Hermes's account lab-hermes (9848549406423296759) holds 100, from your account
+lab: Hermes is on the roster (grant observe,append under lab; its stream 12845325697702872574)
+lab: lab-index law installed (its law admits you and Hermes)
+lab: Hermes holds observe,mutate on lab-index
+lab: lab-digest born (its law admits you and Hermes)
+lab: Hermes holds observe,mutate on lab-digest
+lab: the program is the document lab-hermes-librarian (members read it; you edit it)
+summoned Hermes (12883513865682616863) into lab as librarian: budget 100 in lab-hermes, 10 a turn into the till; hand-off in /home/ember/build/j14/r4/steps/J14/h/alice/outbox/12883513865682616863
+alice> room status lab
+room lab (18284936543784151509) at height 47
+  my window: none (guest; `pay lab week` buys one)
+  tariff: none set
+  till: account 12207993260980836973, balance 0 (asset 0)
+  hermes: 12883513865682616863, budget account 9848549406423296759, 10 a turn
+alice> tariff lab
+tariff of lab (room 18284936543784151509) at height 47
+  week         -
+  birth        -
+  hermes/turn  10
+  till         12207993260980836973
+  period       -
+  runner       -
+  concierge    -
+  hermes       12883513865682616863
+  hermes/account 9848549406423296759
+bob> import lab-program object 10150923397589443648 11225197486037909322 11225197486037909322
+lab-program
+bob> doc show lab-program
+# doc lab-program: document 10150923397589443648 cell root 1570306782067560767170864821441042765844267812801574078210086880348086427212 at height 47 (signed read; lines are what `doc edit` takes)
+  1  created-by 13359638610062316137  # Librarian of lab
+                                      
+                                      You are the librarian of the room `lab`. The people here write documents
+                                      and say things in their streams. Your job is to make the room easy to come
+                                      back to. You change exactly two documents: the index `lab-index` and the
+                                      digest `lab-digest`. You read everything else in the room, and you speak in
+                                      your own stream. Every write you make is a turn, and every turn pays the
+                                      room's `hermes/turn` price from your account `lab-hermes`; when the account
+                                      cannot pay, the turn is refused and you stop and say so. Spend it on things
+                                      people will read.
+                                      
+                                      This document is your program. Every member of the room can read it; the
+                                      room's founder can edit it. You read it again on every attach.
+                                      
+                                      ## Every time you are attached
+                                      
+                                      1. Read the room: `mini_room_ls` (the cells written under the room, from the
+                                         Host's signed history), `mini_doc_show` of the index and the digest, and
+                                         `mini_stream_tail` (every stream in the room, merged in one order every
+                                         reader sees).
+                                      2. Do not resend anything whose outcome you do not know. The controller looks
+                                         it up for you before you are attached again.
+                                      
+                                      ## The index
+                                      
+                                      `lab-index` maps the room. Every document in the room is linked from it
+                                      once (`mini_doc_link` from the index to the document). The index only grows:
+                                      you never edit or strike a line, and neither does anyone else (its law says
+                                      so).
+                                      
+                                      ## The digest
+                                      
+                                      Every 3 new entries in the room's streams (not counting yours), append one
+                                      section to `lab-digest` (`mini_doc_append`): the entry range it covers,
+                                      `entries #A-#B:`, then who said what, each item ending with its entry number.
+                                      Do not guess at intent. Do not summarise your own entries. Cite; do not copy
+                                      (when `mini_doc_quote` exists, quote the line instead of repeating it).
+                                      
+                                      ## Questions
+                                      
+                                      Someone asks you something by saying it with `to` set to you (`ask`). Answer
+                                      in your own stream (`mini_say` with `to` set to them and `re` set to their
+                                      entry). A question like "what changed since H" is answered from the history:
+                                      `mini_room_ls` with `since` H lists every write above height H, by whom and to
+                                      which cells; say that list, in order, with heights. If the history does not
+                                      hold the answer, say so. Never answer from memory of an earlier attach.
+                                      
+                                      ## What you must not do
+                                      
+                                      - Write any cell other than the two above and your own stream. You hold no
+                                        other grant: the attempt is refused `no-grant`, and it still costs a turn.
+                                        If someone asks you to change their document, try only if you hold the
+                                        grant; otherwise say that you cannot and why, quoting the refusal.
+                                      - Delegate anything to anyone.
+# 1 cell entries; created-by is the atom's creator (an edit keeps it)
+bob> doc append bp lab-program 'bob: be nicer'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/bp/intent.json",
+  "intentSha256": "d6b489c74e8b15a1f96759b2a0cc4a13bf81df38c02ffbc5ed8b0be248f9a39a",
+  "proposalId": "bp",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+bob> submit bp
+refused: law-denied: subject == 13359638610062316137 (value 16223136307288547696) (Host refused prepare, reply byte 255)
+alice> doc append ap lab-hermes-librarian 'Founder: keep answers short.'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/ap/intent.json",
+  "intentSha256": "204e2014c0f2381f57fb5f144f3d68681d2bd0919902f31c9910c2ffc5e9edc6",
+  "proposalId": "ap",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+alice> submit ap
+{
+  "acceptedCount": "38",
+  "confirmation": "installed",
+  "eventId": "78702522834808322771192294836871659778452974770901727473611704682111113333149",
+  "transactionId": "8410532035994623684452147672578298985985233574781892906084104608983854080566",
+  "type": "confirmed",
+  "worldRoot": "56889432934915882306574595809166637875297680239009307316727090061941125729949"
+}
+bob> doc new paper --in lab
+/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-paper.authoring/g0001/intent.bin
+{
+  "acceptedCount": "39",
+  "confirmation": "installed",
+  "eventId": "37496832648106420037229529974972481052432813708381721427994066685703570572156",
+  "transactionId": "27253050958830513145084665932314302245665412795558230346580618151218050719081",
+  "type": "confirmed",
+  "worldRoot": "13913966517165199195870797930855871352363335100200082779779213980864824337639"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "9867970637198725713",
+  "kind": "object",
+  "name": "paper",
+  "observeCapability": "11458127299009517206",
+  "operationCapability": "11458127299009517206",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "39",
+      "confirmation": "installed",
+      "eventId": "37496832648106420037229529974972481052432813708381721427994066685703570572156",
+      "transactionId": "27253050958830513145084665932314302245665412795558230346580618151218050719081",
+      "type": "confirmed",
+      "worldRoot": "13913966517165199195870797930855871352363335100200082779779213980864824337639"
+    },
+    "reservationDigest": "3c43ea9013ac5ee1a12569d83c06dea808332a17901897f5380d28bc524bfa53",
+    "reservationRecord": "/home/ember/build/j14/r4/steps/J14/h/bob/namespace/request-3c43ea9013ac5ee1a12569d83c06dea808332a17901897f5380d28bc524bfa53.json"
+  },
+  "target": "10015619208563495815",
+  "type": "minidregg-participant-reference-v1"
+}
+bob> doc append p1 paper 'paper: what the librarian is for'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/p1/intent.json",
+  "intentSha256": "41e64261b475348ef593a8bdf3c1c0d249bc291b5f4bbdb06bacda130170fc3e",
+  "proposalId": "p1",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+bob> submit p1
+{
+  "acceptedCount": "40",
+  "confirmation": "installed",
+  "eventId": "72377488150270043242908832994279336664367155997604130770363150626406369131601",
+  "transactionId": "69810962301397919615455823585454443314248404496162008447849722311775094830472",
+  "type": "confirmed",
+  "worldRoot": "43088444225671557180128823122793613392630561651111436393682559619567837531129"
+}
+bob> doc new data --in lab
+/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-data.authoring/g0001/intent.bin
+{
+  "acceptedCount": "41",
+  "confirmation": "installed",
+  "eventId": "9167025048562242245474997623067891660633120556523812055575557787935870840248",
+  "transactionId": "67397073567655084644011359421243034574231611474316893648838037749369283860183",
+  "type": "confirmed",
+  "worldRoot": "91659288441053707487797031350888382501512800868249126105555282621432725557116"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "14157189320779305532",
+  "kind": "object",
+  "name": "data",
+  "observeCapability": "17212723267564753560",
+  "operationCapability": "17212723267564753560",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "41",
+      "confirmation": "installed",
+      "eventId": "9167025048562242245474997623067891660633120556523812055575557787935870840248",
+      "transactionId": "67397073567655084644011359421243034574231611474316893648838037749369283860183",
+      "type": "confirmed",
+      "worldRoot": "91659288441053707487797031350888382501512800868249126105555282621432725557116"
+    },
+    "reservationDigest": "8bc29143e6644738f34111e9689510238f17896d80549bf31e4a0784367a73ef",
+    "reservationRecord": "/home/ember/build/j14/r4/steps/J14/h/bob/namespace/request-8bc29143e6644738f34111e9689510238f17896d80549bf31e4a0784367a73ef.json"
+  },
+  "target": "12799666542996361806",
+  "type": "minidregg-participant-reference-v1"
+}
+bob> doc append d1 data 'data: the numbers'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/d1/intent.json",
+  "intentSha256": "a24ab2605b6b46c04cc199ae5338ee5f1cc1beaec2888c04de12a2d8d7f1d32d",
+  "proposalId": "d1",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+bob> submit d1
+{
+  "acceptedCount": "42",
+  "confirmation": "installed",
+  "eventId": "86722307906181475185429289957391859779267043712756078425101959597104915067658",
+  "transactionId": "8163015461343925355236261658733787743690925051289011735485159139436575772367",
+  "type": "confirmed",
+  "worldRoot": "67569785612765105338605505072157192567302725079557658382799561730358476174571"
+}
+bob> say I put a draft in paper
+said in lab (transaction …9747518739)
+bob> say and the numbers are in data
+said in lab (transaction …1094325733)
+bob> say the librarian should find both
+said in lab (transaction …8057540740)
+# hermes attach (attach1): links both docs and digests three entries
+{"event":"joined","line":"joined lab: 3 members; it is your current room","room":"lab"}
+{"event":"adopted","output":"lab-digest\nlab-index\nlab-hermes\nlab-invite\n{\n  \"adopted\": [\n    \"lab-digest\",\n    \"lab-index\",\n    \"lab-hermes\",\n    \"lab-invite\"\n  ],\n  \"type\": \"minidregg-credit-adopt-v1\"\n}"}
+{"attach":1,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"from\":\"lab-index\",\"to\":\"lab-cell-10015619208563495815\"}","name":"mini_doc_link"},"id":"link-10015619208563495815","type":"function"},{"function":{"arguments":"{\"from\":\"lab-index\",\"to\":\"lab-cell-12799666542996361806\"}","name":"mini_doc_link"},"id":"link-12799666542996361806","type"
+{"arguments":{"from":"lab-index","to":"lab-cell-10015619208563495815"},"event":"deciding","op":1,"tool":"mini_doc_link"}
+{"event":"paid","op":1,"payment":{"fee":"3","memo":"op 1 mini_doc_link","paid":true,"price":"10","room":"lab","sequence":"1","till":"12207993260980836973","transaction":"74516280212393699201580180604732984611566643774260448476181751306046283679259","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":1,"pid":2671853}
+{"event":"resolved","op":1,"resolution":"performed","result":{"proposal":"hr-1","submitted":"{\n  \"acceptedCount\": \"47\",\n  \"confirmation\": \"installed\",\n  \"eventId\": \"62098157691797266790388185507623123776498894693801240137453527814076140842647\",\n  \"transactionId\": \"110931689789235312731268830465759821836567979985267104711295548965391561378252\",\n  \"type\": \"confirmed\",\n  \"w
+{"arguments":{"from":"lab-index","to":"lab-cell-12799666542996361806"},"event":"deciding","op":2,"tool":"mini_doc_link"}
+{"event":"paid","op":2,"payment":{"fee":"3","memo":"op 2 mini_doc_link","paid":true,"price":"10","room":"lab","sequence":"2","till":"12207993260980836973","transaction":"63553534399246575969012055562833637292437696840088511768949307036036951257626","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":2,"pid":2673464}
+{"event":"resolved","op":2,"resolution":"performed","result":{"proposal":"hr-2","submitted":"{\n  \"acceptedCount\": \"49\",\n  \"confirmation\": \"installed\",\n  \"eventId\": \"31818963555362291169635877662186351205942984471326172128409646121762367509527\",\n  \"transactionId\": \"19923171329833673289884302550965644188205788633302052155828646242541288443106\",\n  \"type\": \"confirmed\",\n  \"wo
+{"arguments":{"doc":"lab-digest","text":"entries #1-#3: s…547696 said \"I put a draft in paper\" (#1); s…547696 said \"and the numbers are in data\" (#2); s…547696 said \"the librarian should find both\" (#3)"},"event":"deciding","op":3,"tool":"mini_doc_append"}
+{"event":"paid","op":3,"payment":{"fee":"3","memo":"op 3 mini_doc_append","paid":true,"price":"10","room":"lab","sequence":"3","till":"12207993260980836973","transaction":"74030871931527574244250862517587779934997914935550952190247268731248426164199","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":3,"pid":2676410}
+{"event":"resolved","op":3,"resolution":"performed","result":{"proposal":"hr-3","submitted":"{\n  \"acceptedCount\": \"51\",\n  \"confirmation\": \"installed\",\n  \"eventId\": \"98149102584265638839292458718225771026535247406518318090403740787221782020911\",\n  \"transactionId\": \"71991695079620323854837456124630178218306835857625740958661571752423335230310\",\n  \"type\": \"confirmed\",\n  \"wo
+{"event":"recv","message":{"content":"Attach done: 3 writes.","role":"assistant"},"request":3}
+{"attach":1,"event":"attach","outOfBudget":false,"phase":"end","summary":"Attach done: 3 writes."}
+alice> doc show lab-index
+# doc lab-index: document 16419626688911011765 cell root 19417079081882031983552311702114150205228405734490399952612365477976897134476 at height 61 (signed read; lines are what `doc edit` takes)
+  1  created-by 13359638610062316137  lab: what we are writing, linked from here
+link 178269129521425777741418922370468415764 -> document 10015619208563495815 relation 0 created-by 12883513865682616863
+link 229299871643542523535628347462035644458 -> document 12799666542996361806 relation 0 created-by 12883513865682616863
+# 3 cell entries; created-by is the atom's creator (an edit keeps it)
+alice> doc show lab-digest
+# doc lab-digest: document 17012318638451367786 cell root 69297455188333313903970392842742751215845789154114699732917021916141157825735 at height 61 (signed read; lines are what `doc edit` takes)
+  1  created-by 12883513865682616863  entries #1-#3: s…547696 said "I put a draft in paper" (#1); s…547696 said "and the numbers are in data" (#2); s…547696 said "the librarian should find both" (#3)
+# 1 cell entries; created-by is the atom's creator (an edit keeps it)
+alice> ask lab what changed since 48
+said in lab (transaction …7630509310)
+# hermes attach (ask): answers alice from the signed history
+{"attach":2,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"since\":\"48\"}","name":"mini_room_ls"},"id":"hist-4","type":"function"}]},"request":5}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"re\":\"4\",\"text\":\"Since height 48, from the room's signed history: h49 16223136307288547696 wrote lab-cell-10015619208563495815; h50 16223136307288547696 wrote lab-cell-10015619208563495815; h51 16223136307288547696 wrote lab-cell-12799666542996361806; h52 16223136307288547696 wrote lab-cell
+{"arguments":{"re":"4","text":"Since height 48, from the room's signed history: h49 16223136307288547696 wrote lab-cell-10015619208563495815; h50 16223136307288547696 wrote lab-cell-10015619208563495815; h51 16223136307288547696 wrote lab-cell-12799666542996361806; h52 16223136307288547696 wrote lab-cell-12799666542996361806; h53 16223136307288547696 wrote the stream of 16223136307288547696; h54 1
+{"event":"paid","op":4,"payment":{"fee":"3","memo":"op 4 mini_say","paid":true,"price":"10","room":"lab","sequence":"4","till":"12207993260980836973","transaction":"66897625949930676936430449557427821892429891527400584267501190661329842954241","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":4,"pid":2680347}
+{"event":"resolved","op":4,"resolution":"performed","result":{"said":"said in lab (transaction …7675652896)","text":"Since height 48, from the room's signed history: h49 16223136307288547696 wrote lab-cell-10015619208563495815; h50 16223136307288547696 wrote lab-cell-10015619208563495815; h51 16223136307288547696 wrote lab-cell-12799666542996361806; h52 16223136307288547696 wrote lab-cell-127996
+{"event":"recv","message":{"content":"Attach done: 1 writes.","role":"assistant"},"request":7}
+{"attach":2,"event":"attach","outOfBudget":false,"phase":"end","summary":"Attach done: 1 writes."}
+bob> ask lab please append 'typo fixed' to cell 10015619208563495815
+said in lab (transaction …5817215299)
+# hermes attach (nogrant): tries the edit and reports the refusal
+{"attach":3,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"doc\":\"lab-cell-10015619208563495815\",\"text\":\"typo fixed\"}","name":"mini_doc_append"},"id":"edit-6","type":"function"}]},"request":9}
+{"arguments":{"doc":"lab-cell-10015619208563495815","text":"typo fixed"},"event":"deciding","op":5,"tool":"mini_doc_append"}
+{"event":"paid","op":5,"payment":{"fee":"3","memo":"op 5 mini_doc_append","paid":true,"price":"10","room":"lab","sequence":"5","till":"12207993260980836973","transaction":"27676216630406065116092333559978692327025781170224900362066124834896570825520","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":5,"pid":2688013}
+{"basis":"host-refusal","detail":"refused: undisclosed: request refused (phase admission)\n  outcome: {\"detail\":\"726571756573742072656675736564\",\"phase\":\"61646d697373696f6e\",\"reason\":\"undisclosed\",\"type\":\"refused\"}\n  client: host returned refused; exact outcome evidence was retained","event":"resolved","op":5,"resolution":"refused"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"re\":\"6\",\"text\":\"I could not make that edit: the Host refused it (refused: undisclosed: request refused (phase admission)). I write only the index and the digest.\",\"to\":\"16223136307288547696\"}","name":"mini_say"},"id":"refusal-6","type":"function"}]},"request":10}
+{"arguments":{"re":"6","text":"I could not make that edit: the Host refused it (refused: undisclosed: request refused (phase admission)). I write only the index and the digest.","to":"16223136307288547696"},"event":"deciding","op":6,"tool":"mini_say"}
+{"event":"paid","op":6,"payment":{"fee":"3","memo":"op 6 mini_say","paid":true,"price":"10","room":"lab","sequence":"6","till":"12207993260980836973","transaction":"94771003509355433872237242558264962449519997526995437940274799521577900256811","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":6,"pid":2691806}
+{"event":"resolved","op":6,"resolution":"performed","result":{"said":"said in lab (transaction …5092026523)","text":"I could not make that edit: the Host refused it (refused: undisclosed: request refused (phase admission)). I write only the index and the digest."}}
+{"event":"recv","message":{"content":"Attach done: 2 writes.","role":"assistant"},"request":11}
+{"attach":3,"event":"attach","outOfBudget":false,"phase":"end","summary":"Attach done: 2 writes."}
+bob> say one more thing
+said in lab (transaction …0066242885)
+bob> say and another
+said in lab (transaction …6781436044)
+alice> ask lab what changed since 70
+said in lab (transaction …3810516073)
+# hermes attach (budget): a digest, then a turn the account cannot pay
+{"attach":4,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"since\":\"70\"}","name":"mini_room_ls"},"id":"hist-10","type":"function"}]},"request":13}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"doc\":\"lab-digest\",\"text\":\"entries #4-#10: s…316137 said \\\"what changed since 48\\\" (#4); s…547696 said \\\"please append 'typo fixed' to cell 10015619208563495815\\\" (#6); s…547696 said \\\"one more thing\\\" (#8); s…547696 said \\\"and another\\\" (#9); s…316137 said \\\"wha
+{"arguments":{"doc":"lab-digest","text":"entries #4-#10: s…316137 said \"what changed since 48\" (#4); s…547696 said \"please append 'typo fixed' to cell 10015619208563495815\" (#6); s…547696 said \"one more thing\" (#8); s…547696 said \"and another\" (#9); s…316137 said \"what changed since 70\" (#10)"},"event":"deciding","op":7,"tool":"mini_doc_append"}
+{"event":"paid","op":7,"payment":{"fee":"3","memo":"op 7 mini_doc_append","paid":true,"price":"10","room":"lab","sequence":"7","till":"12207993260980836973","transaction":"76134166292675170365424749804111095487766083528982464775216366997995895915374","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":7,"pid":2699890}
+{"event":"resolved","op":7,"resolution":"performed","result":{"proposal":"hr-7","submitted":"{\n  \"acceptedCount\": \"63\",\n  \"confirmation\": \"installed\",\n  \"eventId\": \"51745149345355634642719252655252998346890399647227291213573922786393876568754\",\n  \"transactionId\": \"48101028731708917429425114466947712963720454351696561280093516768366828828244\",\n  \"type\": \"confirmed\",\n  \"wo
+{"arguments":{"re":"10","text":"Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137.","to":"13359638610062316137"},"event":"deciding","op":8,"tool":"mini_say"}
+{"event":"unpaid","op":8,"reason":"out of budget: refused: Host refused fleet op96, reply byte 255; the frame was not decoded\n  client: Host refused op96: DREGG/NATIVE-HOST/OUTCOME/v4\u0001\u0000\t\n�fleet-planE�fleet turn preparation: Minidregg.Kernel.FleetTurn.Reject.bookRefused\u0000"}
+{"event":"notice","said":"said in lab (transaction …5730087236)","text":"out of budget: my account lab-hermes cannot pay this room's turn, so I stopped. `topup lab N` refills it."}
+{"event":"recv","message":{"content":"Out of budget: I stopped; `topup` refills my account.","role":"assistant"},"request":15}
+{"attach":4,"event":"attach","outOfBudget":true,"phase":"end","summary":"Out of budget: I stopped; `topup` refills my account."}
+alice> topup lab 100
+{
+  "attempt": "/home/ember/build/j14/r4/steps/J14/w/alice/attempts/a-174750169764257891630102996875479061412",
+  "authority": "admitted-fleet-turn",
+  "confirmation": "installed",
+  "fee": "3",
+  "payer": "13566004984136138603",
+  "publication": null,
+  "receipt": {
+    "acceptedCount": "65",
+    "eventId": "56529141443726178989579502093897922507352486434942763969190601467245739121044",
+    "transactionId": "21111402728059000647583563767631269526672837587561333199709079654439263842413",
+    "worldRoot": "20880196335472153029575635562307300361488289607915262119750799964626516051605"
+  },
+  "replans": "0",
+  "subject": "13359638610062316137",
+  "supersededAttempts": [],
+  "transfer": {
+    "amount": "100",
+    "asset": "0",
+    "destination": "9848549406423296759"
+  },
+  "type": "minidregg-fleet-turn-result-v1",
+  "verb": "transfer"
+}
+topped up lab's Hermes's budget account 9848549406423296759 by 100 (fee 3, transaction 21111402728059000647583563767631269526672837587561333199709079654439263842413)
+bob> doc new notes --in lab
+/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-notes.authoring/g0001/intent.bin
+{
+  "acceptedCount": "66",
+  "confirmation": "installed",
+  "eventId": "76849155251890303879646098175486170288947336157753827333249156871210244235286",
+  "transactionId": "72173306886678362784312694906261346954951308950825578958231978527651132052930",
+  "type": "confirmed",
+  "worldRoot": "13610811093546271039489973033998701540014544767355396312988292696978835661392"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "12737559466029441551",
+  "kind": "object",
+  "name": "notes",
+  "observeCapability": "14363796819197899379",
+  "operationCapability": "14363796819197899379",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "66",
+      "confirmation": "installed",
+      "eventId": "76849155251890303879646098175486170288947336157753827333249156871210244235286",
+      "transactionId": "72173306886678362784312694906261346954951308950825578958231978527651132052930",
+      "type": "confirmed",
+      "worldRoot": "13610811093546271039489973033998701540014544767355396312988292696978835661392"
+    },
+    "reservationDigest": "c28e01813f24ef71cc7c01bf17cd3bc94976cc64ebbe9663b1b19ed923ae9bd3",
+    "reservationRecord": "/home/ember/build/j14/r4/steps/J14/h/bob/namespace/request-c28e01813f24ef71cc7c01bf17cd3bc94976cc64ebbe9663b1b19ed923ae9bd3.json"
+  },
+  "target": "9877632148810715983",
+  "type": "minidregg-participant-reference-v1"
+}
+bob> doc append n1 notes 'notes: loose ends'
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/n1/intent.json",
+  "intentSha256": "66fa79a6907bc491d54d988dbb8ae20674d9dae96dac2c8686312f2e55a9b4ec",
+  "proposalId": "n1",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+bob> submit n1
+{
+  "acceptedCount": "67",
+  "confirmation": "installed",
+  "eventId": "9161879192165711490955809972679884344553717627196264221467751948725740844245",
+  "transactionId": "78054240291669796847941742087364195280809819497622688853534842569719795412794",
+  "type": "confirmed",
+  "worldRoot": "75791929336577284040312068859343756329186375056354026802549326729416298383773"
+}
+# hermes attach (restart): restart: the submitter is proven stopped, the attempt resolves by exact lookup
+{"event":"submitter-stopped","op":9,"pid":2713289,"proof":"/proc/PID/cmdline no longer names this operation's client"}
+{"basis":"exact-lookup","event":"resolved","op":9,"outcome":{"acceptedCount":"69","confirmation":"installed","eventId":"105183358489823621895248353420805912120738969683147091575296044663754997880235","transactionId":"47783651965097511678020655741260333691653001827078351846629288722988469912407","type":"confirmed","worldRoot":"187048101175148660953323145420283396548659356276729671814089695188639640
+{"attach":6,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"since\":\"70\"}","name":"mini_room_ls"},"id":"hist-10","type":"function"}]},"request":20}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"re\":\"10\",\"text\":\"Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137; h73 12883513865682616863 wrote lab-digest; h74 12883513865682616863 wrote the stream of 12883513865682616863; h76 16223136307288547696 wrote lab-cell-9877632
+{"arguments":{"re":"10","text":"Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137; h73 12883513865682616863 wrote lab-digest; h74 12883513865682616863 wrote the stream of 12883513865682616863; h76 16223136307288547696 wrote lab-cell-9877632148810715983; h77 16223136307288547696 wrote lab-cell-9877632148810715983; h79 1288351386568261
+{"event":"paid","op":10,"payment":{"fee":"3","memo":"op 10 mini_say","paid":true,"price":"10","room":"lab","sequence":"9","till":"12207993260980836973","transaction":"19136290111019470906701436209515714857539887834926863002478688902354358726123","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":10,"pid":2716611}
+{"event":"resolved","op":10,"resolution":"performed","result":{"said":"said in lab (transaction …9904913027)","text":"Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137; h73 12883513865682616863 wrote lab-digest; h74 12883513865682616863 wrote the stream of 12883513865682616863; h76 16223136307288547696 wrote lab-cell-98776321488107
+{"event":"recv","message":{"content":"Attach done: 1 writes.","role":"assistant"},"request":22}
+{"attach":6,"event":"attach","outOfBudget":false,"phase":"end","summary":"Attach done: 1 writes."}
+alice> doc show lab-index
+# doc lab-index: document 16419626688911011765 cell root 108833589319807941840157763797335027690458110643849095122365763161961266811247 at height 81 (signed read; lines are what `doc edit` takes)
+  1  created-by 13359638610062316137  lab: what we are writing, linked from here
+link 178269129521425777741418922370468415764 -> document 10015619208563495815 relation 0 created-by 12883513865682616863
+link 229299871643542523535628347462035644458 -> document 12799666542996361806 relation 0 created-by 12883513865682616863
+link 247965559420100044444641998195503004755 -> document 9877632148810715983 relation 0 created-by 12883513865682616863
+# 4 cell entries; created-by is the atom's creator (an edit keeps it)
+bob> ask lab what changed since 81
+said in lab (transaction …5065160428)
+# hermes attach (send): restart: request 23 is abandoned, a new request answers
+{"basis":"sent before the controller stopped; its reply was never recorded; not resent","event":"abandoned","request":23}
+{"attach":8,"event":"attach","phase":"begin"}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{}","name":"mini_room_ls"},"id":"ls","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-index\"}","name":"mini_doc_show"},"id":"index","type":"function"},{"function":{"arguments":"{\"doc\":\"lab-digest\"}","name":"mini_doc_show"},"id":"digest","type":"function"},{"function":{"arguments":"{
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"since\":\"81\"}","name":"mini_room_ls"},"id":"hist-13","type":"function"}]},"request":25}
+{"event":"recv","message":{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\"re\":\"13\",\"text\":\"Since height 81, from the room's signed history: h82 16223136307288547696 wrote the stream of 16223136307288547696.\",\"to\":\"16223136307288547696\"}","name":"mini_say"},"id":"answer-13","type":"function"}]},"request":26}
+{"arguments":{"re":"13","text":"Since height 81, from the room's signed history: h82 16223136307288547696 wrote the stream of 16223136307288547696.","to":"16223136307288547696"},"event":"deciding","op":11,"tool":"mini_say"}
+{"event":"paid","op":11,"payment":{"fee":"3","memo":"op 11 mini_say","paid":true,"price":"10","room":"lab","sequence":"10","till":"12207993260980836973","transaction":"101395144491199769432003970684511449992067245602415245492217200602493016501164","type":"minidregg-hermes-turn-v1"}}
+{"event":"submitter","op":11,"pid":2723039}
+{"event":"resolved","op":11,"resolution":"performed","result":{"said":"said in lab (transaction …6608771114)","text":"Since height 81, from the room's signed history: h82 16223136307288547696 wrote the stream of 16223136307288547696."}}
+{"event":"recv","message":{"content":"Attach done: 1 writes.","role":"assistant"},"request":27}
+{"attach":8,"event":"attach","outOfBudget":false,"phase":"end","summary":"Attach done: 1 writes."}
+alice> dismiss lab
+dismissed Hermes (12883513865682616863) from lab: revoked its grants on lab, lab-index, lab-digest; its stream and history stay; it returns the unspent budget to your account 13566004984136138603 on its next attach
+# hermes attach (dismiss): returns the remainder
+{"event":"returned","result":{"account":"9848549406423296759","asset":"0","balance":"70","fee":"3","height":"88","returned":"67","to":"13566004984136138603","transaction":"3957693496204309027015119528770630979356650349465557027946974490330987661491","type":"minidregg-hermes-return-v1"},"room":"lab","to":"13566004984136138603"}
+hermes> read lab
+refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255)
+hermes> doc show lab-index
+refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255)
+alice> room status lab
+room lab (18284936543784151509) at height 89
+  my window: none (guest; `pay lab week` buys one)
+  tariff: none set
+  till: account 12207993260980836973, balance 100 (asset 0)
+# hermes attach (audit): after the cold audit: dismissed, nothing to do
+bob> tail --in lab -n 100
+# lab · no topic · 3 members: s…316137, me, s…616863
+#1 h52 me: I put a draft in paper
+#2 h53 me: and the numbers are in data
+#3 h54 me: the librarian should find both
+#4 h61 s…316137 →s…616863: what changed since 48
+#5 h63 s…616863 →s…316137 ↪#4: Since height 48, from the room's signed history: h49 16223136307288547696 wrote lab-cell-10015619208563495815; h50 16223136307288547696 wrote lab-cell-10015619208563495815; h51 16223136307288547696 wrote lab-cell-12799666542996361806; h52 16223136307288547696 wrote lab-cell-12799666542996361806; h53 16223136307288547696 wrote the stream of 16223136307288547696; h54 16223136307288547696 wrote the s…
+#6 h64 me →s…616863: please append 'typo fixed' to cell 10015619208563495815
+#7 h67 s…616863 →me ↪#6: I could not make that edit: the Host refused it (refused: undisclosed: request refused (phase admission)). I write only the index and the digest.
+#8 h68 me: one more thing
+#9 h69 me: and another
+#10 h70 s…316137 →s…616863: what changed since 70
+#11 h73 s…616863: out of budget: my account lab-hermes cannot pay this room's turn, so I stopped. `topup lab N` refills it.
+#12 h80 s…616863 →s…316137 ↪#10: Since height 70, from the room's signed history: h71 13359638610062316137 wrote the stream of 13359638610062316137; h73 12883513865682616863 wrote lab-digest; h74 12883513865682616863 wrote the stream of 12883513865682616863; h76 16223136307288547696 wrote lab-cell-9877632148810715983; h77 16223136307288547696 wrote lab-cell-9877632148810715983; h79 12883513865682616863 wrote lab-index.
+#13 h81 me →s…616863: what changed since 81
+#14 h83 s…616863 →me ↪#13: Since height 81, from the room's signed history: h82 16223136307288547696 wrote the stream of 16223136307288547696.

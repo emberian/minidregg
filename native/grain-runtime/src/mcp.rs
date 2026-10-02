@@ -70,6 +70,8 @@ pub struct ToolCatalog {
     pub api_applications: Vec<String>,
     pub resource_workspace: bool,
     pub resource_workspace_create: bool,
+    /// The grain's Hermes was summoned into a room: the room tools.
+    pub room_tools: bool,
 }
 
 pub fn start_broker(
@@ -186,7 +188,8 @@ fn serve_broker_connection(
                 "applications":snapshot.applications,
                 "apiApplications":snapshot.api_applications,
                 "resourceWorkspace":snapshot.resource_workspace,
-                "resourceWorkspaceCreate":snapshot.resource_workspace_create})
+                "resourceWorkspaceCreate":snapshot.resource_workspace_create,
+                "roomTools":snapshot.room_tools})
         );
         return;
     }
@@ -261,6 +264,10 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
             .get("resourceWorkspaceCreate")
             .and_then(Value::as_bool)
             .ok_or("controller MCP resourceWorkspaceCreate absent")?,
+        room_tools: reply
+            .get("roomTools")
+            .and_then(Value::as_bool)
+            .ok_or("controller MCP roomTools absent")?,
     };
     if catalog
         .applications
@@ -312,6 +319,9 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "description":"Return the recipient reference for a delegation this grain proposed and whose submission resolved performed, so it can be handed to the recipient. Read-only exact historical lookup; grants nothing by itself.",
                 "inputSchema":{"type":"object","properties":{"proposalId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"required":["proposalId"],"additionalProperties":false}}),
         ]);
+    }
+    if catalog.room_tools {
+        tools.extend(crate::resource_tools::room_tool_specs());
     }
     if catalog.resource_workspace_create {
         tools.push(json!({"name":"mini_workspace_create",
@@ -677,6 +687,7 @@ mod tests {
                     api_applications: vec![],
                     resource_workspace: false,
                     resource_workspace_create: false,
+                    room_tools: false,
                 })),
             );
         });
@@ -879,5 +890,18 @@ mod tests {
         assert!(result["text"].as_str().unwrap().contains("outcome unknown"));
         server.join().unwrap();
         fs::remove_file(socket).unwrap();
+    }
+
+    #[test]
+    fn room_tools_are_listed_only_for_a_grain_in_a_room() {
+        let without = tools_for_catalog(&ToolCatalog { resource_workspace: true, ..ToolCatalog::default() });
+        let with = tools_for_catalog(&ToolCatalog { resource_workspace: true, room_tools: true, ..ToolCatalog::default() });
+        let names = |v: &Value| -> Vec<String> {
+            v["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect()
+        };
+        assert!(!names(&without).iter().any(|n| n.starts_with("mini_room_") || n.starts_with("mini_doc_")));
+        for tool in ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_show", "mini_doc_link", "mini_doc_append"] {
+            assert!(names(&with).iter().any(|n| n == tool), "{tool}");
+        }
     }
 }

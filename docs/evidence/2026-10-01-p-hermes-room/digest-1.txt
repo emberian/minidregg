@@ -1,0 +1,3 @@
+# doc lab-digest: document 17012318638451367786 cell root 69297455188333313903970392842742751215845789154114699732917021916141157825735 at height 61 (signed read; lines are what `doc edit` takes)
+  1  created-by 12883513865682616863  entries #1-#3: s…547696 said "I put a draft in paper" (#1); s…547696 said "and the numbers are in data" (#2); s…547696 said "the librarian should find both" (#3)
+# 1 cell entries; created-by is the atom's creator (an edit keeps it)

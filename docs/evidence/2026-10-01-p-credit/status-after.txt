@@ -1,0 +1,5 @@
+room lab (10428947152218123678) at height 75
+  my window: ENDED at height 74 (1 heights ago; capability 12712599908594942363); `pay lab week` renews
+  tariff: week 100 credit for 12 heights
+  till: account 14809615720592431327 (its balance is the room's to read)
+  runner account: 17036544356322581062; concierge 17792213969701359209

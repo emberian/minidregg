@@ -86,12 +86,12 @@ HOST_PUB=$(od -An -tx1 -v "$RUN/keys/hermes-host.pub" | tr -d ' \n')
 HERMES_PUB=$(od -An -tx1 -v "$RUN/keys/hermes.pub" | tr -d ' \n')
 jq -n --arg h "$HOST_PUB" --arg w "$HERMES_PUB" '[
   {key:{keyId:"8008",keyEpoch:"2",algorithm:"1",subject:"8",publicKey:$h,
-    activeFrom:"0",activeUntil:"1000000"},
+    activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
    accountId:"8",spendCapabilityId:"42",controlCapabilityId:"52",
    factoryObserveCapabilityId:"55",initialBalance:"100",
    accountPredicate:{type:"all",predicates:[]}},
   {key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",publicKey:$w,
-    activeFrom:"0",activeUntil:"1000000"},
+    activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
    accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
    factoryObserveCapabilityId:"57",initialBalance:"100",
    accountPredicate:{type:"all",predicates:[]}}]' >"$RUN/hermes-genesis-enrollments.json"

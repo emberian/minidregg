@@ -88,7 +88,7 @@ def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment (ready.effectivePins opened.pins)
-      opened.durable draft
+      opened.durable draft height
     | throw "agent lifetime grant birth preparation refused"
   let expected := { draft with auxiliaryCreates := prepared.prepared.grants.auxiliaryCreates }
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=

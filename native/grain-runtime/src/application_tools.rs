@@ -746,6 +746,7 @@ mod tests {
     #[test]
     fn app_and_session_sources_bind_signed_peers_and_complete_members() {
         let tool = ToolTask {
+            room: None,
             task: "1".into(),
             subject: "3".into(),
             capability: "4".into(),

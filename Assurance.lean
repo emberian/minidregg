@@ -12,6 +12,8 @@ SheetLaw and ItemLaw live here, not in Theory: they judge a law by
 `Kernel.DeclaredResourceController`, and Theory may import only Mathlib and Theory.
 -/
 import Assurance.CapabilityRevocationAudit
+import Assurance.RenounceAudit
+import Assurance.StoryLaw  -- P-STORY: the story law for every table; no skip, no rewind, never re-lawed (also in Deployed)
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation
@@ -130,3 +132,4 @@ import Assurance.NativeObservationAudit
 import Assurance.CanonicalResourceBookInvariantAudit
 import Assurance.SheetLaw  -- MUD item 6: the literal law.sheet as a Pred, judged by the kernel (checked_leg_policy_eval: every CheckedLeg satisfies its installed law); stranger_write_bounded, deaths monotone and alive raised only by clause 23 over any accepted history, death_is_reachable; without K-CLOCK nobody revives; regenerated from mud-law-fix 8280b8d7: clause 33 refuses the referee's smite (smite_refused, death_needs_hp) and a clockless death fails closed (death_needs_clock)
 import Assurance.ItemLaw  -- MUD item 6: no_dupe_unique over the literal law.item (holder or referee writes; the referee never moves a held item; a holder who never writes keeps it, by induction over the accepted log), kernel_holder_or_referee over CheckedLeg; the law alone admits two concurrent gives, the durable CAS refuses the second
+import Assurance.KeyPreRotationAudit

@@ -1,0 +1,122 @@
+n	step	who	line	expect	rc	verdict	note
+1	setup	alice	keygen mini.key	0	0	ok	45117e9f83cf4a9186242921a0de1fcc5b2b51599227da38ad28422bf2c0be86
+2	setup	OPERATOR	CUSTODY: copy alice's secret into the sponsor home (enroll plan+seal sign with both keys)	0	0	ok	
+3	setup	sponsor	enroll plan j15-alice j15-alice.key	0	0	ok	{
+4	setup	sponsor	enroll seal j15-alice	0	0	ok	{
+5	setup	sponsor	enroll submit j15-alice	0	0	ok	{
+6	setup	check	alice is enrolled as its own subject	-	-	ok	
+7	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+8	setup	OPERATOR	PROVISION: factory observation + a funded account owned by alice	0	0	ok	
+9	setup	OPERATOR	DELIVER: the birth context into alice's HOME/provision/	0	0	ok	
+10	setup	alice	init mini.key 10297737876958322816	0	0	ok	/home/ember/build/j15/r5/steps/J15/w/alice
+11	setup	bob	keygen mini.key	0	0	ok	0f8f05a350d7e80b2edae46219e27b4f2707e14e886b5ac8500863ead31bf7f9
+12	setup	OPERATOR	CUSTODY: copy bob's secret into the sponsor home (enroll plan+seal sign with both keys)	0	0	ok	
+13	setup	sponsor	enroll plan j15-bob j15-bob.key	0	0	ok	{
+14	setup	sponsor	enroll seal j15-bob	0	0	ok	{
+15	setup	sponsor	enroll submit j15-bob	0	0	ok	{
+16	setup	check	bob is enrolled as its own subject	-	-	ok	
+17	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+18	setup	OPERATOR	PROVISION: factory observation + a funded account owned by bob	0	0	ok	
+19	setup	OPERATOR	DELIVER: the birth context into bob's HOME/provision/	0	0	ok	
+20	setup	bob	init mini.key 11761894439883150201	0	0	ok	/home/ember/build/j15/r5/steps/J15/w/bob
+21	setup	carl	keygen mini.key	0	0	ok	bd29eea09112dca76266841c806650c1d875f078d3c8084e316df02645280f83
+22	setup	OPERATOR	CUSTODY: copy carl's secret into the sponsor home (enroll plan+seal sign with both keys)	0	0	ok	
+23	setup	sponsor	enroll plan j15-carl j15-carl.key	0	0	ok	{
+24	setup	sponsor	enroll seal j15-carl	0	0	ok	{
+25	setup	sponsor	enroll submit j15-carl	0	0	ok	{
+26	setup	check	carl is enrolled as its own subject	-	-	ok	
+27	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+28	setup	OPERATOR	PROVISION: factory observation + a funded account owned by carl	0	0	ok	
+29	setup	OPERATOR	DELIVER: the birth context into carl's HOME/provision/	0	0	ok	
+30	setup	carl	init mini.key 15530373006067706111	0	0	ok	/home/ember/build/j15/r5/steps/J15/w/carl
+31	setup	dana	keygen mini.key	0	0	ok	fe387481ceeb45225323fb887d76c016ada073745e73af5ba3e565c8da1b2398
+32	setup	OPERATOR	CUSTODY: copy dana's secret into the sponsor home (enroll plan+seal sign with both keys)	0	0	ok	
+33	setup	sponsor	enroll plan j15-dana j15-dana.key	0	0	ok	{
+34	setup	sponsor	enroll seal j15-dana	0	0	ok	{
+35	setup	sponsor	enroll submit j15-dana	0	0	ok	{
+36	setup	check	dana is enrolled as its own subject	-	-	ok	
+37	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+38	setup	OPERATOR	PROVISION: factory observation + a funded account owned by dana	0	0	ok	
+39	setup	OPERATOR	DELIVER: the birth context into dana's HOME/provision/	0	0	ok	
+40	setup	dana	init mini.key 18012384069138434823	0	0	ok	/home/ember/build/j15/r5/steps/J15/w/dana
+41	author	alice	story law tale	0	0	ok	[# clause 3: exits]
+42	author	check	story law prints the generated law.player (the same 8 clauses, {S} unbound)	-	-	ok	
+43	author	alice	story new tale --from tale --gm 18012384069138434823	0	0	ok	[story tale: The Lamplighter's House (5 scenes, 4 ways, 1 items)]
+44	author	check	the room template ran: 15 lines done	-	-	ok	
+45	author	check	alice holds a reference tale	-	-	ok	
+46	author	check	alice holds a reference tale.index	-	-	ok	
+47	author	check	alice holds a reference tale.chapters	-	-	ok	
+48	author	check	alice holds a reference tale.scenes	-	-	ok	
+49	author	check	alice holds a reference tale.cast	-	-	ok	
+50	author	check	alice holds a reference tale.table	-	-	ok	
+51	author	check	tale/table is born in the room under the author-only law	-	-	ok	
+52	author	alice	doc show tale/table	0	0	ok	# doc tale/table: document 10020087420359137209 cell root 31572036615164207831456902397182921574395208126936566716754310
+53	author	check	the table document holds the table's 14 rows	-	-	ok	
+54	author	alice	doc show tale/index	0	0	ok	# doc tale/index: document 11739055262082915285 cell root 68764986436189428908522998721367070792384840129049016964384187
+55	author	check	the map links the table	-	-	ok	
+56	author	alice	doc append t0 tale/table '# a note before the seal (not a row)'	0	0	ok	{
+57	author	alice	submit t0	0	0	ok	{
+58	author	alice	story invite tale 11761894439883150201	1	1	ok	error: the table of tale is not sealed (its law is not the sealed table law); a story is played only once sealed
+59	author	alice	story seal tale	0	0	ok	[story tale sealed]
+60	author	check	seal lists the 8 clauses by name	-	-	ok	
+61	author	alice	doc append t1 tale/table 'item lamp 4'	0	0	ok	{
+62	author	alice	submit t1	3	3	ok	refused: law-denied: sealed (Host refused prepare, reply byte 255)
+63	author	alice	law t2 tale/table open	0	0	ok	{
+64	author	alice	submit t2	3	3	ok	refused: undisclosed: request refused (phase admission)
+65	author	alice	doc show tale/table	0	0	ok	# doc tale/table: document 10020087420359137209 cell root 50170082724877143487869312178809917762915380085925741484688890
+66	author	check	the sealed table still holds its 15 lines (14 rows and the note) and no lamp	-	-	ok	
+67	cast	alice	story invite tale 11761894439883150201	0	0	ok	[story join tale ]
+68	cast	check	the invitation to bob is JSON addressed to bob	-	-	ok	
+69	cast	bob	story join tale @tale-invite.json	0	0	ok	[joined tale as player]
+70	cast	alice	story invite tale 15530373006067706111	0	0	ok	[story join tale ]
+71	cast	check	the invitation to carl is JSON addressed to carl	-	-	ok	
+72	cast	carl	story join tale @tale-invite.json	0	0	ok	[joined tale as player]
+73	cast	alice	story invite tale 18012384069138434823 gm	0	0	ok	[story join tale ]
+74	cast	check	the invitation to dana is JSON addressed to dana	-	-	ok	
+75	cast	dana	story join tale @tale-invite.json	0	0	ok	[joined tale as gm]
+76	cast	check	each player's cell is born in the room by the author, under the author-only staging law	-	-	ok	
+77	play	bob	look	0	0	ok	[The hallway (scene 0, turn 0)]
+78	play	OPERATOR	decode bob's retained signed read of his cell's law (Host inspect view-policy)	0	0	ok	
+79	play	check	the law on bob's cell, as the Host decodes it, is law.player.json with {S} = bob	-	-	ok	
+80	play	OPERATOR	decode bob's retained signed read of the table's law	0	0	ok	
+81	play	check	the law on the table, as the Host decodes it, is law.table.json	-	-	ok	
+82	play	bob	take key	3 clause 5	3	ok	refused: law-denied: any [ field 2 delta == 0, all [ field 0 before == 1, field 0 delta == 0 ] ] [clause 5: here key (scene 1)]
+83	play	bob	go 3	3 clause 3	3	ok	refused: law-denied: any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 bef [clause 3: exits]
+84	play	bob	go north	0	0	ok	[The anteroom (scene 1, turn 1)]
+85	play	bob	go north	3 clause 4	3	ok	refused: law-denied: any [ not (all [ field 0 before == 1, field 0 == 3 ]), field 2 before == 1 ] [clause 4: needs key (exit 1 -> 3)]
+86	play	bob	take key	0	0	ok	[you carry: key]
+87	play	bob	take key	3 clause 7	3	ok	refused: law-denied: any [ not (field 0 delta == 0), not (field 2 delta == 0) ] [clause 7: progress]
+88	play	bob	go 0	3 clause 3	3	ok	refused: law-denied: any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 bef [clause 3: exits]
+89	play	bob	invoke r1 tale/me write 1 0 2	0	0	ok	{
+90	play	bob	submit r1	3	3	ok	refused: law-denied: field 1 delta == 1 (value -2) (Host refused prepare, reply byte 255)
+91	play	check	the rewind of the turn is refused by the turn clause (the shell names the Host's clause)	-	-	ok	
+92	play	carl	look	0	0	ok	[The hallway (scene 0, turn 0)]
+93	play	carl	go north	0	0	ok	[The anteroom (scene 1, turn 1)]
+94	play	bob	import tale-cell object 10773944015423856717 14325780733868381940 14325780733868381940	0	0	ok	tale-cell
+95	play	bob	invoke x1 tale-cell write 0 2 1	0	0	ok	{
+96	play	bob	submit x1	3	3	ok	refused: law-denied: subject == 15530373006067706111 (value 11761894439883150201) (Host refused prepare, reply byte 255)
+97	play	alice	invoke a1 tale/p-11761894439883150201 write 0 3 1	0	0	ok	{
+98	play	alice	submit a1	3	3	ok	refused: law-denied: subject == 11761894439883150201 (value 10297737876958322816) (Host refused prepare, reply byte 255)
+99	play	alice	law a2 tale/p-11761894439883150201 open	0	0	ok	{
+100	play	alice	submit a2	3	3	ok	refused: undisclosed: request refused (phase admission)
+101	play	dana	narrate 'the lamp upstairs hums, low and patient'	0	0	ok	[narrated in tale]
+102	play	bob	narrate 'I am the GM now'	3	3	ok	refused: law-denied: any [ not (verb in {write,7}), subject == 18012384069138434823 ]
+103	play	check	bob's narrate is refused by the scenes stream's clause naming dana	-	-	ok	
+104	play	bob	look	0	0	ok	[the GM: ]
+105	play	check	bob reads dana's narration	-	-	ok	
+106	play	carl	go west	0	0	ok	[THE END]
+107	restart	OPERATOR	stop the Host, audit the closed Store, serve again	0	0	ok	
+108	restart	check	audit re-admitted the Store (exit 0)	-	-	ok	
+109	restart	check	the cold audit re-admitted every accepted record	-	-	ok	
+110	restart	bob	look	0	0	ok	[The anteroom (scene 1, turn 2)]
+111	restart	check	bob still carries the key	-	-	ok	
+112	restart	carl	look	0	0	ok	[The glasshouse (scene 2, turn 2)]
+113	restart	carl	go 1	3 clause 3	3	ok	refused: law-denied: any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 bef [clause 3: exits]
+114	end	bob	go north	0	0	ok	[The landing (scene 3, turn 3)]
+115	end	bob	act open	0	0	ok	[The lamp room (scene 4, turn 4)]
+116	end	check	bob is at an end scene	-	-	ok	
+117	end	bob	go 3	3 clause 3	3	ok	refused: law-denied: any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 bef [clause 3: exits]
+118	end	OPERATOR	stop the Host, audit the closed Store, serve again	0	0	ok	
+119	end	check	the last cold audit re-admitted every accepted record	-	-	ok	
+120	end	bob	look	0	0	ok	[The lamp room (scene 4, turn 4)]
+121	end	carl	look	0	0	ok	[The glasshouse (scene 2, turn 2)]

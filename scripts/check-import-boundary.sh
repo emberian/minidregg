@@ -13,7 +13,7 @@
 #   Compiler  Mathlib Lean Std Init Theory Pred Kernel Selvage Assurance Compiler
 #   Assurance Mathlib Theory Pred Kernel Compiler Selvage Assurance
 #   Effects   Mathlib Kernel Compiler Effects
-#   Host      Lean Theory Kernel Compiler Host    (no Mathlib, no Selvage, no Assurance)
+#   Host      Mathlib Lean Theory Pred Kernel Compiler Host  (no Selvage, no Assurance)
 #
 # Two consequences worth naming: Host and Effects are SINKS (no library imports
 # either; only the roots Minidregg and AxiomCensus do), and Pred/Kernel/Compiler/
@@ -23,6 +23,9 @@
 # of Kernel), and the tier line that does hold is: Theory < Selvage < {the group}
 # < {Effects, Host}.
 #
+# Host also imports Pred for the served law satisfiability query and Mathlib for
+# capability-tree deduplication proofs (rooms convergence, 2026-10-02). These do
+# not change the sink boundary: no core library imports Host.
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u
@@ -37,7 +40,7 @@ ALLOWED = {
     "Compiler":  {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Kernel", "Selvage", "Assurance", "Compiler"},
     "Assurance": {"Mathlib", "Theory", "Pred", "Kernel", "Compiler", "Selvage", "Assurance"},
     "Effects":   {"Mathlib", "Kernel", "Compiler", "Effects"},
-    "Host":      {"Lean", "Theory", "Kernel", "Compiler", "Host"},
+    "Host":      {"Mathlib", "Lean", "Theory", "Pred", "Kernel", "Compiler", "Host"},
 }
 files = [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0") if f]
 bad, counts = [], {}
