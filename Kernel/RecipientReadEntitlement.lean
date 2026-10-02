@@ -42,7 +42,8 @@ instance (e : Entry) (s : StoredCapability .object) : Decidable (entryMatches (w
   unfold entryMatches; infer_instance
 /-- Kind exports are derived from the actual old physical instance. The outer
 controller proves the candidate post preserves that immutable descriptor. -/
-def composedConfig (prepared : Preparation)
+def composedConfig (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
     (step : PolicyStepContext) : Option (ComposedPolicyAdmission.Config F) := do
   if preserved : CanonicalCellRegistry.instanceBinding prepared.observed.before =
@@ -58,7 +59,8 @@ def composedConfig (prepared : Preparation)
 /-- Guard the full authenticated closure (including historical source chains),
 kind definition/instance lifecycle, authority, clock and current resource image.
 No request-selected list may replace the source-derived kind dependencies. -/
-def readGuards (prepared : Preparation) : Option (List ReadGuard) := do
+def readGuards (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) : Option (List ReadGuard) := do
   let dependencies ← WorldKindLawDependencies.loadTarget deployment
     context.directory.directory wanted.target.value
   let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
@@ -73,7 +75,8 @@ certifies that indexed view, not its provenance or permission to publish. -/
 def viewRequest (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : Request .object :=
   { wanted with preStateRoot := view.payload.root }
 
-def viewProject (prepared : Preparation)
+def viewProject (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
     (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) : Minidregg.Pred.State :=
   ⟨[("target/storageKind", Int.ofNat view.1.tag.toNat)] ++
@@ -86,18 +89,21 @@ def viewProject (prepared : Preparation)
       (CanonicalAccountView.balanceStream.encode []) ++
     ResourceObservationAdmission.resourceSlots wanted.subject wanted.target.value view.1 logical⟩
 
-def viewStep (prepared : Preparation)
+def viewStep (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (viewProject prepared view) profile.semantics
     (ResourceObservationAdmission.readCandidate (viewRequest (wanted := wanted) view)
       view.1 view.payload rfl)
 
-def viewConfig (prepared : Preparation)
+def viewConfig (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
     Option (ComposedPolicyAdmission.Config F) :=
   composedConfig prepared view (viewStep prepared view)
 
-structure CheckedView (genesisHeight : Nat) (prepared : Preparation) (entry : Entry)
+structure CheckedView (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) where
   private mk ::
   heightExact : wanted.height = genesisHeight + durable.height
@@ -115,7 +121,8 @@ structure CheckedView (genesisHeight : Nat) (prepared : Preparation) (entry : En
   guards : List ReadGuard
   guardsExact : readGuards prepared = some guards
 
-def checkView (genesisHeight : Nat) (prepared : Preparation) (entry : Entry)
+def checkView (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
     Option (CheckedView genesisHeight prepared entry view) := do
   if heightExact : wanted.height = genesisHeight + durable.height then
@@ -148,10 +155,12 @@ def checkView (genesisHeight : Nat) (prepared : Preparation) (entry : Entry)
 
 /-- Current observer-image compatibility entry point, sharing the exact same
 composed entitlement and physical guard construction as candidate views. -/
-abbrev Checked (genesisHeight : Nat) (prepared : Preparation) (entry : Entry) :=
+abbrev Checked (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry) :=
   CheckedView genesisHeight prepared entry prepared.observed.before
 
-def check (genesisHeight : Nat) (prepared : Preparation) (entry : Entry) :
+def check (genesisHeight : Nat) (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry) :
     Option (Checked genesisHeight prepared entry) :=
   checkView genesisHeight prepared entry prepared.observed.before
 
