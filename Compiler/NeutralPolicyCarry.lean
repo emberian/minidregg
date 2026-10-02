@@ -2,7 +2,7 @@
 Closed neutral policy-source carry. This is a byte/state transformation, not
 permission to cross profiles: CarriedSegmentIO must authenticate the complete
 old image with its retained interpreter and pin an unchanged deployment and
-schema before calling `derive`. It then binds `Plan.changes` in the signed carry
+schema before calling `derive` or `deriveStoreV2`. It then binds `Plan.changes` in the signed carry
 body and validates the complete target through NativeHost.validateLoaded.
 
 No request supplies writes, replacement grants, records, or predecessor maps.
@@ -12,6 +12,8 @@ resolved through the checked old chain to its freshly derived v6 counterpart.
 -/
 import Compiler.PolicyRecordCodec
 import Compiler.CredentialAuthorityDomainReceiver
+import Compiler.LegacyStoreCarry
+import Compiler.LegacyContentCarry
 
 namespace Minidregg.Compiler.NeutralPolicyCarry
 
@@ -92,7 +94,29 @@ def Binding.targetAddress (binding : Binding) : Digest :=
 def Binding.targetCellId (binding : Binding) : CellId :=
   ⟨PolicySourceCell.physicalId binding.target.domain binding.targetAddress⟩
 
-private def collect (deployment : CanonicalCellRegistry.Deployment)
+private def checkUnchangedNonPolicy (deployment : CanonicalCellRegistry.Deployment)
+    (identifier : CellId) (bytes : List UInt8) : Except String Unit := do
+  -- The audited legacy registry stopped at role 16. A target decoder must
+  -- never grant an old image new meanings for introduced roles 17/18 (or
+  -- any later role), even if the target bytes happen to decode.
+  match bytes with
+  | 68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: role :: _ =>
+      if role.toNat > 16 then
+        throw "carry refuses a cell role absent from the legacy profile"
+  | _ => pure ()
+  -- Other roles must already have precisely the unchanged target layout.
+  -- They are checked, never re-encoded or rewritten by this transformation.
+  let image ← need "carry refuses unsupported lifecycle or changed cell role"
+    ((LifecycleImage.codec registry).decode bytes)
+  match image with
+  | .live cell =>
+      if !CanonicalCellRegistry.cellCheck deployment identifier.value cell then
+        throw "carry non-policy source violates deployment role/domain"
+      if cell.kind == .policySource then
+        throw "carry refuses policy source outside the legacy wrapper"
+  | _ => pure ()
+
+private def collectSources (deployment : CanonicalCellRegistry.Deployment)
     (sourceSemantics : Digest) (loaded : Durable) : Except String (List Source) := do
   let mut sources := []
   for (identifier, bytes) in loaded.cells do
@@ -105,26 +129,6 @@ private def collect (deployment : CanonicalCellRegistry.Deployment)
           (PolicyRecordCodec.LegacyV4.digest record) then
         throw "carry source physical address differs from exact v4 digest"
       sources := sources ++ [⟨identifier, record⟩]
-    else
-      -- The audited legacy registry stopped at role 16. A target decoder must
-      -- never grant an old image new meanings for introduced roles 17/18 (or
-      -- any later role), even if the target bytes happen to decode.
-      match bytes with
-      | 68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: role :: _ =>
-          if role.toNat > 16 then
-            throw "carry refuses a cell role absent from the legacy profile"
-      | _ => pure ()
-      -- Other roles must already have precisely the unchanged target layout.
-      -- They are checked, never re-encoded or rewritten by this transformation.
-      let image ← need "carry refuses unsupported lifecycle or changed cell role"
-        ((LifecycleImage.codec registry).decode bytes)
-      match image with
-      | .live cell =>
-          if !CanonicalCellRegistry.cellCheck deployment identifier.value cell then
-            throw "carry non-policy source violates deployment role/domain"
-          if cell.kind == .policySource then
-            throw "carry refuses policy source outside the legacy wrapper"
-      | _ => pure ()
   if sources.isEmpty then throw "carry has no legacy policy sources"
   if !decide (sources.map fun source =>
       (source.record.policyId, source.record.version)).Nodup then
@@ -206,6 +210,8 @@ structure Plan where
   deployment : CanonicalCellRegistry.Deployment
   bindings : List Binding
   authority : CredentialAuthorityCell.Cell
+  otherChanges : List (CellId × List UInt8)
+  transformation : Nat
 
 def Plan.addressUpdates (plan : Plan) : List AddressUpdate :=
   plan.bindings.filterMap fun binding =>
@@ -221,10 +227,10 @@ def Plan.changes (plan : Plan) : List (CellId × List UInt8) :=
   (⟨plan.deployment.authorityCellId⟩,
     CredentialAuthorityDomainReceiver.cellBytes
       (materialize CredentialAuthorityCell.materializer plan.authorityAfter)) ::
-  plan.bindings.flatMap fun binding =>
+  (plan.bindings.flatMap fun binding =>
     [(binding.source.cellId, LifecycleImage.bytes registry .retired),
      (binding.targetCellId, LifecycleImage.bytes registry
-       (.live (CanonicalCellRegistry.policySourceCell binding.target)))]
+       (.live (CanonicalCellRegistry.policySourceCell binding.target)))]) ++ plan.otherChanges
 
 theorem Plan.authority_other (plan : Plan)
     (address : Address CredentialAuthorityState.layout)
@@ -247,20 +253,10 @@ theorem neutral_predicate (record : LegacyRecord) (semantics : Digest)
       Minidregg.Pred.eval record.predicate old new :=
   PolicyRecordCodec.LegacyV4.neutralLift_local_eval record semantics previous old new
 
-/-- Closed neutral derivation from the complete resumed snapshot. Deployment
-and profile identities must come from the parent's independently pinned source
-and target configurations; this function does not grant profile-selection
- authority. Schema/field-role changes (including title→membership) are outside
-this transformation and must be refused by that receiving boundary. -/
-def derive (deployment : CanonicalCellRegistry.Deployment)
-    (sourceSemantics targetSemantics : Digest) (loaded : Durable) : Except String Plan := do
-  if !decide deployment.Valid then throw "carry deployment role collision"
-  if sourceSemantics == targetSemantics then throw "carry requires a distinct target profile"
-  let sources ← collect deployment sourceSemantics loaded
-  let bindings ← liftSources sources targetSemantics
-  let authority ← need "carry needs the exact canonical authority cell"
-    (CredentialAuthorityDomainReceiver.decodeCell
-      (loaded.snapshot.canonicalBytes ⟨deployment.authorityCellId⟩))
+private def finishPlan (deployment : CanonicalCellRegistry.Deployment)
+    (bindings : List Binding) (authority : CredentialAuthorityCell.Cell)
+    (loaded : Durable) (otherChanges : List (CellId × List UInt8))
+    (transformation : Nat) : Except String Plan := do
   -- A normal policy update frees the superseded authority address while its
   -- immutable source remains live. Historical sources authenticate through
   -- the unique contiguous predecessor chain of the currently indexed head;
@@ -297,10 +293,80 @@ def derive (deployment : CanonicalCellRegistry.Deployment)
             authority.logical ⟨.policyAddress, key⟩ == some (oldAddress binding.source)) then
           throw "carry authority names unsupported or missing historical source"
     | _ => pure ()
-  let plan : Plan := ⟨deployment, bindings, authority⟩
+  let plan : Plan := ⟨deployment, bindings, authority, otherChanges, transformation⟩
   -- Covers target/target hash collisions and target/source/authority aliases.
   if !decide (plan.changes.map Prod.fst).Nodup then
     throw "carry derived physical identifier collision"
   pure plan
+
+/-- Closed neutral derivation from the complete resumed snapshot. Deployment
+and profile identities must come from the parent's independently pinned source
+and target configurations; this function does not grant profile-selection
+ authority. Schema/field-role changes (including title→membership) are outside
+this transformation and must be refused by that receiving boundary. -/
+def derive (deployment : CanonicalCellRegistry.Deployment)
+    (sourceSemantics targetSemantics : Digest) (loaded : Durable) : Except String Plan := do
+  if !decide deployment.Valid then throw "carry deployment role collision"
+  if sourceSemantics == targetSemantics then throw "carry requires a distinct target profile"
+  let sources ← collectSources deployment sourceSemantics loaded
+  for (identifier, bytes) in loaded.cells do
+    if !hasSourceRole bytes then checkUnchangedNonPolicy deployment identifier bytes
+  let bindings ← liftSources sources targetSemantics
+  let authority ← need "carry needs the exact canonical authority cell"
+    (CredentialAuthorityDomainReceiver.decodeCell
+      (loaded.snapshot.canonicalBytes ⟨deployment.authorityCellId⟩))
+  finishPlan deployment bindings authority loaded [] 1
+
+
+/-- Decode the original lifecycle and role envelope, select a fixed source
+codec, then construct a target cell at the same role and physical identifier.
+No caller supplies a codec, a replacement grant, or a proposed post-state. -/
+private def convertLiveStoreV2 (deployment : CanonicalCellRegistry.Deployment)
+    (identifier : CellId) (height : Nat) (bytes : List UInt8) :
+    Except String (CellRegistry.PackedCell registry) := do
+  let (tag, payload) ← match bytes with
+    | 68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: tag :: payload => pure (tag, payload)
+    | _ => throw "carry refuses noncanonical source lifecycle/role envelope"
+  let kind ← need "carry source has an unknown role" (CanonicalCellRegistry.kindAtTag tag)
+  let store : Store (CanonicalCellRegistry.layout kind) ← match kind with
+    | .content => LegacyContentCarry.convertPayload height payload
+    | other => LegacyStoreCarry.convertPayload other height payload
+  let cell : CellRegistry.PackedCell registry :=
+    ⟨kind, materialize (CanonicalCellRegistry.materializer kind) store⟩
+  if !CanonicalCellRegistry.cellCheck deployment identifier.value cell then
+    throw "carry converted cell violates target role/domain invariants"
+  pure cell
+
+/-- Transformation 2 is the closed Store2 boundary: policy sources are lifted
+with authenticated predecessor mapping; other physical ids retain their roles.
+Unchanged-layout stores retain every logical entry except the declared blinding
+ratchet, authority keys gain only an absent future commitment, and content uses
+its separate lossless legacy projection. Original source bytes and receipts
+remain in the audited prefix; these writes do not reinterpret that history.
+The receiver must authenticate the old capsule and validate the full target. -/
+def deriveStoreV2 (deployment : CanonicalCellRegistry.Deployment)
+    (sourceSemantics targetSemantics : Digest) (loaded : Durable) : Except String Plan := do
+  if !decide deployment.Valid then throw "carry deployment role collision"
+  if sourceSemantics == targetSemantics then throw "carry requires a distinct target profile"
+  let sources ← collectSources deployment sourceSemantics loaded
+  let bindings ← liftSources sources targetSemantics
+  let mut authority : Option CredentialAuthorityCell.Cell := none
+  let mut changes : List (CellId × List UInt8) := []
+  for (identifier, bytes) in loaded.cells do
+    if hasSourceRole bytes then
+      pure ()
+    else if bytes == [] || bytes == [68, 82, 2, 0] then
+      pure ()
+    else
+      let cell ← convertLiveStoreV2 deployment identifier loaded.height bytes
+      match cell with
+      | ⟨.authority, payload⟩ =>
+          if authority.isSome then throw "carry source has multiple authority cells"
+          authority := some payload
+      | cell =>
+          let after := LifecycleImage.bytes registry (.live cell)
+          if after != bytes then changes := changes ++ [(identifier, after)]
+  let authority ← need "carry needs the exact source authority cell" authority
+  finishPlan deployment bindings authority loaded changes 2
 
 end Minidregg.Compiler.NeutralPolicyCarry

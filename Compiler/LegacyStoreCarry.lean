@@ -20,14 +20,14 @@ open Minidregg.Compiler.CanonicalCellRegistry (Kind)
 set_option autoImplicit false
 
 /-- Exact source frame. Never uses the target storeVersion. -/
-def frameV2 {L : Layout.{0, 0, 0}} (wire : Wire L) : List UInt8 :=
+def frameV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69, 2] ++ layoutDigest wire
 
-def encodeV2 {L : Layout.{0, 0, 0}} (wire : Wire L) (store : Store L) : List UInt8 :=
+def encodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) : List UInt8 :=
   frameV2 wire ++ (payloadStream wire).encode store
 
 /-- Fully consumed canonical source bytes, including the frozen outer frame. -/
-def decodeV2 {L : Layout.{0, 0, 0}} (wire : Wire L) (bytes : List UInt8) : Option (Store L) := do
+def decodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (bytes : List UInt8) : Option (Store L) := do
   if bytes.take (frameV2 wire).length != frameV2 wire then none else do
     let store ← decodePayload wire (bytes.drop (frameV2 wire).length)
     if encodeV2 wire store = bytes then some store else none
@@ -67,7 +67,7 @@ def clockDescriptor : LayoutDescriptor :=
 def systemDescriptor : LayoutDescriptor :=
   desc "DREGG/SYSTEM/v1" [ns [0] 1 "unit" "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v1"]
 
-private def decodePinned {L : Layout.{0, 0, 0}} (wire : Wire L)
+private def decodePinned {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
     (expected : LayoutDescriptor) (bytes : List UInt8) : Except String (Store L) := do
   if layoutDescriptor wire != expected then
     throw "carry target wire differs from the frozen source layout"
@@ -76,6 +76,9 @@ private def decodePinned {L : Layout.{0, 0, 0}} (wire : Wire L)
 
 /-- Source v2 signing-key record: no pre-rotation commitment existed. -/
 abbrev LegacyKey := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat
+
+instance : DecidableEq LegacyKey :=
+  inferInstanceAs (DecidableEq (Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat))
 
 def legacyKeyStream : StreamCodec LegacyKey :=
   StreamCodec.product StreamCodec.nat
@@ -121,7 +124,7 @@ def legacyValueStream : (plane : AuthorityPlane) → StreamCodec (LegacyValue pl
   | .registered => CredentialAuthorityCell.valueStream .registered
   | .parent => CredentialAuthorityCell.valueStream .parent
 
-def authorityWire : Wire authorityLayout where
+def authorityWire : StoreCodec.Wire authorityLayout where
   name := "minidregg/credential-authority/v5"
   namespaces := CredentialAuthorityCell.planes
   namespaces_complete := CredentialAuthorityCell.wire.namespaces_complete
@@ -161,12 +164,32 @@ def liftAuthorityValue : (plane : AuthorityPlane) → LegacyValue plane → plan
   | .parent, value => value
 
 def liftAuthority (store : Store authorityLayout) : Store CredentialAuthorityState.layout :=
-  StoreCodec.fromEntries ((entries authorityWire store).map fun entry =>
-    ⟨entry.1, liftAuthorityValue entry.1.1 entry.2⟩)
+  store.mapRange (fun address value => value.map (liftAuthorityValue address.1))
+    (fun _ => rfl)
+
+/-- Every present source entry is lifted at the identical typed address;
+absence is preserved, including retired historical policy-address entries. -/
+@[simp] theorem liftAuthority_apply (store : Store authorityLayout)
+    (address : Address authorityLayout) :
+    liftAuthority store address = (store address).map (liftAuthorityValue address.1) := rfl
+
+theorem liftAuthority_absent (store : Store authorityLayout)
+    (address : Address authorityLayout) (absent : store address = none) :
+    liftAuthority store address = none := by
+  simp [liftAuthority_apply, absent]
+
+/-- Actual grant records, including scopes, parent lineage, epochs and
+revocation references, are retained verbatim as typed values. -/
+@[simp] theorem liftAuthority_capability (store : Store authorityLayout)
+    (kind : ResourceKind) (identifier : CapabilityId) :
+    liftAuthority store ⟨.capability kind, identifier⟩ =
+      store ⟨.capability kind, identifier⟩ := by
+  rw [liftAuthority_apply]
+  cases store ⟨AuthorityPlane.capability kind, identifier⟩ <;> rfl
 
 private def oldObjectCapability (cap : StoredCapability .object) : Bool :=
-  !(cap.head.scope.verbs.contains .placeObject) && cap.ancestry.all fun link =>
-    !(link.parent.scope.verbs.contains .placeObject) && match link.origin with
+  !(decide (.placeObject ∈ cap.head.scope.verbs)) && cap.ancestry.all fun link =>
+    !(decide (.placeObject ∈ link.parent.scope.verbs)) && match link.origin with
       | .strict => true
       | .delegated request => request.verb != .placeObject
 
@@ -177,7 +200,7 @@ def decodeAuthority (bytes : List UInt8) : Except String (Store CredentialAuthor
   let old ← decodePinned authorityWire authorityDescriptor bytes
   for entry in entries authorityWire old do
     match entry with
-    | ⟨⟨.capability .object, _⟩, cap⟩ =>
+    | ⟨⟨AuthorityPlane.capability ResourceKind.object, _⟩, cap⟩ =>
         if !oldObjectCapability cap then throw "carry source grant uses a post-source verb"
     | _ => pure ()
   pure (liftAuthority old)

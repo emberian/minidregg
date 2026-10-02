@@ -5,6 +5,7 @@ mapping, native target validation and detached authorization are all required.
 Publication still belongs to the quiesced, atomic infra switch. -/
 import Compiler.CarriedSegmentIO
 import Compiler.NeutralPolicyCarry
+import Compiler.CarryConfiguration
 
 namespace Minidregg.Compiler.NeutralCarriedSegmentIO
 
@@ -21,12 +22,15 @@ private def hex (bytes : List UInt8) : String :=
   let digit := fun n : Nat => Char.ofNat (if n < 10 then '0'.toNat + n else 'a'.toNat + n - 10)
   String.ofList (bytes.flatMap fun byte => [digit (byte.toNat / 16), digit (byte.toNat % 16)])
 
-/-- A policy-only cut cannot simultaneously change deployment parameters,
+/-- A closed legacy cut cannot simultaneously change deployment parameters,
 factory templates, tariffs, evaluators or observed runtime settings. Other
 schema transitions require their own closed transformations and compositions.
 The signed artifact pins identify the reviewed old and target implementations;
 this is an authorized external cut, not a universal equivalence theorem. -/
 def checkProfiles (source target : SourceCapsule) : IO Unit := do
+  let sourceConfig ← liftResult (Json.parse (← IO.FS.readFile source.configuration))
+  let targetConfig ← liftResult (Json.parse (← IO.FS.readFile target.configuration))
+  liftResult (CarryConfiguration.checkLegacy sourceConfig targetConfig)
   let old ← liftResult (Json.parse (← IO.FS.readFile source.profile))
   let next ← liftResult (Json.parse (← IO.FS.readFile target.profile))
   let oldFields ← liftResult old.getObj?
@@ -59,7 +63,7 @@ def prepare (config : NativeHost.Config) (source target : SourceCapsule)
     checkTarget config target
     let audited ← liftResult (← auditSource source)
     checkProfiles source target
-    let plan ← liftResult (NeutralPolicyCarry.derive config.deployment
+    let plan ← liftResult (NeutralPolicyCarry.deriveStoreV2 config.deployment
       source.identity.semantics target.identity.semantics audited.durable)
     let body : Body := {
       source := source.identity
@@ -68,7 +72,7 @@ def prepare (config : NativeHost.Config) (source target : SourceCapsule)
       sourceCapsule := source.pins
       target := target.identity
       targetCapsule := target.pins
-      transformation := 1
+      transformation := plan.transformation
       writes := writesDigest plan.changes
       originIndex := originIndexDigest audited.durable.image
       operatorPublicKey := trustedOperator
