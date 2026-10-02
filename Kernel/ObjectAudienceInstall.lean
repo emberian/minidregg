@@ -3,7 +3,7 @@ policy installer. It proves no package handout: fresh disclosure remains the
 all-holder exact-post admission's obligation. -/
 import Kernel.ObjectAudienceController
 import Kernel.AudienceRosterBinding
-import Kernel.ResourceTargetAdmission
+import Compiler.ResourceTargetAdmission
 namespace Minidregg.Kernel.ObjectAudienceInstall
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
