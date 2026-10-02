@@ -77,8 +77,15 @@ private def decodePinned {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
 /-- Source v2 signing-key record: no pre-rotation commitment existed. -/
 abbrev LegacyKey := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat
 
+-- Supply the product instances explicitly: asking typeclass search for the
+-- entire transparent alias can select this very instance recursively.
 instance : DecidableEq LegacyKey :=
-  inferInstanceAs (DecidableEq (Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat))
+  @instDecidableEqProd Nat _ inferInstance
+    (@instDecidableEqProd Nat _ inferInstance
+      (@instDecidableEqProd Nat _ inferInstance
+        (@instDecidableEqProd Nat _ inferInstance
+          (@instDecidableEqProd (List UInt8) _ inferInstance
+            (@instDecidableEqProd Nat Nat inferInstance inferInstance)))))
 
 def legacyKeyStream : StreamCodec LegacyKey :=
   StreamCodec.product StreamCodec.nat
