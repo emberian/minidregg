@@ -70,7 +70,7 @@ actual new generation established by checked START. No increment is guessed.
 
 ```sh
 mini session-reenroll --phase resume --contract /private/reenroll.json \
-  --dir /private/reenroll-attempt --socket /run/mini/public.sock \
+  --dir /private/reenroll-attempt --socket /run/mini/operator.sock \
   --admission /root-owned/upgrade/compatible-admission.json \
   --new-generation 7
 ```
@@ -81,6 +81,18 @@ target image/helper pins. Resume immutably binds that admission and new
 generation to the capture. It uses the target Host and retained target config
 for all subsequent authenticated operations. The original config snapshot is
 retained even when the live config pathname has been replaced by the upgrade.
+The old image pathname may likewise be replaced or absent: resume binds its
+historical digest to the authenticated source admission, while capture still
+requires the original live image.
+
+Resume requires explicit `managementSocket` and `publicSocket` fields in that
+admission. Its public endpoint must match the captured contract; its distinct
+management backend must support the same signed public operations as well as
+operator operations. Pass that management path as `--socket` on resume. Both
+signed queries/close and event28 operations use it while public ingress remains
+stopped. The chosen topology is retained in the immutable execution pin. Legacy
+admissions without these fields refuse rather than attempting the stopped public
+relay or guessing a private endpoint.
 
 Resume signed-reads the new app generation, then closes only the exact active
 session captured before quiesce. A changed session root refuses a fresh close.

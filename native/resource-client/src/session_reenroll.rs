@@ -156,7 +156,14 @@ fn retained_identity(value: &Value, directory: &Path) -> Result<(Value, Value)> 
     let original = read(&directory.join("contract.json"))?;
     let mut identity = value.clone();
     if value.get("newGeneration").is_some() {
-        for name in ["host", "config", "inspectorHost", "inspectorSha256"] {
+        for name in [
+            "host",
+            "config",
+            "inspectorHost",
+            "inspectorSha256",
+            "publicSocket",
+            "operatorSocket",
+        ] {
             identity[name] = original[name].clone();
         }
         identity
@@ -219,6 +226,24 @@ fn pinned(value: &Value, directory: &Path) -> Result<()> {
     }
     check_keys(value)
 }
+/// Resume can use private public-operation transport only when the root
+/// admission explicitly binds the topology and the captured public endpoint.
+fn management_transport(
+    original: &Value,
+    management: Option<&Path>,
+    public: Option<&Path>,
+) -> Result<PathBuf> {
+    let management = management.ok_or("compatible admission lacks management socket topology")?;
+    let public = public.ok_or("compatible admission lacks public socket topology")?;
+    if !compatible_upgrade_custody::canonical(management)
+        || !compatible_upgrade_custody::canonical(public)
+        || management == public
+        || path_field(original, "publicSocket")? != public
+    {
+        return Err("admitted socket topology differs from captured public ingress".into());
+    }
+    Ok(management.to_path_buf())
+}
 fn execution_config(value: &Value, directory: &Path) -> PathBuf {
     directory.join(if value.get("newGeneration").is_some() {
         "execution-config.json"
@@ -237,6 +262,18 @@ fn check_execution(value: &Value, directory: &Path) -> Result<()> {
     let admission = compatible_upgrade_custody::load(&admission_path).map_err(|e| e.to_string())?;
     let (original, pin) = retained_identity(value, directory)?;
     source_image(&original, &pin, SourceImage::Admitted(&admission.source))?;
+    let management = management_transport(
+        &original,
+        admission.management_socket.as_deref(),
+        admission.public_socket.as_deref(),
+    )?;
+    if path_field(value, "publicSocket")? != management
+        || path_field(value, "operatorSocket")? != management
+        || path_field(&execution, "managementSocket")? != management
+        || path_field(&execution, "publicSocket")? != path_field(&original, "publicSocket")?
+    {
+        return Err("reenrollment execution socket topology changed".into());
+    }
     if digest(
         &compatible_upgrade_custody::root_bytes(&admission_path, 4 * 1024 * 1024)
             .map_err(|e| e.to_string())?,
@@ -272,6 +309,11 @@ fn bind_execution(
         &original_pin,
         SourceImage::Admitted(&admission.source),
     )?;
+    let management = management_transport(
+        &retained,
+        admission.management_socket.as_deref(),
+        admission.public_socket.as_deref(),
+    )?;
     let (host, sha) = compatible_upgrade_custody::image(&admission.target.manifest, "host")
         .map_err(|e| e.to_string())?;
     if host_image_sha256(&host)? != sha {
@@ -282,11 +324,13 @@ fn bind_execution(
     value["config"] = json!(utf8_path(&admission.target.config_path)?);
     value["inspectorHost"] = value["host"].clone();
     value["inspectorSha256"] = json!(sha);
+    value["publicSocket"] = json!(utf8_path(&management)?);
+    value["operatorSocket"] = value["publicSocket"].clone();
     value["newGeneration"] = json!(generation);
     if number(&value, "newGeneration")? <= number(&value, "oldGeneration")? {
         return Err("target generation must advance captured app generation".into());
     }
-    let execution = json!({"type":FORMAT,"admissionPath":utf8_path(&admission_path)?,"admissionSha256":digest(&compatible_upgrade_custody::root_bytes(&admission_path, 4 * 1024 * 1024).map_err(|e| e.to_string())?),"host":value["host"],"hostSha256":sha,"configSha256":admission.target.config_sha256,"newGeneration":generation,"captureSha256":digest(&private_bytes(&directory.join("capture.json"), LIMIT)?)});
+    let execution = json!({"type":FORMAT,"admissionPath":utf8_path(&admission_path)?,"admissionSha256":digest(&compatible_upgrade_custody::root_bytes(&admission_path, 4 * 1024 * 1024).map_err(|e| e.to_string())?),"host":value["host"],"hostSha256":sha,"configSha256":admission.target.config_sha256,"newGeneration":generation,"captureSha256":digest(&private_bytes(&directory.join("capture.json"), LIMIT)?),"managementSocket":utf8_path(&management)?,"publicSocket":original["publicSocket"]});
     let pin = directory.join("execution.json");
     let config_path = execution_config(&value, directory);
     let config = bounded(&admission.target.config_path, 65_536)?;
@@ -982,6 +1026,32 @@ mod tests {
         drop(lock(&directory).unwrap());
         assert_eq!(fs::read(&target).unwrap(), b"retained");
         fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn management_transport_requires_explicit_exact_admitted_topology() {
+        let original = json!({"publicSocket":"/run/mini/public.sock"});
+        let public = Path::new("/run/mini/public.sock");
+        let management = Path::new("/run/mini/operator.sock");
+        assert_eq!(
+            management_transport(&original, Some(management), Some(public)).unwrap(),
+            management
+        );
+        assert!(management_transport(&original, None, None).is_err());
+        assert!(management_transport(&original, Some(management), None).is_err());
+        assert!(management_transport(&original, None, Some(public)).is_err());
+        assert!(management_transport(&original, Some(public), Some(public)).is_err());
+        assert!(management_transport(
+            &original,
+            Some(management),
+            Some(Path::new("/run/another/public.sock"))
+        )
+        .is_err());
+        assert!(management_transport(
+            &original,
+            Some(Path::new("/run/mini/../operator.sock")),
+            Some(public)
+        )
+        .is_err());
     }
     #[test]
     fn request_keeps_restrictive_role_exactly() {
