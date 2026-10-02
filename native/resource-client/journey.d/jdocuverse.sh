@@ -37,7 +37,7 @@
 # table. Last stderr line: the detail. Exit 0 only when every row is ok.
 set -u
 umask 077
-: "${JOURNEY_STEP_DIR:?}" "${JOURNEY_WORLD:?}" "${JOURNEY_RUN:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" "${SPONSOR_WS:?}"
+: "${JOURNEY_STEP_DIR:?}" "${JOURNEY_WORLD:?}" "${JOURNEY_RUN:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}"
 SD=$JOURNEY_STEP_DIR
 HERE=$(cd "$(dirname "$0")" && pwd)
 H=$SD/h; WS=$SD/w; L=$SD/log
@@ -51,7 +51,9 @@ WEB_PID=""
 TRACE=0   # the transcript starts after the friends' setup
 trap '[ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null' EXIT
 
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
+declare -A WS_PATHS HOME_PATHS CACHE_PASSES
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "${WS_PATHS[$1]:-$WS/$1}"; fi; }
+home_of() { echo "${HOME_PATHS[$1]:-$H/$1}"; }
 
 # say WHO LINE [STDIN]: one line in WHO's own shell session; sets RC, OUT, ERR;
 # appends `WHO> LINE`, its stdout and its last stderr line to the transcript.
@@ -60,8 +62,8 @@ say() {
   N=$((N + 1))
   local stem; stem=$(printf '%03d-%s' "$N" "$who")
   printf '%s\n' "$line" >"$L/$stem.line"
-  "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
-    --workspace "$(ws_of "$who")" --home "$H/$who" --line "$line" <"$input" >"$L/$stem.out" 2>"$L/$stem.err"
+  MINI_KEYCACHE_PASSPHRASE=${CACHE_PASSES[$who]:-${MINI_KEYCACHE_PASSPHRASE:-}} "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+    --workspace "$(ws_of "$who")" --home "$(home_of "$who")" --line "$line" <"$input" >"$L/$stem.out" 2>"$L/$stem.err"
   RC=$?
   OUT=$L/$stem.out; ERR=$L/$stem.err
   [ "$TRACE" = 1 ] || return 0
@@ -77,6 +79,7 @@ record() { # step who line expect verdict note
   if [ "$5" != ok ]; then
     FAILED=$((FAILED + 1))
     [ -n "$FIRST_FAIL" ] || FIRST_FAIL="row $N ($1 $2: $3): $6"
+    [ "${JDV_SUPPLIED_STORE:-0}" != 1 ] || finish
   fi
 }
 
@@ -136,8 +139,21 @@ text_at() { jq -r --argjson n "$2" '.lines[] | select(.line == $n) | .text' "$1"
 mkdir -p -m 700 "$H/sponsor"
 printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
-# ------------------------------------------------ friends: enroll, provision, init (as J12)
+# Supplied mode operates on actual already-enrolled participants. The Python
+# adapter validates one Store/manifest and distinct native principals first.
+# It never copies a signing seed, enrolls/provisions users or restarts service.
+# Standalone mode retains its existing journey setup.
 declare -A SUBJ
+if [ "${JDV_SUPPLIED_STORE:-0}" = 1 ]; then
+  for pair in amy:OWNER ben:MEMBER cal:READER rhea:REVIEWER; do
+    f=${pair%%:*}; role=${pair#*:}
+    ws_var=JDV_${role}_WS; home_var=JDV_${role}_HOME; pass_var=JDV_${role}_PASS
+    WS_PATHS[$f]=${!ws_var:?}; HOME_PATHS[$f]=${!home_var:?}; CACHE_PASSES[$f]=${!pass_var:-}
+    SUBJ[$f]=$(jq -er .subject "${WS_PATHS[$f]}/workspace.json") || exit 1
+    mkdir -p -m 700 "${HOME_PATHS[$f]}/requests"
+  done
+else
+  : "${SPONSOR_WS:?}"
 for f in amy ben cal rhea; do
   mkdir -p -m 700 "$H/$f" "$H/$f/requests"
   ok setup "$f" "keygen mini.key"
@@ -156,6 +172,10 @@ for f in amy ben cal rhea; do
     install -D -m 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
+fi
+for f in amy ben cal rhea; do
+  WS_PATHS[$f]=${WS_PATHS[$f]:-$WS/$f}; HOME_PATHS[$f]=${HOME_PATHS[$f]:-$H/$f}
+done
 B=${SUBJ[ben]}
 TRACE=1
 
@@ -170,21 +190,21 @@ grant J19 amy g-cal paper cal observe paper
 for part in read annotate; do
   case $part in
     read) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["observe"],maxCost:"50000"}' >"$H/amy/requests/rhea-read.json" ;;
+            name:"paper",recipient:$r,verbs:["observe"],maxCost:"50000"}' >"${HOME_PATHS[amy]}/requests/rhea-read.json" ;;
     annotate) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"$H/amy/requests/rhea-annotate.json" ;;
+            name:"paper",recipient:$r,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"${HOME_PATHS[amy]}/requests/rhea-annotate.json" ;;
   esac
   ok J22 amy "propose g-rhea-$part @rhea-$part.json"
   ok J22 amy "submit g-rhea-$part"
   ok J22 amy "publish g-rhea-$part"
 done
-PAPER=$(jq -r .target "$WS/amy/refs/paper.json")
-ok J22 rhea "import paper object $PAPER $(jq -r .capability "$WS/amy/proposals/g-rhea-read/recipient-reference.json") $(jq -r .capability "$WS/amy/proposals/g-rhea-annotate/recipient-reference.json")"
+PAPER=$(jq -r .target "${WS_PATHS[amy]}/refs/paper.json")
+ok J22 rhea "import paper object $PAPER $(jq -r .capability "${WS_PATHS[amy]}/proposals/g-rhea-read/recipient-reference.json") $(jq -r .capability "${WS_PATHS[amy]}/proposals/g-rhea-annotate/recipient-reference.json")"
 
 # ------------------------------------------------ writing: notes by push, paper by lines
 ok J21 ben "doc pull notes"
 check J21 "an empty document pulls as an empty file" test ! -s "$OUT"
-printf 'notes one\nnotes two\nnotes three\nnotes four\n' >"$H/ben/requests/notes.md"
+printf 'notes one\nnotes two\nnotes three\nnotes four\n' >"${HOME_PATHS[ben]}/requests/notes.md"
 ok J21 ben "doc push n1 notes @notes.md"
 check J21 "ben's push was four new lines in one proposal" grep -q '^doc push notes: proposal n1: 4 action(s)' "$OUT"
 ok J19 ben "doc range notes 2 3"
@@ -274,17 +294,17 @@ refused J20 cal "doc show paper --at $FIRST" "no-grant"
 
 # ------------------------------------------------ J21: pull, edit, push; a stale line by line
 ok J21 amy "doc pull paper"
-cp "$OUT" "$H/amy/requests/p.md"
-check J21 "a pulled transclusion is one marker line" test "$(grep -c '^⟦transclusion [0-9]*⟧$' "$H/amy/requests/p.md")" = 2
-sed -i 's/^see the notes$/see the notes (pulled and pushed)/' "$H/amy/requests/p.md"
+cp "$OUT" "${HOME_PATHS[amy]}/requests/p.md"
+check J21 "a pulled transclusion is one marker line" test "$(grep -c '^⟦transclusion [0-9]*⟧$' "${HOME_PATHS[amy]}/requests/p.md")" = 2
+sed -i 's/^see the notes$/see the notes (pulled and pushed)/' "${HOME_PATHS[amy]}/requests/p.md"
 ok J21 amy "doc push p1 paper @p.md"
 check J21 "the push was one edit" grep -q '^doc push paper: proposal p1: 1 action(s)' "$OUT"
 ok J21 amy "doc pull paper"
-cp "$OUT" "$H/amy/requests/p.md"
+cp "$OUT" "${HOME_PATHS[amy]}/requests/p.md"
 ok J21 ben "doc show paper"
 ok J21 ben "doc edit b9 paper 3 'Every write is a signed turn, says ben.'"
 ok J21 ben "submit b9"
-sed -i 's/^Every write is a signed turn\.$/Every write is a signed turn, says amy./' "$H/amy/requests/p.md"
+sed -i 's/^Every write is a signed turn\.$/Every write is a signed turn, says amy./' "${HOME_PATHS[amy]}/requests/p.md"
 refused J21 amy "doc push p2 paper @p.md" "refused: stale-line: line 3 changed"
 
 # ------------------------------------------------ J23: can
@@ -298,7 +318,7 @@ check J23 "rhea's mark is admitted" grep -qE '^  mark +admitted ' "$SD/can-rhea.
 check J23 "rhea's edit is refused, with the reason" grep -qE '^  edit +[a-z-]+: ' "$SD/can-rhea.txt"
 
 # ------------------------------------------------ J24: the web, one renderer
-"$MINI" web --dir "$WS/amy" --listen 127.0.0.1:0 >"$SD/web.out" 2>"$SD/web.err" &
+"$MINI" web --dir "${WS_PATHS[amy]}" --listen 127.0.0.1:0 >"$SD/web.out" 2>"$SD/web.err" &
 WEB_PID=$!
 URL=""
 for i in $(seq 1 100); do
@@ -320,6 +340,13 @@ CODE_CAL=$(curl -s --max-time 600 -o "$SD/web-history.html" -w '%{http_code}' "$
 check J24 "the web's history page renders the same history" test "$CODE_CAL" = 200
 kill "$WEB_PID" 2>/dev/null; wait "$WEB_PID" 2>/dev/null; WEB_PID=""
 { echo "# mini web: GET /doc/paper -> $CODE; the page's <article> is doc show --html:"; sed -n '1,12p' "$SD/web-paper.article"; } >>"$TRANSCRIPT"
+
+# Shared Store lifecycle/checkpoint belongs to the construction coordinator.
+# This component never stops its service or runs a second cold bootstrap.
+if [ "${JDV_SUPPLIED_STORE:-0}" = 1 ]; then
+  printf '%s\n' '{"protocol":"mini-docuverse-cold-audit-v1","state":"not-run","owner":"shared-world-checkpoint","serviceRestart":false}' >"$SD/cold-audit.json"
+  finish
+fi
 
 # ------------------------------------------------ AUDIT: restart, cold audit, identical
 ok AUDIT amy "doc show paper"
@@ -344,7 +371,7 @@ restart() {
   echo "started server $! (jdocuverse restart)" >>"$JOURNEY_RUN/services.log"
   for i in $(seq 1 600); do
     "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
-      --workspace "$WS/amy" --home "$H/amy" --line "doc show paper" >/dev/null 2>&1 && return 0
+      --workspace "${WS_PATHS[amy]}" --home "${HOME_PATHS[amy]}" --line "doc show paper" >/dev/null 2>&1 && return 0
     sleep 0.1
   done
   return 1
