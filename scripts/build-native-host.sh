@@ -60,7 +60,8 @@ Environment:
   MINIDREGG_NATIVE_JOBS=1|2        concurrent C compiler processes (default: 2)
   MINIDREGG_LEAN_THREADS=1|2       threads in each serialized Lean process (default: 2)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
-  MINIDREGG_CYCLE_DIR=DIR          seat/evidence parent (default below /tmp)
+  MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
+  MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats-UID)
 EOF
 }
 
@@ -272,7 +273,11 @@ case "$native_jobs" in 1|2) ;; *) printf 'MINIDREGG_NATIVE_JOBS must be 1 or 2\n
 case "$lean_threads" in 1|2) ;; *) printf 'MINIDREGG_LEAN_THREADS must be 1 or 2\n' >&2; exit 64 ;; esac
 
 cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
-mkdir -p "$cycle_dir/build"
+# Compiler capacity belongs to the host/user, not to one candidate's evidence.
+# Every candidate and scoped build on this host must use this same root.
+seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats-$(id -u)}
+mkdir -p "$seat_root" "$cycle_dir/build"
+seat_root=$(cd "$seat_root" && pwd -P)
 if [[ -z "$output_dir" ]]; then
   output_dir="$cycle_dir/build/native-host-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
@@ -311,7 +316,7 @@ on_signal() {
   exit "$code"
 }
 for seat_number in 1 2; do
-  candidate="$cycle_dir/lean-seat-$seat_number"
+  candidate="$seat_root/lean-seat-$seat_number"
   # Acquire with one syscall, independent of utility-level race handling.
   if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
     seat_dir=$(cd "$candidate" && pwd -P)
@@ -322,7 +327,7 @@ for seat_number in 1 2; do
   fi
 done
 if [[ -z "$seat_dir" ]]; then
-  printf 'build-native-host: both Lean compiler seats are occupied under %s\n' "$cycle_dir" >&2
+  printf 'build-native-host: both Lean compiler seats are occupied under %s\n' "$seat_root" >&2
   exit 75
 fi
 trap on_exit EXIT
@@ -331,8 +336,8 @@ trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
 start_epoch=$(date +%s)
-printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat=%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_dir" \
+printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nseat=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_root" "$seat_dir" \
   > "$output_dir/build.log"
 
 # `transImports` is a nonbuildable Lake facet: it parses source headers and
