@@ -109,3 +109,15 @@ retained adapter becomes the supplied `paid-entry` hook. Synthetic RPC receiving
 proves the source payment/entry path and leaves mainnet pending. It does not
 provide external chain evidence. Preserve a partially completed paid root and
 its exact status/receipts after failure; create a fresh root for a new rehearsal.
+
+The supplied SPK app adapter needs the constructor's source-born parent and tool
+tasks prepared before its first metered birth. Run `platform-task-readiness.py
+--platform-inputs ROOT/platform-inputs.json --evidence ROOT/task-readiness` as the
+Store operator. It uses each task owner's actual key and current signed state:
+parent generation0/status0 attaches softly, generation1/status2 reserves one unit,
+and only generation1/status3-or4/reserved1 is ready. The tool attaches softly and
+must reach generation1/status1-or2/reserved0. Other generations or holds refuse.
+Each effect retains its exact intent and native attempt; a pending attempt or an
+intent published before its receipt blocks new effects and requires exact native
+recovery. Repeating a completed check rereads the current source without attaching
+or reserving again. This helper creates no Store, grants, members, or profiles.
