@@ -3,8 +3,9 @@
 //! by the resident may add a listener. A retry acknowledges the original add and
 //! cannot revive its sessions or replace an existing route's credentials.
 use crate::dispatch_author::FixedAuthoring;
-use crate::dispatch_native::{connect_deadline, private_dir};
+use crate::dispatch_native::{connect_deadline, private_dir, write_new};
 use crate::http_entrance::{CustodianPolicy, EntranceKind};
+use crate::stream_continuity::ContinuityBinding;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -73,7 +74,7 @@ impl RouteRegistration {
             || self.display_name.is_empty()
             || self.display_name.len() > 256
             || self.preferred_handle.is_empty()
-            || self.preferred_handle.len() > 128
+            || self.preferred_handle.len() > 256
             || self.display_name.chars().any(char::is_control)
             || self.preferred_handle.chars().any(char::is_control)
         {
@@ -90,6 +91,91 @@ fn clean_absolute(path: &Path) -> bool {
                 std::path::Component::ParentDir | std::path::Component::CurDir
             )
         })
+}
+
+/// Captured from the exact files and presentation used by this resident, not
+/// reconstructed from a later registration command or reopened mutable path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RouteIdentity {
+    directory: PathBuf,
+    dispatch_custody: PathBuf,
+    dispatch_custody_sha256: String,
+    custodian_sha256: String,
+    display_name: String,
+    preferred_handle: String,
+}
+impl RouteIdentity {
+    pub(crate) fn capture(
+        directory: &Path,
+        dispatch_custody: &Path,
+        display_name: &str,
+        preferred_handle: &str,
+        custody_bytes: &[u8],
+        policy_bytes: &[u8],
+    ) -> Self {
+        Self {
+            directory: directory.into(),
+            dispatch_custody: dispatch_custody.into(),
+            dispatch_custody_sha256: format!("{:x}", Sha256::digest(custody_bytes)),
+            custodian_sha256: format!("{:x}", Sha256::digest(policy_bytes)),
+            display_name: display_name.into(),
+            preferred_handle: preferred_handle.into(),
+        }
+    }
+    pub(crate) fn from_request(request: &RouteRegistration) -> Self {
+        Self {
+            directory: request.directory.clone(),
+            dispatch_custody: request.dispatch_custody.clone(),
+            dispatch_custody_sha256: request.dispatch_custody_sha256.clone(),
+            custodian_sha256: request.custodian_sha256.clone(),
+            display_name: request.display_name.clone(),
+            preferred_handle: request.preferred_handle.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RegistrationAction {
+    Append(usize),
+    Seal(usize),
+}
+impl RegistrationAction {
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Append(index) | Self::Seal(index) => index,
+        }
+    }
+}
+
+/// Pure plan before source admission. Sealing does not consume another route
+/// slot and cannot replace a loaded identity or an already fixed restriction.
+pub(crate) fn registration_action(
+    request: &RouteRegistration,
+    identities: &[RouteIdentity],
+    bindings: &[Option<ContinuityBinding>],
+) -> io::Result<RegistrationAction> {
+    request.validate()?;
+    if identities.len() != bindings.len() {
+        return Err(invalid("resident route registry length drift"));
+    }
+    if let Some(index) = identities
+        .iter()
+        .position(|identity| identity.directory == request.directory)
+    {
+        if bindings[index].is_some() {
+            return Err(invalid("resident route already sealed"));
+        }
+        if identities[index] != RouteIdentity::from_request(request) {
+            return Err(invalid(
+                "existing route differs from retained immutable identity",
+            ));
+        }
+        return Ok(RegistrationAction::Seal(index));
+    }
+    if identities.len() >= MAX_ROUTES {
+        return Err(invalid("resident route limit reached"));
+    }
+    Ok(RegistrationAction::Append(identities.len()))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -242,16 +328,113 @@ struct Envelope {
     error: Option<String>,
 }
 
+const SEALS_DIRECTORY: &str = "route-seals";
+
+/// A generation cannot silently lose a published or interrupted restriction.
+/// Lifecycle STOP/new-generation recovery is required, never resealing as None.
+pub(crate) fn refuse_retained_registrations(journal: &Path) -> io::Result<()> {
+    let directory = journal.join(SEALS_DIRECTORY);
+    match fs::symlink_metadata(&directory) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+        Ok(_) => {}
+    }
+    private_dir(&directory)?;
+    if fs::read_dir(directory)?.next().transpose()?.is_some() {
+        return Err(invalid(
+            "retained route seal requires lifecycle STOP and a new generation",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) struct RegistrationPublisher<'a> {
+    directory: &'a Path,
+    request: &'a RouteRegistration,
+    started: bool,
+    published: Option<RouteRegistrationReply>,
+}
+impl RegistrationPublisher<'_> {
+    /// Call after all fallible preparation, before publishing any in-memory
+    /// binding/listener. A publication failure is fatal to this resident.
+    pub(crate) fn publish(
+        &mut self,
+        reply: &RouteRegistrationReply,
+        binding: &ContinuityBinding,
+        session_kind: &str,
+    ) -> io::Result<()> {
+        if self.started {
+            return Err(invalid("route registration published twice"));
+        }
+        self.started = true;
+        binding.validate()?;
+        let fingerprint: String = binding
+            .session_fingerprint
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        if reply.protocol != PROTOCOL
+            || reply.registration_nonce_hex != self.request.registration_nonce_hex
+            || reply.route_index >= MAX_ROUTES
+            || binding.app != reply.app
+            || binding.app_generation != reply.app_generation
+            || binding.session != reply.session
+            || binding.session_generation != reply.session_generation
+            || binding.subject != reply.subject
+            || binding.ticket_resource != reply.ticket_resource
+            || fingerprint != reply.session_fingerprint_hex
+            || self.request.expected_app != reply.app
+            || self.request.expected_app_generation != reply.app_generation
+            || self.request.expected_session_generation != reply.session_generation
+            || !matches!(session_kind, "web" | "api")
+        {
+            return Err(invalid("route seal evidence differs from admitted binding"));
+        }
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "protocol":"mini-spk-resident-route-seal-v1", "request":self.request, "reply":reply,
+            "binding":{"domain":binding.domain,"semantics":binding.semantics,"app":binding.app,
+                "appGeneration":binding.app_generation,"session":binding.session,
+                "sessionGeneration":binding.session_generation,"subject":binding.subject,
+                "ticketResource":binding.ticket_resource,"sessionFingerprintHex":fingerprint,"sessionKind":session_kind}
+        }))?;
+        if bytes.len() > MAX_COMMAND * 3 {
+            return Err(invalid("route seal record too large"));
+        }
+        let pending_name = format!(".pending-{}.json", self.request.registration_nonce_hex);
+        let pending = write_new(self.directory, &pending_name, &bytes)?;
+        // A hard link publishes without replacing an earlier seal. During the
+        // brief two-link interval, either filename makes reopen fail closed.
+        let final_path = self
+            .directory
+            .join(format!("{}.json", self.request.registration_nonce_hex));
+        fs::hard_link(&pending, &final_path)?;
+        File::open(self.directory)?.sync_all()?;
+        fs::remove_file(&pending)?;
+        File::open(self.directory)?.sync_all()?;
+        self.published = Some(reply.clone());
+        Ok(())
+    }
+}
+
 pub(crate) struct RouteControl {
     listener: UnixListener,
     socket: PathBuf,
     identity: (u64, u64),
     _lock: File,
     accepted: Vec<(RouteRegistration, RouteRegistrationReply)>,
+    seals_directory: PathBuf,
+    poisoned: bool,
 }
 impl RouteControl {
     pub(crate) fn bind(directory: &Path) -> io::Result<Self> {
         private_dir(directory)?;
+        refuse_retained_registrations(directory)?;
+        let seals_directory = directory.join(SEALS_DIRECTORY);
+        if !seals_directory.exists() {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(&seals_directory)?;
+            File::open(directory)?.sync_all()?;
+        }
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -307,6 +490,8 @@ impl RouteControl {
             identity: (meta.dev(), meta.ino()),
             _lock: lock,
             accepted: Vec::new(),
+            seals_directory,
+            poisoned: false,
         })
     }
     pub(crate) fn as_raw_fd(&self) -> libc::c_int {
@@ -316,8 +501,14 @@ impl RouteControl {
     fn apply(
         &mut self,
         request: &RouteRegistration,
-        mut admit: impl FnMut(&RouteRegistration) -> io::Result<RouteRegistrationReply>,
+        mut admit: impl FnMut(
+            &RouteRegistration,
+            &mut RegistrationPublisher<'_>,
+        ) -> io::Result<RouteRegistrationReply>,
     ) -> io::Result<RouteRegistrationReply> {
+        if self.poisoned {
+            return Err(invalid("resident route control publication is uncertain"));
+        }
         request.validate()?;
         if let Some((prior, reply)) = self
             .accepted
@@ -335,14 +526,38 @@ impl RouteControl {
         if self.accepted.len() >= MAX_ROUTES {
             return Err(invalid("route control registration limit reached"));
         }
-        let reply = admit(request)?;
-        self.accepted.push((request.clone(), reply.clone()));
-        Ok(reply)
+        let mut publisher = RegistrationPublisher {
+            directory: &self.seals_directory,
+            request,
+            started: false,
+            published: None,
+        };
+        let result = admit(request, &mut publisher);
+        match result {
+            Ok(reply) if publisher.published.as_ref() == Some(&reply) => {
+                self.accepted.push((request.clone(), reply.clone()));
+                Ok(reply)
+            }
+            Ok(_) => {
+                self.poisoned = true;
+                Err(invalid(
+                    "route admission returned without durable matching publication",
+                ))
+            }
+            Err(error) => {
+                self.poisoned |= publisher.started;
+                Err(error)
+            }
+        }
     }
-    /// Refused or abandoned commands affect only their own control connection.
+    /// Admission refusals affect only their connection. Interrupted publication
+    /// is fatal: the resident must end instead of serving an unbound route.
     pub(crate) fn poll_once(
         &mut self,
-        admit: impl FnMut(&RouteRegistration) -> io::Result<RouteRegistrationReply>,
+        admit: impl FnMut(
+            &RouteRegistration,
+            &mut RegistrationPublisher<'_>,
+        ) -> io::Result<RouteRegistrationReply>,
     ) -> io::Result<()> {
         let (mut stream, _) = self.listener.accept()?;
         if peer_uid(&stream).ok() != Some(unsafe { libc::geteuid() }) {
@@ -355,6 +570,11 @@ impl RouteControl {
                 let request: RouteRegistration = serde_json::from_slice(&bytes)?;
                 self.apply(&request, admit)
             });
+        if self.poisoned {
+            return Err(invalid(
+                "route seal publication interrupted; resident must end",
+            ));
+        }
         let envelope = match result {
             Ok(reply) => Envelope {
                 result: Some(reply),
@@ -512,6 +732,216 @@ mod tests {
             admitted_world_root: "456".into(),
         }
     }
+    fn fixture_binding(request: &RouteRegistration) -> ContinuityBinding {
+        let r = reply(request);
+        ContinuityBinding {
+            domain: "1".into(),
+            semantics: "2".into(),
+            app: r.app,
+            app_generation: r.app_generation,
+            session: r.session,
+            session_generation: r.session_generation,
+            subject: r.subject,
+            ticket_resource: r.ticket_resource,
+            session_fingerprint: [0x44; 32],
+        }
+    }
+    fn publish_fixture(
+        request: &RouteRegistration,
+        publisher: &mut RegistrationPublisher<'_>,
+    ) -> io::Result<RouteRegistrationReply> {
+        let reply = reply(request);
+        publisher.publish(&reply, &fixture_binding(request), "web")?;
+        Ok(reply)
+    }
+
+    #[test]
+    fn seal_existing_initial_route_preserves_b_and_retry_cannot_revive_lease() {
+        let fixture = Fixture::new();
+        let request = fixture.materialize();
+        let (_, policy) = prepare(&request, "17", "4").unwrap();
+        let listener =
+            crate::http_entrance::PrivateHttpEntrance::bind_fixed(&request.directory, policy)
+                .unwrap();
+        let socket_before = fs::symlink_metadata(request.directory.join("http.sock")).unwrap();
+        let identities = vec![
+            RouteIdentity::from_request(&request),
+            RouteIdentity {
+                directory: fixture.0.join("b"),
+                ..RouteIdentity::from_request(&request)
+            },
+        ];
+        let b_binding = ContinuityBinding {
+            subject: "9".into(),
+            session: "28".into(),
+            ..fixture_binding(&request)
+        };
+        let mut bindings = vec![None, Some(b_binding.clone())];
+        let ended_a = crate::web_socket::StreamLease::begin(Duration::from_secs(60)).unwrap();
+        ended_a.revoke();
+        let live_b = crate::web_socket::StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let mut control = RouteControl::bind(&fixture.0).unwrap();
+        assert_eq!(
+            crate::dispatch_native::dispatch_opcode(bindings[0].as_ref()),
+            34
+        );
+        let mut calls = 0;
+        let sealed = control
+            .apply(&request, |request, publisher| {
+                let action = registration_action(request, &identities, &bindings)?;
+                assert_eq!(action, RegistrationAction::Seal(0));
+                calls += 1; // the production source154 admission happens here
+                let binding = fixture_binding(request);
+                let mut reply = reply(request);
+                reply.route_index = action.index();
+                publisher.publish(&reply, &binding, "web")?;
+                bindings[action.index()] = Some(binding);
+                Ok(reply)
+            })
+            .unwrap();
+        assert_eq!(sealed.route_index, 0);
+        assert_eq!(
+            crate::dispatch_native::dispatch_opcode(bindings[0].as_ref()),
+            164
+        );
+        assert_eq!(bindings[1], Some(b_binding));
+        let again = control
+            .apply(&request, |_, _| panic!("cached retry must not reseal"))
+            .unwrap();
+        assert_eq!(again, sealed);
+        assert_eq!(calls, 1);
+        assert!(ended_a.check().is_err());
+        assert!(live_b.check().is_ok());
+        let mut second = request.clone();
+        second.registration_nonce_hex = "55".repeat(32);
+        assert!(control
+            .apply(&second, |request, _| {
+                registration_action(request, &identities, &bindings)?;
+                panic!("already pinned route must refuse before source admission")
+            })
+            .is_err());
+        let socket_after = fs::symlink_metadata(request.directory.join("http.sock")).unwrap();
+        assert_eq!(
+            (socket_before.dev(), socket_before.ino()),
+            (socket_after.dev(), socket_after.ino())
+        );
+        drop(listener);
+    }
+
+    #[test]
+    fn seal_plan_checks_retained_identity_before_admission_and_works_at_capacity() {
+        let fixture = Fixture::new();
+        let request = fixture.materialize();
+        let custody_bytes = fs::read(&request.dispatch_custody).unwrap();
+        let policy_bytes = fs::read(request.directory.join("custodian.json")).unwrap();
+        let captured = RouteIdentity::capture(
+            &request.directory,
+            &request.dispatch_custody,
+            &request.display_name,
+            &request.preferred_handle,
+            &custody_bytes,
+            &policy_bytes,
+        );
+        let mut identities = vec![captured];
+        for index in 1..MAX_ROUTES {
+            identities.push(RouteIdentity {
+                directory: fixture.0.join(format!("route-{index}")),
+                ..RouteIdentity::from_request(&request)
+            });
+        }
+        let bindings = vec![None; MAX_ROUTES];
+        assert_eq!(
+            registration_action(&request, &identities, &bindings).unwrap(),
+            RegistrationAction::Seal(0)
+        );
+        for field in ["custody", "policy", "path", "display", "handle"] {
+            let mut changed = request.clone();
+            match field {
+                "custody" => changed.dispatch_custody_sha256 = "99".repeat(32),
+                "policy" => changed.custodian_sha256 = "99".repeat(32),
+                "path" => changed.dispatch_custody = fixture.0.join("other-custody.json"),
+                "display" => changed.display_name = "Changed".into(),
+                _ => changed.preferred_handle = "changed".into(),
+            }
+            assert!(registration_action(&changed, &identities, &bindings).is_err());
+        }
+        let mut append = request.clone();
+        append.directory = fixture.0.join("another");
+        assert!(registration_action(&append, &identities, &bindings).is_err());
+        // Current-file drift with the original retained hash also fails before source.
+        fs::write(request.directory.join("custodian.json"), b"changed").unwrap();
+        assert!(prepare(&request, "17", "4").is_err());
+    }
+
+    #[test]
+    fn interrupted_seal_publication_cannot_reopen_as_unbound_or_readmit() {
+        let fixture = Fixture::new();
+        let request = fixture.request();
+        let mut control = RouteControl::bind(&fixture.0).unwrap();
+        let mut bindings: Vec<Option<ContinuityBinding>> = vec![None];
+        let mut calls = 0;
+        let result = control.apply(&request, |request, publisher| {
+            calls += 1;
+            let mut reply = reply(request);
+            reply.route_index = 0;
+            publisher.publish(&reply, &fixture_binding(request), "web")?;
+            // Model death after fsynced publication and before the memory update.
+            Err(invalid("simulated interruption before memory publication"))
+        });
+        assert!(result.is_err());
+        assert!(control.poisoned);
+        assert!(bindings[0].is_none());
+        let mut different = request.clone();
+        different.registration_nonce_hex = "66".repeat(32);
+        different.expected_session_generation = "3".into();
+        assert!(control
+            .apply(&different, |_, _| panic!("uncertain seal must not readmit"))
+            .is_err());
+        assert_eq!(calls, 1);
+        let seal = control
+            .seals_directory
+            .join(format!("{}.json", request.registration_nonce_hex));
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(seal).unwrap()).unwrap();
+        assert_eq!(saved["request"], serde_json::to_value(&request).unwrap());
+        assert_eq!(saved["binding"]["domain"], "1");
+        drop(control);
+        assert!(refuse_retained_registrations(&fixture.0).is_err());
+        assert!(RouteControl::bind(&fixture.0).is_err());
+        bindings.clear();
+    }
+
+    #[test]
+    fn partial_pending_seal_and_publish_collision_fail_closed() {
+        let fixture = Fixture::new();
+        let mut control = RouteControl::bind(&fixture.0).unwrap();
+        let request = fixture.request();
+        let final_path = control
+            .seals_directory
+            .join(format!("{}.json", request.registration_nonce_hex));
+        write_new(
+            &control.seals_directory,
+            final_path.file_name().unwrap().to_str().unwrap(),
+            b"earlier seal",
+        )
+        .unwrap();
+        assert!(control.apply(&request, publish_fixture).is_err());
+        assert!(control.poisoned);
+        assert_eq!(fs::read(&final_path).unwrap(), b"earlier seal");
+        drop(control);
+        assert!(RouteControl::bind(&fixture.0).is_err());
+        let pending_fixture = Fixture::new();
+        let control = RouteControl::bind(&pending_fixture.0).unwrap();
+        write_new(
+            &control.seals_directory,
+            ".pending-interrupted.json",
+            b"partial",
+        )
+        .unwrap();
+        drop(control);
+        assert!(refuse_retained_registrations(&pending_fixture.0).is_err());
+        assert!(RouteControl::bind(&pending_fixture.0).is_err());
+    }
+
     #[test]
     fn registration_is_idempotent_but_cannot_replace_or_reanimate_a_route() {
         let fixture = Fixture::new();
@@ -519,13 +949,13 @@ mod tests {
         let request = fixture.request();
         let mut calls = 0;
         let first = control
-            .apply(&request, |request| {
+            .apply(&request, |request, publisher| {
                 calls += 1;
-                Ok(reply(request))
+                publish_fixture(request, publisher)
             })
             .unwrap();
         let again = control
-            .apply(&request, |_| {
+            .apply(&request, |_, _| {
                 panic!("retry must not readmit or mutate the prior lease")
             })
             .unwrap();
@@ -534,14 +964,14 @@ mod tests {
         let mut changed = request.clone();
         changed.expected_session_generation = "3".into();
         assert!(control
-            .apply(&changed, |_| panic!(
+            .apply(&changed, |_, _| panic!(
                 "changed nonce must not reach admission"
             ))
             .is_err());
         let mut fresh = changed;
         fresh.registration_nonce_hex = "55".repeat(32);
         assert!(control
-            .apply(&fresh, |_| Err(invalid(
+            .apply(&fresh, |_, _| Err(invalid(
                 "native current admission stale or revoked"
             )))
             .is_err());
@@ -585,9 +1015,9 @@ mod tests {
             let mut admissions = 0;
             for _ in 0..3 {
                 control
-                    .poll_once(|request| {
+                    .poll_once(|request, publisher| {
                         admissions += 1;
-                        Ok(reply(request))
+                        publish_fixture(request, publisher)
                     })
                     .unwrap();
             }

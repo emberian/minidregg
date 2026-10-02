@@ -195,6 +195,10 @@ fn hex_digest(value: &str) -> io::Result<[u8; 32]> {
 
 impl CustodianPolicy {
     pub(crate) fn load(directory: &Path) -> io::Result<Self> {
+        Self::load_with_bytes(directory).map(|(policy, _)| policy)
+    }
+
+    pub(crate) fn load_with_bytes(directory: &Path) -> io::Result<(Self, Vec<u8>)> {
         let _ = Journal::open(directory)?;
         let file = OpenOptions::new()
             .read(true)
@@ -214,7 +218,7 @@ impl CustodianPolicy {
         if bytes.len() > 4096 {
             return Err(refuse("custodian config grew"));
         }
-        Self::from_bytes(&bytes)
+        Ok((Self::from_bytes(&bytes)?, bytes))
     }
 
     pub(crate) fn verify_tokens(&self, directory: &Path) -> io::Result<()> {
@@ -771,10 +775,6 @@ impl PrivateHttpEntrance {
                 }
             }
         }
-    }
-
-    pub(crate) fn occupies_directory(&self, directory: &Path) -> bool {
-        self.socket.parent() == Some(directory)
     }
 
     pub fn bind(directory: &Path) -> io::Result<Self> {

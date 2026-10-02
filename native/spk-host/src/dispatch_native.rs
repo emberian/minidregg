@@ -897,6 +897,14 @@ fn submit_once(
     })
 }
 
+pub(crate) fn dispatch_opcode(binding: Option<&ContinuityBinding>) -> u8 {
+    if binding.is_some() {
+        ROUTE_BOUND_DISPATCH_OPCODE
+    } else {
+        34
+    }
+}
+
 pub(crate) fn author_and_submit(
     operator: &PrivateOperator,
     custody: &FixedAuthoring,
@@ -911,22 +919,22 @@ pub(crate) fn author_and_submit(
     let deadline = Instant::now() + RESPONSE_DEADLINE;
     let ingress =
         author_signed_ingress(operator, custody, http, operation_id, attempt_dir, deadline)?;
-    let (opcode, submission) = match route_binding {
-        None => (34, ingress.clone()),
+    let opcode = dispatch_opcode(route_binding);
+    let submission = match route_binding {
+        None => ingress.clone(),
         Some(binding) => {
             let input = write_new(
                 attempt_dir,
                 "route-bound-dispatch.json",
                 &serde_json::to_vec(&route_bound_dispatch_json(binding, &ingress))?,
             )?;
-            let envelope = operator.tool_until(
+            operator.tool_until(
                 "author",
                 "application-route-bound-dispatch",
                 &input,
                 &attempt_dir.join("route-bound-dispatch.bin"),
                 deadline,
-            )?;
-            (ROUTE_BOUND_DISPATCH_OPCODE, envelope)
+            )?
         }
     };
     let submitted = submit_once(

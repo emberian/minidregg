@@ -410,7 +410,7 @@ pub(super) fn session_intents(host: &Host, app: &str) -> io::Result<Value> {
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
     let mut intents = Vec::new();
-    for route in routes(&app_dir, app)? {
+    for mut route in routes(&app_dir, app)? {
         let custody_path = PathBuf::from(
             route
                 .get("dispatchCustody")
@@ -437,8 +437,15 @@ pub(super) fn session_intents(host: &Host, app: &str) -> io::Result<Value> {
         {
             return Err(invalid("route entrance and fixed custody differ"));
         }
+        let custody_sha256 = file_sha256(&custody_path)?;
+        let custodian_sha256 = file_sha256(&directory.join("custodian.json"))?;
+        let route_fields = route
+            .as_object_mut()
+            .ok_or_else(|| invalid("retained route is not an object"))?;
+        route_fields.insert("dispatchCustodySha256".into(), json!(custody_sha256));
+        route_fields.insert("custodianSha256".into(), json!(custodian_sha256));
         intents.push(
-            json!({"route":route,"custody":custody,"custodySha256":file_sha256(&custody_path)?,
+            json!({"route":route,"custody":custody,"custodySha256":custody_sha256,
             "enrollmentRole":null}),
         );
     }

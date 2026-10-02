@@ -35,7 +35,8 @@ expected app/process generation, and the signed package's API availability.
 The Unix control socket requires the resident operator's UID on both ends.
 Commands and replies use a bounded 4-byte little-endian length frame; input
 reads have an absolute two-second deadline. The source admission has its own
-bounded budget. An abandoned or refused command does not end the resident.
+bounded budget. Admission refusals affect their own connection; a failed or
+interrupted durable publication ends the resident before further requests.
 
 The native source admission checks a newly signed challenge against current
 Mini authority and the exact physical Store tip. The admission includes the
@@ -47,6 +48,17 @@ socket paths. Exact duplicate admitted bindings are refused; a later session
 generation/fingerprint can create a new route, including with an unchanged
 ticket if current authority admits it.
 
+An already loaded initial/restarted route can be sealed once using this same
+command and source admission. Its directory, custody path, exact custody and
+custodian JSON hashes, display name, and handle must match the identity captured
+when START loaded it. `grain session-intents` exposes both retained file hashes
+for the enrollment orchestrator. Sealing sets the restriction at the existing
+route index; it does not replace the listener, custody, presentation or existing
+leases. It is allowed even when all 64 route slots are occupied. A new nonce
+cannot reseal an already pinned route; the exact original command remains an
+idempotent retry. Existing aliases may each be sealed to the same current
+binding, while new-directory duplicate-binding refusal remains unchanged.
+
 The success JSON reports `protocol`, `registrationNonceHex`, `routeIndex`,
 `app`, `appGeneration`, `session`, `sessionGeneration`, `subject`,
 `ticketResource`, `sessionFingerprintHex`, `admittedHeight`, and
@@ -57,13 +69,30 @@ not a new statement that authority remains current.
 
 The poll registry is append-only, with a maximum of 64 routes in one resident
 generation. Existing accepted sockets and stable route indices remain intact.
-Registration pins are in memory for that generation. Retained route directories
-are enumerated on the next START, with the same 64-route bound and a separately
-bounded resident configuration size. Distinct directories may retain the same
-origin, session, and ticket after regrant. Initial/restarted routes follow
-per-request current admission rather than retaining an old generation pin; old
-streams cannot survive generation STOP, and revoked tickets remain refused by
-source admission.
+Before changing a binding, listener registry or success cache, the resident
+publishes an owner-private record under the generation journal's `route-seals/`.
+It retains the exact request, reply and full source-admitted binding. Publication
+writes and fsyncs a new pending file, creates the final name without replacing
+an existing file, fsyncs the directory, removes the pending name and fsyncs
+again. In-memory changes follow that publication. Any failed publication or
+post-publication error ends the resident instead of continuing with an unbound
+route. Final records are immutable and partial pending records are retained.
+
+If the process remains alive but the caller loses its reply or journal write,
+retry the exact retained request/nonce: the cached receipt has the same index
+and no admission, publication, listener or lease is repeated. If the resident
+actually dies, any pending or final seal makes same-generation startup/control
+reopen fail closed before source admission or serving requests. Recovery is
+lifecycle STOP followed by a new generation and fresh authenticated enrollment;
+never delete the seal to make the generation appear unbound.
+
+Retained route directories are enumerated on a new generation START, with the
+same 64-route bound and a separately bounded resident configuration size.
+Distinct directories may retain the same origin, session and ticket after
+regrant. Until explicitly sealed, initial/restarted routes follow per-request
+current admission rather than carrying a previous generation pin. Old streams
+cannot survive generation STOP, and revoked tickets remain refused by source
+admission.
 
 Every dispatch through a hot-added route must match its admitted namespace,
 app generation, session generation, principal, ticket, and fingerprint. The
@@ -99,5 +128,7 @@ socket remains open, exact retry/change refusal over the private socket,
 private-file/hash/generation checks, a bounded slow input, current-admission
 refusal without registration, dispatch epoch/fingerprint pins, old-grant
 versus new-grant stream isolation, exact route-bound envelope selectors, and
-no-record refusal/uncertain-marker isolation over the private response framing. Actual Mini enrollment/revocation, two-user
+no-record refusal/uncertain-marker isolation over the private response framing,
+one-time initial-route sealing, capacity/identity checks, and interrupted durable
+publication with fail-closed same-generation reopen. Actual Mini enrollment/revocation, two-user
 editing, and restart journeys must also be qualified on the joined candidate.

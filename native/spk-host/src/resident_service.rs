@@ -36,7 +36,9 @@ use crate::lifecycle_v3_report_native::{
 use crate::materialize::verify_installed_spk;
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
-use crate::resident_route_control::{self, RouteControl, RouteRegistrationReply};
+use crate::resident_route_control::{
+    self, RegistrationAction, RouteControl, RouteIdentity, RouteRegistrationReply,
+};
 use crate::sandbox::{open_protected_directory, SandboxSpec};
 use crate::volume_custody::{read_attested_volume, VolumeSite};
 use minidregg_spk_rpc::decode_bridge_config;
@@ -893,18 +895,24 @@ impl ResidentBound {
 /// A retained directory is a transport route, not a unique Mini selector.
 /// Regrant can retain the same origin/session/ticket in a new directory. On
 /// START each route still obtains current Mini admission for every request.
+struct LoadedEntrances {
+    custodies: Vec<FixedAuthoring>,
+    policies: Vec<CustodianPolicy>,
+    identities: Vec<RouteIdentity>,
+}
 fn load_fixed_entrances(
     entries: &[FixedEntranceConfig],
     app_uid: u32,
-) -> io::Result<(Vec<FixedAuthoring>, Vec<CustodianPolicy>)> {
+) -> io::Result<LoadedEntrances> {
     let mut custodies = Vec::with_capacity(entries.len());
     let mut policies = Vec::with_capacity(entries.len());
+    let mut identities = Vec::with_capacity(entries.len());
     for entry in entries {
         open_protected_directory(&entry.directory, app_uid, false)?;
-        let custody: FixedAuthoring =
-            serde_json::from_slice(&private_file(&entry.dispatch_custody, MAX_CONFIG)?)?;
+        let custody_bytes = private_file(&entry.dispatch_custody, MAX_CONFIG)?;
+        let custody: FixedAuthoring = serde_json::from_slice(&custody_bytes)?;
         custody.validate()?;
-        let policy = CustodianPolicy::load(&entry.directory)?;
+        let (policy, policy_bytes) = CustodianPolicy::load_with_bytes(&entry.directory)?;
         if policy.fixed_app != custody.app
             || policy.fixed_subject != custody.subject
             || policy.fixed_session != custody.session
@@ -916,10 +924,22 @@ fn load_fixed_entrances(
         {
             return Err(invalid("HTTP transport differs from fixed Mini custody"));
         }
+        identities.push(RouteIdentity::capture(
+            &entry.directory,
+            &entry.dispatch_custody,
+            &entry.display_name,
+            &entry.preferred_handle,
+            &custody_bytes,
+            &policy_bytes,
+        ));
         policies.push(policy);
         custodies.push(custody);
     }
-    Ok((custodies, policies))
+    Ok(LoadedEntrances {
+        custodies,
+        policies,
+        identities,
+    })
 }
 
 pub fn run(config_path: &Path) -> io::Result<()> {
@@ -935,6 +955,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "resident config differs from the broker-rendered unit's app identity",
         ));
     }
+    resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
     let journal = Journal::open(&config.journal_dir)?;
     let operator = PrivateOperator {
         host: config.mini_host.clone(),
@@ -1003,7 +1024,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // Read every separately fixed transport/custody pair before consuming the
     // one-shot claim. No HTTP socket is bound until START completion.
     let mut route_bindings = vec![None; config.entrances.len()];
-    let (mut custodies, policies) = load_fixed_entrances(&config.entrances, config.app_uid)?;
+    let LoadedEntrances {
+        mut custodies,
+        policies,
+        mut identities,
+    } = load_fixed_entrances(&config.entrances, config.app_uid)?;
     let mut agent_preflights = Vec::with_capacity(config.agents.len());
     for agent in &config.agents {
         open_protected_directory(
@@ -1311,7 +1336,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let entrances = config
         .entrances
         .iter()
-        .map(|entry| PrivateHttpEntrance::bind(&entry.directory))
+        .zip(&policies)
+        .map(|(entry, policy)| PrivateHttpEntrance::bind_fixed(&entry.directory, policy.clone()))
         .collect::<io::Result<Vec<_>>>()?;
     let api_path = bridge.api_path;
     let mut agent_routes = config
@@ -1382,10 +1408,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             return Err(invalid("app process exited; this generation ends"));
         }
         if index == route_control_index {
-            route_control.poll_once(|request| {
-                if entrances.len() >= resident_route_control::MAX_ROUTES {
-                    return Err(invalid("resident route limit reached"));
-                }
+            route_control.poll_once(|request, publisher| {
+                let action = resident_route_control::registration_action(
+                    request,
+                    &identities,
+                    &route_bindings,
+                )?;
                 let (custody, policy) = resident_route_control::prepare(
                     request,
                     &claim.physical_begin.app.to_string(),
@@ -1395,14 +1423,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                     return Err(invalid("signed package has no configured API interface"));
                 }
                 open_protected_directory(&request.directory, config.app_uid, false)?;
-                if entrances
-                    .iter()
-                    .any(|prior| prior.occupies_directory(&request.directory))
-                    || agent_routes.iter().any(|(_, prior, _)| {
-                        let (session, ticket, _, _) = prior.coordinates();
-                        session == custody.session || ticket == custody.ticket_resource
-                    })
-                {
+                if agent_routes.iter().any(|(_, prior, _)| {
+                    let (session, ticket, _, _) = prior.coordinates();
+                    session == custody.session || ticket == custody.ticket_resource
+                }) {
                     return Err(invalid("resident route custody or directory duplicated"));
                 }
                 let admitted = operator.admit_resident_route(
@@ -1413,10 +1437,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                     &config.journal_dir,
                 )?;
                 let binding = admitted.binding();
-                if route_bindings
-                    .iter()
-                    .flatten()
-                    .any(|prior| prior == binding)
+                if matches!(action, RegistrationAction::Append(_))
+                    && route_bindings
+                        .iter()
+                        .flatten()
+                        .any(|prior| prior == binding)
                 {
                     return Err(invalid("resident route source binding duplicated"));
                 }
@@ -1431,11 +1456,16 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 {
                     return Err(invalid("source route admission differs from fixed custody"));
                 }
-                let entrance = PrivateHttpEntrance::bind_fixed(&request.directory, policy)?;
+                let entrance = match action {
+                    RegistrationAction::Append(_) => {
+                        Some(PrivateHttpEntrance::bind_fixed(&request.directory, policy)?)
+                    }
+                    RegistrationAction::Seal(_) => None,
+                };
                 let reply = RouteRegistrationReply {
                     protocol: "mini-spk-route-register-v1".into(),
                     registration_nonce_hex: request.registration_nonce_hex.clone(),
-                    route_index: entrances.len(),
+                    route_index: action.index(),
                     app: binding.app.clone(),
                     app_generation: binding.app_generation.clone(),
                     session: binding.session.clone(),
@@ -1446,17 +1476,28 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                     admitted_height: admitted.tip().height.clone(),
                     admitted_world_root: admitted.tip().world_root.clone(),
                 };
-                // All fallible work precedes these append-only mutations. Existing
-                // custody and lease objects are never replaced or renewed here.
-                config.entrances.push(FixedEntranceConfig {
-                    directory: request.directory.clone(),
-                    dispatch_custody: request.dispatch_custody.clone(),
-                    display_name: request.display_name.clone(),
-                    preferred_handle: request.preferred_handle.clone(),
-                });
-                custodies.push(custody);
-                route_bindings.push(Some(binding.clone()));
-                entrances.push(entrance);
+                // Durable publication precedes memory. Any error during this
+                // phase poisons control and ends the resident; a crash leaves a
+                // retained seal that prevents startup from serving as unbound.
+                publisher.publish(&reply, binding, admitted.session_kind())?;
+                match action {
+                    RegistrationAction::Seal(index) => {
+                        route_bindings[index] = Some(binding.clone())
+                    }
+                    RegistrationAction::Append(_) => {
+                        config.entrances.push(FixedEntranceConfig {
+                            directory: request.directory.clone(),
+                            dispatch_custody: request.dispatch_custody.clone(),
+                            display_name: request.display_name.clone(),
+                            preferred_handle: request.preferred_handle.clone(),
+                        });
+                        identities.push(RouteIdentity::from_request(request));
+                        custodies.push(custody);
+                        route_bindings.push(Some(binding.clone()));
+                        entrances
+                            .push(entrance.expect("append entrance prepared before publication"));
+                    }
+                }
                 Ok(reply)
             })?;
             return Ok(None);
@@ -1858,7 +1899,11 @@ mod tests {
             })
             .collect();
         let app_uid = unsafe { libc::geteuid() }.wrapping_add(1000);
-        let (custodies, policies) = load_fixed_entrances(&entries, app_uid).unwrap();
+        let LoadedEntrances {
+            custodies,
+            policies,
+            ..
+        } = load_fixed_entrances(&entries, app_uid).unwrap();
         assert_eq!(custodies.len(), 2);
         assert_eq!(policies[0].expected_host, policies[1].expected_host);
         assert_eq!(custodies[0].session, custodies[1].session);
