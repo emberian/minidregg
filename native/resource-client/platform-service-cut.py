@@ -57,12 +57,13 @@ def protected(value):
     return path
 
 
-def unit(argv, user, description):
+def unit(argv, user, description, cwd):
     # systemd parses quoted words independently of the shell. Percent is an
     # expansion character even inside quotes; literal arguments escape it.
     words = [json.dumps(str(word).replace("%", "%%")) for word in argv]
     return ("[Unit]\nDescription=" + description + "\n[Service]\nType=exec\nUser=" + user
-            + "\nUMask=0077\nExecStart=" + " ".join(words)
+            + "\nUMask=0077\nWorkingDirectory=" + json.dumps(cwd.replace("%", "%%"))
+            + "\nExecStart=" + " ".join(words)
             + "\nKillMode=control-group\nTimeoutStopSec=30\nRestart=no\n")
 
 
@@ -89,6 +90,12 @@ def prepare(request, output):
     require(uid != 0, "member deployment must use a non-root service owner")
     user = pwd.getpwuid(uid).pw_name
     require(os.getuid() in (uid, 0), "cut preparer differs from runtime owner")
+    cwds = {}
+    for name in ("operator", "public"):
+        retained = state["services"][name]
+        current = provision.proc_identity(retained["pid"])
+        require(all(current[key] == retained[key] for key in current), "retained process identity changed")
+        cwds[name] = str(canonical(Path("/proc", str(retained["pid"]), "cwd").resolve(strict=True)))
     roster = canonical(request["authorizedKeys"])
     require(roster.is_relative_to(root), "roster outside deployment")
     commands, lines, key_inventory = [], [], set()
@@ -130,8 +137,8 @@ def prepare(request, output):
              "--socket", state["privateSocket"]]
     ingress = [cli["path"], "serve-public-proxy", "--socket", state["publicSocket"],
                "--upstream", state["privateSocket"], "--config", config["path"]]
-    write(output / store_unit, unit(store, user, "Mini supplied Store operator"))
-    write(output / public_unit, unit(ingress, user, "Mini supplied Store public ingress"))
+    write(output / store_unit, unit(store, user, "Mini supplied Store operator", cwds["operator"]))
+    write(output / public_unit, unit(ingress, user, "Mini supplied Store public ingress", cwds["public"]))
     descriptor = {"protocol": "mini-service-deployment-binding-v1", "dataRoot": str(root),
         "nodeRoot": str(root / "world"), "operatorSocket": state["privateSocket"],
         "publicSocket": state["publicSocket"], "storeUnit": store_unit, "ingressUnit": public_unit,
@@ -147,7 +154,7 @@ def prepare(request, output):
         (output / name).write_bytes((HERE / name).read_bytes())
     write(output / "proposal.json", {"protocol": "mini-platform-service-cut-proposal-v1",
         "runtime": pin(runtime_path), "input": request, "sourceIdentity": state["identity"],
-        "ownedServices": state["services"], "descriptor": descriptor,
+        "ownedServices": state["services"], "ownedCwds": cwds, "descriptor": descriptor,
         "artifacts": {file.name: digest(file) for file in output.iterdir() if file.is_file()},
         "published": False})
 
@@ -173,6 +180,8 @@ def stop(output):
     for name in ("public", "operator"):
         if name in state["services"]:
             require(state["services"][name] == proposal["ownedServices"][name], "owned process binding changed")
+            cwd = Path("/proc", str(state["services"][name]["pid"]), "cwd").resolve(strict=True)
+            require(str(cwd) == proposal["ownedCwds"][name], "owned process working directory changed")
     world = provision.World(Path(state["root"]), state)
     world.stop(["public"])
     journal["publicStopped"] = True; write(journal_path, journal)

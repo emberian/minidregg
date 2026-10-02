@@ -18,17 +18,20 @@ class DrainBoundary(unittest.TestCase):
             root = Path(directory).resolve(); directory = str(root)
             for name, value in (("config", {}), ("manifest", {"sha256": {"host": "a"*64}}), ("cli", {})):
                 cut.write(root/name, value)
-            owned = {"public": {"pid": 90}, "operator": {"pid": 91}}
+            import os
+            pid = os.getpid()
+            owned = {"public": {"pid": pid}, "operator": {"pid": pid}}
             state = {"root": directory, "identity": {"id": "world"}, "services": dict(owned),
                      "privateSocket": str(root/"operator.sock")}
             cut.write(root/"runtime", state)
             proposal = {"runtime": cut.pin(root/"runtime"), "sourceIdentity": state["identity"],
-                "ownedServices": owned, "artifacts": {"platform-service-cut.py": cut.digest(cut.__file__)}, "descriptor": {"dataRoot": directory,
+                "ownedServices": owned, "ownedCwds": {name: str(Path.cwd().resolve()) for name in owned},
+                "artifacts": {"platform-service-cut.py": cut.digest(cut.__file__)}, "descriptor": {"dataRoot": directory,
                     "deployment": {"memberCommands": [], "rolePaths": {"host": "/native-host"},
                         **{name: cut.pin(root/name) for name in ("config", "manifest", "cli")}}}}
             cut.write(root/"proposal.json", proposal)
             (root/"platform-service-cut.py").write_bytes(Path(cut.__file__).read_bytes())
-            status = {"processId": 91, "instanceId": "instance", "hostSha256": "a"*64,
+            status = {"processId": pid, "instanceId": "instance", "hostSha256": "a"*64,
                       "configSha256": proposal["descriptor"]["deployment"]["config"]["sha256"]}
             drained = {**status, "format": "mini-operator-drain-v1", "phase": "drained",
                 "admissionClosed": True, "drained": True, "acceptedConnections": 0,
