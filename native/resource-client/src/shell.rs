@@ -52,6 +52,7 @@ pub(crate) struct Verb {
 }
 
 pub(crate) const VERBS: &[Verb] = &[
+    Verb { name: "home", usage: "home [REF] [--json]", operation: "mini member --dir WORKSPACE [--name REF]: your resources and exact recovery actions; REF checks current Mini authority" },
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
     Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
@@ -1154,6 +1155,16 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         writes: vec![],
     };
     Ok(match verb.as_str() {
+        "home" => {
+            let mut args = w[1..].to_vec();
+            let json_output = args.last().is_some_and(|s| s == "--json");
+            if json_output { args.pop(); }
+            if args.len() > 1 { return Err(usage_of("home").to_owned()); }
+            let mut flags = vec![flag("dir", session.workspace.clone())];
+            if let Some(name) = args.first() { ref_name(name,"reference")?; flags.push(flag("name",name)); }
+            if json_output { flags.push(flag("json","true")); }
+            Plan::Client {command:"member".into(),flags,writes:vec![]}
+        }
         "whoami" => {
             arity(&w, 0, 0, u)?;
             Plan::Whoami
@@ -2683,7 +2694,7 @@ fn help_text(topic: Option<&str>) -> String {
 /// What an interactive session prints (to stderr) before its first prompt.
 fn start_text(session: &Session) -> String {
     format!(
-        "{HOSTED_CUSTODY_BANNER}\nmini shell: workspace {}. help lists verbs; every decision is the Host's.\n",
+        "{HOSTED_CUSTODY_BANNER}\nmini shell: workspace {}. Type home to find your work; help lists commands.\n",
         session.workspace.display()
     )
 }
@@ -2802,7 +2813,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         (_, 0) => command_catalog().map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
         ("room" | "key" | "chat", 1) => subcommands(verb),
         ("ask" | "dismiss" | "summon", 1) => refs(),
-        ("read" | "describe", 1) => refs(),
+        ("home" | "read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
         ("history", 1) => vec!["all".into()],
@@ -4039,6 +4050,16 @@ mod tests {
         assert_eq!(plan(&s, "help guide").unwrap(), Plan::Guide);
         assert_eq!(plan(&s, "help doc").unwrap(), Plan::Help(Some("doc".into())));
         assert!(plan(&s, "inbox all").is_err());
+    }
+
+    #[test]
+    fn home_checks_only_the_selected_member_reference() {
+        let s = session();
+        assert_eq!(client(plan(&s,"home lab --json").unwrap()),
+            ("member".into(),pairs(&[("dir","/w"),("name","lab"),("json","true")]),vec![]));
+        assert_eq!(client(plan(&s,"home").unwrap()),
+            ("member".into(),pairs(&[("dir","/w")]),vec![]));
+        assert!(plan(&s,"home lab other").is_err());
     }
 
     #[test]

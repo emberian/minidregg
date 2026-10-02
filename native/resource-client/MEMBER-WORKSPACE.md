@@ -1,0 +1,47 @@
+# Find and return to your Mini work
+
+`home` lists your workspace's resource references and the commands that use them.
+Enter a room with `chat enter NAME`, discover its contents with `room ls NAME
+--import`, inspect its allowance with `room status NAME`, or inspect a selected
+resource with `home NAME`. Provider routes, grants, credits and incoming references
+use the existing member commands shown by the workspace view.
+
+`home NAME` checks your current Mini read authority and reports the observed
+height. A room's resident subject, allowance account and assignment come from the
+same signed room read. Assignment alone does not establish a running controller;
+activation and request progress remain unavailable until their source-backed
+member projection is connected. A reference that has lost its read grant refuses
+through the ordinary Host path.
+
+`home --json` and `home NAME --json` expose `mini-member-workspace-v1` for clients.
+Each data section declares its origin and currentness. Resource references remain
+member-local discovery hints; `observation` binds the selected resource to its
+signed domain, semantics, world root, height and clock. The pinned world identity
+comes from the existing workspace configuration. The view does not open another
+member's controller directory or publish custody keys.
+
+Incomplete retained signed calls offer `lookup ID` to recover the exact operation.
+A confirmed receipt or typed native refusal is terminal. The view never suggests
+submitting a new operation to resolve uncertain work.
+
+The shell's command catalog uses the owning modules' existing grammars. Help and
+completion share the same catalog; room, key and chat subcommand completion comes
+from those actual usage strings.
+
+## Receiving evidence, October 2
+
+An isolated member-client binary ran against the same native Host795 and Store as
+the five-member platform fixture, without replacing its pinned services/wrappers.
+All five members loaded their own workspace projection (0.14–0.59 seconds) and
+read the shared room through their own current grants (3.54–3.96 seconds, height
+54 and the same world root). An isolated copied member workspace containing the
+founder's reference refused with native `no-grant`, exit 3, and produced no
+projection. These are actual native reads; forced-SSH receiving of the new member
+client and registered app/resident handoff remain separate qualification work.
+
+The next connected app view must consume an existing member app reference,
+source-current session/ticket/app authority and an actual registered browser
+handoff. SPK receiving operations 34/164 create physical dispatch permits and are
+unsuitable for readiness reads. Generic native dry-run 130 is the intended
+no-effect authority check. No browser URL or reconnect capability is invented by
+this workspace view.

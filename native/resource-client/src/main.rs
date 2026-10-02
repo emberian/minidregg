@@ -122,6 +122,8 @@ mod job;
 #[cfg(unix)]
 mod shell;
 #[cfg(unix)]
+mod member;
+#[cfg(unix)]
 mod transport;
 #[cfg(unix)]
 mod worker;
@@ -3015,6 +3017,7 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
+        "member" => member::run(args),
         #[cfg(unix)]
         "web" => web::run(args),
         #[cfg(unix)]
