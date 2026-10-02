@@ -16,6 +16,7 @@ spec=importlib.util.spec_from_file_location('continuity_fixture',HERE/'ws-contin
 f=importlib.util.module_from_spec(spec);spec.loader.exec_module(f)
 load,save,require,sha,absolute=f.load,f.save,f.require,f.sha,f.absolute
 
+def route_name(label): return 'member-'+hashlib.sha256(label.encode()).hexdigest()[:24]
 def decimal(value): return isinstance(value,str) and re.fullmatch(r'0|[1-9][0-9]*',value) is not None
 
 def validate(c):
@@ -46,7 +47,7 @@ def validate(c):
     session_fields=['session','descriptor','cap','sessionControlCapability','descriptorOwnerCapability','descriptorControlCapability','ticket','appObserve','pkgObserve','ticketOwner','ticketControl','ticketObserve']
     subjects=[]
     for label,d in c['delegates'].items():
-        require(re.fullmatch('[a-z][a-z0-9-]{0,47}',label) is not None,'route label invalid')
+        require(re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,63}',label) is not None,'route label invalid')
         require(d['subject'] in c['keys'] and decimal(d['subject']),'participant signer missing')
         require(all(decimal(d[k]) for k in session_fields),'session coordinates invalid')
         resources.extend(d[k] for k in ['session','descriptor','ticket'])
@@ -112,7 +113,7 @@ def attach(path):
     x.run([artifacts['spkHost']['path'],'grain','install',x.profile,x.f['applicationSource'],x.f['applicationReceipt'],c['spk'],'--class',c.get('sizeClass','S')])
     for label,d in x.f['delegates'].items():
         x.birth_session(d);x.delegate(x.app,x.appcap,d['appObserve'],d['subject']);x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject'])
-        x.issue(d);x.route('member-'+label,d);x.write_state()
+        x.issue(d);x.route(route_name(label),d);x.write_state()
     x.run([artifacts['spkHost']['path'],'grain','start',x.profile,x.app])
     for d in x.f['delegates'].values(): x.enroll(d);x.write_state()
     q=x.query(x.owner,x.app,x.appcap);require(f.entries(q['view'])['1']=='4','app is not source serving')

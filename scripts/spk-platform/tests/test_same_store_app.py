@@ -34,6 +34,16 @@ class AttachTests(unittest.TestCase):
         with patch.object(f,'protected_parent'):return app.validate(self.c)
     def test_arbitrary_members_descriptors_and_signing_epochs(self):
         _,artifacts=self.validate();self.assertEqual(len(artifacts),5);self.assertEqual(self.c['delegates']['member-two']['subject'],'987987')
+    def test_joined_numeric_and_uppercase_member_keys_use_safe_bounded_routes(self):
+        first,second=self.c['delegates'].values()
+        self.c['delegates']={'1000':first,'MEMBER_1001':second}
+        self.validate()
+        names=[app.route_name(key) for key in self.c['delegates']]
+        self.assertEqual(len(set(names)),2)
+        self.assertTrue(all(len(name)<=32 for name in names))
+        self.assertEqual(app.route_name('1000'),names[0])
+        self.c['delegates']={'A'*64:first,'1001':second};self.validate()
+        self.assertLessEqual(len(app.route_name('A'*64)),32)
     def test_overlapping_sessions_caps_or_unknown_signer_refuse(self):
         original=copy.deepcopy(self.c)
         self.c['delegates']['member-two']['descriptor']=self.c['application']['app']
