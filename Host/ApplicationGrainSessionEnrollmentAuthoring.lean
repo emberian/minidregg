@@ -4,6 +4,7 @@ selects the participant and ticket ceiling. The session and descriptor are one
 ordinary signed joint mutation. Event28 admission separately checks a signed
 app observation and adds the app's physical read guard to that same turn.
 -/
+import Compiler.CarriedApplicationProvenance
 import Kernel.ApplicationGrainSessionEnrollmentSource
 import Kernel.ApplicationGrainSessionEnrollmentConstruction
 import Kernel.ApplicationDispatchAdmission
@@ -110,17 +111,10 @@ private def observationSlot (config : Config) (opened : Opened config)
 
 /-- This returns a proposal only. Event28 receiving must independently admit
 the participant's joint mutation and all signed reads at the same image. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (request : Request) :
-    Except String Plan := do
-  let opened := verified.opened
-  let some prior := verified.issues.find? (fun issue =>
-      issue.index == request.issueIndex &&
-      issue.evidence.spec.ticket.resource == request.ticketResource)
-    | throw "exact event22 ticket issue absent"
-  if prior.evidence.record.event.codecVersion != 22 then
-    throw "enrollment requires event22 ticket issue"
-  let ticket := prior.evidence.spec.ticket
+def prepareForIssue (config : Config) (opened : Opened config)
+    (request : Request) (spec : ApplicationShareIssueSource.Spec)
+    (issueReceipt : NativeHostCodec.Receipt) : Except String Plan := do
+  let ticket := spec.ticket
   let app := ticket.scope.app
   let session := ticket.participant.session
   let descriptor := ticket.participant.descriptorResource
@@ -220,7 +214,7 @@ def prepareVerified (config : Config) {target : Durable}
   if command.targets != [sessionTarget, descriptorTarget] then
     throw "enrollment command target mismatch"
   let constructed ← ApplicationGrainSessionEnrollmentConstruction.prepare
-    config opened request prior.evidence.spec
+    config opened request spec
   if constructed.command != command || constructed.enrollment != enrollment ||
       constructed.previous != previous ||
       constructed.appRoot != appCell.payload.root ||
@@ -244,9 +238,40 @@ def prepareVerified (config : Config) {target : Durable}
     request.packageManifest request.manifestObserveCapability manifestCell.payload.root
   let ticketSlot ← observationSlot config opened command prepared 2
     ticket.resource ticket.participant.ticketObserveCapability ticketCell.payload.root
-  pure ⟨request, enrollment, prior.receipt, appCell.payload.root,
+  pure ⟨request, enrollment, issueReceipt, appCell.payload.root,
     manifestCell.payload.root, ticketCell.payload.root, previous,
     invocation, [appSlot, manifestSlot, ticketSlot]⟩
+
+/-- The ordinary path still selects a same-profile, fully admitted event22. -/
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request) :
+    Except String Plan := do
+  let some prior := verified.issues.find? (fun issue =>
+      issue.index == request.issueIndex &&
+      issue.evidence.spec.ticket.resource == request.ticketResource)
+    | throw "exact event22 ticket issue absent"
+  if prior.evidence.record.event.codecVersion != 22 then
+    throw "enrollment requires event22 ticket issue"
+  prepareForIssue config verified.opened request prior.evidence.spec prior.receipt
+
+/-- The carried path changes only historical selection. Current construction,
+headers, role/ticket/interface checks and original receipt remain exact. -/
+def prepareCarried (config : Config) (opened : Opened config)
+    (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (request : Request) :
+    Except String Plan := do
+  let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+  if issue.spec.ticket.resource != request.ticketResource then
+    throw "carried enrollment ticket resource differs"
+  prepareForIssue config opened request issue.spec issue.receipt
+
+def prepareRequestCarried (config : Config) (opened : Opened config)
+    (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (bytes : List UInt8) :
+    Except String Plan := do
+  let some request := requestCodec.decode bytes
+    | throw "noncanonical session enrollment request"
+  if requestCodec.encode request != bytes then
+    throw "noncanonical session enrollment request"
+  prepareCarried config opened custody request
 
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
@@ -297,6 +322,18 @@ def assembleCurrent (config : Config) {target : Durable}
   let fresh ← prepareVerified config verified plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "session enrollment plan no longer current"
+  assemble fresh signatures
+
+
+/-- A carried detached plan is reselected before assembly using the same
+current roots/headers and retained original receipt, never a fresh baseline. -/
+def assembleCurrentCarried (config : Config) (opened : Opened config)
+    (custody : CarriedSegmentIO.PreservedPrefix config opened.durable)
+    (plan : Plan) (signatures : List (List UInt8)) :
+    Except String (List UInt8) := do
+  let fresh ← prepareCarried config opened custody plan.request
+  if planCodec.encode fresh != planCodec.encode plan then
+    throw "carried session enrollment plan no longer current"
   assemble fresh signatures
 
 end Minidregg.Host.ApplicationGrainSessionEnrollmentAuthoring
