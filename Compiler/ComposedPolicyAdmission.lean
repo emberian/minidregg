@@ -29,7 +29,7 @@ def closureDigest {input : GraphInput} (resolved : ResolvedDAG input) : Digest :
     input.roots.length] ++ input.roots.flatMap keyWords ++
     [nodes.length] ++ nodes.flatMap (fun node => keyWords node.key)
   (Minidregg.Compiler.Sp800185Cshake256.hash
-    "DREGG.POLICY.EFFECTIVE.CLOSURE/v1".toUTF8.toList
+    Minidregg.Theory.LawComposition.closureCustomization
     ((StreamCodec.list StreamCodec.nat).encode words)).digest
 
 structure Config (F : Type) [Field F] [DecidableEq F] where
