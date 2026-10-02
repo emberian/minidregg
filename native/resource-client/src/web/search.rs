@@ -41,7 +41,31 @@ fn fields(target: &str) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 fn form(base: &str, query: &str, scope: &str) -> String {
-    format!("<form method=get action=\"{base}/search\"><label>Text <input name=query value=\"{}\" maxlength=256 required></label> <label>Documents <input name=scope value=\"{}\" required></label> <button>Search</button></form><p class=note>Use comma-separated document names, or @held for your held references. Four references per page. Searches current visible direct text; annotations, objects, history and transcluded text are outside this scope.</p>",escape(query),escape(scope))
+    format!("<form method=get action=\"{base}/search\"><label>Text <input name=query value=\"{}\" maxlength=256 required></label> <label>Documents <input name=scope value=\"{}\" required></label> <button>Search</button></form><p class=note>Enter document names separated by commas, or @held for your collection. Up to four per page.</p><p class=note>Searches visible document text. Annotations, objects, history and embedded quotations are not included.</p>",escape(query),escape(scope))
+}
+fn text(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string())
+}
+fn details(value: &Value) -> String {
+    let mut rows = String::new();
+    for (label, field) in [
+        ("Document", "target"),
+        ("Atom", "atom"),
+        ("Revision", "revision"),
+        ("Read height", "height"),
+        ("World root", "worldRoot"),
+    ] {
+        rows.push_str(&format!(
+            "<dt>{label}</dt><dd class=id style=\"overflow-wrap:anywhere\">{}</dd>",
+            escape(&text(&value[field]))
+        ));
+    }
+    format!(
+        "<details class=search-details><summary>Read details</summary><dl>{rows}</dl></details>"
+    )
 }
 pub(super) fn page(site: &Site, target: &str) -> Page {
     let base = site.base();
@@ -75,8 +99,32 @@ pub(super) fn page(site: &Site, target: &str) -> Page {
         Ok(v) => v,
         Err(e) => return simple(400, "Search", &e),
     };
-    body.push_str(&format!("<p>Checked references {}–{} of {} in {} ms. Each document has its own signed current read; this is not a simultaneous world snapshot.</p><ul class=search-hits>",offset,result["through"],result["heldReferences"],result["elapsedMs"]));
-    for hit in result["hits"].as_array().into_iter().flatten() {
+    let documents = result["documents"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let readable = documents
+        .iter()
+        .filter(|doc| doc["status"] == "read")
+        .count();
+    let hits = result["hits"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    body.push_str(&format!(
+        "<p>{} matching {} · {} of {} selected documents searched.</p>",
+        hits.len(),
+        if hits.len() == 1 { "line" } else { "lines" },
+        readable,
+        documents.len()
+    ));
+    if readable < documents.len() {
+        body.push_str(
+            "<p>Some documents could not be read. Results cover the readable documents only.</p>",
+        );
+    }
+    if result["hitsTruncated"] == true {
+        body.push_str("<p>Showing the first 100 matching lines from each document.</p>");
+    }
+    body.push_str("<ul class=search-hits>");
+    for hit in hits {
         let name = hit["name"].as_str().unwrap_or("");
         let link = format!(
             "{base}/search-hit/{}/{}/{}/{}",
@@ -85,28 +133,42 @@ pub(super) fn page(site: &Site, target: &str) -> Page {
             hit["atom"].as_str().unwrap_or(""),
             hit["revision"].as_str().unwrap_or("")
         );
-        body.push_str(&format!("<li><a href=\"{}\">{} · line {} · atom {} revision {}</a><blockquote>{}</blockquote></li>",escape(&link),escape(name),hit["line"],hit["atom"],hit["revision"],escape(hit["snippet"].as_str().unwrap_or(""))));
+        body.push_str(&format!(
+            "<li><a href=\"{}\">{} · line {}</a><blockquote>{}</blockquote>{}</li>",
+            escape(&link),
+            escape(name),
+            escape(&text(&hit["line"])),
+            escape(hit["snippet"].as_str().unwrap_or("")),
+            details(hit)
+        ));
     }
-    body.push_str("</ul><details open><summary>Coverage and unreadable references</summary><ul>");
-    for doc in result["documents"].as_array().into_iter().flatten() {
+    body.push_str("</ul><details><summary>Search coverage</summary><ul>");
+    for doc in documents {
         if doc["status"] == "read" {
-            body.push_str(&format!("<li>{}: {} matching lines ({} shown); {} non-text or transcluded rows omitted; height {}.</li>",escape(doc["name"].as_str().unwrap_or("")),doc["matchingLines"],doc["returned"],doc["omittedNonTextOrTranscluded"],doc["height"]));
+            body.push_str(&format!(
+                "<li>{}: {} matching lines; {} shown. Read height {}.</li>",
+                escape(doc["name"].as_str().unwrap_or("")),
+                doc["matchingLines"],
+                doc["returned"],
+                escape(&text(&doc["height"]))
+            ));
         } else {
             body.push_str(&format!(
-                "<li>{}: unavailable — {}. This is not a no-match result.</li>",
+                "<li>{}: unavailable.<details><summary>Why?</summary><p>{}</p></details></li>",
                 escape(doc["name"].as_str().unwrap_or("")),
                 escape(doc["error"].as_str().unwrap_or("read failed"))
             ));
         }
     }
-    body.push_str("</ul></details>");
+    body.push_str(&format!("</ul><p>References {}–{} of {}. Search took {} ms. Documents were read independently with your current access.</p></details>",
+        if documents.is_empty() { offset } else { offset+1 }, result["through"], result["heldReferences"], result["elapsedMs"]));
     if let Some(next) = result["nextOffset"].as_u64() {
         body.push_str(&format!("<form method=get action=\"{base}/search\"><input type=hidden name=query value=\"{}\"><input type=hidden name=scope value=\"{}\"><input type=hidden name=offset value=\"{next}\"><input type=hidden name=cursor value=\"{}\"><button>Next four references</button></form>",escape(query),escape(scope),escape(result["collectionFingerprint"].as_str().unwrap_or(""))));
     }
     Page {
         status: 200,
         title: "Search documents".into(),
-        stamp: Stamp::None,
+        stamp: Stamp::CurrentReads(readable),
         body,
     }
 }
@@ -122,8 +184,32 @@ pub(super) fn hit(site: &Site, name: &str, target: &str, atom: &str, revision: &
         Ok(v) => v,
         Err(e) => return simple(403, "Search hit unavailable", &e),
     };
-    Page{status:200,title:format!("{} · atom {}",name,atom),stamp:Stamp::None,
-        body:format!("<p>Fresh authorized read at height {}. Atom revision {}{}. Line {}.</p><pre>{}</pre><p><a href=\"{}/search\">Search again</a></p>",value["height"],value["revision"],if value["changed"]==true {" — changed since search"}else{""},value["line"],escape(value["text"].as_str().unwrap_or("")),site.base())}
+    let line = text(&value["line"]);
+    let mut body = format!(
+        "<article class=search-hit><p style=\"white-space:pre-wrap\">{}</p></article>",
+        escape(value["text"].as_str().unwrap_or(""))
+    );
+    if value["changed"] == true {
+        body.push_str("<p class=note>This line changed since your search. You are reading its current text.</p>");
+    }
+    if workspace::validate_name(&name).is_ok() {
+        body.push_str(&format!(
+            "<p><a href=\"{}/doc/{}\">Open surrounding document</a></p>",
+            site.base(),
+            escape(&name)
+        ));
+    }
+    body.push_str(&details(&value));
+    body.push_str(&format!(
+        "<p><a href=\"{}/search\">Search again</a></p>",
+        site.base()
+    ));
+    Page {
+        status: 200,
+        title: format!("{} · line {}", name, line),
+        stamp: Stamp::CurrentReads(1),
+        body,
+    }
 }
 #[cfg(test)]
 mod tests {
