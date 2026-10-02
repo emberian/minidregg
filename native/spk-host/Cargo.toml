@@ -11,6 +11,7 @@ name = "spk-host"
 path = "src/main.rs"
 
 [dependencies]
+minidregg-compatible-upgrade-custody = { path = "../compatible-upgrade-custody" }
 libc = "=0.2.177"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.151"

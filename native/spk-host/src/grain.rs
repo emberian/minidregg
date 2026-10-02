@@ -33,6 +33,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[path = "grain_profile_upgrade.rs"]
+mod profile_upgrade;
+
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_SPK: u64 = 256 * 1024 * 1024;
 const PACKAGE_STORE: &str = "/var/lib/minidregg/spk/packages";
@@ -189,9 +192,11 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    genesis_config_sha256: Option<String>,
     #[serde(default)]
     ws_authority_lease_seconds: Option<u64>,
     protocol: String,
@@ -228,6 +233,8 @@ struct Host {
     /// completion custodian key). Volume, mount, witness and slice names
     /// carry it. K-SPK replaces it with the genesis deployment id.
     store: String,
+    // Serializes profile selection with grain lifecycle operations.
+    _profile_lock: File,
 }
 
 impl Host {
@@ -241,9 +248,15 @@ impl Host {
         if let Some(seconds) = profile.ws_authority_lease_seconds {
             crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
         }
-        let store = profile.mini_config_sha256.get(..16).unwrap_or("").to_owned();
+        let profile_lock = profile_upgrade::lock(&profile.state_root, false)?;
+        profile_upgrade::validate_selected(path, &profile)?;
+        let genesis = profile
+            .genesis_config_sha256
+            .as_ref()
+            .unwrap_or(&profile.mini_config_sha256);
+        let store = genesis.get(..16).unwrap_or("").to_owned();
         if profile.protocol != "mini-spk-grain-host-v2"
-            || path.parent() != Some(profile.state_root.as_path())
+            || !hex64(genesis)
             || !broker::store_key(&store)
             || profile.state_root != profile.grains_root.join(&store).join("host")
             || !lifecycle_selector::decimal(&profile.management_subject)
@@ -282,6 +295,7 @@ impl Host {
             identity,
             management_key_id: key,
             store,
+            _profile_lock: profile_lock,
         })
     }
 
@@ -1306,7 +1320,9 @@ pub fn usage() -> &'static str {
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
-     grain init-store GRAINS_ROOT MINI_CONFIG | grain backup PROFILE"
+     grain init-store GRAINS_ROOT MINI_CONFIG | grain backup PROFILE | \
+     grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
+     grain register-route --socket PATH --request PATH"
 }
 
 fn install_options(rest: &[String]) -> io::Result<(String, Option<(PathBuf, String)>)> {
@@ -1356,6 +1372,21 @@ fn init_store(root: &Path, config: &Path) -> io::Result<Value> {
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, socket_flag, socket, request_flag, request] = args {
+        if verb == "register-route" && socket_flag == "--socket" && request_flag == "--request" {
+            return Ok(serde_json::to_value(
+                crate::resident_route_control::register_file(
+                    Path::new(socket),
+                    Path::new(request),
+                )?,
+            )?);
+        }
+    }
+    if let [verb, profile, admission] = args {
+        if verb == "rebind-profile" {
+            return profile_upgrade::rebind(Path::new(profile), Path::new(admission));
+        }
+    }
     if let [verb, root, config] = args {
         if verb == "init-store" {
             return init_store(Path::new(root), Path::new(config));
@@ -1367,7 +1398,8 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 .split_once('-')
                 .filter(|(store, app)| broker::store_key(store) && broker::decimal(app))
                 .ok_or_else(|| invalid("supervisor instance must be STORE-APP"))?;
-            let profile = Path::new(root).join(store).join("host").join("grain-host.json");
+            let state_root = Path::new(root).join(store).join("host");
+            let profile = profile_upgrade::selected_path(&state_root)?;
             let host = Host::load(&profile)?;
             return supervise(&host, app);
         }
@@ -1393,6 +1425,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 ("start", [app]) => start(&host, app),
                 ("stop", [app]) => stop(&host, app),
                 ("status", [app]) => status(&host, app),
+                ("session-intents", [app]) => profile_upgrade::session_intents(&host, app),
                 ("supervise", [app]) => supervise(&host, app),
                 ("export", [app, out]) => export(&host, app, Path::new(out)),
                 ("backup", []) => broker::call(&Request::Backup {}),
