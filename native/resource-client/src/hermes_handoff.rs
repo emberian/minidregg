@@ -669,13 +669,64 @@ fn emit_registration(root: &Path, task: &str, cell: &str, inbox: &Path) -> Resul
     check_registration_custody(&r)?;
     Ok(r)
 }
+fn origin_count(payload: &Value) -> Result<&str> {
+    let count = text(&payload["origin"]["receipt"], "acceptedCount")?;
+    workspace::decimal(count, "accepted origin count")?;
+    if count == "0" {
+        return Err("assignment has no accepted origin".into());
+    }
+    Ok(count)
+}
 fn point_current(inbox: &Path, bundle: &Value) -> Result<()> {
     let (p, id) = decode(bundle)?;
     let parent = inbox.parent().ok_or("assignment room parent absent")?;
+    workspace::private_dir(parent)?;
+    // Source verification can finish before a later assignment lands. Serialize
+    // the cache publication and compare exact admitted origins, so a delayed
+    // old dispatcher never overwrites a newer delivered assignment's pointer.
+    let _writer = crate::transport::service_lock(&parent.join("current.lock"))?;
+    let target = parent.join("current.json");
+    let incoming_count = origin_count(&p)?;
+    if target.exists() {
+        let prior = json_file(&target)?;
+        fields(
+            &prior,
+            &["type", "task", "roomCell", "assignment", "id", "inbox"],
+        )?;
+        if prior["type"] != "mini-hermes-assignment-pointer-v1"
+            || prior["roomCell"] != p["roomCell"]
+        {
+            return Err("retained assignment pointer differs from canonical room".into());
+        }
+        workspace::decimal(text(&prior, "assignment")?, "retained assignment")?;
+        let previous_inbox = parent.join(format!("assignment-{}", text(&prior, "assignment")?));
+        if prior["inbox"] != json!(previous_inbox) {
+            return Err("retained assignment pointer selects a noncanonical inbox".into());
+        }
+        workspace::private_dir(&previous_inbox)?;
+        let ready = ready_bundle(&previous_inbox)?;
+        let (previous_payload, previous_id) = decode(&ready["bundle"])?;
+        if prior["id"] != previous_id
+            || prior["task"] != previous_payload["task"]
+            || prior["roomCell"] != previous_payload["roomCell"]
+            || prior["assignment"] != previous_payload["assignment"]
+        {
+            return Err("retained assignment pointer differs from immutable delivery".into());
+        }
+        let previous_count = origin_count(&previous_payload)?;
+        let order =
+            (incoming_count.len(), incoming_count).cmp(&(previous_count.len(), previous_count));
+        if order.is_lt() {
+            return Ok(());
+        }
+        if order.is_eq() && previous_payload != p {
+            return Err("same accepted origin cannot replace assignment delivery".into());
+        }
+    }
     // Private routing cache only. Every selector below rechecks accepted source
     // assignment and current grants before returning an activation.
     crate::chat::put_json(
-        &parent.join("current.json"),
+        &target,
         &json!({"type":"mini-hermes-assignment-pointer-v1","task":p["task"],
             "roomCell":p["roomCell"],"assignment":p["assignment"],"id":id,"inbox":inbox}),
     )
@@ -975,7 +1026,7 @@ mod tests {
         let manifest = json!({"type":"mini-hermes-summon-v1","room":"lab","roomCell":room_cell,"task":"71","hermes":"8","founder":"7","assignment":assignment,"encryptionKey":"ab".repeat(32),"stream":"80","founderAccount":"7","account":{"name":"lab-hermes","target":"81"},"program":{"name":"lab-program","target":"82"},"docs":[]});
         let files = json!({"summon-lab.json":hex(&serde_json::to_vec(&manifest).unwrap()),"lab-invite.json":hex(&serde_json::to_vec(&json!({"type":"minidregg-delegated-reference-v1","recipient":"8","target":room_cell,"kind":"object","room":true,"capability":"91"})).unwrap()),"lab-hermes.json":hex(&serde_json::to_vec(&json!({"type":"minidregg-fleet-account-handoff-v1","owner":"8","kind":"account","target":"81","observeCapability":"92"})).unwrap())});
         let command = json!({"subject":"7","nonce":"4","targets":[{"kind":"object","target":room_cell,"payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","resource":room_cell,"field":"1008"},"value":"8"},{"type":"create","key":{"type":"object","resource":room_cell,"field":"1009"},"value":"81"},{"type":"create","key":{"type":"object","resource":room_cell,"field":ASSIGNMENT_FIELD},"value":assignment}]}}]});
-        let payload = json!({"type":"mini-hermes-summon-bundle-v1","world":{"domain":"31","expectedSeed":"0"},"recipient":"8","task":"71","founder":"7","room":"lab","roomCell":room_cell,"assignment":assignment,"origin":{"command":command},"files":files});
+        let payload = json!({"type":"mini-hermes-summon-bundle-v1","world":{"domain":"31","expectedSeed":"0"},"recipient":"8","task":"71","founder":"7","room":"lab","roomCell":room_cell,"assignment":assignment,"origin":{"command":command,"receipt":{"acceptedCount":assignment}},"files":files});
         let bytes = serde_json::to_vec(&payload).unwrap();
         let key = SigningKey::from_bytes(&[7; 32]);
         let bundle = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
@@ -1141,6 +1192,25 @@ mod tests {
             assert_eq!(pointer["id"], ready_bundle(&inbox).unwrap()["id"]);
             assert_eq!(pointer["inbox"], json!(inbox));
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn delayed_older_dispatch_cannot_replace_current_assignment_pointer() {
+        let root = scratch();
+        let first = root.join("room-70/assignment-1");
+        let second = root.join("room-70/assignment-2");
+        let (_, older) = fixture("70", "1");
+        let (_, newer) = fixture("70", "2");
+        publish(&first, &older).unwrap();
+        publish(&second, &newer).unwrap();
+        point_current(&second, &newer).unwrap();
+        // T1 passed its source check before T2 was accepted, but its delayed
+        // publication arrives after T2's ready gate and pointer are durable.
+        point_current(&first, &older).unwrap();
+        let pointer = json_file(&root.join("room-70/current.json")).unwrap();
+        assert_eq!(pointer["assignment"], "2");
+        assert_eq!(pointer["inbox"], json!(second));
+        point_current(&second, &newer).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
