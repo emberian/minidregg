@@ -92,7 +92,7 @@ def project (prepared : Prepared context profile federation height spec descript
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec descriptor) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots spec.ticket.scope.app
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject spec.ticket.scope.app
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height spec descriptor) :

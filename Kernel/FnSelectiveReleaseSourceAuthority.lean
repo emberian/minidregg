@@ -108,7 +108,7 @@ def project (prepared : Prepared context profile federation height spec)
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots spec.packet.release.source.resource
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject spec.packet.release.source.resource
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height spec) :
