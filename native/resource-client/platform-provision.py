@@ -72,6 +72,13 @@ def validate(plan):
     return root, source, manifest
 
 
+def allocated_workload(plan, names):
+    if "workload" not in plan:
+        return {}
+    selected = plan["workload"].get("members", list(names))
+    return {"workload": dict(plan["workload"], members=[names[name] for name in selected])}
+
+
 def proc_identity(pid):
     process = Path("/proc") / str(pid)
     # Field22 follows '(comm)' which can contain spaces and parentheses.
@@ -297,6 +304,7 @@ LogLevel VERBOSE
             "deployment": {"config": str(config), "configSha256": digest(config), "socket": world.state["publicSocket"], "publicSocket": world.state["publicSocket"], "privateSocket": world.state["privateSocket"]},
             "members": inventory, "maxConcurrency": plan.get("maxConcurrency", 16), "sweeps": plan.get("sweeps", []),
             "hooks": {"restart": {"executable": str(Path(__file__).resolve()), "sha256": digest(Path(__file__)), "args": ["hook", "--state", str(root / "runtime.json")]}}}
+    spec.update(allocated_workload(plan, names))
     if rooms: spec["rooms"] = rooms
     save(root / "journey.json", spec)
     identity = joined.validate(spec)

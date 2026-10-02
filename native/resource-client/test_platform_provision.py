@@ -31,6 +31,12 @@ class ProvisioningContract(unittest.TestCase):
         root,_,_=p.validate(self.plan)
         self.assertFalse(root.exists())
         self.assertEqual(len(self.plan['members']),5)
+    def test_selected_names_map_to_actual_subjects_and_keep_concurrency(self):
+        self.plan['workload']={'members':['member-0','member-1'],'concurrency':8}
+        p.validate(self.plan)
+        allocated=p.allocated_workload(self.plan, {'member-'+str(i):str(9010+i*100) for i in range(5)})
+        self.assertEqual(allocated, {'workload':{'members':['9010','9110'],'concurrency':8}})
+        self.assertEqual(self.plan['workload']['members'],['member-0','member-1'])
     def test_preflight_refuses_group_and_allocation_errors(self):
         for mutate in (lambda x:x['members'].append(x['members'][0]),
                        lambda x:x['rooms']['all'].update(owner='missing'),
