@@ -431,23 +431,67 @@ fn method_actions(instance: &Value, method: &Value, dry: &Value) -> Result<Vec<V
     Ok(actions)
 }
 
+pub(super) fn validate_funding_payload(payload: &Value) -> Result<()> {
+    exact(payload,&["type","asset","credits","expectedPayerBalance","expectedBookRoot"])?;
+    if member(payload,"type")? != "computeFunding" {return Err("wrong compute funding payload".into());}
+    decimal(member(payload,"asset")?,"credit asset")?;
+    decimal(member(payload,"credits")?,"compute credits")?;
+    signed_decimal(member(payload,"expectedPayerBalance")?,"payer balance")?;
+    field_decimal(member(payload,"expectedBookRoot")?,"Book root")
+}
+
+/// Pricing uses the signed reader quota. Large cumulative usage is compared as
+/// canonical decimal text; only bounded evaluator steps need a machine integer.
+fn compute_consent(view: &Value, subject: &str, steps: &str, maximum: &str) -> Result<(Option<Value>,Value)> {
+    decimal(steps,"admitted steps")?; decimal(maximum,"maximum compute credits")?;
+    let quote=view.get("computeQuote").filter(|value|value.is_object())
+        .ok_or("compute accounting is not active in this signed account view")?;
+    if member(quote,"subject")? != subject {return Err("compute quote belongs to another member".into());}
+    if member(quote,"freeSteps")? != "1000000" || member(quote,"creditsPerStep")? != "1" {
+        return Err("unsupported source compute pricing".into());
+    }
+    let used=member(quote,"usedSteps")?; decimal(used,"used compute steps")?;
+    let remaining=if decimal_leq(used,"1000000") {1_000_000-used.parse::<u64>().map_err(|e|e.to_string())?} else {0};
+    let admitted=steps.parse::<u64>().map_err(|_|"method steps exceed this client's bounded evaluator range")?;
+    let credits=admitted.saturating_sub(remaining).to_string();
+    if !decimal_leq(&credits,maximum) {return Err(format!("method needs {credits} compute credits, above consent ceiling {maximum}"));}
+    let summary=json!({"day":quote["day"],"usedSteps":used,"admittedSteps":steps,
+        "credits":credits,"maxComputeCredits":maximum});
+    if credits=="0" {return Ok((None,summary));}
+    let asset=member(quote,"creditAsset")?;
+    let balance=view["balances"].as_array().ok_or("signed account view lacks balances")?.iter()
+        .find(|row|row.get(0).and_then(Value::as_str)==Some(asset))
+        .and_then(|row|row.get(1)).and_then(Value::as_str)
+        .ok_or("credit asset balance is outside the account's signed readable scope")?;
+    signed_decimal(balance,"payer balance")?;
+    if balance.starts_with('-') || !decimal_leq(&credits,balance) {return Err("funding account has insufficient compute credits".into());}
+    let payload=json!({"type":"computeFunding","asset":asset,"credits":credits,
+        "expectedPayerBalance":balance,"expectedBookRoot":quote["bookRoot"]});
+    validate_funding_payload(&payload)?;
+    Ok((Some(payload),summary))
+}
+
 /// A call prepares an ordinary signed transaction. Reusing the proposal ID
 /// returns its retained exact intent, without rerunning or repricing the method.
-pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_name: &str) -> Result<()> {
+pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_name: &str, funding: Option<&str>, maximum: Option<&str>) -> Result<()> {
     validate_name(id)?;
     validate_ref_name(name)?;
-    let selector = json!({"instance":name,"method":method_name});
+    if funding.is_some() != maximum.is_some() {return Err("--fund and --max-compute-credits must be supplied together".into());}
+    if let Some(account)=funding {validate_ref_name(account)?;}
+    if let Some(limit)=maximum {decimal(limit,"maximum compute credits")?;}
+    let selector = json!({"instance":name,"method":method_name,"funding":funding,"maxComputeCredits":maximum});
     let directory = root.join("proposals").join(id);
     if directory.exists() {
         if bounded_json(&directory.join("method-request.json"))? != selector {
             return Err("proposal ID already names a different method call".into());
         }
         let request = bounded_json(&directory.join("request.json"))?;
-        let summary = law_export::retained(root,id,&request)?.ok_or("retained method proposal disappeared")?;
+        let mut summary = law_export::retained(root,id,&request)?.ok_or("retained method proposal disappeared")?;
+        summary["compute"]=bounded_json(&directory.join("compute-consent.json"))?;
         return print_json(&summary);
     }
-    let reference = reference(root,name)?;
-    let (view,_,_) = signed_view(root,workspace,&reference,"resource")?;
+    let instance_reference = reference(root,name)?;
+    let (view,_,_) = signed_view(root,workspace,&instance_reference,"resource")?;
     let instance = cell(&view,"worldInstance")?;
     let table = instance["methods"].as_array().ok_or("instance has no canonical method table")?;
     method_table(&instance["descriptor"],&instance["methods"])?;
@@ -467,14 +511,26 @@ pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_
         values.push(json!(["0",name,value]));
     }
     let request = json!({"programId":program,"caller":member(workspace,"subject")?,"room":"0",
-        "targets":[reference["target"]],"values":values});
+        "targets":[instance_reference["target"]],"values":values});
     let dry = method_operation(workspace,134,request.to_string().as_bytes())?;
     if dry["verdict"].as_str() != Some("ok") { return Err(format!("method did not finish: {dry}")); }
     let actions = method_actions(instance,method,&dry)?;
+    let mut targets=vec![json!({"name":name,"payload":{"type":"worldNamed","actions":actions}})];
+    let consent=if let (Some(account),Some(limit))=(funding,maximum) {
+        let payer=reference(root,account)?;
+        if member(&payer,"kind")? != "account" {return Err("--fund requires an account reference".into());}
+        let (payer_view,_,_)=signed_view(root,workspace,&payer,"resource")?;
+        let (payload,mut consent)=compute_consent(&payer_view,member(workspace,"subject")?,member(&dry,"steps")?,limit)?;
+        consent["account"]=json!(account);
+        if let Some(payload)=payload {targets.push(json!({"name":account,"payload":payload}));}
+        consent
+    } else {json!({"admittedSteps":dry["steps"],"maxComputeCredits":"0"})};
     let proposal = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-        "targets":[{"name":name,"payload":{"type":"worldNamed","actions":actions}}],
+        "targets":targets,
         "run":{"programId":program,"sample":dry["sample"],"output":dry["output"],"steps":dry["steps"]}});
-    let summary = propose_request(root,workspace,&proposal,id,None,true)?;
+    let mut summary = propose_request(root,workspace,&proposal,id,None,true)?;
+    summary["compute"]=consent.clone();
+    private_file(&directory.join("compute-consent.json"),&serde_json::to_vec(&consent).map_err(|e|e.to_string())?)?;
     private_file(&directory.join("method-request.json"),&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
     print_json(&summary)
 }
@@ -490,6 +546,20 @@ mod method_tests {
     }
     fn method() -> Value {
         json!({"name":"close","program":"42","outputs":[{"output":"90","field":"3","key":"0"}]})
+    }
+    #[test]
+    fn compute_consent_binds_reader_threshold_and_explicit_limit() {
+        let mut view=json!({"computeQuote":{"subject":"7","bookRoot":"4","day":"8","usedSteps":"999995",
+            "freeSteps":"1000000","creditsPerStep":"1","creditAsset":"9"},"balances":[["9","30"]]});
+        let (payload,summary)=compute_consent(&view,"7","8","3").unwrap();
+        assert_eq!(payload.unwrap()["credits"],"3"); assert_eq!(summary["admittedSteps"],"8");
+        assert!(compute_consent(&view,"7","8","2").is_err());
+        assert!(compute_consent(&view,"8","8","3").is_err());
+        assert!(compute_consent(&view,"7","5","0").unwrap().0.is_none());
+        view["computeQuote"]["usedSteps"]=json!("99999999999999999999999999999999999");
+        assert_eq!(compute_consent(&view,"7","8","8").unwrap().0.unwrap()["credits"],"8");
+        view["balances"]=json!([]); assert!(compute_consent(&view,"7","8","8").is_err());
+        view["computeQuote"]=Value::Null; assert!(compute_consent(&view,"7","0","0").is_err());
     }
     #[test]
     fn output_coordinate_maps_to_declared_semantic_address() {
@@ -511,4 +581,35 @@ mod method_tests {
         assert!(method_actions(&instance(),&method(),&json!({"writes":[["0","90","0"],["0","90","0"]]})).is_err());
         assert!(method_actions(&instance(),&method(),&json!({"writes":[["0","90","-1"]]})).is_err());
     }
+}
+
+/// Source program registration uses the existing canonical evaluator admission
+/// and ordinary content-addressed birth. The client never interprets the code.
+pub(super) fn program_create(root: &Path, workspace: &Value, name: &str,
+    source_path: &Path, predicate: &Path, room: Option<&str>) -> Result<()> {
+    validate_ref_name(name)?;
+    let source=bounded_json(source_path)?;
+    exact(&source,&["jam","abi"])?;
+    let code=unhex(member(&source,"jam")?)?;
+    let length=u32::try_from(code.len()).map_err(|_|"program code too large")?;
+    let mut payload=length.to_le_bytes().to_vec();
+    payload.extend_from_slice(&code);
+    payload.extend_from_slice(&serde_json::to_vec(&source["abi"]).map_err(|e|e.to_string())?);
+    let verdict=method_operation(workspace,131,&payload)?;
+    if verdict["verdict"].as_str()!=Some("admissible") {
+        return Err(format!("program admission refused: {verdict}"));
+    }
+    let directory=root.join("programs");
+    if !directory.exists() { make_private_dir(&directory)?; }
+    private_dir(&directory)?;
+    let path=directory.join(format!("{}.json",ref_file(name)));
+    if path.exists() {
+        let held=bounded_json(&path)?;
+        if held["program"]!=verdict["program"] {
+            return Err("program name already pins different immutable code/ABI".into());
+        }
+    } else {
+        private_file(&path,&serde_json::to_vec(&verdict).map_err(|e|e.to_string())?)?;
+    }
+    super::create(root,workspace,name,"nock",predicate,room,"object",None,Some(&path),None)
 }

@@ -1115,10 +1115,16 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "kindDefinition" =>
       let obj ← exactObject path ["type", "definition"] json
       pure (.kindDefinition (← worldDefinition (path ++ ".definition") (← field path "definition" obj)))
+  | "computeFunding" =>
+      let obj ← exactObject path ["type", "asset", "credits", "expectedPayerBalance", "expectedBookRoot"] json
+      pure (.computeFunding ⟨← nat (path ++ ".asset") (← field path "asset" obj),
+        ← nat (path ++ ".credits") (← field path "credits" obj),
+        ← int (path ++ ".expectedPayerBalance") (← field path "expectedPayerBalance" obj),
+        ⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩⟩)
   | "read" =>
       let _ ← exactObject path ["type"] json
       pure .read
-  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, world or kindDefinition"
+  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, world, kindDefinition or computeFunding"
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do
@@ -4622,7 +4628,7 @@ private def openingJson (opening : NativeObservationController.OpeningView) : Le
 /-- `cell.root` is the cell's own root (the view's leading digest); the
 entries are the cell as the reader's scope narrows it. -/
 private def resourceJson (value : NativeObservationController.ResourceView) : Result Lean.Json := do
-  let (root, bytes, balances, opening) := value
+  let (root, bytes, balances, opening, computeQuote) := value
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry bytes with
     | some packed => pure packed
@@ -4636,7 +4642,12 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
     | _ => pure (.mkObj [("root", decimal root.value), ("canonical", hexJson bytes)])
   pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2]),
-    ("opening", openingJson opening)]
+    ("opening", openingJson opening),
+    ("computeQuote", (computeQuote.map fun quote => .mkObj
+      [("subject", decimal quote.subject), ("bookRoot", decimal quote.bookRoot.value),
+       ("day", decimal quote.day), ("usedSteps", decimal quote.usedSteps),
+       ("freeSteps", decimal quote.freeSteps), ("creditsPerStep", decimal quote.creditsPerStep),
+       ("creditAsset", (quote.creditAsset.map decimal).getD .null)]).getD .null)]
 
 private def wellCommandJson (command : RealmWellCodec.Command) : Lean.Json :=
   .mkObj [("type", "well-command-v1"), ("subject", decimal command.subject.value),
@@ -5292,7 +5303,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       | some .retired => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "retired")]
       | some (.live cell) => do
           let view ← resourceJson (root.getD cell.payload.root,
-            PackedCell.bytes CanonicalCellRegistry.registry cell, [], opening)
+            PackedCell.bytes CanonicalCellRegistry.registry cell, [], opening, none)
           pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
             ("canonical", hexJson lifecycle), ("resource", view)]
       | none => failAt "view-at" "noncanonical lifecycle bytes"

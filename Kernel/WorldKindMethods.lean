@@ -2,6 +2,7 @@
 After-core construction: not activated by the frozen native runtime profile.
 Methods select immutable existing programs; they confer no mutation authority.
 -/
+import Compiler.WorldExecutionContract
 import Compiler.WorldKindCell
 import Compiler.NockProgramCodec
 import Theory.Eval
@@ -19,7 +20,7 @@ set_option autoImplicit false
 
 /-- Descriptor-declared semantics, not a reserved numeric field or display name.
 Exactly one ROM bytes field may carry the canonical table at key zero. -/
-def tableMeaning : String := "dregg/world/method-table/v1"
+def tableMeaning : String := WorldExecutionContract.methodTableMeaning
 
 /-- Existing evaluator output coordinates are explicitly bound to inner addresses.
 The complete descriptor fixes the target field's meaning and codec. -/
@@ -51,7 +52,7 @@ def methodStream : StreamCodec Method :=
     (fun value => ⟨value.1, value.2.1, value.2.2⟩)
     (by intro value; cases value; rfl)
 
-def frame : List UInt8 := "DREGG/WORLD/METHODS".toUTF8.toList ++ [1]
+def frame : List UInt8 := WorldExecutionContract.methodTableFrame
 
 def encode (table : Table) : List UInt8 :=
   frame ++ (StreamCodec.list methodStream).encode table

@@ -60,17 +60,20 @@ with its proposal ID reuses the retained intent; it does not rerun or reprice.
 The first convenience command supports one participant and source state slots.
 Multi-participant programs use the existing composed invocation representation.
 
-Program registration still uses existing op131 and `workspace create --storage
-nock --program VERDICT`. A general friendly program-authoring shell command and
-the real poll method journey remain receiving work. Rust method binding tests
-pass; this does not qualify the source receiver.
+`program create NAME SOURCE-JSON|@FILE LAW [--in ROOM]` accepts canonical jam plus
+ABI JSON, uses existing op131 admission, and births the immutable program cell.
+The `jworld-method.sh` hook authors a tiny tally/close program through this command,
+checks its real method effects, current restrictive export and retained old method
+after a kind revision. It is prepared but has not run against a source-matched Host.
+Nine focused Rust tests pass; this does not qualify the Lean source receiver.
 
 ## Actual compute funding, not command-byte maxCost
 
 Existing exact steps flow into `ResourceCost.proofWork`, then the durable global
-lifetime deployment meter. That is not a per-subject daily allowance or Book
-credit debit. Unauthenticated op134 also lacks a funding gate. The C5 TODO must
-not be described as already implemented.
+lifetime deployment meter. The new source quota is separate. `RunComputeBudgetDomain`
+loads actual PayCell/Book, and the prepared transaction binds its quote to the
+accepted step count. `DeclaredResourceController` adds usage and Book posts to the
+same `DataIntent` as the ordinary effects. This is source-connected but uncompiled.
 
 The after-core policy is 1,000,000 admitted steps per subject per authenticated
 clock day free, then one credit per step. Quota belongs to the subject, independently
@@ -81,20 +84,37 @@ Legacy lift leaves compute namespaces absent. A prospective authenticated
 activation cut must close legacy execution before its boundary; historical
 same-day use must never silently become zero.
 
-The receiving extension must derive the marginal quote from the loaded clock and
+The receiving extension derives the marginal quote from the loaded clock and
 PayCell, admit exact signed payer consent under its actual account capability and
-current law, and create a canonical Book burn. It must commit quota update, Book
+current law, and create a canonical Book burn. It commits quota update, Book
 post and method effect in one durable intent with exact replay first. Funding
 can be checked against signed claimed steps before re-execution, but settlement
 must require the exact checked step count. Refused methods consume neither
 admitted quota nor credits. Concurrent claims contend on the PayCell/Book roots.
 The operator's lifetime meter remains a separate limit.
 
-The existing account `.move` wire can express consent, but generic account scalar
-mutation does not implement this system debit. Recognizing a funding leg requires
-explicit profile semantics and the real receiver connection; merely parsing it
-is insufficient. Dry-run service also needs an explicit bounded or authenticated
-policy; an unauthenticated `caller` must never spend that subject's balance.
+Transaction9 adds explicit `computeFunding` payload6. Its account leg carries the
+real transfer capability, current account/room laws, signed exact credits, payer
+balance and Book root. Issuer balance is derived internally. The validated fee leg
+must be last and is excluded only from evaluator input/output coordinates; every
+law, capability and settlement consumer retains it. Existing transaction8 bytes
+are never reinterpreted. Shared PayCell v5 uses the paid V2 owner's exact union.
+
+`instance call ID NAME METHOD --fund ACCOUNT --max-compute-credits N` uses a signed
+account ResourceView6 quote for the actual reader's quota, with a separate explicit
+credit ceiling. An unfunded call consents to zero credits. Exact retry retains the
+proposal and fee. A stale Book/Pay cut refuses rather than silently repricing.
+
+`Run.checkRun` checks ABI fuel and executes `M.oracle claim.steps`; `Door.checkPoke`
+does likewise. A tiny false claimed count cannot invoke an ABI-sized run. Host
+op134–137 assistance now checks actual source program ABI fuel against operator
+`nockFSync` before evaluation. It cannot debit its unauthenticated caller. Admitted
+quota is not a general rate limit on bounded rejected requests or dry assistance.
+
+`Compiler.WorldExecutionContract` owns method/quote frames, quota constant, fresh
+activation domain and receiving identity. Actual consumers and the runtime profile
+share these. Projection10/observation7 are isolated after-core epochs; frozen core
+transaction8 remains unchanged.
 
 ## Qualification still required
 

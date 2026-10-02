@@ -2576,6 +2576,10 @@ fn propose_summary_once(
                         )?));
                     }
                     lowered
+                } else if member(payload, "type")? == "computeFunding" && sealing.is_none() {
+                    if kind != "account" || protected {return Err("compute funding requires an ordinary account".into());}
+                    world_kind::validate_funding_payload(payload)?;
+                    payload.clone()
                 } else if member(payload, "type")? == "kindDefinition" && sealing.is_none() {
                     world_kind::revise(payload, &view, target)?
                 } else if read_only {
@@ -5813,12 +5817,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             law_export::show(&root, &workspace, &name)
         }
+        "program-create" => {
+            let name = os_string(args.required("name")?, "program name")?;
+            let source = path(args.required("source")?);
+            let predicate = path(args.required("predicate")?);
+            let room = args.optional("in").map(|value|os_string(value,"room name")).transpose()?;
+            args.finish()?;
+            world_kind::program_create(&root,&workspace,&name,&source,&predicate,room.as_deref())
+        }
         "instance-call" => {
             let name = os_string(args.required("name")?, "instance name")?;
             let method = os_string(args.required("method")?, "method name")?;
             let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            let funding = args.optional("fund").map(|value|os_string(value,"funding account")).transpose()?;
+            let maximum = args.optional("max-compute-credits").map(|value|os_string(value,"maximum compute credits")).transpose()?;
             args.finish()?;
-            world_kind::call(&root,&workspace,&id,&name,&method)
+            world_kind::call(&root,&workspace,&id,&name,&method,funding.as_deref(),maximum.as_deref())
         }
         "kind-show" | "instance-show" => {
             let name = os_string(args.required("name")?, "resource name")?;
