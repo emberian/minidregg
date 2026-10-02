@@ -302,12 +302,9 @@ fn project(
             let host = base_path
                 .strip_prefix("https://")
                 .ok_or_else(|| invalid("browser session base path is not an https origin"))?;
-            if host.is_empty()
-                || host.len() > 253
-                || !host
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
-            {
+            // This is the same origin that the custodian already validated.
+            // Keep its host[:port] grammar rather than a divergent DNS-only copy.
+            if !crate::http_entrance::valid_expected_host(host) {
                 return Err(invalid("browser session base path is not an https origin"));
             }
             (SessionKind::Web, base_path.to_owned())
@@ -519,6 +516,23 @@ mod tests {
         // refuses a scheme-less one); a path or a foreign scheme is refused here.
         assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "/").is_err());
         assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "http://x.test").is_err());
+    }
+
+    #[test]
+    fn browser_origin_uses_custodian_host_and_port_grammar() {
+        let http = HttpProjection {
+            method: "GET", path_and_query: "sheet", ordered_headers: &[],
+            body: b"", route: Route::Browser,
+        };
+        for origin in ["https://localhost:18443", "https://grain.example.test", "https://grain.example.test:443"] {
+            let input = physical_web_input(&matched(), &http, "Friend", "friend", origin).unwrap();
+            assert_eq!(input.binding.params.base_path, origin);
+        }
+        for origin in ["https://localhost:0", "https://localhost:018443", "https://localhost:65536",
+            "https://localhost:18443/path", "https://user@localhost:18443", "https://LOCALHOST:18443",
+            "https://localhost:18443#fragment", "https://localhost:18443?query", "https://bad..host"] {
+            assert!(physical_web_input(&matched(), &http, "Friend", "friend", origin).is_err(), "{origin}");
+        }
     }
 
     /// A streamed record projects only as an open, with its signed

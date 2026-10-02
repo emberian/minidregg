@@ -139,7 +139,7 @@ fn canonical_nat(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn valid_expected_host(host: &str) -> bool {
+pub(crate) fn valid_expected_host(host: &str) -> bool {
     if host.is_empty() || host.len() > 255 || host != host.to_ascii_lowercase() {
         return false;
     }
