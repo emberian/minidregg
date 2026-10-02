@@ -659,10 +659,9 @@ def invokeRefusal (config : Config) (opened : Opened config)
       let fieldsOf := fun incidence => match incidence with
         | some i => grantFields config opened grants command.targets[i].target
         | none => some ∅
-      (legs.firstRangeWith (fun i leaf => Refusal.lawInputRangeFor (fieldsOf i) leaf)).orElse fun _ =>
-        (legs.firstCastWith (fun i x y => Refusal.castAliasFor (fieldsOf i) x y)).orElse fun _ =>
-          legs.firstLawWith (fun i committed oldState newState =>
-            Refusal.lawDeniedFor (fieldsOf i) committed.record.predicate oldState newState)
+      (legs.firstRangeRefusal fieldsOf).orElse fun _ =>
+        (legs.firstCastRefusal fieldsOf).orElse fun _ =>
+          legs.firstLawRefusal fieldsOf
   | _ => none
 
 /-- The only public preparation path. A source-owned proof of every actual
