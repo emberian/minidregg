@@ -401,6 +401,67 @@ pub(crate) fn bind_attempt(
     })
 }
 
+/// Release a reservation's exact-attempt binding once that attempt is
+/// DEFINITELY unadmitted: it never assembled an exact call, or the Host
+/// answered its exact call with a final refusal. The caller decides
+/// definiteness; an uncertain outcome must never reach here. The binding
+/// record is retained as `released-{digest}-{n}.json` (never read by
+/// `reserve`), and the reservation's IDs stay reserved for the same request,
+/// so the next attempt reuses them and at most one attempt over these IDs can
+/// ever install. Returns the retained record, or `None` when nothing was bound.
+pub(crate) fn release_attempt(
+    reservation: &Reservation,
+    attempt_path: &Path,
+) -> Result<Option<PathBuf>> {
+    if !attempt_path.is_absolute() {
+        return Err("namespace attempt path must be absolute".into());
+    }
+    let parent = attempt_path
+        .parent()
+        .ok_or("namespace attempt lacks parent")?;
+    let parent = fs::canonicalize(parent).map_err(|error| error.to_string())?;
+    let attempt_name = attempt_path
+        .file_name()
+        .ok_or("namespace attempt lacks filename")?;
+    let attempt_path = parent.join(attempt_name);
+    let root = reservation
+        .record_path
+        .parent()
+        .ok_or("namespace reservation lacks root")?;
+    private_root(root)?;
+    let _guard = lock(root)?;
+    let path = root.join(format!("binding-{}.json", reservation.request_digest));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let prior = record(&path)?;
+    if prior.get("format") != Some(&json!("minidregg-participant-attempt-binding-v1"))
+        || prior.get("requestDigest") != Some(&json!(reservation.request_digest))
+        || prior.get("attemptPath").and_then(Value::as_str)
+            != Some(attempt_path.to_string_lossy().as_ref())
+    {
+        return Err("namespace binding names a different attempt; not released".into());
+    }
+    let mut index = 1u32;
+    let retained = loop {
+        let candidate = root.join(format!(
+            "released-{}-{index:04}.json",
+            reservation.request_digest
+        ));
+        if !candidate.exists() {
+            break candidate;
+        }
+        index = index
+            .checked_add(1)
+            .filter(|next| *next < 10_000)
+            .ok_or("namespace release records exhausted")?;
+    };
+    fs::rename(&path, &retained)
+        .map_err(|error| format!("cannot release namespace attempt binding: {error}"))?;
+    sync_directory_ancestors(root)?;
+    Ok(Some(retained))
+}
+
 fn saved_roles(value: &Value) -> Result<Vec<Role>> {
     let entries = value
         .get("roles")
@@ -785,6 +846,51 @@ mod tests {
             !original.exists(),
             "binding precedes custody attempt creation"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn released_binding_lets_the_same_request_bind_a_new_attempt() {
+        let root = root();
+        let saved = reserve(
+            &root,
+            "deployment-1",
+            "participant-1",
+            "create-x",
+            b"source",
+            &roles(),
+        )
+        .unwrap();
+        let attempts = root.join("attempts");
+        fs::create_dir(&attempts).unwrap();
+        let attempt = attempts.join("create-x");
+        let first = hex(&Sha256::digest(b"first intent"));
+        let second = hex(&Sha256::digest(b"second intent"));
+        bind_attempt(&saved, &attempt, &first).unwrap();
+        assert!(bind_attempt(&saved, &attempt, &second).is_err());
+        // A different attempt path cannot release this binding.
+        assert!(release_attempt(&saved, &attempts.join("create-y")).is_err());
+        let retained = release_attempt(&saved, &attempt).unwrap().unwrap();
+        assert!(retained.exists());
+        assert!(!is_bound(&saved).unwrap());
+        // Nothing left to release.
+        assert_eq!(release_attempt(&saved, &attempt).unwrap(), None);
+        // The same request keeps its IDs and binds the new intent.
+        let again = reserve(
+            &root,
+            "deployment-1",
+            "participant-1",
+            "create-x",
+            b"source",
+            &roles(),
+        )
+        .unwrap();
+        assert_eq!(again.ids, saved.ids);
+        bind_attempt(&again, &attempt, &second).unwrap();
+        // A second release retains a second record beside the first.
+        let next = release_attempt(&again, &attempt).unwrap().unwrap();
+        assert_ne!(next, retained);
+        assert!(retained.exists() && next.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -117,23 +117,28 @@ bcap=$(jq -r .observeCapability "$BW/refs/commons.json")
 ccap=$(jq -r .observeCapability "$CW/refs/commons.json")
 
 # The founder births B's and C's own streams in the room (the room template:
-# owner = the member, law = the member's author law; A pays). B and C hold
-# the owner grants; A holds nothing on them.
+# law = the member's author law; A pays and owns them: a birth into a room is
+# owned by its creator, RoomBirthGate.room_birth_owner_is_creator). B and C
+# speak in them with their room grants, which a kick revokes.
 law "$B" "$D/req/law-b.json"
 law "$C" "$D/req/law-c.json"
 run create-sb "$MINI" workspace --action create --dir "$AW" --name sb --storage stream \
-  --predicate "$D/req/law-b.json" --in commons --owner "$B"; ok create-sb
+  --predicate "$D/req/law-b.json" --in commons; ok create-sb
 run create-sc "$MINI" workspace --action create --dir "$AW" --name sc --storage stream \
-  --predicate "$D/req/law-c.json" --in commons --owner "$C"; ok create-sc
+  --predicate "$D/req/law-c.json" --in commons; ok create-sc
+run create-gift "$MINI" workspace --action create --dir "$AW" --name sgift --storage stream \
+  --predicate "$D/req/law-b.json" --in commons --owner "$B"
+if [ "$(cat "$D/create-gift.rc")" != 0 ] && grep -q ownerNotCreator "$D/create-gift.err"; then gift=refused
+else gift="rc-$(cat "$D/create-gift.rc")"; bad=$((bad + 1)); fi
+printf "create-gift\texpect=refused\tgot=%s\ta room birth owned by another subject is refused ownerNotCreator\n" "$gift" >>"$rows"
 sb=$(jq -r .target "$AW/refs/sb.json")
 sc=$(jq -r .target "$AW/refs/sc.json")
-own() { # WS NAME FROM-REF: the member imports its own stream with its owner grant
+own() { # WS NAME TARGET ROOMCAP: the member imports its stream with its room grant
   run "import-own-$2" "$MINI" workspace --action import --dir "$1" --name "$2" --kind object \
-    --target "$(jq -r .target "$3")" --observe-capability "$(jq -r .observeCapability "$3")" \
-    --operation-capability "$(jq -r .operationCapability "$3")"; ok "import-own-$2"
+    --target "$3" --observe-capability "$4" --operation-capability "$4"; ok "import-own-$2"
 }
-own "$BW" sb "$AW/refs/sb.json"
-own "$CW" sc "$AW/refs/sc.json"
+own "$BW" sb "$sb" "$bcap"
+own "$CW" sc "$sc" "$ccap"
 
 # K=3, interleaved, every plan of a round made before any submit of it.
 for round in 1 2; do

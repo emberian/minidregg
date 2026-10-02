@@ -279,7 +279,7 @@ check J1 "newcomer public key appears in no genesis/config file" \
   bash -c "! grep -l -F '$NEW_PUB' '$R/genesis.json' '$R/operator.json' '$CONFIG' '$R/sponsor-birth-context.json'"
 op J1 "CUSTODY: copy newcomer secret into sponsor home (enroll plan+seal sign with both keys in one process)" \
   bash -c "mkdir -p -m 700 '$RUN/homes/sponsor/keys' && install -m 600 '$RUN/homes/newcomer/keys/mini.key' '$RUN/homes/sponsor/keys/newcomer-1.key' && install -m 644 '$RUN/homes/newcomer/keys/mini.key.next.pub' '$RUN/homes/sponsor/keys/newcomer-1.key.next.pub'"
-step J1 0 sponsor "enroll plan newcomer-1 newcomer-1.key"
+step J1 0 sponsor "enroll plan newcomer-1 newcomer-1.key $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.pub") $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.cosign")"
 step J1 0 sponsor "enroll seal newcomer-1"
 step J1 0 sponsor "enroll submit newcomer-1"
 J1_SUBMIT=$LAST
@@ -345,9 +345,7 @@ check J4 "tty: Tab completed 'read shared' and the Host answered field 2 = 1" \
 step J5 0 third "keygen mini.key"
 op J5 "CUSTODY: copy third secret into sponsor home for the co-signed enrollment" \
   install -m 600 "$RUN/homes/third/keys/mini.key" "$RUN/homes/sponsor/keys/third-1.key"
-op J5 "CUSTODY: copy third NEXT public key beside it (enrollment commits to its digest)" \
-  install -m 644 "$RUN/homes/third/keys/mini.key.next.pub" "$RUN/homes/sponsor/keys/third-1.key.next.pub"
-step J5 0 sponsor "enroll plan third-1 third-1.key"
+step J5 0 sponsor "enroll plan third-1 third-1.key $(xxd -p -c 256 "$RUN/homes/third/keys/mini.key.next.pub") $(xxd -p -c 256 "$RUN/homes/third/keys/mini.key.next.cosign")"
 step J5 0 sponsor "enroll seal third-1"
 step J5 0 sponsor "enroll submit third-1"
 THIRD_SUBJ=$(jq -r .subject "$LAST")

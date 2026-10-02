@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# journey.d/jhide.sh — K-NARROW-HIDE: a narrowed read carries a HIDING root.
+# journey.d/jhide.sh — K-NARROW-HIDE: a narrowed read carries a HIDING root;
+# K-HIDE-ROTATE: the blinding ratchets at every write, so every sealed leaf moves.
 # Runs on the journey's fresh Store after J5 (A = sponsor, B = newcomer).
 #
 # A births `hledger` (declared; A's client derives its blinding from A's key and
@@ -12,20 +13,29 @@
 #   r-opens-3         B holds exactly one opening (field 3: salt + entry) -> 1
 #   r-sealed-4        field 4 reaches B as a 32-byte leaf only: no salt, no
 #                     entry bytes of A's field-4 opening in B's view    -> sealed
-#   owner-derives-4   A's client derives field 4's salt from its own key, and
-#                     it equals the salt the Host serves A             -> same
+#   owner-derives-4   A's client derives field 4's salt from its own key and the
+#                     heights of the cell's two writes (the ratchet), and it
+#                     equals the salt the Host serves A               -> same
 #   owner-derives-3   the same for field 3, against the salt B was served -> same
 #   tamper-value      B's view with field 3's displayed value changed  -> refused
 #   tamper-entry      B's view with field 3's opened entry changed     -> refused
 #   tamper-root       B's view with another root                      -> refused
 #   a-writes-4        A writes field 4: 20 -> 21                       -> installed
-#   covered-same      B reads again: every opened item and every displayed
-#                     entry byte-identical                             -> identical
-#   root-moves        ... and the root differs: the metadata channel — B learns
-#                     THAT a field it may not read changed, not what  -> different
-#   one-leaf-moves    exactly one sealed leaf differs (field 4's)       -> 1
+#   covered-same      B reads again: every opened ENTRY and every displayed
+#                     entry byte-identical (the opened salts are re-keyed) -> identical
+#   root-moves        ... and the root differs: B learns THAT the cell was
+#                     written (still visible under the ratchet)        -> different
+#   every-leaf-moves  every sealed leaf differs (fields 1 and 4 and the
+#                     blinding alike) and none of B's earlier sealed leaves
+#                     appears in its later view: WHICH field was written is
+#                     not visible (K-NARROW-HIDE's one-leaf-moves, inverted) -> 3/3
+#   return-to-old-value-invisible  A writes 4 := 30 then 4 := 20 (its value at
+#                     B's first view); none of B's sealed leaves after equals
+#                     any of B's sealed leaves at its first view       -> invisible
+#   owner-derives-now A derives field 3's salt after all five writes and it
+#                     equals the salt B is served now                 -> same
 #   restart-same      after a stop/audit/start, B's view is byte-identical and
-#                     verifies (the salts replay from the stored blinding) -> identical
+#                     verifies (the ratchet replays to the same blinding) -> identical
 #   audit             `mini audit` re-admits every signed ingress       -> audited
 # Exported by the journey: MINI HOST CONFIG SOCKET JOURNEY_WORLD SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT
 # NEWCOMER_SUBJECT JOURNEY_STEP_DIR. Exit 0 = every row as expected. Last
@@ -73,6 +83,14 @@ verified() { jq -e '.hiding.verified == true' "$1" >/dev/null 2>&1; }
 P=$D/req/permit-all.json
 printf '%s\n' '{"type":"all","predicates":[]}' >"$P"
 A_KEY=$(jq -r .key "$SPONSOR_WS/workspace.json")
+# The admission height of a write: the genesis height plus its record's index
+# (a receipt's acceptedCount is that index + 1).  The ratchet runs at it.
+G=$(jq -r .genesisHeight "$W/genesis-params.json")
+HEIGHTS=""
+add_height() { # OUTCOME.json
+  local c; c=$(jq -r .acceptedCount "$1")
+  HEIGHTS="${HEIGHTS:+$HEIGHTS,}$((G + c - 1))"
+}
 
 # ---- setup
 run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name hledger --storage declared --predicate "$P"
@@ -83,7 +101,9 @@ blinding=$(jq -r '.birth.resources[0].blinding // "none"' "$SPONSOR_WS/sources/c
 [ "$("$MINI" key --action cell-blinding --secret "$A_KEY" --cell "$T")" = "$blinding" ] \
   || { echo "the birth's blinding is not the one A's key derives" >&2; exit 1; }
 scalar hledger create 3 10 >"$D/req/c3.json"; [ "$(invoke "$SPONSOR_WS" h-c3 "$D/req/c3.json")" = installed ] || { echo "create 3 failed" >&2; exit 1; }
+add_height "$SPONSOR_WS/attempts/h-c3/outcome.json"
 scalar hledger create 4 20 >"$D/req/c4.json"; [ "$(invoke "$SPONSOR_WS" h-c4 "$D/req/c4.json")" = installed ] || { echo "create 4 failed" >&2; exit 1; }
+add_height "$SPONSOR_WS/attempts/h-c4/outcome.json"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"hledger",
   recipient:$r,verbs:["observe"],maxCost:"50000",fields:["3"]}' >"$D/req/give.json"
 run give-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/give.json" --proposal-id h-give; must give-propose
@@ -114,11 +134,11 @@ hits=$(jq --arg e "$e4" --arg s "$s4" '[.. | strings | select(. == $e or . == $s
 sealed=$(jq '[.opening.items[] | select(.leaf) | .leaf | length] | map(select(. == 64)) | length' "$D/r-view.out")
 [ "$hits" = 0 ] && [ "$sealed" = 3 ] && got=sealed || got=leaked
 record r-sealed-4 sealed "$got" "field 4 entry/salt occurrences in B's view: $hits; sealed 32-byte leaves: $sealed (fields 1, 4 and the blinding)"
-d4=$("$MINI" key --action derive-salt --secret "$A_KEY" --cell "$T" --storage declared --entry "$e4" 2>"$D/derive4.err")
+d4=$("$MINI" key --action derive-salt --secret "$A_KEY" --cell "$T" --storage declared --heights "$HEIGHTS" --entry "$e4" 2>"$D/derive4.err")
 [ "$d4" = "$s4" ] && got=same || got=different
-record owner-derives-4 same "$got" "A derives field 4's salt from its key: ${d4:0:16}… served ${s4:0:16}…"
+record owner-derives-4 same "$got" "A derives field 4's salt from its key and write heights $HEIGHTS: ${d4:0:16}… served ${s4:0:16}…"
 r3=$(opened_of "$D/r-view.out" 3)
-d3=$("$MINI" key --action derive-salt --secret "$A_KEY" --cell "$T" --storage declared --entry "$(jq -r .entry <<<"$r3")" 2>"$D/derive3.err")
+d3=$("$MINI" key --action derive-salt --secret "$A_KEY" --cell "$T" --storage declared --heights "$HEIGHTS" --entry "$(jq -r .entry <<<"$r3")" 2>"$D/derive3.err")
 [ "$d3" = "$(jq -r .salt <<<"$r3")" ] && got=same || got=different
 record owner-derives-3 same "$got" "A derives the field-3 salt B was served"
 
@@ -136,18 +156,47 @@ cmp -s "$D/t-entry.json" "$D/r-view.out" && { echo "tamper-entry did not change 
 # ---- a write B may not read
 scalar hledger write 4 21 20 >"$D/req/w4.json"
 record a-writes-4 installed "$(invoke "$SPONSOR_WS" h-w4 "$D/req/w4.json")" "A writes field 4: 20 -> 21"
+add_height "$SPONSOR_WS/attempts/h-w4/outcome.json"
 run r-view2 "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name hledger
 verified "$D/r-view2.out" || { echo "B's second view does not verify" >&2; bad=$((bad + 1)); }
-o1=$(jq -c '[[.opening.items[] | select(.salt)], .cell.entries]' "$D/r-view.out")
-o2=$(jq -c '[[.opening.items[] | select(.salt)], .cell.entries]' "$D/r-view2.out")
+o1=$(jq -c '[[.opening.items[] | select(.salt) | .entry], .cell.entries]' "$D/r-view.out")
+o2=$(jq -c '[[.opening.items[] | select(.salt) | .entry], .cell.entries]' "$D/r-view2.out")
+salts=$(jq -n --slurpfile a "$D/r-view.out" --slurpfile b "$D/r-view2.out" \
+  '[$a[0].opening.items[] | select(.salt) | .salt] != [$b[0].opening.items[] | select(.salt) | .salt]')
 [ "$o1" = "$o2" ] && got=identical || got=changed
-record covered-same identical "$got" "opened items and displayed entries before/after A's write to field 4"
+record covered-same identical "$got" "opened entries and displayed entries before/after A's write to field 4 (opened salts re-keyed: $salts)"
 r2_root=$(jq -r .cell.root "$D/r-view2.out")
 [ "$r2_root" != "$r_root" ] && got=different || got=same
-record root-moves different "$got" "the metadata channel: B learns that something it may not read changed"
-moved=$(jq -n --slurpfile a "$D/r-view.out" --slurpfile b "$D/r-view2.out" \
-  '[range(0; $a[0].opening.items | length) as $i | select($a[0].opening.items[$i] != $b[0].opening.items[$i])] | length')
-record one-leaf-moves 1 "$moved" "items that differ between B's two views"
+record root-moves different "$got" "still visible: B learns THAT the cell was written"
+sealed_moved() { # VIEW-BEFORE VIEW-AFTER -> "<moved>/<sealed> <surviving>": positional moves, and how
+  # many of AFTER's sealed leaves equal ANY of BEFORE's (a returned or untouched entry)
+  jq -rn --slurpfile a "$1" --slurpfile b "$2" '
+    ([$a[0].opening.items[] | select(.leaf) | .leaf]) as $x
+    | ([$b[0].opening.items[] | select(.leaf) | .leaf]) as $y
+    | "\([range(0; $x | length) as $i | select($x[$i] != $y[$i])] | length)/\($x | length) \([$y[] | select(. as $l | $x | index($l))] | length)"'
+}
+read -r moved surviving <<<"$(sealed_moved "$D/r-view.out" "$D/r-view2.out")"
+[ "$surviving" = 0 ] && got=$moved || got="$moved+$surviving-survive"
+record every-leaf-moves 3/3 "$got" "B's sealed leaves that moved / sealed; $surviving of B's earlier sealed leaves reappear (was one-leaf-moves = 1 under the static blinding)"
+
+# ---- a return to an earlier value
+scalar hledger write 4 30 21 >"$D/req/w30.json"
+[ "$(invoke "$SPONSOR_WS" h-w30 "$D/req/w30.json")" = installed ] || { echo "write 4 := 30 failed" >&2; exit 1; }
+add_height "$SPONSOR_WS/attempts/h-w30/outcome.json"
+scalar hledger write 4 20 30 >"$D/req/w20.json"
+[ "$(invoke "$SPONSOR_WS" h-w20 "$D/req/w20.json")" = installed ] || { echo "write 4 := 20 failed" >&2; exit 1; }
+add_height "$SPONSOR_WS/attempts/h-w20/outcome.json"
+run a-view4 "$MINI" workspace --action read --dir "$SPONSOR_WS" --name hledger
+run r-view4 "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name hledger
+read -r moved4 surviving4 <<<"$(sealed_moved "$D/r-view.out" "$D/r-view4.out")"
+same4=$(jq -c '[[.opening.items[] | select(.salt) | .entry], .cell.entries]' "$D/r-view4.out")
+verified "$D/r-view4.out" && [ "$(field_value "$D/a-view4.out" 4)" = 20 ] && [ "$same4" = "$o1" ] \
+  && [ "$surviving4" = 0 ] && got=invisible || got="visible($surviving4)"
+record return-to-old-value-invisible invisible "$got" "field 4 back at 20 (A reads $(field_value "$D/a-view4.out" 4)); $moved4 of B's sealed leaves moved; $surviving4 of B's first-view sealed leaves reappear"
+r4=$(opened_of "$D/r-view4.out" 3)
+d3n=$("$MINI" key --action derive-salt --secret "$A_KEY" --cell "$T" --storage declared --heights "$HEIGHTS" --entry "$(jq -r .entry <<<"$r4")" 2>"$D/derive3n.err")
+[ "$d3n" = "$(jq -r .salt <<<"$r4")" ] && got=same || got=different
+record owner-derives-now same "$got" "A derives B's current field-3 salt from its key and the five write heights $HEIGHTS"
 
 # ---- restart, audit, replay
 pidfile=$W/public/server.pid
@@ -162,14 +211,14 @@ for i in $(seq 1 6000); do
   [ -S "$SOCKET" ] && grep -q serving "$W/public/serve-khide.log" 2>/dev/null && break; sleep 0.1
 done
 run r-view3 "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name hledger
-c2=$(jq -c '[.cell, .opening]' "$D/r-view2.out"); c3=$(jq -c '[.cell, .opening]' "$D/r-view3.out")
+c2=$(jq -c '[.cell, .opening]' "$D/r-view4.out"); c3=$(jq -c '[.cell, .opening]' "$D/r-view3.out")
 verified "$D/r-view3.out" && [ "$c2" = "$c3" ] && got=identical || got=changed
-record restart-same identical "$got" "B's view across stop/start (root ${r2_root:0:16}…)"
+record restart-same identical "$got" "B's view across stop/audit/start: the ratchet replays to the same blinding (root $(jq -r .cell.root "$D/r-view4.out" | cut -c1-16)…)"
 grep -q "audited" "$D/audit.out" "$D/audit.err" 2>/dev/null && got=audited || got=failed
 record audit audited "$got" "$(cat "$D/audit.out" "$D/audit.err" 2>/dev/null | grep -m1 audited | cut -c1-140)"
 
 cat "$rows" >&2
 n=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad hide rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$n/$n hide rows as expected: field-3 reader verifies its opening against a salted root, field 4 sealed, owner re-derives salts, tampering refused, a field-4 write moves only the root and one leaf, restart and audit replay" >&2
+echo "$n/$n hide rows as expected: field-3 reader verifies its opening against a salted root, field 4 sealed, owner re-derives ratcheted salts, tampering refused, a field-4 write moves the root and every sealed leaf, a return to an old value is invisible, restart and audit replay the ratchet" >&2
 echo "$rows"

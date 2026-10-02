@@ -300,31 +300,31 @@ inductive TransclusionMode where
   | live
   deriving DecidableEq, Repr
 
-/-- An embed names one atom of a source document at the revision its author
-read.  It stores no source bytes: a reader sees the quoted bytes only through
-its own read of the source (`ContentResource.renderQuote`).  `snapshot` (a
-quote) shows the bytes only while the source atom is still at `revision`;
-`live` (a transclusion) shows the current bytes and says whether they moved. -/
-structure EmbedRef where
-  document : DocumentId
-  atom : AtomId
-  revision : OperationId
-  mode : TransclusionMode
-  deriving DecidableEq, Repr
-
+/-- The element tree of a document.  A `container`'s `children` is the one
+ordering representation: document order is the pre-order walk of the tree from
+the document's root element (`ContentResource.documentOrder`).  A line of text
+is placed by an `atom` leaf naming its `AtomRecord`; a transclusion is placed
+by an `embed` leaf naming its `TransclusionRecord`.  Neither leaf stores bytes
+or a reference of its own: the named record is the one durable object. -/
 inductive ElementBody where
   | container (children : List ElementId)
   | runs (runs : List RunId)
-  | embed (reference : EmbedRef)
+  | embed (transclusion : TransclusionId)
+  | atom (atom : AtomId)
   | opaque (schema : Digest) (payload : List UInt8)
   deriving DecidableEq, Repr
 
+/-- `parent` is the container whose `children` lists this element (`none` for
+the document root and for a detached element).  `revision` is the operation
+that last changed the positions of this element's children, so an edit that
+names a position is checked against the revision its author read. -/
 structure ElementRecord where
   document : DocumentId
   parent : Option ElementId
   body : ElementBody
   createdBy : PrincipalRef
   createdAt : OperationId
+  revision : OperationId
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
@@ -516,11 +516,30 @@ structure TransclusionRecord where
   tombstonedAt : Option OperationId
   deriving DecidableEq
 
+/-- What a mark is laid on: a stable range, or one atom (a line) or one element
+at the revision its author read.  A revision anchor is stale once its target
+moves; it is never re-anchored. -/
+inductive MarkAnchor where
+  | range (range : StableRange)
+  | atom (atom : AtomId) (revision : OperationId)
+  | element (element : ElementId) (revision : OperationId)
+  deriving DecidableEq, Repr
+
+/-- What a mark says.  A `link` mark names the ordinary `LinkRecord` that
+carries its target: the link record is primary (backlinks and the link index
+read it), the mark is the inline overlay that places it on a line. -/
+inductive MarkKind where
+  | bold
+  | italic
+  | code
+  | heading
+  | link (link : LinkId)
+  deriving DecidableEq, Repr
+
 structure MarkRecord where
   document : DocumentId
-  range : StableRange
-  kind : Digest
-  payload : List UInt8
+  anchor : MarkAnchor
+  kind : MarkKind
   author : PrincipalRef
   operation : OperationId
   visibilityPolicy : Digest

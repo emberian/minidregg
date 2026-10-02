@@ -235,6 +235,9 @@ structure Pending {F : Type} [Field F]
     birth.prepared.pre.authority.snapshot.authState source.birth
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     birth.prepared.pre.authority.snapshot.authState ambient.height source.birth
+  bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+    source.birth
   requestsDistinct : Function.Injective (branchIdentity birth grain ambient.height)
 
 def preparePending {F : Type} [Field F]
@@ -257,12 +260,15 @@ def preparePending {F : Type} [Field F]
   let checked ← (ResourceBirthPolicyController.check pins
     CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
     source.birth).mapError Reject.metadata
-  let templateBound ← (ResourceBirthPolicyController.require
-    (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
-      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth)
-      .grantTemplate).mapError Reject.metadata
+  let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt profile.template
+      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
+    Reject.metadata
+  let bornLineage ← (ResourceBirthPolicyController.require
+    (ResourceBirthPolicyController.Concrete.BornLineage
+      (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+      source.birth) .roomLineage).mapError Reject.metadata
   if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
-    return ⟨tuple, physical.down, checked.down, templateBound.down, distinct⟩
+    return ⟨tuple, physical.down, checked.down, templateBound.down, bornLineage.down, distinct⟩
   else .error .ambiguousRequests
 
 /-- Changing the primary selector for one policy branch leaves every old cell,

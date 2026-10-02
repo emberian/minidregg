@@ -71,9 +71,24 @@ def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
 def State.store (s : State) (task : Nat) : Store effectLayout :=
   DeclaredFields.store task s.coordinates
 
-/-- A provider purse at birth: the AgentGrain birth state and no call. -/
+/-- The provider purse declares the four grain fields and its route field. -/
+def recordFields : FieldClosure.FieldSet := .closed [0, 1, 2, 3, 4]
+
+/-- A provider purse at birth: the AgentGrain birth state and no call, with
+exactly its five mutable coordinates declared. -/
 def initialStore (task budget : Nat) : Store effectLayout :=
-  (⟨⟨0, 0, Int.ofNat budget, 0⟩, 0⟩ : State).store task
+  FieldClosure.declare task recordFields
+    ((⟨⟨0, 0, Int.ofNat budget, 0⟩, 0⟩ : State).store task)
+
+/-- Birth is closed under the same five-field rule the receiver enforces. -/
+theorem fixture_initial_closed : FieldClosure.Closed 8784 (initialStore 8784 300000) := by
+  decide
+
+/-- The route can be written, while an unrelated sixth field remains forbidden. -/
+theorem fixture_initial_field_boundary :
+    FieldClosure.declaredIn 8784 (initialStore 8784 300000) 4 = true ∧
+    FieldClosure.declaredIn 8784 (initialStore 8784 300000) 5 = false := by
+  decide
 
 def readState (task : Nat) (store : Store effectLayout) : Option State := do
   let grain ← AgentGrain.readState task store
@@ -561,6 +576,8 @@ theorem fixture_interrupted_pool :
     run ⟨⟨1, 3, 70, 30⟩, 2⟩ ⟨⟨2, 5, 70, 30⟩, 2⟩ = true ∧
       run ⟨⟨2, 5, 70, 30⟩, 2⟩ ⟨⟨2, 0, 80, 0⟩, 0⟩ = true := by decide
 
+#assert_axioms fixture_initial_closed
+#assert_axioms fixture_initial_field_boundary
 #assert_axioms coordinates_ordered
 #assert_axioms store_projection_exact
 #assert_axioms readState_store

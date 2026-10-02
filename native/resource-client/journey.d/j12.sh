@@ -113,7 +113,10 @@ finish() {
 }
 
 # conditions the check rows use
-blame_ok() { grep -q "^  1  created-by $A .*then Alice\.\$" "$1" && grep -q "^  2  created-by $B .*Bob: a second paragraph\.\$" "$1"; }
+# doc show --json: each line's creator and text (P-DOC-RENDER: the text form is notation only)
+line_is() { jq -e --argjson n "$2" --arg by "$3" --arg re "$4" \
+  '.lines[] | select(.line == $n) | (.createdBy.subject == $by) and (.text | test($re))' "$1" >/dev/null; }
+blame_ok() { line_is "$1" 1 "$A" 'then Alice\.$' && line_is "$1" 2 "$B" '^Bob: a second paragraph\.$'; }
 history_ok() { [ "$(grep -cE "^attempt	(b1|b2|l1)	confirmed installed" "$1")" = 3 ]; }
 banner_ok() { [ "$(head -1 "$1")" = "hosted shell: your signing key is a file on this box; root can read and sign; for a key that never leaves your machine use \`mini --remote\` (see FRIENDS.md)" ]; }
 
@@ -127,8 +130,7 @@ for f in alice bob rev eve; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
-    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/$f.key.next.pub"
-  ok setup sponsor "enroll plan $f $f.key"
+  ok setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")
@@ -172,8 +174,8 @@ check J12 "bob's inbox: paper addressed to bob, imported" grep -q "^paper	object
 ok J12 alice "doc append a1 paper 'Alice: the first paragraph.'"
 ok J12 alice "submit a1"
 ok J12 alice "doc show paper"
-ok J12 bob "doc show paper"
-check J12 "bob reads alice's line 1" grep -q "^  1  created-by $A .*Alice: the first paragraph.$" "$OUT"
+ok J12 bob "doc show paper --json"
+check J12 "bob reads alice's line 1" line_is "$OUT" 1 "$A" '^Alice: the first paragraph\.$'
 ok J12 bob "doc append b1 paper 'Bob: a second paragraph.'"
 ok J12 bob "submit b1"
 ok J12 bob "doc edit b2 paper 1 'Alice: the first paragraph, tightened by Bob.'"
@@ -181,18 +183,21 @@ ok J12 bob "submit b2"
 # alice edits line 1 as she last read it; bob changed it since: the Host refuses
 ok J12 alice "doc edit a2 paper 1 'Alice: my own rewrite.'"
 refused J12 alice "submit a2" operation-rejected "ContentResource.Reject.staleAtom"
-ok J12 alice "doc show paper"
-check J12 "alice rereads: line 1 is bob's edit" grep -q "^  1  created-by $A .*tightened by Bob.$" "$OUT"
+ok J12 alice "doc show paper --json"
+check J12 "alice rereads: line 1 is bob's edit" line_is "$OUT" 1 "$A" 'tightened by Bob\.$'
 ok J12 alice "doc edit a3 paper 1 'Alice: the first paragraph, tightened by Bob, then Alice.'"
 ok J12 alice "submit a3"
 ok J12 bob "doc link l1 index paper"
 ok J12 bob "submit l1"
-ok J12 alice "doc show paper"
+ok J12 alice "doc show paper --json"
 check J12 "blame: line 1 created by alice, line 2 created by bob" blame_ok "$OUT"
-ok J12 alice "doc show index"
-check J12 "index links to paper, created by bob" grep -q "^link .* -> paper (document .*) relation 0 created-by $B$" "$OUT"
+ok J12 alice "doc links index"
+check J12 "index links to paper (the Host's link index)" grep -q "^link .* -> document paper relation 0 " "$OUT"
+ok J12 alice "read index"
+check J12 "index's link record was created by bob" \
+  jq -e --arg b "$B" '[.cell.entries[] | select(.type == "link") | .createdBy.subject] == [$b]' "$OUT"
 ok J12 alice "doc backlinks paper"
-check J12 "backlinks of paper: index's link by bob" grep -q "^index link .* relation 0 created-by $B$" "$OUT"
+check J12 "backlinks of paper: index's link (the Host's link index)" grep -q "^index link .* relation 0 " "$OUT"
 ok J12 bob "history"
 check J12 "bob's history holds his three accepted writes" history_ok "$OUT"
 
@@ -216,8 +221,10 @@ LAWPLAN="(Host refused prepare"
 ok J12 rev "doc show paper"
 ok J12 rev "doc append r1 paper 'Reviewer: a note.'"
 refused J12 rev "submit r1" undisclosed "$ADMISSION"
-# J12d (K-FIELDS): annotate-but-not-edit is not expressible on this store
-fails J12d rev "doc annotate paper 1 'Reviewer: cite this.'" 1 "needs K-CONTENT-ACTIONS, and annotate-but-not-edit needs K-FIELDS"
+# an annotation is a write too: the observe-only reviewer's is refused at admission
+# (the annotations-only reviewer that may annotate and not edit is K12M's and JDV's)
+ok J12 rev "doc annotate v1 paper 1 'Reviewer: cite this.'"
+refused J12 rev "submit v1" undisclosed "$ADMISSION"
 # an append-only note: the law's clause refuses an edit
 ok J12 alice "doc new log note"
 ok J12 alice "doc append n1 log 'Decided: we write the paper together.'"

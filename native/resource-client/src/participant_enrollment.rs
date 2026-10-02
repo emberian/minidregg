@@ -120,6 +120,30 @@ pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
+/// Whether an enrollment Host refusal is the Host's own `stale-root`, decoded
+/// by the Host itself over the same session (op8 `inspect outcome`).
+pub(crate) fn stale_refusal(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    decision: Option<&HostDecision>,
+) -> bool {
+    match decision {
+        Some(HostDecision::RefusedFrame { decoded: None, encoded, .. }) => {
+            let kind = b"outcome";
+            let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
+            payload.extend_from_slice(kind);
+            payload.extend_from_slice(encoded);
+            session_invoke(host, socket, config, 8, &payload)
+                .ok()
+                .filter(|frame| frame.first() == Some(&8))
+                .and_then(|frame| serde_json::from_slice::<Value>(&frame[1..]).ok())
+                .is_some_and(|outcome| crate::replan::outcome_is_stale_root(&outcome))
+        }
+        decision => crate::replan::is_stale_root(decision),
+    }
+}
+
 pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
@@ -297,6 +321,9 @@ struct Pin {
     public_key: String,
     plan: Vec<u8>,
     command: Vec<u8>,
+    /// The committed next key and its co-signature (both empty without one).
+    next_public: Vec<u8>,
+    next_cosign: Vec<u8>,
 }
 
 /// A home identity keeps its origin subject number, so only the Store-local
@@ -314,6 +341,49 @@ fn enrollment_roles(home: bool) -> Vec<Role> {
         kind: IdKind::Key,
     });
     roles
+}
+
+fn cosign_file(path: &Path) -> Result<[u8; 64]> {
+    bounded(path, 64)?
+        .try_into()
+        .map_err(|_| format!("the co-signature {} must contain exactly 64 raw bytes", path.display()))
+}
+
+/// `mini enroll --action cosign --key KEY [--next-key NEXT] [--output FILE]`
+/// (or `--public-key PUB` in place of `--key`): the next key's co-signature of
+/// the pair (KEY's public key, NEXT's public key), written to FILE (default
+/// KEY.next.cosign) and printed with both public keys -- the three hex lines a
+/// sponsor's `enroll plan` takes. Run by whoever holds NEXT.
+fn cosign_action(mut args: Args) -> Result<()> {
+    let key_path = args.optional("key").map(|value| absolute(&path(value))).transpose()?;
+    let public_path = args.optional("public-key").map(|value| absolute(&path(value))).transpose()?;
+    let next_path = args.optional("next-key").map(|value| absolute(&path(value))).transpose()?;
+    let output = args.optional("output").map(|value| absolute(&path(value))).transpose()?;
+    args.finish()?;
+    let (public, default_next, default_output) = match (&key_path, &public_path) {
+        (Some(secret), None) => {
+            let mut next = secret.as_os_str().to_owned();
+            next.push(".next");
+            (key(secret)?.verifying_key().to_bytes(), Some(PathBuf::from(next)),
+                Some(crate::key_rotation::conventional_next_cosign(secret)))
+        }
+        (None, Some(public)) => (public_key_file(public)?.to_bytes(), None, None),
+        _ => return Err("cosign takes --key KEY or --public-key PUB".into()),
+    };
+    let next_path = next_path.or(default_next).ok_or("cosign needs --next-key NEXT")?;
+    let next = key(&next_path)?;
+    let output = output.or(default_output).ok_or("cosign with --public-key needs --output")?;
+    let signature = crate::key_rotation::cosign(&public, &next);
+    let next_public = next.verifying_key().to_bytes();
+    crate::key_rotation::verify_cosign(&public, &next_public, &signature)?;
+    match bounded(&output, 64) {
+        Ok(existing) if existing == signature => {}
+        Ok(_) => return Err(format!("{} already holds another co-signature", output.display())),
+        Err(_) => crate::create_public(&output, &signature)?,
+    }
+    print_json(&json!({"type":"minidregg-next-key-cosign-v1","publicKey":hex(&public),
+        "nextPublicKey":hex(&next_public),"cosign":hex(&signature),"cosignAt":utf8_path(&output)?,
+        "next":"give your sponsor nextPublicKey and cosign: `enroll plan NAME KEYFILE NEXT-PUB COSIGN`"}))
 }
 
 fn public_key_file(path: &Path) -> Result<VerifyingKey> {
@@ -402,7 +472,20 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         return Err("enrollment namespace reservation changed".into());
     }
     participant_namespace::bind_attempt(&reservation, directory, &digest(&command))?;
+    let next_public = match request.get("nextPublicKey").and_then(Value::as_str) {
+        Some(text) => decode_hex(text)?,
+        None => Vec::new(),
+    };
+    let next_cosign = match request.get("nextCosign").and_then(Value::as_str) {
+        Some(text) => decode_hex(text)?,
+        None => Vec::new(),
+    };
+    if next_public.is_empty() != next_cosign.is_empty() {
+        return Err("enrollment request names a next key without its co-signature".into());
+    }
     Ok(Pin {
+        next_public,
+        next_cosign,
         host,
         config,
         public_socket,
@@ -457,6 +540,13 @@ pub(crate) fn signed_factory_observation(
         }
         Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
     }
+    // Op 4 is authenticated before the Host reads the factory: the intent's bytes
+    // and the sponsor's signature over them, in the session's pair framing.
+    let intent_signature = signing.sign(&query_bytes).to_bytes();
+    let length: u32 = query_bytes.len().try_into().map_err(|_| "factory intent too large")?;
+    let mut request = length.to_le_bytes().to_vec();
+    request.extend_from_slice(&query_bytes);
+    request.extend_from_slice(&intent_signature);
     let challenge = staged_invoke(
         input.host,
         input.socket,
@@ -464,7 +554,7 @@ pub(crate) fn signed_factory_observation(
         &observation,
         "challenge",
         4,
-        &query_bytes,
+        &request,
     )?;
     let challenge_json = inspect(
         input.host,
@@ -602,6 +692,31 @@ fn plan(mut args: Args) -> Result<()> {
         .map(public_key_file)
         .transpose()?
         .map(|key| key.to_bytes());
+    // FIX-IDENTITY: the committed next key co-signs (Kernel enrollGate). The
+    // co-signature comes from whoever holds the next key: `mini keygen` wrote it
+    // at KEY.next.cosign, `mini enroll --action cosign` makes it again.
+    let next_cosign_arg = args
+        .optional("next-cosign")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let next_cosign: Option<[u8; 64]> = match (&next_public, next_cosign_arg, &new_key) {
+        (None, Some(_), _) => return Err("--next-cosign needs a next key (not --no-prerotation)".into()),
+        (None, None, _) => None,
+        (Some(_), Some(file), _) => Some(cosign_file(&file)?),
+        (Some(_), None, Some(secret)) => {
+            let conventional = crate::key_rotation::conventional_next_cosign(secret);
+            if !conventional.is_file() {
+                return Err(format!(
+                    "the next key must co-sign this enrollment: {} is missing; whoever holds the next key runs `mini enroll --action cosign --key KEY --next-key NEXT` and passes --next-cosign",
+                    conventional.display()
+                ));
+            }
+            Some(cosign_file(&conventional)?)
+        }
+        (Some(_), None, None) => {
+            return Err("a public-key enrollment with a next key needs --next-cosign (the newcomer's `mini join --key` prints it)".into())
+        }
+    };
     let operator_override = args
         .optional("operator-socket")
         .map(path)
@@ -712,7 +827,13 @@ fn plan(mut args: Args) -> Result<()> {
         if hex(next) == public_key {
             return Err("the next key must differ from the key being enrolled".into());
         }
+        let cosign = next_cosign.ok_or("a next key without its co-signature")?;
+        let enrolled: [u8; 32] = decode_hex(&public_key)?
+            .try_into()
+            .map_err(|_| "enrolled public key is not 32 bytes")?;
+        crate::key_rotation::verify_cosign(&enrolled, next, &cosign)?;
         expected_request["nextPublicKey"] = json!(hex(next));
+        expected_request["nextCosign"] = json!(hex(&cosign));
     }
     let request = retained_request(&directory, &expected_request)?;
     let roles = enrollment_roles(home);
@@ -731,80 +852,98 @@ fn plan(mut args: Args) -> Result<()> {
     };
     retain_exact(&directory.join("config.json"), &config_bytes)?;
     let retained_config = directory.join("config.json");
-    let (signed, factory_root, authority_root) = signed_factory_observation(
-        &FactoryObservation {
-            host: &host,
-            socket: &public_socket,
-            config: &retained_config,
-            directory: &directory,
-            sponsor: &sponsor,
-            nonce: field(&request, "nonce")?,
-            factory: &factory_target,
-            observe: &observe,
+    // The factory observation, the command over its roots and the Plan are one
+    // re-plannable unit: nothing is bound or submitted until the Plan is
+    // validated, so a Host stale-root (a tick, certify or write between the
+    // observation and its use) retires them under replanned/ and observes again.
+    let (command, plan, plan_view) = crate::replan::replan(
+        "enroll plan",
+        || {
+            let (signed, factory_root, authority_root) = signed_factory_observation(
+                &FactoryObservation {
+                    host: &host,
+                    socket: &public_socket,
+                    config: &retained_config,
+                    directory: &directory,
+                    sponsor: &sponsor,
+                    nonce: field(&request, "nonce")?,
+                    factory: &factory_target,
+                    observe: &observe,
+                },
+                &sponsor_signing,
+            )?;
+            let factory_root = factory_root.as_str();
+            let authority_root = authority_root.as_str();
+            if let Some(next) = &next_public {
+                let enrolled: [u8; 32] = decode_hex(&public_key)?
+                    .try_into().map_err(|_| "enrolled public key is not 32 bytes")?;
+                crate::key_rotation::host_next_possession_frame(
+                    &host, &public_socket, &retained_config, &enrolled, next)?;
+            }
+            let next_key_digest = match &next_public {
+                Some(next) => json!(crate::key_rotation::next_key_digest(
+                    &host, &public_socket, &retained_config, next
+                )?),
+                None => Value::Null,
+            };
+            let command_source = json!({"sponsor":sponsor,"control":control,
+                "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
+                "expectedAuthorityRoot":authority_root,
+                "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
+                    "subject":subject,"publicKey":public_key,
+                    "activeFrom":"0","activeUntil":u64::MAX.to_string(),
+                    "nextKeyDigest":next_key_digest}});
+            save_json_staged(&directory.join("source.json"), &command_source)?;
+            transform(
+                &host,
+                &public_socket,
+                &retained_config,
+                7,
+                Some(COMMAND_KIND),
+                &directory.join("source.json"),
+                &directory.join("command.bin"),
+            )?;
+            let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
+            let command_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                COMMAND_KIND,
+                &directory.join("command.bin"),
+                &directory.join("command.json"),
+            )?;
+            if field(&command_view, "type")? != "participant-key-enrollment-v1"
+                || field(&command_view, "canonical")? != hex(&command)
+                || command_view.get("key") != Some(&command_source["key"])
+            {
+                return Err("enrollment canonical command differs from reserved source".into());
+            }
+            let plan = staged_invoke(
+                &host,
+                &operation_socket,
+                &retained_config,
+                &directory,
+                "plan",
+                86,
+                &pair(&signed, &command)?,
+            )?;
+            let plan_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                PLAN_KIND,
+                &directory.join("plan.bin"),
+                &directory.join("plan.json"),
+            )?;
+            validate_plan(&plan_view, &command, &plan)?;
+            Ok((command, plan, plan_view))
         },
-        &sponsor_signing,
+        |_, decision| stale_refusal(&host, &public_socket, &retained_config, decision),
+        |number| {
+            crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
+                .map(|_| ())
+        },
     )?;
-    let factory_root = factory_root.as_str();
-    let authority_root = authority_root.as_str();
-    let next_key_digest = match &next_public {
-        Some(next) => json!(crate::key_rotation::next_key_digest(
-            &host,
-            &public_socket,
-            &retained_config,
-            next
-        )?),
-        None => Value::Null,
-    };
-    let command_source = json!({"sponsor":sponsor,"control":control,
-        "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
-        "expectedAuthorityRoot":authority_root,
-        "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
-            "subject":subject,"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string(),
-            "nextKeyDigest":next_key_digest}});
-    save_json_staged(&directory.join("source.json"), &command_source)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        7,
-        Some(COMMAND_KIND),
-        &directory.join("source.json"),
-        &directory.join("command.bin"),
-    )?;
-    let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
-    let command_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        COMMAND_KIND,
-        &directory.join("command.bin"),
-        &directory.join("command.json"),
-    )?;
-    if field(&command_view, "type")? != "participant-key-enrollment-v1"
-        || field(&command_view, "canonical")? != hex(&command)
-        || command_view.get("key") != Some(&command_source["key"])
-    {
-        return Err("enrollment canonical command differs from reserved source".into());
-    }
-    let plan = staged_invoke(
-        &host,
-        &operation_socket,
-        &retained_config,
-        &directory,
-        "plan",
-        86,
-        &pair(&signed, &command)?,
-    )?;
-    let plan_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        PLAN_KIND,
-        &directory.join("plan.bin"),
-        &directory.join("plan.json"),
-    )?;
-    validate_plan(&plan_view, &command, &plan)?;
     pinned(&request, "hostSha256", &host_image_sha256(&host)?)?;
     pinned(
         &request,
@@ -986,6 +1125,12 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
             // plan commits to (absent for a key made with --no-prerotation).
             if let Some(next) = own_next_public(&key_path)? {
                 println!("{}", hex(&next));
+                // The third line: the next key's co-signature, which the
+                // sponsor's plan carries (FIX-IDENTITY).
+                let cosign = crate::key_rotation::conventional_next_cosign(&key_path);
+                if cosign.is_file() {
+                    println!("{}", hex(&cosign_file(&cosign)?));
+                }
             }
             Ok(())
         }
@@ -1149,6 +1294,8 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()>
             key: None,
             subject: None,
             enrollment: Some(&state.join("enrollment.json")),
+            next_public: None,
+            without_prerotation: false,
         },
         context.as_deref(),
         Some(&namespace),
@@ -1220,7 +1367,12 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &directory.join("possession-signature.bin"),
         &possession_signature,
     )?;
-    let signatures = pair(&sponsor_signature, &possession_signature)?;
+    // possession (64), then for a pre-rotated record the next key (32) and its
+    // co-signature (64): the second half of the pair is 64 or 160 bytes.
+    let signatures = pair(
+        &sponsor_signature,
+        &[&possession_signature[..], &pin.next_public, &pin.next_cosign].concat(),
+    )?;
     let assembly = pair(&pin.plan, &signatures)?;
     let ingress = staged_invoke(
         &pin.host,
@@ -1239,11 +1391,13 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &directory.join("ingress.bin"),
         &directory.join("ingress.json"),
     )?;
-    if field(&view, "type")? != "participant-key-enrollment-ingress-v1"
+    if field(&view, "type")? != "participant-key-enrollment-ingress-v2"
         || field(&view, "canonical")? != hex(&ingress)
         || field(&view, "commandBytes")? != hex(&pin.command)
         || field(&view, "possessionSignature")? != hex(&possession_signature)
         || field(&view, "possessionSignatureLength")? != "64"
+        || field(&view, "nextPublicKey")? != hex(&pin.next_public)
+        || field(&view, "nextPossessionSignature")? != hex(&pin.next_cosign)
     {
         return Err("enrollment assembled ingress differs from signed exact Plan".into());
     }
@@ -1393,6 +1547,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     match action.as_str() {
         "plan" => plan(args),
         "possess" => possess(args),
+        "cosign" => cosign_action(args),
         "offer" => {
             let directory = path(args.required("dir")?);
             args.finish()?;
@@ -1591,6 +1746,8 @@ mod tests {
             public_key: "aa".repeat(32),
             plan: vec![],
             command: vec![],
+            next_public: vec![],
+            next_cosign: vec![],
         };
         let installed = json!({"type":"confirmed","confirmation":"installed",
             "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});

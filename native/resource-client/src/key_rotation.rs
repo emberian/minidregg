@@ -80,6 +80,147 @@ fn status(host: &Path, socket: &Path, config: &Path, subject: &str, public: &[u8
     serde_json::from_slice(&body).map_err(|error| format!("invalid key status: {error}"))
 }
 
+/// The key status, or `None` when the Host holds no current key for the
+/// subject (not enrolled yet). Any other refusal is an error, by its name.
+/// Records no Host decision: a caller that refuses explains itself.
+pub(crate) fn status_if_enrolled(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    subject: &str,
+    public: &[u8; 32],
+) -> Result<Option<Value>> {
+    let query = serde_json::to_vec(&json!({"subject":subject,"publicKey":hex(public)}))
+        .map_err(|error| error.to_string())?;
+    let frame = session_invoke(host, socket, config, 144, &query)?;
+    match frame.as_slice() {
+        [144, body @ ..] if !body.is_empty() => serde_json::from_slice(body)
+            .map(Some)
+            .map_err(|error| format!("invalid key status: {error}")),
+        [255 | 254, encoded @ ..] => {
+            let decoded = inspect_bytes(host, socket, config, "outcome", encoded)?;
+            let detail = decoded
+                .get("detail")
+                .and_then(Value::as_str)
+                .and_then(|text| workspace::private::decode_hex(text).ok())
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .unwrap_or_default();
+            let text = format!("{detail} {decoded}");
+            if detail == "subject has no current signing key" {
+                Ok(None)
+            } else {
+                Err(format!("the Host refused the key-status query: {text}"))
+            }
+        }
+        _ => Err("Host op144 returned an invalid frame".into()),
+    }
+}
+
+// ---------------------------------------------------------------- the next key's co-signature
+
+/// What a committed NEXT key signs at enrollment (`Kernel.ParticipantKeyEnrollment.
+/// nextPossessionFrame`): its consent to succeed the enrolled key. Fixed layout,
+/// so `mini keygen` co-signs offline; `enroll plan` checks these bytes against
+/// the Host's own (`participant-key-enrollment-next-possession`) before using a
+/// co-signature, so a drift between this copy and the kernel refuses loudly.
+pub(crate) const NEXT_POSSESSION_TAG: &[u8] = b"DREGG/PARTICIPANT/KEY-ENROLL/NEXT-POSSESSION/v1";
+
+pub(crate) fn next_possession_frame(public: &[u8; 32], next: &[u8; 32]) -> Vec<u8> {
+    [NEXT_POSSESSION_TAG, public, next].concat()
+}
+
+/// The co-signature file `mini keygen` writes beside the key: KEY.next.cosign.
+pub(crate) fn conventional_next_cosign(secret: &Path) -> PathBuf {
+    let mut name = secret.as_os_str().to_owned();
+    name.push(".next.cosign");
+    PathBuf::from(name)
+}
+
+/// The next key's co-signature over the pair (daily public key, next public key).
+pub(crate) fn cosign(public: &[u8; 32], next: &ed25519_dalek::SigningKey) -> [u8; 64] {
+    next.sign(&next_possession_frame(public, &next.verifying_key().to_bytes())).to_bytes()
+}
+
+/// A co-signature verifies under the next key over the client's frame.
+pub(crate) fn verify_cosign(public: &[u8; 32], next: &[u8; 32], signature: &[u8; 64]) -> Result<()> {
+    ed25519_dalek::VerifyingKey::from_bytes(next)
+        .map_err(|_| "the next public key is not a valid Ed25519 point")?
+        .verify_strict(&next_possession_frame(public, next), &ed25519_dalek::Signature::from_bytes(signature))
+        .map_err(|_| "the co-signature does not verify: it was not made by this next key for this key (`mini enroll --action cosign`)".into())
+}
+
+/// The Host's frame for the pair; the client's copy must equal it.
+pub(crate) fn host_next_possession_frame(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    public: &[u8; 32],
+    next: &[u8; 32],
+) -> Result<Vec<u8>> {
+    let frame = author(host, socket, config, "participant-key-enrollment-next-possession",
+        &json!({"publicKey":hex(public),"nextPublicKey":hex(next)}))?;
+    if frame != next_possession_frame(public, next) {
+        return Err("the Host's next-possession frame differs from this client's: refusing to co-sign or plan with it".into());
+    }
+    Ok(frame)
+}
+
+// ---------------------------------------------------------------- whose key can rotate this subject
+
+/// How a workspace binds its subject's pre-rotation commitment (FIX-IDENTITY):
+/// the next public key it holds, or an explicit statement that it holds none.
+pub(crate) enum Commitment {
+    Mine([u8; 32]),
+    Without,
+}
+
+/// The client half of pre-rotation. A subject whose record commits to a next key
+/// that is not THIS client's can be rotated -- taken -- by whoever holds that key;
+/// a friend must never build on it. Refuses, by name, unless the subject's
+/// commitment is the digest of `commitment`'s key (or the subject commits to none
+/// and the friend said `--no-prerotation`). `Ok(None)`: the Host knows no current
+/// key for the subject yet, so there is nothing to compare.
+pub(crate) fn check_commitment(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    subject: &str,
+    daily: &[u8; 32],
+    commitment: &Commitment,
+) -> Result<Option<Value>> {
+    let asked = match commitment {
+        Commitment::Mine(next) => next,
+        Commitment::Without => daily,
+    };
+    let Some(view) = status_if_enrolled(host, socket, config, subject, asked)? else {
+        return Ok(None);
+    };
+    let flag = |name: &str| view.get(name).and_then(Value::as_bool);
+    let prerotated = flag("prerotated").ok_or("key status lacks prerotated")?;
+    let redo = "ask your sponsor to enroll you again, as a NEW name (this subject cannot be repaired): `enroll plan NAME KEYFILE NEXT-PUB COSIGN` with the two hex lines your `keygen` printed (`mini enroll --action cosign --key KEY` prints them again); never use this subject";
+    match (commitment, prerotated) {
+        (Commitment::Mine(_), true) => {
+            if flag("isCommittedNext") != Some(true) {
+                return Err(format!(
+                    "refused: subject {subject}'s record commits to a next key that is NOT yours: whoever holds that key can rotate this subject to itself and lock your key out. {redo}"
+                ));
+            }
+        }
+        (Commitment::Mine(_), false) => {
+            return Err(format!(
+                "refused: subject {subject}'s record commits to no next key, but you hold one: this subject can never rotate, and your next key protects nothing. {redo}, or init with --no-prerotation if a key that can never rotate is what you meant"
+            ));
+        }
+        (Commitment::Without, true) => {
+            return Err(format!(
+                "refused: subject {subject}'s record commits to a next key, and this workspace holds none (--no-prerotation, or no KEY.next.pub): a key you do not hold could replace yours. Pass your next public key (--next-pub), or {redo}"
+            ));
+        }
+        (Commitment::Without, false) => {}
+    }
+    Ok(Some(view))
+}
+
 fn public_file(path: &Path) -> Result<[u8; 32]> {
     fs::read(path)
         .map_err(|error| format!("cannot read public key {}: {error}", path.display()))?
@@ -147,6 +288,17 @@ fn replace_public(path: &Path, bytes: &[u8]) -> Result<()> {
     let _ = fs::remove_file(&staged);
     create_public(&staged, bytes)?;
     fs::rename(&staged, path).map_err(|error| format!("cannot install {}: {error}", path.display()))
+}
+
+/// The workspace subject's current key epoch, as the Host reports it.
+pub(crate) fn current_key_epoch(root: &Path) -> Result<String> {
+    let ws = workspace(root)?;
+    let daily = key(&ws.key)?.verifying_key().to_bytes();
+    let view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &daily)?;
+    view.get("keyEpoch")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "key status lacks keyEpoch".to_owned())
 }
 
 /// `mini key-status --workspace WS [--next-public-key PUB]`
@@ -251,6 +403,13 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         create_private(&ingress_path, &ingress)?;
     }
     let ingress = fs::read(&ingress_path).map_err(|error| format!("cannot read rotation ingress: {error}"))?;
+    // Before anything is overwritten: the encryption secret of the key being
+    // rotated away joins the keyring, so every room epoch wrapped to it stays
+    // openable (FIX-IDENTITY B). Idempotent; a retried rotation adds nothing.
+    if named.is_none() {
+        let epoch_text = epoch.to_string();
+        workspace::private::keyring_remember(&ws.key, &epoch_text)?;
+    }
     let outcome = match call(&ws.host, &ws.socket, &ws.config, 142, &ingress) {
         Ok(frame) => inspect_bytes(&ws.host, &ws.socket, &ws.config, "outcome", &frame)?,
         Err(error) if error.starts_with("host refused") => return Err(error),
@@ -278,9 +437,14 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             fs::remove_file(&next_key).map_err(|error| format!("cannot remove used next key: {error}"))?;
         }
         fs::remove_file(&after_path).map_err(|error| format!("cannot remove staged key: {error}"))?;
+        // The workspace's commitment record follows the rotation: its next key
+        // is now the key after next.
+        workspace::record_next_public(&root, &after_public)?;
+        // Every private room this subject is in learns its new encryption key.
+        let rooms = workspace::roomkey::publish_rotation(&root, &new_epoch.to_string());
         let result = json!({"type":"minidregg-key-rotation-result-v1","subject":ws.subject,
             "keyEpoch":new_epoch.to_string(),"keyId":key_id,"publicKey":hex(&signer_public),
-            "nextKeyAt":destination,"outcome":outcome});
+            "nextKeyAt":destination,"outcome":outcome,"privateRooms":rooms});
         participant_enrollment::save_json(&attempt.join("result.json"), &result)?;
         eprintln!("{PREROTATION_NOTICE}");
         println!("{}", serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?);

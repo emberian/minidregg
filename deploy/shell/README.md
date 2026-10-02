@@ -52,7 +52,7 @@ machine. `MINI_SSH` names another ssh program, as `GIT_SSH` does.
 The sponsor's side, in their (hosted) shell:
 
 ```
-enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX   # plans from the two public keys alone
+enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX   # the three lines `mini join --key` printed
 enroll offer NAME > offer.json       # hand to the friend
 enroll seal NAME SIGNATURE-HEX       # the signature join printed
 enroll submit NAME
@@ -122,8 +122,9 @@ the client where the Host answered, never from error text.
 
 ## Known limit
 
-`enroll plan NAME KEYFILE` (a secret key file in the sponsor's session home)
-still signs with both keys in one process; it is kept for hosted sessions whose
-keys are on the box anyway. A newcomer who keeps their key uses
-`enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX` and `mini join` (above); no process on the box
-ever holds their secret.
+`enroll plan NAME KEYFILE NEXT-PUB-HEX COSIGN-HEX` (a secret key file in the
+sponsor's session home) still signs with both keys in one process; it is kept for
+hosted sessions whose keys are on the box anyway. The next key and its
+co-signature are the friend's words, never a file in the sponsor's home. A newcomer
+who keeps their key uses `enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX`
+and `mini join` (above); no process on the box ever holds their secret.

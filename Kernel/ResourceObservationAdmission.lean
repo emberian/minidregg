@@ -212,6 +212,15 @@ def lawReadGuards (prepared : Prepared context profile wanted marker capability 
   PhysicalLawResolution.readGuards context.authority.snapshot context.directory.directory
     profile.semantics wanted.target.value
 
+/-- The fields the reader's capability names (K-FIELDS), which narrow what a law refusal
+tells it (`Refusal.lawDeniedFor`, FIX-DISCLOSE). A capability that does not read names no
+field (`some ∅`): its refusal then names no clause over the cell's state. -/
+def readerFields (context : Context deployment durable) (kind : ResourceKind)
+    (capability : CapabilityId) : Option (Finset CellField) :=
+  match CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability with
+  | some stored => stored.head.scope.fields
+  | none => some ∅
+
 /-- Read admission after the requester's signature has verified. Capability
 failures carry the reason of the component that decided them
 (`sourceCapabilityOnlyEvidenceChecked`); a missing or failing committed law is
@@ -220,7 +229,7 @@ very witness states the law was admitted against. A law refused because one of
 its order clauses compares two values outside the native order range is
 `lawInputRange`, naming that clause and its two values (`LawLeaf.ofRange`), and
 one refused because two integers of the step share a field image is
-`lawInputRange` naming the two integers (`castAlias`). -/
+`lawInputRange` naming the two integers (`castAlias`). Narrowed grants receive no hidden values in any of these diagnostics. -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
@@ -238,13 +247,13 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
           | none =>
               match LawLeaf.ofRange profile.compilerProfile.compiler committed.predicate
                   witness.compiled.oldState witness.compiled.newState with
-              | some leaf => .error (Refusal.lawInputRange leaf)
+              | some leaf => .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf)
               | none =>
                   match castAlias F (intsOf committed.predicate
                       witness.compiled.oldState witness.compiled.newState) with
-                  | some (x, y) => .error (Refusal.castAlias x y)
-                  | none => .error (Refusal.lawDenied
-                      (LawLeaf.of committed.predicate witness.compiled.oldState witness.compiled.newState))
+                  | some (x, y) => .error (Refusal.castAliasFor (readerFields context kind capability) x y)
+                  | none => .error (Refusal.lawDeniedFor (readerFields context kind capability)
+                      committed.predicate witness.compiled.oldState witness.compiled.newState)
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -282,8 +291,9 @@ theorem authorizeChecked_lawDenied
       (step prepared).oldState (step prepared).newState = true)
     (castExact : castInjOn F (intsOf committed.predicate
       (step prepared).oldState (step prepared).newState)) :
-    authorizeChecked prepared signature = .error (Refusal.lawDenied
-      (LawLeaf.of committed.predicate (step prepared).oldState (step prepared).newState)) := by
+    authorizeChecked prepared signature = .error (Refusal.lawDeniedFor
+      (readerFields context kind capability) committed.predicate
+      (step prepared).oldState (step prepared).newState) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
     committed.predicate (step prepared).oldState (step prepared).newState).mpr inRange
   have noAlias := (castAlias_none_iff F (intsOf committed.predicate
@@ -312,7 +322,7 @@ theorem authorizeChecked_castAlias
       (step prepared).oldState (step prepared).newState = true)
     (alias_ : castAlias F (intsOf committed.predicate
       (step prepared).oldState (step prepared).newState) = some (x, y)) :
-    authorizeChecked prepared signature = .error (Refusal.castAlias x y) := by
+    authorizeChecked prepared signature = .error (Refusal.castAliasFor (readerFields context kind capability) x y) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
     committed.predicate (step prepared).oldState (step prepared).newState).mpr inRange
   simp only [authorizeChecked, supplied, resolved, denied]
@@ -337,7 +347,7 @@ theorem authorizeChecked_lawInputRange
       prepared.epochExact prepared.revisionExact = none)
     (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.predicate
       (step prepared).oldState (step prepared).newState = some leaf) :
-    authorizeChecked prepared signature = .error (Refusal.lawInputRange leaf) := by
+    authorizeChecked prepared signature = .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf) := by
   simp only [authorizeChecked, supplied, resolved, denied]
   have oldExact : committed.witness.compiled.oldState = (step prepared).oldState := rfl
   have newExact : committed.witness.compiled.newState = (step prepared).newState := rfl
@@ -359,11 +369,15 @@ theorem authorizeChecked_leaf_fails
   simp only [authorizeChecked, supplied, resolved] at refused
   split at refused
   · split at refused
-    · simp [Refusal.lawInputRange, Refusal.lawDenied] at refused
+    · simp only [Refusal.lawInputRangeFor] at refused
+      split at refused <;> simp [Refusal.lawInputRange, Refusal.lawDeniedOutsideGrant,
+        Refusal.lawDenied] at refused
     · split at refused
-      · simp [Refusal.castAlias, Refusal.lawDenied] at refused
-      · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
-        obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
+      · cases readerFields context kind capability <;>
+          simp [Refusal.castAliasFor, Refusal.castAlias, Refusal.lawDeniedOutsideGrant,
+            Refusal.lawDenied] at refused
+      · simp only [Except.error.injEq] at refused
+        obtain ⟨at_, _, fails⟩ := lawDeniedFor_fails _ _ _ _ leaf refused
         exact ⟨at_, fails⟩
   · cases refused
 

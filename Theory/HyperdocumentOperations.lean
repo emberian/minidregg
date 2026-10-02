@@ -64,9 +64,8 @@ structure TranscludePayload where
 structure MarkPayload where
   id : MarkId
   document : DocumentId
-  range : StableRange
-  kind : Digest
-  payload : List UInt8
+  anchor : MarkAnchor
+  kind : MarkKind
   visibilityPolicy : Digest
   deriving DecidableEq, Repr
 
@@ -147,6 +146,7 @@ def createWrites (operation : OperationId) (author : PrincipalRef)
         body := payload.rootBody
         createdBy := author
         createdAt := operation
+        revision := operation
         tombstonedAt := none } ]
 
 def editAtomRecord (operation : OperationId)
@@ -208,9 +208,8 @@ def transcludeWrites (operation : OperationId) (author : PrincipalRef)
 def markRecord (operation : OperationId) (author : PrincipalRef)
     (payload : MarkPayload) : MarkRecord :=
   { document := payload.document
-    range := payload.range
+    anchor := payload.anchor
     kind := payload.kind
-    payload := payload.payload
     author := author
     operation := operation
     visibilityPolicy := payload.visibilityPolicy
@@ -361,7 +360,9 @@ def Action.RangesValidAt
   | .transclude payload =>
       ∀ range, payload.source = some range →
         StoredRangeValidAt pre payload.hostDocument range
-  | .mark payload => StoredRangeValidAt pre payload.document payload.range
+  | .mark payload =>
+      ∀ range, payload.anchor = .range range →
+        StoredRangeValidAt pre payload.document range
   | .annotate payload =>
       ∀ range, payload.range = some range →
         StoredRangeValidAt pre payload.document range
@@ -414,7 +415,9 @@ theorem Action.RangesValidAt.of_lookup_eq
   | transclude payload =>
       intro range exact
       exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
-  | mark payload => exact StoredRangeValidAt.of_lookup_eq valid runs atoms
+  | mark payload =>
+      intro range exact
+      exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
   | annotate payload =>
       intro range exact
       exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms

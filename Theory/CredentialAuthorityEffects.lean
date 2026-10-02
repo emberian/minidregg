@@ -420,9 +420,11 @@ def IssueDeclaration.patch {kind : ResourceKind}
     IssueDeclaration.capabilityEntry, registrationEntry]
 
 /-- Issuance is root-only, fresh and current-epoch.  The issued capability's own
-key is not yet registered (issuance registers it); every channel it names is
-already registered and live, read from the planes.  Single use is the durable
-consumed set's, keyed by the operation nullifier. -/
+key is not yet registered (issuance registers it); every ancestor and channel it
+names is already registered and live, read from the planes (a root's ancestors
+are revocation dependencies: a grant born under a room carries the creator's
+room-grant lineage, so revoking that grant refuses it).  Single use is the
+durable consumed set's, keyed by the operation nullifier. -/
 structure IssueEvidence {M : Materializer}
     (pre : Cell M) {kind : ResourceKind}
     (declaration : IssueDeclaration kind) : Type where
@@ -430,7 +432,8 @@ structure IssueEvidence {M : Materializer}
   slotFresh : CapabilityIdFresh pre declaration.capability.id
   rootParent : declaration.capability.parent = none
   rootSelf : declaration.capability.root = declaration.capability.id
-  rootAncestors : declaration.capability.ancestors = ∅
+  ancestorsRegistered : ∀ ancestor ∈ declaration.capability.ancestors,
+    isRegistered pre (.capability ancestor) = true
   issuerCurrent : declaration.capability.issuerEpoch =
     issuerEpochAt pre declaration.capability.issuer
   policyCurrent : declaration.capability.policyEpoch =
@@ -441,6 +444,8 @@ structure IssueEvidence {M : Materializer}
   selfLive : isRevoked pre (.capability declaration.capability.id) = false
   channelsLive : ∀ channel ∈ declaration.capability.channels,
     isRevoked pre (.channel channel) = false
+  ancestorsLive : ∀ ancestor ∈ declaration.capability.ancestors,
+    isRevoked pre (.capability ancestor) = false
 
 theorem IssueEvidence.reject_existing_id {M : Materializer}
     {pre : Cell M} {kind : ResourceKind}
@@ -1330,7 +1335,7 @@ theorem issue_post_lineage_valid
         LineageAnchored accepted.prepared.post stored := by
   refine ⟨⟨declaration.capability, []⟩, issue_post_capability_exact accepted, ?_, trivial⟩
   exact .root declaration.capability accepted.modeEvidence.rootParent
-    accepted.modeEvidence.rootSelf accepted.modeEvidence.rootAncestors
+    accepted.modeEvidence.rootSelf
 
 @[simp] theorem attenuation_post_capability_exact
     {M : Materializer} {pre : Cell M}

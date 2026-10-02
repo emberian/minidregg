@@ -106,7 +106,8 @@ def charge (accepted : AcceptedEnrollment deployment profile ambient durable ing
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length +
-      ingress.ingress.possessionSignature.length
+      ingress.ingress.possessionSignature.length + ingress.ingress.nextPublicKey.length +
+      ingress.ingress.nextPossessionSignature.length
   | .proofWork => 3
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 

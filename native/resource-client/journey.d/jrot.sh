@@ -122,8 +122,26 @@ row "key-status: epoch 1, pre-rotated, the next key matches the commitment" \
 # ---------------------------------------------------------------- the thief
 cp "$D/friend.key" "$D/stolen.key"
 AW=$D/thief-ws
+# FIX-IDENTITY: a client holding no next key refuses a pre-rotated subject.
+run tinit0 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+  --key "$D/stolen.key" --subject "$FRIEND" --dir "$D/thief-ws0"
+row "init of a pre-rotated subject by a client holding no next key: refused by name" "exit != 0, YOUR next key" \
+  "rc=$(cat "$D/tinit0.rc") $(grep -m1 -o 'YOUR next key' "$D/tinit0.err")" \
+  "$([ "$(cat "$D/tinit0.rc")" != 0 ] && grep -q 'YOUR next key' "$D/tinit0.err" && [ ! -e "$D/thief-ws0/workspace.json" ] && echo 1 || echo 0)"
+run tinit1 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+  --key "$D/stolen.key" --subject "$FRIEND" --no-prerotation --dir "$D/thief-ws1"
+row "the same with --no-prerotation: refused by name (a key you do not hold could replace yours)" "exit != 0, holds none" \
+  "rc=$(cat "$D/tinit1.rc") $(grep -m1 -o 'holds none' "$D/tinit1.err")" \
+  "$([ "$(cat "$D/tinit1.rc")" != 0 ] && grep -q 'holds none' "$D/tinit1.err" && [ ! -e "$D/thief-ws1/workspace.json" ] && echo 1 || echo 0)"
+# The thief is not bound by an honest client: it names the friend's committed
+# next PUBLIC key (public), so its client passes and the Host is what refuses it.
 run tinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-  --key "$D/stolen.key" --subject "$FRIEND" --dir "$AW" || die "thief init: $(tail -1 "$D/tinit.err")"
+  --key "$D/stolen.key" --subject "$FRIEND" --next-pub "$D/friend.key.next.pub" --dir "$AW" \
+  || die "thief init: $(tail -1 "$D/tinit.err")"
+thief_follow() {  # the thief re-points its client at the friend's current commitment
+  jq --arg n "$(xxd -p -c 64 "$D/friend.key.next.pub")" '.nextPublicKey = $n' "$AW/workspace.json" >"$AW/workspace.json.t" \
+    && mv "$AW/workspace.json.t" "$AW/workspace.json"
+}
 run timport "$MINI" workspace --action import --dir "$AW" --name rot --from-ref "$REF" || die "thief import"
 run trnimport "$MINI" workspace --action import --dir "$AW" --name rn --from-ref "$RNREF" || die "thief import rn"
 "$MINI" keygen --secret "$D/thief.key" --public "$D/thief.pub" --no-prerotation >/dev/null 2>&1 || die "thief keygen"
@@ -149,6 +167,14 @@ row "the friend rotates with the committed next key" "admitted, epoch 2" \
 [ "$(sha256sum "$D/offline/friend.next" | cut -d' ' -f1)" != "$old_next" ]
 row "the next-key file now holds the key after next" "replaced" "rotated" "$([ $? = 0 ] && echo 1 || echo 0)"
 
+# An honest client of the OLD key refuses to build on a subject whose commitment
+# is no longer its next key (FIX-IDENTITY: every load re-checks).
+cp -a "$AW" "$D/thief-ws-honest"
+run thonest "$MINI" workspace --action read --dir "$D/thief-ws-honest" --name rot
+row "after the rotation, the old key's own client refuses to load the workspace by name" "exit != 0, NOT yours" \
+  "rc=$(cat "$D/thonest.rc") $(grep -m1 -o 'NOT yours' "$D/thonest.err")" \
+  "$([ "$(cat "$D/thonest.rc")" != 0 ] && grep -q 'NOT yours' "$D/thonest.err" && echo 1 || echo 0)"
+thief_follow
 write "$AW" w-thief 9
 row "the old daily key's next write is refused" "not installed" \
   "rc=$(cat "$D/w-thief-submit.rc" 2>/dev/null || cat "$D/w-thief-propose.rc") $(refusal w-thief-submit 2>/dev/null || true)$(refusal w-thief-propose 2>/dev/null || true)" \
@@ -178,6 +204,7 @@ row "a second rotation works and the friend still writes" "epoch 3, installed" \
 # The grant rn was issued while the friend's first key was current. After two
 # rotations only the CURRENT key may give it up: the old key's renounce is
 # refused and changes nothing; the new key's is admitted and revokes exactly rn.
+thief_follow
 renounce "$AW" rn-thief rn
 rc_thief=$(cat "$D/rn-thief-submit.rc" 2>/dev/null || cat "$D/rn-thief-propose.rc")
 row "the OLD key (stolen, two rotations ago) renounces the friend's grant: refused" "exit != 0, not confirmed" \
@@ -216,7 +243,7 @@ run pseal "$MINI" enroll --action seal --dir "$P" || die "plain seal"
 run psub "$MINI" enroll --action submit --dir "$P" || die "plain submit: $(tail -1 "$D/psub.err")"
 PW=$D/plain-ws
 run pinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-  --enrollment "$P/enrollment.json" --dir "$PW" || die "plain init"
+  --enrollment "$P/enrollment.json" --no-prerotation --dir "$PW" || die "plain init"
 run pstat "$MINI" key-status --workspace "$PW"
 "$MINI" keygen --secret "$D/plain-next.key" --public "$D/plain-next.pub" --no-prerotation >/dev/null 2>&1
 run prot "$MINI" rotate-key --workspace "$PW" --next-key "$D/plain-next.key"
@@ -224,6 +251,42 @@ row "a subject enrolled --no-prerotation cannot rotate, as before (refused by na
   "prerotated false; exit 3, notPrerotated" \
   "prerotated=$(jq -r .prerotated "$D/pstat.out") rc=$(cat "$D/prot.rc") $(refusal prot)" \
   "$(jq -e '.prerotated | not' "$D/pstat.out" >/dev/null && [ "$(cat "$D/prot.rc")" = 3 ] && grep -q notPrerotated "$D/prot.err" && echo 1 || echo 0)"
+
+# ---------------------------------------------------------------- FIX-IDENTITY: a sponsor's next key
+# The sponsor commits a next key IT holds (and co-signs with it, so the kernel's
+# possession rule is met: it cannot tell whose key a key is). The friend's own
+# client refuses the subject by name; the friend never builds on it.
+"$MINI" keygen --secret "$D/victim.key" --public "$D/victim.pub" >/dev/null 2>"$D/vkeygen.err" || die "victim keygen"
+"$MINI" keygen --secret "$D/evil.key" --public "$D/evil.pub" --no-prerotation >/dev/null 2>&1 || die "evil keygen"
+run vbad "$MINI" enroll --action plan --sponsor-workspace "$SPONSOR_WS" --factory-ref factory \
+  --name rot-victim0 --new-key "$D/victim.key" --next-public-key "$D/evil.pub" --dir "$D/enroll-victim0"
+row "a sponsor's plan naming a next key that did not co-sign: refused by name" "exit != 0, co-signature does not verify" \
+  "rc=$(cat "$D/vbad.rc") $(grep -m1 -o 'co-signature does not verify' "$D/vbad.err")" \
+  "$([ "$(cat "$D/vbad.rc")" != 0 ] && grep -q 'co-signature does not verify' "$D/vbad.err" && echo 1 || echo 0)"
+run vcos "$MINI" enroll --action cosign --public-key "$D/victim.pub" --next-key "$D/evil.key" --output "$D/evil.cosign" \
+  || die "evil cosign: $(tail -1 "$D/vcos.err")"
+V=$D/enroll-victim
+run vplan "$MINI" enroll --action plan --sponsor-workspace "$SPONSOR_WS" --factory-ref factory \
+  --name rot-victim --new-key "$D/victim.key" --next-public-key "$D/evil.pub" --next-cosign "$D/evil.cosign" --dir "$V" \
+  && run vseal "$MINI" enroll --action seal --dir "$V" && run vsub "$MINI" enroll --action submit --dir "$V"
+row "the sponsor's own next key, co-signed by itself, is admitted (the kernel cannot know whose key it is)" "installed" \
+  "rc=$(cat "$D/vsub.rc" 2>/dev/null)" "$([ "$(cat "$D/vsub.rc" 2>/dev/null)" = 0 ] && echo 1 || echo 0)"
+run vinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+  --enrollment "$V/enrollment.json" --dir "$D/victim-ws"
+row "the friend's init refuses a subject whose committed next key is not his, by name" "exit != 0, NOT yours, no workspace" \
+  "rc=$(cat "$D/vinit.rc") $(grep -m1 -o 'NOT yours' "$D/vinit.err")" \
+  "$([ "$(cat "$D/vinit.rc")" != 0 ] && grep -q 'NOT yours' "$D/vinit.err" && [ ! -e "$D/victim-ws/workspace.json" ] && echo 1 || echo 0)"
+# The honest path: the friend's next key co-signed at keygen, the plan carries it.
+"$MINI" keygen --secret "$D/honest.key" --public "$D/honest.pub" >/dev/null 2>"$D/hkeygen.err" || die "honest keygen"
+H=$D/enroll-honest
+run hplan "$MINI" enroll --action plan --sponsor-workspace "$SPONSOR_WS" --factory-ref factory \
+  --name rot-honest --new-key "$D/honest.key" --dir "$H" \
+  && run hseal "$MINI" enroll --action seal --dir "$H" && run hsub "$MINI" enroll --action submit --dir "$H" \
+  && run hinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --enrollment "$H/enrollment.json" --dir "$D/honest-ws"
+row "an enrollment co-signed by the friend's own next key: admitted, and the friend's init accepts it" "installed, init 0" \
+  "submit=$(cat "$D/hsub.rc" 2>/dev/null) init=$(cat "$D/hinit.rc" 2>/dev/null) cosign=$(jq -r .nextCosign "$H/request.json" | cut -c1-16)" \
+  "$([ "$(cat "$D/hinit.rc" 2>/dev/null)" = 0 ] && jq -e '.prerotation == true' "$D/honest-ws/workspace.json" >/dev/null && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------- restart
 pidf=$W/public/server.pid

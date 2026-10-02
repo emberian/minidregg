@@ -259,10 +259,10 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .and_then(|(plan, signatures)| {
-                exact_pair(signatures).map(|(sponsor, possession)| (plan, sponsor, possession))
+                exact_pair(signatures).map(|(sponsor, rest)| (plan, sponsor, rest))
             })
-            .is_some_and(|(plan, sponsor, possession)| {
-                !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
+            .is_some_and(|(plan, sponsor, rest)| {
+                !plan.is_empty() && sponsor.len() == 64 && matches!(rest.len(), 64 | 160)
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         // Factory-observation provisioning: sponsor-observed plan, one detached
@@ -390,8 +390,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .and_then(|(plan, signatures)| {
-                let (sponsor, possession) = exact_pair(signatures)?;
-                Some(!plan.is_empty() && sponsor.len() == 64 && possession.len() == 64)
+                // possession (64), then for a pre-rotated record the next key
+                // (32) and its co-signature (64).
+                let (sponsor, rest) = exact_pair(signatures)?;
+                Some(!plan.is_empty() && sponsor.len() == 64 && matches!(rest.len(), 64 | 160))
             })
             .unwrap_or(false),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
@@ -1830,6 +1832,17 @@ done"#;
         seal.pop();
         assert!(!allowed_operator_operation(&seal));
         assert!(!allowed_operation(&seal, false));
+        // A pre-rotated record: possession, then the next key and its co-signature.
+        let mut signatures = Vec::new();
+        signatures.extend_from_slice(&64u32.to_le_bytes());
+        signatures.extend_from_slice(&[1u8; 64]);
+        signatures.extend_from_slice(&[2u8; 160]);
+        let mut seal = vec![87];
+        seal.extend_from_slice(&1u32.to_le_bytes());
+        seal.push(b'P');
+        seal.extend_from_slice(&signatures);
+        assert!(allowed_operator_operation(&seal));
+        assert!(allowed_operation(&seal, false));
         for operation in [88, 89] {
             assert!(allowed_operator_operation(&[operation, b'I']));
             assert!(!allowed_operator_operation(&[operation]));

@@ -125,11 +125,6 @@ def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]
   | none => command.first
 
-def observeVerb : (kind : ResourceKind) → Verb kind
-  | .object => .observeObject
-  | .account => .observeAccount
-  | .program => .observeProgram
-
 /-- This signature is specific to the exact proposed joint command, one
 participant's real loaded pre-state and the current authority snapshot. -/
 def readRequest (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -236,6 +231,7 @@ theorem targetProjection_unjoint (target : Target) (before after : Store target.
     | scalar _ => exact scalarSlots_unjoint _ _
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
+    | read => exact contentProject_unjoint _ _ _
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
 `run/fuel`) are not joint keys. -/
@@ -410,14 +406,28 @@ theorem step_prepared_exact
   rw [PolicyStepContext.ofPreparedTupleExact_eq]
   rfl
 
-def policyConfig [DecidableEq F]
+/-- Build the policy configuration from the step the caller is already
+examining. A leg must not project and hash its same old/new cells twice merely
+to resolve the committed law. This helper is only fed the current prepared
+step below; no context is retained across requests or accepted from a client. -/
+def policyConfigFromStep [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
+    (context : PolicyStepContext) : CanonicalPolicyConfig F :=
   CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (sourceCapabilityPortal prepared.authority.snapshot
-      (operationMarker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared tuple incidence)
+      (operationMarker prepared.authority.snapshot.domain profile.semantics command)) context
+
+def policyConfig [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
+  policyConfigFromStep prepared (step prepared tuple incidence)
+
+theorem policyConfigFromStep_exact [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    policyConfigFromStep prepared (step prepared tuple incidence) =
+      policyConfig prepared tuple incidence := rfl
 
 def portals [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -446,7 +456,7 @@ def authorizeLeg [DecidableEq F]
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let config := policyConfig prepared tuple incidence
+  let config := policyConfigFromStep prepared context
   let capability := (incidenceTarget command incidence).capability
   let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
@@ -473,7 +483,7 @@ def lawLeaf [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   LawLeaf.of committed.record.predicate witness.oldState witness.newState
@@ -593,7 +603,7 @@ def rangeLeaf [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
@@ -622,7 +632,7 @@ def castAliasLeg [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option (Int × Int) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   castAlias F (intsOf committed.record.predicate witness.oldState witness.newState)
@@ -656,13 +666,74 @@ def firstRangeLeaf [DecidableEq F]
   ((List.finRange command.targets.length).map some ++ [none]).findSome?
     (rangeLeaf prepared tuple)
 
-/-- The first leg (targets in order, then the authority leg) whose law names a
-failing clause. -/
 def firstLawLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
   ((List.finRange command.targets.length).map some ++ [none]).findSome?
     (lawLeaf prepared tuple)
+
+/-- The law refusal of one leg as a requester whose grant on that leg names
+`fieldsOf incidence` is told it: the same resolved committed law on the same witness
+states as `lawLeaf`, explained only through slots that grant covers
+(`Refusal.lawDeniedFor`, FIX-DISCLOSE). -/
+def lawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option Refusal := do
+  let wanted := (tuple.request incidence).2
+  let context := step prepared tuple incidence
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
+  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
+    context.oldState context.newState
+  if Minidregg.Pred.eval committed.record.predicate witness.oldState witness.newState then none
+  else some (Refusal.lawDeniedFor (fieldsOf incidence) committed.record.predicate
+    witness.oldState witness.newState)
+
+/-- Narrowing changes what a refusal says, never whether there is one: a leg is refused
+exactly when its law names a failing clause (`lawLeaf`, hence exactly when submission's
+compiled check rejects, `lawLeaf_refuses_iff_verifies_rejects`). -/
+theorem lawRefusal_isSome [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    (lawRefusal fieldsOf prepared tuple incidence).isSome =
+      (lawLeaf prepared tuple incidence).isSome := by
+  unfold lawRefusal lawLeaf
+  dsimp only
+  cases (policyConfig prepared tuple incidence).registry.resolve
+      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
+  | none => simp
+  | some committed =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      split
+      · next accepts =>
+          rw [(LawLeaf.of_none_iff _ _ _).mpr accepts]
+          rfl
+      · next rejects =>
+          cases named : LawLeaf.of committed.record.predicate _ _ with
+          | none =>
+              have := (LawLeaf.of_none_iff _ _ _).mp named
+              exact absurd this rejects
+          | some _ => rfl
+
+/-- The first leg (targets in order, then the authority leg) whose law refuses, as the
+requester is told it. -/
+def firstLawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+    (lawRefusal fieldsOf prepared tuple)
+
+/-- Numeric range/cast diagnostics use the same leg-specific disclosure scope. -/
+def firstRangeRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
+    (rangeLeaf prepared tuple i).map (Refusal.lawInputRangeFor (fieldsOf i))
+
+def firstCastRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
+    (castAliasLeg prepared tuple i).map fun (x, y) => Refusal.castAliasFor (fieldsOf i) x y
 
 structure SignedCommand where
   commandBytes : List UInt8
@@ -730,6 +801,8 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
     | append _ => exact fun _ => .body
+    -- An observe-only read writes nothing; its addresses are content addresses.
+    | read => exact fun address => ResourceObservationAdmission.contentField address.1
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by
@@ -739,12 +812,32 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
+    | read => exact fun _ _ => 0
 
-/-- A target's footprint, scanning only the patch's write footprint. -/
+/-- The address the kernel's blinding ratchet writes on every leg of a
+blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
+it (`writableKeyCheck`), no scope names it, and it is left out of the
+footprint. -/
+def targetRatchet (target : Target) : Address target.layout → Bool := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
+    | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
+    | append _ => exact fun _ => false
+    | read => exact fun _ => false
+
+/-- What one write changed, but the ratchet's address. -/
+def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
+  (ResourceObservationAdmission.changed pre post).filter fun address => targetRatchet target address = false
+
+/-- A target's footprint, scanning only the patch's write footprint, without
+the ratchet's address. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   ResourceObservationAdmission.footprintOf
-    (ResourceObservationAdmission.changedWithin (Patch.writeFootprint patch) pre post)
+    (ResourceObservationAdmission.changedWithin
+      ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
     (targetField target) (targetAmount target) pre post
 
 /-- The footprint of one incidence: a target's write, or nothing for the
@@ -757,19 +850,29 @@ def legFootprint (prepared : PreparedInvocation deployment profile ambient durab
       (prepared.targets i).pre.logical (prepared.targets i).post)
   | none => none
 
-/-- **The leg's footprint is exactly what the write changed**: scanning the
-patch's write footprint finds every changed address of the target cell
-(`Patch.run_frame`), so it equals the whole-cell footprint. -/
+/-- **The leg's footprint is exactly what the write changed, but the
+ratchet**: scanning the patch's write footprint finds every changed address of
+the target cell (`Patch.run_frame`), so it equals the whole-cell footprint over
+every address except the blinding the kernel advanced. -/
 theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprint
+    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprintOf
+      (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
       (targetField command.targets[i]) (targetAmount command.targets[i])
       (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  simp only [legFootprint, targetFootprint, ResourceObservationAdmission.footprint]
-  rw [ResourceObservationAdmission.changedWithin_eq_changed]
-  intro address outside
-  rw [← (prepared.targets i).postExact]
-  exact (Patch.run_frame _ _ address outside).symm
+  simp only [legFootprint, targetFootprint, changedEffect]
+  congr 2
+  have whole := ResourceObservationAdmission.changedWithin_eq_changed
+    (candidates := Patch.writeFootprint (targetPatch prepared.authority.snapshot profile.semantics
+      ambient command command.targets[i] (prepared.targets i).pre))
+    (pre := (prepared.targets i).pre.logical) (post := (prepared.targets i).post) (by
+      intro address outside
+      rw [← (prepared.targets i).postExact]
+      exact (Patch.run_frame _ _ address outside).symm)
+  rw [← whole]
+  ext address
+  simp only [ResourceObservationAdmission.changedWithin, Finset.mem_filter]
+  tauto
 
 /-- The authorizing capability's scope against a leg's footprint. Refusals
 name the failed coordinate: a field the scope does not name, or a named field
@@ -847,7 +950,8 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
     {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple (some i) envelope) :
     ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      cap.scope.FieldsCover (ResourceObservationAdmission.footprint
+      cap.scope.FieldsCover (ResourceObservationAdmission.footprintOf
+        (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
         (targetField command.targets[i]) (targetAmount command.targets[i])
         (prepared.targets i).pre.logical (prepared.targets i).post) := by
   have fields := leg.fields
@@ -975,6 +1079,58 @@ def AcceptedInvocation.declaration [DecidableEq F]
     (accepted : AcceptedInvocation prepared signed) :=
   accepted.tuple.toDeclaration (portals prepared accepted.tuple) accepted.apex
 
+/-- Disclosure is decided at transclusion time.  An accepted invocation whose
+content target transcludes `request` carries an observe-only read target on the
+source cell whose read leg was admitted — the transcluder's own observe
+capability, signed for this exact command and checked against the source's
+current policy at this height — and whose loaded state holds the opening.  A
+transcluder without a grant covering the source has no admissible read leg,
+so the transclusion is refused. -/
+theorem transclude_requires_source_coverage [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
+    (i : TargetIndex command) (content : ContentResource.Command)
+    (hostPayload : command.targets[i].payload = .content content)
+    (transclusion : Hyperdocument.TransclusionId) (link : Hyperdocument.LinkId)
+    (request : ContentResource.TranscludeRequest)
+    (member : .transclude transclusion link request ∈ content.actions) :
+    ∃ j : TargetIndex command, command.targets[j].target = request.source ∧
+      command.targets[j].payload = .read ∧
+      Nonempty (ReadLeg prepared j (signed.observeEnvelopes[j.val]?.getD [])) ∧
+      ∃ store, command.targets[j].contentStore? (prepared.targets j).pre = some store ∧
+        ContentResource.openingHolds store request = true := by
+  have all := prepared.openings
+  unfold openingsCheck at all
+  have atHost := List.all_eq_true.mp all i (List.mem_finRange i)
+  simp only [hostPayload] at atHost
+  have atAction := List.all_eq_true.mp atHost _ member
+  simp only at atAction
+  obtain ⟨j, _, holds⟩ := List.any_eq_true.mp atAction
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at holds
+  obtain ⟨⟨sameTarget, isRead⟩, opening⟩ := holds
+  have different : i.val ≠ j.val := by
+    intro same
+    have equal : i = j := Fin.ext same
+    subst equal
+    rw [hostPayload] at isRead
+    cases isRead
+  have many : command.requiresObservation = true := by
+    simp only [Command.requiresObservation, decide_eq_true_eq]
+    have := i.isLt
+    have := j.isLt
+    omega
+  refine ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, ?_⟩
+  have checked : (match command.targets[j].contentStore? (prepared.targets j).pre with
+      | some store => ContentResource.openingHolds store request
+      | none => false) = true := opening
+  split at checked
+  · rename_i store found
+    exact ⟨store, found, checked⟩
+  · cases checked
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.transclude_requires_source_coverage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclude_requires_source_coverage
+
 def AcceptedInvocation.legs [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : accepted.declaration.AcceptedLegs :=
@@ -1019,15 +1175,29 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient durabl
     (appendedEntry prepared.authority.snapshot profile.semantics ambient command command.targets[i]
       (prepared.targets i).pre).map StreamWrite.entryWrite
 
-/-- The physical writes are the targets' (one each) and one fresh entry cell
-per stream append: the authority incidence is a read, so the authority cell
-enters as a read guard (`readGuards`). -/
+/-- An observe-only read target is read, not written. -/
+def Target.isRead (target : Target) : Bool := decide (target.payload = .read)
+
+/-- A read target enters as a read guard on its cell's current root, as the
+authority cell does: the commit refuses if the cell moved, and nothing of it
+is stored or charged. -/
+def targetReadGuard (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : ReadGuard :=
+  ⟨⟨command.targets[i].target⟩,
+    ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live (prepared.targets i).before)⟩
+
+/-- The physical writes are the written targets plus fresh append entries: the authority incidence
+and every observe-only read target are reads, so their cells enter as read
+guards (`readGuards`). -/
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  (List.finRange command.targets.length).map (targetWrite prepared) ++ entryWrites prepared
+  ((List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  (List.finRange command.targets.length).map fun i =>
-    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
+  (List.finRange command.targets.length).map (fun i =>
+    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩) ++
+  (List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then some (targetReadGuard prepared i) else none
 
 /-- The domain reads of every invocation: the authority cell and the clock. -/
 def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
@@ -1073,8 +1243,11 @@ theorem writes_roots_bound (prepared : PreparedInvocation deployment profile amb
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
   rcases List.mem_append.mp member with target | entry
-  · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
-    rfl
+  · obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp target
+    split at produced
+    · cases produced
+    · cases produced
+      rfl
   · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
     obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
     exact StreamWrite.entryWrite_root appended
@@ -1169,16 +1342,16 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
 
 /-- **Charging rule: a record is charged the bytes it writes.**  The storage
 charge of an accepted invocation is exactly the canonical bytes of the cells
-its record writes, and those writes are the targets' (one per target) plus one
-fresh entry cell per stream append: the authority cell is read (a guard),
-neither stored nor charged. -/
+its record writes: each non-read target plus its fresh stream append entry.
+Authority and observe-only targets are guards, neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
-        (List.finRange command.targets.length).map (targetWrite prepared) ++ entryWrites prepared :=
+        (List.finRange command.targets.length).filterMap (fun i =>
+          if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared :=
   ⟨rfl, rfl⟩
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]

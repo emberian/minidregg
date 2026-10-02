@@ -116,7 +116,7 @@ trap 'if [ -s "$ROOT/public/server.pid" ] && kill -0 "$(cat "$ROOT/public/server
 
 # 1. Key-only enrollment of the newcomer by the sponsor.
 step enroll-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" \
-  --factory-ref factory --name newcomer --new-key "$ROOT/newcomer.key" --no-prerotation \
+  --factory-ref factory --name newcomer --new-key "$ROOT/newcomer.key" \
   --dir "$ROOT/attempts/newcomer"
 step enroll-seal ok "$MINI" enroll --action seal --dir "$ROOT/attempts/newcomer"
 step enroll-submit ok "$MINI" enroll --action submit --dir "$ROOT/attempts/newcomer"
