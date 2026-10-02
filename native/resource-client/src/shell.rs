@@ -1287,7 +1287,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         words[4] = text_argument(session, &words[4])?;
                     }
                     if let Some(name) = words.get(2) {
-                        workspace_name(name, "document name")?;
+                        ref_name(name, "document name")?;
                     }
                     let mut flags: Vec<(String, OsString)> = doc_render::doc_flags(&words)
                         .map_err(|message| message.strip_prefix("usage: ").map(str::to_owned).unwrap_or(message))?
@@ -1300,7 +1300,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "push" => {
                     arity(&w, 4, 4, u)?;
                     workspace_name(&w[2], "proposal ID")?;
-                    workspace_name(&w[3], "document name")?;
+                    ref_name(&w[3], "document name")?;
                     // @FILE is HOME/requests/FILE; @- is standard input
                     // (`ssh … doc push ID NAME @- < f.md`).
                     let file = match w[4].strip_prefix('@') {
@@ -1360,7 +1360,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "annotate" => {
                     arity(&w, 5, 5, u)?;
                     workspace_name(&w[2], "proposal ID")?;
-                    workspace_name(&w[3], "document name")?;
+                    ref_name(&w[3], "document name")?;
                     decimal(&w[4], "line")?;
                     let text = text_argument(session, &w[5])?;
                     document_proposal(
@@ -3611,6 +3611,18 @@ mod tests {
             )
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn document_reads_and_push_accept_room_references() {
+        let s = session();
+        for line in ["doc show room/notes", "doc outline room/notes", "doc history room/notes",
+            "doc pull room/notes", "doc push edit1 room/notes @notes.md"] {
+            assert!(plan(&s, line).is_ok(), "{line}");
+        }
+        for line in ["doc show ../notes", "doc show room//notes", "doc push ../edit room/notes @notes.md"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
     }
 
     #[test]

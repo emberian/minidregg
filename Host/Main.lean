@@ -1601,6 +1601,52 @@ def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
     | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures
 
+/-- Audience readback shared by standalone and persistent-session clients. -/
+def objectAudienceJson (view : NativeHost.ObjectAudienceView) : Lean.Json :=
+  let fields : List (String × Lean.Json) :=
+    [("type", toJson "minidregg-object-audience-v1"),
+     ("subject", toJson (toString view.subject.value)),
+     ("object", toJson (toString view.object)),
+     ("worldRoot", toJson (toString view.worldRoot.value)),
+     ("policyAddress", toJson (toString view.policyAddress.value)),
+     ("semanticLawDigest", toJson (toString (PolicyRecordCodec.semanticLawDigest view.sourceRecord).value)),
+     ("policyEpoch", toJson (toString view.policyEpoch)),
+     ("policyRevision", toJson (toString view.policyRevision)),
+     ("currentAuthorityRoot", toJson (toString view.currentAuthorityRoot.value)),
+     ("currentObjectRoot", toJson (toString view.currentObjectRoot.value)),
+     ("source", toJson (Minidregg.Host.Json.encodeHex view.sourceBytes)),
+     ("sourceRecord", Minidregg.Host.Json.policyRecordJson view.sourceRecord)]
+  let metadata := match view.audience with
+    | none => [("audienceState", Lean.Json.null), ("active", toJson false)]
+    | some a =>
+      [("audienceState", Minidregg.Host.Json.audienceStateJson a),
+       ("epoch", toJson (toString a.epoch)),
+       ("transition", toJson (toString a.transition)),
+       ("audience", toJson (toString a.audience)),
+       ("devices", toJson (toString a.devices)),
+       ("history", toJson (toString a.history)),
+       ("manifest", toJson (toString a.manifest)),
+       ("authoritySnapshot", toJson (toString a.authoritySnapshot)),
+       ("deviceSnapshot", toJson (toString a.deviceSnapshot)),
+       ("active", toJson (a.mode == .active))]
+  Lean.Json.mkObj (fields ++ metadata)
+
+def objectRosterJson (bytes : List UInt8) : Except String Lean.Json := do
+  let some roster := Compiler.ObjectAudienceRoster.decode bytes
+    | throw "roster is not canonical"
+  return .mkObj [("roster", Minidregg.Host.Json.audienceRosterJson roster),
+    ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex bytes)),
+    ("audience", toJson (toString (Compiler.ObjectAudienceRoster.digest roster).value)),
+    ("devices", toJson (toString (Compiler.ObjectAudienceRoster.deviceDigest roster).value))]
+
+def checkedObjectRosterJson (audience : Theory.ObjectAudience.State)
+    (roster : Theory.ObjectAudienceRoster.Roster) (rosterBytes : List UInt8) : Lean.Json :=
+  .mkObj [("type", toJson "minidregg-checked-object-roster-v1"),
+    ("audienceState", Minidregg.Host.Json.audienceStateJson audience),
+    ("roster", Minidregg.Host.Json.audienceRosterJson roster),
+    ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex rosterBytes)),
+    ("deviceSnapshot", toJson (toString audience.deviceSnapshot))]
+
 /-- The live protocol keeps exact source-owned authoring and inspection in
 memory, while every state-dependent operation refreshes the verified tip. -/
 def dispatchSession (config : NativeHost.Config)
@@ -1664,8 +1710,30 @@ def dispatchSession (config : NativeHost.Config)
       return (7, ← RequestRefusal.clientBytes (Minidregg.Host.Json.author kind value (some config) providerRoutes))
   | 8 =>
       let (kind, source) ← splitKind payload
-      let value ← RequestRefusal.clientBytes (inspectHost kind source)
-      return (8, value.compress.toUTF8.toList)
+      if kind == "object-audience" then
+        let walked ← sessionWalked config state
+        match ← NativeHost.objectAudienceLoaded config walked.target walked.verified source with
+        | .ok view => return (8, (objectAudienceJson view).compress.toUTF8.toList)
+        | .error reason => return (255, refusalFrame "object-audience" reason)
+      else if kind == "object-roster-inspect" then
+        let value ← RequestRefusal.clientBytes (objectRosterJson source)
+        return (8, value.compress.toUTF8.toList)
+      else if kind == "object-audience-roster" then
+        -- Fixed nested pairs carry bytes only, never service-side file paths.
+        let (sourceObservation, rest) ← splitPair source
+        let (catalogObservation, rest) ← splitPair rest
+        let (plannedBytes, rosterBytes) ← splitPair rest
+        let some plannedText := String.fromUTF8? plannedBytes.toByteArray
+          | throw (RequestRefusal.malformed "object audience state is not UTF-8")
+        let plannedJson ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse plannedText)
+        let planned ← RequestRefusal.clientBytes (Minidregg.Host.Json.audienceState "$" plannedJson)
+        let walked ← sessionWalked config state
+        let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded config
+          walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
+        return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
+      else
+        let value ← RequestRefusal.clientBytes (inspectHost kind source)
+        return (8, value.compress.toUTF8.toList)
   | 9 =>
       let some text := String.fromUTF8? payload.toByteArray
         | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
@@ -6289,12 +6357,7 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "object-roster-inspect", [input, output] =>
           let bytes ← readBoundedBytes input maxFrame
-          let some roster := Compiler.ObjectAudienceRoster.decode bytes
-            | throw (IO.userError "roster is not canonical")
-          writeJson output (.mkObj [("roster", Minidregg.Host.Json.audienceRosterJson roster),
-            ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex bytes)),
-            ("audience", toJson (toString (Compiler.ObjectAudienceRoster.digest roster).value)),
-            ("devices", toJson (toString (Compiler.ObjectAudienceRoster.deviceDigest roster).value))])
+          writeJson output (← IO.ofExcept (objectRosterJson bytes))
           pure 0
       | "object-audience-roster", [sourceObservation, catalogObservation, plannedPath, rosterPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
@@ -6306,11 +6369,7 @@ def run (arguments : List String) : IO UInt32 := do
             let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded pinnedConfig
               walked.target walked.verified (← readBoundedBytes sourceObservation maxFrame)
               (← readBoundedBytes catalogObservation maxFrame) rosterBytes planned)
-            writeJson output (.mkObj [("type", toJson "minidregg-checked-object-roster-v1"),
-              ("audienceState", Minidregg.Host.Json.audienceStateJson audience),
-              ("roster", Minidregg.Host.Json.audienceRosterJson roster),
-              ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex rosterBytes)),
-              ("deviceSnapshot", toJson (toString audience.deviceSnapshot))])
+            writeJson output (checkedObjectRosterJson audience roster rosterBytes)
             pure 0
       | "object-audience", [observationPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
@@ -6322,33 +6381,7 @@ def run (arguments : List String) : IO UInt32 := do
             let view ← match result with
               | .ok view => pure view
               | .error reason => throw (IO.userError s!"object audience observation refused: {repr reason}")
-            let fields : List (String × Lean.Json) :=
-              [("type", toJson "minidregg-object-audience-v1"),
-               ("subject", toJson (toString view.subject.value)),
-               ("object", toJson (toString view.object)),
-               ("worldRoot", toJson (toString view.worldRoot.value)),
-               ("policyAddress", toJson (toString view.policyAddress.value)),
-               ("semanticLawDigest", toJson (toString (PolicyRecordCodec.semanticLawDigest view.sourceRecord).value)),
-               ("policyEpoch", toJson (toString view.policyEpoch)),
-               ("policyRevision", toJson (toString view.policyRevision)),
-               ("currentAuthorityRoot", toJson (toString view.currentAuthorityRoot.value)),
-               ("currentObjectRoot", toJson (toString view.currentObjectRoot.value)),
-               ("source", toJson (Minidregg.Host.Json.encodeHex view.sourceBytes)),
-               ("sourceRecord", Minidregg.Host.Json.policyRecordJson view.sourceRecord)]
-            let metadata := match view.audience with
-              | none => [("audienceState", Lean.Json.null), ("active", toJson false)]
-              | some a =>
-                [("audienceState", Minidregg.Host.Json.audienceStateJson a),
-                 ("epoch", toJson (toString a.epoch)),
-                 ("transition", toJson (toString a.transition)),
-                 ("audience", toJson (toString a.audience)),
-                 ("devices", toJson (toString a.devices)),
-                 ("history", toJson (toString a.history)),
-                 ("manifest", toJson (toString a.manifest)),
-                 ("authoritySnapshot", toJson (toString a.authoritySnapshot)),
-                 ("deviceSnapshot", toJson (toString a.deviceSnapshot)),
-                 ("active", toJson (a.mode == .active))]
-            writeJson output (Lean.Json.mkObj (fields ++ metadata))
+            writeJson output (objectAudienceJson view)
             pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do

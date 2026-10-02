@@ -1088,6 +1088,13 @@ fn socket_process(
         "inspect" if arguments.len() == 4 => {
             (8, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
         }
+        "object-audience" | "object-roster-inspect" if arguments.len() == 3 => {
+            (8, kind_payload(arguments[0], read(1)?)?, Some(arguments[2]))
+        }
+        "object-audience-roster" if arguments.len() == 6 => {
+            let inputs = pair(read(1)?, pair(read(2)?, pair(read(3)?, read(4)?)?)?)?;
+            (8, kind_payload(arguments[0], inputs)?, Some(arguments[5]))
+        }
         "signatures" if arguments.len() == 3 => (9, read(1)?, Some(arguments[2])),
         "observe-assemble" if arguments.len() == 4 => {
             (10, pair(read(1)?, read(2)?)?, Some(arguments[3]))

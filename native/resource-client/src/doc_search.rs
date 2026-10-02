@@ -267,6 +267,7 @@ mod tests {
     #[test]
     fn only_live_opened_text_is_searchable() {
         let rendered = Rendered {
+            shared_names: vec![],
             root: json!("1"),
             root_revision: json!("2"),
             lines: vec![
