@@ -34,8 +34,10 @@ class CheckpointCallbacks(unittest.TestCase):
             seen.append(req);return {'protocol':m.PROTOCOL,'status':'paused' if req['action']=='pause' else 'resumed','intent':{'request':plan['request']}}
         with patch.object(m,'invoke',side_effect=receive):
             q=self.run_phase('quiesce');again=self.run_phase('quiesce');r=self.run_phase('resume')
+            (self.journal/'record.json').write_text('later ordinary receiving evidence')
+            repeated=self.run_phase('resume');self.assertEqual(r,repeated)
         self.assertEqual(q,again);self.assertTrue(r['ready']);self.assertEqual(q['pausedUnits'],['mini-grain-fixture.service'])
-        self.assertEqual([x['nonceHex'] for x in seen],[nonce]*3)
+        self.assertEqual([x['nonceHex'] for x in seen],[nonce]*4)
         inventory=m.load(Path(q['pauseInventory']));self.assertEqual(inventory['apps'],[{'store':'native-store-tag','request':plan['request']}])
         self.assertEqual(self.source_mock.call_count,1)
     def test_capture_rejects_uncertain_generation_and_mutated_config(self):

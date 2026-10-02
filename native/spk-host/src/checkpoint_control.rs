@@ -127,6 +127,9 @@ pub(crate) struct CheckpointControl {
     binding: Binding,
     pause_path: PathBuf,
 }
+fn checkpoint_reply(status: &str, intent: &Intent) -> serde_json::Value {
+    serde_json::json!({"protocol":PROTOCOL,"status":status,"intent":intent,"liveStreams":"closed; clients reopen under current Mini authority"})
+}
 impl CheckpointControl {
     pub fn bind(binding: Binding) -> io::Result<Self> {
         if !digest(&binding.resident_config_sha256) || !digest(&binding.mini_config_sha256) {
@@ -171,13 +174,45 @@ impl CheckpointControl {
                 .parent()
                 .ok_or_else(|| invalid("checkpoint parent absent"))?,
         )?;
-        verify()?;
         let path = self.binding.journal_dir.join(format!(
             "checkpoint-{}-{}.json",
             request.nonce_hex, request.action
         ));
         let mut pause_request = request.clone();
         pause_request.action = "pause".into();
+        let resumed = self
+            .binding
+            .journal_dir
+            .join(format!("checkpoint-{}-resume.json", request.nonce_hex));
+        if request.action == "resume" {
+            // A completed resume is historical acknowledgement. Later receiving
+            // may advance the journal; it must not invalidate this exact retry.
+            match retained(&self.pause_path) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let paused = self
+                        .binding
+                        .journal_dir
+                        .join(format!("checkpoint-{}-pause.json", request.nonce_hex));
+                    let bytes = retained(&paused)?;
+                    let prior: Intent = serde_json::from_slice(&bytes)?;
+                    if prior.request != pause_request || retained(&resumed)? != bytes {
+                        return Err(invalid("checkpoint completed resume identity differs"));
+                    }
+                    File::open(
+                        self.pause_path
+                            .parent()
+                            .ok_or_else(|| invalid("checkpoint parent absent"))?,
+                    )?
+                    .sync_all()?;
+                    return Ok(checkpoint_reply("resumed", &prior));
+                }
+                Ok(_) => {}
+                Err(error) => return Err(error),
+            }
+        } else if fs::symlink_metadata(&resumed).is_ok() {
+            return Err(invalid("completed checkpoint nonce cannot pause again"));
+        }
+        verify()?;
         let record_hash = format!(
             "{:x}",
             Sha256::digest(retained(&self.binding.journal_dir.join("record.json"))?)
@@ -206,13 +241,6 @@ impl CheckpointControl {
             match retained(&self.pause_path) {
                 Ok(active) if active == bytes => {}
                 Ok(_) => return Err(invalid("another checkpoint pause is active")),
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound && retained(&path)? == bytes =>
-                {
-                    return Ok(
-                        serde_json::json!({"protocol":PROTOCOL,"status":"resumed","intent":prior}),
-                    );
-                }
                 Err(error) => return Err(error),
             }
             // Exact acknowledgement is durable before releasing admission. A
@@ -226,9 +254,14 @@ impl CheckpointControl {
             )?
             .sync_all()?;
         }
-        Ok(
-            serde_json::json!({"protocol":PROTOCOL,"status":if request.action=="pause" {"paused"} else {"resumed"},"intent":intent,"liveStreams":"closed; clients reopen under current Mini authority"}),
-        )
+        Ok(checkpoint_reply(
+            if request.action == "pause" {
+                "paused"
+            } else {
+                "resumed"
+            },
+            &intent,
+        ))
     }
     pub fn poll_once(
         &self,
@@ -360,6 +393,35 @@ mod tests {
         control.process(next, || Ok(()), || Ok(())).unwrap();
         assert!(control.process(resume, || Ok(()), || Ok(())).is_err());
         assert!(control.paused());
+        drop(control);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn completed_resume_replays_after_new_receiving_without_repausing_nonce() {
+        let (root, control, request) = fixture();
+        control
+            .process(request.clone(), || Ok(()), || Ok(()))
+            .unwrap();
+        let mut resume = request.clone();
+        resume.action = "resume".into();
+        let original = control
+            .process(resume.clone(), || Ok(()), || Ok(()))
+            .unwrap();
+        fs::write(
+            request.binding.journal_dir.join("record.json"),
+            b"later accepted physical dispatch",
+        )
+        .unwrap();
+        let replay = control
+            .process(
+                resume,
+                || panic!("historical acknowledgement does not inspect later effects"),
+                || panic!("no new drain"),
+            )
+            .unwrap();
+        assert_eq!(original, replay);
+        assert!(control.process(request, || Ok(()), || Ok(())).is_err());
+        assert!(!control.paused());
         drop(control);
         fs::remove_dir_all(root).unwrap();
     }
