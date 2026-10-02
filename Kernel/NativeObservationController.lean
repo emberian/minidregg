@@ -850,6 +850,63 @@ def members (context : Context deployment durable) (kind : ResourceKind) (room h
     | none => ∅
   (held.sort (· ≤ ·)).map SubjectId.mk
 
+/-- A capability reaches into `room` when its targets are `under X` or name a
+cell `X` with `X` in the room's subtree (the room itself, a cell born in it,
+a cell born in one of those). -/
+def reachesInto {kind : ResourceKind} (parentage : Parentage) (room : Nat)
+    (cap : Capability kind) : Bool :=
+  match cap.scope.targets with
+  | .under cell => decide (parentage.Descends cell room)
+  | .explicit cells => decide (∃ cell ∈ cells, parentage.Descends cell.value room)
+
+/-- A capability that can still admit something in `room`: it reaches into the
+room, has not expired at `height` (a grant whose window has not opened yet
+counts), is current, and nothing in its lineage is revoked. -/
+def liveIn {kind : ResourceKind} (state : AuthState) (height room : Nat)
+    (cap : Capability kind) : Bool :=
+  reachesInto state.parent room cap &&
+    decide (height ≤ cap.notAfter) &&
+    decide (cap.policyEpoch = state.policyEpoch cap.policyId) &&
+    decide (cap.issuerEpoch = state.issuerEpoch cap.issuer) &&
+    decide (RevocationKey.capability cap.id ∉ state.revoked) &&
+    decide (∀ ancestor ∈ cap.ancestors, RevocationKey.capability ancestor ∉ state.revoked) &&
+    decide (∀ channel ∈ cap.channels, RevocationKey.channel channel ∉ state.revoked)
+
+/-- Every live capability in `room` that `subject` holds, as (capability id,
+policy id), in id order: what a kick must revoke for the room to stop
+admitting the subject anywhere in it — the founder's invite, a concierge's
+window, a grant on one cell under the room (a private room's keys cell), any
+other, whoever issued it. The policy id names the resource whose control
+grant revokes it. -/
+def grantsOf (context : Context deployment durable) (kind : ResourceKind) (room height : Nat)
+    (subject : SubjectId) : List (Nat × Nat) :=
+  let state := context.authority.snapshot.authState
+  let cell := context.authority.snapshot.cell
+  let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored =>
+        if stored.head.holder = .subject subject ∧ liveIn state height room stored.head = true then
+          {named.value} else ∅
+    | none => ∅
+  (held.sort (· ≤ ·)).filterMap fun named =>
+    (CredentialAuthorityState.readCapability cell kind ⟨named⟩).map fun stored =>
+      (named, stored.head.policyId.value)
+
+/-- The subjects holding a live capability anywhere in `room`, in subject
+order: `members` and everyone else a kick could still have to reach. -/
+def holders (context : Context deployment durable) (kind : ResourceKind) (room height : Nat) :
+    List SubjectId :=
+  let state := context.authority.snapshot.authState
+  let cell := context.authority.snapshot.cell
+  let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored =>
+        match stored.head.holder with
+        | .subject subject => if liveIn state height room stored.head then {subject.value} else ∅
+        | .bearer => ∅
+    | none => ∅
+  (held.sort (· ≤ ·)).map SubjectId.mk
+
 /-- A cell the reader may learn about: under the room, and covered by the
 reader's own grant (a member with an explicit `{R}` grant learns nothing
 about cells born in `R` it cannot read). -/
@@ -1067,12 +1124,18 @@ theorem at_current_eq_read (directory : CredentialAuthorityDomainReceiver.Loaded
   rw [atBytes_current, ← directory.bytes_exact target]
   simp [ResourceBirthCodec.LifecycleImage.view, present]
 
-def whoViewStream : StreamCodec (List (Nat × Option Nat)) :=
-  StreamCodec.list (StreamCodec.product StreamCodec.nat (StreamCodec.option StreamCodec.nat))
+/-- One holder: subject, last seen, whether it is a member (a standing
+capability over the room itself, `members`), and every live capability it
+holds in the room with its policy id (`grantsOf`). -/
+def whoViewStream : StreamCodec (List (Nat × Option Nat × Bool × List (Nat × Nat))) :=
+  StreamCodec.list (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+      (StreamCodec.product StreamCodec.bool
+        (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
 
-def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v1".toUTF8.toList
+def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v2".toUTF8.toList
 
-def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat)) :=
+def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat × Bool × List (Nat × Nat))) :=
   NativeHostCodec.framed whoViewFrame whoViewStream
 
 def sinceEntryStream : StreamCodec SinceEntry :=
@@ -1490,8 +1553,10 @@ def AuthorizedIntent.queryResult
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
         let height := genesisHeight + durable.height
-        pure (whoViewCodec.encode ((members context grant.kind query.target height).map fun subject =>
-          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·))))
+        let roster := members context grant.kind query.target height
+        pure (whoViewCodec.encode ((holders context grant.kind query.target height).map fun subject =>
+          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·),
+            decide (subject ∈ roster), grantsOf context grant.kind query.target height subject)))
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target

@@ -87,7 +87,7 @@ theorem parent_present (M : Materializer) :
 theorem explicit_transfer_shape : DelegationShape request child parent noParents := by decide
 
 theorem explicit_transfer_valid : LineageValid noParents delegatedStored :=
-  .delegate child parent [] request (.root parent rfl rfl rfl) explicit_transfer_shape
+  .delegate child parent [] request (.root parent rfl rfl) explicit_transfer_shape
 
 theorem explicit_transfer_anchored (M : Materializer) :
     LineageAnchored (pre M) delegatedStored :=
@@ -120,7 +120,7 @@ theorem strict_same_holder_accepted (M : Materializer) :
     storedLineageCheck (pre M) noParents strictStored = true := by
   apply (storedLineageCheck_iff (pre M) noParents strictStored).mpr
   refine ⟨?_, ?_⟩
-  · exact .attenuate _ parent [] (.root parent rfl rfl rfl) (by decide)
+  · exact .attenuate _ parent [] (.root parent rfl rfl) (by decide)
   · exact LineageAnchored.cons _ parent [] .strict (parent_present M) trivial
 
 theorem unmarked_transfer_refused (M : Materializer) :
@@ -145,7 +145,7 @@ def substitutedStored : StoredCapability .object :=
   ⟨child, [⟨substitutedParent, .delegated request⟩]⟩
 
 theorem substituted_parent_still_well_shaped : LineageValid noParents substitutedStored :=
-  .delegate child substitutedParent [] request (.root substitutedParent rfl rfl rfl) (by decide)
+  .delegate child substitutedParent [] request (.root substitutedParent rfl rfl) (by decide)
 
 theorem substituted_parent_refused (M : Materializer) :
     storedLineageCheck (pre M) noParents substitutedStored = false := by

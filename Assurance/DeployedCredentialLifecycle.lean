@@ -306,13 +306,14 @@ def issueEvidence : IssueEvidence initialCell issueDeclaration where
   slotFresh := by intro kind; cases kind <;> decide
   rootParent := rfl
   rootSelf := rfl
-  rootAncestors := rfl
+  ancestorsRegistered := by decide
   issuerCurrent := by decide
   policyCurrent := by decide
   selfUnregistered := by decide
   channelsRegistered := by decide
   selfLive := by decide
   channelsLive := by decide
+  ancestorsLive := by decide
 
 noncomputable def issued :=
   acceptIssue initialCell (adminContext initialCell) issueCodec issueDigest issueDeclaration
@@ -358,7 +359,7 @@ def attenuateEvidence :
   preRootExact := rfl
   parentExact := by simpa [parentStored] using issued_root_exact
   parentIdExact := rfl
-  parentLineageValid := .root rootCapability rfl rfl rfl
+  parentLineageValid := .root rootCapability rfl rfl
   parentLineageAnchored := True.intro
   strict := strict_edge
   childSlotFresh := by intro kind; cases kind <;> decide
@@ -505,7 +506,7 @@ def requestDigestScheme : RequestDigestScheme where
   digestWire := fun wire => ⟨wire.nonce + wire.effectsDigest⟩
 
 def childLineage : childCapability.Lineage CredentialAuthorityState.noParents :=
-  .attenuate childCapability rootCapability (.root rootCapability rfl rfl rfl)
+  .attenuate childCapability rootCapability (.root rootCapability rfl rfl)
     strict_edge
 
 /-- Token is only a carrier for the exact capability evidence; the same common

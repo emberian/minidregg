@@ -282,13 +282,14 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     slotFresh := (capabilityIdFreshCheck_iff snapshot.cell command.capability).mp fresh
                     rootParent := rfl
                     rootSelf := rfl
-                    rootAncestors := rfl
+                    ancestorsRegistered := fun _ member => absurd member (Finset.notMem_empty _)
                     issuerCurrent := rfl
                     policyCurrent := rfl
                     selfUnregistered := unregistered
                     channelsRegistered := fun _ member => absurd member (Finset.notMem_empty _)
                     selfLive := live
-                    channelsLive := fun _ member => absurd member (Finset.notMem_empty _) }
+                    channelsLive := fun _ member => absurd member (Finset.notMem_empty _)
+                    ancestorsLive := fun _ member => absurd member (Finset.notMem_empty _) }
                 let candidate : Candidate
                     (family deployment snapshot profile.semantics ambient command)
                     snapshot.cell d () :=

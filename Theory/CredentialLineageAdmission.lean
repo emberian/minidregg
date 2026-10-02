@@ -258,7 +258,7 @@ rechecked against today's grantor key. Creation authorization is retained by
 the accepted source transition; this pure check validates its stored shape. -/
 def lineageCheckAux {kind : ResourceKind} (parentage : Parentage) :
     List (ParentLink kind) → Capability kind → Bool
-  | [], head => decide (head.parent = none ∧ head.root = head.id ∧ head.ancestors = ∅)
+  | [], head => decide (head.parent = none ∧ head.root = head.id)
   | link :: tail, head =>
       parentLinkCheck parentage head link && lineageCheckAux parentage tail link.parent
 
@@ -270,11 +270,11 @@ theorem lineageCheckAux_iff {kind : ResourceKind} (parentage : Parentage)
   | nil =>
       simp only [lineageCheckAux, decide_eq_true_eq]
       constructor
-      · rintro ⟨parent, root, ancestors⟩
-        exact .root head parent root ancestors
+      · rintro ⟨parent, root⟩
+        exact .root head parent root
       · intro valid
         cases valid with
-        | root _ parent root ancestors => exact ⟨parent, root, ancestors⟩
+        | root _ parent root => exact ⟨parent, root⟩
   | cons link tail induction =>
       rcases link with ⟨parent, origin⟩
       cases origin with

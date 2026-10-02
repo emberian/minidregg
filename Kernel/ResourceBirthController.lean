@@ -693,6 +693,11 @@ def prepareGrainDraft (profile : PolicyCompilerProfile F) (disabled : List Diges
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  -- The room gate first: a creator whose placing grant is revoked is refused
+  -- `notRoomMember`, by name, before the grant batch would refuse the born
+  -- grants' revoked ancestors as `authorityBatch`.
+  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
@@ -766,6 +771,10 @@ def prepareDraft (profile : PolicyCompilerProfile F) (disabled : List Digest)
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  -- The room gate first (as `prepareGrainDraft`): a revoked placing grant is
+  -- `notRoomMember`, not the grant batch's `authorityBatch`.
+  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch

@@ -70,7 +70,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
-    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] | law show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
+    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
     Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
     Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
     Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
@@ -81,9 +81,9 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room rotate ID NAME | room register ID NAME | room rewrap ID NAME SUBJECT | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | propose (action revoke; private: room-key --op kick = revoke + rotate + rewrap, submitted) | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
     Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate)" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room seal ID NAME --freeze-roster | room rotate ID NAME | room register ID NAME | room rewrap ID NAME SUBJECT | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | room-kick: one revoke per standing grant SUBJECT holds under NAME (the Host's signed who view: the invite, a concierge's window, any other), proposed; `submit ID` submits them all (private: room-key --op kick = every revoke + rotate + rewrap, submitted) | propose (action install-policy, `sealed`): sealing a room freezes its membership forever (no invite, no kick, while members keep the cells under it), so it needs --freeze-roster | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "job", usage: "job post ROOM PROGRAM --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME] | job claim JOB --room ROOM --bond B --account REF [--name NAME] | job answer NAME [OUTPUT] | job check NAME | job settle NAME | job show NAME | job fund NAME --account REF | job truth NAME", operation: "mini job --action post|claim|answer|check|settle|show|fund|truth --dir WS (the job law, the job-money ops 160-163, the kernel's ran truth turn)" },
     Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
@@ -92,7 +92,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "channel", usage: "channel say ROOM @NAME TEXT... | channel tail ROOM | channel status ROOM", operation: "mini channel say|tail|status ROOM [@NAME TEXT] --home HOME/channels (the member loop, `mini channel join`, is its own long-running process)" },
     Verb { name: "pay", usage: "pay ROOM week|N [--account REF] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
     Verb { name: "credit", usage: "credit [ACCOUNT-REF]", operation: "mini credit --action balance (a signed read of my account)" },
-    Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
+    Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period|open N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
     Verb { name: "topup", usage: "topup ROOM N [hermes|concierge] [--account REF]", operation: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
@@ -441,9 +441,41 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
                     writes: vec![],
                 });
             }
-            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
-                "name":w[3],"recipient":w[4]});
-            proposal(session, &w[2], &request)
+            // Every standing grant SUBJECT holds under the room, from the
+            // Host's signed who view: one revoke each; `submit ID` submits all.
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "room-kick"),
+                    flag("dir", ws),
+                    flag("name", w[3].clone()),
+                    flag("member", w[4].clone()),
+                    flag("proposal-id", w[2].clone()),
+                ],
+                writes: vec![],
+            }
+        }
+        "seal" => {
+            // A room's law is where its roster is enforced: sealing it freezes
+            // membership forever. Said out loud, and only on --freeze-roster.
+            arity(w, 3, 4, u)?;
+            workspace_name(&w[2], "proposal ID")?;
+            ref_name(&w[3], "room name")?;
+            if w.get(4).map(String::as_str) != Some("--freeze-roster") {
+                return Err(format!(
+                    "room seal {} installs `sealed` on the room cell: no one can ever be invited or kicked again, \
+                     while members keep reading and writing the cells under it. Repeat with --freeze-roster to do it.",
+                    w[3]
+                ));
+            }
+            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"install-policy",
+                "name":w[3],"predicate":{"type":"any","predicates":[]}});
+            let mut plan = proposal(session, &w[2], &request);
+            if let Plan::Client { flags, .. } = &mut plan {
+                flags.push(flag("freeze-roster", "true"));
+                flags.push(flag("room-cell", "true"));
+            }
+            plan
         }
         "rotate" => {
             arity(w, 3, 3, u)?;
@@ -1925,14 +1957,14 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "law" => {
-            // Trailing flags, in either order: --allow-unsatisfiable (a law no step
-            // passes, e.g. `sealed`) and --i-lock-myself-out (a law no step BY YOU passes).
+            // Explicit consent flags cover unsatisfiability, self-lockout and frozen membership.
             let mut w = w;
-            let (mut allow, mut lockout) = (false, false);
+            let (mut allow, mut lockout, mut freeze) = (false, false, false);
             while let Some(last) = w.last() {
                 match last.as_str() {
                     "--allow-unsatisfiable" if !allow => allow = true,
                     "--i-lock-myself-out" if !lockout => lockout = true,
+                    "--freeze-roster" if !freeze => freeze = true,
                     _ => break,
                 }
                 w.pop();
@@ -1946,8 +1978,17 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let request = json!({"type":"minidregg-workspace-proposal-v1",
                 "action":"install-policy","name":w[2],"predicate":predicate});
             let mut plan = proposal(session, &w[1], &request);
-            if let (true, Plan::Client { flags, .. }) = (allow, &mut plan) {
-                flags.push(flag("allow-unsatisfiable", "true"));
+            let chat_room = crate::chat::load_room(session, &w[2]).is_ok();
+            if let Plan::Client { flags, .. } = &mut plan {
+                if allow {
+                    flags.push(flag("allow-unsatisfiable", "true"));
+                }
+                if freeze {
+                    flags.push(flag("freeze-roster", "true"));
+                }
+                if chat_room {
+                    flags.push(flag("room-cell", "true"));
+                }
             }
             if let (true, Plan::Client { flags, .. }) = (lockout, &mut plan) {
                 flags.push(flag("i-lock-myself-out", "true"));
@@ -3541,9 +3582,18 @@ mod tests {
         assert_eq!(request["verbs"], json!(["observe","place","delegate"]));
         assert_eq!(request["fields"], json!(["1","annotations"]));
         assert_eq!(request["maxDelta"], json!([{"field":"7","max":"50"}]));
-        let (_, request) = request_of(plan(&s, "room kick k1 lab 12").unwrap());
-        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
-            "name":"lab","recipient":"12"}));
+        // A kick enumerates every standing grant the member holds (room-kick).
+        assert_eq!(client(plan(&s, "room kick k1 lab 12").unwrap()).1,
+            pairs(&[("action", "room-kick"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab"),
+                ("member", "12"), ("proposal-id", "k1")]));
+        // Sealing a room says what it costs and needs --freeze-roster.
+        assert!(plan(&s, "room seal s1 lab").unwrap_err().contains("--freeze-roster"));
+        let (flags, request) = request_of(plan(&s, "room seal s1 lab --freeze-roster").unwrap());
+        assert_eq!(request["predicate"], json!({"type":"any","predicates":[]}));
+        assert!(flags.contains(&("freeze-roster".into(), "true".into())));
+        let (flags, _) = request_of(plan(&s, "law s2 lab sealed --allow-unsatisfiable --freeze-roster").unwrap());
+        assert!(flags.contains(&("freeze-roster".into(), "true".into())));
+        assert!(flags.contains(&("allow-unsatisfiable".into(), "true".into())));
         assert_eq!(client(plan(&s, "room members lab").unwrap()).1,
             pairs(&[("action", "who"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab")]));
         assert_eq!(client(plan(&s, "room law lab").unwrap()).1,
@@ -3630,9 +3680,9 @@ mod tests {
         let (_, flags, _) = client(plan(&s, "room kick k1 lab 12").unwrap());
         assert_eq!(flags, pairs(&[("action", "room-key"), ("op", "kick"),
             ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("member", "12"), ("proposal-id", "k1")]));
-        // A public room's kick is K-ROOM's revoke proposal, unchanged.
-        let (_, request) = request_of(plan(&s, "room kick k2 pub 12").unwrap());
-        assert_eq!(request["action"], "revoke");
+        // A public room's kick is the room-kick enumeration, not submitted.
+        let (_, flags, _) = client(plan(&s, "room kick k2 pub 12").unwrap());
+        assert!(flags.contains(&("action".into(), "room-kick".into())));
         assert_eq!(client(plan(&s, "room keys lab").unwrap()).1, pairs(&[("action", "room-key"),
             ("op", "list"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab")]));
         assert_eq!(client(plan(&s, "room rotate r1 lab").unwrap()).1, pairs(&[("action", "room-key"),

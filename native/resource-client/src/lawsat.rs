@@ -349,13 +349,14 @@ pub(super) fn law_check(root: &Path, workspace: &Value, predicate: &Path) -> Res
 /// `allow_unsatisfiable`, and a law that admits no step BY THE INSTALLER unless
 /// `allow_lockout` (`--i-lock-myself-out`); warns on a law no write can pass and
 /// on a law its installer can never change.
+/// Returns whether no step can pass, for the explicit room-roster freeze check.
 pub(super) fn install_check(
     root: &Path,
     workspace: &Value,
     law: &Value,
     allow_unsatisfiable: bool,
     allow_lockout: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let checked = check(root, workspace, law)?;
     let lines = check_lines(&checked);
     if locks_out(&checked) && !allow_lockout {
@@ -394,7 +395,7 @@ pub(super) fn install_check(
     if verdict(&checked.any) == "unsat" {
         eprintln!("law check: installing it anyway (--allow-unsatisfiable): every request on this cell will be refused");
     }
-    Ok(())
+    Ok(verdict(&checked.any) == "unsat")
 }
 
 // ------------------------------------------------------------------ can --any

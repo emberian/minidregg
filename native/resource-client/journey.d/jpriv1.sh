@@ -224,16 +224,18 @@ law "$A" "$RQ/law-a.json"; law "$B" "$RQ/law-b.json"
 raw say alice "births her stream sa in lab" ok "$MINI" workspace --action create --dir "$WS/alice" \
   --name sa --storage stream --predicate "$RQ/law-a.json" --in lab
 check say "sa's reference is sealed in lab" jq -e '.sealedIn == "lab"' "$WS/alice/refs/sa.json"
-raw say alice "births bob's stream sb in lab (bob owns it)" ok "$MINI" workspace --action create --dir "$WS/alice" \
-  --name sb --storage stream --predicate "$RQ/law-b.json" --in lab --owner "$B"
+raw say alice "births a stream in lab owned by bob: refused (a room birth is owned by its creator)" ownerNotCreator \
+  "$MINI" workspace --action create --dir "$WS/alice" \
+  --name sbgift --storage stream --predicate "$RQ/law-b.json" --in lab --owner "$B"
+raw say alice "births bob's stream sb in lab (bob's author law; alice owns it)" ok "$MINI" workspace --action create --dir "$WS/alice" \
+  --name sb --storage stream --predicate "$RQ/law-b.json" --in lab
 raw say alice "births her stream pa in pub" ok "$MINI" workspace --action create --dir "$WS/alice" \
   --name pa --storage stream --predicate "$RQ/law-a.json" --in pub
 SA=$(jq -r .target "$WS/alice/refs/sa.json"); SB=$(jq -r .target "$WS/alice/refs/sb.json")
 PA=$(jq -r .target "$WS/alice/refs/pa.json")
-raw say bob "imports his own stream with its owner grant" ok "$MINI" workspace --action import --dir "$WS/bob" \
-  --name sb --kind object --target "$SB" --observe-capability "$(jq -r .observeCapability "$WS/alice/refs/sb.json")" \
-  --operation-capability "$(jq -r .operationCapability "$WS/alice/refs/sb.json")"
 BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
+raw say bob "imports his own stream with his room grant" ok "$MINI" workspace --action import --dir "$WS/bob" \
+  --name sb --kind object --target "$SB" --observe-capability "$BCAP" --operation-capability "$BCAP"
 raw say bob "imports alice's stream with his room grant" ok "$MINI" workspace --action import --dir "$WS/bob" \
   --name sa --kind object --target "$SA" --observe-capability "$BCAP"
 ACAP=$(jq -r .observeCapability "$WS/alice/refs/lab.json")
