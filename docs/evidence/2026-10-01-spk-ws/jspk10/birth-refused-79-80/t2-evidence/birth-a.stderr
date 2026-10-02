@@ -1,0 +1,4 @@
+refused: operation-rejected: grain-backed birth draft: Minidregg.Kernel.ResourceBirthController.Concrete.PreparationReject.authorityBatch (phase prepare)
+  Host refused prepare, reply byte 255
+  client: host refused prepare: refused: operation-rejected: grain-backed birth draft: Minidregg.Kernel.ResourceBirthController.Concrete.PreparationReject.authorityBatch (phase prepare); encoded refusal: 44524547472f4e41544956452d484f53542f4f5554434f4d452f763401000907ff707265706172656cff677261696e2d6261636b65642062697274682064726166743a204d696e6964726567672e4b65726e656c2e5265736f757263654269727468436f6e74726f6c6c65722e436f6e63726574652e5072657061726174696f6e52656a6563742e617574686f72697479426174636800
+jq: error: Could not open file /var/lib/minidregg/grains/spk-ws-run/j10/t2/evidence/a-app-attempt/outcome.json: No such file or directory

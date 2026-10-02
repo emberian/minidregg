@@ -29,8 +29,24 @@ def creds(route):
 
 
 def records(journal):
-    """The resident's dispatch records: dispatch-op-N attempt directories."""
-    return sorted(int(n[len("dispatch-op-"):]) for n in os.listdir(journal) if n.startswith("dispatch-op-"))
+    """The generation's committed Mini dispatch records: each dispatch-op-N
+    attempt directory holding Mini's committed inspection."""
+    out = []
+    for name in os.listdir(journal):
+        suffix = name[len("dispatch-op-"):]
+        if name.startswith("dispatch-op-") and suffix.isdigit() and \
+                os.path.exists(os.path.join(journal, name, "inspection.json")):
+            out.append(int(suffix))
+    return sorted(out)
+
+
+def record(journal, n):
+    """One committed record as an audit reads it: method, streamed mark, receipt."""
+    obj = json.load(open(os.path.join(journal, "dispatch-op-%d" % n, "inspection.json")))
+    req = obj["request"]
+    return {"op": n, "type": obj.get("type"), "method": bytes.fromhex(req["methodHex"]).decode(),
+            "streamed": req.get("streamed"), "path": bytes.fromhex(req["pathHex"]).decode(),
+            "acceptedCount": obj["receipt"]["acceptedCount"]}
 
 
 def rss_kib(unit_pid):
@@ -252,7 +268,8 @@ def cmd_ntfy(route, journal, topic):
            "deliveredAfterPostSeconds": round(delivered, 3), "message": json.loads(msg)["message"],
            "recordsBefore": len(r0), "afterOpen": len(r1), "afterPost": len(r2),
            "afterFrames": len(r3), "afterClose": len(r4), "framesExchanged": pings * 2,
-           "openRecord": r1[-1] if len(r1) > len(r0) else None}
+           "openRecord": record(journal, r1[-1]) if len(r1) > len(r0) else None,
+           "postRecord": record(journal, r2[-1]) if len(r2) > len(r1) else None}
     print(json.dumps(out))
     ok = (status == "200" and len(r1) - len(r0) == 1 and len(r2) - len(r1) == 1
           and len(r3) == len(r2) and len(r4) == len(r3))

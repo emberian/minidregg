@@ -1,0 +1,4 @@
+t2-store	PASS	107s	profile                      exit=0 .717720393s
+t3-store	PASS	113s	profile                      exit=0 .591887564s
+t2-birth-a	FAIL	9s	exit 2:  | birth-a                      exit=2 8.293998074s
+t3-birth-a	FAIL	8s	exit 2:  | birth-a                      exit=2 7.945986783s
