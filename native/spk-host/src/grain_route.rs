@@ -115,9 +115,11 @@ struct RouteRequest {
     /// the legacy owner entrance selector. Native admission checks authority.
     #[serde(default)]
     manifest_observe_capability: Option<String>,
-    /// Opt in only a source-derived API session to bounded export custody.
+    /// Opt in only a source-derived participant session to bounded export custody.
     #[serde(default)]
     export_capture: bool,
+    #[serde(default)]
+    export_path: Option<String>,
     participant_key: ParticipantKey,
 }
 
@@ -255,11 +257,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     private_dir(&app_dir)?;
     let placement = crate::grain::load_placement(&app_dir.join("placement.json"))?;
     let derived = derive(app, &placement.selector, &request)?;
-    if request.export_capture && derived.kind != "api" {
-        return Err(invalid(
-            "export capture requires a source-derived api session",
-        ));
-    }
+    validate_export_scope(&request)?;
     let installed = crate::materialize::verify_installed_spk(
         &PathBuf::from(format!(
             "/var/lib/minidregg/spk/packages/sha256-{}",
@@ -302,6 +300,13 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
                 &derived.subject,
                 &derived.session,
                 &derived.ticket,
+                (
+                    &derived.kind,
+                    request
+                        .export_path
+                        .as_deref()
+                        .ok_or_else(|| invalid("export path absent"))?,
+                ),
             )?;
         } else {
             crate::http_entrance::initialize_custodian(
@@ -362,6 +367,18 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     }))
 }
 
+fn validate_export_scope(request: &RouteRequest) -> io::Result<()> {
+    if request.export_capture != request.export_path.is_some()
+        || request
+            .export_path
+            .as_deref()
+            .is_some_and(|p| !crate::http_entrance::valid_export_path(p))
+    {
+        return Err(invalid("export capture requires one exact sheet CSV path"));
+    }
+    Ok(())
+}
+
 fn check_retained_policy(
     policy: &crate::http_entrance::CustodianPolicy,
     app: &str,
@@ -376,7 +393,7 @@ fn check_retained_policy(
         || policy.fixed_ticket != derived.ticket
         || api != (derived.kind == "api")
         || policy.export_capture != request.export_capture
-        || (policy.export_capture && !api)
+        || policy.export_capture_path != request.export_path
     {
         return Err(invalid(
             "retained route custody differs from requested authority or export opt-in",
@@ -470,6 +487,7 @@ mod tests {
             ticket_issue: e.0.clone(),
             manifest_observe_capability: manifest.map(str::to_owned),
             export_capture: false,
+            export_path: None,
             participant_key: ParticipantKey {
                 key_id: format!("{subject}00{subject}"),
                 key_epoch: "2".into(),
@@ -492,15 +510,25 @@ mod tests {
             fixed_ticket: d.ticket.clone(),
             fixed_session_kind: crate::http_entrance::EntranceKind::Browser,
             export_capture: false,
+            export_capture_path: None,
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
         };
         check_retained_policy(&p, "4601", &d, &req).unwrap();
         req.export_capture = true;
+        req.export_path = Some("_/sheet/csv".into());
+        validate_export_scope(&req).unwrap();
+        req.export_path = Some("_/sheet/../other/csv".into());
+        assert!(validate_export_scope(&req).is_err());
+        req.export_path = Some("_/sheet/csv".into());
         assert!(check_retained_policy(&p, "4601", &d, &req).is_err());
         p.export_capture = true;
+        p.export_capture_path = Some("_/sheet/csv".into());
+        check_retained_policy(&p, "4601", &d, &req).unwrap();
+        p.export_capture_path = Some("_/another/csv".into());
         assert!(check_retained_policy(&p, "4601", &d, &req).is_err());
+        p.export_capture_path = req.export_path.clone();
         p.fixed_session_kind = crate::http_entrance::EntranceKind::Api;
         d.kind = "api".into();
         check_retained_policy(&p, "4601", &d, &req).unwrap();

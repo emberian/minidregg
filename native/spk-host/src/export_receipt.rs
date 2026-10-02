@@ -27,12 +27,12 @@ pub(crate) fn requested(
         .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case(CAPTURE_HEADER))
         .collect();
-    if headers.is_empty() {
+    if headers.is_empty() && !policy.export_capture {
         return Ok(None);
     }
     if !policy.export_capture
-        || policy.fixed_session_kind != crate::http_entrance::EntranceKind::Api
-        || !matches!(http.route, crate::dispatch_inspection::Route::Api { .. })
+        || (policy.fixed_session_kind == crate::http_entrance::EntranceKind::Api)
+            != matches!(http.route, crate::dispatch_inspection::Route::Api { .. })
         || headers.len() != 1
         || http.method != "GET"
         || !http.body.is_empty()
@@ -42,6 +42,12 @@ pub(crate) fn requested(
             .any(|(name, _)| name.eq_ignore_ascii_case("upgrade"))
     {
         return Err(invalid("export capture requires an enabled GET-only route"));
+    }
+    let (path, query) = crate::dispatch_inspection::app_route_path(http)?;
+    if policy.export_capture_path.as_deref() != Some(path.as_str()) || !query.is_empty() {
+        return Err(invalid(
+            "export capture differs from its fixed sheet CSV route",
+        ));
     }
     let id = &headers[0].1;
     if id.len() != 32
@@ -92,7 +98,9 @@ pub(crate) fn prepare(
     let body = &response[end + 4..];
     let receipt = json!({"type":"mini-spk-export-custody-v1","capture":capture,
         "app":identity.app.to_string(),"generation":identity.app_generation.to_string(),
-        "subject":custody.subject,"session":identity.session_resource,
+        "subject":custody.subject,"session":identity.session_resource,"sessionKind":custody.session_kind,
+        "credentialKind":if custody.session_kind == "api" {"bearer"} else {"cookie"},
+        "packageManifest":custody.package_manifest,
         "sessionGeneration":identity.session_generation,"ticket":custody.ticket_resource,
         "operation":identity.operation_id,"transaction":identity.dispatch_transaction,
         "event":identity.dispatch_event,"requestDigest":identity.request_digest,
@@ -118,7 +126,7 @@ pub(crate) fn prepare(
 mod tests {
     use super::*;
     #[test]
-    fn capture_opt_in_is_api_get_only_and_unique() {
+    fn capture_opt_in_confines_browser_and_api_to_exact_csv_get() {
         let mut p = CustodianPolicy {
             expected_host: "app.example".into(),
             fixed_app: "7".into(),
@@ -127,6 +135,7 @@ mod tests {
             fixed_ticket: "10".into(),
             fixed_session_kind: crate::http_entrance::EntranceKind::Api,
             export_capture: false,
+            export_capture_path: Some("_/survey/csv".into()),
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
@@ -141,6 +150,11 @@ mod tests {
         };
         assert!(requested(&p, &h).is_err());
         p.export_capture = true;
+        let another = HttpProjection {
+            path_and_query: "other/csv",
+            ..h
+        };
+        assert!(requested(&p, &another).is_err());
         assert_eq!(requested(&p, &h).unwrap(), Some("a".repeat(32)));
         for method in ["HEAD", "POST", "WEBSOCKET"] {
             h.method = method;
@@ -156,7 +170,17 @@ mod tests {
         let duplicate = vec![headers[0].clone(), headers[0].clone()];
         h.ordered_headers = &duplicate;
         assert!(requested(&p, &h).is_err());
+        h.ordered_headers = &headers;
+        h.route = crate::dispatch_inspection::Route::Browser;
+        h.path_and_query = "_/survey/csv";
+        p.fixed_session_kind = crate::http_entrance::EntranceKind::Browser;
+        assert_eq!(requested(&p, &h).unwrap(), Some("a".repeat(32)));
+        h.path_and_query = "_/survey/csv?format=other";
+        assert!(requested(&p, &h).is_err());
+        h.path_and_query = "_/survey/csv";
         h.ordered_headers = &[];
+        assert!(requested(&p, &h).is_err());
+        p.export_capture = false;
         assert_eq!(requested(&p, &h).unwrap(), None);
     }
     #[test]

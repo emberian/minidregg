@@ -116,14 +116,6 @@ fn main() {
             }
         }
     }
-    if args.len() == 8 && args[1] == "connector-custodian-init" {
-        match minidregg_spk_host::http_entrance::initialize_connector_custodian(
-            Path::new(&args[2]), &args[3], &args[4], &args[5], &args[6], &args[7],
-        ) {
-            Ok(()) => { println!("connector custodian initialized at {}", args[2]); return; }
-            Err(error) => { eprintln!("spk-host: connector custodian initialization refused: {error}"); std::process::exit(1); }
-        }
-    }
     if args.len() == 9 && args[1] == "human-custodian-init" {
         match minidregg_spk_host::http_entrance::initialize_custodian(
             Path::new(&args[2]),
@@ -248,7 +240,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | connector-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ... | broker-serve CONFIG"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ... | broker-serve CONFIG"
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
     std::process::exit(2);

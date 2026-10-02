@@ -30,6 +30,10 @@ fn validate(binding: &Value, workspace: &Value) -> Result<()> {
             "type",
             "subject",
             "appReference",
+            "packageReference",
+            "packageManifest",
+            "sessionKind",
+            "credentialKind",
             "app",
             "generation",
             "session",
@@ -53,6 +57,7 @@ fn validate(binding: &Value, workspace: &Value) -> Result<()> {
     }
     for name in [
         "app",
+        "packageManifest",
         "generation",
         "session",
         "sessionGeneration",
@@ -62,7 +67,12 @@ fn validate(binding: &Value, workspace: &Value) -> Result<()> {
     ] {
         field_decimal(member(binding, name)?, name)?;
     }
-    for name in ["appReference", "document", "taskReference"] {
+    for name in [
+        "appReference",
+        "packageReference",
+        "document",
+        "taskReference",
+    ] {
         validate_ref_name(member(binding, name)?)?;
     }
     let sheet = member(binding, "sheet")?;
@@ -82,8 +92,18 @@ fn validate(binding: &Value, workspace: &Value) -> Result<()> {
     {
         return Err("connector requires an HTTPS app route ending in slash".into());
     }
-    if !matches!(binding["apiPath"].as_str(), Some("/_/" | "/")) {
-        return Err("EtherCalc connector requires the source-signed /_/ or / API path".into());
+    match (
+        binding["sessionKind"].as_str(),
+        binding["credentialKind"].as_str(),
+    ) {
+        (Some("web"), Some("cookie")) if binding["apiPath"].is_null() => {}
+        (Some("api"), Some("bearer"))
+            if matches!(binding["apiPath"].as_str(), Some("/_/" | "/")) => {}
+        _ => {
+            return Err(
+                "connector credential kind differs from its source session/interface".into(),
+            )
+        }
     }
     let token = member(binding, "token")?;
     if token.len() < 32
@@ -109,6 +129,7 @@ fn store_key(root: &Path) -> Result<Zeroizing<[u8; 32]>> {
         make_private_dir(&parent)?;
     }
     private_dir(&parent)?;
+    let _lock = crate::transport::service_lock(&parent.join("storage-key.lock"))?;
     let path = parent.join("storage.key");
     if !path.exists() {
         if fs::read_dir(&parent)
@@ -121,7 +142,7 @@ fn store_key(root: &Path) -> Result<Zeroizing<[u8; 32]>> {
         File::open("/dev/urandom")
             .and_then(|mut f| f.read_exact(&mut *seed))
             .map_err(|e| e.to_string())?;
-        private_file(&path, &*seed)?;
+        replace_private_file(&path, &*seed)?;
     }
     Ok(Zeroizing::new(crate::read_secret(&path)?.to_bytes()))
 }
@@ -152,10 +173,11 @@ fn seal(root: &Path, workspace: &Value, id: &str, v: &Value) -> Result<()> {
             },
         )
         .map_err(|_| "custody encryption failed")?;
-    private_file(
-        &operation(root, id)?.join("capture.enc"),
-        &[FRAME, &nonce, &cipher].concat(),
-    )
+    let path = operation(root, id)?.join("capture.enc");
+    if path.exists() {
+        return Err("complete export custody already exists; no replacement".into());
+    }
+    replace_private_file(&path, &[FRAME, &nonce, &cipher].concat())
 }
 fn opened(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
     let path = operation(root, id)?.join("capture.enc");
@@ -183,16 +205,53 @@ fn opened(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
     );
     serde_json::from_slice(&plain).map_err(|e| e.to_string())
 }
+/// Immutable phase records are atomically published under their custody lock.
 fn save(path: &Path, v: &Value) -> Result<()> {
-    private_file(path, &serde_json::to_vec(v).map_err(|e| e.to_string())?)
+    if path.exists() {
+        if bounded_json(path)? == *v {
+            return Ok(());
+        }
+        return Err("retained connector phase differs; no replacement".into());
+    }
+    replace_private_file(path, &serde_json::to_vec(v).map_err(|e| e.to_string())?)
+}
+
+/// Discovery heads change when an admitted export or an unrelated write lands.
+/// Keep target, authority and encryption custody stable; source admission checks
+/// their current meaning again. Retained discovery observations remain evidence.
+fn stable_refs(refs: &Value) -> Value {
+    let mut result = json!({});
+    for name in ["app", "package", "task", "document"] {
+        let mut identity = json!({});
+        for field in [
+            "kind",
+            "target",
+            "observeCapability",
+            "operationCapability",
+            "controlCapability",
+            "sealedIn",
+            "sealedRoom",
+            "private",
+            "protectedDocument",
+            "room",
+        ] {
+            if let Some(v) = refs[name].get(field) {
+                identity[field] = v.clone();
+            }
+        }
+        result[name] = identity;
+    }
+    result
 }
 
 fn read_refs(root: &Path, binding: &Value) -> Result<Value> {
     let app = reference(root, member(binding, "appReference")?)?;
     let task = reference(root, member(binding, "taskReference")?)?;
+    let package = reference(root, member(binding, "packageReference")?)?;
     let doc = reference(root, member(binding, "document")?)?;
     if app["target"] != binding["app"]
         || task["target"] != binding["task"]
+        || package["target"] != binding["packageManifest"]
         || doc["operationCapability"] != binding["documentCapability"]
         || [binding["app"].clone(), binding["task"].clone()].contains(&doc["target"])
     {
@@ -201,7 +260,7 @@ fn read_refs(root: &Path, binding: &Value) -> Result<Value> {
                 .into(),
         );
     }
-    Ok(json!({"app":app,"task":task,"document":doc}))
+    Ok(json!({"app":app,"package":package,"task":task,"document":doc}))
 }
 
 /// Parse a completed response capture. Duplicate reserved headers, altered
@@ -232,7 +291,7 @@ fn checked_receipt(headers: &[u8], body: &[u8], binding: &Value, capture: &str) 
         || receipt["method"] != "GET"
         || receipt["signedApiPath"] != binding["apiPath"]
         || receipt["query"] != ""
-        || receipt["path"] != format!("_/{} /csv", member(binding, "sheet")?).replace(" ", "")
+        || receipt["path"] != format!("_/{}/csv", member(binding, "sheet")?)
         || receipt["bodyBytes"] != body.len().to_string()
         || receipt["bodySha256"] != format!("{:x}", Sha256::digest(body))
     {
@@ -240,8 +299,11 @@ fn checked_receipt(headers: &[u8], body: &[u8], binding: &Value, capture: &str) 
     }
     for field in [
         "app",
+        "packageManifest",
         "generation",
         "subject",
+        "sessionKind",
+        "credentialKind",
         "session",
         "sessionGeneration",
         "ticket",
@@ -287,10 +349,14 @@ fn fetch(dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>
     let mut config = format!(
         "url = {}\nheader = {}\nheader = {}\n",
         quote(&url)?,
-        quote(&format!(
-            "Authorization: Bearer {}",
-            member(binding, "token")?
-        ))?,
+        quote(&if binding["credentialKind"] == "cookie" {
+            format!(
+                "Cookie: __Host-mini_spk_session={}",
+                member(binding, "token")?
+            )
+        } else {
+            format!("Authorization: Bearer {}", member(binding, "token")?)
+        })?,
         quote(&format!("X-Mini-Export-Capture: {capture}"))?
     );
     if !binding["ca"].is_null() {
@@ -399,6 +465,8 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
     if generation != Some(binding["generation"].clone()) {
         return Err("source app is not the selected generation".into());
     }
+    let (package, package_challenge, _) =
+        signed_view(root, workspace, &refs["package"], "resource")?;
     let (task, task_challenge, _) = signed_view(root, workspace, &refs["task"], "resource")?;
     let read = rendered_document(root, workspace, member(binding, "document")?, None, None)?;
     let challenge = bounded_json(&read.attempt.join("challenge.json"))?;
@@ -423,7 +491,7 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
         return Err("sheet export contains NUL bytes".into());
     }
     let v = json!({"type":"mini-app-document-capture-v1","binding":binding,"refs":refs,"seen":seen,
-        "appObservation":app,"appChallenge":app_challenge,"taskObservation":task,"taskChallenge":task_challenge,
+        "appObservation":app,"appChallenge":app_challenge,"packageObservation":package,"packageChallenge":package_challenge,"taskObservation":task,"taskChallenge":task_challenge,
         "body":hex(&body),"receipt":receipt});
     seal(root, workspace, id, &v)?;
     status(root, workspace, id)
@@ -458,7 +526,7 @@ pub(crate) fn publish(root: &Path, workspace: &Value, id: &str) -> Result<Value>
     let _lock = crate::transport::service_lock(&dir.join("operation.lock"))?;
     let v = opened(root, workspace, id)?;
     validate(&v["binding"], workspace)?;
-    if read_refs(root, &v["binding"])? != v["refs"] {
+    if stable_refs(&read_refs(root, &v["binding"])?) != stable_refs(&v["refs"]) {
         return Err("connector references changed; retained export cannot redirect".into());
     }
     if dir.join("submit-started.json").exists() {
@@ -586,13 +654,31 @@ pub(crate) fn rebase(root: &Path, workspace: &Value, id: &str, next: &str) -> Re
             return Err("this export already claimed another successor".into());
         }
     } else {
+        if nextdir.exists() {
+            return Err("new successor identity is already occupied".into());
+        }
         save(&claim, &json!({"next":next,"subject":workspace["subject"]}))?;
     }
+    if nextdir.join("capture.enc").exists() && opened(root, workspace, next)?["rebasedFrom"] != id {
+        return Err("successor belongs to another retained export".into());
+    }
+    if !nextdir.exists() {
+        make_private_dir(&nextdir)?;
+    }
+    private_dir(&nextdir)?;
+    let _next_lock = crate::transport::service_lock(&nextdir.join("operation.lock"))?;
     if nextdir.join("capture.enc").exists() {
+        let prior = opened(root, workspace, next)?;
+        if prior["rebasedFrom"] != id {
+            return Err("successor belongs to another retained export".into());
+        }
         return status(root, workspace, next);
     }
+    if nextdir.join("fetch-started.json").exists() {
+        return Err("successor is already an original source capture; no replacement".into());
+    }
     let mut v = opened(root, workspace, id)?;
-    if read_refs(root, &v["binding"])? != v["refs"] {
+    if stable_refs(&read_refs(root, &v["binding"])?) != stable_refs(&v["refs"]) {
         return Err("connector references changed; rebase cannot redirect retained bytes".into());
     }
     let name = member(&v["binding"], "document")?;
@@ -644,10 +730,10 @@ pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
 mod tests {
     use super::*;
     fn binding() -> Value {
-        json!({"type":"mini-app-document-binding-v1","subject":"8","appReference":"sheet","app":"7","generation":"3","session":"9","sessionGeneration":"2","ticket":"10","document":"paper","documentCapability":"11","taskReference":"job","task":"12","sheet":"survey","endpoint":"https://app.example/","apiPath":"/_/","token":"a".repeat(32),"ca":null})
+        json!({"type":"mini-app-document-binding-v1","subject":"8","appReference":"sheet","packageReference":"package","packageManifest":"11","sessionKind":"api","credentialKind":"bearer","app":"7","generation":"3","session":"9","sessionGeneration":"2","ticket":"10","document":"paper","documentCapability":"11","taskReference":"job","task":"12","sheet":"survey","endpoint":"https://app.example/","apiPath":"/_/","token":"a".repeat(32),"ca":null})
     }
     fn receipt() -> Value {
-        json!({"type":"mini-spk-export-custody-v1","capture":"a".repeat(32),"method":"GET","signedApiPath":"/_/","path":"_/survey/csv","query":"","bodyBytes":"3","bodySha256":format!("{:x}",Sha256::digest(b"abc")),"app":"7","generation":"3","subject":"8","session":"9","sessionGeneration":"2","ticket":"10","operation":"17","transaction":"18","event":"19","requestDigest":"20","permitSha256":"b".repeat(64)})
+        json!({"type":"mini-spk-export-custody-v1","capture":"a".repeat(32),"method":"GET","signedApiPath":"/_/","path":"_/survey/csv","query":"","bodyBytes":"3","bodySha256":format!("{:x}",Sha256::digest(b"abc")),"app":"7","generation":"3","subject":"8","sessionKind":"api","credentialKind":"bearer","packageManifest":"11","session":"9","sessionGeneration":"2","ticket":"10","operation":"17","transaction":"18","event":"19","requestDigest":"20","permitSha256":"b".repeat(64)})
     }
     fn headers(r: &Value) -> Vec<u8> {
         format!(
@@ -655,6 +741,53 @@ mod tests {
             hex(&serde_json::to_vec(r).unwrap())
         )
         .into_bytes()
+    }
+    #[test]
+    fn shared_discovery_head_changes_preserve_exact_grants_but_redirects_refuse() {
+        let before = json!({"document":{"target":"7","kind":"object","observeCapability":"8","operationCapability":"9","sealedIn":"private-room","sharedName":{"height":"10","worldRoot":"11"}}});
+        let mut after = before.clone();
+        after["document"]["sharedName"] = json!({"height":"12","worldRoot":"13"});
+        assert_eq!(stable_refs(&before), stable_refs(&after));
+        for field in [
+            "target",
+            "kind",
+            "observeCapability",
+            "operationCapability",
+            "sealedIn",
+        ] {
+            let mut redirected = after.clone();
+            redirected["document"][field] = json!("different");
+            assert_ne!(stable_refs(&before), stable_refs(&redirected), "{field}");
+        }
+    }
+    #[test]
+    fn interrupted_phase_before_document_call_recovers_without_losing_export() {
+        let root = std::env::temp_dir().join(format!("app-doc-cut-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        let ws = json!({"subject":"8"});
+        store_key(&root).unwrap();
+        let dir = operation(&root, "one").unwrap();
+        make_private_dir(&dir).unwrap();
+        let captured = json!({"binding":binding(),"body":"616263","receipt":receipt(),"refs":{"document":{"target":"22"}}});
+        seal(&root, &ws, "one", &captured).unwrap();
+        fs::write(dir.join(".write-crash-cut"), b"{partial").unwrap();
+        let attempt = root.join("attempts/app-one");
+        let marker = json!({"attempt":attempt,"proposal":"app-one"});
+        save(&dir.join("submit-started.json"), &marker).unwrap();
+        save(&dir.join("submit-started.json"), &marker).unwrap();
+        assert!(save(
+            &dir.join("submit-started.json"),
+            &json!({"attempt":"another"})
+        )
+        .is_err());
+        assert_eq!(status(&root, &ws, "one").unwrap()["status"], "uncertain");
+        assert_eq!(
+            recover_exact(&root, &ws, "one").unwrap()["status"],
+            "failed"
+        );
+        assert_eq!(opened(&root, &ws, "one").unwrap(), captured);
+        assert!(!attempt.join("call.bin").exists());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn only_exact_typed_refusal_permits_new_document_attempt() {
@@ -682,6 +815,9 @@ mod tests {
         checked_receipt(&headers(&r), b"abc", &b, &id).unwrap();
         for field in [
             "app",
+            "packageManifest",
+            "sessionKind",
+            "credentialKind",
             "generation",
             "subject",
             "session",
@@ -711,6 +847,13 @@ mod tests {
     fn binding_has_no_operator_or_unbounded_route_escape() {
         let b = binding();
         validate(&b, &json!({"subject":"8"})).unwrap();
+        let mut web = b.clone();
+        web["sessionKind"] = json!("web");
+        web["credentialKind"] = json!("cookie");
+        web["apiPath"] = Value::Null;
+        validate(&web, &json!({"subject":"8"})).unwrap();
+        web["credentialKind"] = json!("bearer");
+        assert!(validate(&web, &json!({"subject":"8"})).is_err());
         assert!(validate(&b, &json!({"subject":"9"})).is_err());
         for (field, value) in [
             ("endpoint", "http://127.0.0.1/"),
