@@ -205,3 +205,15 @@ fn j12r_renders_to_the_journey_golden() {
     assert_eq!(rendered.raw(), b"Docuverse\nbold words\nslanted\nmini serve\nsee the target\nchanged\n");
     assert_eq!(text::outline(&rendered), "  1  Docuverse\n");
 }
+
+#[test]
+fn shared_name_bindings_render_as_internal_targets_not_external_urls() {
+    let entry=json!({"type":"link","id":"9","source":null,"relation":"0","tombstonedAt":null,
+        "target":crate::workspace::shared_names::target("board","object","42").unwrap()});
+    let rendered=render_with(&fixture("k12m"),&[entry],&BTreeMap::new());
+    assert!(rendered.text().contains("board → object:42"));
+    assert!(rendered.html("lab/index").contains("<dt>board</dt><dd>object:42</dd>"));
+    assert!(!rendered.html("lab/index").contains("mini-name:"));
+    assert_eq!(rendered.json("7")["sharedNames"][0]["name"],"board");
+    assert_eq!(rendered.raw(), b"one\ntwo'\nthree\nfour\n");
+}

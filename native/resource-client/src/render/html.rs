@@ -125,6 +125,14 @@ fn row_attrs(line: &RenderedLine) -> String {
 
 pub fn document(rendered: &Rendered, title: &str) -> String {
     let mut out = vec![format!("<article class=\"doc\" data-name=\"{}\">", escape(title))];
+    if !rendered.shared_names.is_empty() {
+        out.push("<section class=\"shared-names\"><h2>Shared names</h2><dl>".to_owned());
+        for binding in &rendered.shared_names {
+            out.push(format!("<dt>{}</dt><dd>{}:{}</dd>",escape(&binding.name),
+                escape(&binding.kind),escape(&binding.target)));
+        }
+        out.push("</dl></section>".to_owned());
+    }
     for a in &rendered.document_annotations {
         out.push(annotation(a));
     }
