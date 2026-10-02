@@ -58,11 +58,12 @@ def protected(value):
 
 
 def unit(argv, user, description, cwd):
+    require(re.fullmatch(r"/[A-Za-z0-9_./-]+", cwd), "unit working directory requires a simple absolute path")
     # systemd parses quoted words independently of the shell. Percent is an
     # expansion character even inside quotes; literal arguments escape it.
     words = [json.dumps(str(word).replace("%", "%%")) for word in argv]
     return ("[Unit]\nDescription=" + description + "\n[Service]\nType=exec\nUser=" + user
-            + "\nUMask=0077\nWorkingDirectory=" + json.dumps(cwd.replace("%", "%%"))
+            + "\nUMask=0077\nWorkingDirectory=" + cwd
             + "\nExecStart=" + " ".join(words)
             + "\nKillMode=control-group\nTimeoutStopSec=30\nRestart=no\n")
 
