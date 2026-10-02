@@ -180,12 +180,20 @@ def eveDoc : Capability .object :=
 
 /-- Bob's owner grant on doc 51, born after the re-invite with grant 24. -/
 def bobDocAgain : Capability .object :=
-  { bobDoc with id := ⟨32⟩, root := ⟨32⟩, scope := ⟨.under 51, ResourceBirthPolicyController.Concrete.ownerVerbs .object, 8, none, ∅⟩,
-    policyId := ⟨51⟩, ancestors := {⟨24⟩} }
+  { bobDoc with
+    id := ⟨32⟩
+    root := ⟨32⟩
+    scope := ⟨.under 51, ResourceBirthPolicyController.Concrete.ownerVerbs .object, 8, none, ∅⟩
+    policyId := ⟨51⟩
+    ancestors := {⟨24⟩} }
 
 def read (subject : SubjectId) (cell : Nat) : Request .object :=
-  { demoRequest with subject := subject, target := ⟨cell⟩, verb := .observeObject,
-    policyId := ⟨cell⟩, cost := 0 }
+  { demoRequest with
+    subject := subject
+    target := ⟨cell⟩
+    verb := .observeObject
+    policyId := ⟨cell⟩
+    cost := 0 }
 
 /-- After the kick: 22 is revoked; doc 51 is in room 7 too. -/
 def kicked : AuthState :=
@@ -226,9 +234,9 @@ end Sample
 #guard_msgs (whitespace := lax) in #print axioms kick_revokes_born_descendants
 /-- info: 'Minidregg.Kernel.RoomKick.accepted_kick_revokes_room_born_authority' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_kick_revokes_room_born_authority
-/-- info: 'Minidregg.Kernel.RoomKick.old_root_shape_survives_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.RoomKick.old_root_shape_survives_kick' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms old_root_shape_survives_kick
-/-- info: 'Minidregg.Kernel.RoomKick.founder_keeps_room_after_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.RoomKick.founder_keeps_room_after_kick' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms founder_keeps_room_after_kick
 /-- info: 'Minidregg.Kernel.RoomKick.Sample.bob_doc_refused_after_kick' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sample.bob_doc_refused_after_kick
