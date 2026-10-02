@@ -134,6 +134,49 @@ def Config.capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
   (capabilityEvidenceCheckedFor config.snapshot config.portal request identifier
     commitment use issuer revocation (fun id => .capability kind id)).map Subtype.val
 
+structure PreparedLaw {F : Type} [Field F] [DecidableEq F] (config : Config F) where
+  head : LoadedPolicy config.snapshot config.store ⟨config.target⟩
+    (config.snapshot.authState.policyRevision ⟨config.target⟩)
+  graph : LoadedGraph config.snapshot config.store config.profile.semantics
+    config.target config.additional
+  graphExact : loadTarget config.snapshot config.store config.profile.semantics config.target
+    config.resolutionBudget config.additional = .ok graph
+
+def Config.resolve? {F : Type} [Field F] [DecidableEq F] (config : Config F) :
+    Option (PreparedLaw config) := do
+  let head ← loadPolicy config.snapshot config.store ⟨config.target⟩
+    (config.snapshot.authState.policyRevision ⟨config.target⟩)
+  match exact : loadTarget config.snapshot config.store config.profile.semantics config.target
+      config.resolutionBudget config.additional with
+  | .error _ => none
+  | .ok graph => some ⟨head, graph, exact⟩
+
+def PreparedLaw.predicate {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    (law : PreparedLaw config) : Pred := ResolvedLawCompilation.predicate law.graph.resolved
+
+def PreparedLaw.witness {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    (law : PreparedLaw config) : Witness F :=
+  ⟨ResolvedLawCompilation.witness config.profile.compiler law.graph.resolved
+    law.head.committed.address config.step.oldState config.step.newState,
+    closureDigest law.graph.resolved⟩
+
+theorem Config.capabilityEvidence_names_stored {F : Type} [Field F] [DecidableEq F]
+    (config : Config F) {kind : ResourceKind} (request : Request kind)
+    (identifier : CapabilityId) (commitment : config.portal.CapabilityCommitmentWitness)
+    (use : config.portal.CapabilityUseWitness) (issuer : config.portal.IssuerWitness)
+    (revocation : RevocationKey → config.portal.NonRevocationWitness)
+    {evidence : Evidence config.portal config.snapshot.authState request}
+    (accepted : config.capabilityEvidenceChecked request identifier commitment use issuer revocation = .ok evidence) :
+    NamesStored config.snapshot identifier evidence := by
+  unfold Config.capabilityEvidenceChecked at accepted
+  cases result : capabilityEvidenceCheckedFor config.snapshot config.portal request identifier
+      commitment use issuer revocation (fun id => .capability kind id) with
+  | error reason => simp [result, Except.map] at accepted
+  | ok checked =>
+      simp only [result, Except.map, Except.ok.injEq] at accepted
+      rw [← accepted]
+      exact checked.property
+
 /-- Witness construction uses the same loaded closure and the receiver's exact
 pre/post projection. Failure never supplies a permissive fallback witness. -/
 def Config.witness? {F : Type} [Field F] [DecidableEq F]
@@ -173,6 +216,24 @@ def admit {F : Type} [Field F] [DecidableEq F]
       else none
     else none
   else none
+
+theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
+    (config : Config F) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (witness : Witness F) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId)
+    {authorized : Authorized config.portal config.snapshot.authState request}
+    (accepted : admit config request evidence witness membership epochExact revisionExact = some authorized) :
+    authorized.evidence = evidence := by
+  unfold admit at accepted
+  split at accepted
+  · split at accepted
+    · split at accepted
+      · cases accepted; rfl
+      · cases accepted
+    · cases accepted
+  · cases accepted
 
 theorem authorized_effective_law {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)
