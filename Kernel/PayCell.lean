@@ -363,16 +363,16 @@ def rowShaped (store : PayStore) : Address layout → Bool
           | some record => decide (record.sshBlob = blob)
           | none => false
       | none => true
-  | ⟨.claim, id⟩ =>
-      match claimAt store id with
-      | some claim => decide (claim.valid ∧ claim.id = id) && claimMemoCoherent claim &&
-          (claim.reason.isSome || (claimConsumptionAt store id).isSome)
+  | ⟨.claim, claimIdentifier⟩ =>
+      match claimAt store claimIdentifier with
+      | some claim => decide (claim.valid ∧ claim.id = claimIdentifier) && claimMemoCoherent claim &&
+          (claim.reason.isSome || (claimConsumptionAt store claimIdentifier).isSome)
       | none => true
-  | ⟨.claimConsumption, id⟩ =>
-      match claimConsumptionAt store id with
+  | ⟨.claimConsumption, claimIdentifier⟩ =>
+      match claimConsumptionAt store claimIdentifier with
       | some consumed =>
-          match claimAt store id with
-          | some claim => decide (consumed.valid ∧ consumed.claimId = id ∧ consumed.matchesClaim claim) &&
+          match claimAt store claimIdentifier with
+          | some claim => decide (consumed.valid ∧ consumed.claimId = claimIdentifier ∧ consumed.matchesClaim claim) &&
               consumptionAuthorizationCoherent claim consumed
           | none => false
       | none => true
@@ -617,7 +617,7 @@ theorem pendingOwnerHistory_appendOnly :
 /-- No enabled rewrite can replace an already recorded pending epoch. -/
 theorem pendingOwnerHistory_no_rewrite (store : PayStore) (identity : List UInt8) (epoch : Nat)
     (before after : PayEnrolClaim.PendingOwner)
-    (enabled : (Op.write .pendingOwnerHistory (identity, epoch) before after).Enabled store) : False := by
+    (enabled : (Op.write (L := layout) .pendingOwnerHistory (identity, epoch) before after).Enabled store) : False := by
   have wrong := enabled.1
   change Minidregg.Theory.Store.Discipline.appendOnly = .ram at wrong
   cases wrong
@@ -645,7 +645,7 @@ theorem computeActivation_appendOnly :
 
 /-- Activation cannot be replaced to mint another free allowance. -/
 theorem computeActivation_no_rewrite (store : PayStore) (before after : ComputeActivation)
-    (enabled : (Op.write .computeActivation () before after).Enabled store) : False := by
+    (enabled : (Op.write (L := layout) .computeActivation () before after).Enabled store) : False := by
   have wrong := enabled.1
   change Minidregg.Theory.Store.Discipline.appendOnly = .ram at wrong
   cases wrong

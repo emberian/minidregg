@@ -245,7 +245,8 @@ theorem encode_length {memo : Memo} (wf : memo.WellFormed) :
     (encode memo).length = memoLength := by
   have divisible : (binary memo).length % 3 = 0 := by rw [binary_length wf]; decide
   rw [encode, List.length_append, PayEnrolMemo.b64Encode_length _ divisible, binary_length wf]
-  rfl
+  norm_num [memoPrefix, memoLength, binaryLength]
+  decide +kernel
 
 theorem decodeBinary_binary {memo : Memo} (wf : memo.WellFormed) :
     decodeBinary (binary memo) = some memo := by
@@ -254,7 +255,9 @@ theorem decodeBinary_binary {memo : Memo} (wf : memo.WellFormed) :
     (by simp [unsignedBytes_length wf.1.1, wf.2.1])
   unfold decodeBinary binary
   rw [pieces]
-  simp only [decodeUnsigned_unsignedBytes wf.1.1, Option.bind_some]
+  change (decodeUnsigned (unsignedBytes memo.unsigned) >>=
+    fun value => some (Memo.mk value memo.miniSignature memo.sshSignature)) = some memo
+  rw [decodeUnsigned_unsignedBytes wf.1.1]
   cases memo; rfl
 
 theorem rawParse_encode {memo : Memo} (wf : memo.WellFormed) :
@@ -356,7 +359,10 @@ theorem decodeFrame_unsignedFrame {context : Context} {value : Unsigned}
     (by simp [unsignedBytes_length hv, hc.1, hc.2.1])
   unfold decodeFrame unsignedFrame
   rw [pieces]
-  simp only [decodeUnsigned_unsignedBytes hv, Option.bind_some]
+  change (decodeUnsigned (unsignedBytes value) >>= fun decoded =>
+    some (Context.mk context.mint context.tokenProgram context.enrollmentRecipient, decoded)) =
+      some (context, value)
+  rw [decodeUnsigned_unsignedBytes hv]
   cases context; rfl
 
 /-- Byte-level binding of ALL fields and all three asset/recipient identities.
@@ -380,7 +386,7 @@ def fixtureUnsigned : Unsigned :=
     List.replicate 32 4, ⟨5⟩, 1, 94, 497500, 269⟩
 def fixture : Memo := ⟨fixtureUnsigned, List.replicate 64 6, List.replicate 64 7⟩
 
-theorem fixture_wellFormed : fixture.WellFormed := by decide
+theorem fixture_wellFormed : fixture.WellFormed := by decide +kernel
 
 theorem fixture_roundtrip : parse (encode fixture) = .ok fixture :=
   parse_encode fixture_wellFormed
@@ -393,51 +399,51 @@ alphabet and signature placement are pinned rather than merely roundtripped. -/
 def fixtureText : List UInt8 :=
   "enrol:v2:AQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAQAAAAAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAF4AAAAAAAAAXJcHAAAAAAANAQAAAAAAAAYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH".toUTF8.toList
 
-theorem fixture_exact_wire : encode fixture = fixtureText := by decide
+theorem fixture_exact_wire : encode fixture = fixtureText := by decide +kernel
 
 theorem fixture_literal_parses : parse fixtureText = .ok fixture := by
   rw [← fixture_exact_wire]
   exact fixture_roundtrip
 
 theorem little_endian_not_network_order : encodeLE 8 72623859790382856 =
-    [8, 7, 6, 5, 4, 3, 2, 1] := by decide
+    [8, 7, 6, 5, 4, 3, 2, 1] := by decide +kernel
 
 theorem unsupported_mode :
-    decodeUnsigned (0 :: (unsignedBytes fixtureUnsigned).drop 1) = none := by decide
+    decodeUnsigned (0 :: (unsignedBytes fixtureUnsigned).drop 1) = none := by decide +kernel
 
 theorem zero_epoch_refused :
     parse (encode { fixture with unsigned := { fixtureUnsigned with authorityEpoch := 0 } }) =
-      .error .invalidFields := by decide
+      .error .invalidFields := by decide +kernel
 
 theorem initial_rotated_authorizer_refused :
     parse (encode { fixture with unsigned :=
       { fixtureUnsigned with authorizingKey := List.replicate 32 9 } }) =
-      .error .invalidFields := by decide
+      .error .invalidFields := by decide +kernel
 
 theorem initial_epoch_two_refused :
     parse (encode { fixture with unsigned := { fixtureUnsigned with authorityEpoch := 2 } }) =
-      .error .invalidFields := by decide
+      .error .invalidFields := by decide +kernel
 
 def rotatedRenewal : Memo := { fixture with unsigned :=
   { fixtureUnsigned with mode := .renew, authorizingKey := List.replicate 32 9, authorityEpoch := 2 } }
 
 theorem rotated_renewal_roundtrip : parse (encode rotatedRenewal) = .ok rotatedRenewal :=
-  parse_encode (by decide)
+  parse_encode (by decide +kernel)
 
 theorem zero_weeks_refused :
     parse (encode { fixture with unsigned := { fixtureUnsigned with weeks := 0 } }) =
-      .error .invalidFields := by decide
+      .error .invalidFields := by decide +kernel
 
 theorem digest_overflow_not_wellFormed :
-    ¬ ({ fixtureUnsigned with nextKeyDigest := ⟨256 ^ 32⟩ }).WellFormed := by decide
+    ¬ ({ fixtureUnsigned with nextKeyDigest := ⟨256 ^ 32⟩ }).WellFormed := by decide +kernel
 
 theorem scalar_overflow_not_wellFormed :
-    ¬ ({ fixtureUnsigned with amountAtomic := 256 ^ 8 }).WellFormed := by decide
+    ¬ ({ fixtureUnsigned with amountAtomic := 256 ^ 8 }).WellFormed := by decide +kernel
 
-theorem padding_refused : parse (encode fixture ++ [61]) = .error .shape := by decide
+theorem padding_refused : parse (encode fixture ++ [61]) = .error .shape := by decide +kernel
 
 theorem old_version_refused :
-    parse ("enrol:v1:".toUTF8.toList ++ b64Encode (binary fixture)) = .error .shape := by decide
+    parse ("enrol:v1:".toUTF8.toList ++ b64Encode (binary fixture)) = .error .shape := by decide +kernel
 
 def fixtureContext : Context :=
   ⟨List.replicate 32 8, List.replicate 32 9, List.replicate 32 10⟩
@@ -461,19 +467,19 @@ def unsignedMutations : List Unsigned :=
 theorem all_unsigned_mutations_change_frame :
     unsignedMutations.all (fun value =>
       unsignedFrame fixtureContext value != unsignedFrame fixtureContext fixtureUnsigned) = true := by
-  decide
+  decide +kernel
 
 theorem both_signature_fields_are_encoded :
     encode { fixture with miniSignature := List.replicate 64 8 } ≠ encode fixture ∧
-    encode { fixture with sshSignature := List.replicate 64 8 } ≠ encode fixture := by decide
+    encode { fixture with sshSignature := List.replicate 64 8 } ≠ encode fixture := by decide +kernel
 
 theorem checked_digest_overflow_refused :
     encodeChecked { fixture with unsigned :=
-      { fixtureUnsigned with nextKeyDigest := ⟨256 ^ 32⟩ } } = .error .invalidFields := by decide
+      { fixtureUnsigned with nextKeyDigest := ⟨256 ^ 32⟩ } } = .error .invalidFields := by decide +kernel
 
 theorem checked_scalar_overflow_refused :
     encodeChecked { fixture with unsigned :=
-      { fixtureUnsigned with amountAtomic := 256 ^ 8 } } = .error .invalidFields := by decide
+      { fixtureUnsigned with amountAtomic := 256 ^ 8 } } = .error .invalidFields := by decide +kernel
 
 /-! ## Legacy renewal preserves absence of a pre-rotation commitment -/
 
@@ -485,32 +491,32 @@ def zeroCommittedRenewal : Memo := { fixture with unsigned :=
 
 theorem unprerotated_renewal_roundtrip :
     parse (encode unprerotatedRenewal) = .ok unprerotatedRenewal :=
-  parse_encode (by decide)
+  parse_encode (by decide +kernel)
 
 theorem zero_committed_renewal_roundtrip :
     parse (encode zeroCommittedRenewal) = .ok zeroCommittedRenewal :=
-  parse_encode (by decide)
+  parse_encode (by decide +kernel)
 
 theorem unprerotated_renewal_lengths :
     (binary unprerotatedRenewal).length = 357 ∧ (encode unprerotatedRenewal).length = 485 := by
-  exact ⟨binary_length (by decide), encode_length (by decide)⟩
+  exact ⟨binary_length (by decide +kernel), encode_length (by decide +kernel)⟩
 
 theorem optional_next_states_have_distinct_wire :
-    encode unprerotatedRenewal ≠ encode zeroCommittedRenewal := by decide
+    encode unprerotatedRenewal ≠ encode zeroCommittedRenewal := by decide +kernel
 
 theorem optional_next_states_have_distinct_frames :
     miniFrame fixtureContext unprerotatedRenewal ≠
-      miniFrame fixtureContext zeroCommittedRenewal := by decide
+      miniFrame fixtureContext zeroCommittedRenewal := by decide +kernel
 
 theorem unprerotated_nonzero_digest_refused :
     parse (encode { fixture with unsigned :=
       { fixtureUnsigned with mode := .renewWithoutCommitment } }) =
-        .error .invalidFields := by decide
+        .error .invalidFields := by decide +kernel
 
 theorem mode_three_is_not_initial_enrollment :
     unprerotatedRenewal.unsigned.mode ≠ .enroll ∧
     unprerotatedRenewal.unsigned.declaredNext = none ∧
-    zeroCommittedRenewal.unsigned.declaredNext = some ⟨0⟩ := by decide
+    zeroCommittedRenewal.unsigned.declaredNext = some ⟨0⟩ := by decide +kernel
 
 theorem fresh_enrollment_always_declares_commitment (value : Unsigned)
     (initial : value.mode = .enroll) :
