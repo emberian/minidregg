@@ -14,3 +14,5 @@ import Host.ProviderUsageAudit
 
 import Host.KeyRotationInspectionChecks
 import Host.ReceiptContinuityCheck
+
+import Host.ApplicationManagedPolicyAuthoringCheck

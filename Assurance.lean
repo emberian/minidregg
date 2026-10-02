@@ -139,4 +139,3 @@ import Assurance.KeyPreRotationAudit
 
 -- Current member-admin / delegated-manager contracts and executable authoring poles.
 import Kernel.ApplicationManagedPolicyCheck
-import Host.ApplicationManagedPolicyAuthoringCheck
