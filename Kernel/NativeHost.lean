@@ -13,6 +13,7 @@ import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
 import Kernel.FnConsumerProgressHistory
+import Kernel.PreparedInvocationDiagnostics
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -654,12 +655,14 @@ def invokeRefusal (config : Config) (opened : Opened config)
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable
         (some opened.directory) command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
+      let legs := DeclaredResourceController.preparePolicyLegs prepared tuple
       let fieldsOf := fun incidence => match incidence with
         | some i => grantFields config opened grants command.targets[i].target
         | none => some ∅
-      (DeclaredResourceController.firstRangeRefusal fieldsOf prepared tuple).orElse fun _ =>
-        (DeclaredResourceController.firstCastRefusal fieldsOf prepared tuple).orElse fun _ =>
-          DeclaredResourceController.firstLawRefusal fieldsOf prepared tuple
+      (legs.firstRangeWith (fun i leaf => Refusal.lawInputRangeFor (fieldsOf i) leaf)).orElse fun _ =>
+        (legs.firstCastWith (fun i x y => Refusal.castAliasFor (fieldsOf i) x y)).orElse fun _ =>
+          legs.firstLawWith (fun i committed oldState newState =>
+            Refusal.lawDeniedFor (fieldsOf i) committed.record.predicate oldState newState)
   | _ => none
 
 /-- The only public preparation path. A source-owned proof of every actual
