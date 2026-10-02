@@ -510,6 +510,17 @@ impl Runtime {
         if !self.quiescence_active().is_empty() {
             return Err("controller has active work".into());
         }
+        self.quiescence_physical_stop_proof()
+    }
+
+    pub(crate) fn quiescence_recovery_stop_proof(&self) -> Result<()> {
+        if !self.startup_recovery_active || self.quiescence_active().iter().any(|marker|*marker!="startup_recovery") {
+            return Err("provider startup recovery has another active operation".into());
+        }
+        self.quiescence_physical_stop_proof()
+    }
+
+    fn quiescence_physical_stop_proof(&self) -> Result<()> {
         // Fresh, not the cached startup boolean. Includes custody clients in
         // the controller cgroup; a missing journal child alone proves nothing.
         prove_prior_run_stopped(&self.config.task)?;

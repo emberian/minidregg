@@ -44,6 +44,8 @@ mod provider_provision;
 mod provider_owner;
 mod provider_retirement;
 mod provider_recovery;
+mod provider_history;
+mod provider_continuity_rejection;
 mod query_observation;
 #[cfg(test)]
 mod publication_refusal_tests;
@@ -1200,6 +1202,8 @@ impl ReserveAnchor {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderAttempt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fence: Option<provider_history::Fence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     placement: Option<homelab::Placement>,
     id: u64,
@@ -7344,7 +7348,7 @@ impl Runtime {
             .ok_or("provider settlement has no retained request")?;
         if !matches!(
             pending.operation.as_str(),
-            "provider settle" | "provider audit settle"
+            "provider settle" | "provider audit settle" | "provider recovery settle"
         ) || pending.attempt
             != self
                 .config
@@ -8215,6 +8219,13 @@ impl Runtime {
             }
         }
         let id = self.next_id()?;
+        let guarded_provider = slot == AuthoritySlot::Provider
+            && (matches!(label, "provider settle" | "provider recovery settle")
+                || (label == "provider disconnect"
+                    && before.get("status").and_then(Value::as_str) == Some("3")));
+        let provider_continuity = if guarded_provider {
+            Some(self.provider_continuity_descriptor(id)?)
+        } else { None };
         let joint = !publications.is_empty() || witness_capabilities.is_some();
         let parent_witness = if joint {
             let (parent_capability, parent_observe_capability) =
@@ -8348,6 +8359,9 @@ impl Runtime {
         if let Some(socket) = &cfg.host_socket {
             args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
         }
+        if let Some(descriptor) = &provider_continuity {
+            args.extend(["--provider-continuity",descriptor.to_str().ok_or("provider continuity descriptor path UTF-8")?]);
+        }
         let result = if work_submit {
             match self.work_output(&cfg.mini, &args) {
                 Ok(()) => Ok(()),
@@ -8415,6 +8429,13 @@ impl Runtime {
                         .as_mut()
                         .ok_or("dispatch settlement lost retained attempt")?
                         .settlement = Some(settled);
+                }
+                if slot == AuthoritySlot::Provider
+                    && op.get("type").and_then(Value::as_str) == Some("disconnect")
+                    && before.get("status").and_then(Value::as_str) == Some("3")
+                    && self.journal.provider_hold.as_ref().is_some_and(|h|h.reserve_confirmed) {
+                    let pending=self.journal.provider_pending.clone().ok_or("provider fence pending disappeared")?;
+                    self.record_provider_fence(&pending,&attempt.join("outcome.json"))?;
                 }
                 *self.journal.pending_for_mut(slot) = None;
                 if op.get("type").and_then(Value::as_str) == Some("settle") {
@@ -9347,6 +9368,7 @@ impl Runtime {
             return Ok(None); // Historical response consumes no new physical slot.
         }
         self.provider_prompt_budget(task)?;
+        provider_history::require_native_support(&self.provider_native_profile()?)?;
         let Some(config) = task.homelab.as_ref() else { return Ok(None); };
         let table = credentials::ProviderTable::load(&task.providers, 0)?;
         let row = provider_task_row(task, &table)?;
@@ -9390,7 +9412,8 @@ impl Runtime {
         {
             return Err("provider request differs from pinned model or size".into());
         }
-        let tariff = self.provider_tariff(&task)?;
+        let profile = self.provider_native_profile()?;
+        let tariff = select_provider_metering(&profile, &task.task)?.clone();
         if self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
@@ -9401,6 +9424,7 @@ impl Runtime {
             return Ok(replay);
         }
         self.provider_prompt_budget(&task)?;
+        provider_history::require_native_support(&profile)?;
         if self.journal.provider_replays.len() >= 16 {
             return Err("provider prompt response replay bound reached".into());
         }
@@ -9505,6 +9529,7 @@ impl Runtime {
         // later no-send reconciliation never restores this prompt allowance.
         self.journal.provider_prompt_requests += 1;
         self.journal.provider_attempt = Some(ProviderAttempt {
+            fence: None,
             placement: request.placement,
             id,
             prompt_operation_id: request.lease.prompt_operation_id,
@@ -9644,9 +9669,10 @@ impl Runtime {
             row.credential,
         ))
     }
-    /// The Host's pinned per-route tariff for this provider task, read from
-    /// the pinned profile. Every provider task is tariffed by route.
-    fn provider_tariff(&self, task: &ProviderTask) -> Result<Value> {
+    /// Pinned provider tariff and settlement capability metadata. Exact native
+    /// admission remains authoritative; this check rejects incompatible bundles
+    /// before a fresh request can reserve funds or reach a provider.
+    fn provider_native_profile(&self) -> Result<Value> {
         let output = Command::new(&self.config.mini)
             .arg("profile")
             .arg("--host")
@@ -9660,7 +9686,7 @@ impl Runtime {
         }
         let profile: Value = serde_json::from_slice(&output.stdout)
             .map_err(|e| format!("invalid provider metering profile: {e}"))?;
-        Ok(select_provider_metering(&profile, &task.task)?.clone())
+        Ok(profile)
     }
     fn provider_replay(
         replays: &[ProviderReplay],
@@ -13885,7 +13911,13 @@ impl Runtime {
             .pointer("/grain/status")
             .and_then(Value::as_str)
             .ok_or("provider grain status absent")?;
-        if matches!(status, "1" | "3") {
+        // Idle attachment belongs to its current owner; stopping this
+        // controller does not authorize changing it. Only an exact retained
+        // reservation can authorize a history-guarded held disconnect.
+        if status == "1" {
+            return Ok(());
+        }
+        if status == "3" {
             self.transition_as(
                 &authority,
                 json!({"type":"disconnect"}),
@@ -16434,9 +16466,10 @@ impl Runtime {
     fn reconcile_provider_evidence(&mut self, automatic: bool) -> Result<()> {
         if automatic {
             self.require_delivered_provider_response()?;
-            self.quiescence_stop_proof()?;
-            if self.journal.provider_hold.is_some() {
-                return Err("automatic held provider settlement requires native history-bound admission".into());
+            if self.startup_recovery_active {
+                self.quiescence_recovery_stop_proof()?;
+            } else {
+                self.quiescence_stop_proof()?;
             }
         }
         if self.child.is_some()
@@ -16550,6 +16583,9 @@ impl Runtime {
             .and_then(Value::as_str)
             .ok_or("signed provider status absent")?
             .to_owned();
+        if automatic && self.journal.provider_hold.is_some() && status == "5" {
+            self.recover_provider_fence()?;
+        }
         let mut settlement_confirmed_here = false;
         if let Some(hold) = self.journal.provider_hold.clone() {
             if !hold.reserve_confirmed || hold.reserve_refused {
@@ -16579,7 +16615,7 @@ impl Runtime {
                         "signed provider reservation generation differs from held origin".into(),
                     );
                 }
-                if status == "3" {
+                if status == "3" && !automatic {
                     self.transition_as(
                         &authority,
                         json!({"type":"disconnect"}),
@@ -16596,8 +16632,8 @@ impl Runtime {
                 self.transition_as(
                     &authority,
                     json!({"type":"settle","charge":audited_charge,"route":pin.route}),
-                    "provider audit settle",
-                    "operator audited source-quoted provider charge",
+                    if automatic { "provider recovery settle" } else { "provider audit settle" },
+                    if automatic { "recovered delivered source-quoted provider charge" } else { "operator audited source-quoted provider charge" },
                     vec![],
                 )?;
                 settlement_confirmed_here = true;
@@ -16982,6 +17018,9 @@ impl Runtime {
         let pending = self.journal.pending_for(slot);
         if let Some(p) = pending.clone() {
             if !p.attempt.join("call.bin").is_file() {
+                if slot == AuthoritySlot::Provider && self.retire_continuity_rejection(&p)? {
+                    return Ok(());
+                }
                 match inspected_pre_submit_refusal(&self.config, &p.attempt) {
                     Ok(Some(refusal)) => {
                         if matches!(
@@ -17047,12 +17086,16 @@ impl Runtime {
             let provider_settlement = if slot == AuthoritySlot::Provider
                 && matches!(
                     p.operation.as_str(),
-                    "provider settle" | "provider audit settle"
+                    "provider settle" | "provider audit settle" | "provider recovery settle"
                 ) {
                 Some(self.provider_settlement_record(&p, &retry_result)?)
             } else {
                 None
             };
+            if slot == AuthoritySlot::Provider && matches!(p.operation.as_str(),"provider disconnect"|"provider audit fence")
+                && self.journal.provider_hold.as_ref().is_some_and(|h|h.reserve_confirmed) {
+                self.record_provider_fence(&p,&retry_result)?;
+            }
             if let Some(record) = self.confirmed_publication_receipt(&p, &retry_result)? {
                 while self.journal.publication_receipts.len() >= 32 {
                     let Some(index) = self
@@ -17121,6 +17164,7 @@ impl Runtime {
                     | "reconcile settle"
                     | "provider settle"
                     | "provider audit settle"
+                    | "provider recovery settle"
             ) {
                 if let Some(record) = provider_settlement {
                     self.journal.provider_settlement = Some(record);

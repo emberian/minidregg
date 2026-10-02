@@ -402,3 +402,13 @@ symlinked or changed subtrees refuse. Two fd-relative inventories preserve direc
 identity, recheck the sole current process and active MainPID, and use actual cgroup
 v2 population state. The proof remains a read-only snapshot under the controller's
 no-concurrent-launch gate. The shared helper is also used by migration recovery.
+
+Guarded provider settlement (including a recovered delivered response) requires
+Mini's `--provider-continuity` path and Host `pin-plan-height` plus API17 exact
+reserve/optional-fence continuity. The original prepared world must match the
+continuity observation; every signed deadline is tightened to the original plan
+height before assembly. Changed native history must trigger fresh continuity,
+never transparent re-signing. A before-signing guard refusal can retire only its
+exact unsubmitted Pending after fresh sender-stop proof and retained artifact
+validation; the financial hold and response remain. These source consumers require
+the corresponding native feature bundle and native qualification before deployment.

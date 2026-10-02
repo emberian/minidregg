@@ -110,8 +110,7 @@ impl Runtime {
         let Some(attempt) = self.journal.provider_attempt.as_ref() else {
             return Ok(());
         };
-        if self.startup_recovery_active
-            || self.child.is_some()
+        if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()

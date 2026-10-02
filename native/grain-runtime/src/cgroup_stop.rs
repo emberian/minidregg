@@ -244,7 +244,9 @@ mod tests {
             fs::Permissions::from_mode(0),
         )
         .unwrap();
-        assert!(prove_with(&root, 123, || Ok(())).is_err());
+        if unsafe { libc::geteuid() } != 0 {
+            assert!(prove_with(&root, 123, || Ok(())).is_err());
+        }
         fs::remove_file(root.join("empty/cgroup.events")).unwrap();
         assert!(prove_with(&root, 123, || Ok(())).is_err());
         fs::remove_dir_all(root).unwrap();
