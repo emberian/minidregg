@@ -23,6 +23,8 @@ import Compiler.PredCompile
 import Compiler.Tower256ConcreteBackend
 import Compiler.Sp800185Cshake256
 import Theory.PolicyInstall
+import Theory.LawComposition
+import Theory.ObjectAudience
 import Theory.TypedAuthorization
 import Kernel.MultiCellHyperedge
 
@@ -44,16 +46,36 @@ structure PolicyRecord where
   semantics : Digest
   previous : Option Digest
   predicate : Pred
+  /-- Source-compatible defaults are a neutral semantic lift, not a wire decoder fallback. -/
+  localSelector : Minidregg.Theory.LawComposition.Selector := {}
+  parents : List Minidregg.Theory.LawComposition.PolicyRef := []
+  descendants : Option Minidregg.Theory.LawComposition.Component := none
+  /-- Current protected-object epoch; receiving paths authenticate it separately. -/
+  audience : Option Minidregg.Theory.ObjectAudience.State := none
+  /-- Protected-object program descriptor, not a world-kind layout digest. -/
+  objectDescriptor : Option Digest := none
   deriving DecidableEq, Repr
 
+def PolicyRecord.localComponent (record : PolicyRecord) :
+    Minidregg.Theory.LawComposition.Component :=
+  ⟨record.localSelector, record.predicate, record.parents⟩
+
+/-- Legacy single-source admission may only consume the neutral lift. This
+fail-closed convergence gate must be replaced by authenticated closure admission,
+never removed while inherited dependencies are ignored. -/
+def PolicyRecord.neutral (record : PolicyRecord) : Bool :=
+  decide (record.localSelector = {} ∧ record.parents = [] ∧ record.descendants = none)
+
 def PolicyRecord.source (record : PolicyRecord) :
-    Minidregg.Theory.PolicyInstall.Source Pred where
+    Minidregg.Theory.PolicyInstall.Source
+      (Minidregg.Theory.LawComposition.Component ×
+        Option Minidregg.Theory.LawComposition.Component) where
   policyId := record.policyId
   version := record.version
   domain := record.domain
   semantics := record.semantics
   previous := record.previous
-  body := record.predicate
+  body := (record.localComponent, record.descendants)
 
 /-- A registry entry names the exact content address beside its source record.
 The verifier independently recomputes `recordDigest record` and checks it
@@ -245,12 +267,14 @@ structure CompilerSemanticDescriptor where
   orderWidth : Option Nat
   deriving DecidableEq, Repr
 
-/-- Version 4 lowers the tuple `hashEq` (tag 16, SEALED-MARKET: one commitment opens a
+/-- Version 6 binds combined composition and protected-object audience source.
+Version 5 added explicit law components and authenticated closure admission.
+Version 4 lowers the tuple `hashEq` (tag 16, SEALED-MARKET: one commitment opens a
 list of value slots; the digest and opening wires carry the list). Version 3 lowered
 `ran` (tag 14, K-RAN) and the single-value `hashEq` (tag 15, K-HASHEQ, retired); version 2
 lowered the slot-to-slot atoms `eqSlots`/`leSlots`/`leSlotsOff`. Descriptors at an earlier
 version do not verify. -/
-def compilerSemanticVersion : Nat := 4
+def compilerSemanticVersion : Nat := 6
 
 open Minidregg.Compiler.Tower256ConcreteBackend in
 def compilerDescriptorStream :
@@ -356,6 +380,27 @@ structure CanonicalPolicyConfig (F : Type) [Field F] [DecidableEq F] where
   stepBinding : PolicyStepBinding
   compilerProfile : PolicyCompilerProfile F
 
+/-- Shared lowering check for a source-selected predicate. Both the legacy
+neutral source and a resolved law closure use this exact compiler boundary. -/
+def compiledLawAccepts {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (predicate : Pred)
+    (witness : CompiledPolicyWitness F) : Bool :=
+  supported profile.compiler predicate &&
+  inputsInRange profile.compiler predicate witness.oldState witness.newState &&
+  decide (castInjOn F (intsOf predicate witness.oldState witness.newState)) &&
+  decide (systemAccepts
+    (stepAsg witness.oldState witness.newState witness.auxiliary)
+    (lower profile.compiler predicate))
+
+theorem compiledLawAccepts_sound {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (predicate : Pred)
+    (witness : CompiledPolicyWitness F)
+    (accepted : compiledLawAccepts profile predicate witness = true) :
+    Minidregg.Pred.eval predicate witness.oldState witness.newState = true := by
+  simp only [compiledLawAccepts, Bool.and_eq_true, decide_eq_true_eq] at accepted
+  rcases accepted with ⟨⟨⟨supported, ranges⟩, casts⟩, lowered⟩
+  exact lower_sound profile.compiler profile.admissible casts supported ranges lowered
+
 /-- The exact conjunction checked by the policy gate.  In particular, the
 verdict is acceptance of `PredCompile.lower`, not a second hand-written mirror
 of the predicate evaluator. -/
@@ -365,6 +410,7 @@ def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
   match config.registry.resolve request.policyId request.policyRevision with
   | none => false
   | some committed =>
+      committed.record.neutral &&
       decide (committed.record.policyId = request.policyId) &&
       decide (committed.record.version = request.policyRevision) &&
       decide (committed.record.domain = request.domain) &&
@@ -374,14 +420,7 @@ def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
       config.stepBinding.matches request witness.oldState witness.newState &&
       config.compilerProfile.compatible config.stepBinding &&
       decide (request.semantics = config.compilerProfile.semantics) &&
-      supported config.compilerProfile.compiler committed.record.predicate &&
-      inputsInRange config.compilerProfile.compiler committed.record.predicate
-        witness.oldState witness.newState &&
-      decide (castInjOn F
-        (intsOf committed.record.predicate witness.oldState witness.newState)) &&
-      decide (systemAccepts
-        (stepAsg witness.oldState witness.newState witness.auxiliary)
-        (lower config.compilerProfile.compiler committed.record.predicate))
+      compiledLawAccepts config.compilerProfile committed.record.predicate witness
 
 /-- Source selection is independent of capability generation. The common
 `Authorized` gate still requires exact generation equality; this law does not
@@ -439,6 +478,7 @@ def Verified {F : Type} [Field F] [DecidableEq F]
     (request : Request kind) (witness : CompiledPolicyWitness F) : Prop :=
   ∃ committed,
     config.registry.resolve request.policyId request.policyRevision = some committed ∧
+    committed.record.neutral = true ∧
     committed.record.policyId = request.policyId ∧
     committed.record.version = request.policyRevision ∧
     committed.record.domain = request.domain ∧
@@ -464,7 +504,7 @@ theorem verifies_iff_verified {F : Type} [Field F] [DecidableEq F]
   cases hresolve : config.registry.resolve request.policyId request.policyRevision with
   | none => simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
   | some committed =>
-      simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
+      simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, Verified, hresolve]
       all_goals tauto
 
 /-- Soundness is inherited from the GENERAL `PredCompile.lower_sound`: every
@@ -478,7 +518,7 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
       Minidregg.Pred.eval committed.record.predicate
         witness.oldState witness.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, _, _, _, supportedExact,
+    ⟨committed, resolved, _, _, _, _, _, _, _, _, _, _, supportedExact,
       rangesExact, castExact, compiled⟩
   exact ⟨committed, resolved, lower_sound config.compilerProfile.compiler config.compilerProfile.admissible
     castExact supportedExact rangesExact compiled⟩
@@ -499,7 +539,7 @@ theorem canonical_context_verifies_sound {F : Type} [Field F] [DecidableEq F]
       config.registry.resolve request.policyId request.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate context.oldState context.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, matched, _, _, supported, ranges, cast, compiled⟩
+    ⟨committed, resolved, _, _, _, _, _, _, _, matched, _, _, supported, ranges, cast, compiled⟩
   rw [canonical] at matched
   rcases (canonical_step_matches_iff context request witness.oldState witness.newState).mp
       matched with ⟨rootExact, effectsExact, semanticsExact, oldExact, newExact⟩
@@ -523,7 +563,7 @@ theorem canonical_verifies_profile_bound {F : Type} [Field F] [DecidableEq F]
       CharP F descriptor.characteristic ∧
       (match descriptor.orderWidth with | none => True | some width => PredOrder.NoWrap F width) := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨_, _, _, _, _, _, _, _, _, compatible, semanticsExact, _, _, _, _⟩
+    ⟨_, _, _, _, _, _, _, _, _, _, compatible, semanticsExact, _, _, _, _⟩
   rw [canonical] at compatible
   cases hp : config.compilerProfile with
   | researchDisabled semantics =>
@@ -554,6 +594,7 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     {oldState newState : State}
     (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
+    (neutralExact : committed.record.neutral = true)
     (policyIdExact : committed.record.policyId = request.policyId)
     (versionExact : committed.record.version = request.policyRevision)
     (domainExact : committed.record.domain = request.domain)
@@ -578,7 +619,7 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
   · intro evaluated
     apply (verifies_iff_verified config request
       (canonicalWitness config.compilerProfile.compiler committed oldState newState)).mpr
-    refine ⟨committed, resolved, policyIdExact, versionExact, domainExact,
+    refine ⟨committed, resolved, neutralExact, policyIdExact, versionExact, domainExact,
       semanticsExact, recordDigestExact, rfl, stepExact,
       profileCompatible, profileSemanticsExact, supportedExact, rangesExact, castExact, ?_⟩
     exact lower_complete config.compilerProfile.compiler config.compilerProfile.admissible
@@ -678,6 +719,17 @@ theorem unresolved_rejected {F : Type} [Field F] [DecidableEq F]
     config.verifies request witness = false := by
   simp [CanonicalPolicyConfig.verifies, unresolved]
 
+/-- Until the receiving configuration supplies an authenticated effective
+closure, composed source metadata cannot be admitted as its local predicate alone. -/
+theorem nonneutral_requires_composed_admission {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} {committed : CommittedPolicy}
+    (witness : CompiledPolicyWitness F)
+    (resolved : config.registry.resolve request.policyId request.policyRevision = some committed)
+    (nonneutral : committed.record.neutral = false) :
+    config.verifies request witness = false := by
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, nonneutral]
+
 /-- A registry entry whose internal policy id does not equal the request is
 rejected even if it was returned from the requested lookup key. -/
 theorem wrong_policy_rejected {F : Type} [Field F] [DecidableEq F]
@@ -688,7 +740,7 @@ theorem wrong_policy_rejected {F : Type} [Field F] [DecidableEq F]
       some committed)
     (wrong : committed.record.policyId ≠ request.policyId) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, wrong]
 
 /-- A registry entry cannot lie about the version under which it was found. -/
 theorem wrong_version_rejected {F : Type} [Field F] [DecidableEq F]
@@ -700,7 +752,7 @@ theorem wrong_version_rejected {F : Type} [Field F] [DecidableEq F]
     (policyIdExact : committed.record.policyId = request.policyId)
     (wrong : committed.record.version ≠ request.policyRevision) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, policyIdExact, wrong]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, policyIdExact, wrong]
 
 /-- Content-address substitution fails before policy evaluation. -/
 theorem wrong_address_rejected {F : Type} [Field F] [DecidableEq F]
@@ -711,7 +763,7 @@ theorem wrong_address_rejected {F : Type} [Field F] [DecidableEq F]
       some committed)
     (wrong : witness.address ≠ committed.address) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, wrong]
 
 /-- A registry address is not self-authenticating: recomputing a different
 digest from the selected source record rejects the entry. -/
@@ -723,7 +775,7 @@ theorem wrong_content_digest_rejected {F : Type} [Field F] [DecidableEq F]
       some committed)
     (wrong : config.recordDigest committed.record ≠ committed.address) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, wrong]
 
 /-- Mutating the policy step without updating its request commitment fails. -/
 theorem wrong_step_binding_rejected {F : Type} [Field F] [DecidableEq F]
@@ -734,7 +786,7 @@ theorem wrong_step_binding_rejected {F : Type} [Field F] [DecidableEq F]
       some committed)
     (wrong : config.stepBinding.matches request witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, wrong]
 
 /-- A witness cannot select different compiler semantics by rebinding the record alone. -/
 theorem wrong_compiler_semantics_rejected {F : Type} [Field F] [DecidableEq F]
@@ -743,7 +795,7 @@ theorem wrong_compiler_semantics_rejected {F : Type} [Field F] [DecidableEq F]
     (wrong : request.semantics ≠ config.compilerProfile.semantics) :
     config.verifies request witness = false := by
   cases resolved : config.registry.resolve request.policyId request.policyRevision <;>
-    simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+    simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, wrong]
 
 /-- Source bounds are checked independently of the supplied AIR auxiliary values. -/
 theorem out_of_range_rejected {F : Type} [Field F] [DecidableEq F]
@@ -754,7 +806,7 @@ theorem out_of_range_rejected {F : Type} [Field F] [DecidableEq F]
     (outside : inputsInRange config.compilerProfile.compiler committed.record.predicate
       witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
-  simp [CanonicalPolicyConfig.verifies, resolved, outside]
+  simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, outside]
 
 /-- An explicit research profile cannot serve any canonical receiving context. -/
 theorem research_profile_verifier_refused {F : Type} [Field F] [DecidableEq F]
@@ -765,7 +817,7 @@ theorem research_profile_verifier_refused {F : Type} [Field F] [DecidableEq F]
     (research : config.compilerProfile = .researchDisabled semantics) :
     config.verifies request witness = false := by
   cases resolved : config.registry.resolve request.policyId request.policyRevision <;>
-    simp [CanonicalPolicyConfig.verifies, resolved, canonical, research,
+    simp [CanonicalPolicyConfig.verifies, compiledLawAccepts, resolved, canonical, research,
       PolicyCompilerProfile.compatible, PolicyCompilerProfile.descriptor?]
 
 /-- Even if all digest equalities collide or are rebound, a source-level policy

@@ -1,7 +1,7 @@
 /-
 # Compiler.PolicyRecordCodec -- executable, canonical policy source
 
-Version 4 encodes the complete `PolicyRecord`, including every `Pred`
+Version 6 encodes the complete `PolicyRecord`, its component metadata and every `Pred`
 constructor. Naturals use the shared compact base-255 stream codec; integers
 use the one integer codec, `Compiler.IntStream.intStream` (zigzag base-255,
 no tag byte); strings retain their exact Unicode
@@ -17,6 +17,7 @@ The cSHAKE address is executable but is not claimed to be injective.
 -/
 import Compiler.CanonicalPolicyAdmission
 import Compiler.IntStream
+import Compiler.ObjectAudienceCodec
 import Compiler.Sp800185Cshake256
 import Compiler.Tower256ConcreteBackend
 import Mathlib.Data.Char
@@ -239,7 +240,97 @@ def decodePred (tokens : List Token) : Option Pred := do
     decodePred (encodePred predicate) = some predicate := by
   simp [decodePred, encodePred, runTokens_tokensInto, runTokens]
 
-abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token
+/-! Component metadata is first-order source, using the existing Pred token
+stream and stream-codec combinators. Lists retain authored order in source;
+resolved graph order is canonical and confers no method precedence. -/
+
+abbrev SelectorTuple := Option (List Nat) × Option (List Nat) × Option (List Nat)
+abbrev RefTuple := Nat × Nat × Option (Nat × Digest)
+abbrev ComponentTuple := SelectorTuple × List Token × List RefTuple
+
+def selectorTupleStream : StreamCodec SelectorTuple :=
+  StreamCodec.product (StreamCodec.option (StreamCodec.list StreamCodec.nat))
+    (StreamCodec.product (StreamCodec.option (StreamCodec.list StreamCodec.nat))
+      (StreamCodec.option (StreamCodec.list StreamCodec.nat)))
+
+def refTupleStream : StreamCodec RefTuple :=
+  StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.option (StreamCodec.product StreamCodec.nat digestStream)))
+
+def componentTupleStream : StreamCodec ComponentTuple :=
+  StreamCodec.product selectorTupleStream
+    (StreamCodec.product (StreamCodec.list tokenStream) (StreamCodec.list refTupleStream))
+
+def selectorTuple (selector : Minidregg.Theory.LawComposition.Selector) : SelectorTuple :=
+  (selector.physicalKinds, selector.requestKinds, selector.verbs)
+
+def selectorOfTuple (tuple : SelectorTuple) : Minidregg.Theory.LawComposition.Selector :=
+  ⟨tuple.1, tuple.2.1, tuple.2.2⟩
+
+@[simp] theorem selectorOfTuple_tuple (selector : Minidregg.Theory.LawComposition.Selector) :
+    selectorOfTuple (selectorTuple selector) = selector := by cases selector; rfl
+
+def refTuple (reference : Minidregg.Theory.LawComposition.PolicyRef) : RefTuple :=
+  (reference.policyId.value, reference.facet.tag,
+    match reference.selection with
+    | .head => none
+    | .pinned revision digest => some (revision, digest))
+
+def refOfTuple (tuple : RefTuple) : Option Minidregg.Theory.LawComposition.PolicyRef := do
+  let facet ← match tuple.2.1 with
+    | 0 => some Minidregg.Theory.LawComposition.Facet.local
+    | 1 => some Minidregg.Theory.LawComposition.Facet.descendants
+    | _ => none
+  let selection := match tuple.2.2 with
+    | none => Minidregg.Theory.LawComposition.Selection.head
+    | some (revision, digest) => .pinned revision digest
+  some ⟨⟨tuple.1⟩, facet, selection⟩
+
+@[simp] theorem refOfTuple_tuple (reference : Minidregg.Theory.LawComposition.PolicyRef) :
+    refOfTuple (refTuple reference) = some reference := by
+  rcases reference with ⟨⟨policy⟩, facet, selection⟩
+  cases facet <;> cases selection <;> rfl
+
+def refsOfTuples : List RefTuple → Option (List Minidregg.Theory.LawComposition.PolicyRef)
+  | [] => some []
+  | first :: rest => do
+      let first ← refOfTuple first
+      let rest ← refsOfTuples rest
+      some (first :: rest)
+
+@[simp] theorem refsOfTuples_tuples (references : List Minidregg.Theory.LawComposition.PolicyRef) :
+    refsOfTuples (references.map refTuple) = some references := by
+  induction references with
+  | nil => rfl
+  | cons first rest ih => simp [refsOfTuples, ih]
+
+def componentTuple (component : Minidregg.Theory.LawComposition.Component) : ComponentTuple :=
+  (selectorTuple component.selector, encodePred component.predicate, component.parents.map refTuple)
+
+def componentOfTuple (tuple : ComponentTuple) : Option Minidregg.Theory.LawComposition.Component := do
+  let predicate ← decodePred tuple.2.1
+  let parents ← refsOfTuples tuple.2.2
+  some ⟨selectorOfTuple tuple.1, predicate, parents⟩
+
+@[simp] theorem componentOfTuple_tuple (component : Minidregg.Theory.LawComposition.Component) :
+    componentOfTuple (componentTuple component) = some component := by
+  cases component
+  simp [componentOfTuple, componentTuple]
+
+def exportOfTuple : Option ComponentTuple → Option (Option Minidregg.Theory.LawComposition.Component)
+  | none => some none
+  | some tuple => do
+      let component ← componentOfTuple tuple
+      some (some component)
+
+@[simp] theorem exportOfTuple_tuple (component : Option Minidregg.Theory.LawComposition.Component) :
+    exportOfTuple (component.map componentTuple) = some component := by
+  cases component <;> simp [exportOfTuple]
+
+abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token ×
+  SelectorTuple × List RefTuple × Option ComponentTuple ×
+  Option Minidregg.Theory.ObjectAudience.State × Option Digest
 
 def recordTupleStream : StreamCodec RecordTuple :=
   StreamCodec.product StreamCodec.nat
@@ -247,32 +338,48 @@ def recordTupleStream : StreamCodec RecordTuple :=
       (StreamCodec.product digestStream
         (StreamCodec.product digestStream
           (StreamCodec.product (StreamCodec.option digestStream)
-            (StreamCodec.list tokenStream)))))
+            (StreamCodec.product (StreamCodec.list tokenStream)
+              (StreamCodec.product selectorTupleStream
+                (StreamCodec.product (StreamCodec.list refTupleStream)
+                  (StreamCodec.product (StreamCodec.option componentTupleStream)
+                    (StreamCodec.product (StreamCodec.option ObjectAudienceCodec.stateStream)
+                      (StreamCodec.option digestStream))))))))))
 
 def recordTuple (record : PolicyRecord) : RecordTuple :=
   (record.policyId.value, record.version, record.domain, record.semantics,
-    record.previous, encodePred record.predicate)
+    record.previous, encodePred record.predicate, selectorTuple record.localSelector,
+    record.parents.map refTuple, record.descendants.map componentTuple,
+    record.audience, record.objectDescriptor)
 
 def recordOfTuple (tuple : RecordTuple) : Option PolicyRecord := do
-  let predicate ← decodePred tuple.2.2.2.2.2
+  let (policyId, version, domain, semantics, previous, tokens, selector, refs, exported,
+    audience, objectDescriptor) := tuple
+  let predicate ← decodePred tokens
+  let parents ← refsOfTuples refs
+  let descendants ← exportOfTuple exported
   some
-    { policyId := ⟨tuple.1⟩
-      version := tuple.2.1
-      domain := tuple.2.2.1
-      semantics := tuple.2.2.2.1
-      previous := tuple.2.2.2.2.1
-      predicate := predicate }
+    { policyId := ⟨policyId⟩
+      version := version
+      domain := domain
+      semantics := semantics
+      previous := previous
+      predicate := predicate
+      localSelector := selectorOfTuple selector
+      parents := parents
+      descendants := descendants
+      audience := audience
+      objectDescriptor := objectDescriptor }
 
 @[simp] theorem recordOfTuple_tuple (record : PolicyRecord) :
     recordOfTuple (recordTuple record) = some record := by
   cases record
   simp [recordOfTuple, recordTuple]
 
-def sourceVersion : Nat := 4
+def sourceVersion : Nat := 6
 
 def framePrefix : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList
 
-def wireFrame : List UInt8 := framePrefix ++ [4]
+def wireFrame : List UInt8 := framePrefix ++ [6]
 
 def encode (record : PolicyRecord) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
@@ -400,8 +507,45 @@ theorem v3_frame_refused (rest : List UInt8) :
   rw [raw]
   rfl
 
-/-- Conversely every version-4 encoding carries frame byte 4, so a version-3 decoder, whose first
-check is `take wireFrame.length = framePrefix ++ [3]`, refuses every version-4 record — including
+/-- Version 4 records (the single-predicate source without law components) refuse to decode:
+their frame byte is 4. -/
+theorem v4_frame_refused (rest : List UInt8) :
+    decode ((framePrefix ++ [4]) ++ rest) = none := by
+  have taken : ((framePrefix ++ [4]) ++ rest).take wireFrame.length = framePrefix ++ [4] := by
+    rw [wireFrame, List.append_assoc, List.length_append, List.take_length_add_append]
+    rfl
+  have differs : framePrefix ++ [4] ≠ wireFrame := by
+    intro same
+    have := List.append_cancel_left same
+    simp at this
+  have raw : decodeRaw ((framePrefix ++ [4]) ++ rest) = none := by
+    unfold decodeRaw
+    rw [if_neg (by rw [taken]; exact differs)]
+  unfold decode
+  rw [raw]
+  rfl
+
+/-- Both independent v5 layouts (law composition and audience) are rejected
+before inspecting their payload. Neither is a fallback active source format. -/
+theorem v5_frame_refused (rest : List UInt8) :
+    decode ((framePrefix ++ [5]) ++ rest) = none := by
+  have taken : ((framePrefix ++ [5]) ++ rest).take wireFrame.length = framePrefix ++ [5] := by
+    rw [wireFrame, List.append_assoc, List.length_append, List.take_length_add_append]
+    rfl
+  have differs : framePrefix ++ [5] ≠ wireFrame := by
+    intro same
+    have := List.append_cancel_left same
+    simp at this
+  have raw : decodeRaw ((framePrefix ++ [5]) ++ rest) = none := by
+    unfold decodeRaw
+    rw [if_neg (by rw [taken]; exact differs)]
+  unfold decode
+  rw [raw]
+  rfl
+
+
+/-- Conversely every version-6 encoding carries frame byte 6, so a version-3 decoder, whose first
+check is `take wireFrame.length = framePrefix ++ [3]`, refuses every version-6 record — including
 one whose predicate uses a slot-to-slot atom — before reading a token. -/
 theorem encode_not_v3_frame (record : PolicyRecord) :
     (encode record).take (framePrefix ++ [3]).length ≠ framePrefix ++ [3] := by
@@ -453,12 +597,252 @@ theorem decodeToken_unknown_tag (tag : UInt8) (htag : 17 ≤ tag.toNat ∨ tag.t
     | (rename_i heq; simp only [List.cons.injEq] at heq; obtain ⟨rfl, -⟩ := heq
        simp at htag)
 
-def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v4".toUTF8.toList
+def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v6".toUTF8.toList
 
 def hashBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash customization bytes).digest
 
 def digest (record : PolicyRecord) : Digest := hashBytes (encode record)
+
+/-- Clearing audience only breaks the manifest/source hash cycle. It does not
+replace complete audience/roster/device validation in any receiving path. -/
+def semanticLawRecord (record : PolicyRecord) : PolicyRecord :=
+  { record with audience := none }
+
+def semanticLawVersion : Nat := 2
+
+def semanticLawCustomization : List UInt8 :=
+  "LOOM.AUTH.POLICY.SEMANTICLAW/v2".toUTF8.toList
+
+def semanticLawBytes (record : PolicyRecord) : List UInt8 :=
+  encode (semanticLawRecord record)
+
+def semanticLawDigest (record : PolicyRecord) : Digest :=
+  (Sp800185Cshake256.hash semanticLawCustomization (semanticLawBytes record)).digest
+
+@[simp] theorem semanticLawRecord_idempotent (record : PolicyRecord) :
+    semanticLawRecord (semanticLawRecord record) = semanticLawRecord record := rfl
+
+theorem semanticLawRecord_preserves_composition (record : PolicyRecord) :
+    (semanticLawRecord record).localSelector = record.localSelector ∧
+    (semanticLawRecord record).parents = record.parents ∧
+    (semanticLawRecord record).descendants = record.descendants ∧
+    (semanticLawRecord record).objectDescriptor = record.objectDescriptor :=
+  ⟨rfl, rfl, rfl, rfl⟩
+
+theorem semanticLawDigest_audience_independent (record : PolicyRecord)
+    (audience : Option Minidregg.Theory.ObjectAudience.State) :
+    semanticLawDigest { record with audience := audience } = semanticLawDigest record := rfl
+
+theorem semanticLawRecord_audience_invariant (record : PolicyRecord)
+    (audience : Option Minidregg.Theory.ObjectAudience.State) :
+    semanticLawRecord { record with audience := audience } = semanticLawRecord record := rfl
+
+theorem semanticLawBytes_audience_invariant (record : PolicyRecord)
+    (audience : Option Minidregg.Theory.ObjectAudience.State) :
+    semanticLawBytes { record with audience := audience } = semanticLawBytes record := rfl
+
+theorem semanticLawDigest_audience_invariant (record : PolicyRecord)
+    (audience : Option Minidregg.Theory.ObjectAudience.State) :
+    semanticLawDigest { record with audience := audience } = semanticLawDigest record := rfl
+
+/-- Byte injectivity binds the full composed executable source despite audience
+normalization; this is not a claim of cryptographic hash injectivity. -/
+theorem semanticLawBytes_composition_bound {left right : PolicyRecord}
+    (same : semanticLawBytes left = semanticLawBytes right) :
+    left.localSelector = right.localSelector ∧ left.parents = right.parents ∧
+    left.descendants = right.descendants := by
+  have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
+  refine ⟨?_, ?_, ?_⟩
+  · exact congrArg PolicyRecord.localSelector records
+  · exact congrArg PolicyRecord.parents records
+  · exact congrArg PolicyRecord.descendants records
+
+theorem semanticLawBytes_executable_bound {left right : PolicyRecord}
+    (same : semanticLawBytes left = semanticLawBytes right) :
+    left.predicate = right.predicate ∧ left.objectDescriptor = right.objectDescriptor := by
+  have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
+  exact ⟨congrArg PolicyRecord.predicate records, congrArg PolicyRecord.objectDescriptor records⟩
+
+theorem semanticLawBytes_identity_bound {left right : PolicyRecord}
+    (same : semanticLawBytes left = semanticLawBytes right) :
+    left.policyId = right.policyId ∧ left.version = right.version ∧
+    left.domain = right.domain ∧ left.semantics = right.semantics ∧
+    left.previous = right.previous := by
+  have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
+  exact ⟨congrArg PolicyRecord.policyId records, congrArg PolicyRecord.version records,
+    congrArg PolicyRecord.domain records, congrArg PolicyRecord.semantics records,
+    congrArg PolicyRecord.previous records⟩
+
+theorem audience_bound_by_encoding {left right : PolicyRecord}
+    (same : encode left = encode right) : left.audience = right.audience :=
+  congrArg PolicyRecord.audience (encode_injective same)
+
+theorem audience_change_changes_encoding (record : PolicyRecord)
+    (audience : Option Minidregg.Theory.ObjectAudience.State)
+    (different : audience ≠ record.audience) :
+    encode { record with audience := audience } ≠ encode record := by
+  intro same
+  exact different (audience_bound_by_encoding same)
+
+theorem objectDescriptor_bound_by_encoding {left right : PolicyRecord}
+    (same : encode left = encode right) : left.objectDescriptor = right.objectDescriptor :=
+  congrArg PolicyRecord.objectDescriptor (encode_injective same)
+
+
+/-! Historical bytes live in a distinct type. The active codec above never
+calls this decoder. A receiving migration selects this profile from authenticated
+source metadata, then proves its carry relation before creating a target record. -/
+namespace LegacyV4
+
+/-- Exact six-field source under the historical tuple-hashEq v4 profile. -/
+structure Record where
+  policyId : PolicyId
+  version : PolicyRevision
+  domain : Digest
+  semantics : Digest
+  previous : Option Digest
+  predicate : Pred
+  deriving DecidableEq, Repr
+
+abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token
+
+def recordTupleStream : StreamCodec RecordTuple :=
+  StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product digestStream
+        (StreamCodec.product digestStream
+          (StreamCodec.product (StreamCodec.option digestStream) (StreamCodec.list tokenStream)))))
+
+def recordTuple (record : Record) : RecordTuple :=
+  (record.policyId.value, record.version, record.domain, record.semantics,
+    record.previous, encodePred record.predicate)
+
+def recordOfTuple (tuple : RecordTuple) : Option Record := do
+  let (policyId, version, domain, semantics, previous, tokens) := tuple
+  let predicate ← decodePred tokens
+  some ⟨⟨policyId⟩, version, domain, semantics, previous, predicate⟩
+
+@[simp] theorem recordOfTuple_tuple (record : Record) :
+    recordOfTuple (recordTuple record) = some record := by
+  cases record
+  simp [recordOfTuple, recordTuple]
+
+def wireFrame : List UInt8 := framePrefix ++ [4]
+
+def encode (record : Record) : List UInt8 :=
+  wireFrame ++ recordTupleStream.encode (recordTuple record)
+
+def decodeRaw (bytes : List UInt8) : Option Record :=
+  if bytes.take wireFrame.length = wireFrame then do
+    let tuple ← recordTupleStream.toLawful.decode (bytes.drop wireFrame.length)
+    recordOfTuple tuple
+  else none
+
+@[simp] theorem decodeRaw_encode (record : Record) :
+    decodeRaw (encode record) = some record := by
+  have payload := recordTupleStream.toLawful.decode_encode (recordTuple record)
+  change recordTupleStream.toLawful.decode
+    (recordTupleStream.encode (recordTuple record)) = some (recordTuple record) at payload
+  simp [decodeRaw, encode, payload]
+
+def decode (bytes : List UInt8) : Option Record := do
+  let record ← decodeRaw bytes
+  if encode record = bytes then some record else none
+
+@[simp] theorem decode_encode (record : Record) :
+    decode (encode record) = some record := by simp [decode]
+
+theorem decode_canonical {bytes : List UInt8} {record : Record}
+    (accepted : decode bytes = some record) : encode record = bytes := by
+  unfold decode at accepted
+  cases raw : decodeRaw bytes with
+  | none => simp [raw] at accepted
+  | some selected =>
+      simp only [raw, bind, Option.bind] at accepted
+      split at accepted
+      next canonical =>
+        cases Option.some.inj accepted
+        exact canonical
+      next => contradiction
+
+def codec : LawfulCodec Record where
+  encode := encode
+  decode := decode
+  decode_encode := decode_encode
+
+def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v4".toUTF8.toList
+
+def hashBytes (bytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash customization bytes).digest
+
+def digest (record : Record) : Digest := hashBytes (encode record)
+
+/-- The decoded historical identity is computed over the original bytes and
+v4 domain, not the target record or the audience-cleared semantic-law domain. -/
+theorem decoded_digest_exact {bytes : List UInt8} {record : Record}
+    (accepted : decode bytes = some record) : digest record = hashBytes bytes := by
+  unfold digest
+  rw [decode_canonical accepted]
+
+/-- Pure construction, not an authorization to cross profiles. The carry owner
+supplies target semantics and predecessor from its checked transition and must
+prove that this neutral composition retains the applicable legacy behavior. -/
+def neutralLift (record : Record) (targetSemantics : Digest)
+    (targetPrevious : Option Digest) : PolicyRecord where
+  policyId := record.policyId
+  version := record.version
+  domain := record.domain
+  semantics := targetSemantics
+  previous := targetPrevious
+  predicate := record.predicate
+  localSelector := {}
+  parents := []
+  descendants := none
+  audience := none
+  objectDescriptor := none
+
+@[simp] theorem neutralLift_predicate (record : Record) (targetSemantics : Digest)
+    (targetPrevious : Option Digest) :
+    (neutralLift record targetSemantics targetPrevious).predicate = record.predicate := rfl
+
+@[simp] theorem neutralLift_neutral (record : Record) (targetSemantics : Digest)
+    (targetPrevious : Option Digest) :
+    (neutralLift record targetSemantics targetPrevious).neutral = true := rfl
+
+theorem neutralLift_local_eval (record : Record) (targetSemantics : Digest)
+    (targetPrevious : Option Digest) (old new : State) :
+    eval (neutralLift record targetSemantics targetPrevious).localComponent.guarded old new =
+      eval record.predicate old new :=
+  Minidregg.Theory.LawComposition.neutral_component_eval record.predicate old new
+
+theorem refused_by_active_decoder (record : Record) :
+    PolicyRecordCodec.decode (encode record) = none :=
+  v4_frame_refused (recordTupleStream.encode (recordTuple record))
+
+/-- Target bytes always use v6, even when all new metadata is neutral. This
+states byte inequality, not an unproved cryptographic digest inequality. -/
+theorem neutralLift_changes_encoding (record : Record) (targetSemantics : Digest)
+    (targetPrevious : Option Digest) :
+    PolicyRecordCodec.encode (neutralLift record targetSemantics targetPrevious) ≠ encode record := by
+  intro same
+  have refused := refused_by_active_decoder record
+  rw [← same, PolicyRecordCodec.decode_encode] at refused
+  cases refused
+
+end LegacyV4
+
+/-- Selected by the historical receiving profile, never guessed from bytes by
+the active decoder. Only the exact tuple-hashEq v4 vocabulary is supported. -/
+inductive HistoricalProfile where
+  | legacyV4
+  deriving DecidableEq, Repr
+
+def decodeHistorical (profile : HistoricalProfile) (bytes : List UInt8) :
+    Option LegacyV4.Record :=
+  match profile with
+  | .legacyV4 => LegacyV4.decode bytes
+
 
 end Minidregg.Compiler.PolicyRecordCodec
 
