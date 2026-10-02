@@ -119,3 +119,80 @@ billing event census for the adapter. Payer balance is separately recorded from
 an authenticated account query; it is not mislabeled an event count. Flat verified
 Store height during a renewal-only window establishes no new Mini records,
 including no billing writes. The direct billing-event counter remains unqualified.
+
+## Joined replay, race, and seal regressions
+
+The generated journey now includes `replayAcceptedA`. After owner revocation it
+selects the earliest retained delivered A dispatch for the exact ticket, session
+and generation, re-decodes its permit with the pinned Host, and submits its exact
+retained signed ingress once through the private Mini v2 operator envelope.
+It requires a receipt-only historical confirmation matching all four original
+receipt coordinates, plus unchanged authenticated Store tip, payer balance and
+physical dispatch inspection count. Request/reply frames, selection and decoded
+outcomes remain in the private hook evidence. No returned permit is forwarded.
+This establishes receipt-only replay/no new recorded delivery; it does not invent
+an independent application delivery census.
+
+Two input flags enable the additional native regressions:
+
+```json
+{
+  "enableSameIngressRace": true,
+  "enableSealRecovery": true,
+  "sealSupervisor": {
+    "brokerConfig": "/etc/mini-spk/isolated-fixture-broker.json",
+    "brokerConfigSha256": "<exact reviewed SHA-256>"
+  }
+}
+```
+
+These supplement the existing preparation input, rather than replace its pins.
+Race requires a distinct manifest with `spkHostFeatures:["integration-qualification"]`
+and the exact feature-built `spkHost` hash. The native feature is not a public
+endpoint or ordinary release bypass. The adapter reads the native next-operation
+counter without changing it, writes the one-shot private trigger, and sends one
+actual authenticated B page GET. It validates source-authored ready evidence
+before writing go. Success requires one exact permit/receipt-only loser pair,
+one authenticated accepted Store record, the normal resident's delivered journal,
+the native app-response acknowledgement, and an actual HTTP 200 page response.
+The loser's retained confirmation can be `installed`, `replayed`, or
+`recoveredAfterUncertainResponse`; exact receipt equality and lack of another
+permit matter. A direct classified billing-event count remains unavailable.
+Unknown responses retain uncertainty and are never retried.
+
+The race trigger is terminal for subsequent admissions in that generation.
+Ordering is therefore replay, optional regrant/reconnect, race, optional seal
+recovery, final STOP. Held B traffic continues during replay/regrant/race.
+
+Seal recovery requires a previously unsealed B route. Existing valid A seals are
+preserved. It creates an exclusive, explicitly labeled diagnostic collision at a
+fresh seal nonce, invokes the actual registration consumer, and requires the
+native publisher's retained pending record with exact admitted binding. It then
+requires same-generation `resident-run` to fail at the retained-seal guard before
+listeners appear. This invocation uses the original resident configuration and
+its bound environment; it tests the native startup guard, not a full systemd
+restart. The adapter performs native STOP, START to a newer source generation,
+and fresh participant enrollment. Old seals and diagnostic bytes must remain
+unchanged. The traffic harness verifies old streams ended, opens B in the new
+generation, and checks its before-failure sheet marker and a fresh edit. Generation
+transition evidence is explicit and is not mixed into same-generation continuity
+counter comparisons.
+
+The resident's OnFailure must be empty and Restart=no during this deliberate
+fault. With `sealSupervisor`, the adapter invokes the narrow root helper via
+`sudo -n /usr/bin/python3 ws-continuity-supervision.py`. It supplies the exact
+fixture, app, source-generated unit, resident hash, root-owned broker config/hash,
+and validates the root broker custody tag. The helper records prior policy,
+creates only its own exclusive drop-in, and removes only that exact unchanged
+file afterward—even if the fault test fails. Parent directories are synced;
+interrupted install/restore is recoverable from the retained root record. Other
+unit files/drop-ins are never edited. If the runner has already arranged this
+isolated policy, omit `sealSupervisor`; the adapter still checks it. Ordinary
+supervisor recovery remains a separate receiving case.
+
+No joined native qualification has been claimed from these adapters. Local tests
+exercise framing, refusal handling, exact receipt comparisons, one-shot behavior,
+interrupted override cleanup and the traffic harness's lifecycle/persistence
+checks. The actual run still requires a coherent pinned joined Mini/Host/SPK
+candidate, signed EtherCalc package and root-coordinated isolated broker/unit
+setup; it must not reuse a public or retained live fixture.

@@ -148,12 +148,12 @@ class Fixture:
         self.serial += 1
         return self.opdir / f"{self.serial:03d}-{name}"
 
-    def run(self, args, okay=True, env=None):
+    def run(self, args, okay=True, env=None, timeout=1800):
         prefix = self.fresh("command")
         save(str(prefix) + ".argv.json", [str(x) for x in args])
         with open(str(prefix) + ".stdout", "xb") as out, open(str(prefix) + ".stderr", "xb") as err:
             p = subprocess.run([str(x) for x in args], stdout=out, stderr=err,
-                               env=env, timeout=1800)
+                               env=env, timeout=timeout)
         save(str(prefix) + ".exit.json", {"exit": p.returncode})
         if okay:
             require(p.returncode == 0, f"command failed; retained {prefix}.stderr")
@@ -328,6 +328,34 @@ class Fixture:
         route = self.state / f"apps/{self.app}/routes/{name}"
         d["endpoint"] = {"token": str(route/"browser.token"), "unix_socket": str(route/"http.sock"), "host": "grain.test"}
 
+    def close_session(self, d):
+        q = self.query(d["subject"],d["session"],d["cap"])
+        fields = entries(q["view"])
+        require(fields["3"] == "1", "regrant expects an active web session")
+        n = self.n()
+        target = {"kind":"object","target":d["session"],"capability":d["cap"],"observeCapability":d["cap"],
+            "schemaVersion":"1","expectedTargetRoot":q["view"]["cell"]["root"],"payload":{"type":"scalar","actions":[
+                {"type":"write","key":{"type":"object","resource":d["session"],"field":"2"},"expected":fields["2"],"value":str(int(fields["2"])+1)},
+                {"type":"write","key":{"type":"object","resource":d["session"],"field":"3"},"expected":"1","value":"2"}]}}
+        self.submit({"subject":d["subject"],"nonce":n,"grants":[grant(d["session"],d["cap"])],
+            "purpose":{"type":"prepare","draft":{"type":"invoke","command":{"subject":d["subject"],"nonce":n,"targets":[target]}}}},d["subject"])
+
+    def registration_request(self, d):
+        current = self.query(d["subject"],d["session"],d["cap"])
+        enrollment = load(Path(d["enrollment"])/"plan-inspected.json")["enrollment"]
+        require(entries(current["view"])["2"] == enrollment["sessionGeneration"] and
+                entries(current["view"])["1"] == self.f["generation"], "restored enrollment changed before route registration")
+        directory = Path(d["endpoint"]["token"]).parent
+        request = self.fresh("register-route.json")
+        save(request,{"protocol":"mini-spk-route-register-v1", "registrationNonceHex":secrets.token_hex(32),
+            "expectedApp":self.app, "expectedAppGeneration":self.f["generation"],
+            "expectedSessionGeneration":enrollment["sessionGeneration"], "directory":str(directory),
+            "dispatchCustody":str(directory/"dispatch-custody.json"),
+            "dispatchCustodySha256":sha(directory/"dispatch-custody.json"),
+            "custodianSha256":sha(directory/"custodian.json"),
+            "displayName":"Continuity delegate "+d["subject"], "preferredHandle":directory.name})
+        return request
+
     def write_state(self):
         # Update only this fixture's state. Historical versions stay in the hook directory.
         save(self.fresh("fixture-state.json"), self.f)
@@ -405,35 +433,14 @@ class Fixture:
             control = self.state / f"apps/{self.app}/g{self.f['generation']}/route-control.sock"
             require(control.is_socket(), "typed resident route control socket absent; no regrant mutation attempted")
             require(d.get("revoked",False), "regrant requires the retained revoked ticket")
-            q = self.query(d["subject"],d["session"],d["cap"])
-            fields = entries(q["view"])
-            require(fields["3"] == "1", "regrant expects an active web session")
-            n = self.n()
-            target = {"kind":"object","target":d["session"],"capability":d["cap"],"observeCapability":d["cap"],
-                "schemaVersion":"1","expectedTargetRoot":q["view"]["cell"]["root"],"payload":{"type":"scalar","actions":[
-                    {"type":"write","key":{"type":"object","resource":d["session"],"field":"2"},"expected":fields["2"],"value":str(int(fields["2"])+1)},
-                    {"type":"write","key":{"type":"object","resource":d["session"],"field":"3"},"expected":"1","value":"2"}]}}
-            self.submit({"subject":d["subject"],"nonce":n,"grants":[grant(d["session"],d["cap"])],
-                "purpose":{"type":"prepare","draft":{"type":"invoke","command":{"subject":d["subject"],"nonce":n,"targets":[target]}}}},d["subject"])
+            self.close_session(d)
             save(self.opdir/"old-delegate-a.json",d)
             # Issue a fresh ticket; never reuse the permanently revoked grant.
             d.update(ticket=str(int(self.app)+40),ticketOwner="3260",ticketControl="3261",ticketObserve="3262")
             self.issue(d)
             self.enroll(d)
             self.route("delegate-a-restored",d)
-            current = self.query(d["subject"],d["session"],d["cap"])
-            enrollment = load(Path(d["enrollment"])/"plan-inspected.json")["enrollment"]
-            require(entries(current["view"])["2"] == enrollment["sessionGeneration"] and
-                    entries(current["view"])["1"] == self.f["generation"], "restored enrollment changed before route registration")
-            directory = Path(d["endpoint"]["token"]).parent
-            request = self.fresh("register-route.json")
-            save(request,{"protocol":"mini-spk-route-register-v1", "registrationNonceHex":secrets.token_hex(32),
-                "expectedApp":self.app, "expectedAppGeneration":self.f["generation"],
-                "expectedSessionGeneration":enrollment["sessionGeneration"], "directory":str(directory),
-                "dispatchCustody":str(directory/"dispatch-custody.json"),
-                "dispatchCustodySha256":sha(directory/"dispatch-custody.json"),
-                "custodianSha256":sha(directory/"custodian.json"),
-                "displayName":"Continuity delegate "+d["subject"], "preferredHandle":"delegate-a-restored"})
+            request = self.registration_request(d)
             _,registration_out,_ = self.run([self.m["spkHost"]["path"],"grain","register-route","--socket",control,"--request",request])
             check_registration(load(registration_out),load(request),d)
             d["routeRegistration"] = str(registration_out)
@@ -478,6 +485,8 @@ def prepare(path):
     require(m["sourceCommit"] == c["expectedSourceCommit"], "candidate source differs from explicit pin")
     require(all(name in m and name in m.get("sha256",{}) for name in ["host","mini","store","verifier","spkHost"]),
             "candidate manifest lacks required SPK/native artifacts or hashes")
+    if c.get("enableSameIngressRace") is True:
+        require("integration-qualification" in m.get("spkHostFeatures",[]), "race needs explicitly feature-built candidate manifest")
     artifacts = {}
     for name in ["host","mini","store","verifier","spkHost"]:
         p = absolute(m[name])
@@ -502,7 +511,7 @@ def prepare(path):
     (root/"hooks").mkdir(mode=0o700)
     save(root/"input.json",c)
     save(root/"manifest.json",m)
-    save(root/"source-inputs.json",{str(HERE/name):sha(HERE/name) for name in ["grain-journey.sh","grain-store.sh","ws-continuity-fixture.py"]})
+    save(root/"source-inputs.json",{str(HERE/name):sha(HERE/name) for name in ["grain-journey.sh","grain-store.sh","ws-continuity-fixture.py","ws-continuity-regressions.py","ws-continuity-supervision.py"]})
     env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
     def phases(*names):
         p = root/("phase-"+"-".join(names))
@@ -519,7 +528,7 @@ def prepare(path):
     save(tmp,profile)
     os.replace(tmp,profile_path)
     f = {"schema":SCHEMA,"root":str(root),"app":prefix+"01","artifacts":artifacts,"state":str(state),"profilePath":str(profile_path),"grainsRoot":str(grains),
-         "candidateSource":m["sourceCommit"],"leaseSeconds":lease,"enableHotRegrant":c.get("enableHotRegrant",False),"delegates":{}}
+         "candidateSource":m["sourceCommit"],"leaseSeconds":lease,"enableHotRegrant":c.get("enableHotRegrant",False),"enableSealRecovery":c.get("enableSealRecovery",False),"sealSupervisor":c.get("sealSupervisor"),"enableSameIngressRace":c.get("enableSameIngressRace",False),"delegates":{}}
     for label,subject,session,cap,base in [("a","7",prefix+"10","3211",3230),("b","9",prefix+"12","3221",3240)]:
         f["delegates"][label] = {"subject":subject,"session":session,"cap":cap,"ticket":prefix+("20" if label=="a" else "22"),
             "appObserve":str(base),"pkgObserve":str(base+1),"ticketOwner":str(base+2),"ticketControl":str(base+3),"ticketObserve":str(base+4)}
@@ -550,6 +559,12 @@ def prepare(path):
         control = state / f"apps/{fixture.app}/g{fixture.f['generation']}/route-control.sock"
         require(control.is_socket(), "hot regrant requested but joined resident control is absent")
         journey["hooks"]["regrantA"] = [sys.executable,str(HERE/"ws-continuity-fixture.py"),"regrantA",str(root/"fixture.json")]
+    journey["hooks"]["replayAcceptedA"] = [sys.executable,str(HERE/"ws-continuity-regressions.py"),"replayAcceptedA",str(root/"fixture.json")]
+    if c.get("enableSealRecovery") is True:
+        journey["hooks"]["sealRecovery"] = [sys.executable,str(HERE/"ws-continuity-regressions.py"),"sealRecovery",str(root/"fixture.json")]
+    if c.get("enableSameIngressRace") is True:
+        require("integration-qualification" in m.get("spkHostFeatures",[]), "race needs explicitly feature-built candidate manifest")
+        journey["hooks"]["sameIngressRace"] = [sys.executable,str(HERE/"ws-continuity-regressions.py"),"sameIngressRace",str(root/"fixture.json")]
     save(root/"journey.json",journey)
     return {"fixture":str(root/"fixture.json"),"journey":str(root/"journey.json"),"prepared":True}
 

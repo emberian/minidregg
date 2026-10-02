@@ -61,7 +61,9 @@ class Journey:
         self.report = {"schema": "spk-ws-continuity-journey-v1", "status": "running", "room": self.room,
                        "leaseSeconds": self.lease, "durationSeconds": self.duration,
                        "cutoffToleranceSeconds": self.tolerance, "snapshots": [], "traffic": {},
-                       "regrant": "unqualified: hook omitted", "generationStop": "unqualified: hook omitted"}
+                       "regrant": "unqualified: hook omitted", "generationStop": "unqualified: hook omitted",
+                       "replayAcceptedA": "unqualified: hook omitted", "sealRecovery": "unqualified: hook omitted",
+                       "sameIngressRace": "unqualified: hook omitted"}
 
     def save(self):
         if self.output:
@@ -223,6 +225,10 @@ class Journey:
             raise AssertionError("new A open admitted after revoke")
         no_delta(self.report["snapshots"][-1], self.snapshot("after-refused-open"), "refused open")
         self.edit(b, b, "b", "after-refused-a-open")
+        if "replayAcceptedA" in self.c["hooks"]:
+            prior = self.report["snapshots"][-1]
+            self.action_while_b_writes("replayAcceptedA", b)
+            no_delta(prior, self.snapshot("after-exact-accepted-replay"), "accepted replay")
         if "regrantA" in self.c["hooks"]:
             _, _, regrant = self.action_while_b_writes("regrantA", b)
             if "endpoint" in regrant:
@@ -237,6 +243,32 @@ class Journey:
             after = self.snapshot("after-regranted-open-and-edit")
             require(after["dispatchCount"] == granted["dispatchCount"]+1, "regrant reconnect needs exactly one admitted open")
             self.report["regrant"] = {"freshOpenAndEdit": True, "oldStreamRemainedEnded": True, "endpointReplaced": "endpoint" in regrant}
+        if "sameIngressRace" in self.c["hooks"]:
+            self.action_while_b_writes("sameIngressRace", b)
+            self.snapshot("after-same-ingress-race")
+        if "sealRecovery" in self.c["hooks"]:
+            persisted = self.edit(b, b, "b", "before-seal-failure")
+            old_generation = self.report["snapshots"][-1]["generation"]
+            result = self.hook("sealRecovery")
+            require(result.get("schema") == "spk-ws-continuity-action-v1" and result.get("action") == "sealRecovery"
+                    and result.get("confirmed") is True and Path(result.get("artifact", "")).is_file(), "seal recovery unconfirmed")
+            require(result.get("oldGeneration") == old_generation and isinstance(result.get("newGeneration"), str)
+                    and int(result["newGeneration"]) > int(old_generation) and result.get("sameGenerationRefused") is True,
+                    "seal recovery did not prove explicit generation transition")
+            deadline = time.monotonic()+self.lease+self.tolerance
+            while any(s.ended is None for s in self.sockets) and time.monotonic() < deadline:
+                time.sleep(.1)
+            require(all(s.ended is not None for s in self.sockets), "old incarnation retained a stream")
+            self.endpoint["b"] = wsmod.Endpoint(**result["endpoint"])
+            b = self.open("b")
+            require(persisted in self.log(b, "b"), "B data did not survive interrupted seal and new generation")
+            self.edit(b, b, "b", "after-seal-recovery")
+            # Explicit lifecycle boundary: per-generation dispatch counts restart, so
+            # never silently compare this with the continuity snapshots above.
+            self.report["sealRecovery"] = {"artifact":result["artifact"], "oldGeneration":old_generation,
+                "newGeneration":result["newGeneration"], "sameGenerationRefused":True,
+                "oldStreamsEnded":True, "persistedBData":True, "newBOpenAndEdit":True}
+            self.save()
         if "generationStop" in self.c["hooks"]:
             # STOP intentionally ends B, so do not require continuing traffic during this hook.
             result = self.hook("generationStop")

@@ -194,6 +194,41 @@ class Tests(unittest.TestCase):
         run.hook = app.hook
         return app, run
 
+    def test_joined_regressions_order_and_explicit_generation_recovery(self):
+        app, run = self.run_fixture()
+        order = []
+        for name in ('replayAcceptedA','sameIngressRace','sealRecovery','generationStop'):
+            run.c['hooks'][name] = ['unused']
+        def hook(name):
+            if name != 'snapshot': order.append(name)
+            if name == 'replayAcceptedA':
+                return dict(schema='spk-ws-continuity-action-v1',action=name,confirmed=True,artifact=str(app.artifact))
+            result = app.hook('generationStop' if name == 'sealRecovery' else name)
+            if name == 'sealRecovery':
+                result.update(action=name,oldGeneration='4',newGeneration='5',sameGenerationRefused=True,
+                              endpoint=app.config['delegates']['b']['endpoint'])
+            return result
+        run.hook = hook
+        report = run.run()
+        self.assertEqual(order,['revokeA','replayAcceptedA','regrantA','sameIngressRace','sealRecovery','generationStop'])
+        self.assertTrue(report['sealRecovery']['persistedBData'])
+        self.assertTrue(report['sealRecovery']['oldStreamsEnded'])
+        self.assertEqual({s['generation'] for s in report['snapshots']},{'4'})
+
+    def test_seal_recovery_lost_app_data_fails(self):
+        app, run = self.run_fixture()
+        run.c['hooks']['sealRecovery'] = ['unused']
+        def hook(name):
+            result = app.hook('generationStop' if name == 'sealRecovery' else name)
+            if name == 'sealRecovery':
+                app.log.clear()
+                result.update(action=name,oldGeneration='4',newGeneration='5',sameGenerationRefused=True,
+                              endpoint=app.config['delegates']['b']['endpoint'])
+            return result
+        run.hook = hook
+        with self.assertRaisesRegex(AssertionError,'B data did not survive'):
+            run.run()
+
     def test_two_authenticated_endpoints_sustain_revoke_and_regrant(self):
         app, run = self.run_fixture()
         result = run.run()
