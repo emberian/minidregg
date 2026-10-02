@@ -190,8 +190,16 @@ pub(crate) fn catalog_enabled(config: &[u8]) -> Result<bool, String> {
         .is_some_and(serde_json::Value::is_object))
 }
 
+// Continuity carries points and optional authenticated Merkle siblings, never local paths.
+// Lean owns the shape and proof semantics; the socket bounds JSON before dispatch.
+fn continuity_request(payload: &[u8]) -> bool {
+    !payload.is_empty() && payload.len() <= 64 * 1024
+        && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object())
+}
+
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
+        [151, payload @ ..] => continuity_request(payload),
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
         [123..=125, _, ..] => true,
@@ -356,6 +364,7 @@ fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
+        [151, payload @ ..] => continuity_request(payload),
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
         | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80 | 82 | 84 | 85, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
@@ -1765,6 +1774,22 @@ done"#;
         assert!(allowed_operation(&[21, 1], false));
         assert!(!allowed_operation(&[20], false));
         assert!(!allowed_operation(&[21], false));
+    }
+
+    #[test]
+    fn receipt_continuity_accepts_only_bounded_json_objects_on_both_sockets() {
+        let mut valid = vec![151];
+        valid.extend_from_slice(br#"{"identity":{},"from":null,"target":{"height":"1","worldRoot":"2"}}"#);
+        assert!(allowed_operation(&valid, false));
+        assert!(allowed_operator_operation(&valid));
+        for payload in [b"".as_slice(), b"[]", b"{", b"/tmp/request.json"] {
+            let frame = [vec![151], payload.to_vec()].concat();
+            assert!(!allowed_operation(&frame, false));
+            assert!(!allowed_operator_operation(&frame));
+        }
+        let oversized = [vec![151, b'{'], vec![b' '; 64 * 1024], vec![b'}']].concat();
+        assert!(!allowed_operation(&oversized, false));
+        assert!(!allowed_operator_operation(&oversized));
     }
 
     #[test]

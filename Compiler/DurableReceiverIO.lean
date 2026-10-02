@@ -91,11 +91,15 @@ structure NativeConfig where
   /-- The Store's 32-byte MAC key file (mode 0600, generated at bootstrap). -/
   key : System.FilePath
   checkpointEvery : Nat := 64
+  /-- Opaque deployment/genesis identity for the physical rollback anchor. -/
+  anchorIdentity : String := ""
 
 /-- One Store call, through the binary's long-lived `serve` helper
 (`NativeCoprocess.output`: the one-shot call's exact output, no fork of the Host). -/
 def runNative (config : NativeConfig) (arguments : Array String) : IO IO.Process.Output :=
-  NativeCoprocess.output config.binary.toString arguments
+  NativeCoprocess.output config.binary.toString
+    (if config.anchorIdentity.isEmpty then arguments
+      else #["--anchor-identity", config.anchorIdentity] ++ arguments)
 
 def parseCasOutput (output : IO.Process.Output) : CasObservation :=
   if output.exitCode == 0 && output.stderr == "" then

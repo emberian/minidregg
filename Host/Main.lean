@@ -123,6 +123,7 @@ import Kernel.ApplicationLifecycleCompletionV2Receiver
 import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
+import Host.ReceiptContinuity
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -758,6 +759,7 @@ def profileDescription (config : NativeHost.Config)
     [("runtime", toJson "minidregg-native"),
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
+     ("expectedSeed", n config.expectedSeed.value),
      ("federation", n config.federation.value),
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),
@@ -1623,12 +1625,14 @@ def dispatchSession (config : NativeHost.Config)
       return (3, outcomeCodec.encode result)
   | 4 =>
       let opened ← sessionOpened config state
+      ReceiptContinuity.remember config opened.durable
       match NativeHost.challengeLoaded config opened payload with
       | .ok challenge => return (4, NativeObservationCodec.challengeCodec.encode challenge)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
       let t0 ← IO.monoMsNow
       let opened ← sessionOpened config state
+      ReceiptContinuity.remember config opened.durable
       phaseTrace "op5 refresh" t0
       match ← NativeHost.queryLoaded config opened payload with
       | .ok view => return (5, view)
@@ -1677,6 +1681,11 @@ def dispatchSession (config : NativeHost.Config)
   | 150 =>
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
+  | 151 =>
+      let opened ← sessionOpened config state
+      match ← ReceiptContinuity.serve config opened.durable payload with
+      | .ok response => return (151, response)
+      | .error detail => return (255, failure .operationRejected "receipt-continuity" detail)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -5042,6 +5051,17 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "continuity-point", [challengePath, outputPath] =>
+          let challenge ← readJson challengePath
+          let result ← IO.ofExcept (ReceiptContinuity.challengePointJson config challenge)
+          writeJson outputPath result
+          pure 0
+      | "continuity-verify", [requestPath, responsePath, outputPath] =>
+          let request ← readJson requestPath
+          let response ← readJson responsePath
+          let result ← IO.ofExcept (ReceiptContinuity.verifyJson config request response)
+          writeJson outputPath result
+          pure 0
       | "profile", [] =>
           IO.println (profileDescription config
             (← IO.ofExcept settings.providerMeteringPin)

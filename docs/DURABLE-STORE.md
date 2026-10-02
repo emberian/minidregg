@@ -1,7 +1,7 @@
 # The durable Store: interfaces an operator depends on
 
 One Mini Store is one directory (`storageRoot` in the operator configuration)
-plus one key file. This page lists what the Host and its store helper read,
+plus one key file and an independently retained sibling head anchor. This page lists what the Host and its store helper read,
 write and refuse there. Anything not listed is not part of the contract.
 
 ## Files
@@ -10,6 +10,8 @@ write and refuse there. Anything not listed is not part of the contract.
 | --- | --- | --- | --- |
 | `DEPLOYMENT/checkpoint.key` | `mini bootstrap`, once | `0600` | 32 bytes from `/dev/urandom`: the Store's MAC key. Never printed, copied into another artifact, or committed. |
 | `DEPLOYMENT/pinned-config.json` | the Host's `genesis` | `0600` (umask) | Operator configuration plus `expectedSeed` and `checkpointKey` (the key's absolute path). Optional `checkpointEvery` (default 64). |
+| `STORE.head-anchor` | the store helper | `0600` | Independently retained exact genesis/deployment and head commitments; outside the Store directory. |
+| `STORE.head-anchor.lock` | the store helper | `0600` | Serializes SQLite publication and anchor persistence; no history is stored here. |
 | `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, schema version 3. Tables: `durable_seed` (the genesis, once), `durable_log(height, record, tag)`, `durable_checkpoint(height, bytes)` (the latest two are kept). |
 
 `DEPLOYMENT` is the directory given to `mini bootstrap --dir`, and `STORE` is
@@ -43,8 +45,11 @@ that the receipt signatures do not already carry.
 ## Open, write, audit
 
 - **Open.** Performed by `mini serve` and every Host command that reads state.
-  1. Read the seed, the latest checkpoint and every log entry in one SQLite
-     transaction.
+  1. Lock the sibling anchor; read the seed, latest checkpoint and entries in
+     one SQLite transaction. Check the retained deployment/genesis identity and
+     exact anchored prefix entry. A lower head, conflict or missing anchor refuses.
+     A committed but unacknowledged extension may recover. Persist the current
+     anchor before returning the read; the Lean checks below remain mandatory.
   2. Recompute the log root over every record.
   3. Open the checkpoint: its key id, recomputed world root, MAC, and log-root
      value at its height must all check.
@@ -55,7 +60,10 @@ that the receipt signatures do not already carry.
 
   No signed ingress is re-admitted. Every check refuses.
 - **Write.** Each accepted operation appends one entry at `head + 1`; the
-  helper refuses unless the head is still `head`. The Host reads that one entry
+  helper refuses unless the head is still `head` and the anchor still matches.
+  SQLite commits first; the helper then fsyncs a new anchor file, renames it and
+  fsyncs its parent directory before returning success. The independent lock spans
+  both publications. The Host reads that one entry
   back and confirms only on exact equality. Every `checkpointEvery` accepted
   records it seals a checkpoint. The served world root is a cached tree, so
   one write rehashes one path per written slot.
@@ -73,6 +81,9 @@ that the receipt signatures do not already carry.
 
 | condition | observable |
 | --- | --- |
+| missing anchor on a seeded Store | `durable head anchor refused: missing anchor; existing Stores require explicit audited enrollment` |
+| Store truncated below retained head | `durable head anchor refused: Store is behind retained head` |
+| deployment/genesis or same-height retained entry differs | `durable head anchor refused: genesis or retained head conflicts` |
 | Store holds the retired whole-image record (`DREGG.DURABLE.IMAGE`, pre-C2) | helper exit 5, `store holds a retired whole-image record; re-genesis (no migration)` |
 | key file missing or not exactly 32 bytes | `checkpoint MAC key unavailable` / `must be exactly 32 bytes` |
 | checkpoint sealed under another key | `checkpoint refused: foreignKey` |
@@ -101,3 +112,66 @@ minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT
 `durable-append-crash … after-begin|after-insert|after-commit` is a lifecycle
 test hook. The probe `scripts/probe-durable-receiver.sh` exercises every
 command, both MAC poles, crash recovery and checkpoint resume.
+
+
+## Independent head continuity and upgrade
+
+The helper's `--anchor-identity ID` prefix binds its opaque anchor to the Host's
+canonical `domain:D;semantics:S;seed:G` string. `D` and `S` come from
+`minidregg-host PINNED.json profile`; `G` is `expectedSeed` in the pinned config.
+`NativeHost.Config.transport` supplies this automatically. Generic byte-store
+probes use the empty identity; this is not an alternate production identity.
+Changing domain, semantics or genesis requires explicit lineage/re-enrollment,
+not silently deleting the previous anchor.
+
+The fixed 80-byte anchor contains `MINIANC1`, SHA256 of length-delimited opaque
+identity and seed bytes with a domain separator, the big-endian u64 height, and
+SHA256 of the exact height/length-delimited record/tag with a separate domain
+separator. At height zero the entry commitment names the empty entry. Rust does
+not parse or re-admit these bytes. Lean's existing domain/genesis-rooted chain,
+KMAC tags, checkpoint and replay checks continue to establish their meaning.
+No extra full replay occurs on the normal path: only the retained and current
+head entries are read for physical continuity.
+
+A new genesis writes its initial anchor before committing the seed. An
+interruption may retry exactly the same seed and identity. Existing seeded
+Stores never auto-enroll, including height-zero Stores. Before upgrading an
+existing service, stop all writers, preserve its database and key, audit with
+the previously qualified Host/helper, compare any retained client evidence,
+and deliberately enroll the observed head using the new helper:
+
+```
+minidregg-link-sqlite-store --anchor-identity 'domain:D;semantics:S;seed:G' durable-anchor-enroll STORE
+```
+
+Use the actual source-derived decimal identities, not the literal placeholders.
+This command establishes trust in the operator-selected existing history; it
+cannot prove freshness on its own. It refuses to overwrite a conflicting retained
+anchor. Run the updated Host's audit before exposing the upgraded service.
+
+If the process dies after SQLite commit but before anchor publication, the old
+anchor must still match a prefix of the database. A read or exact retry retains
+the committed head durably and succeeds. If it dies after rename but before the
+directory fsync, a retry syncs the existing file and directory before returning.
+An error after commit is still an uncertain result, never permission to submit
+a different operation. Test hooks cover `after-begin`, `after-insert`,
+`after-commit`, `after-anchor-prepare`, `after-anchor-rename`, and `after-anchor`.
+
+For backups, stop the service and copy both the SQLite Store and its sibling
+anchor. When moving the restored Store, put the copied anchor at the sibling
+path of its resolved destination. Preserve any newer live anchor separately;
+never overwrite it merely to make a historic backup open. A copied old database
+with the newer anchor correctly refuses. Restoring an old database **and its old
+anchor** cannot detect their joint rollback. Independent client receipt memory
+and ultimately external witnesses address that stronger threat; a local file
+is not a witness. Loss of the anchor needs explicit recovery evidence and an
+operator enrollment decision. New storage paths and re-enrollment must not
+silently reset clients' history.
+
+Physical tests run real helper subprocesses killed at the publication boundaries,
+then reopen/read/retry and replace the database with an older copy. They also
+exercise row truncation above a checkpoint, same-height conflicts, foreign
+genesis/domain, missing/replaced anchors, and concurrent appenders. This tests
+process failure and exact-byte continuity; it does not prove filesystem/media
+behavior during power loss or provide protection from an operator controlling
+both the Store and retained anchor.
