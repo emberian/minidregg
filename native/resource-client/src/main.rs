@@ -1731,8 +1731,6 @@ fn submit(
     directory: &Path,
     prepare_only: bool,
 ) -> Result<()> {
-    #[cfg(unix)]
-    let continuity = receipt_continuity::begin_attempt(directory)?;
     create_dir(directory)?;
     replan::replan(
         "submit",
