@@ -161,7 +161,7 @@ theorem decideRoom_ok_iff (room : Nat) (stored : Option (Capability .object))
                       cases found
                       rw [rejects] at accepts
                       cases accepts
-          · simp [placing]
+          · simp [placing, refusal]
 
 /-- Actual successful placement carries the same scope condition checked by
 this receiver, independently of the broader global verb alias. -/
