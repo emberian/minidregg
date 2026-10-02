@@ -152,6 +152,59 @@ def authorizePrepared (config : NativeHost.Config) (prepared : Prepared config)
   | .ok false => return .error "operator did not authorize this exact carry edge"
   | .ok true => return .ok ⟨prepared, edge⟩
 
+/-- Restartable provenance token for the exact retained source and authorized
+carry prefix. The current suffix is not claimed admitted by this token: its
+source-owned suffix verifier must establish that separate obligation. -/
+structure PreservedPrefix (config : NativeHost.Config) (current : NativeHost.Durable) where
+  private mk ::
+  source : AuditedSource
+  edge : EdgeSeal
+  start : NativeHost.Opened config
+  prefixExact : current.prefixImage start.durable.height = start.durable.image
+
+/-- Only an actually audited and signature-authorized carry can mint this
+binding. Registry reload reconstructs Authorized from its exact accepted event;
+callers cannot supply an asserted provenance Boolean or an unrelated old image. -/
+def bindPreservedPrefix (config : NativeHost.Config) (authorized : Authorized config)
+    (current : NativeHost.Durable) : Except String (PreservedPrefix config current) := do
+  let start := authorized.prepared.target
+  if current.logStart != start.durable.logStart then throw "carried prefix target log identity differs"
+  if current.height < start.durable.height then throw "carried prefix is beyond current history"
+  if exact : current.prefixImage start.durable.height = start.durable.image then
+    return ⟨authorized.prepared.source, authorized.edge, start, exact⟩
+  else throw "carried prefix differs from the exact authorized history"
+
+/-- Rebind an existing authenticated source to a later actual image. This
+cannot change the origin, authorized edge or validated carry start. -/
+def PreservedPrefix.rebind {config : NativeHost.Config} {current : NativeHost.Durable}
+    (prior : PreservedPrefix config current) (next : NativeHost.Durable)
+    (exact : next.prefixImage prior.start.durable.height = prior.start.durable.image) :
+    PreservedPrefix config next := ⟨prior.source, prior.edge, prior.start, exact⟩
+
+@[simp] theorem PreservedPrefix.rebind_source {config : NativeHost.Config}
+    {current : NativeHost.Durable} (prior : PreservedPrefix config current)
+    (next : NativeHost.Durable) (exact) :
+    (prior.rebind next exact).source = prior.source := rfl
+
+@[simp] theorem PreservedPrefix.rebind_edge {config : NativeHost.Config}
+    {current : NativeHost.Durable} (prior : PreservedPrefix config current)
+    (next : NativeHost.Durable) (exact) :
+    (prior.rebind next exact).edge = prior.edge := rfl
+
+@[simp] theorem PreservedPrefix.rebind_start {config : NativeHost.Config}
+    {current : NativeHost.Durable} (prior : PreservedPrefix config current)
+    (next : NativeHost.Durable) (exact) :
+    (prior.rebind next exact).start = prior.start := rfl
+
+def PreservedPrefix.rebindChecked {config : NativeHost.Config} {current : NativeHost.Durable}
+    (prior : PreservedPrefix config current) (next : NativeHost.Durable) :
+    Except String (PreservedPrefix config next) := do
+  if next.logStart != prior.start.durable.logStart then throw "carried prefix target log identity differs"
+  if next.height < prior.start.durable.height then throw "carried prefix is beyond target history"
+  if exact : next.prefixImage prior.start.durable.height = prior.start.durable.image then
+    return prior.rebind next exact
+  else throw "carried prefix differs from retained authorization"
+
 /-- Stage/resume only the exact authorized full image. An interrupted partial
 stage can continue; a differing seed, prefix or extra record refuses. The normal
 Store helper fsyncs its independent anchor before each acknowledgement. This

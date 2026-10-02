@@ -74,7 +74,7 @@ def parseRegistry (value : Json) (trustedOperator : List UInt8) : Except String 
 original Image, and the current new-profile endpoint. No semantic boolean or
 self-asserted registry digest can replace these checks. -/
 def validate (config : NativeHost.Config) (current : NativeHost.Durable)
-    (registry : Registry) : IO (Except String CarriedSegmentIO.AuditedSource) := do
+    (registry : Registry) : IO (Except String (CarriedSegmentIO.PreservedPrefix config current)) := do
   try
     let body := registry.edge.body
     let configured : Identity := ⟨config.deployment.domain, config.profile.semantics, config.expectedSeed⟩
@@ -107,7 +107,12 @@ def validate (config : NativeHost.Config) (current : NativeHost.Durable)
       current.logStart (current.prefixImage registry.edge.targetStart.height))
     if pointOf selectedPrefix != registry.edge.targetStart then
       return .error "retained registry new start differs"
-    return .ok source
+    let prepared ← liftResult (CarriedSegmentIO.prepareDerived config source
+      registry.trustedOperator body changes)
+    let authorized ← liftResult (← CarriedSegmentIO.authorizePrepared config prepared
+      registry.trustedOperator registry.edge.signature)
+    if authorized.edge != registry.edge then return .error "retained exact authorization differs"
+    return CarriedSegmentIO.bindPreservedPrefix config authorized current
   catch _ => return .error "retained capsule validation failed"
 
 /-- Recheck the exact old cut after dispatch; a concurrently extended or
