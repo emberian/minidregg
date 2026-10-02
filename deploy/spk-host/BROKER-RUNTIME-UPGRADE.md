@@ -69,3 +69,49 @@ invoke it under the configured operator identity instead of parsing pointers.
 This is source and Rust receiving-path coverage. A root-owned joined-candidate
 upgrade, broker bootstrap, adoption, START and browser journey is still required
 for deployment qualification.
+
+## Isolated broker installations
+
+Broker config, Store host profile and retained resident config accept an optional
+`brokerSocket`. Omission means the existing `/run/mini-spk-broker.sock` endpoint.
+An isolated installation must explicitly use exactly `GRAINS_ROOT/broker.sock`;
+arbitrary paths, aliases, systemd syntax and overlong Unix paths refuse. The grains
+root and endpoint ancestors remain root-owned and non-writable by the operator.
+For example, a broker with `grainsRoot=/var/lib/minidregg/jspk1002/grains` sets
+`brokerSocket=/var/lib/minidregg/jspk1002/grains/broker.sock` in its root config and
+all Store profiles. Initialize that Store with:
+
+```
+spk-host grain init-store GRAINS_ROOT MINI_CONFIG --broker-socket GRAINS_ROOT/broker.sock
+```
+
+The init result includes the resolved `brokerSocket`; the profile generator must
+retain that exact pin. The ordinary two-argument form preserves the legacy path.
+No native client takes an endpoint choice from ambient environment variables,
+and an absent or refused chosen socket never falls back to another broker.
+
+Isolated clients check socket ownership/mode, authenticate the root peer, and
+compare `mini-spk-broker-identity-v1` with the expected grains root and socket
+before sending an operation. Identity and action connections must belong to the
+same root process. The broker still requires the configured operator's peer UID;
+Store placements and exact unit ownership remain broker-checked. Legacy canonical
+clients retain their existing wire protocol.
+
+START copies the profile's endpoint into its immutable resident config. The root
+broker renders a matching resident unit pin, which the resident checks alongside
+its Store/root/app identity. This unit pin can only confirm the config choice; it
+does not select an endpoint. Supervisor commands use the selected Store profile,
+and STOP uses the retained generation's resident config through the physical
+journal's broker binding. Compatible profile rebind preserves the endpoint.
+
+A broker binds its socket **before** rendering units. A root-private lifetime
+lock prevents two brokers from owning the endpoint; an existing listener is
+never unlinked, including an older broker without the lock protocol. Only a
+root-owned socket with no listener can be recovered under the exclusive lock.
+Unexpected file types, permissions or uncertain connection errors refuse.
+
+Focused Rust tests cover two real local sockets (only the selected endpoint
+receives the action), identity mismatch before mutation, endpoint/Store unit-pin
+mismatch, occupied socket preservation, exclusive locking and stale restart.
+These transport tests use the test process identity in private test fixtures;
+production always requires root socket ownership and root peer credentials.

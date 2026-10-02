@@ -691,6 +691,7 @@ impl UnitStopAudit {
 #[derive(Clone, Debug)]
 pub struct Journal {
     directory: PathBuf,
+    broker_endpoint: Option<(PathBuf, Option<PathBuf>)>,
 }
 
 trait ChildHandle {
@@ -808,7 +809,24 @@ impl Journal {
         }
         Ok(Self {
             directory: directory.to_owned(),
+            broker_endpoint: None,
         })
+    }
+
+    /// Bind manager operations to the endpoint retained in this generation's
+    /// validated resident config. Ordinary journal readers carry no new grant.
+    pub(crate) fn with_broker_endpoint(mut self, root: &Path, socket: Option<&Path>) -> io::Result<Self> {
+        crate::broker::socket_path(root, socket)?;
+        self.broker_endpoint = Some((root.to_owned(), socket.map(Path::to_owned)));
+        Ok(self)
+    }
+    fn stop_unit(&self, unit: &str) -> io::Result<()> {
+        #[cfg(not(test))]
+        if let Some((root, socket)) = &self.broker_endpoint {
+            return crate::broker::call_at(root, socket.as_deref(),
+                &crate::broker::Request::Stop { unit: unit.to_owned() }).map(|_| ());
+        }
+        stop_unit(unit)
     }
 
     pub(crate) fn directory(&self) -> &Path {
@@ -1611,7 +1629,7 @@ impl Journal {
                     return Ok(());
                 }
                 UnitStopAudit::before_stop(&record)?;
-                stop_unit(unit)
+                self.stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )
@@ -1631,7 +1649,7 @@ impl Journal {
             verify_volume,
             UnitStopAudit::before_stop,
             |unit| {
-                stop_unit(unit)
+                self.stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )
@@ -1650,7 +1668,7 @@ impl Journal {
             true,
             UnitStopAudit::before_stop,
             |unit| {
-                stop_unit(unit)
+                self.stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )

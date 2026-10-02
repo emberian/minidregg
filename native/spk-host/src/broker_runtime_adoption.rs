@@ -669,6 +669,7 @@ mod tests {
         let config = BrokerConfig {
             protocol: "mini-spk-broker-config-v1".into(),
             grains_root: "/var/lib/grains".into(),
+            broker_socket: None,
             operator_user: "mini".into(),
             unit_prefix: "mini".into(),
             spk_host: "/old/spk-host".into(),

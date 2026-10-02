@@ -170,6 +170,8 @@ struct ResidentPins {
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
     grains_root: PathBuf,
+    #[serde(default)]
+    broker_socket: Option<PathBuf>,
     store: String,
     deployment_id: String,
     host_id: String,
@@ -1204,7 +1206,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         &pins.completion_custodian_seed,
         &pins.completion_semantics,
     )?;
-    let journal = Journal::open(&pins.journal_dir)?;
+    let journal = Journal::open(&pins.journal_dir)?
+        .with_broker_endpoint(&pins.grains_root, pins.broker_socket.as_deref())?;
     let phase = journal
         .read()?
         .ok_or_else(|| invalid("STOP prior running journal absent"))?

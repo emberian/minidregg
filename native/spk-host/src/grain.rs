@@ -213,6 +213,8 @@ struct HostProfile {
     completion_custodian_seed: PathBuf,
     completion_semantics: String,
     grains_root: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    broker_socket: Option<PathBuf>,
     bwrap: PathBuf,
     bwrap_sha256: String,
     spk_host: PathBuf,
@@ -434,11 +436,11 @@ fn place(
         }
         return Ok(placement);
     }
-    let placed = broker::call(&Request::Place {
+    let placed = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Place {
         store: host.store.clone(),
         app: selector.app.clone(),
     })?;
-    let cgroup = broker::call(&Request::SetCgroup {
+    let cgroup = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::SetCgroup {
         store: host.store.clone(),
         app: selector.app.clone(),
         class: class.to_owned(),
@@ -598,7 +600,7 @@ fn image_dir(raw_sha256: &str) -> PathBuf {
 fn ensure_image(host: &Host, placement: &Placement) -> io::Result<()> {
     let image = image_dir(&placement.raw_sha256);
     if !exists(&image)? {
-        broker::call(&Request::Ingest {
+        broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Ingest {
             store: host.store.clone(),
             app: placement.selector.app.clone(),
             sha256: placement.raw_sha256.clone(),
@@ -622,7 +624,7 @@ fn mount_volume(
     if !hex64(volume_id) {
         return Err(invalid("source volume ID malformed"));
     }
-    let reply = broker::call(&Request::MountVolume {
+    let reply = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::MountVolume {
         store: host.store.clone(),
         app: placement.selector.app.clone(),
         volume_id: volume_id.to_owned(),
@@ -871,7 +873,7 @@ fn unit_active(unit: &str) -> io::Result<String> {
 /// failure starts the app's supervisor. Re-installing the same generation is
 /// idempotent.
 fn install_unit(host: &Host, app: &str, generation: u64) -> io::Result<String> {
-    let reply = broker::call(&Request::InstallUnit {
+    let reply = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::InstallUnit {
         store: host.store.clone(),
         app: app.to_owned(),
         generation: generation.to_string(),
@@ -1069,6 +1071,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         "entrances":entrances,
         "agents":[],
     });
+    resident["brokerSocket"] = json!(broker::socket_path(&host.profile.grains_root, host.profile.broker_socket.as_deref())?);
     if let Some(seconds) = host.profile.ws_authority_lease_seconds {
         resident["wsAuthorityLeaseSeconds"] = json!(seconds);
     }
@@ -1076,7 +1079,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
     install_unit(host, app, generation)?;
     let started = Instant::now();
-    if let Err(error) = broker::call(&Request::Start { unit: unit.clone() }) {
+    if let Err(error) = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Start { unit: unit.clone() }) {
         if !matches!(unit_active(&unit)?.as_str(), "failed" | "inactive") {
             return Err(error);
         }
@@ -1279,7 +1282,7 @@ fn export(host: &Host, app: &str, out: &Path) -> io::Result<Value> {
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("prepared INSTALL lacks volume ID"))?
         .to_owned();
-    let copied = broker::call(&Request::ExportVolume {
+    let copied = broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::ExportVolume {
         store: host.store.clone(),
         app: app.to_owned(),
     })?;
@@ -1322,7 +1325,7 @@ pub fn usage() -> &'static str {
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
-     grain init-store GRAINS_ROOT MINI_CONFIG | grain backup PROFILE | \
+     grain init-store GRAINS_ROOT MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
      grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
      grain register-route --socket PATH --request PATH | \
      grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
@@ -1351,10 +1354,10 @@ fn install_options(rest: &[String]) -> io::Result<(String, Option<(PathBuf, Stri
 
 /// `spk-host grain init-store GRAINS_ROOT MINI_CONFIG`: the broker creates
 /// this Store's operator-owned state directory under the grains root.
-fn init_store(root: &Path, config: &Path) -> io::Result<Value> {
+fn init_store(root: &Path, config: &Path, socket: Option<&Path>) -> io::Result<Value> {
     let bytes = fs::read(config)?;
     let store = format!("{:x}", Sha256::digest(&bytes))[..16].to_owned();
-    let reply = broker::call(&Request::InitStore { store: store.clone() })?;
+    let reply = broker::call_at(root, socket, &Request::InitStore { store: store.clone() })?;
     let expected = root.join(&store).join("host");
     if reply.get("stateRoot").and_then(Value::as_str) != expected.to_str() {
         return Err(invalid("broker grains root differs from the requested one"));
@@ -1371,10 +1374,16 @@ fn init_store(root: &Path, config: &Path) -> io::Result<Value> {
     {
         return Err(invalid("retained host identity differs from the broker's"));
     }
-    Ok(json!({"protocol":"mini-spk-grain-init-store-v1","store":store,"stateRoot":expected}))
+    Ok(json!({"protocol":"mini-spk-grain-init-store-v1","store":store,"stateRoot":expected,
+        "brokerSocket":broker::socket_path(root, socket)?}))
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, root, config, flag, socket] = args {
+        if verb == "init-store" && flag == "--broker-socket" {
+            return init_store(Path::new(root), Path::new(config), Some(Path::new(socket)));
+        }
+    }
     if let [verb, profile] = args {
         if verb == "current-profile" {
             return profile_upgrade::current_profile(Path::new(profile));
@@ -1405,7 +1414,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
     }
     if let [verb, root, config] = args {
         if verb == "init-store" {
-            return init_store(Path::new(root), Path::new(config));
+            return init_store(Path::new(root), Path::new(config), None);
         }
     }
     if let [verb, root, instance] = args {
@@ -1444,7 +1453,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 ("session-intents", [app]) => profile_upgrade::session_intents(&host, app),
                 ("supervise", [app]) => supervise(&host, app),
                 ("export", [app, out]) => export(&host, app, Path::new(out)),
-                ("backup", []) => broker::call(&Request::Backup {}),
+                ("backup", []) => broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Backup {}),
                 _ => Err(invalid(usage())),
             }
         }

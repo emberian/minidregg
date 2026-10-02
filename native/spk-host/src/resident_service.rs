@@ -163,6 +163,8 @@ struct ResidentConfig {
     #[serde(default = "default_stream_lease_seconds")]
     ws_authority_lease_seconds: u64,
     grains_root: PathBuf,
+    #[serde(default)]
+    broker_socket: Option<PathBuf>,
     store: String,
     deployment_id: String,
     host_id: String,
@@ -863,10 +865,19 @@ struct ResidentBound {
     app_uid: u32,
     app_gid: u32,
     grains_root: PathBuf,
+    broker_socket: PathBuf,
     store: String,
 }
 
 impl ResidentBound {
+    fn validate(&self, config: &ResidentConfig) -> io::Result<()> {
+        if config.app_uid != self.app_uid || config.app_gid != self.app_gid
+            || config.grains_root != self.grains_root || config.store != self.store
+            || crate::broker::socket_path(&config.grains_root, config.broker_socket.as_deref())? != self.broker_socket {
+            return Err(invalid("resident config differs from broker-rendered unit identity or endpoint"));
+        }
+        Ok(())
+    }
     fn from_unit_environment() -> io::Result<Self> {
         if unsafe { libc::geteuid() } == 0 {
             return Err(invalid(
@@ -887,6 +898,8 @@ impl ResidentBound {
             app_uid: id("MINI_SPK_APP_UID")?,
             app_gid: id("MINI_SPK_APP_GID")?,
             grains_root: PathBuf::from(var("MINI_SPK_GRAINS_ROOT")?),
+            broker_socket: PathBuf::from(std::env::var("MINI_SPK_BROKER_SOCKET")
+                .unwrap_or_else(|_| crate::broker::SOCKET.to_owned())),
             store: var("MINI_SPK_STORE")?,
         })
     }
@@ -946,17 +959,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let bound = ResidentBound::from_unit_environment()?;
     crate::setid_bound::install(bound.app_uid, bound.app_gid)?;
     let mut config = ResidentConfig::load(config_path)?;
-    if config.app_uid != bound.app_uid
-        || config.app_gid != bound.app_gid
-        || config.grains_root != bound.grains_root
-        || config.store != bound.store
-    {
-        return Err(invalid(
-            "resident config differs from the broker-rendered unit's app identity",
-        ));
-    }
+    bound.validate(&config)?;
     resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
-    let journal = Journal::open(&config.journal_dir)?;
+    let journal = Journal::open(&config.journal_dir)?
+        .with_broker_endpoint(&config.grains_root, config.broker_socket.as_deref())?;
     let operator = PrivateOperator {
         host: config.mini_host.clone(),
         config: config.mini_config.clone(),
@@ -1762,6 +1768,22 @@ mod tests {
         (journal, path, config)
     }
 
+    #[test]
+    fn resident_endpoint_pin_must_match_unit_and_store() {
+        let (dir, _, value) = resident_config_fixture();
+        let mut config: ResidentConfig = serde_json::from_value(value).unwrap();
+        let mut bound = ResidentBound { app_uid: config.app_uid, app_gid: config.app_gid,
+            grains_root: config.grains_root.clone(), store: config.store.clone(),
+            broker_socket: PathBuf::from(crate::broker::SOCKET) };
+        assert!(bound.validate(&config).is_ok());
+        config.broker_socket = Some(config.grains_root.join("broker.sock"));
+        assert!(bound.validate(&config).is_err());
+        bound.broker_socket = config.broker_socket.clone().unwrap();
+        assert!(bound.validate(&config).is_ok());
+        bound.store = "fedcba9876543210".into();
+        assert!(bound.validate(&config).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn resident_config_refuses_two_agent_sockets_under_one_acl_parent() {
         let (journal, path, mut config) = resident_config_fixture();

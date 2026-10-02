@@ -64,6 +64,7 @@ fn profile_layout(path: &Path, profile: &HostProfile) -> io::Result<()> {
     if let Some(seconds) = profile.ws_authority_lease_seconds {
         crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
     }
+    broker::socket_path(&profile.grains_root, profile.broker_socket.as_deref())?;
     root_ancestors(&profile.grains_root)?;
     let root = fs::symlink_metadata(&profile.grains_root)?;
     if !root.is_dir() || root.uid() != 0 || root.mode() & 0o022 != 0 {
@@ -484,13 +485,13 @@ pub(super) fn runtime_status(path: &Path) -> io::Result<Value> {
     let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
     let _lock = lock(&profile.state_root, false)?;
     validate_selected(path, &profile)?;
-    broker::call(&Request::RuntimeStatus {
+    broker::call_at(&profile.grains_root, profile.broker_socket.as_deref(), &Request::RuntimeStatus {
         store: store(&profile)?.into(),
     })
 }
 
 pub(super) fn require_ready_runtime(profile: &HostProfile) -> io::Result<()> {
-    let value = broker::call(&Request::RuntimeStatus {
+    let value = broker::call_at(&profile.grains_root, profile.broker_socket.as_deref(), &Request::RuntimeStatus {
         store: store(profile)?.into(),
     })?;
     if value.get("protocol").and_then(Value::as_str) != Some("mini-spk-runtime-status-v1")
@@ -528,7 +529,7 @@ pub(super) fn adopt_runtime(path: &Path, admission: &Path) -> io::Result<Value> 
             "selected profile differs from admitted target runtime",
         ));
     }
-    let reply = broker::call(&Request::AdoptRuntime {
+    let reply = broker::call_at(&profile.grains_root, profile.broker_socket.as_deref(), &Request::AdoptRuntime {
         store: store(&profile)?.into(),
         admission: admission.into(),
     })?;

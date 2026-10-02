@@ -22,6 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[path = "broker_endpoint.rs"]
+mod endpoint;
+
 #[path = "broker_runtime_adoption.rs"]
 mod runtime_adoption;
 
@@ -147,6 +150,8 @@ pub fn supervisor_unit(prefix: &str, store: &str, app: &str) -> String {
 pub struct BrokerConfig {
     pub protocol: String,
     pub grains_root: PathBuf,
+    #[serde(default)]
+    pub broker_socket: Option<PathBuf>,
     pub operator_user: String,
     pub unit_prefix: String,
     pub spk_host: PathBuf,
@@ -167,6 +172,7 @@ struct Broker {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "verb", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
+    Identify {},
     /// Create `GRAINS/<store>` (operator-owned 0700), the grain host state.
     InitStore {
         store: String,
@@ -238,27 +244,13 @@ pub enum Request {
 }
 
 pub fn call(request: &Request) -> io::Result<Value> {
-    let mut stream = UnixStream::connect(SOCKET)
-        .map_err(|error| io::Error::new(error.kind(), format!("mini-spk-broker: {error}")))?;
-    stream.set_read_timeout(Some(Duration::from_secs(600)))?;
-    let mut line = serde_json::to_vec(request)?;
-    line.push(b'\n');
-    stream.write_all(&line)?;
-    stream.shutdown(std::net::Shutdown::Write)?;
-    let mut reply = Vec::new();
-    stream.take(1024 * 1024).read_to_end(&mut reply)?;
-    let reply: Value =
-        serde_json::from_slice(&reply).map_err(|_| invalid("mini-spk-broker reply is not JSON"))?;
-    match reply.get("ok") {
-        Some(Value::Bool(true)) => Ok(reply.get("result").cloned().unwrap_or(Value::Null)),
-        _ => Err(invalid(format!(
-            "mini-spk-broker refused: {}",
-            reply
-                .get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("no reason")
-        ))),
-    }
+    endpoint::call_legacy(request)
+}
+pub fn socket_path(root: &Path, socket: Option<&Path>) -> io::Result<PathBuf> {
+    endpoint::resolve(root, socket)
+}
+pub fn call_at(root: &Path, socket: Option<&Path>, request: &Request) -> io::Result<Value> {
+    endpoint::call_at(root, socket, request)
 }
 
 fn read_private_root(path: &Path, max: u64) -> io::Result<Vec<u8>> {
@@ -696,6 +688,8 @@ impl Broker {
 
     fn handle(&mut self, request: Request) -> io::Result<Value> {
         match request {
+            Request::Identify {} => Ok(json!({"protocol":"mini-spk-broker-identity-v1",
+                "grainsRoot":self.root(),"brokerSocket":socket_path(self.root(), self.config.broker_socket.as_deref())?})),
             Request::InitStore { store } => {
                 if !store_key(&store) {
                     return Err(invalid("store key refused"));
@@ -1029,7 +1023,7 @@ impl Broker {
                      OnFailure={supervisor}\n\n[Service]\nType=exec\nUser={user}\nGroup={group}\n\
                      Slice={slice}\n\
                      Environment=MINI_SPK_APP_UID={uid} MINI_SPK_APP_GID={gid} \
-                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store}\n\
+                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_BROKER_SOCKET={broker_socket}\n\
                      ExecStart={spk} resident-run {config}\n\
                      AmbientCapabilities=CAP_SETUID CAP_SETGID\n\
                      CapabilityBoundingSet=CAP_SETUID CAP_SETGID\nNoNewPrivileges=yes\n\
@@ -1042,6 +1036,7 @@ impl Broker {
                     uid = placement.app_uid,
                     gid = placement.app_gid,
                     root = self.root().display(),
+                    broker_socket = socket_path(self.root(), self.config.broker_socket.as_deref())?.display(),
                     spk = runtime.spk_host.display(),
                     config = config.display(),
                 );
@@ -1291,12 +1286,10 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
         libc::umask(0o077);
     }
     let mut broker = Broker::load(config_path)?;
+    let socket = socket_path(broker.root(), broker.config.broker_socket.as_deref())?;
+    let (listener, _socket_lock) = endpoint::bind(&socket, broker.operator_gid)?;
     broker.render_static()?;
-    let _ = fs::remove_file(SOCKET);
-    let listener = UnixListener::bind(SOCKET)?;
-    std::os::unix::fs::chown(SOCKET, Some(0), Some(broker.operator_gid))?;
-    fs::set_permissions(SOCKET, fs::Permissions::from_mode(0o660))?;
-    broker.log(&json!({"event":"listening","socket":SOCKET,
+    broker.log(&json!({"event":"listening","socket":socket,
         "grainsRoot":broker.config.grains_root,"operator":broker.config.operator_user,
         "unitPrefix":broker.config.unit_prefix}));
     for stream in listener.incoming() {
