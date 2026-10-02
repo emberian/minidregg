@@ -59,6 +59,8 @@ mod proxy;
 #[cfg(unix)]
 mod public_proxy;
 #[cfg(unix)]
+mod operator_drain;
+#[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
 mod relay;
@@ -525,6 +527,8 @@ usage:
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
+  mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
@@ -2889,6 +2893,18 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
             public_proxy::serve(socket, &upstream, &config)
+        }
+        #[cfg(unix)]
+        "operator-status" | "drain-operator" => {
+            let drain = args.command == OsStr::new("drain-operator");
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let instance = if drain { Some(args.required("instance")?.into_string().map_err(|_| "instance must be UTF-8")?) } else { None };
+            let pid = if drain { args.required("pid")?.to_str().ok_or("pid must be UTF-8")?.parse::<u32>().map_err(|_| "invalid process PID")? } else { 0 };
+            let timeout = if drain { args.required("timeout-seconds")?.to_str().ok_or("timeout must be UTF-8")?.parse::<u64>().map_err(|_| "invalid timeout")? } else { 0 };
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("operator control requires --socket")?;
+            operator_drain::command(socket, &host, &config, instance.as_deref().map(|instance| (instance, pid, timeout)))
         }
         "host-command" => {
             let host = path(args.required("host")?);

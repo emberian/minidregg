@@ -177,6 +177,58 @@ while True:
     public.with_suffix(".mode").write_bytes(b"operator-v1")
     refused = start("wrong-mode", args)
     checked("retained operator path cannot become public relay", refused.wait(timeout=3) != 0 and not public.exists())
+    def control(command, extra=(), expected=0):
+        result = subprocess.run([mini, command, "--socket", str(private), "--host", str(host), "--config", str(config)] + list(extra), capture_output=True, timeout=8)
+        assert result.returncode == expected, (result.returncode, result.stderr)
+        return json.loads(result.stdout) if result.stdout else None
+    state = control("operator-status")
+    checked("control status binds current private process", state["format"] == "mini-operator-drain-v1" and state["processId"] == backend.pid and state["phase"] == "serving")
+    instance = state["instanceId"]
+    original_host_pid = state["hostProcessId"]
+    drain_args = ["--instance", instance, "--pid", str(backend.pid), "--timeout-seconds", "1"]
+    control("drain-operator", ["--instance", "0" * 64, "--pid", str(backend.pid), "--timeout-seconds", "1"], expected=1)
+    checked("wrong instance cannot close admission", control("operator-status")["phase"] == "serving")
+    (root / "release").unlink()
+    busy = connect(private)
+    queued = connect(private)
+    accepted_idle = connect(private)
+    send(busy, envelope(b"\x00stall"))
+    send(queued, envelope(b"\x00queued-after-cancel"))
+    until = time.monotonic() + 3
+    while control("operator-status")["unresolvedConnections"] < 3:
+        assert time.monotonic() < until
+        time.sleep(.01)
+    timed_out = control("drain-operator", drain_args, expected=1)
+    checked("drain timeout closes admission but preserves unresolved work", timed_out["admissionClosed"] and not timed_out["drained"] and timed_out["unresolvedConnections"] >= 2)
+    try:
+        connect(private)
+        raise AssertionError("private listener remained open after close")
+    except OSError:
+        rows.append("drain closes actual private listener")
+    busy.close()
+    queued.close()
+    accepted_idle.close()
+    still_busy = control("operator-status")
+    checked("cancelled clients do not imply Host drain", not still_busy["drained"] and still_busy["unresolvedConnections"] >= 2)
+    checked("Host survives admission close and timeout", backend.poll() is None and still_busy["hostProcessId"] == original_host_pid)
+    os.kill(original_host_pid, 0)
+    (root / "release").touch()
+    drained = control("drain-operator", drain_args[:-1] + ["3"])
+    checked("exact-instance retry certifies all accepted and queued work drained", drained["admissionClosed"] and drained["drained"] and all(drained[k] == 0 for k in ["unresolvedConnections", "acceptedConnections", "queuedRequests", "activeRequests"]))
+    checked("queued request completes despite disconnected client", b"007175657565642d61667465722d63616e63656c" in (root / "received.hex").read_bytes())
+    checked("drain keeps same Host process alive", drained["hostProcessId"] == original_host_pid)
+    os.kill(original_host_pid, 0)
+    again = control("drain-operator", drain_args)
+    checked("drain remains idempotently closed", again["instanceId"] == instance and again["phase"] == "drained")
+    # Restart, rather than a control command, is the only reopening operation.
+    os.killpg(backend.pid, signal.SIGTERM)
+    backend.wait(timeout=3)
+    backend2 = start("private-restart", ["serve-operator", "--host", str(host), "--config", str(config), "--socket", str(private)])
+    wait_listener(backend2, private)
+    new_state = control("operator-status")
+    checked("service restart creates fresh instance and reopens admission", new_state["instanceId"] != instance and new_state["processId"] == backend2.pid and new_state["phase"] == "serving")
+    control("drain-operator", drain_args, expected=1)
+    checked("old drain receipt cannot close restarted process", control("operator-status")["phase"] == "serving" and exchange(private, envelope(b"\x00new-instance")) == b"\x00new-instance")
     result = {"format": "mini-public-ingress-process-v1", "mini": mini, "miniSha256": hashlib.sha256(Path(mini).read_bytes()).hexdigest(), "scope": "real mini processes and Unix sockets; framed echo Host fixture, not Lean admission", "passed": len(rows), "checks": rows, "evidence": str(root)}
     (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))

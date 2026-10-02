@@ -17,7 +17,7 @@ pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG + 32;
 
-fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
     let mut file = fs::File::open(path)
         .map_err(|e| format!("cannot open host image {}: {e}", path.display()))?;
     let mut hash = Sha256::new();
@@ -456,6 +456,10 @@ pub(crate) fn read_config(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
+    read_frame_bounded(reader, MAX_FRAME)
+}
+
+pub(crate) fn read_frame_bounded<R: Read>(reader: &mut R, bound: usize) -> io::Result<Option<Vec<u8>>> {
     let mut prefix = [0u8; 4];
     let mut read = 0;
     while read < prefix.len() {
@@ -471,7 +475,7 @@ pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>>
         }
     }
     let size = u32::from_le_bytes(prefix) as usize;
-    if !(1..=MAX_FRAME).contains(&size) {
+    if !(1..=MAX_FRAME.min(bound)).contains(&size) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid frame length",
@@ -662,9 +666,9 @@ pub(crate) fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
     Ok(())
 }
 
-struct DeadlinePipe<'a, R: Read + AsRawFd> {
-    reader: &'a mut R,
-    deadline: Instant,
+pub(crate) struct DeadlinePipe<'a, R: Read + AsRawFd> {
+    pub(crate) reader: &'a mut R,
+    pub(crate) deadline: Instant,
 }
 
 impl<R: Read + AsRawFd> Read for DeadlinePipe<'_, R> {
@@ -697,9 +701,9 @@ impl<R: Read + AsRawFd> Read for DeadlinePipe<'_, R> {
     }
 }
 
-struct DeadlinePipeWrite<'a, W: Write + AsRawFd> {
-    writer: &'a mut W,
-    deadline: Instant,
+pub(crate) struct DeadlinePipeWrite<'a, W: Write + AsRawFd> {
+    pub(crate) writer: &'a mut W,
+    pub(crate) deadline: Instant,
 }
 
 impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
@@ -929,6 +933,9 @@ fn serve_with_mode(
         HostProcess::start(&mut command, &host.display().to_string())
     };
     eprintln!("mini: serving {}", socket.display());
+    if operator {
+        return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, &mut start);
+    }
     supervise(
         &listener,
         operator,
@@ -1104,6 +1111,47 @@ fn supervise_bounded(
     })
 }
 
+/// Close private admission, drain every accepted connection and queued Host
+/// exchange, then retain this exact process/Host instance for explicit unit
+/// stop. A signed read cannot substitute for this channel-disconnection proof.
+fn supervise_operator(
+    listener: UnixListener,
+    socket: &Path,
+    config: &[u8],
+    host_sha256: &[u8; 32],
+    catalog: bool,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+) -> Result<(), String> {
+    let mut process = start()?;
+    let mut control = crate::operator_drain::Control::start(socket, config, host_sha256, process.child.id())?;
+    let state = control.state.clone();
+    let (jobs, queue) = mpsc::sync_channel::<HostJob>(SERVE_BOUNDS.host_queue);
+    let rules = EnvelopeRules { operator: true, config_bytes: config, host_sha256, catalog_enabled: catalog, read_deadline: SERVE_BOUNDS.read_deadline };
+    std::thread::scope(|scope| {
+        let (state, rules) = (&state, &rules);
+        let accept = scope.spawn(move || {
+            accept_connections(scope, &listener, rules, SERVE_BOUNDS, jobs, &state.close, &state.live);
+            // Closing the actual listener precedes the admissionClosed bit.
+            // Existing readers remain counted and may finish their one turn.
+            drop(listener);
+            state.admission_closed.store(true, Ordering::Release);
+        });
+        let ended = serve_host_observed(&mut process, queue, start, Some(state));
+        state.close.store(true, Ordering::Release);
+        let accepted = accept.join().map_err(|_| "operator accept thread panicked");
+        ended?;
+        accepted?;
+        // Every sender lives in the accept loop or an accepted worker. The
+        // receiver ends only after all workers finish response delivery and
+        // drop their sender. Thus no queued or active Host request remains.
+        if !state.admission_closed.load(Ordering::Acquire) || state.live.load(Ordering::Acquire) != 0 {
+            return Err("operator drain ended before admission/worker closure".into());
+        }
+        state.drained.store(true, Ordering::Release);
+        control.hold_closed()
+    })
+}
+
 /// The Host thread: one request at a time, a Host that stops is replaced.
 /// Returns only when a Host cannot be started (or every sender is gone).
 fn serve_host(
@@ -1111,11 +1159,21 @@ fn serve_host(
     queue: mpsc::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
 ) -> Result<(), String> {
+    serve_host_observed(process, queue, start, None)
+}
+
+fn serve_host_observed(
+    process: &mut HostProcess,
+    queue: mpsc::Receiver<HostJob>,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+    state: Option<&crate::operator_drain::State>,
+) -> Result<(), String> {
     for job in queue {
         if process.exited() {
             eprintln!("mini: host process {} exited between requests; restarting", process.child.id());
             process.stop();
             *process = start()?;
+            if let Some(state) = state { state.host_pid.store(process.child.id(), Ordering::Release); }
         }
         match process.exchange(&job.request) {
             Ok(reply) => {
@@ -1129,6 +1187,7 @@ fn serve_host(
                 drop(job);
                 process.stop();
                 *process = start()?;
+                if let Some(state) = state { state.host_pid.store(process.child.id(), Ordering::Release); }
             }
         }
     }
@@ -1137,7 +1196,7 @@ fn serve_host(
 
 fn accept_connections<'scope, 'env>(
     scope: &'scope std::thread::Scope<'scope, 'env>,
-    listener: &'env UnixListener,
+    listener: &UnixListener,
     rules: &'env EnvelopeRules<'env>,
     bounds: ServeBounds,
     jobs: mpsc::SyncSender<HostJob>,

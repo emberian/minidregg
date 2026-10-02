@@ -156,7 +156,7 @@ impl Write for BoundedStream<'_> {
     }
 }
 
-fn connect(path: &Path, stop: &AtomicBool, deadline: Instant) -> io::Result<UnixStream> {
+pub(crate) fn connect(path: &Path, stop: &AtomicBool, deadline: Instant) -> io::Result<UnixStream> {
     let bytes = path.as_os_str().as_bytes();
     let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     if bytes.is_empty() || bytes.contains(&0) || bytes.len() >= address.sun_path.len() {

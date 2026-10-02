@@ -79,3 +79,85 @@ Lean admission or a deployed service. Joined native journeys and infrastructure
 quiescence/resume qualification are separate consumers of this interface. The
 script leaves its isolated evidence directory and cleans up only the process
 groups it started.
+
+## Private admission close and drain
+
+Before stopping any managed service, capability-check the live private endpoint:
+
+```
+mini operator-status --socket /NODE/operator/mini.sock --host HOST --config CONFIG
+```
+
+Compare its `processId` with the service manager's live MainPID (and executable
+pin); retain `instanceId`, `configSha256` and `hostSha256`. After closing public
+ingress and quiescing managed apps, agents, schedulers and other writers, request:
+
+```
+mini drain-operator --socket /NODE/operator/mini.sock --host HOST --config CONFIG \
+  --instance INSTANCE --pid PID --timeout-seconds 600
+```
+
+This uses a separate owner-private Unix control socket, `mini.control`, beside
+the private `mini.sock`. Both directions check same UID; the request pins the
+random process instance, process PID and exact configuration/Host hashes. A
+fresh request nonce binds each response. This is a local process lifecycle
+protocol, not a Host opcode and not available through public ingress. It adds
+no Mini authorization or semantics. Neither command accepts a remote address.
+
+Drain closes the **actual private listener** first. Every already accepted
+worker retains its normal frame deadline and may complete its one request.
+The Host processes queued work normally; a client disconnect does not cancel
+its worker's wait for the Host answer. After a worker has attempted its bounded
+reply delivery, it drops its queue sender. Only after the queue receiver ends
+(all accepted workers and the accept loop have dropped their senders), and the
+accept thread has joined, does the service report `drained: true`. A zero live
+connection snapshot or an intervening signed read is insufficient.
+
+The Host remains alive and owned by this process, while private admission stays
+closed. Control status/drain remain available, so the same instance can be
+queried and drained idempotently. There is intentionally no reopen command;
+explicit service restart creates a fresh instance and reopens admission. An
+old instance's drain request cannot affect the replacement. Service stop should
+use KillMode=control-group, as with the existing private Host wrapper.
+
+Successful drain stdout is one JSON object:
+
+```
+{
+  "format": "mini-operator-drain-v1",
+  "processId": 123,
+  "instanceId": "64 lowercase hex digits",
+  "configSha256": "64 lowercase hex digits",
+  "hostSha256": "64 lowercase hex digits",
+  "requestNonce": "64 lowercase hex digits",
+  "hostProcessId": 124,
+  "phase": "drained",
+  "admissionClosed": true,
+  "drained": true,
+  "unresolvedConnections": 0,
+  "acceptedConnections": 0,
+  "queuedRequests": 0,
+  "activeRequests": 0
+}
+```
+
+`phase` is `serving`, `closing`, `draining` or `drained`. `unresolvedConnections`
+counts live accepted work connections. The final three counts are null before
+the channel-disconnection proof, and exactly zero afterward; they do not count
+control connections. A timeout (1–3600 seconds) emits the latest observed JSON
+and exits nonzero. Admission remains closed, and retry uses the same instance.
+A lost control reply is uncertain about whether closing began; query that same
+live instance instead of restarting or selecting a new one automatically.
+
+The drain receipt certifies physical quiescence of this private service. It is
+not an admission receipt, a statement that clients received their replies, or a
+replacement for exact recovery and final Store audit. Only after this receipt
+and closure of every other writer may orchestration stop the private unit and
+run its cold checkpoint/upgrade checks.
+
+The process receiving check now includes timeout with a stalled Host, an
+already accepted idle reader, queued work, disconnected clients, exact-instance
+retry, unchanged live Host PID, explicit restart and refusal of stale instance
+requests (32 assertions total). Unit checks additionally reject changed
+PID/instance/profile pins and unknown control fields before closing admission,
+and distinguish an empty connection snapshot from a drained queue.
