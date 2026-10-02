@@ -55,6 +55,8 @@ mod participant_namespace;
 mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
+#[cfg(unix)]
+mod provider_continuity;
 mod replan;
 #[cfg(unix)]
 mod proxy;
@@ -541,7 +543,7 @@ usage:
   mini session-enrollment-lookup --attempt PRIVATE-DIR
   mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
-  mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
+  mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] [--provider-continuity DESCRIPTOR.json] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
@@ -581,6 +583,7 @@ usage:
   mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
   mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
+  mini provider-continuity --host HOST --config CONFIG.json --socket SOCKET --guarded-attempt ATTEMPT --dir NEW-PROOF
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E] [--fault-drop SLOT:TICK] [--records-dir DIR]
   mini relay-emit --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --slot S --subject ID --key KEY --out MEMBER.csv [--ticks K]
@@ -1725,10 +1728,31 @@ fn submit(
     create_dir(directory)?;
     replan::replan(
         "submit",
-        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only),
+        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only, None),
         replan::stale_root,
         |number| replan::retire_attempt(directory, number),
     )
+}
+
+/// A guarded attempt preserves one exact admission prefix. It deliberately
+/// bypasses ordinary stale-root replanning; recovery needs fresh native proof.
+fn submit_with_continuity(
+    host: &Path, config: &Path, intent: &Path, intent_kind: &OsStr,
+    key: &Path, directory: &Path, prepare_only: bool, descriptor: Option<&Path>,
+) -> Result<()> {
+    let Some(descriptor) = descriptor else {
+        return submit(host, config, intent, intent_kind, key, directory, prepare_only);
+    };
+    if SOCKET.get().is_none() {
+        return Err("provider continuity requires --socket".into());
+    }
+    create_dir(directory)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("cannot protect continuity attempt: {e}"))?;
+    }
+    submit_once(host, config, intent, intent_kind, key, directory, prepare_only, Some(descriptor))
 }
 
 fn submit_once(
@@ -1739,6 +1763,7 @@ fn submit_once(
     key: &Path,
     directory: &Path,
     prepare_only: bool,
+    provider_continuity: Option<&Path>,
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
@@ -1765,12 +1790,57 @@ fn submit_once(
     let signatures_json = directory.join("transaction-signatures.json");
     let signatures_bin = directory.join("transaction-signatures.bin");
     let call = directory.join("call.bin");
+    let prepared_bin = if provider_continuity.is_some() {
+        directory.join("original-plan.bin")
+    } else {
+        plan_bin.clone()
+    };
+    let prepared_json = if provider_continuity.is_some() {
+        directory.join("original-plan.json")
+    } else {
+        plan_json.clone()
+    };
     host_files(
         host,
         &retained_config,
         &[Path::new("prepare"), &observed.signed, &plan_bin],
     )?;
-    let presentation = inspect(host, &retained_config, "plan", &plan_bin, &plan_json)?;
+    if provider_continuity.is_some() {
+        // Preserve the existing plan.bin prepare-refusal contract. Only a
+        // successful prepare becomes the immutable original guarded plan.
+        fs::hard_link(&plan_bin, &prepared_bin)
+            .map_err(|e| format!("cannot retain original continuity plan: {e}"))?;
+        fs::remove_file(&plan_bin)
+            .map_err(|e| format!("cannot move original continuity plan: {e}"))?;
+    }
+    let presentation = inspect(host, &retained_config, "plan", &prepared_bin, &prepared_json)?;
+    if provider_continuity.is_some() {
+        sync_retained_call(directory, &prepared_bin)?;
+        sync_retained_call(directory, &prepared_json)?;
+    }
+    #[cfg(unix)]
+    let presentation = match provider_continuity {
+        Some(descriptor) => match provider_continuity::guard(
+            host, &retained_config, descriptor, directory,
+            &prepared_bin, &presentation, &plan_bin, &plan_json,
+        ) {
+            Ok(presentation) => presentation,
+            Err(error) => {
+                let retained = provider_continuity::retain_rejection(directory, &retained_intent);
+                // This return is the positive control-flow guarantee recorded
+                // by the marker: no transaction signing or submit follows it.
+                return Err(match retained {
+                    Ok(()) => error,
+                    Err(retention) => format!("{error}; cannot retain continuity rejection: {retention}"),
+                });
+            }
+        },
+        None => presentation,
+    };
+    #[cfg(not(unix))]
+    if provider_continuity.is_some() {
+        return Err("provider continuity requires Unix sockets".into());
+    }
     encode_signatures(
         host,
         &retained_config,
@@ -2834,10 +2904,7 @@ fn continuity(
     create_private(&directory.join("call.bin"), &call_bytes)?;
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
     sync_directory_ancestors(directory)?;
-    let mut payload = Vec::with_capacity(4 + call_bytes.len() + outcome_bytes.len());
-    payload.extend_from_slice(&(call_bytes.len() as u32).to_le_bytes());
-    payload.extend_from_slice(&call_bytes);
-    payload.extend_from_slice(&outcome_bytes);
+    let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
     let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
@@ -3150,6 +3217,21 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("origin-publish requires Unix sockets".to_owned())
+            }
+        }
+        "provider-continuity" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let attempt = path(args.required("guarded-attempt")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                provider_continuity::resolve_attempt(&host, &config, &attempt, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("provider continuity requires Unix sockets".into())
             }
         }
         "continuity" => {
@@ -3977,10 +4059,11 @@ fn run(mut args: Args) -> Result<()> {
                 Some(value) if value == OsStr::new("true") => true,
                 _ => return Err("--prepare-only must be true or false".to_owned()),
             };
+            let provider_continuity = args.optional("provider-continuity").map(path);
             let key = path(args.required("key")?);
             let directory = path(args.required("dir")?);
             args.finish()?;
-            submit(
+            submit_with_continuity(
                 &host,
                 &config,
                 &intent,
@@ -3988,6 +4071,7 @@ fn run(mut args: Args) -> Result<()> {
                 &key,
                 &directory,
                 prepare_only,
+                provider_continuity.as_deref(),
             )
         }
         "query" => {
