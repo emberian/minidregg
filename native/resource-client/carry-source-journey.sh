@@ -121,6 +121,26 @@ jq -e '.type == "confirmed" and .confirmation == "installed"' "$WS/attempts/docu
 run document-read "$MINI" workspace --action read --dir "$WS" --name notes
 run document-show "$MINI" workspace --action doc-show --dir "$WS" --name notes
 jq -e '[.cell.entries[] | select(.type == "atom") | .id] | length == 2' "$RUN/logs/document-read.out" >/dev/null
+# The old content API also allowed useful pages without a DocumentRecord.
+# Preserve both atom-only pages and quote-only pages, without inventing ownership.
+run atom-only-create "$MINI" workspace --action create --dir "$WS" --name atom-only --storage content \
+  --predicate "$RUN/open-law.json"
+printf '%s\n' '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"atom-only","payload":{"type":"content","actions":[{"type":"createAtom","atom":"255","kind":{"type":"text"},"payload":"61746f6d2d6f6e6c79206669727374"},{"type":"createAtom","atom":"256","kind":{"type":"text"},"payload":"61746f6d2d6f6e6c79207365636f6e64"}]}}]}' >"$RUN/atom-only.json"
+run atom-only-propose "$MINI" workspace --action propose --dir "$WS" --request "$RUN/atom-only.json" --proposal-id atom-only
+run atom-only-submit "$MINI" workspace --action submit --dir "$WS" --intent "$WS/proposals/atom-only/intent.json" --attempt "$WS/attempts/atom-only"
+run atom-only-read "$MINI" workspace --action read --dir "$WS" --name atom-only
+jq -e '([.cell.entries[] | select(.type == "document")] | length == 0) and ([.cell.entries[] | select(.type == "atom")] | length == 2)' "$RUN/logs/atom-only-read.out" >/dev/null
+run atom-only-show "$MINI" workspace --action doc-show --dir "$WS" --name atom-only
+run quotes-create "$MINI" workspace --action create --dir "$WS" --name quotes --storage content \
+  --predicate "$RUN/open-law.json"
+jq -n --arg document "$(jq -r .target "$WS/refs/notes.json")" \
+  --arg revision "$(jq -r '.cell.entries[] | select(.type == "atom" and .id == "255") | .revision' "$RUN/logs/document-read.out")" \
+  '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"quotes",payload:{type:"content",actions:[{type:"quote",element:"8001",link:"9001",reference:{document:$document,atom:"255",revision:$revision,mode:"snapshot"}},{type:"quote",element:"8002",link:"9002",reference:{document:$document,atom:"255",revision:$revision,mode:"live"}}]}}]}' >"$RUN/quotes.json"
+run quotes-propose "$MINI" workspace --action propose --dir "$WS" --request "$RUN/quotes.json" --proposal-id quotes
+run quotes-submit "$MINI" workspace --action submit --dir "$WS" --intent "$WS/proposals/quotes/intent.json" --attempt "$WS/attempts/quotes"
+run quotes-read "$MINI" workspace --action read --dir "$WS" --name quotes
+jq -e '([.cell.entries[] | select(.type == "document" or .type == "atom")] | length == 0) and ([.cell.entries[] | select(.type == "element")] | length == 2)' "$RUN/logs/quotes-read.out" >/dev/null
+run quotes-show "$MINI" workspace --action doc-show --dir "$WS" --name quotes
 # A same-subject delegated reference still has to obey its narrower scope.
 jq -n --arg subject "$(jq -r '.sponsor.subject' "$RUN/params.json")" \
   '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"notes",recipient:$subject,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"$RUN/reviewer.json"

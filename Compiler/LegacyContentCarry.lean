@@ -291,7 +291,7 @@ structure DocumentCarry where
   original : Option DocumentRecord
   root : ElementId
   atoms : List AtomId
-  /-- Attribution copied from the source document or first numeric atom;
+  /-- Attribution copied from the source document, first numeric atom, or source element;
   it is not a newly authenticated author and confers no document ownership. -/
   sourceAttribution : PrincipalRef
   carryOperation : OperationId
@@ -340,7 +340,7 @@ def carriedDocument (store : CurrentStore) (document : DocumentId) : Option Docu
   if root.document = document ∧ root.parent = none then some carried else none
 
 /-- Current structural order, with an explicit metadata-only root for old
-atom-only stores. No synthetic document row or owner is introduced. -/
+atom-only or element-only stores. No synthetic document row or owner is introduced. -/
 def documentOrder (store : CurrentStore) (document : DocumentId) : List ElementId :=
   match store ⟨.documents, document⟩ with
   | some _ => Minidregg.Kernel.ContentResource.documentOrder store document
@@ -434,15 +434,19 @@ private def migrate (height : Nat) (old : LegacyStore) (raw : List UInt8) : Exce
     -- Retained atom records themselves are never rewritten or renumbered.
     if current ⟨.atoms, identifier⟩ != some record then throw "legacy content atom changed"
   let documentIds := (originalDocuments.map Prod.fst ++
-    originalAtoms.map (fun entry => entry.2.document)).eraseDups
+    originalAtoms.map (fun entry => entry.2.document) ++
+    originalElements.map (fun entry => entry.2.document)).eraseDups
   for document in documentIds do
     let original := (originalDocuments.find? (fun entry => entry.1 == document)).map Prod.snd
     let sourceAttribution ← match original with
       | some record => pure record.createdBy
-      | none => do
-          let first ← need "legacy atom-only document has no source attribution"
-            (originalAtoms.find? (fun entry => entry.2.document == document))
-          pure first.2.createdBy
+      | none =>
+          match originalAtoms.find? (fun entry => entry.2.document == document) with
+          | some first => pure first.2.createdBy
+          | none => do
+              let first ← need "legacy document has no original source attribution"
+                (originalElements.find? (fun entry => entry.2.document == document))
+              pure first.2.createdBy
     let root : ElementId :=
       ⟨generatedId "DREGG.CARRY.CONTENT-ROOT/v1" height document.digest⟩
     let selected := originalAtoms.filter fun entry => entry.2.document == document
