@@ -357,17 +357,17 @@ lineage, current epochs, time window and no ancestor/channel revocation.
 This is a data/current-law check; it does not pretend an old signature is a
 fresh signature at the new height. The app law is separately exact-matched
 by `linkedCurrentPolicies`. -/
-def issuerLineageCurrent {F : Type} [Field F]
+def issuerLineageCurrentFromSourceBytes {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
-    (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
+    (originalSourceBytes : List UInt8)
     (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
       (command ingress.dispatch selection ingress.parent)) : Bool :=
   let snapshot := prepared.authority.snapshot
-  let request := ApplicationShareIssueSource.appRequest deployment.domain profile.semantics
-    ambient.federation snapshot.authState ambient.height ingress.dispatch.appRoot spec descriptor
+  let request := ApplicationShareIssueSource.appRequestFromSourceBytes deployment.domain profile.semantics
+    ambient.federation snapshot.authState ambient.height ingress.dispatch.appRoot spec originalSourceBytes
   match CredentialAuthorityState.readCapability snapshot.cell .object spec.appDelegateCapability with
   | none => false
   | some stored =>
@@ -376,15 +376,27 @@ def issuerLineageCurrent {F : Type} [Field F]
       AuthorizationDeclaration.capabilityAdmissibleCheck stored.head snapshot.authState request
 
 
-/-- Current-image native checks, still short of accepted historical issue
-provenance and a durable special pending event. The `spec` and `descriptor`
-arguments must come from a verified historical issue selector, never directly
-from HTTP or the caller's ticket bytes. -/
-structure CheckedCurrent {F : Type} [Field F] [DecidableEq F]
+def issuerLineageCurrent {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
-    (spec : Spec) (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) where
+    (spec : Spec) (selection : Selection)
+    (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+      (command ingress.dispatch selection ingress.parent)) : Bool :=
+  issuerLineageCurrentFromSourceBytes deployment profile ambient durable ingress spec selection
+    (ApplicationShareIssueSource.sourceBytes spec descriptor) prepared
+
+
+/-- Current-image native checks, still short of accepted historical issue
+provenance and a durable special pending event. The spec and original source
+bytes must come from a verified historical issue selector, never directly
+from HTTP or the caller's ticket bytes. -/
+structure CheckedCurrentForSourceBytes {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (originalSourceBytes : List UInt8) where
   private mk ::
   profileExact : ingress.dispatch.domain = deployment.domain ∧
     ingress.dispatch.semantics = profile.semantics
@@ -429,9 +441,19 @@ structure CheckedCurrent {F : Type} [Field F] [DecidableEq F]
   bits : List Bool
   meaningExact : selectedMeaning ingress spec actualApp manifest enrollment ticket = some bits
   requestShape : requestSafe ingress.dispatch.dispatch.request = true
-  issuerCurrent : issuerLineageCurrent deployment profile ambient durable ingress spec
-    selection descriptor prepared = true
+  issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile ambient durable ingress spec
+    selection originalSourceBytes prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared ingress.dispatch.signed
+
+/-- The original API remains definitionally the same admission over its own
+canonical descriptor commitment. Carried users require separate provenance. -/
+abbrev CheckedCurrent {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) :=
+  CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec
+    (ApplicationShareIssueSource.sourceBytes spec descriptor)
 
 /-- Only app-side identity and authorization continuity belongs in the
 WebSession cache key. A DRC active witness reads the live session root on
@@ -629,6 +651,16 @@ theorem sessionFingerprint_ingress_workflow_invariant (authorityRoot : Digest) (
   rfl
 
 /-- This is a cache invalidation key, never an external delivery permit. -/
+def CheckedCurrentForSourceBytes.sessionFingerprint {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {durable : Durable}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {spec : Spec} {originalSourceBytes : List UInt8}
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) : Digest :=
+  sessionFingerprintOfKey (sessionFingerprintKeyFor
+    checked.prepared.authority.snapshot.cell.root checked.selection ingress
+    checked.bits spec.ticket.resource)
+
 def CheckedCurrent.sessionFingerprint {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable}
@@ -644,13 +676,13 @@ old-page admission. This is intentionally not the final dispatch receiver:
 the `spec`/`descriptor` must be obtained from a separately verified, admitted
 historical issue at a prefix of this exact image before a pending event can be
 committed. -/
-def checkCurrent {F : Type} [Field F] [DecidableEq F]
+def checkCurrentFromSourceBytes {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
     (durable : Durable) (ingress : ApplicationDispatchAdmissionIngress.Ingress)
-    (spec : Spec) (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) :
-    IO (Except String (CheckedCurrent deployment profile ambient durable ingress
-      spec descriptor)) := do
+    (spec : Spec) (originalSourceBytes : List UInt8) :
+    IO (Except String (CheckedCurrentForSourceBytes deployment profile ambient durable ingress
+      spec originalSourceBytes)) := do
   if profileExact : ingress.dispatch.domain = deployment.domain ∧
       ingress.dispatch.semantics = profile.semantics then
     if identityExact : identityMatches ingress = true then
@@ -720,8 +752,8 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
                                 | some bits =>
                                   if requestShape : requestSafe
                                       ingress.dispatch.dispatch.request = true then
-                                    if issuerCurrent : issuerLineageCurrent deployment profile
-                                        ambient durable ingress spec selection descriptor prepared = true then
+                                    if issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile
+                                        ambient durable ingress spec selection originalSourceBytes prepared = true then
                                       match ← DeclaredResourceController.admit native prepared
                                           ingress.dispatch.signed with
                                       | .error _ => return .error "current dispatch mutation authority refused"
@@ -740,6 +772,18 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
               else return .error "signed dispatch command differs from selected session/agent"
     else return .error "app-visible principal or app generation mismatch"
   else return .error "dispatch domain or semantics differs from deployment"
+
+
+/-- Ordinary descriptor callers use the same checker and all the same current
+signature, policy, role, resource and physical guards as before. -/
+def checkCurrent {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (durable : Durable) (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) :
+    IO (Except String (CheckedCurrent deployment profile ambient durable ingress spec descriptor)) :=
+  checkCurrentFromSourceBytes deployment profile ambient native durable ingress spec
+    (ApplicationShareIssueSource.sourceBytes spec descriptor)
 
 
 end Minidregg.Kernel.ApplicationDispatchAdmission

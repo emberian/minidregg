@@ -27,32 +27,32 @@ variable {ambient : DeclaredResourceController.Ambient}
 variable {durable : DeclaredResourceController.Durable}
 variable {ingress : ApplicationDispatchAdmissionIngress.Ingress}
 variable {spec : ApplicationShareIssueSource.Spec}
-variable {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+variable {originalSourceBytes : List UInt8}
 
-private def appGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+private def appGuard (_checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     ReadGuard := observationGuard ingress.dispatch.dispatch.app.resource
       (ResourceBirthCodec.physicalRoot (.live _checked.appRead.selected.observed.before))
 
-private def manifestGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+private def manifestGuard (_checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     ReadGuard := observationGuard ingress.dispatch.dispatch.app.packageManifest
       (ResourceBirthCodec.physicalRoot (.live _checked.manifestRead.selected.observed.before))
 
-private def enrollmentGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+private def enrollmentGuard (_checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     ReadGuard := observationGuard ingress.dispatch.enrollmentResource
       (ResourceBirthCodec.physicalRoot (.live _checked.enrollmentRead.selected.observed.before))
 
-private def ticketGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+private def ticketGuard (_checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     ReadGuard := observationGuard spec.ticket.resource
       (ResourceBirthCodec.physicalRoot (.live _checked.ticketRead.selected.observed.before))
 
 /-- Four independently signed and checked current reads are bound to the
 same physical CAS as the session/agent witness. -/
-def readGuards (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+def readGuards (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     List ReadGuard :=
   [appGuard checked, manifestGuard checked, enrollmentGuard checked, ticketGuard checked]
 
 theorem readGuards_current
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor)
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   simp [readGuards] at member
@@ -63,7 +63,7 @@ theorem readGuards_current
   · subst guard; exact checked.ticketRead.current
 
 theorem readGuards_readonly
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor)
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
     guard.cellId ∉ (DeclaredResourceController.writes checked.prepared).map DataWrite.cellId := by
   simp [readGuards] at member
@@ -76,7 +76,7 @@ theorem readGuards_readonly
 /-- The pending source tariff includes four additional native observations,
 the complete wrapper ingress, and its stable one-use operation key. It charges
 no external HTTP effect, which has not happened. -/
-def charge (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+def charge (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     Charge :=
   let ordinary := checked.invocation.dataIntent checked.shape
   fun dimension => match dimension with
@@ -94,7 +94,7 @@ def charge (checked : CheckedCurrent deployment profile ambient durable ingress 
 candidate data intent; only a receiver joined with verifier-authenticated
 share-issue provenance may submit it. -/
 def candidateIntent
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     DataIntent rootBytes := by
   let ordinary := checked.invocation.dataIntent checked.shape
   have guarded : ∀ guard ∈ ordinary.readGuards ++ readGuards checked,
@@ -116,15 +116,15 @@ def candidateIntent
       guardsReadOnly := guarded }
 
 theorem candidateIntent_retains_full_ingress
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     (candidateIntent checked).event.canonicalBytes = ingress.canonicalBytes := rfl
 
 theorem candidateIntent_event_version
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     (candidateIntent checked).event.codecVersion = 11 := rfl
 
 theorem candidateIntent_reuses_ordinary_transaction
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     (candidateIntent checked).transactionId =
       (checked.invocation.dataIntent checked.shape).transactionId := rfl
 
@@ -144,7 +144,7 @@ theorem special_event_eq_iff_ingress_eq
     rw [equal]
 
 theorem candidateIntent_ne_ordinary_event
-    (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) :
     (candidateIntent checked).event ≠
       DeclaredResourceController.invocationEvent deployment.domain profile.semantics
         (ApplicationDispatchCommand.command ingress.dispatch checked.selection ingress.parent)

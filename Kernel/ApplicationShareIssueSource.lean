@@ -348,24 +348,27 @@ def Ready.expectedDescriptor {F : Type} [Field F]
     Descriptor CanonicalCellRegistry.registry :=
   ready.descriptor profile config authority height rfl rfl payer funding
 
-/-- The app delegation request commits to the exact complete source draft
-under an independent domain. Hash collision resistance is an external crypto
-assumption; no theorem treats digest equality as byte equality. -/
-def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+/-- The delegation request commits to the complete source draft. Carried
+descriptors stay opaque bytes authenticated by their original profile's record.
+Hash collision resistance is external; digest equality is not byte equality. -/
+def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
   "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v2".toUTF8.toList ++
-    (StreamCodec.product bytesStream bytesStream).encode
-      (specCodec.encode spec,
-        (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
+    (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
+
+def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    List UInt8 :=
+  sourceBytesFromDescriptorBytes spec
+    ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
     "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v2".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
-def appRequest (domain semantics : Digest) (federation : FederationId)
+def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)
     (authority : AuthState) (height : Nat) (appRoot : Digest)
-    (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    (spec : Spec) (originalSourceBytes : List UInt8) :
     Request .object where
   domain := domain
   semantics := semantics
@@ -376,17 +379,32 @@ def appRequest (domain semantics : Digest) (federation : FederationId)
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
     "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v2".toUTF8.toList
-    (sourceBytes spec descriptor)).digest
+    originalSourceBytes).digest
   effectsDigest := (Sp800185Cshake256.hash
     "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v2".toUTF8.toList
-    (sourceBytes spec descriptor)).digest
+    originalSourceBytes).digest
   nonce := spec.ticket.issueNonce
   height := height
   preStateRoot := appRoot
   policyId := ⟨spec.ticket.scope.app⟩
   policyEpoch := authority.policyEpoch ⟨spec.ticket.scope.app⟩
   policyRevision := authority.policyRevision ⟨spec.ticket.scope.app⟩
-  cost := (sourceBytes spec descriptor).length
+  cost := originalSourceBytes.length
+
+/-- Ordinary callers retain exactly the prior descriptor API and request. -/
+def appRequest (domain semantics : Digest) (federation : FederationId)
+    (authority : AuthState) (height : Nat) (appRoot : Digest)
+    (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    Request .object :=
+  appRequestFromSourceBytes domain semantics federation authority height appRoot spec
+    (sourceBytes spec descriptor)
+
+theorem appRequest_source_bytes_exact (domain semantics : Digest) (federation : FederationId)
+    (authority : AuthState) (height : Nat) (appRoot : Digest)
+    (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
+    appRequest domain semantics federation authority height appRoot spec descriptor =
+      appRequestFromSourceBytes domain semantics federation authority height appRoot spec
+        (sourceBytes spec descriptor) := rfl
 
 theorem appRequest_issuer (domain semantics : Digest) (federation : FederationId)
     (authority : AuthState) (height : Nat) (appRoot : Digest)
