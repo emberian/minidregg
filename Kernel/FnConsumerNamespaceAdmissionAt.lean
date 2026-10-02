@@ -86,7 +86,7 @@ def Conditional.intent (config : NativeHost.Config) (opened : NativeHost.Opened 
     DataIntent ResourceBirthCodec.rootBytes :=
   { transactionId := transactionId ingress.spec
     writes := []
-    readGuards := [FnConsumerFrontierGateway.readGuard accepted.gateway.prepared] ++
+    readGuards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
       opened.authority.readGuards
     nullifiers := [claimNullifier ingress.spec]
     exactCharge := charge ingress

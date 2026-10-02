@@ -27,6 +27,8 @@ and a changed command under the same identity conflicts.
 import Kernel.ParticipantKeyEnrollment
 import Compiler.NativeHostCodec
 import Kernel.StreamWrite
+import Compiler.WorldKindLawDependencies
+import Compiler.PhysicalLawResolution
 
 namespace Minidregg.Kernel.FleetTurn
 
@@ -471,7 +473,8 @@ def project (prepared : Prepared deployment profile tariff ambient durable comma
   let sequence := match command.publication with
     | none => 0
     | some publication => publication.sequence
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.payer ++
+    CanonicalRuntimeProfile.requestSlots
       (request prepared.authority.snapshot profile.semantics ambient command) ++
     ([("fleet/operation/turn", 1), ("fleet/fee", (command.fee : Int)),
      ("fleet/transfer/destination", (destination : Int)), ("fleet/transfer/asset", (asset : Int)),
@@ -492,13 +495,30 @@ def sourceStore (prepared : Prepared deployment profile tariff ambient durable c
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
     prepared.directory.directory⟩
 
+def kindDependencies (prepared : Prepared deployment profile tariff ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.payer
+
+/-- Fleet topics are derived account metadata, not independently born room
+streams: UserShape permits only emptyRoomHead, ResourceTransaction's append
+requires binding .room, and planFrom here requires .topic of the payer-derived
+streamDigest. The payer's composed transfer law sees this exact signed command;
+Book balances and these indices are its physical settlement. -/
+def lawReadGuards (prepared : Prepared deployment profile tariff ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics command.payer structural.additional
+  pure (sources ++ structural.readGuards)
+
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    (prepared : Prepared deployment profile tariff ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) command.payer
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command) :=
@@ -516,21 +536,17 @@ def authorize [DecidableEq F]
   let wanted := request prepared.authority.snapshot profile.semantics ambient command
   let config := policyConfig prepared
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.spend receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.spend () receipt () (fun _ => ())).toOption
+  let _ ← requireSome .policyUnavailable (lawReadGuards prepared)
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      witness.compiled.oldState witness.compiled.newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate witness.compiled.oldState witness.compiled.newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
+  match ComposedPolicyAdmission.admit config wanted
       evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
@@ -697,10 +713,9 @@ account's holder, or a key the account never delegated to — is refused
 theorem fleet_refuses_without_capability [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
-    (noGrant : sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared) (marker prepared.authority.snapshot.domain profile.semantics command)
-      (step prepared) (request prepared.authority.snapshot profile.semantics ambient command)
-      command.spend receipt = none) :
+    (noGrant : ((policyConfig prepared).capabilityEvidenceChecked
+      (request prepared.authority.snapshot profile.semantics ambient command)
+      command.spend () receipt () (fun _ => ())).toOption = none) :
     authorize prepared receipt = .error .capabilityRejected := by
   unfold authorize
   simp [requireSome, noGrant, bind, Except.bind]
