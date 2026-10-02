@@ -52,8 +52,16 @@ retains an immutable restart artifact. `stop --state ROOT/runtime.json` stops th
 owned SSH and Store process groups without deleting roots. Process identity uses
 kernel start time, uid and executable inode, since sshd updates its argv title.
 
-Resident, SPK and group-boundary adapters must attach to the emitted same-Store
-inventory; they are explicit missing journey hooks until configured. For SPK,
+The copied hook bundle pins executable source under `ROOT/hooks`, so later worktree
+edits cannot invalidate a live restart hook. The native group-boundary adapter
+imports an owner's real document capability ID as an outsider's local discovery
+hint and requires a definitive native refusal signed by that outsider; it does
+not grant authority or move seeds.
+
+Resident and SPK adapters must attach to the emitted same-Store
+inventory; they are explicit missing journey hooks until configured. The growth
+bar also remains an explicit adapter until its 1000 accepted records and measured
+write/reopen bounds run on this same deployment. For SPK,
 `scripts/spk-platform/same-store-profile.py` initializes the SPK image on these
 same sockets/config, and `same-store-hook.py` consumes its retained profile and
 actual room/namespace authority. Creator/payer8 can sponsor an application owned

@@ -15,6 +15,7 @@ from pathlib import Path
 import pwd
 import re
 import signal
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -70,6 +71,17 @@ def validate(plan):
     require(re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,23}", plan.get("prefix", "platform")), "invalid journey prefix")
     require("WORKROOM_OPERATOR_POLICY" in (source / "scripts/workroom/provision.sh").read_text(), "source recipe lacks pre-genesis operator policy contract")
     return root, source, manifest
+
+
+def retain_hooks(root):
+    retained = root / "hooks"
+    retained.mkdir(mode=0o700)
+    for name in ("platform-provision.py", "joined-member-journey.py", "platform-native-hooks.py"):
+        source = HERE / name
+        require(source.is_file(), "missing native hook source: " + name)
+        shutil.copyfile(source, retained / name)
+        (retained / name).chmod(0o700)
+    return retained
 
 
 def allocated_workload(plan, names):
@@ -203,6 +215,7 @@ def start(plan):
     root.mkdir(mode=0o700)
     for name in ("logs", "custody", "sock", "members", "ssh", "namespace", "operator-home"):
         (root / name).mkdir(mode=0o700)
+    hooks_root = retain_hooks(root)
     save(root / "plan.json", plan)
     world = World(root)
     world.state.update(manifest=manifest, manifestPath=plan["manifest"], manifestSha256=plan["manifestSha256"], timeoutSeconds=plan.get("timeoutSeconds", 600))
@@ -304,7 +317,8 @@ LogLevel VERBOSE
     spec = {"type": "mini-joined-member-journey-v1", "manifest": plan["manifest"], "manifestSha256": plan["manifestSha256"], "prefix": plan.get("prefix", "platform"),
             "deployment": {"config": str(config), "configSha256": digest(config), "socket": world.state["publicSocket"], "publicSocket": world.state["publicSocket"], "privateSocket": world.state["privateSocket"]},
             "members": inventory, "maxConcurrency": plan.get("maxConcurrency", 16), "sweeps": plan.get("sweeps", []),
-            "hooks": {"restart": {"executable": str(Path(__file__).resolve()), "sha256": digest(Path(__file__)), "args": ["hook", "--state", str(root / "runtime.json")]}}}
+            "hooks": {"restart": {"executable": str(hooks_root / "platform-provision.py"), "sha256": digest(hooks_root / "platform-provision.py"), "args": ["hook", "--state", str(root / "runtime.json")]}}}
+    spec["hooks"]["group-boundary"] = {"executable": str(hooks_root / "platform-native-hooks.py"), "sha256": digest(hooks_root / "platform-native-hooks.py"), "args": ["--state", str(root / "runtime.json")]}
     spec.update(allocated_workload(plan, names))
     if rooms: spec["rooms"] = rooms
     save(root / "journey.json", spec)

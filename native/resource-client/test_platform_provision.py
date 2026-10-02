@@ -49,6 +49,22 @@ class ProvisioningContract(unittest.TestCase):
     def test_pin_change_refused_before_launch(self):
         (self.root/'binary').write_text('changed')
         with self.assertRaises(ValueError):p.validate(self.plan)
+    def test_boundary_reference_must_match_exact_document(self):
+        m=importlib.util.spec_from_file_location('boundary',Path(__file__).with_name('platform-native-hooks.py'))
+        boundary=importlib.util.module_from_spec(m);m.loader.exec_module(boundary)
+        refs={'references':[{'target':'100','observeCapability':'20'},{'target':'101','observeCapability':'21'}]}
+        self.assertEqual(boundary.foreign_reference(refs,'101')['observeCapability'],'21')
+        with self.assertRaises(ValueError):boundary.foreign_reference(refs,'102')
+    def test_hook_bundle_retains_independent_pinned_copies(self):
+        run=self.root/'hooks-test';run.mkdir()
+        retained=p.retain_hooks(run)
+        for name in ('platform-provision.py','joined-member-journey.py','platform-native-hooks.py'):
+            self.assertEqual(p.digest(retained/name),p.digest(p.HERE/name))
+            self.assertTrue(os.access(retained/name,os.X_OK))
+            source_pin=p.digest(p.HERE/name)
+            self.assertNotEqual((retained/name).stat().st_ino,(p.HERE/name).stat().st_ino)
+            (retained/name).write_bytes(b'local-copy-change')
+            self.assertEqual(p.digest(p.HERE/name),source_pin)
     def test_command_retains_path_arguments(self):
         run=self.root/'commands';run.mkdir();(run/'logs').mkdir()
         world=p.World(run)
