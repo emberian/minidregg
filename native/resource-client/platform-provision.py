@@ -381,7 +381,8 @@ LogLevel VERBOSE
             "hooks": {"restart": {"executable": str(hooks_root / "platform-provision.py"), "sha256": digest(hooks_root / "platform-provision.py"), "args": ["hook", "--state", str(root / "runtime.json")]}}}
     spec["hooks"]["group-boundary"] = {"executable": str(hooks_root / "platform-native-hooks.py"), "sha256": digest(hooks_root / "platform-native-hooks.py"), "args": ["--state", str(root / "runtime.json")]}
     if paid_state:
-        spec['hooks']['paid-entry']={'executable':str(adapter),'sha256':digest(adapter),'args':['--state',str(paid_state)]}
+        spec['hooks']['paid-entry']={'executable':str(adapter),'sha256':digest(adapter),'args':['--state',str(paid_state)],
+                                    'paidSubjects':[member['subject'] for member in paid_members.values()]}
     spec.update(allocated_workload(plan, names))
     if rooms: spec["rooms"] = rooms
     save(root / "journey.json", spec)

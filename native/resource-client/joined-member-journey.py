@@ -180,6 +180,20 @@ def deployed_roles(spec, manifest, config_path):
     return roles
 
 
+def paid_partition(spec, selected, result):
+    paid = spec['hooks']['paid-entry']['paidSubjects']
+    require(type(paid) is list and len(set(paid)) == len(paid)
+            and set(paid) <= {member['subject'] for member in spec['members'].values()},
+            'invalid configured paid subject inventory')
+    subjects = {key: spec['members'][key]['subject'] for key in selected}
+    credited = {key: subject for key, subject in subjects.items() if subject in paid}
+    non_paid = {key: subject for key, subject in subjects.items() if subject not in paid}
+    require(result.get('creditedSubjects') == credited
+            and result.get('nonPaidSubjects') == non_paid
+            and result.get('selectedSubjects') == subjects, 'paid result differs from exact selected partition')
+    return credited
+
+
 def validate(spec):
     require(spec["type"] == "mini-joined-member-journey-v1", "unknown journey type")
     manifest_path = absolute(spec["manifest"])
@@ -378,8 +392,10 @@ class Journey:
         p = self.spec["prefix"]
         paid = self.hook("paid-entry")
         if paid:
-            subjects = {key: self.spec["members"][key]["subject"] for key in self.plan["members"]}
-            real = paid.get("rail") == "solana-mainnet" and paid.get("creditedSubjects") == subjects
+            credited = paid_partition(self.spec, self.plan['members'], paid)
+            self.record({'id':'paid-selected-members','status':'pass' if credited else 'unqualified',
+                         'detail': 'native payment receipts for '+str(len(credited))+' selected paid members; sponsored members are separate'})
+            real = bool(credited) and paid.get("rail") == "solana-mainnet"
             self.record({"id": "paid-mainnet", "status": "pass" if real else "pending-environment",
                          "environmental": not real, "detail": "actual mainnet receipts and the selected subject IDs required"})
         for who in self.plan["members"]:

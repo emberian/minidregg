@@ -205,3 +205,15 @@ class DeployedRoleBinding(unittest.TestCase):
                 binding['deployment']['memberCommands'][0]['authorizedKeys']=pinned(authorized);declare()
                 with self.assertRaisesRegex(ValueError,'actual forced SSH command differs'):
                     joined.deployed_roles(spec,manifest,Path(config))
+
+
+class PaidSelectedPartition(unittest.TestCase):
+    def test_mixed_and_swept_inventory_cannot_credit_sponsored_members(self):
+        spec={'members':{'owner':{'subject':'11'},'guest':{'subject':'22'},'other':{'subject':'33'}},
+              'hooks':{'paid-entry':{'paidSubjects':['11','33']}}}
+        result={'creditedSubjects':{'owner':'11'},'nonPaidSubjects':{'guest':'22'},'selectedSubjects':{'owner':'11','guest':'22'}}
+        self.assertEqual(joined.paid_partition(spec,['owner','guest'],result),{'owner':'11'})
+        with self.assertRaisesRegex(ValueError,'exact selected partition'):
+            joined.paid_partition(spec,['owner','guest'],dict(result,creditedSubjects={'owner':'11','guest':'22'}))
+        result={'creditedSubjects':{},'nonPaidSubjects':{'guest':'22'},'selectedSubjects':{'guest':'22'}}
+        self.assertEqual(joined.paid_partition(spec,['guest'],result),{})
