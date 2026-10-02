@@ -20,6 +20,12 @@ signed domain, semantics, world root, height and clock. The pinned world identit
 comes from the existing workspace configuration. The view does not open another
 member's controller directory or publish custody keys.
 
+A selected programmable object shows its signed descriptor, field meanings,
+codecs, disciplines, natural-key values and method program/output bindings. Kind
+defaults are identified separately from current instance values. `kind show NAME`
+or `instance show NAME` opens the existing complete JSON view and retains the
+editing base; `home NAME` itself does not edit the object.
+
 Incomplete retained signed calls offer `lookup ID` to recover the exact operation.
 A confirmed receipt or typed native refusal is terminal. The view never suggests
 submitting a new operation to resolve uncertain work.

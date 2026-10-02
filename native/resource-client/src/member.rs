@@ -190,6 +190,35 @@ fn connector_operations(root: &Path, pin: &Value) -> Result<Vec<Value>> {
     Ok(rows)
 }
 
+/// World objects carry their own descriptor and natural-key map. Presentation
+/// follows the signed descriptor instead of a host list of board/poll kinds.
+fn programmable_object(view: &Value) -> Option<Value> {
+    for (role, command) in [("worldKind", "kind"), ("worldInstance", "instance")] {
+        if let Some(data) = view.pointer(&format!("/cell/{role}")) {
+            return Some(json!({"type":role,"origin":"native-signed-resource",
+                "currentness":"at-observed-head","descriptor":data["descriptor"],
+                "entries":data[if role == "worldKind" {"defaults"} else {"entries"}],
+                "entryRole":if role == "worldKind" {"defaults"} else {"current-values"},
+                "kindRoot":data["kindRoot"],"methods":data["methods"],"command":command}));
+        }
+    }
+    None
+}
+
+fn object_value(field: &Value, value: &Value) -> String {
+    if field["codec"] == "bytes" {
+        if let Some(text) = value
+            .as_str()
+            .and_then(|hex| crate::decode_hex(hex).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+        {
+            // JSON quoting keeps untrusted text and terminal controls visible.
+            return serde_json::to_string(&text).unwrap_or_default();
+        }
+    }
+    value.to_string()
+}
+
 fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
     let pin = workspace::load(root)?;
     let config = workspace::bounded_json(&workspace::member_path(&pin, "config")?)?;
@@ -231,6 +260,14 @@ fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
             "height":challenge["height"],"worldRoot":challenge["worldRoot"],"clock":challenge["clock"],
             "target":reference["target"],"resourceRoot":view.pointer("/cell/root"),
             "balances":view.get("balances")});
+        if let Some(object) = programmable_object(&view) {
+            let command = object["command"].as_str().unwrap();
+            value["resources"][0]["actions"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"label":"object details","command":format!("{command} show {name}")}));
+            value["object"] = object;
+        }
         if reference.get("room").and_then(Value::as_str).is_some() {
             value["resident"] = resident(&view);
             if value["resident"]["subject"]
@@ -303,6 +340,53 @@ fn render(value: &Value) -> String {
     {
         for balance in balances {
             text.push_str(&format!("Balance: {}\n", balance));
+        }
+    }
+    if let Some(object) = value.get("object") {
+        text.push_str(&format!(
+            "\nObject kind {} · revision {}\n",
+            object["descriptor"]["kind"].as_str().unwrap_or("?"),
+            object["descriptor"]["revision"].as_str().unwrap_or("?")
+        ));
+        if object["type"] == "worldKind" {
+            text.push_str("Default values:\n");
+        }
+        for field in object["descriptor"]["fields"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            text.push_str(&format!(
+                "  {} · {} · {} {}\n",
+                field["name"],
+                field["meaning"],
+                field["codec"].as_str().unwrap_or("?"),
+                field["discipline"].as_str().unwrap_or("?")
+            ));
+            for entry in object["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|e| e["field"] == field["id"])
+            {
+                text.push_str(&format!(
+                    "    [{}] {}\n",
+                    entry["key"],
+                    object_value(field, &entry["value"])
+                ));
+            }
+        }
+        for method in object["methods"].as_array().into_iter().flatten() {
+            text.push_str(&format!(
+                "  Method {} · program {}\n",
+                method["name"], method["program"]
+            ));
+            for output in method["outputs"].as_array().into_iter().flatten() {
+                text.push_str(&format!(
+                    "    output {} → field {} key {}\n",
+                    output["output"], output["field"], output["key"]
+                ));
+            }
         }
     }
     if let Some(resident) = value.get("resident") {
@@ -487,6 +571,25 @@ mod tests {
             1
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn programmable_objects_keep_natural_keys_and_method_bindings() {
+        let field = json!({"id":"1","name":"title","meaning":"tasks/title","codec":"bytes","discipline":"ram"});
+        let data = json!({"descriptor":{"kind":"77","revision":"2","fields":[field]},
+            "entries":[{"field":"1","key":"100000000000","value":"7461736b"}],
+            "methods":[{"name":"close","program":"42","outputs":[{"output":"90","field":"3","key":"0"}]}]});
+        let object = programmable_object(&json!({"cell":{"worldInstance":data}})).unwrap();
+        assert_eq!(object["entries"][0]["key"], "100000000000");
+        assert_eq!(object["methods"][0]["outputs"][0]["output"], "90");
+        assert_eq!(object_value(&field, &json!("7461736b")), "\"task\"");
+        assert_eq!(
+            object_value(&field, &json!("1b5b33316d")),
+            "\"\\u001b[31m\""
+        );
+        let kind=programmable_object(&json!({"cell":{"worldKind":{"descriptor":data["descriptor"],"defaults":data["entries"],"methods":data["methods"]}}})).unwrap();
+        assert_eq!(kind["entries"], object["entries"]);
+        assert_eq!(kind["entryRole"], "defaults");
+        assert!(programmable_object(&json!({"cell":{"entries":[]}})).is_none());
     }
     #[test]
     fn assignment_never_claims_runtime_liveness_and_uses_shared_schema() {
