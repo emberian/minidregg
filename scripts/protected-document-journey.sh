@@ -10,13 +10,12 @@ umask 077
 : "${JOURNEY_STEP_DIR:?}" "${JOURNEY_WORLD:?}" "${JOURNEY_RUN:?}"
 : "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}"
 SD=$JOURNEY_STEP_DIR
+STORE=${PD_STORE_DIR:-$JOURNEY_WORLD/store}
 FIXTURE=${PD_FIXTURE_DIR:-$JOURNEY_RUN/steps/JDV}
 OWNER_WS=${PD_OWNER_WS:-$FIXTURE/w/amy}
 MEMBER_WS=${PD_MEMBER_WS:-$FIXTURE/w/ben}
 OWNER_HOME=${PD_OWNER_HOME:-$FIXTURE/h/amy}
 MEMBER_HOME=${PD_MEMBER_HOME:-$FIXTURE/h/ben}
-OWNER_PASS=${PD_OWNER_PASS:-cache-pass-amy}
-MEMBER_PASS=${PD_MEMBER_PASS:-cache-pass-ben}
 DOC=${PD_DOCUMENT:-pd-paper}
 CAT=${PD_CATALOG:-pd-paper-catalog}
 # Must name the actual source gate; unrelated law/stale/transport failures do
@@ -48,9 +47,9 @@ check() {
   row "$label" "$OUT"
 }
 run_as() {
-  local who=$1; shift
-  if [ "$who" = owner ]; then MINI_KEYCACHE_PASSPHRASE=$OWNER_PASS "$@"
-  else MINI_KEYCACHE_PASSPHRASE=$MEMBER_PASS "$@"; fi
+  shift
+  "$@"
+
 }
 line() {
   local who=$1 text=$2 ws home
@@ -295,7 +294,7 @@ check 'refusals retain original member storage key' cmp "$SD/member-storage.key"
 pull owner "$SD/after-excluded-writes.txt"
 check 'excluded member changed no current text' cmp "$SD/owner-final.txt" "$SD/after-excluded-writes.txt"
 check 'source and submitted intents contain no document plaintext' python3 "$SD/assert.py" scan \
-  "$JOURNEY_WORLD/store" "$OWNER_WS/proposals" "$MEMBER_WS/proposals"
+  "$STORE" "$OWNER_WS/proposals" "$MEMBER_WS/proposals"
 printf '%s\n' '{"state":"passed","coldHostRestart":false,"crashInjection":false}' >"$SD/status.json"
 echo "$TABLE"
 echo "JPROTECTED-DOCS: $N rows passed on existing Store; client custody reopen only" >&2
