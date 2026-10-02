@@ -53,6 +53,7 @@ def canonicalKey : KeyRecord where
   publicKey := [11, 22, 33, 44, 55, 66, 77, 88]
   activeFrom := 4
   activeUntil := 8
+  nextKeyDigest := none
 
 def canonicalRegistry : KeyRegistryProjection where
   codecVersion := registryCodecVersion
@@ -494,7 +495,8 @@ def rotatedKey : KeyRecord :=
     subject := canonicalKey.subject
     publicKey := canonicalKey.publicKey
     activeFrom := 6
-    activeUntil := 10 }
+    activeUntil := 10
+    nextKeyDigest := none }
 
 def rotatedRegistry : KeyRegistryProjection :=
   { canonicalRegistry with registryEpoch := 6, keys := [rotatedKey] }

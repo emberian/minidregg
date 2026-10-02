@@ -38,6 +38,7 @@ import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
+import Kernel.SubjectKeyRotation
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
@@ -49,6 +50,7 @@ import Kernel.PayEnrolReceiver
 import Kernel.PurseRefillReceiver
 import Kernel.JobMoneyReceiver
 import Kernel.CertifyReceiver
+import Kernel.CapabilityRenounce
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -719,10 +721,18 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
+  | renounce {ingress : CapabilityRenounce.DecodedIngress}
+      (accepted : CapabilityRenounce.AcceptedRenounce config.deployment config.profile.semantics
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (CapabilityRenounce.intent accepted)
   | participantKeyEnrollment {ingress : ParticipantKeyEnrollment.DecodedIngress}
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
+  | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
+      (accepted : SubjectKeyRotation.AcceptedRotation config.deployment config.profile.semantics
+        opened.durable ingress) :
+      NativeAdmission config opened (SubjectKeyRotation.intent accepted)
   | participantFactoryProvisioning {ingress : ParticipantFactoryProvisioning.DecodedIngress}
       (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1560,6 +1570,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := SubjectKeyRotation.decodeIngress bytes then
+    match ← SubjectKeyRotation.admitDecodedNative config.deployment config.profile.semantics
+        opened.durable config.signature ingress with
+    | .error reason => return .error s!"subject key rotation refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨SubjectKeyRotation.intent accepted,
+          .subjectKeyRotation accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantFactoryProvisioning.decodeIngress bytes then
     match ← ParticipantFactoryProvisioningReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -1635,6 +1652,13 @@ private def derive (config : Config) (opened : Opened config)
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := CapabilityRenounce.decodeIngress bytes then
+    match ← CapabilityRenounce.admitDecodedNative config.deployment config.profile.semantics
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .rejected reason => return .error s!"renounce refused: {repr reason}"
+    | .refusedToHolder refusal => return .error s!"renounce refused: {repr refusal.reason}"
+    | .accepted accepted =>
+        return .ok ⟨CapabilityRenounce.intent accepted, .renounce accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseAdmission.admit config opened ingress with
     | .error _ => return .error "historical selected release admission refused"
@@ -1775,7 +1799,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok tariff =>
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
-            config.profile.disabledEvaluators config.deployment opened.pins opened.durable config.profile.semantics tariff source with
+            config.profile.disabledEvaluators config.deployment opened.pins opened.durable config.profile.semantics tariff source height with
         | .error reason => return .error s!"historical grain-backed birth preparation: {repr reason}"
         | .ok birth =>
             let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩

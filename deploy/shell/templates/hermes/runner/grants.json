@@ -1,18 +1,16 @@
 {
-  "type": "mini-hermes-role-grants-v1",
+  "type": "mini-hermes-role-grants-v2",
   "role": "runner",
   "placeholders": {
-    "{ROOM}": "the room name given to summon",
-    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
-    "{OUT}": "each output cell named in the program's Outputs line",
-    "{IN}": "each input cell named in the program's Inputs line"
+    "{ROOM}": "the room given to summon",
+    "{FOUNDER}": "the summoner, the room's founder",
+    "{H}": "Hermes's subject"
   },
-  "delegate": [],
-  "delegateEach": [
-    {"over": "outputs",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{OUT}","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}},
-    {"over": "inputs",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{IN}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
-  ],
-  "own": ["{ROOM}-stream-{H}"]
+  "room": ["observe", "append"],
+  "docs": [],
+  "each": {
+    "outputs": {"verbs": ["observe", "mutate"], "from": "the program's `- **Outputs**` line"},
+    "inputs": {"verbs": ["observe"], "from": "the program's `- **Inputs**` line"}
+  },
+  "program": {"name": "{ROOM}-hermes-runner", "law": "any [ not (verb == write), subject == {FOUNDER} ]"}
 }

@@ -14,6 +14,8 @@ pub const MAX_BODY: usize = 64 * 1024;
 pub struct Request {
     pub method: String,
     pub path: String,
+    /// The query string after `?`, or empty.
+    pub query: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
@@ -74,6 +76,7 @@ pub fn read_request(stream: &mut TcpStream) -> Result<Request, ReadError> {
         return Err(bad(505, "HTTP Version Not Supported", "not HTTP/1.x"));
     }
     let path = target.split('?').next().unwrap_or("").to_string();
+    let query = target.split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
     let mut headers = Vec::new();
     for line in lines {
         let (k, v) = line
@@ -81,7 +84,7 @@ pub fn read_request(stream: &mut TcpStream) -> Result<Request, ReadError> {
             .ok_or_else(|| bad(400, "Bad Request", "malformed header"))?;
         headers.push((k.trim().to_string(), v.trim().to_string()));
     }
-    let mut request = Request { method: method.to_string(), path, headers, body: Vec::new() };
+    let mut request = Request { method: method.to_string(), path, query, headers, body: Vec::new() };
     if request.header("transfer-encoding").is_some() {
         return Err(bad(411, "Length Required", "only Content-Length bodies are accepted"));
     }

@@ -34,6 +34,7 @@ import Theory.AuthorizationDeclaration  -- first-order authorization plans compi
 import Theory.Noun  -- NOCK: nouns, axis/edit, Hoon jam/cue with back-references; cue_jam, jam_injective, canonical_unique
 import Theory.Eval  -- K-EVAL: the run outcomes every evaluator shares (Outcome; ByteRun and its C ABI wire form)
 import Theory.Nock  -- NOCK: Nock 4K as Step/Crash relations + fueled exec/run; run_sound, run_complete, run_crash_iff, step_deterministic, run_fuel_monotone; runJammed @[export]
+import Theory.Renounce  -- K-RENOUNCE: the holder-revocation gate, RevokedOne, renounce_revokes_exactly_lineage, renounce_preserves_others, poles
 import Theory.RoomAuthorization  -- K-ROOM: `under R` target sets decided at the system cell's parent projection; room_confidentiality (refusal form) and room_admission_traces_to_root (lineage form), narrows_stable with its refused-before-birth tooth, all poles by `decide`
 import Theory.NockCost.Summaries  -- NC-2: loop summaries (count-up trap, decrement-both sub) as a sound oracle; costSym O(program), pole_forge_symbolic = 1185 + 60·2^64
 import Theory.NockCost  -- NC-1: syntactic step bound (Shape, cost, cost_sound) over the first-order+interval fragment; pole_forge_bound = 1345
@@ -46,6 +47,7 @@ import Theory.DeclaredTurn  -- data-only authorization/effect execution with exa
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
+import Theory.KeyPreRotation  -- KERI pre-rotation: a rotation opens the current record next-key commitment; the current key is irrelevant to it
 import Theory.MaterializerCardinality  -- REGRESSION TOOTH: the deleted total-function carrier was uncountable; the landed sparse carrier is characterized by ordinary countability
 import Theory.DeployedTotalCarrierAudit  -- closes the deleted total-carrier impossibility teeth for authority and Hyperdocument, completing all four migrated deployed schemas
 import Theory.DeployedMaterializerWitness  -- effect, authority, and Hyperdocument schemas now have concrete materializers and cells; existence codecs are not deployment wire claims

@@ -5,7 +5,7 @@ use crate::{write_new, Config, PublicationGrant, Result, ToolTask};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 // A complete content page can include the fn consumer's typed inbox atom and
@@ -673,6 +673,406 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+// ---------------------------------------------------------------- room tools
+
+/// Hermes's tools in a room (PLACE §2.7, §5 row 7). Each is one or two lines
+/// of the pinned `mini` client's shell, run under HERMES'S OWN workspace (its
+/// key, its references, its grants): no tool holds or lends authority the
+/// workspace lacks, and a line the Host refuses comes back as the Host's
+/// refusal, verbatim. The controller pins the room; the model names no room,
+/// no capability and no proposal id.
+///
+/// Every WRITE is a turn: before it, one fleet turn pays the room's
+/// `hermes/turn` price from Hermes's budget account to the room's till
+/// (`mini credit --action turn`). When the account cannot cover it the Host
+/// refuses that payment at plan (`bookRefused`) and the write is not
+/// attempted: the error starts `out of budget:`.
+///
+/// Seams: `mini_doc_quote` and `mini_doc_history` (DEOS §2.3) wait for the
+/// docuverse-on-final lane (the content cell's transclusion action and the
+/// history view); they are not offered.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RoomToolsConfig {
+    /// The pinned `mini` client.
+    pub mini: PathBuf,
+    pub host: PathBuf,
+    pub host_config: PathBuf,
+    pub socket: PathBuf,
+    /// Hermes's own workspace and shell home.
+    pub workspace: PathBuf,
+    pub home: PathBuf,
+    /// The room (Hermes's name for the chat room it joined).
+    pub room: String,
+    /// Hermes's budget account reference (`ROOM-hermes`). Absent: writes are
+    /// not metered (a room without a Hermes tariff).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+}
+
+/// The room tools' MCP schemas (also the provider's function list).
+pub(crate) fn room_tool_specs() -> Vec<Value> {
+    let name = json!({"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"});
+    vec![
+        json!({"name":"mini_room_ls",
+            "description":"The cells written under this room, from the Host's signed history (since HEIGHT, default 0): each cell's first and last height, its writers, whether it is a member's stream, and the names this workspace holds for it (unnamed cells are named ROOM-cell-ID under your room grant). Read-only.",
+            "inputSchema":{"type":"object","properties":{"since":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"additionalProperties":false}}),
+        json!({"name":"mini_room_status",
+            "description":"This room's tariff (what a turn costs), its till, and your budget account's balance. Signed reads; read-only.",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}),
+        json!({"name":"mini_stream_tail",
+            "description":"Every stream in this room merged in one order every reader sees (height, author, cell, sequence); entry numbers #N never change. Only entries whose text the Host verified are shown with text. Read-only.",
+            "inputSchema":{"type":"object","properties":{
+                "n":{"type":"string","pattern":"^[0-9]+$","maxLength":6},
+                "since":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"additionalProperties":false}}),
+        json!({"name":"mini_say",
+            "description":"Append one entry to YOUR stream in this room (a turn: it pays the room's hermes/turn first). `to` addresses a member (a subject), `re` replies to entry #N.",
+            "inputSchema":{"type":"object","properties":{
+                "text":{"type":"string","maxLength":3000},
+                "to":{"type":"string","pattern":"^[0-9]+$","maxLength":20},
+                "re":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
+                "required":["text"],"additionalProperties":false}}),
+        json!({"name":"mini_doc_show",
+            "description":"A signed read of one document: its lines (who created each) and its links (to which cells). Read-only.",
+            "inputSchema":{"type":"object","properties":{"doc":name},"required":["doc"],"additionalProperties":false}}),
+        json!({"name":"mini_doc_link",
+            "description":"Add a link from document `from` to the cell `to` (a turn). Admitted only where you hold a grant to write `from` and its law admits you; otherwise the Host refuses and says why.",
+            "inputSchema":{"type":"object","properties":{"from":name,"to":name,
+                "relation":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
+                "required":["from","to"],"additionalProperties":false}}),
+        json!({"name":"mini_doc_append",
+            "description":"Append a line to document `doc` (a turn). Admitted only where you hold a grant to write `doc` and its law admits you; otherwise the Host refuses and says why (no-grant, law-denied).",
+            "inputSchema":{"type":"object","properties":{"doc":name,"text":{"type":"string","maxLength":3000}},
+                "required":["doc","text"],"additionalProperties":false}}),
+    ]
+}
+
+/// The room tools that write (each one a metered turn).
+pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append"];
+
+pub(crate) fn is_room_tool(name: &str) -> bool {
+    room_tool_specs().iter().any(|spec| spec["name"] == name)
+}
+
+/// One shell line's ending: (exit code, stdout, stderr).
+pub(crate) struct LineRun {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl LineRun {
+    /// The refusal or error block as the client printed it (from its first
+    /// `refused:`/`error:`/`usage:`/`undecided:` line), verbatim and bounded.
+    pub fn ending(&self) -> String {
+        let lines: Vec<&str> = self.stderr.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| ["refused: ", "error: ", "usage: ", "undecided: ", "not here: "].iter().any(|p| l.starts_with(p)))
+            .unwrap_or(0);
+        let mut text = lines[at..].join("\n");
+        if text.trim().is_empty() {
+            text = format!("the client exited {} with no message", self.code);
+        }
+        text.chars().take(4096).collect()
+    }
+}
+
+fn bounded_name(value: &Value, key: &str) -> Result<String> {
+    let text = value.get(key).and_then(Value::as_str).ok_or_else(|| format!("{key} absent"))?;
+    if text.is_empty() || text.len() > 64 || !text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(format!("{key} must be 1..64 ASCII letters, digits or hyphens"));
+    }
+    Ok(text.to_owned())
+}
+
+fn bounded_decimal(value: &Value, key: &str, max: usize) -> Result<Option<String>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if !text.is_empty() && text.len() <= max && text.bytes().all(|b| b.is_ascii_digit()) => {
+            Ok(Some(text.clone()))
+        }
+        Some(_) => Err(format!("{key} must be a decimal string")),
+    }
+}
+
+fn bounded_text(value: &Value, key: &str) -> Result<String> {
+    let text = value.get(key).and_then(Value::as_str).ok_or_else(|| format!("{key} absent"))?;
+    if text.trim().is_empty() || text.len() > 3000 || text.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(format!("{key} must be 1..3000 bytes of text"));
+    }
+    Ok(text.to_owned())
+}
+
+fn only_keys(value: &Value, keys: &[&str]) -> Result<()> {
+    let object = value.as_object().ok_or("tool arguments must be an object")?;
+    if let Some(extra) = object.keys().find(|k| !keys.contains(&k.as_str())) {
+        return Err(format!("unknown argument {extra}"));
+    }
+    Ok(())
+}
+
+/// The last JSON document a client printed (pretty or compact): the last
+/// one that starts at a line beginning with `{`.
+pub(crate) fn last_json(stdout: &str) -> Option<Value> {
+    let mut starts: Vec<usize> = stdout.match_indices("\n{").map(|(at, _)| at + 1).collect();
+    if stdout.starts_with('{') {
+        starts.insert(0, 0);
+    }
+    starts
+        .iter()
+        .rev()
+        .find_map(|&at| serde_json::Deserializer::from_str(&stdout[at..]).into_iter::<Value>().next()?.ok())
+}
+
+/// The links a `doc show` rendering states: `link ID -> … (KIND TARGET) …` or
+/// `link ID -> KIND TARGET …`; the target ids, in order.
+pub(crate) fn rendered_links(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("link "))
+        .filter_map(|rest| rest.split_once(" -> ").map(|(_, target)| target))
+        .filter_map(|target| {
+            let inner = match (target.find('('), target.find(')')) {
+                (Some(open), Some(close)) if open < close => &target[open + 1..close],
+                _ => target,
+            };
+            let mut words = inner.split_whitespace();
+            words.next()?;
+            words.next().filter(|id| id.bytes().all(|b| b.is_ascii_digit())).map(str::to_owned)
+        })
+        .collect()
+}
+
+pub(crate) struct RoomTools<'a> {
+    pub config: &'a RoomToolsConfig,
+}
+
+impl RoomTools<'_> {
+    /// Run one shell line under Hermes's workspace; `spawned` sees the child's
+    /// pid before it is waited on (the controller journals it: a submitter it
+    /// can later prove stopped).
+    pub fn line_with(&self, line: &str, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
+        let config = self.config;
+        let child = Command::new(&config.mini)
+            .arg("shell")
+            .arg("--socket")
+            .arg(&config.socket)
+            .arg("--host")
+            .arg(&config.host)
+            .arg("--config")
+            .arg(&config.host_config)
+            .arg("--workspace")
+            .arg(&config.workspace)
+            .arg("--home")
+            .arg(&config.home)
+            .arg("--line")
+            .arg(line)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("{}: {e}", config.mini.display()))?;
+        spawned(child.id());
+        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        Ok(LineRun {
+            code: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
+    }
+
+    pub fn line(&self, line: &str) -> Result<LineRun> {
+        self.line_with(line, &mut |_| {})
+    }
+
+    fn ok_or_ending(run: LineRun) -> Result<LineRun> {
+        if run.code == 0 {
+            Ok(run)
+        } else {
+            Err(run.ending())
+        }
+    }
+
+    /// A plain file in Hermes's `HOME/requests` (`@FILE` arguments).
+    fn request_file(&self, name: &str, text: &str) -> Result<String> {
+        let dir = self.config.home.join("requests");
+        fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let path = dir.join(name);
+        let _ = fs::remove_file(&path);
+        fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(name.to_owned())
+    }
+
+    /// A read-only tool.
+    pub fn read(&self, name: &str, arguments: &Value) -> Result<Value> {
+        let room = &self.config.room;
+        match name {
+            "mini_room_ls" => {
+                only_keys(arguments, &["since"])?;
+                let since = bounded_decimal(arguments, "since", 20)?.unwrap_or_else(|| "0".into());
+                let run = Self::ok_or_ending(self.line(&format!("room ls {room} --since {since} --import --json"))?)?;
+                last_json(&run.stdout).ok_or_else(|| "room ls printed no JSON".to_owned())
+            }
+            "mini_room_status" => {
+                only_keys(arguments, &[])?;
+                let status = Self::ok_or_ending(self.line(&format!("room status {room}"))?)?;
+                let budget = match &self.config.account {
+                    Some(account) => Self::ok_or_ending(self.line(&format!("credit {account}"))?)?.stdout,
+                    None => "no budget account".into(),
+                };
+                Ok(json!({"status":status.stdout,"budget":budget.trim()}))
+            }
+            "mini_stream_tail" => {
+                only_keys(arguments, &["n", "since"])?;
+                let n = bounded_decimal(arguments, "n", 6)?.unwrap_or_else(|| "100".into());
+                let mut line = format!("tail --in {room} --json -n {n}");
+                if let Some(since) = bounded_decimal(arguments, "since", 20)? {
+                    line.push_str(&format!(" --since {since}"));
+                }
+                let run = Self::ok_or_ending(self.line(&line)?)?;
+                let mut docs = run.stdout.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+                let state = docs.next().ok_or("tail printed no room state")?;
+                Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
+            }
+            "mini_doc_show" => {
+                only_keys(arguments, &["doc"])?;
+                let doc = bounded_name(arguments, "doc")?;
+                let run = Self::ok_or_ending(self.line(&format!("doc show {doc}"))?)?;
+                Ok(json!({"doc":doc,"text":run.stdout,"links":rendered_links(&run.stdout)}))
+            }
+            _ => Err(format!("{name} is not a room read tool")),
+        }
+    }
+
+    /// Pay one turn for `tool` as operation `op`. Ok: the payment (or the
+    /// room's statement that it does not charge). Err starting `out of
+    /// budget:` when the Host refused the payment at plan.
+    pub fn pay(&self, op: &str, tool: &str) -> Result<Value> {
+        let Some(account) = &self.config.account else {
+            return Ok(json!({"paid":false,"note":"unmetered"}));
+        };
+        let output = Command::new(&self.config.mini)
+            .arg("credit")
+            .arg("--action")
+            .arg("turn")
+            .arg("--dir")
+            .arg(&self.config.workspace)
+            .arg("--room")
+            .arg(&self.config.room)
+            .arg("--account")
+            .arg(account)
+            .arg("--memo")
+            .arg(format!("op {op} {tool}"))
+            .arg("--socket")
+            .arg(&self.config.socket)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("{}: {e}", self.config.mini.display()))?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() {
+            let run = LineRun { code: output.status.code().unwrap_or(-1), stdout: String::new(), stderr: stderr.into_owned() };
+            let ending = run.ending();
+            if run.stderr.contains("bookRefused") {
+                return Err(format!("out of budget: {ending}"));
+            }
+            return Err(format!("the turn's payment failed: {ending}"));
+        }
+        last_json(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| "the turn's payment printed no JSON".to_owned())
+    }
+
+    /// The proposal id of operation `op` (fixed: a rerun looks it up).
+    pub fn proposal(op: &str) -> String {
+        format!("hr-{op}")
+    }
+
+    /// A write tool as operation `op`, already paid for. `spawned` sees each
+    /// child's pid (the submitter).
+    pub fn write(&self, op: &str, name: &str, arguments: &Value, spawned: &mut dyn FnMut(u32)) -> Result<Value> {
+        let id = Self::proposal(op);
+        match name {
+            "mini_say" => {
+                only_keys(arguments, &["text", "to", "re"])?;
+                let text = bounded_text(arguments, "text")?;
+                let file = self.request_file(&format!("{id}.txt"), &text)?;
+                let mut line = format!("say --in {}", self.config.room);
+                if let Some(to) = bounded_decimal(arguments, "to", 20)? {
+                    line.push_str(&format!(" --to {to}"));
+                }
+                if let Some(re) = bounded_decimal(arguments, "re", 10)? {
+                    line.push_str(&format!(" --re {re}"));
+                }
+                line.push_str(&format!(" --file {file}"));
+                let run = Self::ok_or_ending(self.line_with(&line, spawned)?)?;
+                Ok(json!({"said":run.stdout.trim(),"text":text}))
+            }
+            "mini_doc_link" | "mini_doc_append" => {
+                let propose = if name == "mini_doc_link" {
+                    only_keys(arguments, &["from", "to", "relation"])?;
+                    let from = bounded_name(arguments, "from")?;
+                    let to = bounded_name(arguments, "to")?;
+                    let relation = bounded_decimal(arguments, "relation", 10)?.unwrap_or_else(|| "0".into());
+                    format!("doc link {id} {from} {to} {relation}")
+                } else {
+                    only_keys(arguments, &["doc", "text"])?;
+                    let doc = bounded_name(arguments, "doc")?;
+                    let text = bounded_text(arguments, "text")?;
+                    let file = self.request_file(&format!("{id}.txt"), &text)?;
+                    format!("doc append {id} {doc} @{file}")
+                };
+                if !self.config.workspace.join("proposals").join(&id).join("proposal.json").exists() {
+                    Self::ok_or_ending(self.line(&propose)?)?;
+                }
+                let run = Self::ok_or_ending(self.line_with(&format!("submit {id}"), spawned)?)?;
+                Ok(json!({"proposal":id,"submitted":run.stdout.trim()}))
+            }
+            _ => Err(format!("{name} is not a room write tool")),
+        }
+    }
+
+    /// Pay, then write: one turn (the MCP path; the room runner journals
+    /// between the two).
+    pub fn call(&self, op: &str, name: &str, arguments: &Value) -> Result<Value> {
+        if ROOM_WRITE_TOOLS.contains(&name) {
+            let paid = self.pay(op, name)?;
+            let mut result = self.write(op, name, arguments, &mut |_| {})?;
+            result["turn"] = paid;
+            Ok(result)
+        } else {
+            self.read(name, arguments)
+        }
+    }
+
+    /// Exact lookup of operation `op`'s submission (never a resend): its
+    /// attempt's outcome after `mini workspace --action recover`.
+    pub fn lookup(&self, op: &str) -> Result<Value> {
+        let id = Self::proposal(op);
+        let attempt = self.config.workspace.join("attempts").join(&id);
+        if !attempt.join("call.bin").exists() {
+            return Ok(json!({"resolution":"refused","basis":"not-submitted","proposal":id}));
+        }
+        let run = self.line(&format!("lookup {id}"))?;
+        let outcome: Option<Value> = fs::read(attempt.join("outcome.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+        let accepted = outcome.as_ref().and_then(|o| o.get("type")).and_then(Value::as_str).is_some_and(|t| t != "refused");
+        if accepted {
+            return Ok(json!({"resolution":"performed","basis":"exact-lookup","proposal":id,"outcome":outcome}));
+        }
+        if run.stdout.contains("absent") || run.stderr.contains("absent") {
+            return Ok(json!({"resolution":"refused","basis":"absent-after-submitter-stop","proposal":id}));
+        }
+        if run.code == 3 || outcome.as_ref().and_then(|o| o.get("type")).and_then(Value::as_str) == Some("refused") {
+            return Ok(json!({"resolution":"refused","basis":"host-refusal","proposal":id,"detail":run.ending()}));
+        }
+        Ok(json!({"resolution":"uncertain","basis":"lookup-inconclusive","proposal":id,"detail":run.ending()}))
+    }
+
+    /// An unmetered notice in Hermes's stream (the one write that is not a
+    /// turn: saying that the budget is spent).
+    pub fn notice(&self, text: &str) -> Result<LineRun> {
+        let file = self.request_file("hr-notice.txt", text)?;
+        Self::ok_or_ending(self.line(&format!("say --in {} --file {file}", self.config.room))?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +1150,7 @@ mod tests {
     fn content_birth_uses_exact_factory_payer_tool_parent_footprint() {
         let family = birth_family();
         let tool = ToolTask {
+            room: None,
             task: "7002".into(),
             subject: "8".into(),
             capability: "81".into(),
@@ -923,5 +1324,47 @@ mod tests {
         assert!(select_read(&reads, &json!({"name":"other"})).is_err());
         assert!(select_read(&reads, &json!({"name":"inbox","target":"999"})).is_err());
         assert!(select_read(&reads, &json!({"name":90})).is_err());
+    }
+
+    #[test]
+    fn room_tools_are_seven_and_writes_are_metered() {
+        let names: Vec<String> = super::room_tool_specs().iter().map(|s| s["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_show", "mini_doc_link", "mini_doc_append"]);
+        for write in super::ROOM_WRITE_TOOLS {
+            assert!(names.iter().any(|n| n == write));
+        }
+        // The seams are not offered.
+        assert!(!super::is_room_tool("mini_doc_quote") && !super::is_room_tool("mini_doc_history"));
+        // No tool takes a room, a capability or a proposal id from the model.
+        for spec in super::room_tool_specs() {
+            let props = spec["inputSchema"]["properties"].as_object().unwrap();
+            for forbidden in ["room", "capability", "proposalId", "operation", "account"] {
+                assert!(!props.contains_key(forbidden), "{} takes {forbidden}", spec["name"]);
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_links_name_their_targets() {
+        let text = "# doc lab-index: document 77 cell root 1 at height 9\n  1  created-by 7   map\nlink 3 -> lab-cell-501 (document 501) relation 0 created-by 42\nlink 4 -> object 502 relation 0 created-by 42\n# 3 cell entries\n";
+        assert_eq!(super::rendered_links(text), vec!["501".to_owned(), "502".to_owned()]);
+    }
+
+    #[test]
+    fn the_last_printed_json_document_is_read() {
+        let out = "paid\n{\n  \"a\": 1\n}\n{\n  \"b\": {\"c\": 2}\n}\n";
+        assert_eq!(super::last_json(out), Some(serde_json::json!({"b":{"c":2}})));
+        assert_eq!(super::last_json("no json here"), None);
+    }
+
+    #[test]
+    fn room_tool_arguments_are_bounded() {
+        assert!(super::bounded_name(&serde_json::json!({"doc":"lab-index"}), "doc").is_ok());
+        assert!(super::bounded_name(&serde_json::json!({"doc":"../x"}), "doc").is_err());
+        assert!(super::bounded_name(&serde_json::json!({"doc":"a b"}), "doc").is_err());
+        assert!(super::bounded_decimal(&serde_json::json!({"since":"12"}), "since", 20).unwrap() == Some("12".into()));
+        assert!(super::bounded_decimal(&serde_json::json!({"since":12}), "since", 20).is_err());
+        assert!(super::bounded_text(&serde_json::json!({"text":"hi\u{0007}"}), "text").is_err());
+        assert!(super::only_keys(&serde_json::json!({"doc":"x","room":"y"}), &["doc"]).is_err());
     }
 }

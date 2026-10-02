@@ -198,7 +198,7 @@ jq -e --arg sel "$(hexstr "$SELECTED_TEXT")" --arg uns "$(hexstr "$UNSELECTED_TE
 # --- 3. B introduces A's home identity (A's public key only) -------------------
 begin b-plan-home-identity
 "$MINI" enroll --action plan --sponsor-workspace "$B/sponsor" --factory-ref factory \
-  --name source-owner --new-public-key "$A/sponsor.pub" --home-subject "$SOURCE_SUBJECT" \
+  --name source-owner --new-public-key "$A/sponsor.pub" --home-subject "$SOURCE_SUBJECT" --no-prerotation \
   --dir "$B/attempts/source-owner" >"$B/enroll-plan.json"
 end
 begin a-sign-possession

@@ -61,6 +61,8 @@ check_params() {
           .activeUntil, .accountId, .spendCapabilityId, .controlCapabilityId,
           .factoryObserveCapabilityId, .tickCapabilityId] | all(int)))
     and (.clock.subject != .sponsor.subject and .clock.accountId != .sponsor.accountId)
+    and (.sponsor | has("nextKeyDigest") and (.nextKeyDigest == null
+          or (.nextKeyDigest | type == "string" and test("^(0|[1-9][0-9]*)$"))))
     and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
     and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
@@ -119,7 +121,8 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    enrollments: [{key: {keyId: ($p.sponsor.keyId|s), keyEpoch: ($p.sponsor.keyEpoch|s),
                         algorithm: "1", subject: ($p.sponsor.subject|s), publicKey: $public,
                         activeFrom: ($p.sponsor.activeFrom|s),
-                        activeUntil: ($p.sponsor.activeUntil|s)},
+                        activeUntil: ($p.sponsor.activeUntil|s),
+                        nextKeyDigest: $p.sponsor.nextKeyDigest},
                   accountId: ($p.sponsor.accountId|s),
                   spendCapabilityId: ($p.sponsor.spendCapabilityId|s),
                   controlCapabilityId: ($p.sponsor.controlCapabilityId|s),
@@ -129,7 +132,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
                  {key: {keyId: ($p.clock.keyId|s), keyEpoch: ($p.clock.keyEpoch|s),
                         algorithm: "1", subject: ($p.clock.subject|s), publicKey: $clockPublic,
                         activeFrom: ($p.clock.activeFrom|s),
-                        activeUntil: ($p.clock.activeUntil|s)},
+                        activeUntil: ($p.clock.activeUntil|s), nextKeyDigest: ($p.clock.nextKeyDigest // null)},
                   accountId: ($p.clock.accountId|s),
                   spendCapabilityId: ($p.clock.spendCapabilityId|s),
                   controlCapabilityId: ($p.clock.controlCapabilityId|s),

@@ -94,7 +94,7 @@ EOF
  "factoryPredicate":{"type":"all","predicates":[]},
  "enrollments":[{"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1",
    "subject":"7","publicKey":"$OWNER_PUBLIC","activeFrom":"0",
-   "activeUntil":"1000000"},"accountId":"7",
+   "activeUntil":"1000000","nextKeyDigest":null},"accountId":"7",
    "spendCapabilityId":"41","controlCapabilityId":"51",
    "factoryObserveCapabilityId":"54","initialBalance":"100",
    "accountPredicate":{"type":"all","predicates":[]} }],

@@ -55,7 +55,7 @@ def genesis (sponsorKey : List UInt8) : NativeHostGenesis.Config where
   genesisHeight := 10
   factoryPredicate := .all []
   enrollments :=
-    [⟨⟨7007, 2, 1, 7, sponsorKey, 0, 100⟩, 7,
+    [⟨⟨7007, 2, 1, 7, sponsorKey, 0, 100, none⟩, 7,
       ⟨41⟩, ⟨44⟩, ⟨46⟩, 100, .all []⟩]
   factoryController := ⟨⟨7⟩, ⟨43⟩⟩
   meterAllowance := fun _ => 10000000
@@ -90,7 +90,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
       durable.snapshot with
     | none => throw (IO.userError "authority unavailable")
     | some value => pure value
-  let key : KeyRecord := ⟨7008, 2, 1, 8, newPublic, 0, 100⟩
+  let key : KeyRecord := ⟨7008, 2, 1, 8, newPublic, 0, 100, none⟩
   let command : ParticipantKeyEnrollment.Command :=
     ⟨⟨7⟩, ⟨43⟩, 71, factory.payload.root, authority.snapshot.cell.root, key⟩
   let ambient : ParticipantKeyEnrollment.Ambient := ⟨cfg.federation, cfg.genesisHeight⟩
@@ -239,7 +239,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
       | .ok value => pure value
     require "full host replay retained enrollment" (opened.durable.image.accepted.length == 1)
     let (fourthPublic, _) ← sign signer 9 []
-    let nextKey : KeyRecord := ⟨7009, 2, 1, 9, fourthPublic, 0, 100⟩
+    let nextKey : KeyRecord := ⟨7009, 2, 1, 9, fourthPublic, 0, 100, none⟩
     let nextCommand : ParticipantKeyEnrollment.Command :=
       ⟨⟨8⟩, ⟨46⟩, 72, factory.payload.root, opened.authority.snapshot.cell.root, nextKey⟩
     let nextAmbient : ParticipantKeyEnrollment.Ambient :=

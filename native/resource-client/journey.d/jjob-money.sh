@@ -77,7 +77,7 @@ for who in ("p", "s"):
     keys[who] = open(path(f"{who}.pub"), "rb").read().hex()
 def enrollment(subject, who):
     return {"key": {"keyId": str(7000 + subject), "keyEpoch": "2", "algorithm": "1", "subject": str(subject),
-                    "publicKey": keys[who], "activeFrom": "0", "activeUntil": "1000000"},
+                    "publicKey": keys[who], "activeFrom": "0", "activeUntil": "1000000", "nextKeyDigest": None},
             "accountId": str(100 + subject), "spendCapabilityId": str(1000 + subject),
             "controlCapabilityId": str(2000 + subject), "factoryObserveCapabilityId": str(3000 + subject),
             "initialBalance": "1000000", "accountPredicate": {"type": "all", "predicates": []}}

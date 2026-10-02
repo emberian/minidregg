@@ -23,6 +23,7 @@
     "keyEpoch": 2,
     "activeFrom": 0,
     "activeUntil": 1000000,
+    "nextKeyDigest": null,
     "accountId": 7,
     "spendCapabilityId": 41,
     "controlCapabilityId": 51,

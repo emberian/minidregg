@@ -5,6 +5,7 @@
 # updated 2026-10-01: BRAID-HOST: host-keccak brings the fast cSHAKE (Compiler.Sp800185Cshake256Fast, Compiler.Sp800185Cshake256Spec under the Core umbrella) and Compiler.NatDigits255Fast into the Host  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 75 153, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-01: INTEGRATOR-2 merges 2-3: braid-proof brings k-narrow-hide (Compiler.StoreHiding, Theory.StoreNormalize) and ch-client (Kernel.DomainEpoch, Kernel.DomainEpochLaw, Theory.Channel, Theory.Channel.Cell/Lease/Trace) into the Host; durable-tags brings Compiler.DurableLogTags  [counts: Minidregg 0 1, Theory 51 90, Kernel 233 302, Pred 4 8, Effects 0 3, Compiler 77 155, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-01: braid-compute merge (INTEGRATOR-3): the Host now runs K-EVAL (Compiler.Evaluator, Kernel.Run/NockEntry/Door replace Kernel.NockRun), K-ORDER over ZMod 2^127-1 (Compiler.Mersenne127, PredOrderWide, PredRangeLeaf), K-FIELD-CLOSURE (Kernel.FieldClosure), the job law (Kernel.Job over Kernel.LawView), C14 certify and the tail bound (Kernel.CertifyReceiver, SystemCell, SystemCellDomain, TailBound) and the NC shapes (Theory.Eval, Theory.NockCost.Shape, Kernel.NockProgramCell.Sample)  [counts: Minidregg 0 1, Theory 53 94, Kernel 243 311, Pred 4 8, Effects 0 3, Compiler 81 161, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
+# updated 2026-10-02: Rooms convergence: inspection and law-sat queries, committed-clock room birth gate, stream writes, prerotation and renunciation are now deployed  [counts: Minidregg 0 1, Theory 55 96, Kernel 247 318, Pred 6 10, Effects 0 3, Compiler 81 161, Selvage 12 151, Assurance 0 129, Host 50 60, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -128,7 +129,11 @@ Host.FnSelectiveReleaseSourceAuthoring
 Host.GrainOriginCommand
 Host.GrainOriginPreparation
 Host.GrainOriginSource
+Host.InspectRender
+Host.InspectViews
 Host.Json
+Host.LawSat
+Host.LawSatWire
 Host.Main
 Host.ProviderUsage
 Host.RequestRefusal
@@ -248,6 +253,7 @@ Kernel.CanonicalPolicyRegistry
 Kernel.CanonicalResourceEffect
 Kernel.CapabilityDelegationController
 Kernel.CapabilityDelegationReceiver
+Kernel.CapabilityRenounce
 Kernel.CapabilityRevocationController
 Kernel.CapabilityRevocationReceiver
 Kernel.CertifyReceiver
@@ -365,8 +371,11 @@ Kernel.ResourceBirthPolicyController
 Kernel.ResourceBirthReceiver
 Kernel.ResourceObservationAdmission
 Kernel.ResourceTransaction
+Kernel.RoomBirthGate
 Kernel.Run
 Kernel.SparseAuthenticatedState
+Kernel.StreamWrite
+Kernel.SubjectKeyRotation
 Kernel.SystemCell
 Kernel.SystemCellDomain
 Kernel.TailBound
@@ -379,6 +388,8 @@ Pred.Core
 Pred.HashEq
 Pred.HashEqDigest
 Pred.Leaf
+Pred.Satisfiable
+Pred.SatisfiableTotal
 Selvage.Accumulator
 Selvage.BinaryLookup
 Selvage.Commitment
@@ -427,6 +438,7 @@ Theory.Hyperdocument
 Theory.HyperdocumentOperationIntent
 Theory.HyperdocumentOperations
 Theory.IndexedProgram
+Theory.KeyPreRotation
 Theory.Nock
 Theory.NockCost.Shape
 Theory.Noun
@@ -436,6 +448,7 @@ Theory.PrivacyProfile
 Theory.PrivateComputationDeclaration
 Theory.ReactiveController
 Theory.ReactiveReceipt
+Theory.Renounce
 Theory.ResourceBirth
 Theory.ResourceBirthAuthority
 Theory.ResourceCost

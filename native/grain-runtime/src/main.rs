@@ -2,6 +2,8 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod application_api_tools;
 mod application_tools;
+mod concierge;
+mod hermes_room;
 #[cfg(test)]
 mod birth_lifecycle_tests;
 mod control;
@@ -126,6 +128,11 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
+    /// The room this grain's Hermes was summoned into (PLACE §2.7): the room
+    /// tools (`resource_tools::room_tool_specs`) run the pinned client's shell
+    /// under this workspace; each write pays the room's `hermes/turn` first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    room: Option<resource_tools::RoomToolsConfig>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -12188,6 +12195,16 @@ impl Runtime {
         }
         let authority = self.tool()?;
         match name {
+            room if resource_tools::is_room_tool(room) => {
+                let config = self
+                    .config
+                    .tool_task
+                    .as_ref()
+                    .and_then(|tool| tool.room.clone())
+                    .ok_or("this grain's Hermes is in no room (toolTask.room)")?;
+                let op = format!("g{}", self.next_id()?);
+                resource_tools::RoomTools { config: &config }.call(&op, room, arguments)
+            }
             "mini_workspace_list" => self.workspace_readonly("list", arguments),
             "mini_workspace_describe" => self.workspace_readonly("describe", arguments),
             "mini_workspace_read" => self.workspace_readonly("read", arguments),
@@ -14192,6 +14209,7 @@ impl Runtime {
                 Vec::new()
             },
             resource_workspace: tool.resource_workspace.is_some(),
+            room_tools: tool.room.is_some(),
             resource_workspace_create: if let Some(root) = &tool.resource_workspace {
                 let workspace: Value = serde_json::from_slice(&bounded_regular_file(
                     &root.join("workspace.json"),
@@ -17572,6 +17590,24 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.len() >= 3 && args[1] == "hermes-room" {
+        return match hermes_room::main(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("grain-runtime hermes-room: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.len() >= 3 && args[1] == "concierge" {
+        return match concierge::main(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("grain-runtime concierge: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() == 2 && args[1] == "tool-id" {
         let mut bytes = [0u8; 16];
         let result =
@@ -18660,6 +18696,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             foreground_tool: None,
             dispatch_task: None,
             tool_task: Some(ToolTask {
+                room: None,
                 task: "7102".into(),
                 subject: "8".into(),
                 capability: "81".into(),

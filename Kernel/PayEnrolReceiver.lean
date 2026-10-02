@@ -210,11 +210,18 @@ def ids (domain : Digest) (miniKey : List UInt8) : Ids :=
 current authority revision with no expiry of its own (the lease gates the
 login, not the key). -/
 def keyEpoch : Nat := 1
+/-- K-PREROTATE: a self-enrolled key commits to NO next key. The payment memo
+carries the Mini key alone, so the subject it makes is the `--no-prerotation`
+kind: it can never rotate (`SubjectKeyRotation` refuses `notPrerotated`); a
+stolen key is replaced by enrolling a new subject, exactly as before
+pre-rotation. Committing a next key here needs it in the memo (a pay-memo
+format change, task opened at the merge). -/
+def selfEnrolNextKey : Option TypedAuthorization.Digest := none
 def keyLifetime : Nat := 2 ^ 62
 
 def keyRecord (revision : Nat) (identities : Ids) (miniKey : List UInt8) : KeyRecord :=
   ⟨identities.keyId, keyEpoch, CredentialSignatureAdmission.ed25519Algorithm, identities.subject,
-    miniKey, revision, revision + keyLifetime⟩
+    miniKey, revision, revision + keyLifetime, selfEnrolNextKey⟩
 
 /-! ## The birth of the account, as an ordinary birth descriptor -/
 
@@ -266,7 +273,7 @@ def observeGrant (deployment : Deployment) (template : CanonicalRuntimeProfile.F
 
 def birthItem (identities : Ids) : BirthItem Registry :=
   ⟨⟨identities.account, CellSlot.root Registry .absent,
-    NativeHostGenesis.declaredPacked identities.account true (.closed [])⟩, .account, ⟨identities.subject⟩, none⟩
+    NativeHostGenesis.declaredPacked identities.account true (.closed [])⟩, .account, ⟨identities.subject⟩, none, none⟩
 
 def initialPolicy (deployment : Deployment) (semantics : Digest) (identities : Ids) :
     InitialPolicy :=

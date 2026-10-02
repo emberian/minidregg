@@ -21,7 +21,7 @@ def profile := NativeHostProfile.profile ⟨⟨5⟩, 100000, 10000⟩
 
 def key (subject : Nat) (bytes : List UInt8) : KeyRecord :=
   ⟨7000 + subject, 2, CredentialSignatureAdmission.ed25519Algorithm,
-    subject, bytes, 0, 100⟩
+    subject, bytes, 0, 100, none⟩
 
 def config (alice bob : List UInt8) : Config where
   deployment := ⟨⟨8500⟩, 10, 11, 12⟩

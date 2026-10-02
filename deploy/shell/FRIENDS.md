@@ -11,6 +11,18 @@ and i'm root there, so i can read it. enrollment also needs a copy in my session
 moment (the shell co-signs with both keys; a later step removes that). don't put
 anything precious behind it yet. taking your key home to your own machine is planned.
 
+**your next key.** `keygen mini.key` also makes `mini.key.next`: your *next* key. your
+record commits to it (only its digest is stored), and it is the only thing that can
+rotate your identity: `rotate-key mini.key.next` moves your subject to it, your old key
+stops signing (the Host refuses it by name), your grants and resources stay yours, and
+`mini.key.next` then holds the key after it. someone who steals `mini.key` cannot rotate
+you away, because the Host refuses any rotation to a key whose digest isn't the one you
+committed, whatever the stolen key signs. but **it protects you only once the next key is
+not on the box**: while `mini.key.next` sits beside `mini.key` here, root (me) and anyone
+who takes one file takes both. copy it home (or to a USB stick, or paper), delete it from
+your session home, and bring it back only to rotate. `key-status` shows your key epoch and
+whether a next key is committed.
+
 ## what this is
 
 mini is a small store of owned resources. every action is a signed request the Host
@@ -47,9 +59,11 @@ locally and the box only relays its frames (it keeps what you store, not your ke
 
 ```
 mini join --key ~/.mini/me.key
-    # prints your Mini public key (64 hex): send it to me
+    # prints two lines: your Mini public key, and your NEXT key's public half
+    # (me.key.next: move it off this laptop, to paper or a stick); send me both
 mini --remote mini-box join --key ~/.mini/me.key --sponsor-plan offer.json --dir ~/.mini/box
-    # offer.json is what i send back; you sign possession and it prints a signature: send it
+    # offer.json is what i send back; it is refused unless it commits to YOUR next key.
+    # you sign possession and it prints a signature: send it
 mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box
     # welcome.json is my second reply; this makes your workspace
 ```
@@ -94,13 +108,39 @@ laws. you can change the law and grants keep working:
 `law v2 notes {"type":"not","predicate":{"type":"any","predicates":[]}}`, then `submit v2`.
 this one still permits everything, and sam can still write. now lock it:
 ```
-mini> law lock notes {"type":"any","predicates":[]}    # "any of nothing": denies everything
+mini> law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable   # "any of nothing": denies everything
 mini> submit lock
 mini> read notes                                       # refused: law-denied: …   (exit 3)
 mini> law unlock notes {"type":"all","predicates":[]}  # refused: law-denied: …
 ```
 that's the point: nobody can bypass it, not you as owner and not me. **a lock is
-permanent**, so lock throwaway things. `history` lists what you did and how each attempt ended.
+permanent**, so lock throwaway things. (`law` asks the Host first whether a law can ever
+pass; a lock can't, so without `--allow-unsatisfiable` it stops you and says so.)
+
+can a law ever pass? ask before you install it:
+```
+mini> law check "field 1 <= 0; field 1 monotone; field 1 == 1"
+UNSATISFIABLE: this law admits no step.
+these clauses contradict:
+  field 1 <= 0                 from clause [0] `field 1 <= 0`
+  field 1 >= 1                 from clause [2] `field 1 == 1`
+  (added up, they say 0 <= -1, which no value can make true)
+mini> law check "verb == read"
+satisfiable: admits e.g. verb = read
+WARNING: this law admits no write.
+mini> can --any board             # one write board's law admits, from its values now
+  a write this law admits, from the cell as it is now:
+    field 2 = 2    (now 1)
+  paste:
+    invoke ID board write 2 2 1
+```
+`law ID REF …` runs the same check before it proposes anything: a law no step can satisfy
+is refused on the spot, with the clauses that contradict (add `--allow-unsatisfiable` when
+you mean it, as for a lock); a law no write can pass is proposed with a warning. the answer
+is the Host's (it decides the law's arithmetic exactly and hands back a step it checked, or
+the contradiction), and asking writes nothing. a law with `ran`/`witnessed` or a hash
+commitment is outside what it can decide and says which clause; a law of more than about
+ten independent `any [ … ]` clauses is too many cases and says so too. `history` lists what you did and how each attempt ended.
 take a grant back with `revoke cut notes SAMS-SUBJECT`, then `submit cut`; sam's next read
 is `refused: revoked`.
 
@@ -117,6 +157,110 @@ mini> board new tasks                     # tasks 0 and 1: `board add`, `board t
 ```
 share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
 content cell with no fixed size; its lines are ordered by their atom ids.
+
+rooms. a room is a resource that other things are born *in*; holding a grant under the
+room reaches the room and everything in it. the five verbs you'll use:
+```
+mini> room new lab                         # a bare room you found (`--law realm`: only you
+                                           #   place things; or start from a template, below)
+mini> room invite i1 lab SAMS-SUBJECT      # one grant under lab: observe + place (add things)
+mini> submit i1                            #   widen with --verbs observe,place,mutate,delegate;
+mini> publish i1                           #   narrow with --fields 1,2 or --max-delta 7=50
+mini> export i1                            # → the reference; sam runs `import lab <it>`
+sam> doc new notes --in lab                # sam adds a doc to the room (so does `create … --in lab`)
+mini> room members lab                     # who holds a standing grant under lab
+mini> room kick k1 lab SAMS-SUBJECT        # then `submit k1`: sam's grant, and every grant sam
+                                           #   handed on from it, is refused `revoked`
+```
+also `room list` (your rooms), `room law lab` (its current law). someone with no grant
+under lab can't add anything to it: they get `refused: … notRoomMember`. the room's law
+decides who may add things: changing it never revokes anyone's grant (the J7 rule), but a
+law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else adding
+(`birthRefused`), while their reads keep working.
+
+**leaving a room is yours to do; nobody has to kick you.** `room leave l1 lab`, then
+`submit l1`: you give up your grant under lab, signed with your own key, and no one else's
+permission is asked. everything you handed on from that grant ends with it (the leave says
+which: `ended with it: …`), so if you invited someone with it, they're out too. after that
+your reads of lab are refused `revoked` and you can't add to it. it's permanent: leaving
+twice is refused `alreadyRevoked`, and coming back means the founder invites you again, which
+is a new grant. the same verb works for any grant you hold, room or not: `renounce r1 REF`
+(or `renounce r1 CAPABILITY-NUMBER [object|account|program]`), then `submit r1`. you can only
+give up what's yours: renouncing someone else's grant is refused `notHolder`, and it tells
+you nothing about theirs. an agent you run (Hermes) gives up a grant it was handed the same
+way; giving up authority never needs `--i-know`.
+
+start a room from a template. `room new lab --template workroom` founds lab *with a map*:
+`lab/index` (a doc everyone in the room reads and only you write, and it only grows: its
+links are the room's map), `lab/wall` (a stream: what the room says), `lab/notes` (a draft
+anyone with write in the room edits) and `lab/tasks` (a list that only grows), linked from
+the index. `doc show lab/index` shows the map; `doc backlinks lab/wall` finds who points at
+the wall. `--template social` is index + wall + intro, and `room welcome lab SAMS-SUBJECT
+--template social` invites sam and bears sam a stream only sam may write (you pay for it,
+sam owns it). `--template story` is index + chapters (only grows) + scenes (a stream) + cast.
+a template is just the lines you'd type, in order, with `$ROOM` and `$ME` filled in:
+```
+mini> room template list                   # workroom, social, story
+mini> room template show workroom          # the file itself, every line a verb you know
+mini> room new mine --template @my.shell   # your own copy, from HOME/requests/my.shell
+```
+the first line that doesn't end done stops the rest, and the shell says which line and why
+(`refused: law-denied: …` with the clause); the lines before it stand. names under a room
+are yours: `lab/index` is your reference's name (sam may call it anything), never a path.
+
+## talking in a room
+
+a room is a place a few of you talk. whoever starts it is its founder:
+
+```
+mini> chat new commons                    # you found it; it becomes your current room
+mini> chat invite commons 1279008242 bob  # prints a `chat join commons {…}` line: send it to bob
+bob>  chat join commons {…}               # bob pastes the line you sent
+mini> say hello, friends                  # no quotes needed; apostrophes are fine
+mini> tail                                # the last 20 lines: #N, hHEIGHT, who, text
+mini> say --re 3 agreed                   # a reply to #3     (say --to bob … addresses bob)
+mini> react 3 +1                          # topic TEXT, pin N and unpin are the founder's
+mini> tail --follow                       # keep watching; ctrl-c stops
+```
+each of you writes only your own stream; the Host refuses a write to anyone else's, so
+nobody can put words in your mouth, and a line once said stays said. `#N` numbers never
+change. names are yours: `chat name SUBJECT bob` decides what *you* see. a line from
+Discord shows as `bridge via discord NAME#ID: …`: the bridge said it, quoting someone.
+`help chat` has the rest.
+
+## a week in a room
+
+some rooms charge. a room's price is its **tariff** (`tariff lab`: `week` credit buys
+`period` heights of membership); your balance is `credit`. paying is one line:
+
+```
+mini> credit                    # credit 1000  (a signed read of your account)
+mini> pay lab week              # one turn: the week's price to lab's till, marked renew
+mini> room status lab           # picks up the window the room's concierge issued you
+mini> doc new notes --in lab    # a member places cells in the room until the window ends
+```
+the window is a grant with an end height; past it the Host refuses you `outside-validity`
+and `room status` says ENDED. `pay lab week` again renews. a founder runs a room with
+`room new lab --template workroom --concierge SUBJECT`, sets prices with `tariff lab set
+week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
+`topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
+
+private rooms. `room new lab --private` makes a room whose words the node stores but cannot
+read: what you say and write in it is sealed on *your* machine under the room key before it
+leaves, and the node only ever holds that key wrapped to each member. so run `mini` on your own
+machine for it (here, in the hosted shell, your key is a file on this box, and so is the room key).
+```
+sam> whoami                                # "encryptionKey": give it to whoever invites you
+mini> room invite i1 lab SAMS-SUBJECT SAMS-ENCRYPTION-KEY   # the grant, and the key wrapped to sam
+mini> room kick k1 lab SAMS-SUBJECT        # revoke + a fresh room key for everyone else, in one line:
+                                           #   sam keeps what he could already read, gets nothing new
+mini> room keys lab                        # the key epochs you hold;  `forget lab` deletes yours
+```
+your keys live in an encrypted file in your workspace: set `MINI_KEYCACHE_PASSPHRASE`. without it
+you see `[sealed under epoch N — you do not hold that key]`. inviting a hosted subject (a friend who
+only uses this shell, or hosted Hermes) into a private room needs `--i-know`: it puts the room key on
+the box. the node still sees who is in the room, who wrote when, and how big each line is (in 64-byte
+steps). details: `deploy/shell/templates/room/private/README.md`.
 
 what can you do here? ask before you try:
 ```
@@ -171,6 +315,25 @@ mini> law show fish                        # the market's law, in the one-line g
 a bid you never reveal fills nothing. there is no deposit yet, so not revealing costs nothing:
 markets here are for friends, not for strangers who might bid and walk away.
 
+## a librarian in a room
+
+a room's founder can bring in the node's Hermes, an agent that holds only what it is given and
+pays for each thing it writes from a budget the founder funds:
+
+```
+mini> summon lab as librarian --budget 100   # founder: Hermes joins lab's roster with 100 credit
+mini> ask lab what changed since 48          # a say addressed to Hermes; it answers in its stream
+mini> topup lab 50                           # its budget ran out: it said so, and stopped
+mini> dismiss lab                            # founder: its grants are revoked, the rest comes back
+```
+the librarian links every document in the room from `lab-index`, writes a digest of what was
+said into `lab-digest`, and answers "since" questions from the room's signed history. its
+instructions are a document in the room, `lab-hermes-librarian`: you can read it, the founder
+can edit it. each write it makes costs the room's `hermes/turn` price (`tariff lab`) plus the
+fee, paid into the room's till; when its account can't pay, the Host refuses the turn and Hermes
+says "out of budget" in its stream. it can't write anything it holds no grant on: ask it to
+edit your document and the Host refuses it.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -191,14 +354,16 @@ the reason after `refused:`:
 - `stale-root`: you signed against a state that has since moved; do it again.
 - `bad-signature`: the signature didn't verify for that key and that exact request.
 - `malformed`: the request didn't decode, or didn't fit its operation.
-- `undisclosed`: a refusal before you proved who you are, so on purpose it names nothing.
+- `undisclosed`: a refusal before you proved who you are, or of a write at admission: on purpose
+  it names nothing on your channel (the operator's log names it).
 
 (rarer ones exist too, like `outside-validity`. refused frames are kept under `refusals/`.)
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. jobs run Nock programs
-  only, and each check runs the whole program again on the box; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
+- numbered fields, one scalar action per `invoke`, laws as JSON. Jobs run Nock programs
+  only, and each check runs the whole program again on the box. Paying is for room weeks;
+  chat rooms are new (`help chat`); docs have no annotations or quotes yet. No uptime promises. IDs are write-once:
   pick a new one per request. `help guide` prints this guide.
 
 ## reaching me
@@ -208,10 +373,9 @@ because it holds the Host's own decoding.
 
 ## what's planned
 
-this is why you'd come back, with no dates promised: **rooms** (a place with members,
-where your stuff lives), **docs** and **streams** inside them, **laws in a one-line
-grammar** instead of JSON, **Hermes in a room** (an agent that reads the room and does
-small useful things), **paying with $DREGG** for a room's week (a few dollars), and
+this is why you'd come back, with no dates promised: **streams** (chat) inside rooms, **laws in a one-line
+grammar** instead of JSON, Hermes as a **game master** and as a **runner** you hand a program,
+**paying with $DREGG** for a room's week (a few dollars), and
 eventually **a MUD** built from the same pieces.
 
 thank you for poking at it early. (｡◕‿◕｡)

@@ -143,7 +143,7 @@ integer codec; the declared roles moved in S2c, and to v4 when the declared-effe
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
-  | .authority => ⟨⟨91003⟩, 7⟩
+  | .authority => ⟨⟨91003⟩, 8⟩
   | .declaredObject => ⟨⟨91004⟩, 4⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
   | .accountMetadata => ⟨⟨91007⟩, 4⟩
@@ -486,7 +486,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v12".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v13".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/

@@ -1,18 +1,17 @@
 {
-  "type": "mini-hermes-role-grants-v1",
+  "type": "mini-hermes-role-grants-v2",
   "role": "librarian",
   "placeholders": {
-    "{ROOM}": "the room name given to summon",
-    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
-    "{CELL}": "each name in the room's cell list at summon time"
+    "{ROOM}": "the room given to summon (a chat room: its roster carries Hermes's stream)",
+    "{FOUNDER}": "the summoner, who must be the room's founder",
+    "{H}": "Hermes's subject (the node's Hermes, HOME/hermes/node.json, or --hermes)"
   },
-  "delegate": [
-    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{ROOM}-index","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"},
-    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{ROOM}-digest","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}
+  "room": ["observe", "append"],
+  "docs": [
+    {"name": "{ROOM}-index", "verbs": ["observe", "mutate"],
+     "law": "any [ not (verb == write), all [ any [ subject == {FOUNDER}, subject == {H} ], slot \"content/atom-edits\" == 0, slot \"content/tombstones\" == 0 ] ]"},
+    {"name": "{ROOM}-digest", "verbs": ["observe", "mutate"],
+     "law": "any [ not (verb == write), all [ any [ subject == {FOUNDER}, subject == {H} ], slot \"content/atom-edits\" == 0, slot \"content/tombstones\" == 0 ] ]"}
   ],
-  "delegateEach": [
-    {"over": "room cells except {ROOM}-index and {ROOM}-digest",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{CELL}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
-  ],
-  "own": ["{ROOM}-stream-{H}"]
+  "program": {"name": "{ROOM}-hermes-librarian", "law": "any [ not (verb == write), subject == {FOUNDER} ]"}
 }

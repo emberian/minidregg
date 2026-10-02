@@ -1,0 +1,37 @@
+{
+  "decisions": [
+    {
+      "decision": "issued",
+      "entry": {
+        "amount": "100",
+        "asset": "0",
+        "height": "48",
+        "ledgerTip": "48",
+        "payer": "9877660218138729659",
+        "payload": "room 10428947152218123678",
+        "subject": "10322412572256133520",
+        "transactionId": "18739590769999263785620393229643513405952166431850547359423274760653105228613"
+      },
+      "key": "ledger:48",
+      "notAfter": "60",
+      "period": "12",
+      "proposal": "renew-h48",
+      "subject": "10322412572256133520",
+      "week": "100",
+      "window": {
+        "capability": "11787482321950018643",
+        "delivered": "/home/ember/build/j17/r4/steps/J17/h/con/outbox/10322412572256133520/renew-h48.json",
+        "receipt": {
+          "acceptedCount": "39",
+          "confirmation": "replayed",
+          "eventId": "112065732005306957127924998836422942208917368509090125737622725596085464280477",
+          "transactionId": "101776355190794567129750086491982065897950094616455856454644747405528689776797",
+          "type": "confirmed",
+          "worldRoot": "74127192089247270713592709665092886334417043052098128760158661054397903648466"
+        },
+        "reference": "/home/ember/build/j17/r4/steps/J17/w/con/proposals/renew-h48/recipient-reference.json"
+      }
+    }
+  ],
+  "type": "minidregg-concierge-pass-v1"
+}

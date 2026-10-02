@@ -29,10 +29,12 @@ against the published `SHA256SUMS`). Put `Host mini-box` with your ssh key in
 
 ```
 mini join --key ~/.mini/me.key
-    # prints your Mini public key (64 hex); send it to your sponsor
+    # prints your Mini public key and your next key's public half (two lines of
+    # 64 hex; K-PREROTATE); send both to your sponsor
 mini --remote mini-box join --key ~/.mini/me.key --sponsor-plan offer.json --dir ~/.mini/box
     # offer.json is what your sponsor's `enroll offer NAME` printed. The Host
-    # re-decodes it over the proxy; you sign possession. Prints a signature:
+    # re-decodes it over the proxy and checks it commits to YOUR next key
+    # (a plan committing another key is refused); you sign possession. Prints a signature:
     # send it to your sponsor
 mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box
     # welcome.json is your sponsor's `enroll welcome NAME`; makes your workspace
@@ -50,7 +52,7 @@ machine. `MINI_SSH` names another ssh program, as `GIT_SSH` does.
 The sponsor's side, in their (hosted) shell:
 
 ```
-enroll plan NAME PUBLIC-KEY-HEX      # plans from the public key alone
+enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX   # plans from the two public keys alone
 enroll offer NAME > offer.json       # hand to the friend
 enroll seal NAME SIGNATURE-HEX       # the signature join printed
 enroll submit NAME
@@ -123,5 +125,5 @@ the client where the Host answered, never from error text.
 `enroll plan NAME KEYFILE` (a secret key file in the sponsor's session home)
 still signs with both keys in one process; it is kept for hosted sessions whose
 keys are on the box anyway. A newcomer who keeps their key uses
-`enroll plan NAME PUBLIC-KEY-HEX` and `mini join` (above); no process on the box
+`enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX` and `mini join` (above); no process on the box
 ever holds their secret.

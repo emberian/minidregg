@@ -117,7 +117,7 @@ for s in SUBJECTS:
     public[s] = open(path("keys", f"{s}.pub"), "rb").read().hex()
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
-                    "publicKey": public[s], "activeFrom": "0", "activeUntil": "1000000"},
+                    "publicKey": public[s], "activeFrom": "0", "activeUntil": "1000000", "nextKeyDigest": None},
             "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
             "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
             "initialBalance": str(INITIAL), "accountPredicate": {"type": "all", "predicates": []}}

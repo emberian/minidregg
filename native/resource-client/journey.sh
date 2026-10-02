@@ -37,8 +37,11 @@
 #   KCL    K-FIELD-CLOSURE: a declared cell holds only the fields it declares (journey.d/jclosure.sh)
 #   JMKT   SEALED-MARKET: a sealed-bid market through mini shell (journey.d/jmarket.sh)
 #   J12A   P-AFFORDANCES: `can NAME`, each held verb dry-run (journey.d/j12a.sh -> affordances-journey.sh, its own Store)
+#   JINSPECT K-INSPECT-VIEWS: inspect caps|law|turn|receipt, why (journey.d/jinspect.sh -> inspect-journey.sh, its own Store)
+#   JLS    C-SAT-2: law check, the install-time check, can --any (journey.d/jlawsat.sh -> lawsat-journey.sh, its own Store)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
+#   JROT   K-PREROTATE: key pre-rotation on this Store (journey.d/jrot.sh; restarts the service once)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
 #   (journey.d/m3.sh, m4.sh, m5.sh); their detail lines say so.
 #   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
@@ -50,7 +53,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket jtail jchan-epoch jchan-relay jchan-client jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -159,7 +162,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW JN2 JN3 JN3P JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -190,6 +193,12 @@ TITLE[KH]="a narrowed read verifies against a salted root: covered entries open,
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
 TITLE[JMKT]="the sealed market: bids commit, reveals open, the runner settles on revealed bids"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
+TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole, leave (renounce), kick, a realm"
+TITLE[J14]="Hermes as librarian: summon with a budget, links and a digest, asks answered from history, a no-grant edit, out of budget, topup, a restart, dismiss returns the rest"
+TITLE[J15]="a story: the author seals a table; two players play it under the law it generates, a GM narrates"
+TITLE[J17]="a week in the place: credit, pay, the concierge, the window expires outside-validity, renewal, conservation"
+TITLE[KTPL]="room templates: a room born with a map (index, wall, notes) from a file of shell lines"
+TITLE[JPRIV1]="a private room: the operator stores and serves ciphertext; a kick rotates the key"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
 TITLE[JN3P]="a pinned program: one run claim admitted at two heights (own Store)"
@@ -223,11 +232,15 @@ TITLE[JJOB]="the job floor: a Nock job posted, run, checked by re-execution, set
 TITLE[JJOBM]="a job's money: escrow, bond, payout and slash as Book turns (own Store)"
 TITLE[KCL]="K-FIELD-CLOSURE: an undeclared field is refused by name; an open cell admits it"
 TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
+TITLE[JCHAT]="friends talk in a room: say, tail, topic, pin, react, the Discord bridge"
+TITLE[JINSPECT]="inspect views: cap tree, law, why, turn, receipt; nothing committed (own Store)"
+TITLE[JLS]="law-sat: an unsatisfiable law is caught at install; can --any's write is admitted (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
 TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
+TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -769,7 +782,7 @@ step_J7() {
 step_J8() {
   local A=$SPONSOR_WS/attempts/lockout NA=$NEWCOMER_WS/attempts/after-law-v2 root n=0 c
   ARTIFACT=$SD/refusals.tsv; : >"$ARTIFACT"
-  call propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/deny-all.json" --proposal-id lockout \
+  call propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/deny-all.json" --proposal-id lockout --allow-unsatisfiable true \
     || fail "deny-all propose failed" || return
   call submit "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/lockout/intent.json" --attempt "$A" \
     || fail "deny-all install refused: $(tail -1 "$SD/submit.err")" || return
@@ -878,6 +891,7 @@ step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
 step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
+step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_KCH() { hook jchan-epoch "CH-EPOCH rows: e0 e1 e2 admitted; a gap, an out-of-order record, E-1 roots and a non-sequencer refused by name; a wrong-length opening refused maskLength; tail in order; cold audit (lane ch-epoch)"; }
 step_KCHC() { hook jchan-client "CH-CLIENT-1 rows: alice -> bob delivered byte-exact in order (one message over 3 cells), carol opens nothing; 887 B down and 256 B up per (tick, slot) in every run; the (tick, slot, size) logs of runs with different traffic diff to 0 lines; with carol killed only her slot differs at the relay; a dropped cell is re-sent by its sender own-slot check; every record checked; cold audit (lane ch-client)"; }
@@ -887,6 +901,12 @@ step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write,
 step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves only the root and one leaf, restart and audit replay (lane k-narrow-hide)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) tuples through mini shell; nothing sealed is on the Store or in a signed read before the close, a public price is; the right opening installs, a wrong, partial, replayed or repeated opening and every out-of-phase write are refused by name; the runner settles on revealed bids only (lane sealed-market; supersedes KHQ)" shell; }
+step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a leave renounces the member grant and takes the attenuated invite with it (notHolder for a stranger, alreadyRevoked twice, exact retry replays, re-invite is a new grant), a kick still works, a realm refuses fake wells, restart and audit (lanes k-room-3c, k-renounce)" shell; }
+step_KTPL() { hook jtemplates "P-DOC-TEMPLATES rows: room new --template workroom births lab/index (only the founder writes the map), lab/wall (a stream), lab/notes, lab/tasks with the map's links; the same file piped into mini shell by hand births the same shape; a member reads the map and is refused editing it by its clause while writing notes; a bad template stops at its line; social welcomes a member with their own stream; story; restart and audit (lane p-templates)" shell; }
+step_J14() { hook j14 "P-HERMES-ROOM rows: A summons Hermes into lab as librarian with budget 100; B creates two docs and says three things; Hermes links both from lab-index and writes a digest; asks are answered in its stream from the signed history; its edit of a doc it holds no grant on is refused no-grant; each turn pays the tariff; out of budget refuses bookRefused and Hermes says so; topup resumes; a kill mid-write resolves by exact lookup and a kill after send is never resent; dismiss revokes and returns the remainder; the budget account conserves; cold audit (lane p-hermes-room; needs GRAIN_RUNTIME, TEST_PROVIDER)" shell; }
+step_J15() { hook j15 "P-STORY rows: story new tale --from tale births the room and the table; the author edits before the seal and is refused after it (sealed); players join a sealed story only; legal moves admitted; a skip, a rewind, an absent take, a second take, a conditional exit without the key refused naming the table's clause; one player cannot move another's cell; the author can neither move nor re-law a player's cell; the GM narrates, a player is refused; the Host-decoded law on a cell is law.player.json; restart mid-story keeps each place; both reach an end; cold audits (lane p-story)" shell; }
+step_J17() { hook j17 "P-CREDIT rows: B with 0 credit is refused bookRefused; the sponsor credits 1000; pay lab week lands on the till ledger; the concierge delegates member under lab with notAfter = h + period and journals the entry; B writes; restart; past notAfter B is refused outside-validity; B pays again and writes; an underpayment issues nothing; a free room issues on request; balances conserve; cold audit (lane p-credit; needs GRAIN_RUNTIME)" shell; }
+step_JPRIV1() { hook jpriv1 "J-PRIV-1 rows: a private room founded and keyed, a member invited by its encryption key, sealed lines read by members, the operator's signed view and the Store bytes hold no plaintext while a public control line is found, an outsider refused, the keys law refuses a member's wrap, a kick rotates and rewraps (the kicked member keeps the past and opens nothing new), --past, forget, a hosted invitee refused without --i-know, restart and audit (lane priv-rooms)" shell; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -908,8 +928,11 @@ step_JJOB() { hook jjob "J-JOB: one friend posts a Nock job in a room, another f
 step_JJOBM() { hook jjob-money "J-JOB-MONEY: fund, claim and settle as conservation-checked Book turns; refusals named by the operator explanation"; }
 step_KCL() { hook jclosure "a write creating a field its cell did not declare is refused by name (undeclaredField N) before the law runs, on a sealed board, a plain cell and a cell that declared nothing; an open cell admits it (lane K-FIELD-CLOSURE)"; }
 step_J12A() { hook j12a "affordances-journey.sh: can NAME lists the verbs my grants cover, each prepared and dry-run (Host op 130) with the clause on a law refusal; root, height and audit unchanged around every can (lane p-affordances, J12A)" shell; }
+step_JINSPECT() { hook jinspect "inspect-journey.sh: the cap tree draws the delegation as a narrowing edge, law prints and round-trips the installed law, why names the clause + slots + the passing value (undisclosed: the dry run), turn lists the footprint and commits nothing (lane k-inspect, JINSPECT)" shell; }
+step_JLS() { hook jlawsat "lawsat-journey.sh: the EVAL falsifier is UNSATISFIABLE with its two-constraint cycle named and refused at install; each can --any witness, submitted as a write, is admitted; sealed, read-only, ran and past-the-cap laws answered; root, height and audit unchanged around every query (lane c-sat2, JLS)" shell; }
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
+step_JROT() { hook jrot "a thief holding the daily key cannot rotate (notPrecommitted, noPossession); the friend rotates with the committed next key; the old key's write is refused; grants survive; a second rotation; a --no-prerotation subject cannot rotate; restart; audit re-admits (lane k-prerotate)"; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
@@ -928,7 +951,7 @@ run_step G J4
 run_step J7 J4
 run_step J8 J7
 run_step K4 J2
-run_step KC J2
+run_step KC J4
 run_step KT J0
 run_step JJ J2
 run_step K10 J5
@@ -942,6 +965,12 @@ run_step KH J5
 run_step K12C J5
 run_step JMKT J4
 run_step KW J5
+run_step K10C J5
+run_step KTPL J5
+run_step J15 J5
+run_step J17 J5
+run_step J14 J5
+run_step JPRIV1 J5
 run_step JN2 J0
 run_step JN3 J0
 run_step JN3P J0
@@ -962,6 +991,9 @@ run_step JJOB J0
 run_step JJOBM J0
 run_step KCL J1
 run_step J12A J0
+run_step JCHAT J0
+run_step JINSPECT J0
+run_step JLS J0
 run_step JPAY1 J0
 run_step JPAY2 J0
 run_step JPAY3 J0
@@ -971,6 +1003,7 @@ run_step JPAYE3 J0
 run_step JPAY4 J0
 run_step JPAY6 J0
 run_step JP2 J0
+run_step JROT J1
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 journey_shortdir_return

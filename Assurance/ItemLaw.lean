@@ -25,7 +25,7 @@ namespace Minidregg.Assurance.ItemLaw
 
 open Minidregg.Pred (Pred State eval)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName get)
-open Minidregg.Assurance.SheetLaw (Accepted stepsOf final)
+open Minidregg.Kernel.LawHistory (Accepted stepsOf final)
 open Minidregg.Kernel.LawView (ev_eq ev_le ev_memberOf ev_eqSlots ev_not ev_all ev_any Turn view admits get_before get_after get_verb get_subject find_none state_get scalarSlots_split mem_deltas mem_pairs mem_joint request_ne_field clock_ne_field joint_ne_field ne_of_lastc lastc_before lastc_after lastc_delta pairName_ne_fieldName fieldName_inj get_delta)
 set_option autoImplicit false
 
@@ -296,7 +296,7 @@ theorem kernel_holder_or_referee (p : Params)
       (x = p.REF ∧ (step prepared tuple incidence).newState.get "resource/field/2/delta" = some 0 ∧
         (step prepared tuple incidence).newState.get "resource/field/3/delta" = some 0 ∧
         (step prepared tuple incidence).newState.get "resource/field/4/delta" = some 0) := by
-  obtain ⟨committed, resolved, holds⟩ := SheetLaw.checked_leg_policy_eval leg
+  obtain ⟨committed, resolved, holds⟩ := Minidregg.Kernel.LawHistory.checked_leg_policy_eval leg
   rw [installed committed resolved] at holds
   exact holder_or_referee p _ _ x holds verb subject
 

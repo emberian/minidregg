@@ -101,7 +101,8 @@ cat >"$EVIDENCE/genesis.json" <<EOF
       "subject": "7",
       "publicKey": "$PUBLIC_KEY",
       "activeFrom": "0",
-      "activeUntil": "1000000"
+      "activeUntil": "1000000",
+      "nextKeyDigest": null
     },
     "accountId": "7",
     "spendCapabilityId": "41",

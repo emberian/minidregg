@@ -1,0 +1,24 @@
+# social: a map (index), a wall the room talks on, an intro the room writes, and a stream per member (room welcome)
+#
+# The same shape as every room template: the lines you would type, run in
+# order as you with $ROOM and $ME bound (room template show workroom says
+# more). Members arrive with `room welcome $ROOM SUBJECT --template social`,
+# which runs member.shell: their invite and a stream only they may write.
+
+room new $ROOM --law open
+
+# The map: everyone reads it, only you write it, and it only grows.
+doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]' --in $ROOM
+
+# The room talking: a stream any member who may append speaks on.
+create $ROOM/wall stream open --in $ROOM
+
+# Who we are: a draft anyone holding write in the room edits.
+doc new $ROOM/intro draft --in $ROOM
+
+doc append $ROOM-map $ROOM/index 'social room $ROOM: wall is the room talking, intro is who we are, and each member speaks in their own stream'
+submit $ROOM-map
+doc link $ROOM-map-wall $ROOM/index $ROOM/wall
+submit $ROOM-map-wall
+doc link $ROOM-map-intro $ROOM/index $ROOM/intro
+submit $ROOM-map-intro

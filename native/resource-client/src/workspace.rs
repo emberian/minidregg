@@ -21,15 +21,28 @@ const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
 const MAX_PROGRAM_SOURCE: u64 = 4 * 1024 * 1024;
 
-/// Client-side private-cell codec (`PrivateEnvelope/v1`); hooked into `propose`
-/// and `read` by `--private ROOM`. See `docs/PRIVATE-CELL.md`.
+/// Client-side private-cell codec (`PrivateEnvelope/v2`); hooked into `propose`,
+/// `read` and `tail` by `--private ROOM` (or a reference born in a private room).
+/// See `docs/PRIVATE-CELL.md`.
 #[path = "private.rs"]
 pub(crate) mod private;
+/// The room-key protocol of a private room: wraps in the room's keys cell,
+/// rotation on a kick, the cache sync, sealing stream entries.
+#[path = "roomkey.rs"]
+pub(crate) mod roomkey;
 
 /// `can [NAME] [--all]` (P-AFFORDANCES): the verbs my grants cover, each
 /// prepared and dry-run against the current state, never submitted.
 #[path = "can.rs"]
 mod can;
+
+/// `inspect caps|law|receipt|turn`, `why` (K-INSPECT-VIEWS): Lean renderers
+/// over bytes this workspace holds or reads with its own signed views.
+#[path = "inspect_views.rs"]
+mod inspect_views;
+/// `law check`, the install-time check and `can --any` (C-SAT-2, Host op 150).
+#[path = "lawsat.rs"]
+mod lawsat;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
@@ -104,6 +117,29 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
         return Err("workspace name must contain 1..64 ASCII letters, digits or hyphens".into());
     }
     Ok(())
+}
+
+/// A reference name: one segment (`lab`) or a path of segments under a room
+/// (`lab/index`), each segment a `validate_name` word, at most 128 bytes in
+/// all. The name is the friend's own local handle; nothing on the wire carries
+/// it, and the Host never sees it.
+pub(crate) fn validate_ref_name(value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > 128 || value.split('/').any(|segment| validate_name(segment).is_err()) {
+        return Err("a reference name is 1..128 bytes of segments separated by '/', each 1..64 ASCII letters, digits or hyphens".into());
+    }
+    Ok(())
+}
+
+/// The file stem that holds a reference name (`lab/index` -> `lab.index`).
+/// A segment never contains '.', so the spelling is reversible
+/// (`ref_name_of_file`) and every per-name file stays one flat directory entry.
+pub(crate) fn ref_file(name: &str) -> String {
+    name.replace('/', ".")
+}
+
+/// The reference name a `ref_file` stem spells.
+pub(crate) fn ref_name_of_file(stem: &str) -> String {
+    stem.replace('.', "/")
 }
 
 pub(crate) fn private_dir(path: &Path) -> Result<()> {
@@ -201,6 +237,25 @@ pub(crate) fn workspace_host(value: &Value) -> Result<PathBuf> {
             Ok(PathBuf::new())
         }
         _ => member_path(value, "host"),
+    }
+}
+
+/// The identifier namespace this workspace reserves fresh IDs in: the shared
+/// root it was initialized with (`--namespace-root`), or else its own private
+/// `ROOT/namespace`. Reservations are random 63-bit draws and the Host refuses
+/// a collision, so a workspace without a shared root (a newcomer initialized
+/// from its enrollment alone) can still create and re-delegate.
+pub(crate) fn namespace_root(root: &Path, workspace: &Value) -> Result<PathBuf> {
+    match workspace.get("namespaceRoot") {
+        Some(Value::String(_)) => member_path(workspace, "namespaceRoot"),
+        Some(Value::Null) | None => {
+            let own = root.join("namespace");
+            if !own.exists() {
+                make_private_dir(&own)?;
+            }
+            Ok(own)
+        }
+        Some(_) => Err("workspace namespaceRoot is not a path".into()),
     }
 }
 
@@ -405,8 +460,8 @@ pub(crate) fn init(
 }
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
-    validate_name(name)?;
-    let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
+    validate_ref_name(name)?;
+    let value = bounded_json(&root.join("refs").join(format!("{}.json", ref_file(name))))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
         || member(&value, "name")? != name
     {
@@ -438,6 +493,9 @@ pub(crate) struct ImportInput<'a> {
     pub(crate) operation: Option<&'a str>,
     pub(crate) control: Option<&'a str>,
     pub(crate) provenance: Option<&'a Path>,
+    /// The reference is a room: an imported room invite, or a room this
+    /// workspace founded (`room new`). Discovery only; the Host decides.
+    pub(crate) room: Option<&'a str>,
 }
 
 pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
@@ -449,8 +507,9 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
         operation,
         control,
         provenance,
+        room,
     } = input;
-    validate_name(name_value)?;
+    validate_ref_name(name_value)?;
     if !matches!(kind, "object" | "account" | "program") {
         return Err("resource kind must be object, account or program".into());
     }
@@ -463,14 +522,17 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
         decimal(control, "control capability")?;
     }
     let provenance = provenance.map(bounded_json).transpose()?;
-    let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
+    let mut value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
         "kind":kind,"target":target,"observeCapability":observe,
         "operationCapability":operation.unwrap_or(observe),"controlCapability":control,
         "provenance":provenance,"authority":"hint-only"});
+    if let Some(room) = room {
+        value["room"] = json!(room);
+    }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(
-        &root.join("refs").join(format!("{name_value}.json")),
+        &root.join("refs").join(format!("{}.json", ref_file(name_value))),
         &bytes,
     )?;
     println!("{name_value}");
@@ -505,8 +567,15 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
             operation: Some(member(&value, "capability")?),
             control: None,
             provenance: Some(source),
+            room: (value.get("room") == Some(&json!(true))).then_some("member"),
         },
-    )
+    )?;
+    if let Some(private) = value.get("private") {
+        let mut imported = reference(root, name)?;
+        imported["private"] = private.clone();
+        roomkey::rewrite_reference(root, name, &imported)?;
+    }
+    Ok(())
 }
 
 fn list(root: &Path) -> Result<()> {
@@ -520,7 +589,7 @@ fn list(root: &Path) -> Result<()> {
         let Some(stem) = file.strip_suffix(".json") else {
             return Err("unknown file in references".into());
         };
-        values.push(reference(root, stem)?);
+        values.push(reference(root, &ref_name_of_file(stem))?);
     }
     values.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     println!(
@@ -566,7 +635,7 @@ fn judged_at(attempt: &Path) -> Result<Value> {
         "clock": challenge.get("clock")}))
 }
 
-fn read(
+pub(crate) fn read(
     root: &Path,
     workspace: &Value,
     resource_name: &str,
@@ -881,22 +950,10 @@ fn stream_append(payload: &Value) -> Result<Value> {
         "payload":to_hex(&text),"to":to,"ref":reference}))
 }
 
-/// The room named by a workspace reference, and its latest key from the cache.
-fn private_room(root: &Path, room: &str) -> Result<(String, private::RoomKey)> {
-    let room_id = member(&reference(root, room)?, "target")?.to_owned();
-    let keys = private::workspace_keys(root)?
-        .ok_or("--private needs the key cache: set MINI_KEYCACHE_PASSPHRASE")?;
-    let key = keys
-        .latest(&room_id)
-        .ok_or_else(|| format!("no room key for {room} in the key cache"))?;
-    Ok((room_id, key))
-}
-
 fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str) -> Result<()> {
-    let room_id = member(&reference(root, room)?, "target")?.to_owned();
+    let (room_id, keys) = roomkey::reader_keys(root, workspace, room)?;
     let reference = reference(root, resource_name)?;
     let (mut view, _, _) = signed_view(root, workspace, &reference, "resource")?;
-    let keys = private::workspace_keys(root)?;
     let count = private::open_view(
         &mut view,
         &room_id,
@@ -909,6 +966,14 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
         serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+/// The private room a target is sealed under: the proposal's `--private ROOM`,
+/// or the room its reference was born in (`sealedIn`).
+fn sealing_room(explicit: Option<&str>, reference: &Value) -> Option<String> {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| reference.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
 }
 
 pub(crate) fn propose(
@@ -942,15 +1007,15 @@ fn propose_summary(
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
         return Err("unknown workspace proposal version".into());
     }
-    let sealing = match private_room_name {
-        Some(_) if member(&request, "action")? != "invoke" => {
-            return Err("--private applies to invoke proposals only".into())
-        }
-        Some(room) => Some(private_room(root, room)?),
-        None => None,
-    };
+    if private_room_name.is_some() && member(&request, "action")? != "invoke" {
+        return Err("--private applies to invoke proposals only".into());
+    }
+    // One sync per private room this proposal seals under.
+    let mut room_keys: std::collections::BTreeMap<String, (String, private::RoomKey)> =
+        std::collections::BTreeMap::new();
     let nonce = random_nonce()?;
     let mut delegation = None::<Value>;
+    let mut renounce = None::<Value>;
     let intent = match member(&request, "action")? {
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
@@ -1021,11 +1086,39 @@ fn propose_summary(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                let lowered = if member(payload, "type")? == "append" {
-                    if sealing.is_some() {
-                        return Err("--private seals content payloads only".into());
+                let sealing = match sealing_room(private_room_name, &reference) {
+                    None => None,
+                    Some(room) => {
+                        if !room_keys.contains_key(&room) {
+                            let key = roomkey::current_key(root, workspace, &room)?;
+                            room_keys.insert(room.clone(), key);
+                        }
+                        let (room_id, key) = room_keys.get(&room).expect("inserted");
+                        Some((room_id.as_str(), key))
                     }
-                    stream_append(payload)?
+                };
+                let lowered = if member(payload, "type")? == "append" {
+                    let mut lowered = stream_append(payload)?;
+                    if let Some((room, key)) = &sealing {
+                        // The topic is a kernel field the operator reads: a sealed
+                        // entry carries none (put it inside the sealed text).
+                        if !member(&lowered, "topic")?.is_empty() {
+                            return Err("a topic is plaintext the operator reads: a sealed append has an empty topic".into());
+                        }
+                        let sequence = view
+                            .get("cell")
+                            .and_then(|page| page.get("nextSeq"))
+                            .and_then(Value::as_str)
+                            .ok_or("signed stream view lacks nextSeq")?;
+                        field_decimal(sequence, "stream nextSeq")?;
+                        // Seal the normalized bytes so binary append proposals retain
+                        // the same room privacy as text proposals.
+                        let plain = zeroize::Zeroizing::new(unhex(member(&lowered, "payload")?)?);
+                        lowered["payload"] = json!(hex(&roomkey::seal_for_room(
+                            key, room, target, sequence, &plain
+                        )?));
+                    }
+                    lowered
                 } else {
                     if payload_obj.len() != 2
                         || !payload_obj.contains_key("type")
@@ -1047,8 +1140,20 @@ fn propose_summary(
                                 member(&challenge, "height")?, &payload["actions"])?,
                             false,
                         )?,
-                        ("scalar" | "document", Some(_)) => {
-                            return Err("--private seals content payloads only".into())
+                        // A doc in a private room: an append is sealed; an edit or
+                        // a link would carry plaintext and refuses.
+                        ("document", Some((room, key))) => private::seal_content(
+                            content_actions(
+                                &document_actions(root, workspace, local_name, &view, fresh,
+                                    member(&challenge, "height")?, &payload["actions"])?,
+                                true,
+                            )?,
+                            room,
+                            target,
+                            key,
+                        )?,
+                        ("scalar", Some(_)) => {
+                            return Err("--private seals content and stream payloads only".into())
                         }
                         _ => return Err("unsupported workspace payload type".into()),
                     }
@@ -1119,7 +1224,10 @@ fn propose_summary(
             // Optional K-FIELDS narrowing: `"fields": ["1","annotations",...]`
             // (absent = the parent's fields) and `"maxDelta": [{"field":"7","max":"50"}]`
             // (absent = the parent's bounds). The Host decides narrowing.
-            let optional_keys = ["room", "fields", "maxDelta"]
+            // Optional `"notAfter": H`: the child's window ends at height H
+            // (absent = the parent's end); a concierge issues a member's week
+            // this way, and the Host's `Admissible.validUntil` enforces it.
+            let optional_keys = ["room", "fields", "maxDelta", "notAfter"]
                 .iter()
                 .filter(|key| obj.contains_key(**key))
                 .count();
@@ -1222,6 +1330,20 @@ fn propose_summary(
             if !decimal_leq(child_before, parent_after) {
                 return Err("parent capability is outside its effective lifetime".into());
             }
+            let child_after = match obj.get("notAfter") {
+                None => parent_after,
+                Some(Value::String(requested)) => {
+                    field_decimal(requested, "delegation notAfter")?;
+                    if !decimal_leq(requested, parent_after) {
+                        return Err("delegation notAfter exceeds the parent's window".into());
+                    }
+                    if !decimal_leq(child_before, requested) {
+                        return Err("delegation notAfter is already past (below the current height)".into());
+                    }
+                    requested.as_str()
+                }
+                Some(_) => return Err("delegation notAfter must be a decimal string".into()),
+            };
             let mut ancestors = head
                 .get("ancestors")
                 .and_then(Value::as_array)
@@ -1233,7 +1355,7 @@ fn propose_summary(
             {
                 ancestors.push(json!(parent_id));
             }
-            let namespace = member_path(workspace, "namespaceRoot")?;
+            let namespace = namespace_root(root, workspace)?;
             let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
                 "subject":member(workspace,"subject")?}))
             .map_err(|error| error.to_string())?;
@@ -1261,7 +1383,7 @@ fn propose_summary(
             let mut child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
                 "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
                 "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
-                "notBefore":child_before,"notAfter":parent_after,
+                "notBefore":child_before,"notAfter":child_after,
                 "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
                 "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
                 "channels":head.get("channels").ok_or("parent capability lacks channels")?});
@@ -1328,9 +1450,56 @@ fn propose_summary(
                 "grants":[{"kind":kind,"target":target,
                     "capability":member(&reference,"observeCapability")?}]})
         }
+        "renounce" => {
+            // K-RENOUNCE: the holder revokes a capability it holds. Named by a
+            // reference (its operation capability) or by number with its kind.
+            // `leave: true` (the shell's `room leave`) requires the reference
+            // to be a room this workspace joined, not one it founded.
+            let obj = request.as_object().ok_or("proposal must be an object")?;
+            let leave = obj.get("leave") == Some(&json!(true));
+            let extra = usize::from(obj.contains_key("leave"));
+            let (kind, capability) = if obj.len() == 3 + extra && obj.contains_key("name") {
+                let name = member(&request, "name")?;
+                let reference = reference(root, name)?;
+                if leave && reference.get("room").and_then(Value::as_str) != Some("member") {
+                    return Err(format!(
+                        "{name} is not a room you joined (leaving one you founded would renounce your owner grant; use renounce explicitly)"
+                    ));
+                }
+                (
+                    member(&reference, "kind")?.to_owned(),
+                    member(&reference, "operationCapability")?.to_owned(),
+                )
+            } else if !leave
+                && obj.len() == 4
+                && obj.contains_key("capability")
+                && obj.contains_key("kind")
+            {
+                let capability = member(&request, "capability")?;
+                decimal(capability, "renounced capability")?;
+                let kind = member(&request, "kind")?;
+                if !matches!(kind, "object" | "account" | "program") {
+                    return Err("renounce kind must be object, account or program".into());
+                }
+                (kind.to_owned(), capability.to_owned())
+            } else {
+                return Err(
+                    "renounce proposal may contain only type, action, and name [leave] or capability and kind"
+                        .into(),
+                );
+            };
+            renounce = Some(json!({"capability":capability,"kind":kind,
+                "alsoEnds":delegations_from(root, &capability)}));
+            json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+                "purpose":{"type":"prepare","draft":{"type":"renounce-source",
+                    "command":{"subject":member(workspace,"subject")?,"nonce":random_nonce()?,
+                        "kind":kind,"capability":capability}}},
+                "grants":[]})
+        }
         _ => {
             return Err(
-                "proposal action must be invoke, install-policy, delegate, or revoke".into(),
+                "proposal action must be invoke, install-policy, delegate, revoke, or renounce"
+                    .into(),
             )
         }
     };
@@ -1353,7 +1522,7 @@ fn propose_summary(
     let summary = json!({"type":"minidregg-workspace-proposal-result-v1",
         "proposalId":proposal_id,"intentPath":proposal_dir.join("intent.json"),
         "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission",
-        "delegation":delegation});
+        "delegation":delegation,"renounce":renounce});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     private_file(&proposal_dir.join("proposal.json"), &bytes)?;
     Ok(summary)
@@ -1395,7 +1564,83 @@ pub(crate) fn submit_intent(
         &member_path(workspace, "key")?,
         &attempt,
         prepare_only,
-    )
+    )?;
+    if !prepare_only {
+        renounce_note(&source);
+    }
+    Ok(())
+}
+
+/// The grants this workspace delegated from `capability`, transitively, as
+/// its retained proposals record them: `[{capability, recipient, proposal}]`.
+/// They end with it (the Host's lineage rule); this is discovery only.
+fn delegations_from(root: &Path, capability: &str) -> Vec<Value> {
+    let mut records = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("proposals")) {
+        for entry in entries.flatten() {
+            let Ok(intent) = bounded_json(&entry.path().join("intent.json")) else {
+                continue;
+            };
+            let command = &intent["purpose"]["draft"]["command"];
+            if intent["purpose"]["draft"]["type"] != json!("delegate-source") {
+                continue;
+            }
+            if let (Some(parent), Some(child)) = (
+                command["parentId"].as_str(),
+                command["child"]["id"].as_str(),
+            ) {
+                let recipient = command["child"]["holder"]["subject"].clone();
+                let proposal = entry.file_name().to_string_lossy().into_owned();
+                records.push((parent.to_owned(), child.to_owned(), recipient, proposal));
+            }
+        }
+    }
+    let mut ended = Vec::new();
+    let mut frontier = vec![capability.to_owned()];
+    while let Some(parent) = frontier.pop() {
+        for (from, child, recipient, proposal) in &records {
+            if from == &parent && !ended.iter().any(|v: &Value| v["capability"] == json!(child)) {
+                ended.push(json!({"capability":child,"recipient":recipient,"proposal":proposal}));
+                frontier.push(child.clone());
+            }
+        }
+    }
+    ended
+}
+
+/// After an admitted renounce proposal: say what was renounced and what
+/// ended with it.
+fn renounce_note(source: &Path) {
+    let Some(dir) = source.parent() else { return };
+    if source.file_name() != Some(OsStr::new("intent.json")) {
+        return;
+    }
+    let Ok(summary) = bounded_json(&dir.join("proposal.json")) else {
+        return;
+    };
+    let Some(renounced) = summary.get("renounce").filter(|value| value.is_object()) else {
+        return;
+    };
+    let ended: Vec<String> = renounced["alsoEnds"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .map(|v| {
+                    format!(
+                        "{} (delegated to {})",
+                        v["capability"].as_str().unwrap_or("?"),
+                        v["recipient"].as_str().unwrap_or("?")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    eprintln!(
+        "renounced capability {} ({}); ended with it: {}",
+        renounced["capability"].as_str().unwrap_or("?"),
+        renounced["kind"].as_str().unwrap_or("?"),
+        if ended.is_empty() { "nothing this workspace delegated".to_owned() } else { ended.join(", ") }
+    );
 }
 
 fn bind_delegation_attempt(
@@ -1435,7 +1680,7 @@ fn bind_delegation_attempt(
     let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
         "subject":member(workspace,"subject")?}))
     .map_err(|error| error.to_string())?;
-    let namespace = member_path(workspace, "namespaceRoot")?;
+    let namespace = namespace_root(root, workspace)?;
     let reservation = participant_namespace::reserve(
         &namespace,
         member(delegation, "domain")?,
@@ -1468,7 +1713,7 @@ fn bind_delegation_attempt(
     Ok(())
 }
 
-fn recover(root: &Path, attempt: &Path) -> Result<()> {
+pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
     let attempt = absolute(attempt)?;
     let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     let candidate = fs::canonicalize(&attempt).map_err(|error| error.to_string())?;
@@ -1503,7 +1748,7 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
     Ok(None)
 }
 
-fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
+pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
     validate_name(proposal_id)?;
     let proposal_dir = root.join("proposals").join(proposal_id);
     private_dir(&proposal_dir)?;
@@ -1545,12 +1790,23 @@ fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<
     retry(&attempt, "lookup", false)?;
     let receipt = accepted_outcome(&attempt)?
         .ok_or("delegation historical lookup did not confirm admission")?;
-    let value = json!({"type":"minidregg-delegated-reference-v1",
+    let mut value = json!({"type":"minidregg-delegated-reference-v1",
         "recipient":member(delegation,"recipient")?,"kind":member(delegation,"kind")?,
         "target":member(delegation,"target")?,
         "capability":member(delegation,"childCapability")?,
         "receipt":receipt,"proposalSha256":member(&summary,"intentSha256")?,
         "authority":"hint-only"});
+    // A room invite (the child is `under` the target): the recipient's
+    // reference says so, and `room list` shows it.
+    if child.get("room").is_some() {
+        value["room"] = json!(true);
+        // A private room's invite tells the invitee where the wraps are.
+        if let Ok(room) = reference(root, member(delegation, "name")?) {
+            if let Some(private) = room.get("private") {
+                value["private"] = private.clone();
+            }
+        }
+    }
     let path = proposal_dir.join("recipient-reference.json");
     if path.exists() {
         if bounded_json(&path)? != value {
@@ -1573,6 +1829,7 @@ fn complete_birth(
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
     program_cell: Option<&str>,
+    room_template: Option<&str>,
 ) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
@@ -1595,7 +1852,7 @@ fn complete_birth(
     {
         return Err("birth source no longer matches durable namespace reservation".into());
     }
-    let reference_path = root.join("refs").join(format!("{name_value}.json"));
+    let reference_path = root.join("refs").join(format!("{}.json", ref_file(name_value)));
     if reference_path.exists() {
         let prior = reference(root, name_value)?;
         if member(&prior, "target")? == target && member(&prior, "observeCapability")? == owner {
@@ -1603,11 +1860,14 @@ fn complete_birth(
         }
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
-    let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
+    let mut value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
         "kind":kind,"target":target,"observeCapability":owner,
         "operationCapability":owner,"controlCapability":control,
         "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
             "reservationRecord":reservation.record_path},"authority":"hint-only"});
+    if let Some(template) = room_template {
+        value["room"] = json!(template);
+    }
     private_file(
         &reference_path,
         &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
@@ -1780,11 +2040,23 @@ fn birth(
     name_value: &str,
     shape: &BirthShape<'_>,
 ) -> Result<(Value, Value, participant_namespace::Reservation)> {
-    validate_name(name_value)?;
+    validate_ref_name(name_value)?;
     // `--in ROOM`: the new resource is born in the room a workspace reference
     // names. The Host refuses a room that is not a present resource cell.
+    // The creator's placing capability is the room reference's operation
+    // capability (its observe capability when it holds no other): the Host's
+    // birth gate requires it to cover the room with `place` (or `mutate`), held
+    // by the creator, and the room's law to accept the placement.
     let room = match shape.room {
-        Some(room_name) => Some(member(&reference(root, room_name)?, "target")?.to_string()),
+        Some(room_name) => {
+            let room_ref = reference(root, room_name)?;
+            let placement = room_ref
+                .get("operationCapability")
+                .and_then(Value::as_str)
+                .map_or_else(|| member(&room_ref, "observeCapability"), Ok)?
+                .to_string();
+            Some((member(&room_ref, "target")?.to_string(), placement))
+        }
         None => None,
     };
     if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
@@ -1807,20 +2079,21 @@ fn birth(
         _ => {}
     }
     let context_path = member_path(workspace, "birthContext")?;
-    let namespace_root = member_path(workspace, "namespaceRoot")?;
+    let namespace_root = namespace_root(root, workspace)?;
     let context = bounded_json(&context_path)?;
     if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
         return Err("unknown birth context version".into());
     }
     let request_path = root
         .join("sources")
-        .join(format!("create-{name_value}.request.json"));
+        .join(format!("create-{}.request.json", ref_file(name_value)));
     let mut requested_core = json!({"type":"minidregg-workspace-create-request-v2",
         "name":name_value,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
         "funding":shape.funding,"predicate":shape.predicate,"context":context,
         "subject":member(workspace,"subject")?});
-    if let Some(room) = &room {
+    if let Some((room, placement)) = &room {
         requested_core["room"] = json!(room);
+        requested_core["placement"] = json!(placement);
     }
     if let Some((hex, _)) = &program {
         requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
@@ -1912,7 +2185,7 @@ fn birth(
     };
     let source_path = root
         .join("sources")
-        .join(format!("create-{name_value}.json"));
+        .join(format!("create-{}.json", ref_file(name_value)));
     let nonce = member(&request, "nonce")?;
     let resource = match &program {
         Some((hex, _)) => json!({"kind":shape.kind,"storage":shape.storage,"program":hex,
@@ -1950,8 +2223,9 @@ fn birth(
                 "sourceCapabilities":source_capabilities,
                 "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
-    if let Some(room) = &room {
+    if let Some((room, placement)) = &room {
         expected_source["birth"]["resources"][0]["room"] = json!(room);
+        expected_source["birth"]["resources"][0]["placement"] = json!(placement);
     }
     let source = if source_path.exists() {
         let saved = bounded_json_limit(&source_path, MAX_PROGRAM_SOURCE)?;
@@ -1984,8 +2258,8 @@ fn birth(
         .ok_or("workspace create requires a pinned persistent Host socket")?;
     let authoring = root
         .join("sources")
-        .join(format!("create-{name_value}.authoring"));
-    let attempt = root.join("attempts").join(format!("create-{name_value}"));
+        .join(format!("create-{}.authoring", ref_file(name_value)));
+    let attempt = root.join("attempts").join(format!("create-{}", ref_file(name_value)));
     let host = workspace_host(workspace)?;
     let config = member_path(workspace, "config")?;
     let author_dir = if attempt.exists() {
@@ -2089,8 +2363,44 @@ pub(crate) fn create(
     program_path: Option<&Path>,
     fields: Option<&str>,
 ) -> Result<()> {
+    create_with_template(root, workspace, name_value, storage, predicate_path, room, kind,
+        owner, program_path, fields, None)
+}
+
+fn create_with_template(
+    root: &Path,
+    workspace: &Value,
+    name_value: &str,
+    storage: &str,
+    predicate_path: &Path,
+    room: Option<&str>,
+    kind: &str,
+    owner: Option<&str>,
+    program_path: Option<&Path>,
+    fields: Option<&str>,
+    room_template: Option<&str>,
+) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
     let fields = fields.map(parse_fields).transpose()?;
+    // A private room's key goes into the encrypted cache: refuse before the
+    // birth, not after it.
+    if room_template == Some("private") {
+        if std::env::var_os(private::KEYCACHE_PASSPHRASE_ENV).is_none() {
+            return Err(format!(
+                "a private room's keys live in this workspace's encrypted key cache: set {}",
+                private::KEYCACHE_PASSPHRASE_ENV
+            ));
+        }
+        roomkey::keys_name(name_value)?;
+    }
+    // A cell born in a private room is sealed under it by default.
+    let sealed_in = match room {
+        Some(parent) => reference(root, parent)?
+            .get("private")
+            .is_some()
+            .then(|| parent.to_owned()),
+        None => None,
+    };
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
     // canonical DREGG/PROGRAM/v1 record bytes and, when admissible, its cell id.
     let program = match program_path {
@@ -2129,7 +2439,16 @@ pub(crate) fn create(
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
-    complete_birth(root, name_value, &source, &receipt, &reservation, program_cell).map(|_| ())
+    let mut born =
+        complete_birth(root, name_value, &source, &receipt, &reservation, program_cell, room_template)?;
+    if let Some(parent) = sealed_in {
+        born["sealedIn"] = json!(parent);
+        roomkey::rewrite_reference(root, name_value, &born)?;
+    }
+    if room_template == Some("private") {
+        roomkey::found(root, workspace, name_value)?;
+    }
+    Ok(())
 }
 
 /// A declared account the sponsor births for another admitted subject, funded
@@ -2171,7 +2490,7 @@ pub(crate) fn create_funded_account(
     retain_or_compare(
         &root
             .join("sources")
-            .join(format!("create-{name_value}.handoff.json")),
+            .join(format!("create-{}.handoff.json", ref_file(name_value))),
         &value,
     )?;
     Ok(value)
@@ -2236,7 +2555,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
                 .get()
                 .ok_or("provisioning requires a pinned persistent Host socket")?,
             sponsor_key: &member_path(workspace, "key")?,
-            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            namespace_root: &namespace_root(root, workspace)?,
             domain: member(&context["genesis"], "domain")?,
             name: request.name,
             sponsor: member(workspace, "subject")?,
@@ -2310,7 +2629,7 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
                 .get()
                 .ok_or("provisioning requires a pinned persistent Host socket")?,
             sponsor_key: &member_path(workspace, "key")?,
-            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            namespace_root: &namespace_root(root, workspace)?,
             domain: member(&context["genesis"], "domain")?,
             name,
             sponsor: member(workspace, "subject")?,
@@ -2355,14 +2674,63 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
 /// `documentOf target`, the resource's own id, so it is not read from the cell.
 fn content_page<'a>(view: &'a Value, name: &str) -> Result<&'a Value> {
     let cell = view.get("cell").ok_or("signed resource view lacks cell")?;
+    match cell_storage(cell)? {
+        "content" => Ok(cell),
+        storage => Err(format!("{name} is not a document (its storage is {storage}, not content)")),
+    }
+}
+
+/// Which storage a signed resource view's cell is, read from the shape the
+/// Host spells it in (`Host/Json.lean` `resourceJson`): a stream cell carries
+/// `nextSeq`; a declared cell's entries are `key`/`value` fields; a content
+/// cell's entries are typed hyperdocument records. An empty stream has no
+/// entries, so `nextSeq` is what tells it from a document.
+fn cell_storage(cell: &Value) -> Result<&'static str> {
+    // A stream read shows its HEAD (nextSeq, count, tail, binding; no
+    // entries: they are their own cells, read with `tail`), FLEET-TOPIC-ON-STREAM.
+    if cell.get("nextSeq").is_some() || cell.get("head").is_some() {
+        return Ok("stream");
+    }
     let entries = cell
         .get("entries")
         .and_then(Value::as_array)
         .ok_or("signed resource view lacks cell entries")?;
-    if entries.iter().any(|entry| entry.get("type").is_none()) {
-        return Err(format!("{name} is not a document (its storage is not content)"));
+    if entries.iter().any(|entry| entry.get("key").is_some()) {
+        return Ok("declared");
     }
-    Ok(cell)
+    if entries.iter().any(|entry| entry.get("type").is_none()) {
+        return Ok("unknown");
+    }
+    Ok("content")
+}
+
+/// The URI scheme of a link from a document to a resource that is not a
+/// document (a stream, a declared cell). The hyperdocument's `LinkTarget` has
+/// no resource constructor, so such a link is `external mini:KIND/ID` with an
+/// empty authority (this node): the resource's kind and id, nothing else.
+const RESOURCE_LINK_SCHEME: &str = "mini";
+
+fn resource_link_target(kind: &str, target: &str) -> Value {
+    json!({"type":"external","scheme":crate::hex(RESOURCE_LINK_SCHEME.as_bytes()),
+        "authority":"","path":crate::hex(format!("{kind}/{target}").as_bytes())})
+}
+
+/// `(kind, id)` of a link target that names a resource on this node
+/// (`resource_link_target`), as the Host spells it back.
+fn resource_link_of(target: &Value) -> Option<(String, String)> {
+    if target.get("type").and_then(Value::as_str) != Some("external") {
+        return None;
+    }
+    let text = |key: &str| {
+        unhex(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+    };
+    if text("scheme")? != RESOURCE_LINK_SCHEME || !text("authority")?.is_empty() {
+        return None;
+    }
+    let path = text("path")?;
+    let (kind, id) = path.split_once('/')?;
+    (matches!(kind, "object" | "account" | "program") && decimal(id, "id").is_ok())
+        .then(|| (kind.to_owned(), id.to_owned()))
 }
 
 fn page_entries(page: &Value) -> Result<&Vec<Value>> {
@@ -2443,8 +2811,8 @@ fn atom_record(atom: &Value) -> Result<Value> {
 }
 
 fn seen_path(root: &Path, name: &str) -> Result<PathBuf> {
-    validate_name(name)?;
-    Ok(root.join("seen").join(format!("{name}.json")))
+    validate_ref_name(name)?;
+    Ok(root.join("seen").join(format!("{}.json", ref_file(name))))
 }
 
 /// Replace the retained "as I last read it" view of one document.
@@ -2455,7 +2823,7 @@ fn retain_seen(root: &Path, name: &str, view: &Value, challenge: &Value) -> Resu
     }
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
-    let staged = dir.join(format!(".{name}.{}", random_nonce()?));
+    let staged = dir.join(format!(".{}.{}", ref_file(name), random_nonce()?));
     let value = json!({"type":"minidregg-workspace-seen-document-v1","name":name,
         "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
         "view":view});
@@ -2540,12 +2908,20 @@ fn document_actions(
                 let to = member(action, "to")?;
                 let relation = member(action, "relation")?;
                 decimal(relation, "link relation")?;
+                // The link names what the target IS, read from a signed view
+                // of it now (which also shows this workspace may observe it):
+                // a document is a `document` target, any other resource a
+                // `mini:KIND/ID` link.
                 let target_ref = reference(root, to)?;
                 let (target_view, _, _) = signed_view(root, workspace, &target_ref, "resource")?;
-                content_page(&target_view, to)?;
+                let cell = target_view.get("cell").ok_or("signed resource view lacks cell")?;
+                let id = member(&target_ref, "target")?;
+                let target = match cell_storage(cell)? {
+                    "content" => json!({"type":"document","id":id}),
+                    _ => resource_link_target(member(&target_ref, "kind")?, id),
+                };
                 json!({"type":"link","link":random_nonce()?,"source":null,
-                    "target":{"type":"document","id":member(&target_ref,"target")?},
-                    "relation":relation})
+                    "target":target,"relation":relation})
             }
             _ => unreachable!("document action tags were checked"),
         });
@@ -2554,15 +2930,16 @@ fn document_actions(
 }
 
 /// The local reference names whose target is `document`, for rendering.
-fn names_for_target(root: &Path, document: &str) -> Vec<String> {
+pub(crate) fn names_for_target(root: &Path, document: &str) -> Vec<String> {
     let mut names = Vec::new();
     if let Ok(entries) = fs::read_dir(root.join("refs")) {
         for entry in entries.flatten() {
             let file = entry.file_name().to_string_lossy().into_owned();
             if let Some(stem) = file.strip_suffix(".json") {
-                if let Ok(value) = reference(root, stem) {
+                let name = ref_name_of_file(stem);
+                if let Ok(value) = reference(root, &name) {
                     if value.get("target").and_then(Value::as_str) == Some(document) {
-                        names.push(stem.to_owned());
+                        names.push(name);
                     }
                 }
             }
@@ -2588,6 +2965,14 @@ fn link_target_text(root: &Path, target: &Value) -> String {
         _ => None,
     }
     .and_then(Value::as_str);
+    if let Some((resource_kind, id)) = resource_link_of(target) {
+        let names = names_for_target(root, &id);
+        return if names.is_empty() {
+            format!("{resource_kind} {id}")
+        } else {
+            format!("{} ({resource_kind} {id})", names.join(","))
+        };
+    }
     match (kind, document) {
         (_, Some(document)) => {
             let names = names_for_target(root, document);
@@ -2671,12 +3056,12 @@ fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
 }
 
 /// Backlinks as a fold over the content pages this workspace can read now:
-/// every link entry, in any readable page, whose target is this document.
-/// A page the Host refuses to show contributes nothing and is named.
+/// every link entry, in any readable page, whose target is this resource (a
+/// document, or any other resource through its `mini:KIND/ID` link). A page
+/// the Host refuses to show contributes nothing and is named.
 fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
     let own = reference(root, name)?;
     let (view, challenge, _) = signed_view(root, workspace, &own, "resource")?;
-    content_page(&view, name)?;
     let document = member(&own, "target")?.to_owned();
     let mut names: Vec<String> = fs::read_dir(root.join("refs"))
         .map_err(|error| error.to_string())?
@@ -2686,12 +3071,16 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
                 .file_name()
                 .to_string_lossy()
                 .strip_suffix(".json")
-                .map(str::to_owned)
+                .map(ref_name_of_file)
         })
         .collect();
     names.sort();
     println!(
-        "# backlinks to {name} (document {document}) from the documents this workspace can read at height {}",
+        "# backlinks to {name} ({} {document}) from the documents this workspace can read at height {}",
+        match view.get("cell").map(cell_storage).transpose()? {
+            Some("content") => "document",
+            _ => member(&own, "kind")?,
+        },
         member(&challenge, "height")?
     );
     let mut found = 0usize;
@@ -2715,10 +3104,12 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
         };
         for entry in page_entries(page)? {
             let target = &entry["target"];
+            let resource = resource_link_of(target);
             let hit = entry.get("type").and_then(Value::as_str) == Some("link")
                 && match target.get("type").and_then(Value::as_str) {
                     Some("document") => target.get("id").and_then(Value::as_str),
                     Some("range") => target.get("document").and_then(Value::as_str),
+                    Some("external") => resource.as_ref().map(|(_, id)| id.as_str()),
                     _ => None,
                 } == Some(document.as_str());
             if hit {
@@ -2824,6 +3215,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     operation: operation.as_deref(),
                     control: control.as_deref(),
                     provenance: provenance.as_deref(),
+                    room: None,
                 },
             )
         }
@@ -2863,12 +3255,122 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 ephemeral,
             )
         }
+        // `who`: the room's members as the Host's who view lists them — the
+        // subjects holding a standing capability that covers the room — read
+        // with this workspace's own grant (so only a member may ask).
+        "who" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            read(&root, &workspace, &name, "who", None, false)
+        }
         "tail" => {
             let name = os_string(args.required("name")?, "reference name")?;
             let start = os_string(args.required("from")?, "tail start")?;
             let count = os_string(args.required("count")?, "tail count")?;
+            let room = args
+                .optional("private")
+                .map(|value| os_string(value, "private room"))
+                .transpose()?;
             args.finish()?;
-            read(&root, &workspace, &name, "tail", Some((&start, &count)), false)
+            let room = room.or_else(|| {
+                reference(&root, &name)
+                    .ok()
+                    .and_then(|r| r.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
+            });
+            match room {
+                Some(room) => roomkey::tail(&root, &workspace, &name, &start, &count, &room),
+                None => read(&root, &workspace, &name, "tail", Some((&start, &count)), false),
+            }
+        }
+        // The room-key protocol of a private room (`roomkey.rs`).
+        "room-key" => {
+            let op = os_string(args.required("op")?, "room-key op")?;
+            let name = os_string(args.required("name")?, "room name")?;
+            let flag = |args: &mut Args, key: &str| -> Result<bool> {
+                match args.optional(key).as_deref() {
+                    None => Ok(false),
+                    Some(value) if value == OsStr::new("true") => Ok(true),
+                    Some(value) if value == OsStr::new("false") => Ok(false),
+                    _ => Err(format!("--{key} must be true or false")),
+                }
+            };
+            match op.as_str() {
+                "found" => {
+                    args.finish()?;
+                    roomkey::found(&root, &workspace, &name)
+                }
+                "sync" => {
+                    args.finish()?;
+                    let synced = roomkey::sync(&root, &workspace, &name)?;
+                    println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-sync-v1",
+                        "room":name,"epoch":synced.epoch(),"learned":synced.learned,
+                        "held":synced.ring.epochs(&synced.room)})).map_err(|e| e.to_string())?);
+                    Ok(())
+                }
+                "invite" => {
+                    let member_subject = os_string(args.required("member")?, "invitee")?;
+                    let enc = os_string(args.required("enc-pub")?, "invitee encryption key")?;
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let request = args.optional("request").map(path);
+                    let past = flag(&mut args, "past")?;
+                    let i_know = flag(&mut args, "i-know")?;
+                    args.finish()?;
+                    roomkey::check_invitee(&member_subject, i_know)?;
+                    // The grant: K-ROOM's delegation proposal, spelled by the
+                    // caller and proposed here (submit and publish as ever).
+                    if let Some(request) = request {
+                        let value = roomkey::request(&request)?;
+                        if member(&value, "action")? != "delegate"
+                            || member(&value, "name")? != name
+                            || member(&value, "recipient")? != member_subject
+                        {
+                            return Err("the invite request must delegate this room to this invitee".into());
+                        }
+                        propose(&root, &workspace, &request, &proposal_id, None)?;
+                    }
+                    roomkey::invite(&root, &workspace, &name, &member_subject, &enc, past, i_know,
+                        &format!("{proposal_id}-keys"))
+                }
+                "rotate" => {
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let drop = args
+                        .optional("drop")
+                        .map(|value| os_string(value, "dropped member"))
+                        .transpose()?;
+                    args.finish()?;
+                    roomkey::rotate(&root, &workspace, &name, drop.as_deref(), &proposal_id)
+                }
+                "kick" => {
+                    let subject = os_string(args.required("member")?, "kicked member")?;
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    args.finish()?;
+                    roomkey::kick(&root, &workspace, &name, &subject, &proposal_id)
+                }
+                "list" => {
+                    args.finish()?;
+                    roomkey::list(&root, &name)
+                }
+                "open" => {
+                    let stream = os_string(args.required("stream")?, "stream cell")?;
+                    let sequence = os_string(args.required("sequence")?, "sequence")?;
+                    let payload = os_string(args.required("payload")?, "payload hex")?;
+                    args.finish()?;
+                    roomkey::open_local(&root, &name, &stream, &sequence, &payload)
+                }
+                "forget" => {
+                    let epoch = args
+                        .optional("epoch")
+                        .map(|value| {
+                            os_string(value, "epoch")?
+                                .parse::<u32>()
+                                .map_err(|_| "--epoch is a decimal epoch".to_owned())
+                        })
+                        .transpose()?;
+                    args.finish()?;
+                    roomkey::forget(&root, &name, epoch)
+                }
+                _ => Err("room-key --op is found, sync, invite, rotate, kick, list, open or forget".into()),
+            }
         }
         "submit" => {
             let source = path(args.required("intent")?);
@@ -2904,8 +3406,33 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some("true") => true,
                 _ => return Err("--all must be true or false".into()),
             };
+            let any = matches!(args.optional("any").as_deref().and_then(OsStr::to_str), Some("true"));
             args.finish()?;
+            if any {
+                let name = name.as_deref().ok_or("can --any needs a name")?;
+                return lawsat::can_any(&root, &workspace, name);
+            }
             can::can(&root, &workspace, name.as_deref(), all)
+        }
+        "inspect" => {
+            let view = os_string(args.required("view")?, "inspect view")?;
+            let name = args
+                .optional("name")
+                .map(|value| os_string(value, "inspect name"))
+                .transpose()?;
+            let refusals = args.optional("refusals").map(path);
+            let json_out = match args.optional("json").as_deref().and_then(OsStr::to_str) {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--json must be true or false".into()),
+            };
+            args.finish()?;
+            inspect_views::run(&root, &workspace, &view, name.as_deref(), refusals.as_deref(), json_out)
+        }
+        "law-check" => {
+            let predicate = path(args.required("predicate")?);
+            args.finish()?;
+            lawsat::law_check(&root, &workspace, &predicate)
         }
         "propose" => {
             let request = path(args.required("request")?);
@@ -2914,7 +3441,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .optional("private")
                 .map(|value| os_string(value, "private room"))
                 .transpose()?;
+            let allow = matches!(
+                args.optional("allow-unsatisfiable").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
             args.finish()?;
+            let source = bounded_json(&request)?;
+            if source.get("action").and_then(Value::as_str) == Some("install-policy") {
+                lawsat::install_check(&root, &workspace, &source["predicate"], allow)?;
+            }
             propose(&root, &workspace, &request, &proposal_id, room.as_deref())
         }
         "create" => {
@@ -2938,8 +3473,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "declared fields")?),
                 None => None,
             };
+            // `--room-template T`: this resource is a room this workspace
+            // founds (`room new`); its reference records the template.
+            let room_template = match args.optional("room-template") {
+                Some(value) => Some(os_string(value, "room template")?),
+                None => None,
+            };
             args.finish()?;
-            create(
+            create_with_template(
                 &root,
                 &workspace,
                 &name,
@@ -2950,6 +3491,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 owner.as_deref(),
                 program.as_deref(),
                 fields.as_deref(),
+                room_template.as_deref(),
             )
         }
         "provision" => {
@@ -3394,6 +3936,7 @@ mod tests {
             operation: None,
             control: None,
             provenance: None,
+            room: None,
         };
         assert!(import(&root, named("../escape", "123")).is_err());
         assert!(import(&root, named("one", "01")).is_err());
@@ -3540,6 +4083,7 @@ mod tests {
                 operation: Some("61"),
                 control: None,
                 provenance: None,
+                room: None,
             },
         )
         .unwrap();

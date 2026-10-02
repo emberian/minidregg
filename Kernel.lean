@@ -7,6 +7,7 @@ The admission gate a committed turn passes is
 `DeclaredHyperedge.Declaration.authorizationCheck`, consulted by
 `DeclaredHyperedge.execute`.
 -/
+import Kernel.RoomBirthGateAdmission  -- K-ROOM 3c: the room birth gate runs at the admission height; every 3c theorem pinned
 import Kernel.RealmWellReceiver  -- K-WELL: realm wells mint and burn under the well law; the audit identity per realm asset
 import Kernel.PayObservationProofs  -- PAY P3: observed payments mint Book credit; the audit identity, the transfer nullifier, the clock
 import Kernel.PayEnrolProofs  -- PAY P3b-2: one enrollment-index payment is one turn over authority, factory, Book and pay cell
@@ -79,6 +80,7 @@ import Kernel.ContentResourceAudit
 import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
+import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceTransactionAudit
 import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
@@ -104,6 +106,7 @@ import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
+import Kernel.PrivateRoomKeys  -- private room wrapping law
 import Kernel.StreamWrite  -- stream head and immutable entry writes
 import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
@@ -118,3 +121,5 @@ import Kernel.NockEntry -- K-EVAL E2: Nock's entry into the run (N16 subjectForm
 import Kernel.Run -- K-RAN made generic (K-EVAL E2): RunClaim, resolve (registry; unknownEvaluator / evaluatorDisabled), checkRun E (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle over E.Spec and at Nock; op 134 dryRun
 import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R
 import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)
+
+import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge

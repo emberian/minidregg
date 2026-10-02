@@ -290,7 +290,7 @@ op S "bootstrap fresh private Store, sponsor workspace, mini serve" \
 op S "ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:$PORT" setup_sshd
 step S 0 newcomer "keygen mini.key"
 op S "CUSTODY: copy newcomer secret into sponsor home (co-signed enrollment)" \
-  bash -c "mkdir -p -m 700 '$RUN/homes/sponsor/keys' && install -m 600 '$RUN/homes/newcomer/keys/mini.key' '$RUN/homes/sponsor/keys/newcomer-1.key'"
+  bash -c "mkdir -p -m 700 '$RUN/homes/sponsor/keys' && install -m 600 '$RUN/homes/newcomer/keys/mini.key' '$RUN/homes/sponsor/keys/newcomer-1.key' && install -m 644 '$RUN/homes/newcomer/keys/mini.key.next.pub' '$RUN/homes/sponsor/keys/newcomer-1.key.next.pub'"
 step S 0 sponsor "enroll plan newcomer-1 newcomer-1.key"
 step S 0 sponsor "enroll seal newcomer-1"
 step S 0 sponsor "enroll submit newcomer-1"
@@ -381,7 +381,7 @@ check R "after revocation: the record's refusal is shown" grep -q '^  # capabili
 
 # ------------------------------------------------------------- locked (J8: deny-all)
 
-step L 0 sponsor "law seal paper sealed"
+step L 0 sponsor "law seal paper sealed --allow-unsatisfiable"
 step L 0 sponsor "submit seal"
 cstep L sponsor "can paper"
 for v in read delegate law revoke; do

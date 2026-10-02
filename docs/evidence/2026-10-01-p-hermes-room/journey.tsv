@@ -1,0 +1,47 @@
+J0	PASS	27.860	/home/ember/build/j14/r4/world/handoff.json	service up and a signed read answered in 27.825s
+J1	PASS	4.362	/home/ember/build/j14/r4/world/attempts/newcomer/submit.json	subject 10654491313315882087, record 1; key absent from genesis/config; lookup = same receipt
+J2	PASS	3.227	/home/ember/build/j14/r4/world/sponsor/attempts/create-shared/outcome.json	object 17065472256137816288 under all[], record 2
+J3	PASS	5.554	/home/ember/build/j14/r4/world/sponsor/attempts/grant-newcomer/outcome.json	child 15977076559355450227 verbs observe,mutate, record 3
+J4	PASS	5.585	/home/ember/build/j14/r4/world/newcomer-workspace/attempts/first-action/outcome.json	read 0.906s, write 3.415s, readback field 2 = 1, record 4
+J5	PASS	19.179	/home/ember/build/j14/r4/steps/J5/refusals.tsv	6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5
+J6	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+G	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J7	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J8	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+K4	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KC	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JJ	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+K10	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+K11	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KIX	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KF	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+K12C	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KHQ	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KW	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+K10C	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+KT	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J17	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J14	PASS	598.890	/home/ember/build/j14/r4/steps/J14/j14.tsv	J14: 136 rows as expected (/home/ember/build/j14/r4/steps/J14/j14.tsv)
+JN2	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JN3	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JN5	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M3	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M4	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M5	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M6	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M7	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+M8	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+BD	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J12	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J12C	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+J13	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JCHAT	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAY1	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAY2	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAY3	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAYE1	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAYE2	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAYE3	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAY4	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JPAY6	SKIPPED	0.000		skipped: not in JOURNEY_ONLY
+JP2	SKIPPED	0.000		skipped: not in JOURNEY_ONLY

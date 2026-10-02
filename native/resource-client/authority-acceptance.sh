@@ -113,12 +113,12 @@ cat >"$EVIDENCE/genesis.json" <<EOF
  "factoryPredicate":{"type":"all","predicates":[]},
  "enrollments":[
    {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-     "publicKey":"$ALICE_PUBLIC","activeFrom":"0","activeUntil":"1000000"},
+     "publicKey":"$ALICE_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
     "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
     "factoryObserveCapabilityId":"54","initialBalance":"100",
     "accountPredicate":{"type":"all","predicates":[]}},
    {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-     "publicKey":"$BOB_PUBLIC","activeFrom":"0","activeUntil":"1000000"},
+     "publicKey":"$BOB_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
     "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
     "factoryObserveCapabilityId":"55","initialBalance":"200",
     "accountPredicate":{"type":"all","predicates":[]}}
