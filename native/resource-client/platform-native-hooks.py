@@ -51,11 +51,15 @@ def main():
     evidence=j.absolute(request['evidenceDirectory'])/(label+'.json')
     j.require(not evidence.exists(),'native boundary evidence already exists')
     records=[]
+    retained={'identity':identity,'roomTarget':request['roomTarget'],'documentTarget':request['documentTarget'],
+              'owner':spec['members'][owner]['subject'],'outsider':spec['members'][outsider]['subject'],
+              'commands':records}
     def run(argv):
         j.require(j.validate(spec)==identity,'Store pins changed during native boundary check')
         argv=[str(v) for v in argv]
         result=subprocess.run(argv,stdin=subprocess.DEVNULL,capture_output=True,timeout=spec.get('timeoutSeconds',300))
         records.append({'argv':argv,'rc':result.returncode,'stdout':result.stdout.decode(errors='replace'),'stderr':result.stderr.decode(errors='replace')})
+        j.save(evidence,retained)
         return result
     def shell(member,line):
         ssh=spec['members'][member]['ssh']
@@ -63,16 +67,17 @@ def main():
     observed=shell(owner,'refs')
     j.require(observed.returncode==0,'native owner reference observation failed')
     reference=foreign_reference(json.loads(observed.stdout),request['documentTarget'])
-    alias='foreign-'+hashlib.sha256(str(request['documentTarget']).encode()).hexdigest()[:16]
+    # A prior failed check may already have installed its local discovery hint.
+    # Allocate a fresh local name for this retained request instead of replacing it.
+    alias='foreign-'+hashlib.sha256((str(Path(a.request).resolve())+':'+str(request['documentTarget'])).encode()).hexdigest()[:16]
     manifest=j.read(j.absolute(spec['manifest']))
     imported=run([manifest['mini'],'workspace','--action','import','--dir',spec['members'][outsider]['workspace'],'--name',alias,'--kind','object','--target',request['documentTarget'],'--observe-capability',reference['observeCapability']])
     j.require(imported.returncode==0,'local foreign discovery hint could not be installed')
     # Importing another holder's real capability ID is only a local hint. The
     # outsider must receive a source signed refusal on this exact document.
     refused=shell(outsider,'read '+alias)
-    j.save(evidence,{'identity':identity,'roomTarget':request['roomTarget'],'documentTarget':request['documentTarget'],
-                     'owner':spec['members'][owner]['subject'],'outsider':spec['members'][outsider]['subject'],
-                     'foreignCapability':reference['observeCapability'],'commands':records})
+    retained['foreignCapability']=reference['observeCapability']
+    j.save(evidence,retained)
     outcome=native_refusal(refused)
     j.save(Path(a.result),{'type':'mini-joined-member-hook-result-v1','role':request['role'],'phase':request['phase'],'status':'pass',
                           'identity':identity,'refused':True,'refusedSubject':spec['members'][outsider]['subject'],
