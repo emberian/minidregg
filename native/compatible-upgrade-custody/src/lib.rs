@@ -24,6 +24,10 @@ fn decimal(s: &str) -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct Admission {
     pub protocol: String,
+    #[serde(default)]
+    pub management_socket: Option<PathBuf>,
+    #[serde(default)]
+    pub public_socket: Option<PathBuf>,
     pub transaction: PathBuf,
     pub phase: String,
     pub identity: Identity,
@@ -233,7 +237,21 @@ fn validate_config_transition(admission: &Admission) -> io::Result<()> {
     Ok(())
 }
 
-/// Authenticate the shared artifact and the exact currently installed target.
+fn validate_topology(admission: &Admission) -> io::Result<()> {
+    match (&admission.management_socket, &admission.public_socket) {
+        (None, None) => Ok(()),
+        (Some(management), Some(public))
+            if canonical(management) && canonical(public) && management != public =>
+        {
+            Ok(())
+        }
+        _ => Err(invalid(
+            "compatible socket topology is incomplete or unsafe",
+        )),
+    }
+}
+
+/// Authenticate retained root evidence without requiring obsolete live images.
 pub fn load_evidence(path: &Path) -> io::Result<Admission> {
     let admission: Admission = serde_json::from_slice(&root_bytes(path, 4 * 1024 * 1024)?)?;
     if admission.protocol != "mini-compatible-admission-v1"
@@ -244,6 +262,7 @@ pub fn load_evidence(path: &Path) -> io::Result<Admission> {
     {
         return Err(invalid("compatible admission state refused"));
     }
+    validate_topology(&admission)?;
     validate_config_transition(&admission)?;
     Ok(admission)
 }
@@ -306,5 +325,18 @@ mod tests {
     fn writable_ancestor_and_traversal_are_refused() {
         assert!(root_ancestors(Path::new("/tmp/compatible-admission.json")).is_err());
         assert!(root_ancestors(Path::new("/var/lib/../admission.json")).is_err());
+    }
+    #[test]
+    fn adopted_socket_topology_is_explicit_paired_and_distinct() {
+        let mut a = admission();
+        assert!(validate_topology(&a).is_ok());
+        a.management_socket = Some("/node/operator/mini.sock".into());
+        assert!(validate_topology(&a).is_err());
+        a.public_socket = Some("/node/public/mini.sock".into());
+        assert!(validate_topology(&a).is_ok());
+        a.public_socket = a.management_socket.clone();
+        assert!(validate_topology(&a).is_err());
+        a.public_socket = Some("/node/../public/mini.sock".into());
+        assert!(validate_topology(&a).is_err());
     }
 }
