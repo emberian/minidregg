@@ -47,6 +47,40 @@ inductive Action where
   | erase (field key : Nat) (before : List UInt8)
   deriving DecidableEq, Repr
 
+def actionStream : StreamCodec Action where
+  encode
+    | .read field key expected => 0 :: (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.option bytesStream))).encode
+          (field, key, expected)
+    | .create field key value => 1 :: (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat bytesStream)).encode (field, key, value)
+    | .write field key before after => 2 :: (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream bytesStream))).encode
+          (field, key, before, after)
+    | .erase field key before => 3 :: (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat bytesStream)).encode (field, key, before)
+  decodePrefix
+    | 0 :: bytes => do
+        let ((field, key, expected), suffix) ← (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat (StreamCodec.option bytesStream))).decodePrefix bytes
+        some (.read field key expected, suffix)
+    | 1 :: bytes => do
+        let ((field, key, value), suffix) ← (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat bytesStream)).decodePrefix bytes
+        some (.create field key value, suffix)
+    | 2 :: bytes => do
+        let ((field, key, before, after), suffix) ← (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream bytesStream))).decodePrefix bytes
+        some (.write field key before after, suffix)
+    | 3 :: bytes => do
+        let ((field, key, before), suffix) ← (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat bytesStream)).decodePrefix bytes
+        some (.erase field key before, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro action suffix
+    cases action <;> simp [StreamCodec.decodePrefix_encode]
+
 def Action.field : Action → Nat
   | .read field _ _ | .create field _ _ | .write field _ _ _ | .erase field _ _ => field
 

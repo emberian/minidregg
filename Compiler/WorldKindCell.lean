@@ -67,13 +67,25 @@ instance definitionLawDecidable (cell : Nat) (store : Store definitionLayout) :
   | none => simp; infer_instance
   | some definition => simp; infer_instance
 
+/-- Chosen kind payload root is signed inside the instance's immutable birth
+binding. The receiver separately guards the lifecycle physical root. -/
+structure Binding where
+  descriptor : Descriptor
+  kindRoot : Digest
+  deriving DecidableEq, Repr
+
+def bindingStream : StreamCodec Binding :=
+  StreamCodec.xmap (StreamCodec.product descriptorStream digestStream)
+    (fun binding => (binding.descriptor, binding.kindRoot))
+    (fun pair => ⟨pair.1, pair.2⟩) (by intro binding; cases binding; rfl)
+
 inductive InstanceSpace where
   | descriptor
   | payload
   deriving DecidableEq, Repr
 
 def InstanceSpace.Value : InstanceSpace → Type
-  | .descriptor => Descriptor
+  | .descriptor => Binding
   | .payload => List UInt8
 
 instance instanceValueDecidable (space : InstanceSpace) : DecidableEq space.Value := by
@@ -105,21 +117,22 @@ def instanceWire : StoreCodec.Wire instanceLayout where
   namespaceStream := instanceSpaceStream
   keyStream := fun _ => StoreCodec.unitStream
   valueStream
-    | .descriptor => descriptorStream
+    | .descriptor => bindingStream
     | .payload => bytesStream
   keyCodecId := fun _ => "unit/v1"
   valueCodecId
-    | .descriptor => "world-kind-descriptor/v1"
+    | .descriptor => "world-kind-birth-binding/v1"
     | .payload => "world-kind-inner-store/v1"
 
 def instanceMaterializer := StoreCodec.materializer instanceWire
 
-def instanceOf (value : Kernel.WorldKindInstance.Instance) : Store instanceLayout :=
-  ((0 : Store instanceLayout).set descriptorAddress (some value.descriptor)).set
+def instanceOf (kindRoot : Digest) (value : Kernel.WorldKindInstance.Instance) : Store instanceLayout :=
+  ((0 : Store instanceLayout).set descriptorAddress (some ⟨value.descriptor, kindRoot⟩)).set
     payloadAddress (some (StoreCodec.encode (wire value.descriptor) value.store))
 
 def instanceAt (store : Store instanceLayout) : Option Kernel.WorldKindInstance.Instance := do
-  let descriptor ← store descriptorAddress
+  let binding ← store descriptorAddress
+  let descriptor := binding.descriptor
   if valid : descriptor.Valid then
     let payload ← store payloadAddress
     let inner ← StoreCodec.decode (wire descriptor) payload
@@ -150,5 +163,34 @@ def preparePatch (store : Store instanceLayout) (actions : List Kernel.WorldKind
   let oldBytes ← store payloadAddress
   let newBytes := StoreCodec.encode (wire value.descriptor) prepared.post.store
   some [.write .payload () oldBytes newBytes]
+
+/-- A birth retains every ROM default. Mutable fields may be initialized by
+the complete signed birth; the kind's exported law still judges that birth.
+The descriptor equality is exact source equality, not a hash injectivity claim. -/
+def birthMatches (definition : Definition) (store : Store instanceLayout) : Bool :=
+  match store descriptorAddress, store payloadAddress with
+  | some binding, some bytes =>
+      if binding.descriptor = definition.descriptor then
+        match StoreCodec.decode (wire definition.descriptor) definition.defaults,
+            StoreCodec.decode (wire definition.descriptor) bytes with
+        | some defaults, some initial =>
+            decide (∀ address ∈ defaults.support ∪ initial.support,
+              (layout definition.descriptor).discipline address.1 = .rom →
+                defaults address = initial address)
+        | _, _ => false
+      else false
+  | _, _ => false
+
+/-- A kind definition revision changes only future instance construction.
+Its identity is stable and its revision advances exactly once. Current kind
+management authority/law is checked by the ordinary transaction receiver. -/
+def prepareDefinition (store : Store definitionLayout) (next : Definition) :
+    Option (Patch definitionLayout) := do
+  let old ← store definitionAddress
+  if next.descriptor.kind = old.descriptor.kind ∧
+      next.descriptor.revision = old.descriptor.revision + 1 ∧
+      next.Valid old.descriptor.kind then
+    some [.write () () old next]
+  else none
 
 end Minidregg.Compiler.WorldKindCell
