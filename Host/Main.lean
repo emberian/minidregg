@@ -53,6 +53,7 @@ behind a signed account observation, 102=exact receipt by transaction id,
 115=refill submit, 116=refill receipt-only lookup,
 117=self-enrollment signing plan, 118=self-enrollment detached assembly,
 119=self-enrollment submit, 120=self-enrollment receipt-only lookup.
+121=public enrollment/renewal quote (bounded JSON request and response).
 123=realm well signing plan, 124=realm well detached assembly,
 125=realm well submit (non-confirmed outcomes reply 255),
 126=clock tick signing plan, 127=clock tick detached assembly,
@@ -5547,6 +5548,16 @@ def run (arguments : List String) : IO UInt32 := do
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "enrollment view exceeds host frame bound")
                             return ((112 : UInt8), bytes)
+                        | 121 =>
+                            unless payload.length ≤ 4096 do
+                              throw (IO.userError "pay quote request exceeds bound")
+                            let some text := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "pay quote request is not UTF-8")
+                            let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let opened ← sessionOpened pinnedConfig state
+                            let quoted ← IO.ofExcept
+                              (Minidregg.Host.Json.payEnrolQuoteLoadedJson pinnedConfig opened request)
+                            return ((121 : UInt8), quoted.compress.toUTF8.toList)
                         | 117 =>
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept

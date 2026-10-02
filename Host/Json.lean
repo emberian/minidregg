@@ -40,6 +40,7 @@ import Kernel.PayAssignmentReceiver
 import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
+import Kernel.PayEnrolQuote
 import Compiler.PayEnrolSignatureIO
 import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
@@ -3338,6 +3339,69 @@ def payEnrolmentViewJson (view : PayCellDomain.EnrolmentView) : Lean.Json := .mk
       ("amount", .num (Lean.JsonNumber.fromNat row.amount)),
       ("slot", .num (Lean.JsonNumber.fromNat row.slot)),
       ("reason", payJournalReasonName row.reason)]).toArray)]
+
+/-- Public, read-only quote over the same loaded authority and pay cell as the
+receiver. No price is reserved and no admission or mint takes place here. -/
+def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (json : Lean.Json) : Result Lean.Json := do
+  let obj ← exactObject "$" ["miniKey", "mode", "weeks", "starterCredit"] json
+  let miniKey ← decodeHex "$.miniKey" (← field "$" "miniKey" obj)
+  unless miniKey.length = 32 do failAt "$.miniKey" "a Mini key is 32 bytes"
+  let mode ← string "$.mode" (← field "$" "mode" obj)
+  unless mode = "enrol" ∨ mode = "renew" do failAt "$.mode" "expected enrol or renew"
+  let weeks ← nat "$.weeks" (← field "$" "weeks" obj)
+  let view ← NativeHost.payViewLoaded config opened
+  let some tariff := view.tariff | throw "pay quote: tariff unavailable"
+  unless tariff.valid do throw "pay quote: tariff invalid"
+  let some index := tariff.enrolIndex | throw "pay quote: self-enrollment disabled"
+  let some address := view.book[index]? | throw "pay quote: enrollment address unavailable"
+  let some pay := PayCellDomain.load config.deployment opened.durable.snapshot
+    | throw "pay quote: pay cell unavailable"
+  let enrolled := (PayCell.enrolmentAt pay.cell.logical miniKey).isSome
+  if mode = "enrol" ∧ enrolled then throw "pay quote: key already enrolled; request renewal"
+  if mode = "renew" ∧ !enrolled then throw "pay quote: key not enrolled"
+  let height := NativeHost.logicalHeight config opened.durable
+  let identities := PayEnrolReceiver.ids config.deployment.domain miniKey
+  let birthFee := if mode = "renew" then 0 else
+    PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
+      config.tariff opened.authority.snapshot.cell height identities 0
+  -- Two rounds of room+founder stream, document, application and application
+  -- session births. Counts follow their actual source constructors: five
+  -- transactions, eight births, sixteen grants. Byte-priced deployments must
+  -- choose an explicit starter budget; resource counts cannot quote their bytes.
+  let suggestion : Option Nat := if mode = "renew" then some 0 else
+    if config.tariff.perInitialPayloadByte = 0 then
+      some (2 * (5 * config.tariff.base + 8 * config.tariff.perBirth + 16 * config.tariff.perGrant))
+    else none
+  let starterInput ← field "$" "starterCredit" obj
+  let starter ← if starterInput == .null then
+      match suggestion with
+      | some amount => pure amount
+      | none => throw "pay quote: byte-priced deployment requires explicit starterCredit"
+    else nat "$.starterCredit" starterInput
+  let quoted ← match PayEnrolQuote.quote tariff birthFee weeks starter with
+    | .ok quoted => pure quoted
+    | .error reason => throw s!"pay quote: {repr reason}; choose an explicit duration/budget or use a separate account deposit"
+  pure <| .mkObj
+    [("type", "minidregg-pay-enrollment-quote-v1"), ("mode", .str mode),
+     ("miniKey", hexJson miniKey), ("domain", decimal config.deployment.domain.value),
+     ("semantics", decimal config.profile.semantics.value),
+     ("payRoot", decimal view.payRoot.value), ("authorityRoot", decimal view.authorityRoot.value),
+     ("factoryRoot", decimal view.factoryRoot.value), ("height", decimal height),
+     ("tariffVersion", decimal tariff.version), ("mint", hexJson tariff.mint),
+     ("tokenProgram", hexJson tariff.tokenProgram), ("decimals", decimal tariff.decimals),
+     ("enrolIndex", decimal index), ("enrolAddress", hexJson address),
+     ("birthFee", decimal quoted.birthFee), ("weekCredit", decimal tariff.weekCredit),
+     ("requestedWeeks", decimal quoted.requestedWeeks), ("grantedWeeks", decimal quoted.actualWeeks),
+     ("membershipCredit", decimal quoted.leaseCredit),
+     ("requestedStarterCredit", decimal quoted.minimumStarterCredit),
+     ("spendableRemainder", decimal quoted.creditedRemainder),
+     ("recommendedStarterCredit", match suggestion with | some n => decimal n | none => .null),
+     ("atomicAmount", decimal quoted.amountAtomic), ("totalCredit", decimal quoted.credit),
+     ("minimumEntryCredit", decimal quoted.minimumEntryCredit),
+     ("roundingCredit", decimal (quoted.credit -
+       (birthFee + weeks * tariff.weekCredit + starter))),
+     ("priceReserved", .bool false)]
 
 /-- The identities a self-enrollment derives from a Mini key in this
 deployment (`PayEnrolReceiver.ids`): what a friend's client needs to act as
