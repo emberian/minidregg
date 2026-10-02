@@ -259,12 +259,19 @@ impl ResidentHuman<'_> {
             }
         };
         let head = http.method == "HEAD";
+        #[cfg(feature = "integration-qualification")]
+        crate::dispatch_native::qualification::delivery_event(&attempt_dir, None)?;
         let response = self.rpc.dispatch(
             physical.binding,
             physical.request,
             MAX_APP_RESPONSE,
             APP_CALL_TIME,
         );
+        #[cfg(feature = "integration-qualification")]
+        crate::dispatch_native::qualification::delivery_event(
+            &attempt_dir,
+            Some(response.is_ok()),
+        )?;
         let origin = format!("https://{}", policy.expected_host);
         let serialized = response
             .and_then(|reply| http_response::serialize_for_origin(&reply, head, Some(&origin)));

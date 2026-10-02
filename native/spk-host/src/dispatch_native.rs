@@ -846,6 +846,19 @@ struct SubmittedDispatch {
     active_bytes: Vec<u8>,
 }
 
+impl SubmittedDispatch {
+    /// A confirmed historical receipt is evidence of a Store record, never a
+    /// fresh physical-delivery permit. Keep the active marker on every outcome.
+    fn committed_payload(&self) -> io::Result<Vec<u8>> {
+        match parse_op34_response(&self.frame)? {
+            Op34Reply::CommittedBytes(payload) => Ok(payload.to_vec()),
+            Op34Reply::OutcomeBytes(_) => {
+                Err(invalid("Mini op34 did not commit a delivery permit"))
+            }
+        }
+    }
+}
+
 /// Only the fresh private response from this call can certify no Store record.
 /// Keep per-attempt evidence and prohibit its replay even after releasing the
 /// generation-wide marker so an unrelated participant can make progress.
@@ -916,6 +929,8 @@ pub(crate) fn author_and_submit(
 ) -> io::Result<CommittedDispatch> {
     // Fail before creating an attempt or entering any native authoring route.
     validate_route_binding(custody, route_binding, namespace)?;
+    #[cfg(feature = "integration-qualification")]
+    let qualification = qualification::claim(custody, http, operation_id, attempt_dir)?;
     let deadline = Instant::now() + RESPONSE_DEADLINE;
     let ingress =
         author_signed_ingress(operator, custody, http, operation_id, attempt_dir, deadline)?;
@@ -943,14 +958,23 @@ pub(crate) fn author_and_submit(
         &ingress,
         opcode,
         &submission,
-        |opcode, bytes| operator.invoke_until(opcode, bytes, deadline),
+        |opcode, bytes| {
+            #[cfg(feature = "integration-qualification")]
+            if let Some(trigger) = &qualification {
+                return qualification::run(
+                    trigger,
+                    operator,
+                    custody,
+                    http,
+                    attempt_dir,
+                    opcode,
+                    bytes,
+                );
+            }
+            operator.invoke_until(opcode, bytes, deadline)
+        },
     )?;
-    let payload = match parse_op34_response(&submitted.frame)? {
-        Op34Reply::CommittedBytes(payload) => payload.to_vec(),
-        Op34Reply::OutcomeBytes(_) => {
-            return Err(invalid("Mini op34 did not commit a delivery permit"))
-        }
-    };
+    let payload = submitted.committed_payload()?;
     let payload_path = write_new(attempt_dir, "committed-payload.bin", &payload)?;
     let inspection_path = attempt_dir.join("inspection.json");
     let inspection = operator.tool(
@@ -1129,15 +1153,564 @@ impl PrivateOperator {
     }
 }
 
+/// Deliberately absent from ordinary release builds. This qualification path
+/// can race only the resident's freshly prepared request, never supplied grants.
+#[cfg(feature = "integration-qualification")]
+pub(crate) mod qualification {
+    use super::*;
+    use serde::Deserialize;
+    use serde_json::Value;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub(super) struct Trigger {
+        protocol: String,
+        nonce_hex: String,
+        app: String,
+        session: String,
+        subject: String,
+        ticket_resource: String,
+        session_kind: String,
+        operation_id: String,
+        method: String,
+        path_and_query: String,
+        signed_api_path: Option<String>,
+    }
+    fn private_read(path: &Path) -> io::Result<Vec<u8>> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+            || meta.len() > MAX_CONFIG as u64
+        {
+            return Err(invalid("qualification file identity refused"));
+        }
+        let mut bytes = Vec::new();
+        std::io::Read::by_ref(&mut file)
+            .take(MAX_CONFIG as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.is_empty() || bytes.len() > MAX_CONFIG || bytes.len() as u64 != meta.len() {
+            return Err(invalid("qualification file size refused"));
+        }
+        Ok(bytes)
+    }
+    pub(super) fn claim(
+        custody: &FixedAuthoring,
+        http: &HttpProjection<'_>,
+        operation: &str,
+        attempt: &Path,
+    ) -> io::Result<Option<Trigger>> {
+        let parent = attempt
+            .parent()
+            .ok_or_else(|| invalid("qualification parent absent"))?;
+        let bytes = match private_read(&parent.join("dispatch-race-trigger.json")) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        // Check every ancestor before accepting operator qualification controls.
+        let _ = Journal::open(parent)?;
+        let trigger: Trigger = serde_json::from_slice(&bytes)?;
+        let signed_path = match http.route {
+            crate::dispatch_inspection::Route::Browser => None,
+            crate::dispatch_inspection::Route::Api { signed_path } => Some(signed_path),
+        };
+        if trigger.protocol != "mini-spk-dispatch-race-trigger-v1"
+            || trigger.nonce_hex.len() != 64
+            || !trigger
+                .nonce_hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || trigger.app != custody.app
+            || trigger.session != custody.session
+            || trigger.subject != custody.subject
+            || trigger.ticket_resource != custody.ticket_resource
+            || trigger.session_kind != custody.session_kind
+            || trigger.operation_id != operation
+            || trigger.method != "GET"
+            || http.method != "GET"
+            || !http.body.is_empty()
+            || trigger.path_and_query != http.path_and_query
+            || trigger.signed_api_path.as_deref() != signed_path
+        {
+            return Err(invalid(
+                "qualification trigger differs from this exact resident request",
+            ));
+        }
+        write_new(parent, "dispatch-race-claimed.json", &bytes)?;
+        Ok(Some(trigger))
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Go {
+        protocol: String,
+        nonce_hex: String,
+        submission_sha256: String,
+    }
+    fn await_go(attempt: &Path, nonce: &str, hash: &str, deadline: Instant) -> io::Result<()> {
+        loop {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "qualification go deadline",
+                ));
+            }
+            match private_read(&attempt.join("race-go.json")) {
+                Ok(bytes) => {
+                    let go: Go = serde_json::from_slice(&bytes)?;
+                    if go.protocol != "mini-spk-dispatch-race-go-v1"
+                        || go.nonce_hex != nonce
+                        || go.submission_sha256 != hash
+                    {
+                        return Err(invalid("qualification go differs from retained submission"));
+                    }
+                    return Ok(());
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    fn select_winner(
+        replies: &[io::Result<Vec<u8>>],
+        mut inspect: impl FnMut(usize, bool, &[u8]) -> io::Result<Value>,
+    ) -> io::Result<(usize, Value)> {
+        if replies.len() != 2 {
+            return Err(invalid("qualification requires exactly two responses"));
+        }
+        let mut winner = None;
+        let mut historical = None;
+        for (index, response) in replies.iter().enumerate() {
+            let frame = response
+                .as_ref()
+                .map_err(|_| invalid("qualification response lost; outcome uncertain"))?;
+            match parse_op34_response(frame)? {
+                Op34Reply::CommittedBytes(payload) => {
+                    if winner.is_some() {
+                        return Err(invalid("qualification returned two fresh permits"));
+                    }
+                    winner = Some((index, inspect(index, true, payload)?));
+                }
+                Op34Reply::OutcomeBytes(payload) => {
+                    if historical.is_some() {
+                        return Err(invalid("qualification returned no fresh permit"));
+                    }
+                    let outcome = inspect(index, false, payload)?;
+                    // Confirmation describes Store provenance, not fresh CAS
+                    // authority. An AlreadyPresent loser may say installed.
+                    if outcome["type"] != "confirmed"
+                        || !matches!(
+                            outcome["confirmation"].as_str(),
+                            Some("installed" | "replayed" | "recoveredAfterUncertainResponse")
+                        )
+                    {
+                        return Err(invalid(
+                            "qualification loser is not a historical confirmed receipt",
+                        ));
+                    }
+                    historical = Some(outcome);
+                }
+            }
+        }
+        let (index, permit) = winner.ok_or_else(|| invalid("qualification fresh permit absent"))?;
+        let receipt =
+            historical.ok_or_else(|| invalid("qualification historical receipt absent"))?;
+        for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+            let expected = permit["receipt"][field]
+                .as_str()
+                .ok_or_else(|| invalid("qualification permit receipt field absent"))?;
+            if receipt[field].as_str() != Some(expected) {
+                return Err(invalid(
+                    "qualification historical receipt differs from sole permit",
+                ));
+            }
+        }
+        Ok((index, receipt))
+    }
+    pub(super) fn run(
+        trigger: &Trigger,
+        operator: &PrivateOperator,
+        custody: &FixedAuthoring,
+        http: &HttpProjection<'_>,
+        attempt: &Path,
+        opcode: u8,
+        submission: &[u8],
+    ) -> io::Result<Vec<u8>> {
+        let parent = attempt
+            .parent()
+            .ok_or_else(|| invalid("qualification parent absent"))?;
+        let hash = hex(&Sha256::digest(submission));
+        let ready = json!({"protocol":"mini-spk-dispatch-race-ready-v1","nonceHex":trigger.nonce_hex,
+            "operationId":trigger.operation_id,"attemptDirectory":attempt,"opcode":opcode,
+            "ingressSha256":hex(&Sha256::digest(read_bounded(&attempt.join("ingress.bin"),HOST_MAX_FRAME)?)),
+            "submissionSha256":hash});
+        // submit_once has fsynced its normal per-attempt and global markers.
+        write_new(
+            parent,
+            "dispatch-race-ready.json",
+            &serde_json::to_vec(&ready)?,
+        )?;
+        let evaluate = || -> io::Result<(Vec<u8>, Value)> {
+            await_go(
+                attempt,
+                &trigger.nonce_hex,
+                &hash,
+                Instant::now() + Duration::from_secs(60),
+            )?;
+            let barrier = std::sync::Barrier::new(2);
+            let replies = std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..2).map(|index| {
+                    let barrier = &barrier;
+                    scope.spawn(move || -> io::Result<Vec<u8>> {
+                        barrier.wait();
+                        let response = operator.invoke_until(opcode,submission,Instant::now()+RESPONSE_DEADLINE);
+                        match response {
+                            Ok(frame) => { write_new(attempt,&format!("race-{index}-frame.bin"),&frame)?; Ok(frame) }
+                            Err(error) => {
+                                write_new(attempt,&format!("race-{index}-error.json"),&serde_json::to_vec(&json!({"status":"uncertain","error":error.to_string()}))?)?;
+                                Err(error)
+                            }
+                        }
+                    })
+                }).collect();
+                workers
+                    .into_iter()
+                    .map(|worker| {
+                        worker.join().unwrap_or_else(|_| {
+                            Err(invalid("qualification worker panicked; outcome uncertain"))
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let (index, receipt) = select_winner(&replies, |index, permit, payload| {
+                let payload_path =
+                    write_new(attempt, &format!("race-{index}-payload.bin"), payload)?;
+                let bytes = operator.tool(
+                    "inspect",
+                    if permit {
+                        "application-dispatch-committed"
+                    } else {
+                        "outcome"
+                    },
+                    &payload_path,
+                    &attempt.join(format!("race-{index}-inspection.json")),
+                )?;
+                if permit {
+                    let fixed = FixedCustody {
+                        app: &custody.app,
+                        subject: &custody.subject,
+                        session: &custody.session,
+                        ticket: &custody.ticket_resource,
+                    };
+                    let matched = match_inspection(payload, &bytes, http, &fixed)?;
+                    if matched.operation_id != trigger.operation_id {
+                        return Err(invalid("qualification permit operation drift"));
+                    }
+                }
+                Ok(serde_json::from_slice(&bytes)?)
+            })?;
+            let selected = json!({"protocol":"mini-spk-dispatch-race-selection-v1","operationId":trigger.operation_id,
+                "nonceHex":trigger.nonce_hex,"winnerIndex":index,"historicalIndex":1-index,"receipt":receipt});
+            write_new(
+                attempt,
+                "race-selection.json",
+                &serde_json::to_vec(&selected)?,
+            )?;
+            let frame = replies
+                .into_iter()
+                .nth(index)
+                .ok_or_else(|| invalid("qualification winner absent"))??;
+            Ok((frame, selected))
+        };
+        let evaluated = evaluate();
+        let result = match &evaluated {
+            Ok((_, selected)) => {
+                json!({"status":"winner-forwarded-to-resident","selection":selected})
+            }
+            Err(error) => json!({"status":"uncertain-or-failed","error":error.to_string()}),
+        };
+        write_new(
+            parent,
+            "dispatch-race-result.json",
+            &serde_json::to_vec(&json!({
+            "protocol":"mini-spk-dispatch-race-result-v1","nonceHex":trigger.nonce_hex,
+            "attemptDirectory":attempt,"operationId":trigger.operation_id,"result":result,
+            "physicalDeliveries":0,"chargeCountIndependentlyVerified":false,
+            "deliveryEvidence":"race-delivery-result.json in attemptDirectory",
+            "recovery":"terminal-fixture-checked-stop-new-generation"}))?,
+        )?;
+        evaluated.map(|(frame, _)| frame)
+    }
+    /// Evidence is emitted around the real resident RpcDriver call. A transport
+    /// error is not proof of zero delivery, and never reports a successful one.
+    pub(crate) fn delivery_event(attempt: &Path, response: Option<bool>) -> io::Result<()> {
+        match private_read(&attempt.join("race-selection.json")) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+        let (name, value) = match response {
+            None => (
+                "race-delivery-requested.json",
+                json!({"status":"rpc-invocation-requested","physicalDeliveries":0}),
+            ),
+            Some(true) => (
+                "race-delivery-result.json",
+                json!({"status":"app-response-received","physicalDeliveries":1}),
+            ),
+            Some(false) => (
+                "race-delivery-result.json",
+                json!({"status":"rpc-error-delivery-uncertain","physicalDeliveries":null}),
+            ),
+        };
+        write_new(attempt, name, &serde_json::to_vec(&value)?)?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn framed(payload: &[u8]) -> Vec<u8> {
+            let mut frame = ((payload.len() + 1) as u32).to_le_bytes().to_vec();
+            frame.push(34);
+            frame.extend_from_slice(payload);
+            frame
+        }
+        fn permit() -> Vec<u8> {
+            framed(b"DREGG/APPLICATION/DISPATCH-COMMITTED-PERMIT/v1x")
+        }
+        fn receipt() -> Vec<u8> {
+            framed(b"DREGG/NATIVE-HOST/OUTCOME/v4x")
+        }
+        fn inspection(permit: bool) -> Value {
+            let receipt =
+                json!({"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+            if permit {
+                json!({"receipt":receipt})
+            } else {
+                let mut result = receipt;
+                result["type"] = json!("confirmed");
+                result["confirmation"] = json!("replayed");
+                result
+            }
+        }
+        #[test]
+        fn race_selects_only_exact_one_permit_and_matching_historical_receipt() {
+            for reversed in [false, true] {
+                let replies = if reversed {
+                    vec![Ok(receipt()), Ok(permit())]
+                } else {
+                    vec![Ok(permit()), Ok(receipt())]
+                };
+                assert_eq!(
+                    select_winner(&replies, |_, p, _| Ok(inspection(p)))
+                        .unwrap()
+                        .0,
+                    usize::from(reversed)
+                );
+            }
+            for replies in [
+                vec![Ok(permit()), Ok(permit())],
+                vec![Ok(permit()), Err(invalid("lost"))],
+                vec![Ok(receipt()), Ok(receipt())],
+                vec![Ok(permit()), Ok(vec![0])],
+            ] {
+                assert!(select_winner(&replies, |_, p, _| Ok(inspection(p))).is_err());
+            }
+            for field in [
+                "transactionId",
+                "eventId",
+                "acceptedCount",
+                "worldRoot",
+                "confirmation",
+            ] {
+                assert!(select_winner(&[Ok(permit()), Ok(receipt())], |_, p, _| {
+                    let mut v = inspection(p);
+                    if !p {
+                        v[field] = json!("wrong");
+                    }
+                    Ok(v)
+                })
+                .is_err());
+            }
+        }
+        #[test]
+        fn race_already_present_installed_receipt_is_never_a_second_permit() {
+            for confirmation in ["installed", "replayed", "recoveredAfterUncertainResponse"] {
+                let (index, _) = select_winner(&[Ok(permit()), Ok(receipt())], |_, p, _| {
+                    let mut value = inspection(p);
+                    if !p {
+                        value["confirmation"] = json!(confirmation);
+                    }
+                    Ok(value)
+                })
+                .unwrap();
+                assert_eq!(index, 0);
+            }
+        }
+        #[test]
+        fn race_private_fifo_refuses_without_waiting_for_writer() {
+            use std::os::unix::ffi::OsStrExt;
+            let root = super::super::tests::BoundFixture::new();
+            let path = root.0.join("fifo");
+            let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(cpath.as_ptr(), 0o600) }, 0);
+            let start = Instant::now();
+            assert!(private_read(&path).is_err());
+            assert!(start.elapsed() < Duration::from_secs(1));
+        }
+
+        #[test]
+        fn race_ambiguous_responses_preserve_marker_and_never_forward_a_permit() {
+            for mode in ["lost", "multiple", "receipt-drift", "uncertain"] {
+                let root = super::super::tests::BoundFixture::new();
+                let attempt = root.0.join("attempt");
+                DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+                let replies = match mode {
+                    "lost" => vec![Ok(permit()), Err(invalid("lost response"))],
+                    "multiple" => vec![Ok(permit()), Ok(permit())],
+                    _ => vec![Ok(permit()), Ok(receipt())],
+                };
+                let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+                    select_winner(&replies, |_, p, _| {
+                        let mut value = inspection(p);
+                        if !p && mode == "receipt-drift" {
+                            value["transactionId"] = json!("9");
+                        }
+                        if !p && mode == "uncertain" {
+                            value["type"] = json!("uncertain");
+                        }
+                        Ok(value)
+                    })?;
+                    panic!("ambiguous race must never forward a permit")
+                });
+                assert!(result.is_err());
+                assert!(root.0.join("native-dispatch-active.json").exists());
+                assert!(attempt.join("submit-requested.json").exists());
+                assert!(!attempt.join("op34-frame.bin").exists());
+                let next = root.0.join("next");
+                DirBuilder::new().mode(0o700).create(&next).unwrap();
+                assert!(
+                    submit_once(&next, "2", b"ingress", 34, b"submission", |_, _| panic!(
+                        "uncertain race must block subsequent submission"
+                    ))
+                    .is_err()
+                );
+            }
+        }
+
+        #[test]
+        fn race_no_go_and_mismatched_go_fail_before_submission() {
+            let root = super::super::tests::BoundFixture::new();
+            let attempt = root.0.join("attempt");
+            DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+            let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+                await_go(
+                    &attempt,
+                    "nonce",
+                    "hash",
+                    Instant::now() + Duration::from_millis(1),
+                )?;
+                panic!("missing go must never submit")
+            });
+            assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
+            assert!(root.0.join("native-dispatch-active.json").exists());
+            assert!(attempt.join("submit-requested.json").exists());
+            write_new(&attempt,"race-go.json",br#"{"protocol":"mini-spk-dispatch-race-go-v1","nonceHex":"other","submissionSha256":"hash"}"#).unwrap();
+            assert!(await_go(
+                &attempt,
+                "nonce",
+                "hash",
+                Instant::now() + Duration::from_secs(1)
+            )
+            .is_err());
+        }
+        #[test]
+        fn race_claim_pins_exact_route_and_survives_reopen_without_rearming() {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join(format!(".spk-race-test-{}-{nonce}", std::process::id()));
+            DirBuilder::new().mode(0o700).create(&path).unwrap();
+            let root = super::super::tests::BoundFixture(path);
+            let (custody, _) = super::super::tests::bound_fixture();
+            let http = HttpProjection {
+                method: "GET",
+                path_and_query: "probe",
+                ordered_headers: &[],
+                body: &[],
+                route: crate::dispatch_inspection::Route::Browser,
+            };
+            let trigger = json!({"protocol":"mini-spk-dispatch-race-trigger-v1","nonceHex":"a".repeat(64),
+                "app":custody.app,"session":custody.session,"subject":custody.subject,
+                "ticketResource":custody.ticket_resource,"sessionKind":"web","operationId":"1",
+                "method":"GET","pathAndQuery":"probe","signedApiPath":null});
+            write_new(
+                &root.0,
+                "dispatch-race-trigger.json",
+                &serde_json::to_vec(&trigger).unwrap(),
+            )
+            .unwrap();
+            let attempt = root.0.join("attempt");
+            assert!(claim(&custody, &http, "2", &attempt).is_err());
+            assert!(!root.0.join("dispatch-race-claimed.json").exists());
+            assert!(claim(&custody, &http, "1", &attempt).unwrap().is_some());
+            assert!(claim(&custody, &http, "1", &attempt).is_err());
+            Journal::open(&root.0).unwrap();
+            assert!(claim(&custody, &http, "1", &attempt).is_err());
+            assert_eq!(
+                fs::read(root.0.join("dispatch-race-claimed.json")).unwrap(),
+                serde_json::to_vec(&trigger).unwrap()
+            );
+        }
+
+        #[test]
+        fn race_absent_trigger_preserves_normal_path_and_delivery_needs_selection() {
+            let root = super::super::tests::BoundFixture::new();
+            let (custody, _) = super::super::tests::bound_fixture();
+            let http = HttpProjection {
+                method: "GET",
+                path_and_query: "probe",
+                ordered_headers: &[],
+                body: &[],
+                route: crate::dispatch_inspection::Route::Browser,
+            };
+            assert!(claim(&custody, &http, "1", &root.0.join("attempt"))
+                .unwrap()
+                .is_none());
+            delivery_event(&root.0, None).unwrap();
+            assert!(!root.0.join("race-delivery-requested.json").exists());
+            write_new(&root.0, "race-selection.json", b"{}").unwrap();
+            delivery_event(&root.0, None).unwrap();
+            delivery_event(&root.0, Some(true)).unwrap();
+            let value: Value = serde_json::from_slice(
+                &fs::read(root.0.join("race-delivery-result.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(value["physicalDeliveries"], 1);
+            assert!(delivery_event(&root.0, Some(true)).is_err());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct BoundFixture(PathBuf);
+    pub(super) struct BoundFixture(pub(super) PathBuf);
     impl BoundFixture {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1158,7 +1731,7 @@ mod tests {
             fs::remove_dir_all(&self.0).unwrap();
         }
     }
-    fn bound_fixture() -> (FixedAuthoring, ContinuityBinding) {
+    pub(super) fn bound_fixture() -> (FixedAuthoring, ContinuityBinding) {
         let custody = serde_json::from_value(json!({
             "protocol":"mini-spk-human-dispatch-custody-v1","app":"17","subject":"8","session":"27","sessionKind":"web",
             "issueIndex":"1","ticketResource":"37","packageManifest":"40","snapshotManifest":"41","sessionObserveCapability":"42",
@@ -1375,6 +1948,64 @@ mod tests {
         }
     }
     #[test]
+    fn bound_dispatch_historical_confirmed_receipt_retains_marker_and_refuses_delivery() {
+        // NativeHostCodec.outcomeCodec: confirmed (.inl), replayed (.inr false),
+        // then receipt(transactionId=11,eventId=12,acceptedCount=13,worldRoot=14).
+        // Each positive Nat/Digest is one base-255 digit followed by 255.
+        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v4".to_vec();
+        outcome.extend_from_slice(&[0, 1, 0, 11, 255, 12, 255, 13, 255, 14, 255]);
+        let mut historical = ((outcome.len() + 1) as u32).to_le_bytes().to_vec();
+        historical.push(34);
+        historical.extend_from_slice(&outcome);
+        assert!(matches!(
+            parse_op34_response(&historical).unwrap(),
+            Op34Reply::OutcomeBytes(bytes) if bytes == outcome
+        ));
+        for opcode in [34, ROUTE_BOUND_DISPATCH_OPCODE] {
+            let root = BoundFixture::new();
+            let a = root.attempt("a");
+            let submitted = submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
+                Ok(historical.clone())
+            })
+            .unwrap();
+            // This is the production gate before writing/inspecting a permit
+            // or constructing the opaque CommittedDispatch used for delivery.
+            assert_eq!(
+                submitted.committed_payload().unwrap_err().to_string(),
+                "Mini op34 did not commit a delivery permit"
+            );
+            assert_eq!(
+                fs::read(&submitted.active_marker).unwrap(),
+                submitted.active_bytes
+            );
+            assert_eq!(
+                fs::read(a.join(format!("op{opcode}-frame.bin"))).unwrap(),
+                historical
+            );
+            assert!(a.join("submit-requested.json").exists());
+            assert!(!a.join("committed-payload.bin").exists());
+            assert!(!a.join("inspection.json").exists());
+            assert!(
+                submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
+                    panic!("historical attempt must never be replayed")
+                })
+                .is_err()
+            );
+            let b = root.attempt("b");
+            assert!(
+                submit_once(&b, "2", b"b ingress", 34, b"b submission", |_, _| {
+                    panic!("historical receipt must not release the global marker")
+                })
+                .is_err()
+            );
+            assert_eq!(
+                fs::read(&submitted.active_marker).unwrap(),
+                submitted.active_bytes
+            );
+        }
+    }
+
+    #[test]
     fn bound_dispatch_uncertain_or_malformed_refusal_preserves_global_marker() {
         let valid = no_record_frame();
         let mut wrong_tag = valid.clone();
@@ -1404,6 +2035,7 @@ mod tests {
             )
             .unwrap();
             assert!(submitted.active_marker.exists());
+            assert!(submitted.committed_payload().is_err());
             let b = root.attempt("b");
             assert!(
                 submit_once(&b, "2", b"ingress", 34, b"request", |_, _| panic!(

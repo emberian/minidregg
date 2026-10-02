@@ -10,6 +10,10 @@ description = "Physical Linux custody and sandbox launch for Sandstorm SPK grain
 name = "spk-host"
 path = "src/main.rs"
 
+[features]
+# Private disposable-fixture instrumentation; absent from ordinary releases.
+integration-qualification = []
+
 [dependencies]
 minidregg-compatible-upgrade-custody = { path = "../compatible-upgrade-custody" }
 libc = "=0.2.177"
