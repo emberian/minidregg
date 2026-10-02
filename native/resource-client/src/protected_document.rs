@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+#[path = "protected_document_members.rs"]
+pub(crate) mod members;
+
 const FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM/v1";
 const MESSAGE_FRAME: &[u8] = b"MINI/OBJECT-MESSAGE/v1";
 const OP_FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM-OP/v1";
@@ -223,7 +226,7 @@ pub(crate) fn observe(root:&std::path::Path, workspace:&Value, reference:&Value,
     if source["active"] != true { return Err("protected document is frozen; finish its recorded audience transition".into()); }
     let catalog=super::local_reference(root,text(hint,"catalog")?)?;
     let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog,"resource")?;
-    let roster=root.join("protected-documents").join(target).join("roster.bin");
+    let roster=members::active_home(&root.join("protected-documents").join(target))?.join("roster.bin");
     let state=dir.join("current-audience-state.json");
     super::private_file(&state,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
     let checked_path=dir.join("checked-document-roster.json");
@@ -597,16 +600,25 @@ pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,outp
     let audience=observe(root,workspace,&reference,&signed)?;
     let source=audience_source(workspace,&signed)?;
     let home=root.join("protected-documents").join(target);
-    let meta=super::bounded_json(&home.join("enrollment.json"))?;
-    let manifest=std::fs::read(home.join("epoch-manifest.bin")).map_err(|_|"document has no admitted manifest handout; finish protected enrollment first")?;
+    let publication=members::active_home(&home)?;
+    let meta=if publication==home {super::bounded_json(&home.join("enrollment.json"))?}else {
+        if !publication.join("published.json").exists(){return Err("membership packages remain private until current-text admission finishes".into());}
+        super::bounded_json(&publication.join("epoch.json"))?
+    };
+    let manifest=std::fs::read(publication.join("epoch-manifest.bin")).map_err(|_|"document has no admitted manifest handout; finish protected enrollment first")?;
     if source["audienceState"]["manifest"]!=decimal(&Sha256::digest(&manifest)) {
         return Err("retained manifest is not this source's current committed epoch".into());
     }
-    let writer=crate::read_secret(&super::member_path(workspace,"key")?)?;
+    if manifest.len()<72{return Err("retained manifest frame is incomplete".into());}
+    let length=u64::from_be_bytes(manifest[..8].try_into().map_err(|_|"invalid manifest length")?);
+    if length!=(manifest.len()-72) as u64{return Err("retained manifest length differs".into());}
+    let signed_manifest:Value=serde_json::from_slice(&manifest[8..manifest.len()-64]).map_err(|e|e.to_string())?;
+    let writer=text(&signed_manifest,"writer")?;
+    if private::decode_hex(writer)?.len()!=32{return Err("retained manifest writer is invalid".into());}
     let bundle=json!({"type":"mini-protected-document-epoch-v1","object":target,
         "epoch":audience.anchor.epoch.to_string(),"manifest":crate::hex(&manifest),
-        "operation":meta["operation"],"writer":crate::hex(&writer.verifying_key().to_bytes()),
-        "rosterBytes":crate::hex(&std::fs::read(home.join("roster.bin")).map_err(|e|e.to_string())?)});
+        "operation":meta["operation"],"writer":writer,
+        "rosterBytes":crate::hex(&std::fs::read(publication.join("roster.bin")).map_err(|e|e.to_string())?)});
     super::private_file(output,&serde_json::to_vec_pretty(&bundle).map_err(|e|e.to_string())?)
 }
 

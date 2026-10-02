@@ -2404,6 +2404,19 @@ fn holds_sealed(view: &Value, target: &str) -> bool {
 const OBSERVATIONS_MOVED: &str =
     "the plan's signed reads saw the Host state move between them (another admission landed)";
 
+/// An explicit caller pin is semantic input. Replanning may refresh other
+/// observations but never substitutes another resource image for this pin.
+fn check_requested_root(target: &Value, actual: &str) -> Result<()> {
+    if let Some(value) = target.get("expectedTargetRoot") {
+        let expected = value.as_str().ok_or("expectedTargetRoot must be a decimal string")?;
+        field_decimal(expected, "expectedTargetRoot")?;
+        if expected != actual {
+            return Err("the pinned document changed before proposal authoring".into());
+        }
+    }
+    Ok(())
+}
+
 /// Author a proposal from fresh signed reads. A Host `stale-root` on one read
 /// is re-observed inside that read; reads that disagree with each other are
 /// re-planned here, all of them, under the same `--replan-max` bound.
@@ -2518,8 +2531,9 @@ fn propose_summary_once(
                 let obj = entry
                     .as_object()
                     .ok_or("proposal target must be an object")?;
-                if obj.len() != 2 || !obj.contains_key("name") || !obj.contains_key("payload") {
-                    return Err("proposal target may contain only name and payload".into());
+                if !obj.contains_key("name") || !obj.contains_key("payload")
+                    || obj.keys().any(|key| !matches!(key.as_str(), "name" | "payload" | "expectedTargetRoot")) {
+                    return Err("proposal target may contain only name, payload and optional expectedTargetRoot".into());
                 }
                 let local_name = member(entry, "name")?;
                 if !seen.insert(local_name.to_owned()) {
@@ -2544,6 +2558,7 @@ fn propose_summary_once(
                     .and_then(Value::as_str)
                     .ok_or("signed resource view lacks page root")?;
                 field_decimal(root_value, "signed resource root")?;
+                check_requested_root(entry, root_value)?;
                 let payload = entry.get("payload").ok_or("target payload absent")?;
                 let payload_obj = payload
                     .as_object()
@@ -2635,8 +2650,10 @@ fn propose_summary_once(
                     }
                 };
                 let lowered = if let Some(audience) = &audience {
-                    if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
-                    protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
+                    if read_only { lowered } else {
+                        if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
+                        protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
+                    }
                 } else { lowered };
                 // A read target's authorization leg is checked under the observe
                 // verb, so it carries the observe capability.
@@ -5949,6 +5966,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
+        }
+        "doc-share" | "doc-revoke" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let change=os_string(args.required("change")?,"membership change")?;
+            let subject=os_string(args.required("subject")?,"member subject")?;
+            let device=args.optional("device").map(path);
+            let output=args.optional("output").map(path);
+            args.finish()?;
+            if (action=="doc-share")!=device.is_some(){return Err("doc-share requires --device; doc-revoke omits it".into());}
+            protected_document::members::change(&root,&workspace,&name,&change,&subject,device.as_deref())?;
+            if let Some(output)=output {protected_document::members::export_share(&root,&workspace,&name,&change,&output)?;}
+            Ok(())
+        }
+        "doc-membership-recover" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let change=os_string(args.required("change")?,"membership change")?;
+            let output=args.optional("output").map(path);args.finish()?;
+            protected_document::members::recover(&root,&workspace,&name,&change)?;
+            if let Some(output)=output {protected_document::members::export_share(&root,&workspace,&name,&change,&output)?;}
+            Ok(())
+        }
+        "doc-accept" => {
+            let name=os_string(args.required("name")?,"document name")?;
+            let catalog=os_string(args.required("catalog")?,"catalog name")?;
+            let bundle=path(args.required("bundle")?);args.finish()?;
+            protected_document::members::accept(&root,&workspace,&name,&catalog,&bundle)
         }
         "doc-device" => {
             args.finish()?;
