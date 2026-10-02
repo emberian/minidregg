@@ -86,16 +86,20 @@ fn world(ws: &Value) -> Result<Value> {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| v.to_string());
-        if s.is_empty()
-            || s.len() > 80
-            || (s.len() > 1 && s.starts_with('0'))
-            || !s.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err(format!("{k} must be a canonical bounded decimal"));
-        }
+        source_decimal(&s, k)?;
         Ok(s)
     };
     Ok(json!({"domain":natural("domain")?,"expectedSeed":natural("expectedSeed")?}))
+}
+fn source_decimal(value: &str, label: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 80
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(format!("{label} must be a canonical bounded decimal"));
+    }
+    Ok(())
 }
 fn message(bytes: &[u8]) -> Vec<u8> {
     [DOMAIN, bytes].concat()
@@ -319,7 +323,7 @@ fn account_evidence(
         return Err("native account capability differs from handoff recipient/target/grant".into());
     }
     for key in ["height", "worldRoot", "authorityRoot"] {
-        crate::chat::decimal(text(challenge, key)?, "account observation identity")?;
+        source_decimal(text(challenge, key)?, "account observation identity")?;
     }
     let verbs = head["verbs"]
         .as_array()
@@ -1321,7 +1325,9 @@ mod tests {
         let view = json!({"type":"capability","kind":"account","head":{
             "id":"80","holder":{"type":"subject","subject":"8"},
             "room":"70","verbs":["observe","transfer"]}});
-        let challenge = json!({"height":"3","worldRoot":"4","authorityRoot":"5",
+        let challenge = json!({"height":"3",
+            "worldRoot":"49263608972345960957461998196908737762472409962603021562937875631642370926371",
+            "authorityRoot":"60754036600791298313000201660134478268036195276917052611359876138565388040352",
             "domain":"31","intent":{"subject":"8","nonce":"1",
             "purpose":{"type":"query","kind":"account","target":"70","view":"capability"},
             "grants":[{"kind":"account","target":"70","capability":"80"}]}});
@@ -1375,6 +1381,8 @@ mod tests {
             "/intent/purpose/target",
             "/intent/grants/0/capability",
             "/domain",
+            "/worldRoot",
+            "/authorityRoot",
         ] {
             let mut changed = challenge.clone();
             *changed.pointer_mut(pointer).unwrap() = json!("wrong");
