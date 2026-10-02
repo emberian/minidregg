@@ -1945,6 +1945,30 @@
       "owner": "law-diagnostics",
       "purpose": "Same-image authorized law diagnostic over original signed prepare and at most32 separately signed current-policy queries; DREGG/NATIVE-HOST/LAW-DIAGNOSTIC/v1 wrapper. Read-only optional Refusal; no change to ordinary observation footprint. No endpoint until bounded receiver and routes qualify.",
       "receiver": null
+    },
+    {
+      "code": 193,
+      "symbol": "APPLICATION_DISPATCH_READY",
+      "status": "reserved",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "application-dispatch/member-workspace",
+      "purpose": "Authenticated bounded signed-ingress observation of specialized current app dispatch admission; read-only, no physical permit or CAS until qualified activation",
+      "receiver": null
+    },
+    {
+      "code": 194,
+      "symbol": "APPLICATION_DISPATCH_AUTHENTICATED_PLAN",
+      "status": "reserved",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "application-dispatch/member-workspace",
+      "purpose": "Member-authenticated bounded app/session signing preparation bound to exact request intent; existing operator-only36 remains private until qualified activation",
+      "receiver": null
     }
   ],
   "response_markers": [
