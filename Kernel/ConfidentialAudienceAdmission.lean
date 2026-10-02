@@ -6,6 +6,7 @@ exactly the complete entry list. Device-source writes in the same invocation are
 refused until a source-owned final-overlay construction exists. -/
 import Kernel.RecipientReadEntitlement
 import Kernel.ObjectAudience
+import Kernel.AudienceRosterBinding
 namespace Minidregg.Kernel.ConfidentialAudienceAdmission
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -28,15 +29,7 @@ variable {profile : CanonicalRuntimeProfile.Profile F}
 
 /-- Typed canonical device data must be present in a current authenticated
 content resource; matching protected-object roots is not device validation. -/
-def devicePayload (context : Context deployment durable) (source : Nat) : Option (Digest × List UInt8) := do
-  let .present packed := context.directory.directory.slots source | none
-  if !decide (CanonicalCellRegistry.CellLaw deployment source packed) then none else
-   match packed with
-   | ⟨.content, materialized⟩ =>
-     let atom : Hyperdocument.AtomId := ⟨⟨0⟩⟩
-     let record ← Hyperdocument.lookup materialized.logical .atoms atom
-     if record.tombstonedAt.isNone then some (materialized.root, record.payload) else none
-   | _ => none
+abbrev devicePayload := AudienceRosterBinding.catalogPayload
 
 /-- Pure physical guards derived from signed roster source identifiers. Admission
 checks each source's actual typed canonical payload before this list is used. -/
