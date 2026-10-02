@@ -381,7 +381,10 @@ fn protect(root:&std::path::Path,workspace:&Value,name:&str,current:bool) -> Res
     let initial=super::bounded_json(&supported)?;
     if !initial["audienceState"].is_null() {return Err("document audience already enrolled; recover its retained enrollment".into());}
     let conversion=if current {Some(conversion::snapshot(root,workspace,name,&view,&signed)?)}else{None};
-    if current {eprintln!("{name}: protecting current text prospectively; earlier plaintext/history, links and non-text metadata remain under their existing read law; annotations keep their original revision");}
+    if current {
+        eprintln!("{name}: protecting current text prospectively; earlier public plaintext/history, links and non-text metadata remain readable under their existing read law; annotations keep their original revision");
+        eprintln!("If interrupted, run doc protect-recover {name} to resume this same retained plan.");
+    }
     ensure_custody(root)?;
     let public=device(root)?;
     let home=root.join("protected-documents").join(&target);
@@ -640,7 +643,7 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
         }
     } else {super::private_file(&public_manifest,&manifest)?;}
     if converting {
-        println!("{name}: current text protected; carried formatting received. Original marks, annotations, links and earlier disclosures remain in history; future text edits use the admitted epoch");
+        println!("{name}: current text protected; carried formatting received. Earlier public plaintext/history remains readable under its existing law. Original marks, annotations and links retain their history; future text edits use the admitted epoch");
     } else {println!("{name}: protected audience enrolled; document edits use its admitted object epoch");}
     Ok(())
 }
