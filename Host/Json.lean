@@ -993,7 +993,7 @@ private def worldDefinition (path : String) (json : Lean.Json) :
     if (store address).isSome then failAt entryPath "duplicate default field/key"
     let raw ← field entryPath "value" entry
     let definition := descriptor.fields.get space
-    let value ← if definition.meaning = WorldKindMethods.tableMeaning && raw.getArr?.isOk then do
+    let value ← if definition.meaning == WorldKindMethods.tableMeaning && raw.getArr?.isOk then do
         unless definition.codec = .bytes ∧ definition.discipline = .rom ∧ key = 0 do
           failAt entryPath "method table must be ROM bytes at key zero"
         let methods ← list (entryPath ++ ".value") worldMethod raw
