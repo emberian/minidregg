@@ -116,11 +116,6 @@ fn verify_bindings(config: &Config, pending: &Pending, marker: &Marker) -> Resul
         .provider_task
         .as_ref()
         .ok_or("continuity rejection has no configured provider")?;
-    let operation = match pending.operation.as_str() {
-        "provider settle" | "provider recovery settle" => "settle",
-        "provider disconnect" => "disconnect",
-        _ => return Err("continuity rejection is not a guarded provider transition".into()),
-    };
     if pending.publication.is_some()
         || pending.attempt
             != config
@@ -196,6 +191,29 @@ fn verify_bindings(config: &Config, pending: &Pending, marker: &Marker) -> Resul
     }
     let source: Value =
         serde_json::from_slice(&intent).map_err(|e| format!("continuity rejection source: {e}"))?;
+    verify_source(config, pending, &source)?;
+    let descriptor: Value = serde_json::from_slice(&descriptor)
+        .map_err(|e| format!("continuity rejection descriptor: {e}"))?;
+    if descriptor["type"] != "mini-provider-continuity-v1"
+        || descriptor["providerResourceId"] != provider.task
+    {
+        return Err("continuity rejection descriptor names another provider".into());
+    }
+    Ok(())
+}
+/// Full source-owned constructor equality, shared by positive before-signing
+/// rejection and expired-contention recovery. Numeric identity alone is never
+/// enough to authorize retirement of a pending operation.
+pub(super) fn verify_source(config: &Config, pending: &Pending, source: &Value) -> Result<()> {
+    let provider = config
+        .provider_task
+        .as_ref()
+        .ok_or("continuity source has no configured provider")?;
+    let operation = match pending.operation.as_str() {
+        "provider settle" | "provider recovery settle" => "settle",
+        "provider disconnect" => "disconnect",
+        _ => return Err("continuity source is not a guarded provider transition".into()),
+    };
     let identity = grain_source::operation_id(
         &config.task,
         &provider.task,
@@ -267,15 +285,8 @@ fn verify_bindings(config: &Config, pending: &Pending, marker: &Marker) -> Resul
             grants: grain_observation_grants(&authority, None, &[])?,
         },
     )?;
-    if source != expected {
+    if source != &expected {
         return Err("continuity rejection is not the complete pending provider transition".into());
-    }
-    let descriptor: Value = serde_json::from_slice(&descriptor)
-        .map_err(|e| format!("continuity rejection descriptor: {e}"))?;
-    if descriptor["type"] != "mini-provider-continuity-v1"
-        || descriptor["providerResourceId"] != provider.task
-    {
-        return Err("continuity rejection descriptor names another provider".into());
     }
     Ok(())
 }

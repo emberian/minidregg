@@ -353,7 +353,7 @@ impl Runtime {
         self.save()
     }
 
-    pub(super) fn provider_continuity_descriptor(&self, id: u64) -> Result<PathBuf> {
+    pub(super) fn provider_continuity_value(&self) -> Result<Value> {
         let task = self
             .config
             .provider_task
@@ -425,6 +425,11 @@ impl Runtime {
             Value::Null
         };
         let descriptor = json!({"type":"mini-provider-continuity-v1","providerResourceId":task.task,"reserve":reserve,"fence":fence});
+        Ok(descriptor)
+    }
+
+    pub(super) fn provider_continuity_descriptor(&self, id: u64) -> Result<PathBuf> {
+        let descriptor = self.provider_continuity_value()?;
         let path = self
             .config
             .state_dir
