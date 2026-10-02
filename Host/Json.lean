@@ -5424,7 +5424,9 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       pure <| .mkObj [("type", "resource-scope"), ("resource", ← resourceJson resource),
         ("capability", .mkObj [("kind", match kind with | .object => "object" | .account => "account" | .program => "program"),
           ("head", .mkObj [("id", decimal capability),
-            ("fields", (fields.map fun values => .arr <| values.toList.toArray.map (fun field => .str (CredentialAuthorityEntryCodec.cellFieldName field))).getD .null)])])]
+            ("fields", (fields.map fun values => .arr <| ((values.image CredentialAuthorityEntryCodec.fieldLabel).sort (· ≤ ·)).toArray.map
+              (fun label => .str (CredentialAuthorityEntryCodec.cellFieldName
+                (CredentialAuthorityEntryCodec.fieldOfLabel label)))).getD .null)])])]
   | "view-tail" => do
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
