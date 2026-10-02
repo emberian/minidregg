@@ -377,8 +377,8 @@ theorem authorizeChecked_leaf_fails
       split at refused <;> simp [Refusal.lawInputRange, Refusal.lawDeniedOutsideGrant,
         Refusal.lawDenied] at refused
     · split at refused
-      · cases readerFields context kind capability <;>
-          simp [Refusal.castAliasFor, Refusal.castAlias, Refusal.lawDeniedOutsideGrant,
+      · cases fields : readerFields context kind capability <;>
+          simp [fields, Refusal.castAliasFor, Refusal.castAlias, Refusal.lawDeniedOutsideGrant,
             Refusal.lawDenied] at refused
       · simp only [Except.error.injEq] at refused
         obtain ⟨at_, _, fails⟩ := lawDeniedFor_fails _ _ _ _ leaf refused
@@ -590,12 +590,15 @@ theorem authorize_names_stored
         simp only [Except.toOption] at accepted
         injection accepted with same
         subst same
+        simp only [portal, policyConfig, PhysicalLawResolution.config] at evidence supplied admitted ⊢
         have named := ComposedPolicyAdmission.Config.capabilityEvidence_names_stored
           (policyConfig prepared) wanted capability () signature () (fun _ => ())
           (evidence := evidence) (by simpa only [capabilityEvidenceChecked] using supplied)
         obtain ⟨stored, read, identity⟩ := named
         refine ⟨stored, read, ?_⟩
-        rw [ComposedPolicyAdmission.admit_preserves_evidence _ _ _ _ _ _ _ admitted]
+        rw [ComposedPolicyAdmission.admit_preserves_evidence (policyConfig prepared) wanted
+          evidence committed.witness (.policy wanted.policyId wanted.policyRevision)
+          prepared.epochExact prepared.revisionExact admitted]
         exact identity
 
 /-- Refusal: an observer — however valid their signature — whose named stored
