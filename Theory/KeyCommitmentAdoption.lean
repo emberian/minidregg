@@ -116,6 +116,26 @@ theorem next_signature_required (logical : Store layout) (revision : Nat) (adopt
     gate logical revision adoption currentSigned nextSigned = .error .nextNotSigned := by
   simp [gate, eligible, current, absent]
 
+/-- The existing rotation gate consumes the new commitment without any
+change to its authority rule. A successor still needs its own next commitment
+and its own possession signature. -/
+theorem adoption_enables_rotation (digestOf : List UInt8 → Digest)
+    (logical : Store layout) (revision : Nat) (adoption : Adoption)
+    (currentSigned nextSigned : List UInt8 → Bool)
+    (accepted : gate logical revision adoption currentSigned nextSigned = .ok ())
+    (rotation : KeyPreRotation.Rotation)
+    (sameSubject : rotation.subject = adoption.subject)
+    (sameNext : rotation.key.publicKey = adoption.nextPublicKey)
+    (successor : KeyPreRotation.Successor (adopted digestOf adoption) rotation)
+    (commits : rotation.key.nextKeyDigest.isSome = true)
+    (signed : List UInt8 → Bool) (possession : signed rotation.key.publicKey = true) :
+    KeyPreRotation.gate digestOf (post digestOf logical adoption) rotation signed =
+      .ok (adopted digestOf adoption) := by
+  have eligibility := ((gate_ok_iff _ _ _ _ _).1 accepted).1
+  apply (KeyPreRotation.gate_ok_iff _ _ _ _ _).2
+  exact ⟨sameSubject ▸ post_current digestOf logical adoption eligibility.1,
+    by simp [adopted, sameNext], successor, commits, possession⟩
+
 namespace Witness
 private def daily := List.replicate 32 (1 : UInt8)
 private def next := List.replicate 32 (2 : UInt8)
@@ -133,11 +153,17 @@ theorem patch_valid : Patch.ValidFrom store (patch digestOf adoption) := by deci
 theorem same_key_committed : currentSigningKey (post digestOf store adoption) ⟨9⟩ =
     some { old with nextKeyDigest := some ⟨77⟩ } := by decide
 theorem replay_not_fresh : gate (post digestOf store adoption) 8 adoption yes yes = .error .ineligible := by decide
+theorem wrong_subject : gate store 7 { adoption with subject := ⟨10⟩ } yes yes = .error .ineligible := by decide
+theorem revoked : gate (store.set ⟨.revoked, .signingKey ⟨9⟩ 4⟩ (some ())) 7 adoption yes yes =
+    .error .ineligible := by decide
+theorem same_key_refused : gate store 7 { adoption with nextPublicKey := daily } yes yes =
+    .error .ineligible := by decide
 theorem expired : gate store 101 adoption yes yes = .error .ineligible := by decide
 end Witness
 
 #assert_axioms gate_ok_iff
 #assert_axioms post_current
+#assert_axioms adoption_enables_rotation
 #assert_axioms identity_preserved
 #assert_axioms post_frame
 #assert_axioms Witness.admitted
