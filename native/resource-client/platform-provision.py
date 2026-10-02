@@ -82,6 +82,18 @@ def validate(plan):
         require(os.access(executable, os.X_OK) and digest(executable) == manifest["sha256"][role], "candidate binary changed: " + role)
     for path in (source / "scripts/workroom/provision.sh", source / "deploy/shell/mini-shell-ssh", source / "deploy/shell/render-shell-key"):
         require(path.is_file(), "missing source recipe: " + str(path))
+    if "sshLauncher" in plan:
+        launcher = plan["sshLauncher"]
+        require(type(launcher) is dict and set(launcher) == {"path", "sha256"}, "invalid SSH launcher pin")
+        path = simple(launcher["path"])
+        require(Path(launcher["path"]).absolute() == path, "SSH launcher must be canonical")
+        require(path.is_file() and os.access(path, os.X_OK)
+                and digest(path) == launcher["sha256"] == digest(source / "deploy/shell/mini-shell-ssh"),
+                "SSH launcher differs from the pinned source renderer")
+        for parent in (path, *path.parents):
+            metadata = parent.stat()
+            require(metadata.st_uid == 0 and not metadata.st_mode & 0o022,
+                    "SSH launcher requires immutable root-owned custody")
     members = plan["members"]
     require(type(members) is list and 2 <= len(members) <= plan.get("maxMembers", 100), "member population outside operator receiving bound")
     names = [row["name"] for row in members]
@@ -274,6 +286,8 @@ def start(plan):
     save(root / "operator-policy.json", policy)
     recipe = source / "scripts/workroom/provision.sh"
     source_pins = {str(path): digest(path) for path in (recipe, source / "deploy/shell/render-shell-key", source / "deploy/shell/mini-shell-ssh", Path(__file__))}
+    ssh_launcher = simple(plan["sshLauncher"]["path"]) if "sshLauncher" in plan else source / "deploy/shell/mini-shell-ssh"
+    source_pins[str(ssh_launcher)] = digest(ssh_launcher)
     save(root / "source-pins.json", source_pins)
     env = dict(os.environ, MINI=manifest["mini"], STORE_BINARY=manifest["store"], SIGNATURE_BINARY=manifest["verifier"],
                WORKROOM_OPERATOR_POLICY=str(root / "operator-policy.json"), WORKROOM_SPONSOR_BALANCE=str(plan.get("sponsorBalance", 10000000)),
@@ -363,7 +377,7 @@ def start(plan):
             key = root / "ssh" / name
             world.run(name + "-ssh-key", ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key])
         require(re.fullmatch(r"0|[1-9][0-9]*", subject) and subject not in inventory, "enrollment returned duplicate/invalid subject")
-        authorized.append(world.run(name + "-force-command", [source / "deploy/shell/render-shell-key", source / "deploy/shell/mini-shell-ssh",
+        authorized.append(world.run(name + "-force-command", [source / "deploy/shell/render-shell-key", ssh_launcher,
                                                              manifest["mini"], manifest["host"], config, world.state["publicSocket"], workspace, home, str(key) + ".pub"]))
         inventory[subject] = {"subject": subject, "workspace": str(workspace), "home": str(home), "budget": row.get("funding", 1000),
                               "ssh": {"identityFile": str(key), "knownHostsFile": str(known), "destination": pwd.getpwuid(os.getuid()).pw_name + "@127.0.0.1", "port": plan["sshPort"]}}

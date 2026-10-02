@@ -21,6 +21,10 @@ publication. `nodeDirectory: "node"` places the single native Node there instead
 of the default `world`. The retained runtime records its actual `nodeRoot`, and
 the service descriptor consumes that path. This mutable Store subtree does not
 provide authority for the root-owned candidate or controller registration.
+An optional `sshLauncher: {path,sha256}` selects the staged immutable SSH wrapper.
+Its bytes must match the source recipe exactly and its entire canonical ancestry
+must be root-owned and unwritable by other users. Forced commands record that
+actual executable path; selecting a candidate never relabels a different wrapper.
 
 Example plan (paths and SHA must refer to the supplied candidate family):
 

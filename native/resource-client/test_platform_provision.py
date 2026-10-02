@@ -55,6 +55,17 @@ class ProvisioningContract(unittest.TestCase):
         for name in ('../other','a/b','sock','custody','hooks'):
             with self.assertRaisesRegex(ValueError,'nodeDirectory'):p.validate(dict(self.plan,nodeDirectory=name))
         self.assertFalse(Path(self.plan['root']).exists())
+    def test_selected_ssh_launcher_requires_exact_source_and_root_custody(self):
+        executable=Path('/usr/bin/true').resolve()
+        source=Path(self.plan['sourceRepo'])/'deploy/shell/mini-shell-ssh'
+        source.write_bytes(executable.read_bytes())
+        plan=dict(self.plan,sshLauncher={'path':str(executable),'sha256':p.digest(executable)})
+        p.validate(plan)
+        copied=self.root/'launcher';copied.write_bytes(executable.read_bytes());copied.chmod(0o700)
+        with self.assertRaisesRegex(ValueError,'root-owned custody'):
+            p.validate(dict(plan,sshLauncher={'path':str(copied),'sha256':p.digest(copied)}))
+        source.write_text('changed source')
+        with self.assertRaisesRegex(ValueError,'pinned source renderer'):p.validate(plan)
     def test_selected_names_map_to_actual_subjects_and_keep_concurrency(self):
         self.plan['workload']={'members':['member-0','member-1'],'concurrency':8}
         p.validate(self.plan)
