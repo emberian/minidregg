@@ -173,11 +173,26 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
     if let Some(explain) = outcome.get("explain").and_then(Value::as_str) {
         return Some(format!("refused: {reason}: {explain}"));
     }
+    let detail = outcome_text(outcome.get("detail"));
+    let hint = refusal_hint(&detail);
     Some(format!(
-        "refused: {reason}: {} (phase {})",
-        outcome_text(outcome.get("detail")),
+        "refused: {reason}: {detail} (phase {}){hint}",
         outcome_text(outcome.get("phase"))
     ))
+}
+
+/// What to do about a refusal whose name alone does not say (AUDIT-ROOMS,
+/// client defect 8). A delegation's `descent` check reads the authority as it
+/// stood when the proposal was authored (its root, the issuer and policy
+/// epochs, a fresh child id, an unspent nullifier); most often the authority
+/// has moved since, and the cure is a new proposal.
+fn refusal_hint(detail: &str) -> &'static str {
+    if detail.contains("CapabilityDelegationController.Reject.descent") {
+        "\n  hint: this delegation was authored against the authority as it stood then; it has moved since \
+         (or the proposal was already used). Propose it again under a new ID and submit that."
+    } else {
+        ""
+    }
 }
 
 /// The line `mini` prints when the Host decided a refusal, from the recorded
