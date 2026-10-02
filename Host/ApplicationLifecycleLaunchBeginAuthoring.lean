@@ -333,6 +333,42 @@ def prepareStopRequestVerified (config : Config) {target : Durable}
     | throw "noncanonical launch STOP operator request"
   prepareStopVerified config verified pin request
 
+/-- Unsigned plan consistency uses the private completed-create certificate
+already minted by this exact replay walk. Reconstructing and re-admitting both
+original prefix images here would only repeat that completed admission. This
+check confers no BEGIN authority: the fresh receiver still selects CreatedAt
+and checks current signatures, laws, package state and markers separately. -/
+private def checkCreatedReference {config : Config} {target : Durable}
+    (verified : NativeHostReplay.Verified config target)
+    (prior : NativeHostReplay.PriorCreatedV3 config)
+    (binding : ApplicationLifecycleLaunchBinding.Binding) : Except String Unit := do
+  let some record := verified.opened.durable.image.accepted[prior.index]?
+    | throw "completed-create record absent from verified history"
+  let some receipt := verified.receipts[prior.index]?
+    | throw "completed-create original receipt absent from verified history"
+  unless DurableReceiverCodec.intentStream.encode record ==
+      DurableReceiverCodec.intentStream.encode prior.record do
+    throw "completed-create full record differs from admitted history"
+  unless receipt == prior.receipt && receipt.acceptedCount == prior.index + 1 &&
+      receipt.transactionId == record.transactionId &&
+      receipt.eventId == record.event.eventId do
+    throw "completed-create original receipt differs from admitted history"
+  unless record.event.codecVersion == 25 &&
+      record.event.canonicalBytes == prior.ingress.canonicalBytes &&
+      prior.ingress.creationMarker.isSome do
+    throw "completed-create ingress differs from admitted history"
+  unless (match prior.ingress.source.originalBegin.start.map (·.choice) with
+      | some (.create _) => true
+      | _ => false) do
+    throw "selected completion was not a create action"
+  unless prior.ingress.source.app == binding.app &&
+      prior.ingress.source.originalBegin.volume == binding.volume do
+    throw "completed-create application or volume differs"
+  let some custody := prior.ingress.source.physical.report.volumeCustody
+    | throw "selected successful create lacks volume custody"
+  unless binding.priorCreate == some (receipt, custody) do
+    throw "completed-create custody or receipt differs"
+
 def prepareContinueRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
     (bytes : List UInt8) : IO (Except String Plan) := do
@@ -353,7 +389,7 @@ def prepareContinueRequestVerified (config : Config) {target : Durable}
       choice := .continue
       priorCreate := some (prior.receipt, custody)
       commandDigest := descriptor.continueCommand.digest }
-  match ← verified.selectCreated binding with
+  match checkCreatedReference verified prior binding with
   | .error detail => return .error detail
   | .ok _ =>
       let beginRequest : Request :=
