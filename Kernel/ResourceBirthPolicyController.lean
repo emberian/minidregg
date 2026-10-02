@@ -1340,7 +1340,7 @@ def Pending.branchConfig [DecidableEq F]
     prepared.directory.directory
     (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
     (pending.branchStep branch) (branchRequest prepared height branch).2.target.value
-    ((pending.branchDependencies branch).map (·.additional)).getD []
+    (((pending.branchDependencies branch).map (·.additional)).getD [])
 
 /-- Failure to load the old target or any selected current/historical policy
 source refuses the branch. No missing structural root becomes an empty law. -/
