@@ -503,6 +503,7 @@ theorem lawLeaf_fails [DecidableEq F]
         (canonicalWitness (F := F) profile.compilerProfile.compiler committed
           (step prepared tuple incidence).oldState (step prepared tuple incidence).newState).newState = false := by
   unfold lawLeaf at named
+  simp only [policyConfigFromStep_exact] at named
   cases resolved : (policyConfig prepared tuple incidence).registry.resolve
       (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
   | none => simp [resolved] at named
@@ -551,6 +552,7 @@ theorem lawLeaf_none_iff_verifies [DecidableEq F]
     profileCompatible profileSemanticsExact supportedExact rangesExact castExact
   refine Iff.trans ?_ verdict.symm
   unfold lawLeaf
+  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.of_none_iff _ _ _
 
@@ -621,6 +623,7 @@ theorem rangeLeaf_none_iff_inputsInRange [DecidableEq F]
       inputsInRange profile.compilerProfile.compiler committed.record.predicate
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true := by
   unfold rangeLeaf
+  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
   exact LawLeaf.ofRange_none_iff _ _ _ _
 
@@ -648,6 +651,7 @@ theorem castAliasLeg_none_iff_castInjOn [DecidableEq F]
       castInjOn F (intsOf committed.record.predicate
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) := by
   unfold castAliasLeg
+  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
   exact castAlias_none_iff F _
 
@@ -698,6 +702,7 @@ theorem lawRefusal_isSome [DecidableEq F] (fieldsOf : Incidence command → Opti
       (lawLeaf prepared tuple incidence).isSome := by
   unfold lawRefusal lawLeaf
   dsimp only
+  simp only [policyConfigFromStep_exact]
   cases (policyConfig prepared tuple incidence).registry.resolve
       (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
   | none => simp

@@ -1049,7 +1049,10 @@ theorem lawInputRangeFor_hidden (fields : Option (Finset CellField)) (leaf : Law
 /-- An unnarrowed grant retains the exact range diagnostic. -/
 theorem lawInputRangeFor_none (leaf : LawLeaf) :
     Refusal.lawInputRangeFor none leaf = Refusal.lawInputRange leaf := by
-  simp only [Refusal.lawInputRangeFor, LawLeaf.slotCovered, LawLeaf.readsOnly_all, if_true]
+  have covered : LawLeaf.slotCovered none = (fun _ => true) := by
+    funext slot
+    rfl
+  simp [Refusal.lawInputRangeFor, covered, LawLeaf.readsOnly_all]
 
 /-- The law refusal told to a requester whose grant names `fields`: the narrowed leaf
 (`LawLeaf.narrowed`), or no clause when every failing clause reads outside the grant. -/

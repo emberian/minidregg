@@ -1544,7 +1544,7 @@ in one command. Retired links do not reserve names forever; atomic unlink/link
 can rename or replace a binding. This is a law-visible property, not a rule
 imposed on every document. -/
 def sharedNames (store : ContentStore) : List (List UInt8) :=
-  store.support.toList.filterMap (sharedNameAt store)
+  (StoreCodec.sortedSupport HyperdocumentCell.contentWire store).filterMap (sharedNameAt store)
 
 def sharedNamesUnique (store : ContentStore) : Bool :=
   decide (sharedNames store).Nodup

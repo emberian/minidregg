@@ -100,6 +100,7 @@ theorem quote_success_split (tariff : Tariff) (birthFee requestedWeeks starter :
   let credit := tariff.creditFor amount
   let actualWeeks := (credit - birthFee) / tariff.weekCredit
   unfold quote at accepted
+  dsimp only at accepted
   split at accepted
   · cases accepted
   split at accepted
