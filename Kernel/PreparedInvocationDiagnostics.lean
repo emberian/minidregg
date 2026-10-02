@@ -1,4 +1,4 @@
-/- Request-local composed-law diagnostics. The retained config, law and witness
+/- Request-local composed-law diagnostics. The retained step, law and witness
 are bound to one prepared invocation/tuple/incidence. Public explanations are
 always delegated to ComposedLawDiagnostics; effective ancestor leaves never
 cross this boundary. Submission constructs its own current prepared image. -/
@@ -14,16 +14,18 @@ variable {F : Type} [Field F]
 variable {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
 variable {ambient : Ambient} {durable : Durable} {command : Command}
 
-/-- Retain the config as a value too: rendering a dependent PreparedLaw must
-not reconstruct its source step. All other retained values are exact derivatives. -/
+/-- Retain the finite step, not the universe-lifted portal config. Rebuilding
+its config from this step neither reprojects the source nor resolves the law;
+the resolved closure and all other retained values are exact derivatives. -/
 structure PreparedPolicyLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) where
   private mk ::
-  config : ComposedPolicyAdmission.Config F
-  configExact : config = policyConfig prepared tuple incidence
-  law : ComposedPolicyAdmission.PreparedLaw config
-  resolved : config.resolve? = some law
+  context : PolicyStepContext
+  contextExact : context = step prepared tuple incidence
+  law : ComposedPolicyAdmission.PreparedLaw
+    (policyConfigFromStep prepared incidence context)
+  resolved : (policyConfigFromStep prepared incidence context).resolve? = some law
   predicate : Minidregg.Pred.Pred
   predicateExact : predicate = law.predicate
   witness : ComposedPolicyAdmission.Witness F
@@ -37,7 +39,7 @@ def preparePolicyLeg [DecidableEq F]
   let config := policyConfigFromStep prepared incidence context
   match resolved : config.resolve? with
   | none => none
-  | some law => some ⟨config, rfl, law, resolved, law.predicate, rfl, law.witness, rfl⟩
+  | some law => some ⟨context, rfl, law, resolved, law.predicate, rfl, law.witness, rfl⟩
 
 def PreparedPolicyLeg.range [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command}
