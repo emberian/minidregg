@@ -137,19 +137,23 @@ def Config.capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
 structure PreparedLaw {F : Type} [Field F] [DecidableEq F] (config : Config F) where
   head : LoadedPolicy config.snapshot config.store ⟨config.target⟩
     (config.snapshot.authState.policyRevision ⟨config.target⟩)
+  headExact : loadPolicy config.snapshot config.store ⟨config.target⟩
+    (config.snapshot.authState.policyRevision ⟨config.target⟩) = some head
   graph : LoadedGraph config.snapshot config.store config.profile.semantics
     config.target config.additional
   graphExact : loadTarget config.snapshot config.store config.profile.semantics config.target
     config.resolutionBudget config.additional = .ok graph
 
 def Config.resolve? {F : Type} [Field F] [DecidableEq F] (config : Config F) :
-    Option (PreparedLaw config) := do
-  let head ← loadPolicy config.snapshot config.store ⟨config.target⟩
-    (config.snapshot.authState.policyRevision ⟨config.target⟩)
-  match exact : loadTarget config.snapshot config.store config.profile.semantics config.target
-      config.resolutionBudget config.additional with
-  | .error _ => none
-  | .ok graph => some ⟨head, graph, exact⟩
+    Option (PreparedLaw config) :=
+  match headExact : loadPolicy config.snapshot config.store ⟨config.target⟩
+      (config.snapshot.authState.policyRevision ⟨config.target⟩) with
+  | none => none
+  | some head =>
+      match exact : loadTarget config.snapshot config.store config.profile.semantics config.target
+          config.resolutionBudget config.additional with
+      | .error _ => none
+      | .ok graph => some ⟨head, headExact, graph, exact⟩
 
 def PreparedLaw.predicate {F : Type} [Field F] [DecidableEq F] {config : Config F}
     (law : PreparedLaw config) : Pred := ResolvedLawCompilation.predicate law.graph.resolved
@@ -159,6 +163,43 @@ def PreparedLaw.witness {F : Type} [Field F] [DecidableEq F] {config : Config F}
   ⟨ResolvedLawCompilation.witness config.profile.compiler law.graph.resolved
     law.head.committed.address config.step.oldState config.step.newState,
     closureDigest law.graph.resolved⟩
+
+def PreparedLaw.binding {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind) : Bool :=
+  decide (request.target.value = config.target) &&
+  decide (request.policyId = law.head.committed.record.policyId) &&
+  decide (request.policyRevision = law.head.committed.record.version) &&
+  decide (request.domain = config.snapshot.domain) &&
+  decide (request.semantics = config.profile.semantics) &&
+  (PolicyStepBinding.canonical config.step).matches request config.step.oldState config.step.newState &&
+  config.profile.compatible (.canonical config.step)
+
+/-- The same lowering fold both constructs witnesses and decides the effective
+law. Binding facts remain explicit; diagnostic evaluation cannot authorize an
+unbound or stale request. -/
+theorem PreparedLaw.verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (bound : law.binding request = true)
+    (supportedExact : supported config.profile.compiler law.predicate = true)
+    (rangesExact : inputsInRange config.profile.compiler law.predicate
+      config.step.oldState config.step.newState = true)
+    (casts : castInjOn F (intsOf law.predicate config.step.oldState config.step.newState)) :
+    config.verifies request law.witness = true ↔
+      Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState = true := by
+  have same : config.verifies request law.witness =
+      (law.binding request && compiledLawAccepts config.profile law.predicate law.witness.compiled) := by
+    simp [Config.verifies, law.headExact, law.graphExact, PreparedLaw.binding,
+      ResolvedLawCompilation.checks, PreparedLaw.witness, ResolvedLawCompilation.witness,
+      PreparedLaw.predicate, Bool.and_assoc]
+  rw [same, bound, Bool.true_and]
+  constructor
+  · intro accepted
+    exact compiledLawAccepts_sound config.profile law.predicate law.witness.compiled accepted
+  · intro evaluated
+    have lowered := lower_complete config.profile.compiler config.profile.admissible
+      casts supportedExact rangesExact evaluated
+    simp only [compiledLawAccepts, Bool.and_eq_true, decide_eq_true_eq]
+    exact ⟨⟨⟨supportedExact, rangesExact⟩, casts⟩, lowered⟩
 
 theorem Config.capabilityEvidence_names_stored {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)

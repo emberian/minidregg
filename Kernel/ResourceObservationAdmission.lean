@@ -15,6 +15,7 @@ import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.PhysicalLawResolution
+import Compiler.ComposedLawDiagnostics
 import Compiler.ResourceTargetAdmission
 import Compiler.CanonicalAccountView
 import Compiler.ResourceAuthorityProjection
@@ -244,16 +245,8 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
           match ComposedPolicyAdmission.admit config wanted
               evidence witness (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
-          | none =>
-              match LawLeaf.ofRange profile.compilerProfile.compiler committed.predicate
-                  witness.compiled.oldState witness.compiled.newState with
-              | some leaf => .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf)
-              | none =>
-                  match castAlias F (intsOf committed.predicate
-                      witness.compiled.oldState witness.compiled.newState) with
-                  | some (x, y) => .error (Refusal.castAliasFor (readerFields context kind capability) x y)
-                  | none => .error (Refusal.lawDeniedFor (readerFields context kind capability)
-                      committed.predicate witness.compiled.oldState witness.compiled.newState)
+          | none => .error (ComposedLawDiagnostics.publicRefusal
+              (readerFields context kind capability) committed)
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -287,21 +280,20 @@ theorem authorizeChecked_lawDenied
       committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (inRange : inputsInRange profile.compilerProfile.compiler committed.predicate
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = true)
-    (castExact : castInjOn F (intsOf committed.predicate
+    (castExact : castInjOn F (intsOf committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState)) :
     authorizeChecked prepared signature = .error (Refusal.lawDeniedFor
-      (readerFields context kind capability) committed.predicate
+      (readerFields context kind capability) committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
-    committed.predicate (step prepared).oldState (step prepared).newState).mpr inRange
-  have noAlias := (castAlias_none_iff F (intsOf committed.predicate
+    committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
+  have noAlias := (castAlias_none_iff F (intsOf committed.head.committed.record.localComponent.guarded
     (step prepared).oldState (step prepared).newState)).mpr castExact
-  simp only [authorizeChecked, supplied, resolved, denied]
-  have oldExact : committed.witness.compiled.oldState = (step prepared).oldState := rfl
-  have newExact : committed.witness.compiled.newState = (step prepared).newState := rfl
-  simp only [oldExact, newExact, none_, noAlias]
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, none_, noAlias]
 
 /-- With every order clause in range, a law refused because two integers of its
 step share a field image is reported as `lawInputRange` naming the two integers,
@@ -318,17 +310,16 @@ theorem authorizeChecked_castAlias
       committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (inRange : inputsInRange profile.compilerProfile.compiler committed.predicate
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = true)
-    (alias_ : castAlias F (intsOf committed.predicate
+    (alias_ : castAlias F (intsOf committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState) = some (x, y)) :
     authorizeChecked prepared signature = .error (Refusal.castAliasFor (readerFields context kind capability) x y) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
-    committed.predicate (step prepared).oldState (step prepared).newState).mpr inRange
-  simp only [authorizeChecked, supplied, resolved, denied]
-  have oldExact : committed.witness.compiled.oldState = (step prepared).oldState := rfl
-  have newExact : committed.witness.compiled.newState = (step prepared).newState := rfl
-  simp only [oldExact, newExact, none_, alias_]
+    committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, none_, alias_]
 
 /-- A law refused while one of its order clauses compares two values outside the
 native order range is reported as `lawInputRange`, naming that clause and the two
@@ -345,13 +336,12 @@ theorem authorizeChecked_lawInputRange
       committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.predicate
+    (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = some leaf) :
     authorizeChecked prepared signature = .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf) := by
-  simp only [authorizeChecked, supplied, resolved, denied]
-  have oldExact : committed.witness.compiled.oldState = (step prepared).oldState := rfl
-  have newExact : committed.witness.compiled.newState = (step prepared).newState := rfl
-  simp only [oldExact, newExact, out]
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, out]
 
 /-- The clause a read refusal names is false on the step the law was
 evaluated on. -/
@@ -364,9 +354,10 @@ theorem authorizeChecked_leaf_fails
     (resolved : (policyConfig prepared).resolve? =
       some committed)
     (refused : authorizeChecked prepared signature = .error (Refusal.lawDenied (some leaf))) :
-    committed.predicate.subterm leaf.path = some leaf.clause ∧
+    committed.head.committed.record.localComponent.guarded.subterm leaf.path = some leaf.clause ∧
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
-  simp only [authorizeChecked, supplied, resolved] at refused
+  simp only [authorizeChecked, supplied, resolved,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal] at refused
   split at refused
   · split at refused
     · simp only [Refusal.lawInputRangeFor] at refused
@@ -581,9 +572,7 @@ theorem authorize_names_stored
     | some committed =>
       simp only [supplied, resolved] at accepted
       split at accepted
-      · split at accepted
-        · simp [Except.toOption] at accepted
-        · split at accepted <;> simp [Except.toOption] at accepted
+      · simp [Except.toOption] at accepted
       · rename_i authorized admitted
         simp only [Except.toOption] at accepted
         injection accepted with same
