@@ -295,7 +295,7 @@ op S "ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:$PORT" setup
 step S 0 newcomer "keygen mini.key"
 op S "CUSTODY: copy newcomer secret into sponsor home (co-signed enrollment)" \
   bash -c "mkdir -p -m 700 '$RUN/homes/sponsor/keys' && install -m 600 '$RUN/homes/newcomer/keys/mini.key' '$RUN/homes/sponsor/keys/newcomer-1.key' && install -m 644 '$RUN/homes/newcomer/keys/mini.key.next.pub' '$RUN/homes/sponsor/keys/newcomer-1.key.next.pub'"
-step S 0 sponsor "enroll plan newcomer-1 newcomer-1.key"
+step S 0 sponsor "enroll plan newcomer-1 newcomer-1.key $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.pub") $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.cosign")"
 step S 0 sponsor "enroll seal newcomer-1"
 step S 0 sponsor "enroll submit newcomer-1"
 B_SUBJ=$(jq -r '.subject' "$LAST")

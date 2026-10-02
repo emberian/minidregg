@@ -4,8 +4,18 @@ the same canonical authority cell used by every signed receiver. Enrollment
 does not issue a capability or create an account: a current factory-management
 capability, its current law, and the new key holder's proof of possession are
 all required before the authority update and its durable nullifier commit.
+
+A record that commits to a next key (pre-rotation) also needs POSSESSION of
+that next key: the ingress carries the next public key and its signature over
+`nextPossessionFrame` (the enrolled public key and the next public key), and
+admission runs `Theory.KeyPreRotation.enrollGate` -- the same possession rule a
+rotation has (`Accepted.nextPossession`).  A sponsor therefore cannot commit a
+next key it merely names.  It CAN commit a keypair of its own; only the
+subject's client, comparing the commitment with the digest of its own next
+key, refuses that (`workspace init`).
 -/
 import Kernel.CapabilityRevocationController
+import Theory.KeyPreRotation
 
 namespace Minidregg.Kernel.ParticipantKeyEnrollment
 
@@ -34,6 +44,27 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
+
+/-! ## The next-key digest -/
+
+def nextKeyDigestTag : List UInt8 := "DREGG.SIGNING-KEY.NEXT/v1".toUTF8.toList
+
+/-- The pre-rotation commitment to a public key: cSHAKE256 under its own tag,
+projected to the authority `Digest`.  The client never computes it; it asks the
+host (`Host.Json` kind `signing-key-next-digest`). -/
+def nextKeyDigest (publicKey : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash nextKeyDigestTag publicKey).digest
+
+/-- The exact bytes the committed NEXT key signs at enrollment: its consent to
+succeed the enrolled key.  Fixed layout (tag, the enrolled public key, the next
+public key; both 32 bytes for Ed25519) so a key made offline by `mini keygen`
+can co-sign before any Host is reachable.  No domain and no command: the
+co-signature is made once, at keygen, and binds the pair only. -/
+def nextPossessionTag : List UInt8 :=
+  "DREGG/PARTICIPANT/KEY-ENROLL/NEXT-POSSESSION/v1".toUTF8.toList
+
+def nextPossessionFrame (publicKey nextPublicKey : List UInt8) : List UInt8 :=
+  nextPossessionTag ++ publicKey ++ nextPublicKey
 
 structure Command where
   sponsor : SubjectId
@@ -73,21 +104,30 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
 def commandCodec : LawfulCodec Command :=
   framed "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream
 
+/-- `nextPublicKey` / `nextPossessionSignature` are empty exactly when the
+record commits to no next key (`enrollGate` refuses any other combination). -/
 structure Ingress where
   commandBytes : List UInt8
   sponsorEnvelope : List UInt8
   possessionSignature : List UInt8
+  nextPublicKey : List UInt8
+  nextPossessionSignature : List UInt8
   deriving DecidableEq, Repr
 
 def ingressStream : StreamCodec Ingress :=
   StreamCodec.xmap (StreamCodec.product bytesStream
-    (StreamCodec.product bytesStream bytesStream))
-    (fun ingress => (ingress.commandBytes, ingress.sponsorEnvelope, ingress.possessionSignature))
-    (fun (command, sponsor, possession) => ⟨command, sponsor, possession⟩)
+    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream bytesStream))))
+    (fun ingress => (ingress.commandBytes, ingress.sponsorEnvelope, ingress.possessionSignature,
+      ingress.nextPublicKey, ingress.nextPossessionSignature))
+    (fun (command, sponsor, possession, next, nextPossession) =>
+      ⟨command, sponsor, possession, next, nextPossession⟩)
     (by intro ingress; cases ingress; rfl)
 
+/-- v2: v1 plus the next key and its co-signature.  A v1 ingress refuses to
+decode (its frame differs). -/
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PARTICIPANT/KEY-ENROLL/SIGNED/v1".toUTF8.toList ingressStream
+  framed "DREGG/PARTICIPANT/KEY-ENROLL/SIGNED/v2".toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -242,6 +282,8 @@ inductive Reject where
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   | possession (reason : CredentialSignatureIO.Error) | invalidPossession
+  | nextPossession (reason : CredentialSignatureIO.Error)
+  | nextKey (reason : KeyPreRotation.EnrollReject)
   deriving Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -395,6 +437,12 @@ def authorize [DecidableEq F]
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
+/-- The signature oracle of the one presented next-possession signature: it
+vouches for the presented next key exactly when the native verifier accepted
+it there, and for no other key. -/
+def presentedNext (nextPublicKey : List UInt8) (verified : Bool) : List UInt8 → Bool :=
+  fun publicKey => decide (publicKey = nextPublicKey) && verified
+
 structure Accepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (ingress : DecodedIngress) where
@@ -404,6 +452,18 @@ structure Accepted [DecidableEq F]
   semantic : prepared.SemanticAccepted
   possessionVerified : Bool
   possessionTrue : possessionVerified = true
+  nextVerified : Bool
+  nextGated : KeyPreRotation.enrollGate nextKeyDigest command.key ingress.ingress.nextPublicKey
+    (presentedNext ingress.ingress.nextPublicKey nextVerified) = .ok ()
+
+/-- The native verdict on the next-possession signature: `false` (and no call)
+when no next key is presented. -/
+def verifyNext (native : CredentialSignatureIO.NativeConfig) (command : Command)
+    (ingress : DecodedIngress) : IO (Except CredentialSignatureIO.Error Bool) :=
+  if ingress.ingress.nextPublicKey = [] then pure (.ok false)
+  else CredentialSignatureIO.verify native ingress.ingress.nextPublicKey
+    (nextPossessionFrame command.key.publicKey ingress.ingress.nextPublicKey)
+    ingress.ingress.nextPossessionSignature
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -423,9 +483,29 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
               ingress.ingress.possessionSignature with
           | .error reason => return .error (.possession reason)
           | .ok verified =>
-              if yes : verified = true then return .ok ⟨receipt, same, semantic, verified, yes⟩
+              if yes : verified = true then
+                match ← verifyNext native command ingress with
+                | .error reason => return .error (.nextPossession reason)
+                | .ok nextVerified =>
+                  match gated : KeyPreRotation.enrollGate nextKeyDigest command.key
+                      ingress.ingress.nextPublicKey
+                      (presentedNext ingress.ingress.nextPublicKey nextVerified) with
+                  | .error reason => return .error (.nextKey reason)
+                  | .ok () => return .ok ⟨receipt, same, semantic, verified, yes, nextVerified, gated⟩
               else return .error .invalidPossession
       else return .error .capabilityRejected
+
+/-- **An admitted enrollment that commits to a next key carried that key,
+and that key signed** (`enroll_requires_next_key_possession`, at the host's
+own oracle). -/
+theorem Accepted.nextPossession [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command}
+    {ingress : DecodedIngress} (accepted : Accepted prepared ingress) {committed : Digest}
+    (precommitted : command.key.nextKeyDigest = some committed) :
+    nextKeyDigest ingress.ingress.nextPublicKey = committed ∧ accepted.nextVerified = true := by
+  have facts := KeyPreRotation.enroll_requires_next_key_possession accepted.nextGated precommitted
+  refine ⟨facts.1, ?_⟩
+  simpa [presentedNext] using facts.2
 
 /-- The caller signs the sponsor's exact request header and the new key's
 independent possession frame. The two raw signatures have distinct meanings. -/

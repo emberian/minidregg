@@ -2597,13 +2597,24 @@ private def subjectKeyRotation (json : Lean.Json) : Result (List UInt8) := do
   return SubjectKeyRotation.commandCodec.encode command
 
 /-- The pre-rotation commitment to one public key, as the canonical decimal of
-`SubjectKeyRotation.nextKeyDigest` (UTF-8).  The client never hashes; this is
+`ParticipantKeyEnrollment.nextKeyDigest` (UTF-8).  The client never hashes; this is
 the one place the digest is computed for it. -/
 private def signingKeyNextDigest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["publicKey"] json
   let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
   unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
-  return (toString (SubjectKeyRotation.nextKeyDigest publicKey).value).toUTF8.toList
+  return (toString (ParticipantKeyEnrollment.nextKeyDigest publicKey).value).toUTF8.toList
+
+/-- The exact bytes a committed next key co-signs at enrollment
+(`ParticipantKeyEnrollment.nextPossessionFrame`).  A client that made the
+co-signature offline checks it against these bytes before planning. -/
+private def enrollmentNextPossession (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["publicKey", "nextPublicKey"] json
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  let nextPublicKey ← decodeHex "$.nextPublicKey" (← field "$" "nextPublicKey" obj)
+  unless nextPublicKey.length = 32 do failAt "$.nextPublicKey" "expected 32 bytes"
+  return ParticipantKeyEnrollment.nextPossessionFrame publicKey nextPublicKey
 
 /-- Source-owned authoring for a factory-observation provisioning request.
 These bytes name a holder and a fresh identifier; they do not claim that the
@@ -2890,6 +2901,7 @@ def author (kind : String) (json : Lean.Json)
   | "participant-key-enrollment" => participantKeyEnrollment json
   | "subject-key-rotation" => subjectKeyRotation json
   | "signing-key-next-digest" => signingKeyNextDigest json
+  | "participant-key-enrollment-next-possession" => enrollmentNextPossession json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "fleet-turn" => fleetTurnCommand json
   | "pay-book" => payBook json
@@ -4675,13 +4687,15 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let some parsed := ParticipantKeyEnrollment.decodeIngress bytes
         | failAt "participant-key-enrollment-ingress" "noncanonical ingress or nested bytes"
       pure <| .mkObj
-        [("type", "participant-key-enrollment-ingress-v1"),
+        [("type", "participant-key-enrollment-ingress-v2"),
          ("canonical", hexJson bytes),
          ("commandBytes", hexJson parsed.ingress.commandBytes),
          ("command", participantKeyCommandJson parsed.command),
          ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
          ("possessionSignature", hexJson parsed.ingress.possessionSignature),
          ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
+         ("nextPublicKey", hexJson parsed.ingress.nextPublicKey),
+         ("nextPossessionSignature", hexJson parsed.ingress.nextPossessionSignature),
          ("signatureVerified", .bool false)]
   | "participant-factory-provisioning" => do
       let command ← decoded "participant-factory-provisioning"

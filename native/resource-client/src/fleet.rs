@@ -874,6 +874,8 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
                 key: None,
                 subject: None,
                 enrollment: Some(&enrollment),
+                next_public: None,
+                without_prerotation: false,
             },
             None,
             Some(&workspace::member_path(&sponsor_workspace, "namespaceRoot")?),

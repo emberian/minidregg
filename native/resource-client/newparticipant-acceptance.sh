@@ -152,7 +152,7 @@ done
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$ROOT/sponsor.key" --subject "$SUBJECT" \
   --birth-context "$ROOT/sponsor-birth-context.json" \
-  --namespace-root "$ROOT/namespace" --dir "$ROOT/sponsor" \
+  --namespace-root "$ROOT/namespace" --dir "$ROOT/sponsor" --no-prerotation \
   >"$ROOT/sponsor-workspace.stdout"
 "$MINI" workspace --action import --dir "$ROOT/sponsor" --name factory \
   --kind object --target 10 --observe-capability 54 --control-capability 53 \
@@ -175,7 +175,7 @@ jq -e '.type == "minidregg-participant-reference-v1" and .target == "10" and
   "$ROOT/sponsor/refs/factory.json" >/dev/null
 
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
-  --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 \
+  --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 --no-prerotation \
   --dir "$ROOT/pay/observer" >"$ROOT/pay/observer-workspace.stdout"
 jq -e '.payObserver == {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}' \
   "$ROOT/genesis.json" >/dev/null

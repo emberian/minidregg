@@ -275,10 +275,13 @@ def enrollmentPlan (config : Config) (signedObservationBytes commandBytes : List
   let opened ← IO.ofExcept (← openExisting config)
   enrollmentPlanAuthorizedLoaded config opened signedObservationBytes commandBytes
 
-/-- Assembly transports two detached signatures. Native submission rechecks
-both, the current factory law, exact old state and fresh subject. -/
+/-- Assembly transports the detached signatures: the sponsor's, the new key's
+and, for a record that commits to a next key, that next key's public half and
+its co-signature (both empty otherwise). Native submission rechecks all of
+them, the current factory law, exact old state and fresh subject. -/
 def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
-    (sponsorSignature possessionSignature : List UInt8) : Except String (List UInt8) := do
+    (sponsorSignature possessionSignature nextPublicKey nextSignature : List UInt8) :
+    Except String (List UInt8) := do
   check (decide (sponsorSignature.length = 64)) "sponsor signature must be 64 bytes"
   check (decide (possessionSignature.length = 64)) "possession signature must be 64 bytes"
   let header ← need "noncanonical enrollment sponsor header"
@@ -287,10 +290,19 @@ def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
     (ParticipantKeyEnrollment.commandCodec.decode plan.commandBytes)
   check (decide (plan.possessionHeader = ParticipantKeyEnrollment.possessionFrame
     plan.domain plan.semantics command)) "enrollment possession frame differs"
+  match command.key.nextKeyDigest with
+  | none =>
+      check (decide (nextPublicKey = [] ∧ nextSignature = []))
+        "the record commits to no next key: no next key or co-signature may be presented"
+  | some _ =>
+      check (decide (nextPublicKey.length = 32))
+        "the record commits to a next key: its 32-byte public key is required"
+      check (decide (nextSignature.length = 64))
+        "the record commits to a next key: that key's 64-byte co-signature is required"
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
     ⟨header, sponsorSignature⟩
   pure (ParticipantKeyEnrollment.ingressCodec.encode
-    ⟨plan.commandBytes, envelope, possessionSignature⟩)
+    ⟨plan.commandBytes, envelope, possessionSignature, nextPublicKey, nextSignature⟩)
 
 /-! ## Subject key rotation (pre-rotation)
 

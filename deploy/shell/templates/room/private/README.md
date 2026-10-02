@@ -14,19 +14,26 @@ shell your key is a file on the box, and so is the room key you unwrap with it.
 | cell | law | file |
 |---|---|---|
 | the room `R` (declared) | `all []`: every member (a holder of `place` under R) bears cells in; capabilities decide reads | `law.room.json` |
-| `R-keys` (content, born in R by the founder) | only the founder writes, and only by creating atoms: no edit, no tombstone, no other action. Reads, grants, law installs and revocations are left to capabilities. `@FOUNDER` is replaced by the founder's subject | `law.keys.json` |
+| `R-keys` (content, born in R by the founder) | two regions by atom id. WRAPS (high half of the id nonzero): only the founder writes, only by creating atoms -- no edit, no tombstone, no other action. Each subject's ENCRYPTION-KEY RECORD (atom id = its subject number): only that subject writes it, one create or edit. Reads, grants, law installs and revocations are left to capabilities. `@FOUNDER` is replaced by the founder's subject | `law.keys.json` |
 
 `law.keys.json` is the law `Kernel/PrivateRoomKeys.lean` names `keysLaw`;
-`keysLaw_refuses_nonfounder_write`, `keysLaw_refuses_edit`, `keysLaw_refuses_tombstone`,
-`keysLaw_refuses_non_atom`, `keysLaw_admits_founder_wraps`, `keysLaw_admits_reads` are
-what it decides. Because wraps are only ever added, the room's epoch (the largest epoch with a
-wrap) never goes backwards; that is the `monotone epoch` PRIVACY §3.1 asked of R, held by
-the keys cell instead of a field on R.
+`keysLaw_refuses_nonfounder_wrap`, `keysLaw_refuses_foreign_record`, `keysLaw_refuses_wrap_edit`,
+`keysLaw_refuses_tombstone`, `keysLaw_refuses_non_atom`, `keysLaw_admits_founder_wraps`,
+`keysLaw_admits_own_record`, `keysLaw_admits_reads` are what it decides. Because wraps are only
+ever added, the room's epoch (the largest epoch with a wrap) never goes backwards.
 
-One wrap per `(epoch, member)`: atom id `epoch * 2^64 + member`, kind
-`inlineObject(schema of DREGG/PRIVATE-WRAP/v1)`, payload = the member's X25519 public key
-(32 bytes) then the wrap (104 bytes). Every member may read every wrap; a wrap opens for one
-X25519 secret only.
+A wrap of epoch `e` for member `m`, addressed to `m`'s key of generation `g` (the key epoch of
+the record it went to; 0 for the key given at invite): atom id `(e + 1)·2^96 + g·2^64 + m`, kind
+`inlineObject(schema of DREGG/PRIVATE-WRAP/v1)`, payload = the member's X25519 public key, the wrap
+(104 bytes), the member's keys-grant capability id (8 bytes, 0 for the founder). A member's record:
+atom id `m`, kind `inlineObject(schema of DREGG/PRIVATE-ENC-KEY/v1)`, payload = key epoch (4 bytes)
+then X25519 public key. A second wrap to the same key is the same atom and refused; a re-wrap to a
+member's newer key is a new atom.
+
+At invite the founder also delegates `observe, mutate` on the keys cell alone to the invitee: the
+law confines it to the invitee's own record. `rotate-key` publishes the member's new encryption key
+there (its X25519 key comes from the seed, so a signing-key rotation changes it) and keeps the old
+secret in `KEY.enc-ring`, so past epochs stay open; the founder's next rotation wraps to the record.
 
 ## The verbs
 
@@ -38,6 +45,8 @@ X25519 secret only.
     room kick k1 lab SUBJECT            revoke + rotate to a fresh key + rewrap for everyone else, all submitted.
                                         They keep the past; they get nothing new.
     room rotate r1 lab                  rotate and rewrap without a kick (finishes a kick that stopped half-way)
+    room register g1 lab                (a member) publish my current encryption key as my record
+    room rewrap w1 lab SUBJECT          (the founder) wrap SUBJECT's past epochs again to its record
     room keys lab                       the epochs you hold (local)
     forget lab [EPOCH]                  delete your copies; your client will not unwrap them again
     doc new notes --in lab              a doc in the room: its appends are sealed (edits and links refuse: they would be plaintext)

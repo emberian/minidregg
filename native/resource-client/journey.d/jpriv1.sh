@@ -165,8 +165,7 @@ for f in alice bob carl dave; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jp-$f.key"
-    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/jp-$f.key.next.pub"  # K-PREROTATE: the record commits to the next key
-  ok setup sponsor "enroll plan jp-$f jp-$f.key"
+  ok setup sponsor "enroll plan jp-$f jp-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal jp-$f"
   ok setup sponsor "enroll submit jp-$f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")
@@ -417,8 +416,9 @@ expectgot carl "carl opens the epoch-1 line" "$T_A1" "$(jq -r '.entries[1].priva
 expectgot carl "carl does not hold epoch 0: the marker (default: current epoch only)" \
   "[sealed under epoch 0 — you do not hold that key]" "$(jq -r '.entries[0].private' "$OUT")"
 ok carl alice "room invite i-carl-past lab $C ${ENC[carl]} --past --verbs observe"
+# The wrap of (epoch 0, generation 0, carl): (0 + 1) * 2^96 + carl (Kernel/PrivateRoomKeys.lean wrapAtomId).
 check carl "--past wrote only the epoch carl lacked (epoch 0)" \
-  jq -e --arg c "$C" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
+  jq -e --arg c "$(echo "2^96 + $C" | BC_LINE_LENGTH=0 bc)" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
     "$WS/alice/proposals/i-carl-past-keys/intent.json"
 tail_of carl sa-c --private lab
 expectgot carl "with --past carl opens the epoch-0 line too" "$T_A0" "$(jq -r '.entries[0].private.text' "$OUT")"
@@ -458,6 +458,43 @@ check chat "carl (a member holding the wrap) reads both private lines in the mer
   sh -c "grep -q 'PRIVATE-ECHO' \"\$1\" && grep -q 'PRIVATE-FOXTROT' \"\$1\"" _ "$OUT"
 ok chat alice "tail"
 check chat "alice reads carl's private line" grep -q 'PRIVATE-FOXTROT' "$OUT"
+
+# ------------------------------------------------ a member rotates its signing key (FIX-IDENTITY B)
+# rotate-key keeps the old encryption secret (KEY.enc-ring) and publishes the new
+# public key as carl's record in every private room he is in; the founder's next
+# rotation wraps to the record; the keys law lets only carl write his record.
+ENC_OLD=${ENC[carl]}
+ok rotkey carl "rotate-key mini.key.next"
+check rotkey "rotate-key published carl's new encryption key to lab and pc" \
+  jq -s -e 'last | [.privateRooms[] | select(.record == "published") | .room] | sort == ["lab","pc"]' "$OUT"
+check rotkey "carl's keyring kept the old encryption secret (0600, one entry)" \
+  sh -c "[ \"\$(stat -c %a \"\$1\")\" = 600 ] && [ \"\$(jq '.keys | length' \"\$1\")\" = 1 ]" _ "$H/carl/keys/mini.key.enc-ring"
+ok rotkey carl "whoami"
+ENC_NEW=$(jq -r .encryptionKey "$OUT")
+check rotkey "carl's encryption key changed with the seed" test "$ENC_NEW" != "$ENC_OLD"
+T_RK="PRIVATE-GOLF alice says this after carl rotated"
+ok rotkey alice "room rotate r-pc pc"
+# pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
+RK_ID=$(echo "2 * 2^96 + 2 * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
+  jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
+    "$WS/alice/proposals/r-pc/intent.json"
+ok rotkey alice "say $T_RK"
+ok rotkey carl "tail --json -n 100"
+check rotkey "carl opens the epoch sealed after his rotation, and still the line before it" \
+  sh -c "grep -q 'PRIVATE-GOLF' \"\$1\" && grep -q 'PRIVATE-ECHO' \"\$1\"" _ "$OUT"
+jq -n --arg a "$A" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"pc-keys",
+  payload:{type:"content",actions:[{type:"createAtom",atom:$a,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/foreign-record.json"
+raw rotkey carl "plans alice's record (atom id = alice) in pc's keys cell" ok "$MINI" workspace --action propose \
+  --dir "$WS/carl" --request "$RQ/foreign-record.json" --proposal-id foreign-record
+raw rotkey carl "submits it: refused (each subject writes only its own record)" "law-denied" "$MINI" workspace --action submit \
+  --dir "$WS/carl" --intent "$WS/carl/proposals/foreign-record/intent.json" --attempt "$WS/carl/attempts/foreign-record"
+jq -n --arg d "$D" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"pc-keys",
+  payload:{type:"content",actions:[{type:"createAtom",atom:$d,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/squat-record.json"
+raw rotkey alice "the founder plans dave's record (atom id = dave; dave has none yet)" ok "$MINI" workspace --action propose \
+  --dir "$WS/alice" --request "$RQ/squat-record.json" --proposal-id squat-record
+raw rotkey alice "submits it: refused (the founder cannot write a member's record either)" "law-denied" "$MINI" workspace --action submit \
+  --dir "$WS/alice" --intent "$WS/alice/proposals/squat-record/intent.json" --attempt "$WS/alice/attempts/squat-record"
 
 # ------------------------------------------------ a hosted subject (B6)
 echo "$D  # dave stands in for hosted Hermes: his key is a session-home file" >"$MINI_HOSTED_SUBJECTS"

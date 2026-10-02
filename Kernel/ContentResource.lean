@@ -1491,6 +1491,32 @@ def Action.tag : Action → Nat
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
 
+/-- The atom identifiers a command creates or edits, in command order. -/
+def touchedAtoms (command : Command) : List Nat :=
+  command.actions.filterMap fun action => match action with
+    | .createAtom atom _ _ => some atom.digest.value
+    | .editAtom edit => some edit.atomId.digest.value
+    | _ => none
+
+/-- The least / greatest of `f` over the touched atom identifiers; `-1` when the
+command touches no atom (an identifier is a natural, so `-1` names none). -/
+def touchedMin (f : Nat → Nat) (command : Command) : Int :=
+  match touchedAtoms command with
+  | [] => -1
+  | first :: rest => ((rest.map f).foldl min (f first) : Nat)
+
+def touchedMax (f : Nat → Nat) (command : Command) : Int :=
+  match touchedAtoms command with
+  | [] => -1
+  | first :: rest => ((rest.map f).foldl max (f first) : Nat)
+
+/-- An atom identifier's high and low 64-bit halves.  A law that partitions a
+cell's atoms by identifier (a private room's keys cell: wraps above, each
+member's own encryption-key record at its subject number below 2^64) reads the
+range of the halves a write touches. -/
+def atomHigh (id : Nat) : Nat := id / 2 ^ 64
+def atomLow (id : Nat) : Nat := id % 2 ^ 64
+
 /-- The store a content law sees: the cell without its hiding key, so every
 count and byte measure is of content alone. -/
 def lawStore (store : ContentStore) : ContentStore :=
@@ -1525,7 +1551,11 @@ def project (before' after' : ContentStore) (command : Command) : List (String �
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
       | .editAtom edit => edit.tombstone
-      | _ => false).length)]
+      | _ => false).length),
+   ("content/atoms/high-min", touchedMin atomHigh command),
+   ("content/atoms/high-max", touchedMax atomHigh command),
+   ("content/atoms/low-min", touchedMin atomLow command),
+   ("content/atoms/low-max", touchedMax atomLow command)]
 
 /-! ## Annotations: attached to a read revision, never touching the body -/
 

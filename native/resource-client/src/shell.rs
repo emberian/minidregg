@@ -56,8 +56,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
     Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether HOME/keys/<key>.next.pub matches it" },
     Verb { name: "rotate-key", usage: "rotate-key NEXTFILE", operation: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
-    Verb { name: "init", usage: "init KEYFILE SUBJECT", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace" },
-    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE [FACTORY-REF] [--no-prerotation] | enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
+    Verb { name: "init", usage: "init KEYFILE SUBJECT [--no-prerotation]", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
+    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
     Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
@@ -81,7 +81,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room rotate ID NAME | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | propose (action revoke; private: room-key --op kick = revoke + rotate + rewrap, submitted) | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room rotate ID NAME | room register ID NAME | room rewrap ID NAME SUBJECT | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | propose (action revoke; private: room-key --op kick = revoke + rotate + rewrap, submitted) | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
@@ -456,6 +456,42 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
                     flag("op", "rotate"),
                     flag("dir", ws),
                     flag("name", w[3].clone()),
+                    flag("proposal-id", w[2].clone()),
+                ],
+                writes: vec![],
+            }
+        }
+        "register" => {
+            // room register ID NAME: publish my current encryption key as my record
+            arity(w, 3, 3, u)?;
+            workspace_name(&w[2], "proposal ID")?;
+            workspace_name(&w[3], "room name")?;
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "room-key"),
+                    flag("op", "register"),
+                    flag("dir", ws),
+                    flag("name", w[3].clone()),
+                    flag("proposal-id", w[2].clone()),
+                ],
+                writes: vec![],
+            }
+        }
+        "rewrap" => {
+            // room rewrap ID NAME SUBJECT: wrap SUBJECT's epochs again to its record
+            arity(w, 4, 4, u)?;
+            workspace_name(&w[2], "proposal ID")?;
+            workspace_name(&w[3], "room name")?;
+            decimal(&w[4], "member")?;
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "room-key"),
+                    flag("op", "rewrap"),
+                    flag("dir", ws),
+                    flag("name", w[3].clone()),
+                    flag("member", w[4].clone()),
                     flag("proposal-id", w[2].clone()),
                 ],
                 writes: vec![],
@@ -1350,6 +1386,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             )
         }
         "init" => {
+            let mut w: Vec<String> = w.to_vec();
+            let without = take_switch(&mut w, "--no-prerotation");
             arity(&w, 2, 2, u)?;
             session_file(&w[1], "key file")?;
             decimal(&w[2], "subject")?;
@@ -1374,6 +1412,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 flag("namespace-root", session.home.join("namespace")),
                 flag("dir", ws()),
             ]);
+            // init refuses a subject whose committed next key is not
+            // HOME/keys/KEYFILE.next.pub (FIX-IDENTITY), unless --no-prerotation.
+            if without {
+                flags.push(flag("no-prerotation", "true"));
+            }
             client("workspace", flags)
         }
         "enroll" => {
@@ -1382,15 +1425,16 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             };
             match action.as_str() {
                 "plan" => {
-                    // `--no-prerotation`: enroll a key that commits to no next key
-                    // (it can never rotate). A public-key enrollment names the
-                    // next public key after the key (`mini join` prints both).
+                    // enroll plan NAME KEYFILE|PUBLIC-HEX [NEXT-PUB-HEX COSIGN-HEX | --no-prerotation] [FACTORY-REF]
+                    // The next public key and its co-signature are the NEWCOMER's
+                    // (their `keygen` / `mini join --key` prints them): never a file
+                    // this session home happens to hold (FIX-IDENTITY).
                     let mut w: Vec<String> = w.to_vec();
                     let without = take_switch(&mut w, "--no-prerotation");
-                    let next_public = match w.get(4).and_then(|word| hex_bytes(word, 32)) {
-                        Some(next) if hex_bytes(&w[3], 32).is_some() => {
-                            w.remove(4);
-                            Some(next)
+                    let next = match (w.get(4).and_then(|word| hex_bytes(word, 32)), w.get(5).and_then(|word| hex_bytes(word, 64))) {
+                        (Some(next), Some(cosign)) => {
+                            w.drain(4..6);
+                            Some((next, cosign))
                         }
                         _ => None,
                     };
@@ -1411,22 +1455,22 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         let path = session.home.join("keys").join(format!("{}.pub", w[2]));
                         flags.push(flag("new-public-key", path.clone()));
                         writes.push((path, public));
-                        match (&next_public, without) {
-                            (Some(next), false) => {
-                                let next_path = session.home.join("keys").join(format!("{}.next.pub", w[2]));
-                                flags.push(flag("next-public-key", next_path.clone()));
-                                writes.push((next_path, next.clone()));
-                            }
-                            (None, true) => flags.push(flag("no-prerotation", "true")),
-                            (Some(_), true) => return Err("a next public key and --no-prerotation exclude each other".into()),
-                            (None, false) => return Err("enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX: the record commits to the newcomer's next key (their `mini join --key` prints both lines), or add --no-prerotation".into()),
-                        }
                     } else {
                         session_file(&w[3], "key file")?;
                         flags.push(flag("new-key", session.home.join("keys").join(&w[3])));
-                        if without {
-                            flags.push(flag("no-prerotation", "true"));
+                    }
+                    match (next, without) {
+                        (Some((next, cosign)), false) => {
+                            let next_path = session.home.join("enroll").join(format!("{}.next.pub", w[2]));
+                            let cosign_path = session.home.join("enroll").join(format!("{}.next.cosign", w[2]));
+                            flags.push(flag("next-public-key", next_path.clone()));
+                            flags.push(flag("next-cosign", cosign_path.clone()));
+                            writes.push((next_path, next));
+                            writes.push((cosign_path, cosign));
                         }
+                        (None, true) => flags.push(flag("no-prerotation", "true")),
+                        (Some(_), true) => return Err("a next public key and --no-prerotation exclude each other".into()),
+                        (None, false) => return Err("enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX: the record commits to the newcomer's next key, and that key co-signs (their `keygen` prints both; `mini enroll --action cosign --key KEY` prints them again), or add --no-prerotation".into()),
                     }
                     flags.push(flag("dir", session.home.join("enroll").join(&w[2])));
                     Plan::Client { command: "enroll".into(), flags, writes }
@@ -2916,8 +2960,18 @@ mod tests {
             client(plan(&s, "lookup first-action").unwrap()).1,
             pairs(&[("action", "recover"), ("dir", "/w"), ("attempt", "/w/attempts/first-action")])
         );
+        // FIX-IDENTITY: a hosted enrollment takes the newcomer's next public key
+        // and co-signature as words, never a file the sponsor's home holds.
+        assert!(plan(&s, "enroll plan newcomer-1 nc.key").is_err());
+        let Plan::Client { command, flags, writes } =
+            plan(&s, &format!("enroll plan newcomer-1 nc.key {} {}", "cd".repeat(32), "ef".repeat(64))).unwrap()
+        else {
+            panic!("not a client plan")
+        };
+        let flags: Vec<(String, String)> =
+            flags.into_iter().map(|(k, v)| (k, v.into_string().unwrap())).collect();
         assert_eq!(
-            client(plan(&s, "enroll plan newcomer-1 nc.key").unwrap()),
+            (command, flags, writes),
             (
                 "enroll".into(),
                 pairs(&[
@@ -2926,9 +2980,14 @@ mod tests {
                     ("factory-ref", "factory"),
                     ("name", "newcomer-1"),
                     ("new-key", "/h/keys/nc.key"),
+                    ("next-public-key", "/h/enroll/newcomer-1.next.pub"),
+                    ("next-cosign", "/h/enroll/newcomer-1.next.cosign"),
                     ("dir", "/h/enroll/newcomer-1"),
                 ]),
-                vec![]
+                vec![
+                    (PathBuf::from("/h/enroll/newcomer-1.next.pub"), vec![0xcd; 32]),
+                    (PathBuf::from("/h/enroll/newcomer-1.next.cosign"), vec![0xef; 64]),
+                ]
             )
         );
         assert!(matches!(plan(&s, "init mini.key 42").unwrap(), Plan::NotHere(text)
@@ -2961,7 +3020,9 @@ mod tests {
             panic!("not a client plan")
         };
         assert!(bare.contains(&flag("no-prerotation", "true")));
-        let plan_line = format!("enroll plan alice {public} {next}");
+        let cosign = "ef".repeat(64);
+        assert!(plan(&s, &format!("enroll plan alice {public} {next}")).is_err(), "a next key without its co-signature");
+        let plan_line = format!("enroll plan alice {public} {next} {cosign}");
         let Plan::Client { command, flags, writes } = plan(&s, &plan_line).unwrap() else {
             panic!("not a client plan")
         };
@@ -2976,7 +3037,8 @@ mod tests {
                 ("factory-ref", "factory"),
                 ("name", "alice"),
                 ("new-public-key", "/h/keys/alice.pub"),
-                ("next-public-key", "/h/keys/alice.next.pub"),
+                ("next-public-key", "/h/enroll/alice.next.pub"),
+                ("next-cosign", "/h/enroll/alice.next.cosign"),
                 ("dir", "/h/enroll/alice"),
             ])
         );
@@ -2985,7 +3047,8 @@ mod tests {
             writes,
             vec![
                 (PathBuf::from("/h/keys/alice.pub"), vec![0xab; 32]),
-                (PathBuf::from("/h/keys/alice.next.pub"), vec![0xcd; 32]),
+                (PathBuf::from("/h/enroll/alice.next.pub"), vec![0xcd; 32]),
+                (PathBuf::from("/h/enroll/alice.next.cosign"), vec![0xef; 64]),
             ]
         );
 

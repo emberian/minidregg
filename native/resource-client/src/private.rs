@@ -448,6 +448,108 @@ pub(crate) fn enc_public(seed: &[u8; 32]) -> PublicKey {
     PublicKey::from(&derive_enc_key(seed))
 }
 
+// ---------------------------------------------------------------- the encryption keyring
+
+/// FIX-IDENTITY B. The X25519 key is derived from the signing seed, so a
+/// signing-key rotation (which overwrites the seed) changes it. Before the seed
+/// is overwritten, `rotate-key` keeps the OLD encryption secret here, beside the
+/// key, so every room epoch wrapped to it stays openable: `KEY.enc-ring`, mode
+/// 0600 -- exactly the protection the seed itself has (the seed is a raw 0600
+/// file). It holds X25519 secrets only, never a signing seed: a past signing key
+/// is revoked at the Host and nothing here could sign.
+const ENC_RING_TYPE: &str = "minidregg-encryption-keyring-v1";
+
+pub(crate) fn enc_ring_path(key: &Path) -> std::path::PathBuf {
+    let mut name = key.as_os_str().to_owned();
+    name.push(".enc-ring");
+    std::path::PathBuf::from(name)
+}
+
+fn read_seed(key: &Path) -> Result<Zeroizing<[u8; 32]>> {
+    let bytes = Zeroizing::new(
+        fs::read(key).map_err(|error| format!("cannot read signing key {}: {error}", key.display()))?,
+    );
+    let seed: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("signing key {} must contain exactly 32 raw bytes", key.display()))?;
+    Ok(Zeroizing::new(seed))
+}
+
+fn load_enc_ring(key: &Path) -> Result<Vec<(String, Zeroizing<[u8; 32]>)>> {
+    let path = enc_ring_path(key);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => Zeroizing::new(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("{} is not an encryption keyring: {error}", path.display()))?;
+    if value.get("type").and_then(Value::as_str) != Some(ENC_RING_TYPE) {
+        return Err(format!("{} is not a {ENC_RING_TYPE}", path.display()));
+    }
+    let mut out = Vec::new();
+    for entry in value.get("keys").and_then(Value::as_array).ok_or("keyring lacks keys")? {
+        let epoch = entry.get("keyEpoch").and_then(Value::as_str).ok_or("keyring entry lacks keyEpoch")?;
+        let secret: [u8; 32] = decode_hex(entry.get("secret").and_then(Value::as_str).ok_or("keyring entry lacks secret")?)?
+            .try_into()
+            .map_err(|_| "a keyring secret is 32 bytes")?;
+        out.push((epoch.to_owned(), Zeroizing::new(secret)));
+    }
+    Ok(out)
+}
+
+/// Keep the encryption secret of the seed now at `key`, labelled with the key
+/// epoch it belonged to. Idempotent: a secret already kept is not added again.
+pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
+    let seed = read_seed(key)?;
+    let mut secret = cshake(ENC_LABEL, &[&seed[..]]);
+    let mut ring = load_enc_ring(key)?;
+    if ring.iter().any(|(_, kept)| **kept == secret) {
+        secret.zeroize();
+        return Ok(());
+    }
+    ring.push((key_epoch.to_owned(), Zeroizing::new(secret)));
+    secret.zeroize();
+    let keys: Vec<Value> = ring
+        .iter()
+        .map(|(epoch, secret)| {
+            json!({"keyEpoch":epoch,
+                "public":hex(PublicKey::from(&StaticSecret::from(**secret)).as_bytes()),
+                "secret":hex(&secret[..])})
+        })
+        .collect();
+    let bytes = Zeroizing::new(
+        serde_json::to_vec_pretty(&json!({"type":ENC_RING_TYPE,"keys":keys})).map_err(|e| e.to_string())?,
+    );
+    let path = enc_ring_path(key);
+    let mut staged = path.as_os_str().to_owned();
+    staged.push(".staged");
+    let staged = std::path::PathBuf::from(staged);
+    let _ = fs::remove_file(&staged);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&staged)
+        .map_err(|error| format!("cannot create {}: {error}", staged.display()))?;
+    file.write_all(&bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("cannot write {}: {error}", staged.display()))?;
+    fs::rename(&staged, &path).map_err(|error| format!("cannot install {}: {error}", path.display()))
+}
+
+/// Every X25519 secret this key file can open with: the current seed's first,
+/// then every kept past secret, newest last.
+pub(crate) fn enc_secrets(key: &Path) -> Result<Vec<StaticSecret>> {
+    let seed = read_seed(key)?;
+    let mut out = vec![derive_enc_key(&seed)];
+    for (_, secret) in load_enc_ring(key)? {
+        out.push(StaticSecret::from(*secret));
+    }
+    Ok(out)
+}
+
 /// ECIES: ephemeral X25519 → cSHAKE KEK → XChaCha20-Poly1305 of a 32-byte secret.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Wrapped {
@@ -1025,6 +1127,26 @@ mod tests {
             .err()
             .unwrap()
             .contains("low-order"));
+    }
+
+    #[test]
+    fn the_encryption_keyring_keeps_every_past_secret_across_seed_rotations() {
+        let dir = scratch("enc-ring");
+        let key = dir.join("mini.key");
+        fs::write(&key, [1u8; 32]).unwrap();
+        assert_eq!(enc_secrets(&key).unwrap().len(), 1, "no ring: the current secret only");
+        keyring_remember(&key, "1").unwrap();
+        keyring_remember(&key, "1").unwrap();
+        // rotate-key overwrites the seed; the old secret stays openable.
+        fs::write(&key, [2u8; 32]).unwrap();
+        let secrets: Vec<[u8; 32]> = enc_secrets(&key).unwrap().iter()
+            .map(|s| *PublicKey::from(s).as_bytes()).collect();
+        assert_eq!(secrets, vec![*enc_public(&[2; 32]).as_bytes(), *enc_public(&[1; 32]).as_bytes()]);
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(enc_ring_path(&key)).unwrap().mode() & 0o777, 0o600);
+        let text = fs::read_to_string(enc_ring_path(&key)).unwrap();
+        assert!(!text.contains(&hex(&[1u8; 32])), "the ring holds no signing seed");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

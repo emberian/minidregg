@@ -687,7 +687,7 @@ fn utf8_path(path: &Path) -> Result<&str> {
         .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))
 }
 
-fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -703,7 +703,7 @@ fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
-fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -935,7 +935,15 @@ fn generate_key(
             create_private(next_secret, &next_seed)?;
             next_seed.fill(0);
             create_public(next_public, &next_signing.verifying_key().to_bytes())?;
+            // FIX-IDENTITY: the next key co-signs its succession now, while it is
+            // here; an enrollment that commits to it carries this signature.
+            let cosign_path = key_rotation::conventional_next_cosign(secret);
+            let cosign = key_rotation::cosign(&signing.verifying_key().to_bytes(), &next_signing);
+            create_public(&cosign_path, &cosign)?;
             eprintln!("next key: {} (its public half: {})", next_secret.display(), next_public.display());
+            eprintln!("for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):");
+            eprintln!("  next public key: {}", hex(&next_signing.verifying_key().to_bytes()));
+            eprintln!("  co-signature:    {}", hex(&cosign));
             eprintln!("{}", key_rotation::PREROTATION_NOTICE);
             if hosted {
                 eprintln!("{}", key_rotation::HOSTED_PREROTATION_NOTICE);
@@ -4255,6 +4263,16 @@ mod tests {
             .unwrap();
         assert!(away.exists() && directory.join("a.key.next.pub").exists());
         assert!(!directory.join("a.key.next").exists());
+        // FIX-IDENTITY: the next key co-signed its succession at keygen; the
+        // co-signature verifies for (a.key, its next key) and for no other pair.
+        let daily: [u8; 32] = fs::read(directory.join("a.pub")).unwrap().try_into().unwrap();
+        let next: [u8; 32] = fs::read(directory.join("a.key.next.pub")).unwrap().try_into().unwrap();
+        let cosign: [u8; 64] = fs::read(directory.join("a.key.next.cosign")).unwrap().try_into().unwrap();
+        key_rotation::verify_cosign(&daily, &next, &cosign).unwrap();
+        assert!(key_rotation::verify_cosign(&next, &daily, &cosign).is_err());
+        let mut other = daily;
+        other[0] ^= 1;
+        assert!(key_rotation::verify_cosign(&other, &next, &cosign).is_err());
 
         // --no-prerotation makes no next key at all.
         keygen(&directory.join("p.key"), &directory.join("p.pub"), None, NextKey::Without, false).unwrap();
