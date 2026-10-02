@@ -31,6 +31,36 @@ fn decimal(value: &Value) -> Result<()> {
     Ok(())
 }
 
+// The kernel derives the canonical opening descriptor. Authoring supplies
+// only source/range/mode/pins; there is no caller-controlled byte carrier.
+fn transclusion_reference(request: &Value) -> Result<()> {
+    exact(request, &["source", "range", "mode", "pins"])?;
+    decimal(&request["source"])?;
+    if !matches!(request["mode"].as_str(), Some("snapshot" | "live")) {
+        return Err("transclusion mode must be snapshot or live".into());
+    }
+    exact(&request["range"], &["start", "finish"])?;
+    for key in ["start", "finish"] {
+        let point = &request["range"][key];
+        exact(point, &["run", "neighbor", "bias", "death"])?;
+        decimal(&point["run"])?;
+        if !point["neighbor"].is_null() { decimal(&point["neighbor"])?; }
+        if !matches!(point["bias"].as_str(), Some("before" | "after")) {
+            return Err("transclusion bias must be before or after".into());
+        }
+        if !matches!(point["death"].as_str(), Some("invalidate" | "keepTombstone"
+            | "preferPrevious" | "preferNext" | "preferPreviousThenNext" | "preferNextThenPrevious")) {
+            return Err("unknown transclusion endpoint death policy".into());
+        }
+    }
+    for pin in request["pins"].as_array().ok_or("transclusion pins must be an array")? {
+        exact(pin, &["atom", "revision"])?;
+        decimal(&pin["atom"])?;
+        decimal(&pin["revision"])?;
+    }
+    Ok(())
+}
+
 /// Structure-only actions are checked recursively: no unexamined payload can
 /// hide in an element edit, schema, run member or extra field.
 pub(crate) fn classify(action: &Value) -> Result<Exposure> {
@@ -46,7 +76,7 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "annotate" => (&["type", "annotation", "atom", "revision", "body"], Exposure::Annotation),
         "rewrapAtom" => (&["type", "atom", "before", "wrapping"], Exposure::RewrapAtom),
         "rewrapAnnotation" => (&["type", "annotation", "before", "wrapping"], Exposure::RewrapAnnotation),
-        "transclude" => (&["type", "transclusion", "link", "request"], Exposure::Unsupported),
+        "transclude" => (&["type", "transclusion", "link", "request"], Exposure::Structure),
         "unlink" => (&["type", "link"], Exposure::Unsupported),
         "mark" => (&["type", "mark", "target", "revision", "kind"], Exposure::Unsupported),
         "unmark" => (&["type", "mark"], Exposure::Unsupported),
@@ -79,6 +109,11 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "createAtom" | "editAtom" | "rewrapAtom" => decimal(&action["atom"])? ,
         "annotate" => {decimal(&action["annotation"])?;decimal(&action["atom"])?;decimal(&action["revision"])?;}
         "rewrapAnnotation" => decimal(&action["annotation"])? ,
+        "transclude" => {
+            decimal(&action["transclusion"])?;
+            decimal(&action["link"])?;
+            transclusion_reference(&action["request"])?;
+        }
         _ => {}
     }
     Ok(exposure)
@@ -123,4 +158,26 @@ mod tests {
         assert!(actions(&annotate, false).is_ok());
         assert!(actions(&json!([{"type":"futureAction","payload":"secret"}]), true).is_err());
     }
+    #[test]
+    fn protected_references_are_metadata_only_at_every_level() {
+        let point = json!({"run":"1","neighbor":null,"bias":"before","death":"invalidate"});
+        let reference = json!({"type":"transclude","transclusion":"2","link":"3",
+            "request":{"source":"4","mode":"snapshot","range":{"start":point,"finish":point},
+                "pins":[{"atom":"5","revision":"6"}]}});
+        assert_eq!(classify(&reference).unwrap(), Exposure::Structure);
+        assert!(actions(&json!([reference.clone()]), true).is_ok());
+        for pointer in ["/payload", "/request/payload", "/request/range/payload",
+            "/request/range/start/payload", "/request/pins/0/payload"] {
+            let mut bad=reference.clone();
+            let (parent,key)=pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent).unwrap().as_object_mut().unwrap().insert(key.into(),json!("secret"));
+            assert!(classify(&bad).is_err(), "{pointer}");
+        }
+        for (pointer,value) in [("/request/mode","copy"),("/request/range/start/bias","secret"),
+            ("/request/range/finish/death","secret"),("/request/pins/0/revision","secret")] {
+            let mut bad=reference.clone(); *bad.pointer_mut(pointer).unwrap()=json!(value);
+            assert!(classify(&bad).is_err());
+        }
+    }
+
 }

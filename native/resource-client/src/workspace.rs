@@ -1680,6 +1680,50 @@ pub(crate) fn opened_entries(root: &Path, workspace: &Value, reference: &Value, 
     Ok(entries(&display)?.clone())
 }
 
+/// Source plaintext is a display projection only. Match each Host-selected
+/// atom/revision against the independently admitted source view, then its own
+/// custody opening. Never identify an atom by ciphertext or borrow host keys.
+fn project_transclusion_source(item: &mut Value, source: &str,
+    raw: &[Value], opened: Option<&[Value]>) {
+    const LOCKED: &str = "[private: source fragment is locked or unavailable]";
+    const UNSUPPORTED: &str = "[source fragment: unsupported content]";
+    if !matches!(item["render"]["view"].as_str(), Some("snapshot" | "live")) { return; }
+    let Some(lines)=item["render"]["lines"].as_array() else { return; };
+    let selected=item["render"]["selected"].as_array();
+    let projected: Vec<Value>=lines.iter().enumerate().map(|(index, _)| {
+        let text = (|| -> Option<String> {
+            let selected=selected.filter(|pins|pins.len()==lines.len())?;
+            let pin=&selected[index];
+            let id=pin["atom"].as_str()?;
+            let revision=pin["revision"].as_str()?;
+            let matching: Vec<_>=raw.iter().filter(|entry|entry["type"]=="atom"
+                && entry["id"].as_str()==Some(id) && entry["revision"].as_str()==Some(revision)
+                && entry["document"].as_str()==Some(source) && entry["tombstonedAt"].is_null()).collect();
+            if matching.len()!=1 { return None; }
+            let atom=matching[0];
+            if atom["kind"]==json!({"type":"text"}) {
+                return Some(match crate::decode_hex(atom["payload"].as_str()?).ok()
+                    .and_then(|bytes|String::from_utf8(bytes).ok()) {
+                    Some(text)=>text, None=>"[source fragment: binary text]".into(),
+                });
+            }
+            if !private::is_private_kind(&atom["kind"]) { return Some(UNSUPPORTED.into()); }
+            let candidates: Vec<_>=opened?.iter().filter(|entry| {
+                let mut original=(*entry).clone();
+                if let Some(object)=original.as_object_mut() { object.remove("private"); }
+                original==*atom
+            }).collect();
+            if candidates.len()!=1 { return None; }
+            let note=&candidates[0]["private"];
+            if let Some(text)=note["text"].as_str() { Some(text.into()) }
+            else if note["hex"].as_str().is_some() { Some("[private: source fragment is binary]".into()) }
+            else { None }
+        })().unwrap_or_else(||LOCKED.into());
+        json!(hex(text.as_bytes()))
+    }).collect();
+    item["render"]["lines"]=json!(projected);
+}
+
 pub(crate) fn rendered_document(
     root: &Path,
     workspace: &Value,
@@ -1723,6 +1767,7 @@ pub(crate) fn rendered_document(
     let mut sources = Vec::new();
     let mut source_bins = std::collections::BTreeMap::<String, Vec<u8>>::new();
     let mut readable = std::collections::BTreeMap::new();
+    let mut source_displays = std::collections::BTreeMap::<String, (Vec<Value>, Option<Vec<Value>>)>::new();
     for record in &records {
         let source = if record["legacyReference"].is_object() {
             member(&record["legacyReference"], "document")?
@@ -1734,12 +1779,12 @@ pub(crate) fn rendered_document(
         }
         // A page at height H reads each source `at` H too: what the reader
         // could see then, under its grants as they stood then.
-        let attempt = |reference: &Value| -> Result<(Value, Vec<u8>)> {
+        let attempt = |reference: &Value| -> Result<(Value, Vec<u8>, Value)> {
             match at {
                 None => {
-                    let (_, _, signed) = signed_view(root, workspace, reference, "resource")?;
+                    let (view, _, signed) = signed_view(root, workspace, reference, "resource")?;
                     let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-                    Ok((json!({"target":source,"view":hex(&bin)}), bin))
+                    Ok((json!({"target":source,"view":hex(&bin)}), bin, view))
                 }
                 Some(height) => {
                     let (view, bin) = signed_at(root, workspace, reference, height)?;
@@ -1747,13 +1792,16 @@ pub(crate) fn rendered_document(
                         return Err(format!("source {source} is not live at height {height}"));
                     }
                     let bin = fs::read(bin).map_err(|error| error.to_string())?;
-                    Ok((json!({"target":source,"at":hex(&bin)}), bin))
+                    Ok((json!({"target":source,"at":hex(&bin)}), bin, view["resource"].clone()))
                 }
             }
         };
         let read = match reference_for_target(root, &source)? {
             Some(reference) => match attempt(&reference) {
-                Ok((read, bin)) => {
+                Ok((read, bin, view)) => {
+                    let raw=entries(&view)?.clone();
+                    let opened=opened_entries(root, workspace, &reference, &view).ok();
+                    source_displays.insert(source.clone(), (raw, opened));
                     sources.push(read);
                     source_bins.insert(source.clone(), bin);
                     Some(reference)
@@ -1808,7 +1856,12 @@ pub(crate) fn rendered_document(
         } else {
             member(&item["opening"], "source")?
         }.to_owned();
-        if member(&item["render"], "view")? == "moved" && !item["legacyReference"].is_object() {
+        let mut historical_display = None;
+        if item["mode"] == "snapshot" && !item["legacyReference"].is_object()
+            && matches!(item["render"]["view"].as_str(), Some("snapshot" | "moved")) {
+            // A current source wrapper cannot supply historical custody or
+            // imply that this reader held authority at the opening height.
+            historical_display=Some((Vec::new(), None));
             if let Some(Some(reference)) = readable.get(&source) {
                 let height = member(&item["opening"], "height")?.to_owned();
                 // The snapshot is rendered by a read of the source `at` its
@@ -1816,7 +1869,13 @@ pub(crate) fn rendered_document(
                 // reader's grant stood then. A reader granted later keeps the
                 // `moved` placeholder: it is told the lines moved, not shown them.
                 match signed_at(root, workspace, reference, &height) {
-                    Ok((_, bin)) => {
+                    Ok((historical, bin)) => {
+                        // Only this independently admitted historical observation
+                        // supplies the snapshot wrapper. Current readability gives
+                        // no historical authority or fallback.
+                        let raw=entries(&historical["resource"] )?.clone();
+                        let opened=opened_entries(root, workspace, reference, &historical["resource"]).ok();
+                        historical_display=Some((raw, opened));
                         let at = fs::read(&bin).map_err(|error| error.to_string())?;
                         let again = render(&host_bin, &vec![json!({"target":source,"at":hex(&at)})])?;
                         if let Some(found) = again["transclusions"].as_array().and_then(|all| {
@@ -1826,9 +1885,26 @@ pub(crate) fn rendered_document(
                             item["at"] = json!(height);
                         }
                     }
-                    Err(_) if history_refused() => item["atRefused"] = json!(height),
+                    Err(_) if history_refused() => {
+                        item["render"]=json!({"view":"moved","height":height});
+                        item["atRefused"] = json!(height);
+                    },
                     Err(error) => return Err(error),
                 }
+            }
+        }
+        if !item["legacyReference"].is_object() {
+            let display=historical_display.as_ref().or_else(||source_displays.get(&source));
+            match display {
+                Some((raw, opened))=>project_transclusion_source(&mut item, &source, raw, opened.as_deref()),
+                None=>project_transclusion_source(&mut item, &source, &[], None),
+            }
+        } else if let Some((raw, _))=source_displays.get(&source) {
+            // Legacy renderers have no exact selected-source identity. Keep
+            // ordinary text compatible, but never display a protected carrier
+            // as if its ciphertext were text or guess which atom it names.
+            if raw.iter().any(|entry|entry["type"]=="atom" && entry["kind"]!=json!({"type":"text"})) {
+                project_transclusion_source(&mut item, &source, &[], None);
             }
         }
         resolved.push(item.clone());
@@ -8085,4 +8161,76 @@ with open(sys.argv[4], 'w') as output:
         assert_eq!(fs::read(key).unwrap(),vec![19;32]);
     }
 
+}
+
+#[cfg(test)]
+mod source_transclusion_projection_tests {
+    use super::*;
+    fn source() -> Value {
+        json!({"type":"atom","id":"11","revision":"12","document":"10",
+            "tombstonedAt":null,"kind":{"type":"inlineObject","schema":private::schema_decimal()},
+            "payload":"deadbeef","createdBy":{"type":"participant","id":"9"}})
+    }
+    fn reference() -> Value {
+        json!({"opening":{"source":"10"},"render":{"view":"snapshot","lines":["deadbeef"],
+            "selected":[{"atom":"11","revision":"12"}]}})
+    }
+    fn line(value:&Value) -> String {
+        String::from_utf8(crate::decode_hex(value["render"]["lines"][0].as_str().unwrap()).unwrap()).unwrap()
+    }
+    #[test]
+    fn exact_source_opening_is_display_only_and_does_not_coalesce_ciphertexts() {
+        let raw=source(); let mut opened=raw.clone(); opened["private"]=json!({"text":"source quote"});
+        let mut other=raw.clone();other["id"]=json!("99");
+        let mut item=reference();
+        project_transclusion_source(&mut item,"10",&[raw.clone(),other],Some(&[opened]));
+        assert_eq!(line(&item),"source quote");assert_eq!(raw,source());
+        assert_eq!(item["render"]["selected"],reference()["render"]["selected"]);
+    }
+    #[test]
+    fn missing_source_keys_or_inexact_pins_stay_locked() {
+        let raw=source();let mut opened=raw.clone();opened["private"]=json!({"text":"secret"});
+        for (source_id,raws,openeds) in [("10",vec![raw.clone()],None),("20",vec![raw.clone()],Some(vec![opened.clone()])),
+            ("10",vec![raw.clone(),raw.clone()],Some(vec![opened.clone()]))] {
+            let mut item=reference();project_transclusion_source(&mut item,source_id,&raws,openeds.as_deref());
+            assert!(line(&item).contains("locked"));
+        }
+        for field in ["atom","revision"] {
+            let mut item=reference();item["render"]["selected"][0][field]=json!("99");
+            project_transclusion_source(&mut item,"10",&[raw.clone()],Some(&[opened.clone()]));
+            assert!(line(&item).contains("locked"));
+        }
+        let mut item=reference();item["render"].as_object_mut().unwrap().remove("selected");
+        project_transclusion_source(&mut item,"10",&[raw],Some(&[opened]));assert!(line(&item).contains("locked"));
+    }
+    #[test]
+    fn current_wrapper_cannot_substitute_for_historical_source() {
+        let raw=source();let mut current=raw.clone();current["payload"]=json!("cafe");current["private"]=json!({"text":"secret"});
+        let mut item=reference();project_transclusion_source(&mut item,"10",&[raw],Some(&[current]));
+        assert!(line(&item).contains("locked"));
+    }
+    #[test]
+    fn authored_source_fragment_matches_its_exact_historical_wrapper() {
+        let mut raw=source();
+        raw["payload"]=json!("");
+        raw["kind"]=json!({"type":"sealedObject","schema":"92895485019854371026069279487697518846333301443668073301247233536453259132999",
+            "fragment":{"ciphertext":"deadbeef","wrapping":"old-wrapper","wrappedBy":"8"}});
+        let mut opened=raw.clone();opened["private"]=json!({"text":"original authored text"});
+        let mut item=reference();
+        project_transclusion_source(&mut item,"10",&[raw.clone()],Some(&[opened.clone()]));
+        assert_eq!(line(&item),"original authored text");
+        opened["kind"]["fragment"]["wrapping"]=json!("current-wrapper");
+        let mut item=reference();
+        project_transclusion_source(&mut item,"10",&[raw],Some(&[opened]));
+        assert!(line(&item).contains("locked"));
+    }
+    #[test]
+    fn binary_and_unknown_sealed_schema_are_explicit_placeholders() {
+        let raw=source();let mut opened=raw.clone();opened["private"]=json!({"hex":"ff"});
+        let mut item=reference();project_transclusion_source(&mut item,"10",&[raw],Some(&[opened]));
+        assert!(line(&item).contains("binary"));
+        let mut unknown=source();unknown["kind"]=json!({"type":"sealedObject","schema":"999"});
+        let mut item=reference();project_transclusion_source(&mut item,"10",&[unknown],None);
+        assert!(line(&item).contains("unsupported"));
+    }
 }

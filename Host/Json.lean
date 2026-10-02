@@ -4903,6 +4903,28 @@ private def transclusionViewJson : ContentResource.TransclusionView → Lean.Jso
   | .invalidated => .mkObj [("view", "invalidated")]
   | .unresolved => .mkObj [("view", "unresolved")]
 
+/-- Presentation selectors come from the same kernel range resolution as the
+bytes. Readers can open exactly these source atoms using their own custody;
+no payload equality or destination authority identifies a source fragment. -/
+private def transclusionProjectionJson (source : Option ContentResource.ContentStore)
+    (opening : ContentResource.RangeOpening) (mode : Hyperdocument.TransclusionMode) : Lean.Json :=
+  let rendered := ContentResource.renderTransclusion source opening mode
+  let pins := match source, mode with
+    | some _, .snapshot => opening.pins
+    | some store, .live =>
+        match ContentResource.resolveRange store (ContentResource.documentOf opening.source) opening.range with
+        | .slots atoms => ContentResource.livePins store (ContentResource.documentOf opening.source) atoms
+        | _ => []
+    | _, _ => []
+  let selected := Lean.Json.arr <| pins.toArray.map fun pin => .mkObj
+    [("atom", decimal pin.1.digest.value), ("revision", decimal pin.2.digest.value)]
+  match rendered with
+  | .snapshot lines => .mkObj [("view", "snapshot"),
+      ("lines", .arr <| lines.toArray.map hexJson), ("selected", selected)]
+  | .live lines revised => .mkObj [("view", "live"),
+      ("lines", .arr <| lines.toArray.map hexJson), ("revised", .bool revised), ("selected", selected)]
+  | other => transclusionViewJson other
+
 /-- A content cell holds one document (`ContentLaw`); a view does not carry the
 cell's identifier, so the document is the one record of `documents`. -/
 private def documentOf? (store : ContentResource.ContentStore) : Option Hyperdocument.DocumentId :=
@@ -5018,8 +5040,7 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
               let source := (sources.find? (fun pair => pair.1 = opening.source)).map Prod.snd
               .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson record.reference.mode),
                 ("opening", openingJson opening),
-                ("render", transclusionViewJson
-                  (ContentResource.renderTransclusion source opening record.reference.mode))]
+                ("render", transclusionProjectionJson source opening record.reference.mode)]
     | _ => none
   pure <| .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
     [("transclusions", .arr rendered.toArray)])
