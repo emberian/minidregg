@@ -109,6 +109,17 @@ def EdgeSeal.signingBytes (edge : EdgeSeal) : List UInt8 :=
   "DREGG.CARRIED-SEGMENT.SEAL/v1".toUTF8.toList ++
     (StreamCodec.list bytesStream).encode [edge.body.bytes, pointBytes edge.targetStart]
 
+/-- Closed, source-owned carry plans. Version 1 changes only policy records;
+version 2 additionally lifts the frozen legacy Store/content layouts and starts
+per-write blinding at the authenticated carry boundary. Neither names an
+arbitrary replacement function supplied by a caller. -/
+def supportedTransformation (identifier : Nat) : Bool := identifier == 1 || identifier == 2
+
+@[simp] theorem unknown_transformation_refused (identifier : Nat)
+    (notPolicy : identifier ≠ 1) (notLegacy : identifier ≠ 2) :
+    supportedTransformation identifier = false := by
+  simp [supportedTransformation, notPolicy, notLegacy]
+
 /-- Public conditions on the authorized bridge. This is deliberately not a
 claim that public clients possess or replay private source-state bytes. The IO
 checker additionally verifies the detached signature using the independently
@@ -125,7 +136,7 @@ def checkPublic (expectedSource : Identity) (trustedOperator : List UInt8)
   if body.target.domain != body.source.domain || body.target.genesis != body.source.genesis then
     throw "carry edge changes original domain or genesis"
   if body.target.semantics == body.source.semantics then throw "carry edge does not change profile"
-  if body.transformation != 1 || body.nonce.length != 32 then throw "unsupported carry edge"
+  if !supportedTransformation body.transformation || body.nonce.length != 32 then throw "unsupported carry edge"
   if edge.targetStart.height != body.cut.height + 1 then throw "carry edge resets or skips logical history"
   if !ReceiptContinuity.opens ⟨body.cut.height, body.cut.worldRoot⟩
       body.cut.logChain edge.sourceSiblings then throw "carry old-cut opening refused"
@@ -180,9 +191,8 @@ def checkBody (expectedSource : Identity) (trustedOperator : List UInt8)
     throw "carry operator was not independently authorized"
   if body.nonce.length != 32 then throw "carry nonce must contain 32 bytes"
   if changes.isEmpty || !decide (changes.map Prod.fst).Nodup then throw "empty or duplicate carry writes"
-  -- Version 1 has one source-owned semantic transformation; callers cannot name
-  -- a permissive arbitrary function. The IO receiver computes these changes.
-  if body.transformation != 1 then throw "unsupported carry transformation"
+  -- The source-owned IO receiver computes the selected closed transformation.
+  if !supportedTransformation body.transformation then throw "unsupported carry transformation"
 
 def carryWrites (before : DataSnapshot ResourceBirthCodec.rootBytes)
     (changes : List (CellId × List UInt8)) : List DataWrite :=
