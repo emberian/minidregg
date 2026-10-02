@@ -645,7 +645,7 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   resourceGuard prepared :: policyGuard prepared ::
     (prepared.authority.readGuards ++
-      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => ⟨⟨cellIdValue⟩, root⟩)).filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧

@@ -791,7 +791,7 @@ def sourceGuards (prepared : Prepared deployment profile ambient durable command
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++
     (prepared.authority.readGuards ++
-      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => ⟨⟨cellIdValue⟩, root⟩)).filter fun guard =>
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId ∧
         guard.cellId ∉ (sourceGuards prepared).map ReadGuard.cellId
 

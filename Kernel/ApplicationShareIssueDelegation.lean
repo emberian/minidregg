@@ -120,7 +120,7 @@ def lawReadGuards (prepared : Prepared context profile federation height spec de
   let structural ← kindDependencies prepared
   let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
     context.directory.directory profile.semantics spec.ticket.scope.app structural.additional
-  pure ((sources ++ structural.readGuards).map fun (cellIdValue, root) => ⟨⟨cellIdValue⟩, root⟩)
+  pure ((sources ++ structural.readGuards).map fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))
 
 def readGuards (prepared : Prepared context profile federation height spec descriptor) :
     List DurableDataIntent.ReadGuard := (lawReadGuards prepared).getD []
