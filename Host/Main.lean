@@ -128,6 +128,7 @@ import Host.CarryInspection
 import Host.RetainedSegmentInspection
 import Kernel.CarriedNativeHostSession
 import Kernel.CarriedSessionEnrollmentReceiver
+import Kernel.CarriedApplicationDispatchReceiver
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -1721,9 +1722,7 @@ def dispatchSession (config : NativeHost.Config)
   | 25 =>
       return (25, outcomeCodec.encode
         (← selectedSourcePublicationLookupSession config state payload))
-  | 35 =>
-      return (35, outcomeCodec.encode
-        (← applicationDispatchLookupSession config state payload))
+  | 35 => fnDispatch operation payload
   | 47 =>
       return (47, outcomeCodec.encode
         (← applicationAgentDispatchLookupSession config state payload))
@@ -1935,9 +1934,11 @@ the external host must fence process generation and reconcile uncertain
 delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+    (payload : List UInt8) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
   let session ← sessionWalked config state
-  let result ← ApplicationDispatchReceiver.receiveVerified config session.verified payload
+  let result ← if routeBound then
+      ApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
+    else ApplicationDispatchReceiver.receiveVerified config session.verified payload
   match result with
   | .permitted permit =>
       let handed ← permit.withFreshTip fun committedBytes =>
@@ -1947,6 +1948,17 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .committed committed =>
+      -- Exact durable receipt/cache recovery never authorizes another fd3 call.
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        .confirmed committed.confirmation committed.receipt
+      sessionSetWalked state committed.verified
+  | .noRecordRefused =>
+      -- Until the positive-absence token is joined, this refusal cannot retire
+      -- a caller's uncertain attempt as absent.
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.refused .operationRejected
+          "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
   | .rejected _ =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -2098,13 +2110,14 @@ def serveFrame (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
     (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let wrote ← IO.mkRef false
   let tracked : IO.FS.Stream :=
     { output with write := fun bytes => do wrote.set true; output.write bytes }
   try
-    if operation == 34 then
-      dispatchApplicationSubmitSession config state payload tracked
+    if operation == 34 || operation == 164 then
+      applicationDispatch (operation == 164) payload tracked
     else if operation == 46 then
       dispatchAgentSubmitSession config state payload tracked
     else if operation == 76 then
@@ -2135,6 +2148,7 @@ partial def serveSession (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
@@ -2158,8 +2172,8 @@ partial def serveSession (config : NativeHost.Config)
         (RequestRefusal.malformed "native host frame exceeds operation bound"))
     else
       let payload ← readExactly input (length - 1)
-      serveFrame config state meteringProfile providerRoutes fnDispatch operation payload.toList output
-  serveSession config state meteringProfile providerRoutes fnDispatch input output
+      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
+  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
@@ -3356,6 +3370,60 @@ def carriedEnrollmentLookup (config : NativeHost.Config)
   | some (.error _) =>
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
+
+/-- A real carried dispatch keeps the same private permit handoff boundary.
+Route mismatch is classified before CAS; no post-durable branch claims absence. -/
+def carriedApplicationSubmit (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (routeBound : Bool) (payload : List UInt8)
+    (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCarriedWalked config state carried settings
+  let result ← if routeBound then
+    CarriedApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
+  else CarriedApplicationDispatchReceiver.receiveVerified config session.verified payload
+  match result with
+  | .permitted permit =>
+      let handed ← permit.withFreshTip (fun bytes => writeSessionFrame output 34 bytes)
+      match handed with
+      | .ok _ => carried.set (some ⟨session.anchor, permit.committed.target, permit.verified⟩)
+      | .error _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
+          .uncertain "carried dispatch physical handoff uncertain".toUTF8.toList
+  | .committed committed =>
+      carried.set (some ⟨session.anchor, committed.target, committed.verified⟩)
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        .confirmed .replayed committed.receipt
+  | .historical receipt =>
+      writeSessionFrame output 34 (outcomeCodec.encode (.confirmed .replayed receipt))
+  | .rejected _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
+      NativeHost.publicSubmissionOutcome (.refused .operationRejected
+        "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  | .contention => writeSessionFrame output 34 (outcomeCodec.encode .contention)
+  | .unavailable _ =>
+      writeSessionFrame output 34 (outcomeCodec.encode
+        (.unavailable "carried dispatch unavailable".toUTF8.toList))
+  | .uncertain _ =>
+      writeSessionFrame output 34 (outcomeCodec.encode
+        (.uncertain "carried dispatch readback uncertain".toUTF8.toList))
+
+/-- A suffix receipt is selected at its original accepted count. A retained
+old-profile dispatch requires its source interpreter and never gets a new root. -/
+def carriedApplicationLookup (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCarriedWalked config state carried settings
+  match CarriedApplicationDispatchReceiver.lookupVerified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused .malformed "application-dispatch".toUTF8.toList
+        "noncanonical lookup ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused .conflict "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "dispatch original history requires retained profile".toUTF8.toList
 
 def readDispatchAuthorJson (path : String) : IO Lean.Json := do
   let bytes ← readBoundedBytes path maxDispatchAuthorJsonBytes
@@ -6212,6 +6280,11 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
                             return ((75 : UInt8), ingress)
+                        | 35 =>
+                            let outcome ← if settings.carryRegistry.isSome then
+                              carriedApplicationLookup pinnedConfig state carriedState settings payload
+                            else applicationDispatchLookupSession pinnedConfig state payload
+                            return (35, outcomeCodec.encode outcome)
                         | 36 =>
                             let prepared ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
@@ -6322,8 +6395,12 @@ def run (arguments : List String) : IO UInt32 := do
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
+                  let applicationDispatch := fun routeBound payload output =>
+                    if settings.carryRegistry.isSome then
+                      carriedApplicationSubmit pinnedConfig state carriedState settings routeBound payload output
+                    else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
                   serveSession pinnedConfig state meteringProfile
-                    (← IO.ofExcept settings.providerRoutes) fnDispatch
+                    (← IO.ofExcept settings.providerRoutes) fnDispatch applicationDispatch
                     (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>

@@ -3,17 +3,54 @@ and new tickets retain their actual typed current admission. One exact CAS
 extends the suffix; only its fresh winner can hand a physical permit to Host. -/
 import Kernel.ApplicationDispatchReceiver
 import Kernel.CarriedDispatchAdmission
+import Kernel.ApplicationDispatchLookup
 
 namespace Minidregg.Kernel.CarriedApplicationDispatchReceiver
 
 open Minidregg.Compiler
 open Minidregg.Compiler.NativeHostCodec
 open Minidregg.Compiler.ResourceBirthCodec
+open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.NativeHost
 open Minidregg.Theory
 open Minidregg.Theory.IndexedProgram
 
 set_option autoImplicit false
+
+/-- Exact signed-ingress status under the suffix's original receipts. This
+lookup deliberately runs before current authority checks, so later revocation
+cannot turn an occupied transaction into absence or a fresh submission. -/
+def lookupVerified {config : Config} {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
+    Except ApplicationDispatchLookup.Error (Option Receipt) := do
+  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
+    | throw .malformed
+  if ingress.canonicalBytes != bytes then throw .malformed
+  let some selection := ApplicationDispatchAdmission.selectCommand ingress
+    | throw .malformed
+  let some signedCommand := DeclaredResourceController.commandCodec.decode
+      ingress.dispatch.signed.commandBytes
+    | throw .malformed
+  if !ApplicationDispatchCommand.matchesCommand ingress.dispatch selection ingress.parent
+      signedCommand then throw .malformed
+  let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
+    ingress.dispatch.semantics signedCommand
+  let some index := verified.opened.durable.image.accepted.findIdx?
+      (fun record => record.transactionId == transactionId)
+    | return none
+  let some record := verified.opened.durable.image.accepted[index]?
+    | throw .nativeHistoryUnavailable
+  -- Earlier records belong to their retained interpreter; never reconstruct
+  -- an old root through target-profile replay, even when bytes happen to parse.
+  let some receipt := verified.receiptAt index
+    | throw .nativeHistoryUnavailable
+  let expectedEvent := ApplicationDispatchAdmissionIngress.event ingress
+  let expectedNullifier := ApplicationDispatchAdmissionIngress.nullifier ingress
+  if record.event == expectedEvent && record.nullifiers.contains expectedNullifier &&
+      receipt.transactionId == transactionId && receipt.eventId == expectedEvent.eventId &&
+      receipt.acceptedCount == index + 1 then
+    return some receipt
+  else throw .transactionConflict
 
 /-- Computational admission evidence; the ordinary branch is obtained from
 actual suffix provenance, never by eliminating a Prop or forging Verified. -/
@@ -142,8 +179,8 @@ def Permit.withFreshTip {config : Config} {anchor : Opened config} {α : Type}
 inductive Result (config : Config) (anchor : Opened config) where
   | permitted (permit : Permit config anchor)
   | committed (committed : Committed config anchor)
-  /-- Definite pre-durable refusal only; suitable for the private op164 marker. -/
-  | noRecordRefused
+  /-- Original receipt only, with no fresh delivery authority. -/
+  | historical (receipt : Receipt)
   | rejected (detail : String)
   | contention
   | unavailable (detail : String)
@@ -155,10 +192,10 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
     (constraint : Option ApplicationDispatchReceiver.RouteConstraint) :
     IO (Result config anchor) := do
   if constraint.isSome && !(constraint.all (routeMatches admitted)) then
-    return .noRecordRefused
+    return .rejected "dispatch pre-CAS request refused"
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == admitted.intent.transactionId) != none then
-    return .noRecordRefused
+    return .rejected "dispatch pre-CAS request refused"
   let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
     config.transport rootBytes old.opened.durable admitted.intent
   match result with
@@ -195,42 +232,52 @@ theorem mismatched_route_never_submits {config : Config} {anchor : Opened config
     (admitted : Admitted config old.opened)
     (constraint : ApplicationDispatchReceiver.RouteConstraint)
     (mismatch : routeMatches admitted constraint = false) :
-    receiveAdmitted old admitted (some constraint) = pure .noRecordRefused := by
+    receiveAdmitted old admitted (some constraint) = pure (.rejected "dispatch pre-CAS request refused") := by
   simp [receiveAdmitted, mismatch]
 
 private def receiveVerifiedWith {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8)
     (constraint : Option ApplicationDispatchReceiver.RouteConstraint) :
     IO (Result config anchor) := do
+  match lookupVerified old bytes with
+  | .ok (some receipt) => return .historical receipt
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "dispatch original receipt belongs to another segment or is unavailable"
+  | .error .transactionConflict => return .rejected "dispatch transaction has a different original"
+  | .error .malformed => return .rejected "noncanonical dispatch ingress"
+  | .ok none => pure ()
   let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
-    | return .noRecordRefused
-  if ingress.canonicalBytes != bytes then return .noRecordRefused
+    | return .rejected "dispatch pre-CAS request refused"
+  if ingress.canonicalBytes != bytes then return .rejected "dispatch pre-CAS request refused"
   if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
-    return .noRecordRefused
-  if ingress.dispatch.dispatch.session.origin != .human then return .noRecordRefused
+    return .rejected "dispatch pre-CAS request refused"
+  if ingress.dispatch.dispatch.session.origin != .human then return .rejected "dispatch pre-CAS request refused"
   let .ok derived ← NativeHostReplay.deriveSuffixVerified old bytes
-    | return .noRecordRefused
+    | return .rejected "dispatch pre-CAS request refused"
   match derived with
   | .carriedDispatch selected admitted =>
-      if selected.canonicalBytes != bytes then return .noRecordRefused
+      if selected.canonicalBytes != bytes then return .rejected "dispatch pre-CAS request refused"
       receiveAdmitted old (.carried selected admitted) constraint
   | .ordinary _ =>
       -- Derived's admission is a Prop. Obtain computational projection evidence
       -- through the same suffix's real issue cache and checked current image.
       let .ok admitted ← NativeHostReplay.admitDispatchSuffixVerified old ingress
-        | return .noRecordRefused
+        | return .rejected "dispatch pre-CAS request refused"
       receiveAdmitted old (.ordinary ingress admitted) constraint
-  | .carriedEnrollment _ _ => return .noRecordRefused
+  | .carriedEnrollment _ _ => return .rejected "dispatch pre-CAS request refused"
 
 def receiveVerified (config : Config) {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
     IO (Result config anchor) := receiveVerifiedWith old bytes none
 
+/-- Route-bound failures remain ordinary non-clearing outcomes here until a
+positive-absence token with a physical-tip callback is integrated. Neither a
+parse failure nor a current-policy refusal is evidence for clearing a marker. -/
 def receiveRouteBoundVerified (config : Config) {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
     IO (Result config anchor) := do
   let some (constraint, ingress) := ApplicationDispatchReceiver.routeBoundCodec.decode bytes
-    | return .noRecordRefused
+    | return .rejected "dispatch pre-CAS request refused"
   receiveVerifiedWith old ingress (some constraint)
 
 end Minidregg.Kernel.CarriedApplicationDispatchReceiver

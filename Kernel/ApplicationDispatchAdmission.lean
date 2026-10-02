@@ -122,6 +122,12 @@ def cleanTransportText (bytes : List UInt8) : Bool :=
   (String.fromUTF8? bytes.toByteArray).isSome &&
     bytes.all (fun byte => byte != 0 && byte != 10 && byte != 13)
 
+/-- Shared reserved streamed-open wire tokens. The current request safety
+predicate remains unchanged here; the common SPK join owns streamed admission. -/
+def streamedOpenMethod : List UInt8 := "WEBSOCKET".toUTF8.toList
+
+def webSocketProtocolHeader : List UInt8 := "sec-websocket-protocol".toUTF8.toList
+
 /-- The exact signed request is a bounded WebSession candidate. The received
 `generated` tag is never trusted: every incoming header must be ordinary,
 and the host synthesizes Sandstorm security context from checked fields.
