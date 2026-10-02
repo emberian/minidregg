@@ -20,7 +20,7 @@ class ProvisioningContract(unittest.TestCase):
         for relative in ('scripts/workroom/provision.sh', 'deploy/shell/mini-shell-ssh', 'deploy/shell/render-shell-key'):
             path=source / relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('WORKROOM_OPERATOR_POLICY\n')
         binary=self.root/'binary';binary.write_text('contract fixture, never launched');binary.chmod(0o700)
-        manifest={role:str(binary) for role in ('mini','host','store','verifier')}
+        manifest={role:str(binary) for role in ('mini','host','store','verifier','payWatcher')}
         manifest['sha256']={role:p.digest(binary) for role in manifest}
         p.save(self.root/'manifest.json',manifest)
         self.plan={'type':'mini-platform-provision-v1','root':str(self.root/'world'),'sourceRepo':str(source),
@@ -38,6 +38,21 @@ class ProvisioningContract(unittest.TestCase):
         allocated=p.allocated_workload(self.plan, {'member-'+str(i):str(9010+i*100) for i in range(5)})
         self.assertEqual(allocated, {'workload':{'members':['9010','9110'],'concurrency':8}})
         self.assertEqual(self.plan['workload']['members'],['member-0','member-1'])
+    def test_paid_entry_requires_separate_noncolliding_genesis_observer(self):
+        observer=dict(subject='30',keyId='7030',account='130',spendCapability='1030',controlCapability='2030',factoryObserveCapability='3030',capability='4030',payControlCapability='4031',enrolCapability='4032')
+        self.plan['members'][0]['entry']='paid'
+        with self.assertRaisesRegex(ValueError,'separate genesis pay observer'):p.validate(self.plan)
+        self.plan['payObserver']=observer
+        adapter=self.root/'adapter.py';adapter.write_text('synthetic source adapter never launched')
+        self.plan['paidEntryAdapter']={'path':str(adapter),'sha256':p.digest(adapter)}
+        recipe=Path(self.plan['sourceRepo'])/'scripts/workroom/provision.sh';recipe.write_text('WORKROOM_OPERATOR_POLICY WORKROOM_PAY_OBSERVER')
+        p.validate(self.plan)
+        self.assertFalse((self.root/'world').exists())
+        for field,value in [('subject','7'),('capability','4031'),('keyId','07030')]:
+            plan=copy.deepcopy(self.plan);plan['payObserver'][field]=value
+            with self.assertRaises(ValueError):p.validate(plan)
+        adapter.write_text('changed')
+        with self.assertRaisesRegex(ValueError,'adapter changed'):p.validate(self.plan)
     def test_preflight_refuses_group_and_allocation_errors(self):
         for mutate in (lambda x:x['members'].append(x['members'][0]),
                        lambda x:x['rooms']['all'].update(owner='missing'),

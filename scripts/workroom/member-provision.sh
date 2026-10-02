@@ -9,7 +9,7 @@ if [ "$#" -ne 2 ]; then
 fi
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BASE=$HERE/provision.sh
-EXPECTED=202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb
+EXPECTED=9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
 ACTUAL=$(sha256sum "$BASE" | cut -d' ' -f1)
 [ "$ACTUAL" = "$EXPECTED" ] || {
   echo "reviewed provisioner changed; inspect before updating member overlay" >&2

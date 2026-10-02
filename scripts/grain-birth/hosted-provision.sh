@@ -16,7 +16,7 @@ MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
 SOURCE="$REPO/scripts/workroom/provision.sh"
-SOURCE_SHA=202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb
+SOURCE_SHA=9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
 test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = "$SOURCE_SHA" || {
   echo "workroom source changed; review overlay before use" >&2; exit 2;
 }

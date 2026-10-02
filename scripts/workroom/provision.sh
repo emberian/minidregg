@@ -24,6 +24,7 @@ WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET-50}
 # Optional deployment policy is applied before profile/genesis identity. It
 # cannot replace Store coordinates or add old single-application lifecycle pins.
 WORKROOM_OPERATOR_POLICY=${WORKROOM_OPERATOR_POLICY-}
+WORKROOM_PAY_OBSERVER=${WORKROOM_PAY_OBSERVER-}
 for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET"; do
   case "$value" in ''|0?*|*[!0-9]*) echo "allocation must be canonical decimal" >&2; exit 2;; esac
 done
@@ -45,6 +46,15 @@ canonical_task "$WORKROOM_TOOL_TASK"
 [ "$WORKROOM_PARENT_TASK" != "$WORKROOM_TOOL_TASK" ] || {
   echo "parent and tool task IDs must differ" >&2; exit 2;
 }
+if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
+  case "$WORKROOM_PAY_OBSERVER" in /*) ;; *) echo "pay observer allocation must be absolute" >&2; exit 2;; esac
+  jq -e --arg parent "$WORKROOM_PARENT_TASK" --arg tool "$WORKROOM_TOOL_TASK" '
+    (keys | sort) == (["subject","keyId","account","spendCapability","controlCapability","factoryObserveCapability","capability","payControlCapability","enrolCapability"] | sort) and
+    all(.[]; type == "string" and test("^[1-9][0-9]*$")) and
+    ([.[]] | length == (unique | length)) and
+    ([.[]] - ["5","7","8","9","10","11","12","41","42","51","52","53","54","55","71","72","73","81","82","89","90","91","92","93","94","7003","8001","7007","8008",$parent,$tool] | length == 9)
+  ' "$WORKROOM_PAY_OBSERVER" >/dev/null || { echo "invalid or colliding pay observer allocation" >&2; exit 2; }
+fi
 
 absolute_executable() {
   item=$1
@@ -140,6 +150,18 @@ cat >"$EVIDENCE/genesis.json" <<EOF
    "networkBytes":"10000000","sideEffectCount":"10000000",
    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
 EOF
+if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
+  "$MINI" keygen --secret "$EVIDENCE/pay-observer.key" --public "$EVIDENCE/pay-observer.pub" --no-prerotation >"$EVIDENCE/pay-observer-public.txt"
+  OBSERVER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/pay-observer.pub" | tr -d ' \n')
+  jq --slurpfile observer "$WORKROOM_PAY_OBSERVER" --arg public "$OBSERVER_PUBLIC" '
+    $observer[0] as $o | .enrollments += [{
+      key:{keyId:$o.keyId,keyEpoch:"2",algorithm:"1",subject:$o.subject,publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
+      accountId:$o.account,spendCapabilityId:$o.spendCapability,controlCapabilityId:$o.controlCapability,
+      factoryObserveCapabilityId:$o.factoryObserveCapability,initialBalance:"100",accountPredicate:{type:"all",predicates:[]}}] |
+    .payObserver={subject:$o.subject,capability:$o.capability,controlCapability:$o.payControlCapability,enrolCapability:$o.enrolCapability}
+  ' "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-observer.json"
+  mv "$EVIDENCE/genesis-with-observer.json" "$EVIDENCE/genesis.json"
+fi
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
 CONFIG="$EVIDENCE/deployment/pinned-config.json"

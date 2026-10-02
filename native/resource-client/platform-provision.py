@@ -34,6 +34,19 @@ def simple(path, exists=True):
     return Path(value).resolve(strict=exists)
 
 
+def observer_allocation(plan):
+    observer=plan.get('payObserver')
+    if observer is None:
+        return None
+    fields={'subject','keyId','account','spendCapability','controlCapability','factoryObserveCapability','capability','payControlCapability','enrolCapability'}
+    reserved={'5','7','8','9','10','11','12','41','42','51','52','53','54','55','71','72','73','81','82','89','90','91','92','93','94','7003','8001','7007','8008',str(plan.get('parentTask',7901)),str(plan.get('toolTask',7902))}
+    require(type(observer) is dict and set(observer)==fields,'invalid pay observer allocation fields')
+    values=list(observer.values())
+    require(all(type(value) is str and re.fullmatch(r'[1-9][0-9]*',value) and int(value)<2**256 for value in values), 'pay observer allocations must be positive canonical Nat256 strings')
+    require(len(set(values))==len(values) and not reserved.intersection(values), 'pay observer allocations collide')
+    return observer
+
+
 def validate(plan):
     require(plan["type"] == "mini-platform-provision-v1", "unknown provisioning plan")
     root = simple(plan["root"], False)
@@ -54,6 +67,15 @@ def validate(plan):
     names = [row["name"] for row in members]
     require(len(set(names)) == len(names) and all(re.fullmatch(r"[a-z][a-z0-9-]{0,31}", name) for name in names), "member names must be distinct Mini names")
     require(all(type(row.get("funding", 1000)) is int and 0 < row.get("funding", 1000) < 2**53 for row in members), "invalid independent member funding")
+    require(all(row.get('entry','sponsored') in ('sponsored','paid') for row in members), 'unknown member entry mode')
+    observer=observer_allocation(plan)
+    if any(row.get('entry')=='paid' for row in members):
+        require(observer is not None, 'paid members require a separate genesis pay observer')
+        adapter=plan['paidEntryAdapter'];path=simple(adapter['path'])
+        require(path.is_file() and digest(path)==adapter['sha256'],'paid entry adapter changed')
+        require(all(type(row.get('weeks',2)) is int and 0 < row.get('weeks',2) < 2**32 for row in members if row.get('entry')=='paid'),'invalid paid membership duration')
+        require('payWatcher' in manifest and digest(simple(manifest['payWatcher']))==manifest['sha256']['payWatcher'],'paid candidate watcher missing or changed')
+        require('WORKROOM_PAY_OBSERVER' in (source/'scripts/workroom/provision.sh').read_text(),'source recipe lacks genesis pay observer contract')
     port = plan["sshPort"]
     require(type(port) is int and 1024 < port < 65536, "private SSH port must be 1025..65535")
     budget = plan.get("sponsorBalance", 10000000)
@@ -233,6 +255,10 @@ def start(plan):
                WORKROOM_TOOL_BALANCE=str(plan.get("toolBalance", 1000000)), WORKROOM_PARENT_BUDGET=str(plan.get("parentBudget", 1000000)),
                WORKROOM_TOOL_BUDGET=str(plan.get("toolBudget", 1000000)), WORKROOM_PARENT_TASK=str(plan.get("parentTask", 7901)),
                WORKROOM_TOOL_TASK=str(plan.get("toolTask", 7902)))
+    observer=observer_allocation(plan)
+    if observer:
+        save(root/'pay-observer-allocation.json',observer)
+        env['WORKROOM_PAY_OBSERVER']=str(root/'pay-observer-allocation.json')
     world.run("single-native-world", ["/bin/sh", recipe, manifest["host"], root / "world"], env)
     config = root / "world/deployment/pinned-config.json"
     configured = load(config)
@@ -252,6 +278,32 @@ def start(plan):
                                "--birth-context", root / "operator-birth-context.json", "--namespace-root", root / "namespace", "--dir", sponsor, "--no-prerotation"])
     world.run("sponsor-factory", [manifest["mini"], "workspace", "--action", "import", "--dir", sponsor, "--name", "factory", "--kind", "object",
                                   "--target", str(configured["factoryId"]), "--observe-capability", "54", "--control-capability", "53"])
+    paid_members={};paid_state=None
+    if any(row.get('entry')=='paid' for row in plan['members']):
+        observer_workspace=root/'pay-observer-workspace'
+        world.run('pay-observer-init',[manifest['mini'],'workspace','--action','init','--host',manifest['host'],'--config',config,
+                  '--socket',world.state['publicSocket'],'--key',root/'world/pay-observer.key','--subject',observer['subject'],
+                  '--dir',observer_workspace,'--no-prerotation'])
+        world.run('pay-observer-account',[manifest['mini'],'workspace','--action','import','--dir',observer_workspace,'--name','account',
+                  '--kind','account','--target',observer['account'],'--operation-capability',observer['spendCapability'],'--observe-capability',observer['spendCapability']])
+        paid_root=root/'paid-entry'
+        paid_rows=[row for row in plan['members'] if row.get('entry')=='paid']
+        for row in paid_rows:
+            (root/'members'/row['name']).mkdir(mode=0o700)
+        adapter=hooks_root/'paid-entry-adapter.py'
+        adapter.write_bytes(simple(plan['paidEntryAdapter']['path']).read_bytes());adapter.chmod(0o700)
+        require(digest(adapter)==plan['paidEntryAdapter']['sha256'],'paid entry adapter changed before retention')
+        paid_request=root/'paid-entry-request.json';paid_state=root/'paid-entry-result.json'
+        save(paid_request,{'type':'mini-paid-entry-provision-v1','manifest':plan['manifest'],'manifestSha256':plan['manifestSha256'],'sourceRepo':str(source),
+          'deployment':{'config':str(config),'configSha256':digest(config),'socket':world.state['publicSocket'],'operatorSocket':world.state['privateSocket'],'genesis':str(root/'world/genesis.json')},
+          'operatorWorkspace':str(sponsor),'observerWorkspace':str(observer_workspace),'observer':{'capability':observer['capability'],'enrolCapability':observer['enrolCapability']},
+          'factoryControl':'53','evidenceDirectory':str(paid_root),
+          'members':[{'name':row['name'],'joinDir':str(root/'members'/row['name']/'join'),'weeks':row.get('weeks',2),'starterCredit':str(row.get('funding',1000))} for row in paid_rows]})
+        world.run('native-paid-member-entry',[adapter,'--mode','provision','--request',paid_request,'--result',paid_state])
+        received=load(paid_state)
+        require(received['type']=='mini-paid-entry-provision-result-v1' and received['status']=='pass' and received['rail']=='synthetic-rpc','native paid entry incomplete')
+        paid_members={row['name']:row for row in received['members']}
+        require(len(paid_members)==len(paid_rows) and set(paid_members)=={row['name'] for row in paid_rows},'paid member inventory differs')
     save(root / "permit-all.json", {"type": "all", "predicates": []})
     world.run("ssh-host-key", ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", root / "ssh/host"])
     host_public = (root / "ssh/host.pub").read_text().split()
@@ -261,29 +313,38 @@ def start(plan):
     for row in plan["members"]:
         name = row["name"]
         home = root / "members" / name
-        home.mkdir(mode=0o700)
-        workspace = home / "workspace"
-        world.shell(workspace, home, "keygen mini.key", name + "-keygen")
-        enrollment = home / "enrollment"
-        world.run(name + "-enroll-plan", [manifest["mini"], "enroll", "--action", "plan", "--sponsor-workspace", sponsor, "--factory-ref", "factory", "--name", name,
+        if row.get('entry')=='paid':
+            received=paid_members[name];subject=str(received['subject']);workspace=simple(received['workspace']);key=simple(received['sshKeyFile'])
+            require(workspace==home/'join/workspace' and simple(received['joinDir'])==home/'join','paid entry returned another workspace')
+            pin=load(workspace/'workspace.json')
+            require(str(pin['subject'])==subject and simple(pin['config'])==config.resolve() and simple(pin['host'])==simple(manifest['host']) and pin['socket']==world.state['publicSocket'],'paid workspace is not bound to the supplied world')
+            simple(received['miniKeyFile']);simple(received['nextPublicFile']);simple(str(key)+'.pub')
+        else:
+            home.mkdir(mode=0o700)
+            workspace = home / "workspace"
+            world.shell(workspace, home, "keygen mini.key", name + "-keygen")
+            enrollment = home / "enrollment"
+            world.run(name + "-enroll-plan", [manifest["mini"], "enroll", "--action", "plan", "--sponsor-workspace", sponsor, "--factory-ref", "factory", "--name", name,
                                         "--new-key", home / "keys/mini.key", "--next-public-key", home / "keys/mini.key.next.pub", "--operator-socket", world.state["privateSocket"], "--dir", enrollment])
-        for action in ("seal", "submit"):
-            world.run(name + "-enroll-" + action, [manifest["mini"], "enroll", "--action", action, "--dir", enrollment])
-        admitted = json.loads(world.run(name + "-enroll-lookup", [manifest["mini"], "enroll", "--action", "lookup", "--dir", enrollment]))
-        subject = str(admitted["subject"])
+            for action in ("seal", "submit"):
+                world.run(name + "-enroll-" + action, [manifest["mini"], "enroll", "--action", action, "--dir", enrollment])
+            admitted = json.loads(world.run(name + "-enroll-lookup", [manifest["mini"], "enroll", "--action", "lookup", "--dir", enrollment]))
+            subject = str(admitted["subject"])
+            world.run(name + "-provision", [manifest["mini"], "workspace", "--action", "provision", "--dir", sponsor, "--name", name, "--holder", subject,
+                                           "--funding", str(row.get("funding", 1000)), "--account-predicate", root / "permit-all.json", "--factory-ref", "factory"])
+            (home / "provision").mkdir(mode=0o700)
+            (home / "provision/birth-context.json").write_bytes((sponsor / "provisions" / name / "birth-context.json").read_bytes())
+            world.shell(workspace, home, "init mini.key " + subject, name + "-init")
+            key = root / "ssh" / name
+            world.run(name + "-ssh-key", ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key])
         require(re.fullmatch(r"0|[1-9][0-9]*", subject) and subject not in inventory, "enrollment returned duplicate/invalid subject")
-        world.run(name + "-provision", [manifest["mini"], "workspace", "--action", "provision", "--dir", sponsor, "--name", name, "--holder", subject,
-                                       "--funding", str(row.get("funding", 1000)), "--account-predicate", root / "permit-all.json", "--factory-ref", "factory"])
-        (home / "provision").mkdir(mode=0o700)
-        (home / "provision/birth-context.json").write_bytes((sponsor / "provisions" / name / "birth-context.json").read_bytes())
-        world.shell(workspace, home, "init mini.key " + subject, name + "-init")
-        key = root / "ssh" / name
-        world.run(name + "-ssh-key", ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key])
         authorized.append(world.run(name + "-force-command", [source / "deploy/shell/render-shell-key", source / "deploy/shell/mini-shell-ssh",
                                                              manifest["mini"], manifest["host"], config, world.state["publicSocket"], workspace, home, str(key) + ".pub"]))
         inventory[subject] = {"subject": subject, "workspace": str(workspace), "home": str(home), "budget": row.get("funding", 1000),
                               "ssh": {"identityFile": str(key), "knownHostsFile": str(known), "destination": pwd.getpwuid(os.getuid()).pw_name + "@127.0.0.1", "port": plan["sshPort"]}}
         names[name] = subject
+        if row.get('entry')=='paid':
+            inventory[subject]['paidEntry']=paid_members[name]
     (root / "ssh/authorized_keys").write_text("".join(authorized))
     ssh_config = root / "ssh/sshd_config"
     ssh_config.write_text(f"""Port {plan['sshPort']}
@@ -319,10 +380,14 @@ LogLevel VERBOSE
             "members": inventory, "maxConcurrency": plan.get("maxConcurrency", 16), "sweeps": plan.get("sweeps", []),
             "hooks": {"restart": {"executable": str(hooks_root / "platform-provision.py"), "sha256": digest(hooks_root / "platform-provision.py"), "args": ["hook", "--state", str(root / "runtime.json")]}}}
     spec["hooks"]["group-boundary"] = {"executable": str(hooks_root / "platform-native-hooks.py"), "sha256": digest(hooks_root / "platform-native-hooks.py"), "args": ["--state", str(root / "runtime.json")]}
+    if paid_state:
+        spec['hooks']['paid-entry']={'executable':str(adapter),'sha256':digest(adapter),'args':['--state',str(paid_state)]}
     spec.update(allocated_workload(plan, names))
     if rooms: spec["rooms"] = rooms
     save(root / "journey.json", spec)
     identity = joined.validate(spec)
+    if paid_state:
+        require(load(paid_state)['identity']==identity,'paid entry artifact belongs to another supplied Store')
     world.state.update(journey=str(root / "journey.json"), identity=identity, allocationNames=names)
     world.persist()
     save(root / "platform-inputs.json", {"identity": identity, "config": str(config), "genesis": str(root / "world/genesis.json"), "manifest": plan["manifest"],

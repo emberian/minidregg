@@ -70,7 +70,7 @@ POSITIVE="$REPO/scripts/application-share-issue/native-positive-base.sh"
 ROOTS="$REPO/scripts/application-share-issue/gitweb-roots.json"
 PACKAGE="$REPO/scripts/application-share-issue/gitweb-verified-package.json"
 test "$(sha256sum "$PROVISION" | cut -d ' ' -f 1)" = \
-  202a6ee4495ed46c474e2a965b258b6f2a4a94412d58f2319c69e9c8c35bd1cb
+  9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
 test "$(sha256sum "$MEMBER" | cut -d ' ' -f 1)" = \
   b76b7bda932f016e86c3013366132a16458768c3fd59cec1106cee2c0cb3ee9a
 test "$(sha256sum "$APP" | cut -d ' ' -f 1)" = \

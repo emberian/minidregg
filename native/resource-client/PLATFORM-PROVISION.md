@@ -72,3 +72,27 @@ real-provider and human-transcript rows pending.
 The contract tests launch no native Mini calls; the Linux process case only checks
 owned process signalling. Actual receiving evidence must come from `start` and a
 joined run against the supplied candidate family.
+
+For paid construction, selected member rows set `entry: "paid"` and optional
+positive `weeks` (default2); `funding` becomes their requested starter credit.
+The plan supplies `paidEntryAdapter: {path,sha256}` and a separate `payObserver`
+allocation with canonical positive Nat256 strings: `subject`, `keyId`,
+`account`, `spendCapability`, `controlCapability`, `factoryObserveCapability`,
+`capability`, `payControlCapability`, and `enrolCapability`. These allocations
+must be distinct and cannot collide with the provisioner's operator resources.
+
+The sole genesis enrolls that observer with its own native signing key and
+account before bootstrap. The observer is separate from the factory controller:
+its source confinement must not restrict the operator's room/grain authority.
+The retained paid adapter then performs native v2 quote/deposit/watch/wait on
+the supplied config/sockets/Store and returns actual identity-derived subjects,
+workspace paths, current/NEXT keys, and SSH keys. The constructor uses those
+exact workspaces and keys for forced SSH; it does not sponsor-enroll or fund a
+second identity for a paid member. Ordinary `entry: "sponsored"` remains the
+default and can coexist in the declared population.
+
+The immutable paid result identity must equal the final journey identity; its
+retained adapter becomes the supplied `paid-entry` hook. Synthetic RPC receiving
+proves the source payment/entry path and leaves mainnet pending. It does not
+provide external chain evidence. Preserve a partially completed paid root and
+its exact status/receipts after failure; create a fresh root for a new rehearsal.
