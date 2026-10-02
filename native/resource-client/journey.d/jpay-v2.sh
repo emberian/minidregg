@@ -545,6 +545,10 @@ require("interrupted onboarding retains awaiting first trust and exact B custody
         interrupted.returncode!=0 and not MEMDROP.is_set() and initial_pending["state"]=="awaiting-first-read"
         and json.load(open(path("join","bob","workspace-setup.json")))["authorizingKey"]==successor_public,
         interrupted.stderr[-300:])
+# Retain the exact earlier native setup as a second physical checkpoint cut
+# before workspace publication. No trust record is imported into the new root.
+shutil.copytree(path("join","bob"),path("join","bob-before-publish"),
+                ignore=shutil.ignore_patterns("workspace","workspace-build-*"))
 rotation_c=mini("rotate-key","--workspace",controller_workspace,"--next-key",path("after-next.key"))
 require("ordinary admitted owner rotates B to C while the first workspace is unfinished",
         rotation_c.returncode==0,rotation_c.stderr[-300:] or rotation_c.stdout[-250:])
@@ -611,6 +615,13 @@ require("rotated onboarding retains the original payment and actual member autho
         and json.load(open(pending_path))==first_candidate
         and len(glob.glob(path("join","bob","paid-custody-*.json")))==2
         and len(HISTORY)==2 and not MEMERRORS,bob_workspace)
+before_publish_join=wait("bob-before-publish",B,"--key",current_key,"--next-public",current_next,member_socket=MEMFAULT)
+require("current owner recovers a setup retained before workspace publication with fresh source trust",
+        before_publish_join.returncode==0
+        and json.load(open(path("join","bob-before-publish","workspace","workspace.json")))["key"]==current_key
+        and json.load(open(path("join","bob-before-publish","join.json")))==JB
+        and json.load(open(path("join","bob-before-publish","paid-onboarding-recovery.json")))["complete"]==True,
+        before_publish_join.stderr[-350:] or before_publish_join.stdout[-250:])
 os.rename(current_key,current_key+".retired-evidence")
 call_mark=len(FAULT_CALLS)
 lookups=[mini(*claim_args("bob","lookup","--operation-record",ACCEPT)) for _ in range(2)]
