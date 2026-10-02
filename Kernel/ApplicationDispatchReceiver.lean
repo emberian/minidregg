@@ -139,37 +139,41 @@ def noRecordRefusalBytes : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1".toUTF8.toList
 
 /-- Positive exact-call absence at one authenticated current image. The
-caller supplies an actual verified/suffix-verified opened image; this token
-also keeps the canonical command selection rather than trusting a plan label.
+token retains the full-history Verified witness, so an unchecked Opened
+image cannot mint this verdict. It also keeps the canonical command selection
+rather than trusting a plan label.
 It is emitted only after a fresh physical-tip callback. -/
-structure RefusalAtTip (config : Config) (opened : Opened config)
+structure RefusalAtTip (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress) where
   private mk ::
   selected : ApplicationDispatchCommand.Selection
   selectionExact : ApplicationDispatchAdmission.selectCommand ingress = some selected
-  absent : opened.durable.image.accepted.findIdx? (fun record =>
+  absent : old.opened.durable.image.accepted.findIdx? (fun record =>
     record.transactionId == DeclaredResourceController.transactionId ingress.dispatch.domain
       ingress.dispatch.semantics
       (ApplicationDispatchCommand.command ingress.dispatch selected ingress.parent)) = none
 
-def refusalAtTip? {config : Config} (opened : Opened config)
+def refusalAtTip? {config : Config} {target : Durable}
+    (old : NativeHostReplay.Verified config target)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
-    Option (RefusalAtTip config opened ingress) :=
+    Option (RefusalAtTip config old ingress) :=
   match selected : ApplicationDispatchAdmission.selectCommand ingress with
   | none => none
   | some selection =>
-      if absent : opened.durable.image.accepted.findIdx? (fun record =>
+      if absent : old.opened.durable.image.accepted.findIdx? (fun record =>
           record.transactionId == DeclaredResourceController.transactionId ingress.dispatch.domain
             ingress.dispatch.semantics
             (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent)) = none then
         some ⟨selection, selected, absent⟩
       else none
 
-def RefusalAtTip.withFreshTip {config : Config} {opened : Opened config}
+def RefusalAtTip.withFreshTip {config : Config} {target : Durable}
+    {old : NativeHostReplay.Verified config target}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress} {α : Type}
-    (_refusal : RefusalAtTip config opened ingress) (handoff : List UInt8 → IO α) :
+    (_refusal : RefusalAtTip config old ingress) (handoff : List UInt8 → IO α) :
     IO (Except String α) :=
-  ApplicationStreamContinuity.withOpenedFreshTip opened (handoff noRecordRefusalBytes)
+  ApplicationStreamContinuity.withVerifiedFreshTip old (handoff noRecordRefusalBytes)
 
 inductive Result (config : Config) where
   | permitted (permit : Permit config)
@@ -177,9 +181,9 @@ inductive Result (config : Config) where
   | historical (receipt : NativeHostCodec.Receipt)
   | rejected (detail : String)
   /-- Positive call absence, emitted only while the same physical tip is current. -/
-  | noRecordRefused {opened : Opened config}
+  | noRecordRefused {target : Durable} {old : NativeHostReplay.Verified config target}
       {ingress : ApplicationDispatchAdmissionIngress.Ingress}
-      (refusal : RefusalAtTip config opened ingress)
+      (refusal : RefusalAtTip config old ingress)
   | contention
   | unavailable (detail : String)
   | uncertain (detail : String)
@@ -245,7 +249,7 @@ def receiveAdmitted (config : Config) {target : Durable}
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (admitted : NativeHostReplay.DispatchAt config old.opened ingress)
     (constraint : Option RouteConstraint)
-    (refusal : RefusalAtTip config old.opened ingress) : IO (Result config) := do
+    (refusal : RefusalAtTip config old ingress) : IO (Result config) := do
   let derived := admitted.toDerived
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
@@ -281,7 +285,7 @@ theorem mismatched_route_never_submits (config : Config) {target : Durable}
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (admitted : NativeHostReplay.DispatchAt config old.opened ingress)
     (constraint : RouteConstraint)
-    (refusal : RefusalAtTip config old.opened ingress)
+    (refusal : RefusalAtTip config old ingress)
     (absent : old.opened.durable.image.accepted.findIdx? (fun record =>
       record.transactionId == admitted.toDerived.intent.transactionId) = none)
     (mismatch : routeMatches config admitted constraint = false) :
@@ -301,7 +305,7 @@ private def receiveVerifiedWith (config : Config) {target : Durable}
   | .error _ => return .rejected "dispatch historical identity unavailable or conflicting"
   | .ok (some receipt) => return .historical receipt
   | .ok none => pure ()
-  let some refusal := refusalAtTip? old.opened ingress
+  let some refusal := refusalAtTip? old ingress
     | return .rejected "dispatch exact-call absence unavailable"
   if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
     return .noRecordRefused refusal
@@ -363,10 +367,10 @@ submitted to the app-open receiver. Refusal occurs before admission/CAS. -/
 theorem continuity_probe_never_submits (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
-    (refusal : RefusalAtTip config old.opened ingress)
+    (refusal : RefusalAtTip config old ingress)
     (lookupAbsent : ApplicationDispatchLookup.lookupVerified old
       (ApplicationDispatchAdmissionIngress.codec.encode ingress) = .ok none)
-    (refusalExact : refusalAtTip? old.opened ingress = some refusal)
+    (refusalExact : refusalAtTip? old ingress = some refusal)
     (challenge : ApplicationStreamContinuity.Challenge)
     (probe : ingress.dispatch.dispatch.request =
       ApplicationStreamContinuity.probeRequest challenge) :
@@ -379,10 +383,10 @@ theorem continuity_probe_never_submits (config : Config) {target : Durable}
 theorem route_probe_never_submits (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
-    (refusal : RefusalAtTip config old.opened ingress)
+    (refusal : RefusalAtTip config old ingress)
     (lookupAbsent : ApplicationDispatchLookup.lookupVerified old
       (ApplicationDispatchAdmissionIngress.codec.encode ingress) = .ok none)
-    (refusalExact : refusalAtTip? old.opened ingress = some refusal)
+    (refusalExact : refusalAtTip? old ingress = some refusal)
     (challenge : ApplicationRouteAdmission.Challenge)
     (probe : ingress.dispatch.dispatch.request = ApplicationRouteAdmission.probeRequest challenge) :
     receiveVerified config old (ApplicationDispatchAdmissionIngress.codec.encode ingress) =
