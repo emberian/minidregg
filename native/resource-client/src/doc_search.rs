@@ -331,6 +331,7 @@ mod tests {
     #[test]
     fn locked_coverage_excludes_detached_history_and_opened_private_text() {
         let mut rendered = Rendered {
+            shared_names: vec![],
             root: json!("1"),
             root_revision: json!("2"),
             lines: vec![line(Body::Object {
