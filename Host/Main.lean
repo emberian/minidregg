@@ -790,6 +790,9 @@ def profileDescription (config : NativeHost.Config)
   let n := fun value : Nat => toJson (toString value)
   let base :=
     [("runtime", toJson "minidregg-native"),
+     -- Binary capability only: API17 exact-fence continuity plus canonical
+     -- invocation height pinning. It is not a current admission receipt.
+     ("providerContinuityAdmission", toJson "exact-height-v1"),
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
      ("expectedSeed", n config.expectedSeed.value),

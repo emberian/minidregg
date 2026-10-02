@@ -55,8 +55,8 @@ theorem pinHeader_expired_after (height current : Nat)
 def pinSlot (height : Nat) (slot : SigningSlot) : Except String SigningSlot := do
   let some header := CredentialSignedEnvelopeController.headerCodec.decode slot.header
     | .error "noncanonical signing header"
-  return { slot with header := CredentialSignedEnvelopeController.headerCodec.encode
-    (pinHeader height header) }
+  return { slot with header := (CredentialSignedEnvelopeController.headerCodec.encode
+    (pinHeader height header)) }
 
 /-- Reject non-invocations and malformed/empty plans; never change the signed
 command, role ordering, subject, nonce, keys, footprint or request bytes. -/
@@ -73,6 +73,16 @@ def pin (plan : SigningPlan) : Except String SigningPlan := do
     let slots ← plan.slots.mapM (pinSlot plan.height)
     return { plan with slots := slots }
 
+/-- Invert one refusal guard without simplifying any symbolic codec terms. -/
+private theorem refusal_else {E A : Type} {condition : Prop} [Decidable condition]
+    {reason : E} {rest : Except E A} {value : A}
+    (accepted : (if condition then Except.error reason else rest) = .ok value) :
+    ¬ condition ∧ rest = .ok value := by
+  by_cases selected : condition
+  · rw [if_pos selected] at accepted
+    contradiction
+  · exact ⟨selected, by simpa only [if_neg selected] using accepted⟩
+
 /-- This is the actual receiving controller, not a second deadline predicate.
 Successful parsing/admission preparation entails its signed deadline check. -/
 theorem receiving_prepare_deadline {NativeError : Type}
@@ -82,8 +92,45 @@ theorem receiving_prepare_deadline {NativeError : Type}
       subject domain message state registry envelope = .ok prepared) :
     prepared.state.height ≤ prepared.envelope.header.validUntil := by
   unfold CredentialSignedEnvelopeController.prepare at accepted
-  repeat' first | split at accepted | contradiction
-  all_goals simp_all
+  cases stateDecoded : CredentialSignedEnvelopeController.stateCodec.decode state with
+  | none => simp only [stateDecoded] at accepted; contradiction
+  | some current =>
+    simp only [stateDecoded] at accepted
+    cases registryDecoded : CredentialSignedEnvelopeController.registryCodec.decode registry with
+    | none => simp only [registryDecoded] at accepted; contradiction
+    | some keys =>
+      simp only [registryDecoded] at accepted
+      cases envelopeDecoded : CredentialSignedEnvelopeController.envelopeCodec.decode envelope with
+      | none => simp only [envelopeDecoded] at accepted; contradiction
+      | some signed =>
+        simp only [envelopeDecoded] at accepted
+        -- Each inversion retains the original receiver expression. In
+        -- particular, it never evaluates symbolic wire re-encoding guards.
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨notExpired, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        obtain ⟨_, accepted⟩ := refusal_else accepted
+        cases keyFound : keys.findKey signed.header.keyId with
+        | none => simp only [keyFound] at accepted; contradiction
+        | some key =>
+          simp only [keyFound] at accepted
+          obtain ⟨_, accepted⟩ := refusal_else accepted
+          obtain ⟨_, accepted⟩ := refusal_else accepted
+          obtain ⟨_, accepted⟩ := refusal_else accepted
+          obtain ⟨_, accepted⟩ := refusal_else accepted
+          cases accepted
+          exact Nat.le_of_not_lt notExpired
 
 /-- Exact historical replay takes the recorded branch before any new
 preparation, key verification or deadline check. This is the actual invoked
