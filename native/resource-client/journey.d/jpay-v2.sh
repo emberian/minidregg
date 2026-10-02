@@ -587,6 +587,9 @@ crash_env=dict(os.environ,LD_PRELOAD=crash_lib,MINI_TEST_RECOVERY_DIR=path("join
 cut=wait("bob",B,"--key",c_key,"--next-public",d_pub,member_socket=MEMFAULT,extra_env=crash_env)
 active_path=path("join","bob","paid-onboarding-recovery.json")
 active=json.load(open(active_path));first_candidate=json.load(open(pending_path))
+first_candidate_bytes=open(pending_path,"rb").read()
+open(path("bob-first-candidate-before-replay.json"),"wb").write(first_candidate_bytes)
+first_candidate_sha=hashlib.sha256(first_candidate_bytes).hexdigest()
 require("admitted C recovery crashes after manifest publication with exact journal retained",
         cut.returncode==97 and active["complete"]==False and first_candidate["state"]=="complete"
         and json.load(open(path("join","bob","workspace","workspace.json")))["key"]==c_key
@@ -599,7 +602,7 @@ stale_retry=wait("bob",B,"--key",c_key,"--next-public",d_pub,member_socket=MEMFA
 require("exact C publication finishes before fresh stale C authority is refused",
         stale_retry.returncode!=0 and json.load(open(active_path))["complete"]==True
         and json.load(open(path("join","bob","workspace-setup.json")))["key"]==c_key
-        and json.load(open(pending_path))==first_candidate,stale_retry.stderr[-300:])
+        and open(pending_path,"rb").read()==first_candidate_bytes,stale_retry.stderr[-300:])
 current_key=path("current-d.key")
 shutil.copyfile(controller_key,current_key);os.chmod(current_key,0o600)
 current_public=nacl.signing.SigningKey(open(current_key,"rb").read()).verify_key.encode().hex()
@@ -612,9 +615,13 @@ bob_workspace=json.load(open(path("join","bob","workspace","workspace.json")))
 require("rotated onboarding retains the original payment and actual member authority",
         bob_workspace["subject"]==bob_ids["subject"] and bob_workspace["key"]==current_key
         and json.load(open(path("join","bob","join.json")))==JB
-        and json.load(open(pending_path))==first_candidate
+        and open(pending_path,"rb").read()==first_candidate_bytes
         and len(glob.glob(path("join","bob","paid-custody-*.json")))==2
         and len(HISTORY)==2 and not MEMERRORS,bob_workspace)
+json.dump({"originalCandidate":pending_path,"beforeCopy":path("bob-first-candidate-before-replay.json"),
+           "beforeSha256":first_candidate_sha,"afterSha256":hashlib.sha256(open(pending_path,"rb").read()).hexdigest(),
+           "exactBytesPreserved":open(pending_path,"rb").read()==first_candidate_bytes},
+          open(path("bob-first-candidate-preservation.json"),"w"),indent=2)
 before_publish_join=wait("bob-before-publish",B,"--key",current_key,"--next-public",current_next,member_socket=MEMFAULT)
 require("current owner recovers a setup retained before workspace publication with fresh source trust",
         before_publish_join.returncode==0
