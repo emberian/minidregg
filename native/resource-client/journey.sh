@@ -42,7 +42,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket jtail m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jbirthwin jjoint jclock jjob1 jjob jjob-money jclosure jmarket jtail m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -126,7 +126,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KIX KF K12C JMKT KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KIX KF K12C JMKT KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -134,6 +134,7 @@ TITLE[J2]="sponsor creates a resource under a permissive law"
 TITLE[J3]="sponsor delegates observe+mutate (no control) to newcomer"
 TITLE[J4]="newcomer signed read, writes field to 1, reads back 1"
 TITLE[J5]="a key with no grant: read and write refused"
+TITLE[KBW]="births under concurrent admissions: authored window, bounded lag, a stale birth refused by name, its name created again"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
@@ -222,6 +223,10 @@ count_of() { jq -r '.acceptedCount' "$1"; }
 # JOURNEY_TIMER_COUNTS names the file the timers append each accepted count to (one per
 # line); unset means no timer runs and the count must be exactly LAST + 1. Every record
 # between is accounted for either way: a stranger's record still fails the step.
+# Each count is the acceptedCount of the Host's own confirmed receipt to the timer
+# (journey-timers/ticker.sh, journey-timers/hostile.sh write it), so a count is never a
+# stranger's; a timer whose reply was lost leaves its record uncounted and the step FAILS
+# (a lost receipt can make a step red, never green).
 timer_between() {  # timer_between LOW HIGH -> how many timer records have LOW < count < HIGH
   [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ -f "$JOURNEY_TIMER_COUNTS" ] || { echo 0; return; }
   awk -v lo="$1" -v hi="$2" '$1 > lo && $1 < hi { n++ } END { print n + 0 }' "$JOURNEY_TIMER_COUNTS"
@@ -800,6 +805,7 @@ hook() {
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
 step_KT() { hook jtail "a fresh Store with L=8 admits writes up to certified+L, refuses the next naming tail-bound, resumes after the operator certifies, holds the bound across a restart, and audits clean (C14)"; }
+step_KBW() { hook jbirthwin "KBW_BIRTHS births by workspace create while a second workspace writes every KBW_WRITE_PERIOD s are all installed; a birth held past birthSlack admissions is refused birthStale (operator log) and its name is then created again (lane k-birth-window)"; }
 step_KC() { hook jclock "the one clock ticks forward only, under the clock subject's C_tick (the sponsor's is refused), a law over clock/now admits after the tick and refuses before on writes and signed reads, and 200 ephemeral ticks leave no attempt behind (MUD item 3, K-CLOCK; CLOCK-SUBJECT)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
@@ -850,6 +856,7 @@ run_step G J4
 run_step J7 J4
 run_step J8 J7
 run_step K4 J2
+run_step KBW J4
 run_step KC J2
 run_step KT J0
 run_step JJ J2

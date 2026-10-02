@@ -257,10 +257,9 @@ def preparePending {F : Type} [Field F]
   let checked ← (ResourceBirthPolicyController.check pins
     CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
     source.birth).mapError Reject.metadata
-  let templateBound ← (ResourceBirthPolicyController.require
-    (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
-      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth)
-      .grantTemplate).mapError Reject.metadata
+  let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt profile.template
+      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
+    Reject.metadata
   if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
     return ⟨tuple, physical.down, checked.down, templateBound.down, distinct⟩
   else .error .ambiguousRequests

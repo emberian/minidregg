@@ -37,7 +37,7 @@ def sign (binary : System.FilePath) (seed : Nat) (frame : List UInt8) :
 def hostTemplate : NativeHost.Config where
   deployment := ⟨⟨8500⟩, 10, 11, 12⟩
   federation := ⟨9⟩
-  template := ⟨⟨5⟩, 100000, 10000⟩
+  template := ⟨⟨5⟩, 100000, 10000, 64⟩
   tariff := ⟨3, 2, 1, 0, 99, 0⟩
   genesisHeight := 10
   expectedSeed := ⟨0⟩
