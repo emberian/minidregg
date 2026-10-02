@@ -151,3 +151,54 @@ The existing `session-reenroll` compatible-upgrade admission is not that ordinar
 client flow. Its new same-source reconnect mode and audited stopped-fence retirement
 are explicit remaining implementation/receiving work; automatic disaster restore
 has not been delivered by these callbacks.
+
+
+## Member-owned hosting delegation
+
+A member application keeps its birth identity and owner administration. Hosting
+uses a separate manager only after the owner installs the fixed managed policies
+and delegates object `observe`/`mutate` capabilities. The manager receives no
+program installation, revocation, delegation, or control capability. The native
+Host derives owner and manager from the exact authenticated current app law,
+links the corresponding package law, and checks current delegated authority at
+BEGIN, claim, and completion. Managed BEGIN must be signed by the manager;
+owner/ticket issuer identity remains the owner for application dispatch.
+
+The owner uses their own workspace and signing key:
+
+```
+mini workspace --action app-lifecycle --dir OWNER_WS --op prepare --request-id hosting-1 --name APP --package-name PACKAGE --snapshot-name SNAPSHOT --manager MANAGER_SUBJECT
+mini workspace --action app-lifecycle --dir OWNER_WS --op submit --request-id hosting-1
+```
+
+Repeat `prepare` and `submit` for the six source phases. Followup commands need
+only the request ID and operation. `status` reports retained progress; `recover`
+looks up the exact retained call. `submit` reuses that call after an uncertain
+reply. A preparation interrupted before a call or submission intent exists can
+be archived and prepared again with the same request ID. Submitted calls are
+never replaced. The initial owner, manager, and three held references remain
+bound to the request. Each new proposal uses current source observations; the
+ordinary source pipeline rejects stale or revoked authority.
+
+After all six phases are confirmed, the command emits the private
+`management-selector.json` path. Give its exact bytes to the host operator, who
+uses `spk-host grain install ... --management-selector PATH`. The selector must
+match the confirmed application birth owner, app/package/snapshot identities,
+and the host profile manager. It changes lifecycle capability selectors only;
+it does not grant authority. Installation without this option retains the
+ordinary owner-equals-manager requirement. No participant signing secret is an
+input to the host selector or the production delegation command.
+
+The owner installs app, package, and snapshot managed laws and delegates all
+three resources. Existing install/start/stop/upgrade authority consumers read
+app and package only; they do not govern a snapshot change and do not claim to
+check the snapshot law. Snapshot selectors are retained for an operation that
+actually reads or writes the snapshot. Owner administration can revoke the
+manager children through the ordinary workspace revocation path.
+
+This source path requires the matching managed-policy Host family. The earlier
+same-world receiving app530101 exposed the owner/manager gap and remains
+unstarted. App531101 is a separately identified operator-owned receiving app;
+its source installation was confirmed at count105 and its first ticket at112.
+Neither that fallback nor source/unit tests qualify member-owned physical
+receiving, online pause/copy/resume, or disaster restoration.

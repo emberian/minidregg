@@ -35,6 +35,8 @@ use std::time::{Duration, Instant};
 
 #[path = "grain_profile_upgrade.rs"]
 mod profile_upgrade;
+#[path = "grain_management.rs"]
+mod management;
 
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_SPK: u64 = 256 * 1024 * 1024;
@@ -663,13 +665,17 @@ fn install(
     spk: &Path,
     class: &str,
     import: Option<(&Path, &str)>,
+    management_selector: Option<&Path>,
 ) -> io::Result<Value> {
-    let (selector, owner) = admitted_application(source, receipt)?;
-    if owner != host.profile.management_subject {
-        return Err(invalid(
-            "application owner is not this host's lifecycle management subject",
-        ));
-    }
+    let (admitted, owner) = admitted_application(source, receipt)?;
+    let delegation = management_selector
+        .map(|path| read_private(path, MAX_JSON))
+        .transpose()?;
+    let selector = match &delegation {
+        Some(bytes) => management::select(bytes, &admitted, &owner, &host.profile.management_subject)?,
+        None if owner == host.profile.management_subject => admitted,
+        None => return Err(invalid("member-owned app requires an explicit lifecycle delegation selector")),
+    };
     broker::class(class)?;
     let (raw_sha256, staged, qualification) = stage_package(host, spk)?;
     // An import is checked completely before any Mini effect: the exporter's
@@ -685,6 +691,9 @@ fn install(
         )?),
     };
     let placement = place(host, &selector, &raw_sha256, class)?;
+    if let Some(bytes) = &delegation {
+        derived_file(&host.app_dir(&selector.app).join("lifecycle-delegation.json"), bytes)?;
+    }
     if let Some(imported) = &imported {
         derived_file(
             &host.app_dir(&selector.app).join("import.json"),
@@ -1321,7 +1330,7 @@ fn stop_receipt(dir: &Path) -> io::Result<Option<PathBuf>> {
 
 pub fn usage() -> &'static str {
     "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk \
-     [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] | \
+     [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] [--management-selector PATH] | \
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
@@ -1331,25 +1340,37 @@ pub fn usage() -> &'static str {
      grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
 }
 
-fn install_options(rest: &[String]) -> io::Result<(String, Option<(PathBuf, String)>)> {
+struct InstallOptions {
+    class: String,
+    import: Option<(PathBuf, String)>,
+    management_selector: Option<PathBuf>,
+}
+fn install_options(rest: &[String]) -> io::Result<InstallOptions> {
     let mut class = "S".to_owned();
     let mut import = None;
     let mut key = None;
+    let mut management_selector = None;
     let mut index = 0;
     while index < rest.len() {
         match (rest[index].as_str(), rest.get(index + 1)) {
             ("--class", Some(value)) => class = value.clone(),
             ("--import", Some(value)) => import = Some(PathBuf::from(value)),
             ("--exporter-key", Some(value)) => key = Some(value.clone()),
+            ("--management-selector", Some(value)) if management_selector.is_none() => {
+                let path = PathBuf::from(value);
+                if !path.is_absolute() { return Err(invalid("management selector path must be absolute")); }
+                management_selector = Some(path);
+            }
             _ => return Err(invalid(usage())),
         }
         index += 2;
     }
-    match (import, key) {
-        (None, None) => Ok((class, None)),
-        (Some(dir), Some(key)) => Ok((class, Some((dir, key)))),
-        _ => Err(invalid("--import and --exporter-key go together")),
-    }
+    let import = match (import, key) {
+        (None, None) => None,
+        (Some(dir), Some(key)) => Some((dir, key)),
+        _ => return Err(invalid("--import and --exporter-key go together")),
+    };
+    Ok(InstallOptions { class, import, management_selector })
 }
 
 /// `spk-host grain init-store GRAINS_ROOT MINI_CONFIG`: the broker creates
@@ -1434,14 +1455,15 @@ pub fn run(args: &[String]) -> io::Result<Value> {
             let host = Host::load(Path::new(profile))?;
             match (verb.as_str(), rest) {
                 ("install", [source, receipt, spk, options @ ..]) => {
-                    let (class, import) = install_options(options)?;
+                    let options = install_options(options)?;
                     install(
                         &host,
                         Path::new(source),
                         Path::new(receipt),
                         Path::new(spk),
-                        &class,
-                        import.as_ref().map(|(dir, key)| (dir.as_path(), key.as_str())),
+                        &options.class,
+                        options.import.as_ref().map(|(dir, key)| (dir.as_path(), key.as_str())),
+                        options.management_selector.as_deref(),
                     )
                 }
                 ("route", [app, request]) => {

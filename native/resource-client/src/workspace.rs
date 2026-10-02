@@ -64,6 +64,8 @@ mod world_kind;
 
 #[path = "law_export.rs"]
 mod law_export;
+#[path = "app_lifecycle.rs"]
+mod app_lifecycle;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
@@ -206,6 +208,40 @@ pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
             .map_err(|error| format!("cannot sync {}: {error}", parent.display()))?;
     }
     Ok(())
+}
+
+/// Publish complete JSON under a per-record custody lock. Immutable exact
+/// retries and expected-prior replacements both close the rename/fsync cut.
+fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    let parent=path.parent().ok_or("retained JSON lacks parent")?;
+    private_dir(parent)?;
+    let filename=path.file_name().and_then(OsStr::to_str).ok_or("record name is not UTF-8")?;
+    let guard=OpenOptions::new().read(true).write(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC)
+        .open(parent.join(format!(".{filename}.lock"))).map_err(|e|e.to_string())?;
+    let meta=guard.metadata().map_err(|e|e.to_string())?;
+    if !meta.is_file() || meta.uid()!=unsafe{libc::geteuid()} || meta.mode() & 0o077 !=0 || meta.nlink()!=1 {
+        return Err("retained JSON lock has unsafe custody".into());
+    }
+    if unsafe{libc::flock(guard.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)} !=0 {
+        return Err("retained JSON publication busy; retry exact request".into());
+    }
+    if path.exists() {
+        let prior=bounded_json(path)?;
+        if prior == *value {
+            return File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string());
+        }
+        if expected != Some(&prior) {
+            return Err(format!("retained JSON differs from exact request: {}",path.display()));
+        }
+    } else if expected.is_some() {
+        return Err("expected retained JSON is absent".into());
+    }
+    let stage=parent.join(format!(".stage-{}",random_nonce()?));
+    private_file(&stage,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
+    fs::rename(stage,path).map_err(|e|e.to_string())?;
+    File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
 }
 
 pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
@@ -3836,17 +3872,8 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
         value["sealedRoom"] = room.clone();
     }
     let path = proposal_dir.join("recipient-reference.json");
-    if path.exists() {
-        if bounded_json(&path)? != value {
-            return Err("prior delegated reference differs from exact receipt".into());
-        }
-    } else {
-        private_file(
-            &path,
-            &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
-        )?;
-    }
-    println!("{}", path.display());
+    atomic_json(&path,&value,None)?;
+    if !crate::QUIET_WORKER.load(std::sync::atomic::Ordering::Relaxed) { println!("{}", path.display()); }
     Ok(())
 }
 
@@ -5939,6 +5966,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             shared_names::command(&root,&workspace,&op,&room,name.as_deref(),to.as_deref(),id.as_deref())
         }
         "index-law" => { args.finish()?; print_json(&shared_names::index_law()) }
+        "app-lifecycle" => app_lifecycle::run(&root, &workspace, args),
         "import" => {
             if let Some(from) = args.optional("from-ref") {
                 let name = os_string(args.required("name")?, "reference name")?;
