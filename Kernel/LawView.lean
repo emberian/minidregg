@@ -7,7 +7,7 @@ Kernel law (`Kernel/Job.lean`) reads it without importing Assurance; the sheet a
 read it from here too.
 -/
 import Pred.Core
-import Kernel.DeclaredResourceController
+import Kernel.DeclaredResourceProjection
 
 namespace Minidregg.Kernel.LawView
 
