@@ -554,6 +554,48 @@ fn check_birth_context(record: &Value, selected: Option<&Path>) -> Result<Option
     }
     Ok(path)
 }
+/// Onboarding custody can advance while the signed payment stays immutable.
+/// Check current registry authority and NEXT before pinning any workspace setup.
+fn onboarding_record(common: &Common, record: &Value, subject: &str,
+    selected_key: Option<&Path>, selected_next: Option<&Path>) -> Result<Value> {
+    let binding = common.directory.join(format!("onboarding-{}.json",
+        hex(&Sha256::digest(field(record,"memo")?.as_bytes()))));
+    let held = if binding.exists() { Some(workspace::bounded_json(&binding)?) } else { None };
+    if selected_key.is_none() && selected_next.is_none() && held.is_none() { return Ok(record.clone()); }
+    let key_path = selected_key.map(absolute).transpose()?.unwrap_or_else(||
+        PathBuf::from(held.as_ref().and_then(|v|v["miniKeyFile"].as_str())
+            .unwrap_or(record["miniKeyFile"].as_str().unwrap_or(""))));
+    let next = selected_next.map(absolute).transpose()?.or_else(||
+        held.as_ref().and_then(|v|v["nextPublicFile"].as_str()).map(PathBuf::from));
+    let daily = read_secret(&key_path)?.verifying_key().to_bytes();
+    if SOCKET.get().is_none() {
+        SOCKET.set(transport::remote_address(field(record,"login")?)?)
+            .map_err(|_|"cannot pin member remote")?;
+    }
+    let socket = SOCKET.get().ok_or("onboarding key check needs a source connection")?;
+    if transport::is_remote(socket) { pin_ssh_identity(Path::new(field(record,"sshKeyFile")?))?; }
+    let current = key_rotation::status_if_enrolled(&common.host,socket,&common.config,subject,&daily)?
+        .ok_or("paid membership has no current registry key")?;
+    same(current["subject"] == subject && current["isCurrent"] == true
+        && current["currentRevoked"] == false,"selected onboarding key is not current source authority")?;
+    let commitment = match &next {
+        Some(path) => key_rotation::Commitment::Mine(key_rotation::public_file(path)?),
+        None => key_rotation::Commitment::Without,
+    };
+    key_rotation::check_commitment(&common.host,socket,&common.config,subject,&daily,&commitment)?
+        .ok_or("paid membership has no current source commitment")?;
+    let mut updated = record.clone();
+    updated["miniKeyFile"] = json!(key_path);
+    updated["authorizingKey"] = json!(hex(&daily));
+    updated["authorityEpoch"] = current["keyEpoch"].clone();
+    updated["nextPublicFile"] = json!(next);
+    let selection = json!({"miniKeyFile":updated["miniKeyFile"],"authorizingKey":updated["authorizingKey"],
+        "authorityEpoch":updated["authorityEpoch"],"nextPublicFile":updated["nextPublicFile"]});
+    if let Some(held) = held { same(held == selection,"onboarding custody differs from retained selection")?; }
+    else { retain_json(&binding,&selection)?; }
+    Ok(updated)
+}
+
 fn wait(
     common: &Common,
     record: &Value,
@@ -561,6 +603,8 @@ fn wait(
     timeout: u64,
     interval: u64,
     birth: Option<&Path>,
+    onboarding_key: Option<&Path>,
+    onboarding_next: Option<&Path>,
 ) -> Result<()> {
     let identity = fixed(field(record, "miniKey")?, "identity")?;
     let recipient = fixed(field(record, "enrolAddress")?, "recipient")?;
@@ -642,12 +686,14 @@ fn wait(
                             && entry.account.as_str() == field(&ids, "account")?,
                         "source status and stable identifiers differ",
                     )?;
+                    let onboarding = onboarding_record(common,record,field(&ids,"subject")?,
+                        onboarding_key,onboarding_next)?;
                     let root = join_solana::admitted_workspace_v2(
                         &common.host,
                         &common.config,
                         &common.directory,
                         common.bootstrap.as_deref(),
-                        record,
+                        &onboarding,
                         &value.raw["entry"],
                         &ids,
                         birth.as_deref(),
@@ -917,6 +963,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             )
         }
         "wait" => {
+            let onboarding_key = args.optional("key").map(path);
+            let onboarding_next = args.optional("next-public").map(path);
+            same(onboarding_next.is_none() || onboarding_key.is_some(),
+                "--next-public needs explicit --key for onboarding")?;
             let signature = args
                 .optional("signature")
                 .map(|v| text(v, "signature"))
@@ -946,6 +996,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 timeout,
                 interval,
                 birth.as_deref(),
+                onboarding_key.as_deref(),
+                onboarding_next.as_deref(),
             )
         }
         _ => Err("v2 join expects --solana, --renew or --wait".into()),
@@ -1314,13 +1366,15 @@ mod tests {
                 0,
                 1,
                 None,
+                None,
+                None,
             )
             .unwrap_err();
             assert!(error.contains(expected_error), "{error}");
         }
         // Retrying without --signature uses the exact immutable locator, never entry inference.
         phase.store(1, std::sync::atomic::Ordering::SeqCst);
-        assert!(wait(&common, &record, None, 0, 1, None)
+        assert!(wait(&common, &record, None, 0, 1, None, None, None)
             .unwrap_err()
             .contains("payment received; admission pending"));
         assert_eq!(

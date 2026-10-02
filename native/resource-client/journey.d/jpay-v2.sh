@@ -310,10 +310,10 @@ def join(name):
     return mini("join","--memo-version","v2","--solana","--host",HOST,"--config",CONFIG,
                 "--socket",SOCKET,"--enrol",PIN,"--dir",path("join",name),"--name",name,
                 "--weeks",WEEKS,"--starter-credit",STARTER,"--birth-context",BIRTH_CONTEXT)
-def wait(name,signature):
+def wait(name,signature,*custody):
     return mini("join","--memo-version","v2","--wait","--host",HOST,"--config",CONFIG,
                 "--socket",SOCKET,"--dir",path("join",name),"--signature",gen.b58(signature),
-                "--timeout","0","--birth-context",BIRTH_CONTEXT)
+                "--timeout","0","--birth-context",BIRTH_CONTEXT,*custody)
 
 missing=source_json(181,{"identityKey":public[OBSERVER]},"missing-tip-status")
 require("fresh genesis has no authenticated chain evidence",
@@ -496,6 +496,14 @@ require("current quote consumes once: exact weeks, spendable extra-week remainde
         and bal_after[str(acct(FLOAT))]==bal_pending[str(acct(FLOAT))]
         and int(BP["birthFee"])+int(BP["membershipCredit"])+int(BP["creditedRemainder"])==int(BP["mintedCredit"])
         and after["entry"]["subject"]==bob_ids["subject"],BP)
+bob_join=wait("bob",B,"--key",successor,"--next-public",path("after-next.pub"))
+require("accepted pending claim joins with source-checked rotated custody and original stable identity",
+        bob_join.returncode==0 and os.path.exists(path("join","bob","workspace","workspace.json")),
+        bob_join.stderr[-400:] or bob_join.stdout[-300:])
+bob_workspace=json.load(open(path("join","bob","workspace","workspace.json")))
+require("rotated onboarding retains the original payment and actual member authority",
+        bob_workspace["subject"]==bob_ids["subject"] and bob_workspace["key"]==successor
+        and json.load(open(path("join","bob","join.json")))==JB,bob_workspace)
 os.rename(successor,successor+".retired-evidence")
 call_mark=len(FAULT_CALLS)
 lookups=[mini(*claim_args("bob","lookup","--operation-record",ACCEPT)) for _ in range(2)]

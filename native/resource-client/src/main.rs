@@ -479,13 +479,13 @@ usage:
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true] [--operator-socket OPERATOR-SOCKET]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
-  mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX]
+  mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub]
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
   mini enrollment-bootstrap --host HOST --config PUBLIC-CONFIG --socket PUBLIC-SOCKET --listen 127.0.0.1:8794 --metadata PUBLIC-BOOTSTRAP.json [--trusted-proxy IP]
   mini enrollment-view --socket SOCKET [--config CONFIG]
   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
-  mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
+  mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
   mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
   mini enc-public --secret KEY
