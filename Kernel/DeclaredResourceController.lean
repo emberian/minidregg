@@ -1095,11 +1095,16 @@ def checkTargetAudience [DecidableEq F]
     match signedRoster : command.targets[i].audienceRoster with
     | none => .error (.audience .malformed)
     | some roster =>
-      match ConfidentialAudienceAdmission.check (profile := profile) (audienceContext prepared)
+      let checked? : Option (ConfidentialAudienceAdmission.Checked (profile := profile)
+          (audienceContext prepared) ambient command.targets[i].target
+          (prepared.targets i).pre.root state roster (audienceView prepared i)
+          (audienceDisclosure prepared i)) :=
+        ConfidentialAudienceAdmission.check (profile := profile) (audienceContext prepared)
           ambient command.targets[i].target (prepared.targets i).pre.root state roster
-          (audienceView prepared i) (audienceDisclosure prepared i) with
-      | none => .error (.audience .transition)
-      | some checked => .ok (.protectedView state present roster signedRoster checked)
+          (audienceView prepared i) (audienceDisclosure prepared i)
+      match checked? with
+      | .none => .error (.audience .transition)
+      | .some checked => .ok (.protectedView state present roster signedRoster checked)
 
 def audienceGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command}
