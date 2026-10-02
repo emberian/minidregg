@@ -13,6 +13,7 @@ open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.WorldKindDescriptor
 open Minidregg.Theory
+open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Store
 open Minidregg.Kernel.WorldKindInstance
 
@@ -81,7 +82,7 @@ def tableOf (value : Instance) : Option Table := do
   let [space] := spaces | none
   let field := value.descriptor.fields.get space
   if field.codec != .bytes || field.discipline != .rom then none else do
-    let raw ← value.store ⟨space, 0⟩
+    let raw ← value.store ⟨space, (0 : Nat)⟩
     -- Reuse the declared scalar codec rather than casting a dependent value.
     let bytes ← (ResourceBirthCodec.strictCodec bytesStream.toLawful).decode
       (field.codec.stream.encode raw)

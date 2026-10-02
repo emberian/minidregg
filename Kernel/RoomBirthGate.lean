@@ -79,6 +79,17 @@ inductive Refusal where
 
 /-! ## The pure decision -/
 
+/-- Placement is explicit authority, or the existing full-room mutation
+alias. A title-only, annotation-only, or bounded mutation grant must not acquire
+room placement authority when the place verb is introduced by an upgrade. -/
+def PlacementScope (scope : Scope .object) : Prop :=
+  Verb.placeObject ∈ scope.verbs ∨
+    (Verb.mutateObject ∈ scope.verbs ∧ scope.fields = none ∧ scope.maxDelta = ∅)
+
+instance (scope : Scope .object) : Decidable (PlacementScope scope) := by
+  unfold PlacementScope
+  infer_instance
+
 /-- One room: the stored capability at the named id (if any), the authority
 projection, the creator's placement request, the room's committed law (if any)
 and the law's view of the room. -/
@@ -91,7 +102,8 @@ def decideRoom (room : Nat) (stored : Option (Capability .object)) (state : Auth
       match RefusalReason.capabilityRefusal cap state request with
       | some reason => .error (.notRoomMember room reason)
       | none =>
-          match law with
+          if !decide (PlacementScope cap.scope) then .error (.notRoomMember room .noGrant)
+          else match law with
           | none => .error (.birthRefused room none)
           | some law =>
               match LawLeaf.of law view view with
@@ -109,7 +121,7 @@ theorem decideRoom_ok_iff (room : Nat) (stored : Option (Capability .object))
     (view : Minidregg.Pred.State) :
     decideRoom room stored state request law view = .ok () ↔
       ∃ cap, stored = some cap ∧ cap.Admissible state request ∧
-        ∃ pred, law = some pred ∧ Minidregg.Pred.eval pred view view = true := by
+        PlacementScope cap.scope ∧ ∃ pred, law = some pred ∧ Minidregg.Pred.eval pred view view = true := by
   unfold decideRoom
   cases stored with
   | none => simp
@@ -123,30 +135,43 @@ theorem decideRoom_ok_iff (room : Nat) (stored : Option (Capability .object))
       | none =>
           have admissible : cap.Admissible state request :=
             (RefusalReason.capabilityRefusal_eq_none_iff_admissible cap state request).mp refusal
-          cases law with
-          | none => simp [refusal]
-          | some pred =>
-              cases leaf : LawLeaf.of pred view view with
-              | none =>
-                  have accepts := (LawLeaf.of_none_iff pred view view).mp leaf
-                  simp [refusal, leaf, admissible, accepts]
-              | some named =>
-                  have rejects : Minidregg.Pred.eval pred view view = false := by
-                    cases evaluated : Minidregg.Pred.eval pred view view with
-                    | false => rfl
-                    | true =>
-                        have := (LawLeaf.of_none_iff pred view view).mpr evaluated
-                        rw [leaf] at this
-                        cases this
-                  simp only [refusal, leaf]
-                  constructor
-                  · intro decided
-                    split at decided <;> cases decided
-                  · rintro ⟨_, stored, _, _, found, accepts⟩
-                    cases stored
-                    cases found
-                    rw [rejects] at accepts
-                    cases accepts
+          by_cases placing : PlacementScope cap.scope
+          · simp only [placing, decide_true, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+            cases law with
+            | none => simp [refusal]
+            | some pred =>
+                cases leaf : LawLeaf.of pred view view with
+                | none =>
+                    have accepts := (LawLeaf.of_none_iff pred view view).mp leaf
+                    simp [refusal, leaf, admissible, accepts, placing]
+                | some named =>
+                    have rejects : Minidregg.Pred.eval pred view view = false := by
+                      cases evaluated : Minidregg.Pred.eval pred view view with
+                      | false => rfl
+                      | true =>
+                          have := (LawLeaf.of_none_iff pred view view).mpr evaluated
+                          rw [leaf] at this
+                          cases this
+                    simp only [refusal, leaf]
+                    constructor
+                    · intro decided
+                      split at decided <;> cases decided
+                    · rintro ⟨_, stored, _, _, _, found, accepts⟩
+                      cases stored
+                      cases found
+                      rw [rejects] at accepts
+                      cases accepts
+          · simp [placing, refusal]
+
+/-- Actual successful placement carries the same scope condition checked by
+this receiver, independently of the broader global verb alias. -/
+theorem decideRoom_ok_has_placement (room : Nat) (stored : Option (Capability .object))
+    (state : AuthState) (request : Request .object) (law : Option Minidregg.Pred.Pred)
+    (view : Minidregg.Pred.State) (accepted : decideRoom room stored state request law view = .ok ()) :
+    ∃ cap, stored = some cap ∧ PlacementScope cap.scope := by
+  obtain ⟨cap, present, _, placing, _⟩ :=
+    (decideRoom_ok_iff room stored state request law view).mp accepted
+  exact ⟨cap, present, placing⟩
 
 /-- A creator naming no stored capability is refused as a non-member. -/
 theorem decideRoom_absent (room : Nat) (state : AuthState) (request : Request .object)
@@ -335,7 +360,7 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
           split at step
           · cases step
           · rename_i observed _
-            obtain ⟨cap, stored, admissible, law, resolved, accepts⟩ :=
+            obtain ⟨cap, stored, admissible, _placing, law, resolved, accepts⟩ :=
               (decideRoom_ok_iff _ _ _ _ _ _).mp step
             exact ⟨placement, cap, rfl, stored, admissible.holder, admissible, clock, rfl,
               observed, law, resolved, accepts⟩
@@ -462,6 +487,28 @@ theorem realm_founder_birth_admitted :
     decideRoom 7 (some founderGrant) (roomState ∅) (place founder) (some realmLaw)
       (view founder) = .ok () := by decide
 
+/-- Exact scope poles use the actual admission decision, not a separate model. -/
+def titleOnlyGrant : Capability .object :=
+  { founderGrant with scope := { founderGrant.scope with
+      verbs := {.mutateObject}, fields := some {.slot 0} } }
+def boundedMutationGrant : Capability .object :=
+  { founderGrant with scope := { founderGrant.scope with
+      verbs := {.mutateObject}, maxDelta := {(.slot 0, 1)} } }
+def fullMutationGrant : Capability .object :=
+  { founderGrant with scope := { founderGrant.scope with verbs := {.mutateObject} } }
+
+theorem title_only_cannot_place :
+    decideRoom 7 (some titleOnlyGrant) (roomState ∅) (place founder) (some openLaw)
+      (view founder) = .error (.notRoomMember 7 .noGrant) := by decide
+
+theorem bounded_mutation_cannot_place :
+    decideRoom 7 (some boundedMutationGrant) (roomState ∅) (place founder) (some openLaw)
+      (view founder) = .error (.notRoomMember 7 .noGrant) := by decide
+
+theorem unrestricted_mutation_can_place :
+    decideRoom 7 (some fullMutationGrant) (roomState ∅) (place founder) (some openLaw)
+      (view founder) = .ok () := by decide
+
 /-! ## The general refusal forms -/
 
 /-- A creator whose named capability is inadmissible for its placement is
@@ -483,6 +530,7 @@ the clause narrowed to the member's grant (`LawLeaf.narrowed`), or
 theorem law_refusal_named (room : Nat) (cap : Capability .object) (state : AuthState)
     (request : Request .object) (law : Minidregg.Pred.Pred) (view : Minidregg.Pred.State)
     (admissible : cap.Admissible state request)
+    (placing : PlacementScope cap.scope)
     (refuses : Minidregg.Pred.eval law view view = false) :
     decideRoom room (some cap) state request (some law) view =
       match LawLeaf.narrowed cap.scope.fields law view view with
@@ -494,16 +542,17 @@ theorem law_refusal_named (room : Nat) (cap : Capability .object) (state : AuthS
   | none =>
       have := (LawLeaf.of_none_iff law view view).mp named
       rw [refuses] at this; cases this
-  | some leaf => simp only [decideRoom, none_, named]
+  | some leaf => simp [decideRoom, none_, named, placing]
 
 /-- An unnarrowed member (`fields = none`) is told the failing clause, as before. -/
 theorem law_refusal_named_unnarrowed (room : Nat) (cap : Capability .object) (state : AuthState)
     (request : Request .object) (law : Minidregg.Pred.Pred) (view : Minidregg.Pred.State)
-    (admissible : cap.Admissible state request) (whole : cap.scope.fields = none)
+    (admissible : cap.Admissible state request) (placing : PlacementScope cap.scope)
+    (whole : cap.scope.fields = none)
     (refuses : Minidregg.Pred.eval law view view = false) :
     ∃ leaf, decideRoom room (some cap) state request (some law) view =
       .error (.birthRefused room (some leaf)) := by
-  rw [law_refusal_named room cap state request law view admissible refuses, whole,
+  rw [law_refusal_named room cap state request law view admissible placing refuses, whole,
     LawLeaf.narrowed_none]
   cases named : LawLeaf.of law view view with
   | none =>
@@ -522,6 +571,6 @@ theorem fake_realm_asset_refused :
         (view memberB) = .error (.birthRefused 7 (some leaf)) :=
   ⟨rfl, law_refusal_named_unnarrowed 7 memberGrant (roomState ∅) (place memberB) realmLaw
     (view memberB) ((RefusalReason.capabilityRefusal_eq_none_iff_admissible _ _ _).mp (by decide))
-    rfl (by decide)⟩
+    (by decide) rfl (by decide)⟩
 
 end Minidregg.Kernel.RoomBirthGate

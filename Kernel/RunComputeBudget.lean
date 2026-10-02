@@ -1,4 +1,4 @@
-/-!
+/-
 # RunComputeBudget — admitted execution quota and existing Book consumption
 
 Preparation component for the after-core PayCell v5 profile. The receiver

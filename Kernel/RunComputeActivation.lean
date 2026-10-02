@@ -1,4 +1,4 @@
-/-!
+/-
 # Explicit activation after an audited legacy execution cut
 
 This is a pure after-core carry helper. The caller must bind the clock and

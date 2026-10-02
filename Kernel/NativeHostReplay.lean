@@ -13,6 +13,8 @@ wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
+import Kernel.CarriedSessionEnrollmentAdmission
+import Kernel.CarriedDispatchAdmission
 import Kernel.AuditTiming
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
@@ -40,6 +42,7 @@ import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
 import Kernel.SubjectKeyRotation
+import Kernel.SubjectKeyCommitmentAdoption
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
@@ -736,6 +739,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : SubjectKeyRotation.AcceptedRotation config.deployment config.profile.semantics
         opened.durable ingress) :
       NativeAdmission config opened (SubjectKeyRotation.intent accepted)
+  | subjectKeyCommitmentAdoption {ingress : SubjectKeyCommitmentAdoption.DecodedIngress}
+      (accepted : SubjectKeyCommitmentAdoption.AcceptedAdoption config.deployment config.profile.semantics
+        opened.durable ingress) :
+      NativeAdmission config opened (SubjectKeyCommitmentAdoption.intent accepted)
   | participantFactoryProvisioning {ingress : ParticipantFactoryProvisioning.DecodedIngress}
       (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1588,6 +1595,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨SubjectKeyRotation.intent accepted,
           .subjectKeyRotation accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := SubjectKeyCommitmentAdoption.decodeIngress bytes then
+    match ← SubjectKeyCommitmentAdoption.admitDecodedNative config.deployment config.profile.semantics
+        opened.durable config.signature ingress with
+    | .error reason => return .error s!"next-key adoption refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨SubjectKeyCommitmentAdoption.intent accepted,
+          .subjectKeyCommitmentAdoption accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantFactoryProvisioning.decodeIngress bytes then
     match ← ParticipantFactoryProvisioningReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -3025,6 +3039,455 @@ def extendVerified (config : Config) {oldTarget : Durable}
       else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
   else
     return .error ⟨count, "verified accepted-record prefix changed"⟩
+
+/-! ## Admission after an externally authorized anchor
+
+Requires the additional top-level import Kernel.CarriedSessionEnrollmentAdmission.
+The anchor is validated target state, not target-profile admission of its old
+history. Original Verified, NativeAdmission and Derived remain unchanged.
+Ordinary origins are minted by this suffix's walk. Imported origins use the separate retained-capsule event22 → current event28
+enrollment and event11 dispatch admissions.
+-/
+
+/-- Same-profile admission or explicitly typed carried enrollment/dispatch.
+No constructor accepts an unadmitted intent. -/
+inductive SuffixDerived (config : Config) (opened : Opened config) where
+  | ordinary (derived : Derived config opened)
+  | carriedEnrollment (ingress : ApplicationGrainSessionEnrollmentSource.Ingress)
+      (admitted : CarriedSessionEnrollmentAdmission.Admitted config opened ingress)
+  | carriedDispatch (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+      (admitted : CarriedDispatchAdmission.Admitted config opened ingress)
+
+def SuffixDerived.intent {config : Config} {opened : Opened config} :
+    SuffixDerived config opened → DataIntent rootBytes
+  | .ordinary derived => derived.intent
+  | .carriedEnrollment _ admitted => admitted.intent
+  | .carriedDispatch _ admitted => admitted.intent
+
+/-- Both carried families use the same durable preparation, tail judgement and
+installer. Only the typed `SuffixDerived` cases call this private helper. -/
+private def advanceCarriedIntent {config : Config} (opened : Opened config)
+    (intent : DataIntent rootBytes) : Except String Durable :=
+  let durable := opened.durable
+  match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
+      durable.withinLog durable.resumed intent with
+  | .inl ready =>
+      match durable.judge config.transport intent with
+      | .ok () => .ok (durable.extend ready)
+      | .error reason => .error s!"carried durable intent refused: {repr reason}"
+  | .inr (.rejected reason) => .error s!"carried durable intent refused: {repr reason}"
+  | .inr (.replayed _) => .error "duplicate accepted suffix entry"
+  | .inr _ => .error "carried intent did not make one new commit"
+
+/-- A carried origin never supplies a stored post snapshot. Ordinary steps
+retain exactly their existing executor; both carried cases execute their real
+admission-produced intents through the shared durable installer. -/
+def advanceSuffix {config : Config} (opened : Opened config)
+    (derived : SuffixDerived config opened) : Except String Durable :=
+  match derived with
+  | .ordinary ordinary => advance opened ordinary
+  | .carriedEnrollment _ admitted => advanceCarriedIntent opened admitted.intent
+  | .carriedDispatch _ admitted => advanceCarriedIntent opened admitted.intent
+
+/-- Every step contains an actual typed admission, complete expected-record
+comparison, exact executor successor, target validation and original receipt. -/
+def SuffixStep (config : Config) (before after : Opened config)
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt) : Prop :=
+  ∃ derived : SuffixDerived config before,
+    recordMatches record derived.intent = true ∧
+    ∃ next : Durable,
+      advanceSuffix before derived = .ok next ∧
+      validateLoaded config next = .ok after ∧
+      receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
+        before.durable.image.accepted.length + 1, next.worldRoot⟩
+
+theorem SuffixStep.ofAdmittedStep {config : Config} {before after : Opened config}
+    {record : DurableReceiver.IntentRecord} {receipt : NativeHostCodec.Receipt}
+    (step : AdmittedStep config before after record receipt) :
+    SuffixStep config before after record receipt := by
+  obtain ⟨derived, matched, next, advanced, validated, sealed⟩ := step
+  exact ⟨.ordinary derived, matched, next, advanced, validated, sealed⟩
+
+inductive AdmittedSuffix (config : Config) : Opened config →
+    List DurableReceiver.IntentRecord → Opened config →
+    List NativeHostCodec.Receipt → Prop
+  | nil (opened) : AdmittedSuffix config opened [] opened []
+  | cons {before middle after record records receipt receipts}
+      (step : SuffixStep config before middle record receipt)
+      (tail : AdmittedSuffix config middle records after receipts) :
+      AdmittedSuffix config before (record :: records) after (receipt :: receipts)
+
+theorem AdmittedSuffix.append {config : Config}
+    {before middle after : Opened config}
+    {prior later : List DurableReceiver.IntentRecord}
+    {priorReceipts laterReceipts : List NativeHostCodec.Receipt}
+    (left : AdmittedSuffix config before prior middle priorReceipts)
+    (right : AdmittedSuffix config middle later after laterReceipts) :
+    AdmittedSuffix config before (prior ++ later) after
+      (priorReceipts ++ laterReceipts) := by
+  induction left with
+  | nil _ => simpa using right
+  | cons step tail ih =>
+      simpa only [List.cons_append] using AdmittedSuffix.cons step (ih right)
+
+theorem AdmittedSuffix.ofAdmittedReplay {config : Config}
+    {before after : Opened config} {records : List DurableReceiver.IntentRecord}
+    {receipts : List NativeHostCodec.Receipt}
+    (trace : AdmittedReplay config before records after receipts) :
+    AdmittedSuffix config before records after receipts := by
+  induction trace with
+  | nil opened => exact .nil opened
+  | cons step tail ih => exact .cons (SuffixStep.ofAdmittedStep step) ih
+
+/-- Ordinary witness caches always originate in this target-profile suffix.
+Carried event28/event11 admissions create no replacement historical witnesses. -/
+structure SuffixContext (config : Config) where
+  issues : List (PriorIssue config) := []
+  reserves : List (PriorDispatchReserve config) := []
+  begins : List (PriorBegin config) := []
+  beginsV2 : List (PriorBeginV2 config) := []
+  claimsV2 : List (PriorClaimV2 config) := []
+  frontier : FnConsumerFrontierReplay.Audit := {}
+  releases : List PriorSelectedRelease := []
+  beginsV3 : List (PriorBeginV3 config) := []
+  claimsV3 : List (PriorClaimV3 config) := []
+  createdV3 : List (PriorCreatedV3 config) := []
+  runningV3 : List (PriorRunningV3 config) := []
+  grants : List (PriorLifetimeGrant config) := []
+
+private def deriveSuffixAt (config : Config) (anchor : Opened config)
+    (origin : Option (CarriedSegmentIO.PreservedPrefix config anchor.durable))
+    (opened : Opened config) (context : SuffixContext config) (bytes : List UInt8) :
+    IO (Except String (SuffixDerived config opened)) := do
+  if let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode bytes then
+    if ingress.request.issueIndex < anchor.durable.height then
+      let some retained := origin
+        | return .error "pre-anchor enrollment requires authenticated carried provenance"
+      let .ok custody := retained.rebindChecked opened.durable
+        | return .error "carried enrollment prefix no longer matches authorized anchor"
+      let .ok issue := CarriedApplicationProvenance.selectIssue custody ingress.request.issueIndex
+        | return .error "carried enrollment original event22 refused"
+      match ← CarriedSessionEnrollmentAdmission.admitAt config opened issue ingress with
+      | .error detail => return .error detail
+      | .ok admitted => return .ok (.carriedEnrollment ingress admitted)
+  if let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes then
+    if let some retained := origin then
+      -- Decide the segment by exact authenticated old event22 bytes. A fresh
+      -- suffix issue remains ordinary; an old-source failure cannot fall back.
+      if retained.source.durable.image.accepted.any (fun record =>
+          record.event.codecVersion == 22 &&
+          record.event.canonicalBytes == ingress.issueIngressBytes) then
+        let .ok custody := retained.rebindChecked opened.durable
+          | return .error "carried dispatch prefix no longer matches authorized anchor"
+        let .ok issue := CarriedDispatchProvenance.select custody ingress.issueIngressBytes
+          | return .error "carried dispatch original event22 refused"
+        match ← CarriedDispatchAdmission.admitAt config opened issue ingress with
+        | .error detail => return .error detail
+        | .ok admitted => return .ok (.carriedDispatch ingress admitted)
+  match ← derive config opened context.issues context.reserves context.begins context.beginsV2
+      context.claimsV2 context.beginsV3 context.claimsV3 context.createdV3 context.runningV3
+      context.grants context.frontier context.releases bytes with
+  | .error detail => return .error detail
+  | .ok derived => return .ok (.ordinary derived)
+
+/-- Keep ordinary cache construction outside the dependent sum elimination.
+The same `matched` proof is checked once at the ordinary Derived type. -/
+private def ordinarySuffixContextAfter (config : Config) (before after : Opened config)
+    (context : SuffixContext config) (record : DurableReceiver.IntentRecord)
+    (receipt : NativeHostCodec.Receipt) (ordinary : Derived config before)
+    (matched : recordMatches record ordinary.intent = true) : Except String (SuffixContext config) := do
+  let frontier ← frontierAfter config context.frontier record receipt
+  let issues := issuesAfter config before context.issues record receipt ordinary matched
+  let reserves := reservesAfter config before context.reserves record receipt ordinary matched
+  let begins := beginsAfter config before context.begins record ordinary matched
+  let beginsV2 := beginsV2After config before context.beginsV2 record ordinary matched
+  let claimsV2 := claimsV2After config before context.claimsV2 record ordinary matched
+  let releases := selectedReleaseAfter config after context.releases record receipt
+  let beginsV3 := beginsV3After config before context.beginsV3 record ordinary matched
+  let claimsV3 := claimsV3After config before context.claimsV3 record ordinary matched
+  let createdV3 := createdV3After config before context.createdV3 record receipt ordinary matched
+  let runningV3 := runningV3After config before context.runningV3 record receipt ordinary matched
+  let grants := grantsAfter config before context.grants record receipt ordinary matched
+  pure ⟨issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
+    beginsV3, claimsV3, createdV3, runningV3, grants⟩
+
+private def suffixContextAfter (config : Config) (before after : Opened config)
+    (context : SuffixContext config) (record : DurableReceiver.IntentRecord)
+    (receipt : NativeHostCodec.Receipt) (derived : SuffixDerived config before) :
+    recordMatches record derived.intent = true → Except String (SuffixContext config) :=
+  match derived with
+  | .carriedEnrollment _ _ => fun _ => .ok context
+  | .carriedDispatch _ _ => fun _ => .ok context
+  | .ordinary ordinary => ordinarySuffixContextAfter config before after context record receipt ordinary
+
+private structure SuffixWalked (config : Config) (start : Opened config)
+    (records : List DurableReceiver.IntentRecord) where
+  final : Opened config
+  receipts : List NativeHostCodec.Receipt
+  trace : AdmittedSuffix config start records final receipts
+  context : SuffixContext config
+
+private def walkSuffix (config : Config) (anchor : Opened config)
+    (origin : Option (CarriedSegmentIO.PreservedPrefix config anchor.durable))
+    (opened : Opened config) (context : SuffixContext config) :
+    (records : List DurableReceiver.IntentRecord) →
+    IO (Except Failure (SuffixWalked config opened records))
+  | [] => pure (.ok ⟨opened, [], .nil opened, context⟩)
+  | record :: rest => do
+    let index := opened.durable.image.accepted.length
+    match ← deriveSuffixAt config anchor origin opened context record.event.canonicalBytes with
+    | .error detail => return .error ⟨index, detail⟩
+    | .ok derived =>
+      if matched : recordMatches record derived.intent = true then
+        match advanced : advanceSuffix opened derived with
+        | .error detail => return .error ⟨index, detail⟩
+        | .ok next =>
+          match validated : validateLoaded config next with
+          | .error detail => return .error ⟨index, s!"suffix native post image: {detail}"⟩
+          | .ok after =>
+            let receipt : NativeHostCodec.Receipt :=
+              ⟨derived.intent.transactionId, derived.intent.event.eventId, index + 1, next.worldRoot⟩
+            match suffixContextAfter config opened after context record receipt derived matched with
+            | .error detail => return .error ⟨index, detail⟩
+            | .ok nextContext =>
+              match ← walkSuffix config anchor origin after nextContext rest with
+              | .error failure => return .error failure
+              | .ok tail =>
+                let step : SuffixStep config opened after record receipt :=
+                  ⟨derived, matched, next, advanced, validated, rfl⟩
+                return .ok ⟨tail.final, receipt :: tail.receipts,
+                  .cons step tail.trace, tail.context⟩
+      else return .error ⟨index, "retained suffix differs from source-admitted intent"⟩
+
+/-- Native admission of precisely the records after one validated anchor.
+The constructor is private: all provenance caches come from the actual walk. -/
+structure SuffixVerified (config : Config) (anchor : Opened config) (target : Durable) where
+  private mk ::
+  origin : Option (CarriedSegmentIO.PreservedPrefix config anchor.durable)
+  opened : Opened config
+  exactImage : opened.durable.image = target.image
+  seedExact : target.image.seed = anchor.durable.image.seed
+  anchorWithin : anchor.durable.image.accepted.length ≤ target.image.accepted.length
+  prefixExact : target.image.accepted.take anchor.durable.image.accepted.length =
+    anchor.durable.image.accepted
+  logStartExact : target.logStart = anchor.durable.logStart
+  openedLogStartExact : opened.durable.logStart = target.logStart
+  receipts : List NativeHostCodec.Receipt
+  countExact : receipts.length =
+    (target.image.accepted.drop anchor.durable.image.accepted.length).length
+  admitted : AdmittedSuffix config anchor
+    (target.image.accepted.drop anchor.durable.image.accepted.length) opened receipts
+  issues : List (PriorIssue config)
+  reserves : List (PriorDispatchReserve config)
+  begins : List (PriorBegin config)
+  beginsV2 : List (PriorBeginV2 config)
+  claimsV2 : List (PriorClaimV2 config)
+  frontier : FnConsumerFrontierReplay.Audit
+  releases : List PriorSelectedRelease
+  beginsV3 : List (PriorBeginV3 config)
+  claimsV3 : List (PriorClaimV3 config)
+  createdV3 : List (PriorCreatedV3 config)
+  runningV3 : List (PriorRunningV3 config)
+  grants : List (PriorLifetimeGrant config)
+
+/-- Global accepted-record index in, original target-segment receipt out.
+The anchor and all earlier records must be selected through their own segment.
+In particular this never recomputes an old receipt under target semantics. -/
+def SuffixVerified.receiptAt {config : Config} {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) (index : Nat) :
+    Option NativeHostCodec.Receipt :=
+  if anchor.durable.image.accepted.length ≤ index then
+    verified.receipts[index - anchor.durable.image.accepted.length]?
+  else none
+
+theorem SuffixVerified.receiptAt_before_anchor {config : Config}
+    {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) (index : Nat)
+    (earlier : index < anchor.durable.image.accepted.length) :
+    verified.receiptAt index = none := by
+  simp [SuffixVerified.receiptAt, Nat.not_le_of_lt earlier]
+
+theorem SuffixVerified.accepted_suffix {config : Config}
+    {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) :
+    AdmittedSuffix config anchor
+      (target.image.accepted.drop anchor.durable.image.accepted.length)
+      verified.opened verified.receipts := verified.admitted
+
+def SuffixVerified.context {config : Config} {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) : SuffixContext config :=
+  { issues := verified.issues, reserves := verified.reserves, begins := verified.begins
+    beginsV2 := verified.beginsV2, claimsV2 := verified.claimsV2, frontier := verified.frontier
+    releases := verified.releases, beginsV3 := verified.beginsV3, claimsV3 := verified.claimsV3
+    createdV3 := verified.createdV3, runningV3 := verified.runningV3, grants := verified.grants }
+
+/-- Fresh admission at the certified tip, retaining either the actual ordinary
+admission or the separately authenticated carried enrollment admission. -/
+def deriveSuffixVerified {config : Config} {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) (bytes : List UInt8) :
+    IO (Except String (SuffixDerived config verified.opened)) :=
+  deriveSuffixAt config anchor verified.origin verified.opened verified.context bytes
+
+/-- Retain the computational ordinary dispatch admission from this suffix's
+own issue cache. No external origin or caller-supplied witness is inserted. -/
+def admitDispatchSuffixVerified {config : Config} {anchor : Opened config} {target : Durable}
+    (old : SuffixVerified config anchor target)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
+    IO (Except String (DispatchAt config old.opened ingress)) :=
+  admitDispatchAt config old.opened old.issues ingress
+
+/-- Audit a target suffix from an actual validated image. This does not confer
+operator authority on the anchor; that obligation belongs to the carry receiver.
+The suffix walk performs native admission, full-record comparison, tail-law
+judgement and post-image validation at every original absolute height. -/
+def verifySuffixLoaded (config : Config) (anchor : Opened config) (target : Durable)
+    (origin : Option (CarriedSegmentIO.PreservedPrefix config anchor.durable) := none) :
+    IO (Except Failure (SuffixVerified config anchor target)) := do
+  if let some custody := origin then
+    if custody.start.durable.image != anchor.durable.image ||
+        custody.start.durable.logStart != anchor.durable.logStart then
+      return .error ⟨anchor.durable.height, "carried provenance names another suffix anchor"⟩
+  let count := anchor.durable.image.accepted.length
+  if seedBytes : DurableReceiverCodec.seedStream.encode target.image.seed =
+      DurableReceiverCodec.seedStream.encode anchor.durable.image.seed then
+    have seedExact : target.image.seed = anchor.durable.image.seed :=
+      (lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedBytes
+    if anchorWithin : count ≤ target.image.accepted.length then
+      if prefixBytes : (StreamCodec.list DurableReceiverCodec.intentStream).encode
+          (target.image.accepted.take count) =
+          (StreamCodec.list DurableReceiverCodec.intentStream).encode
+            anchor.durable.image.accepted then
+        have prefixExact : target.image.accepted.take count = anchor.durable.image.accepted :=
+          (lawful_encode_injective
+            (StreamCodec.list DurableReceiverCodec.intentStream).toLawful) prefixBytes
+        if logStartExact : target.logStart = anchor.durable.logStart then
+          let suffix := target.image.accepted.drop count
+          match ← walkSuffix config anchor origin anchor {} suffix with
+          | .error failure => return .error failure
+          | .ok walked =>
+            if exactImage : walked.final.durable.image = target.image then
+              if openedLogStartExact : walked.final.durable.logStart = target.logStart then
+                if countExact : walked.receipts.length = suffix.length then
+                  return .ok
+                    { origin := origin
+                      opened := walked.final
+                      exactImage := exactImage
+                      seedExact := seedExact
+                      anchorWithin := anchorWithin
+                      prefixExact := prefixExact
+                      logStartExact := logStartExact
+                      openedLogStartExact := openedLogStartExact
+                      receipts := walked.receipts
+                      countExact := countExact
+                      admitted := walked.trace
+                      issues := walked.context.issues
+                      reserves := walked.context.reserves
+                      begins := walked.context.begins
+                      beginsV2 := walked.context.beginsV2
+                      claimsV2 := walked.context.claimsV2
+                      frontier := walked.context.frontier
+                      releases := walked.context.releases
+                      beginsV3 := walked.context.beginsV3
+                      claimsV3 := walked.context.claimsV3
+                      createdV3 := walked.context.createdV3
+                      runningV3 := walked.context.runningV3
+                      grants := walked.context.grants }
+                else return .error ⟨target.image.accepted.length, "suffix receipt count mismatch"⟩
+              else return .error ⟨target.image.accepted.length, "suffix final log anchor differs"⟩
+            else return .error ⟨target.image.accepted.length, "suffix canonical tip mismatch"⟩
+        else return .error ⟨count, "suffix log anchor changed"⟩
+      else return .error ⟨count, "suffix anchor prefix changed"⟩
+    else return .error ⟨target.image.accepted.length, "suffix predates its anchor"⟩
+  else return .error ⟨count, "suffix genesis seed changed"⟩
+
+/-- Registry/carry receiving seam: retain the authenticated origin already
+bound to this target, then audit from that token's exact authorized start. -/
+def verifyCarriedSuffixLoaded (config : Config) (target : Durable)
+    (custody : CarriedSegmentIO.PreservedPrefix config target) :
+    IO (Except Failure (SuffixVerified config custody.start target)) := do
+  match custody.rebindChecked custody.start.durable with
+  | .error detail => return .error ⟨custody.start.durable.height, detail⟩
+  | .ok atAnchor => verifySuffixLoaded config custody.start target (some atAnchor)
+
+/-- Extend the exact previously admitted suffix, preserving its anchor and
+origin witnesses. The new physical image must retain every prior record; only
+its newly appended records run through native admission again. -/
+def extendSuffixVerified (config : Config) {anchor : Opened config} {oldTarget : Durable}
+    (old : SuffixVerified config anchor oldTarget) (target : Durable) :
+    IO (Except Failure (SuffixVerified config anchor target)) := do
+  let count := oldTarget.image.accepted.length
+  if seedBytes : DurableReceiverCodec.seedStream.encode target.image.seed =
+      DurableReceiverCodec.seedStream.encode oldTarget.image.seed then
+    have sameSeed : target.image.seed = oldTarget.image.seed :=
+      (lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedBytes
+    if within : count ≤ target.image.accepted.length then
+      if prefixBytes : (StreamCodec.list DurableReceiverCodec.intentStream).encode
+          (target.image.accepted.take count) =
+          (StreamCodec.list DurableReceiverCodec.intentStream).encode
+            oldTarget.image.accepted then
+        have prefixExact : target.image.accepted.take count = oldTarget.image.accepted :=
+          (lawful_encode_injective
+            (StreamCodec.list DurableReceiverCodec.intentStream).toLawful) prefixBytes
+        if sameLogStart : target.logStart = oldTarget.logStart then
+          let suffix := target.image.accepted.drop count
+          match ← walkSuffix config anchor old.origin old.opened old.context suffix with
+          | .error failure => return .error failure
+          | .ok walked =>
+            if exactImage : walked.final.durable.image = target.image then
+              if openedLogStartExact : walked.final.durable.logStart = target.logStart then
+                let receipts := old.receipts ++ walked.receipts
+                if countExact : receipts.length =
+                    (target.image.accepted.drop anchor.durable.image.accepted.length).length then
+                  have acceptedExact : target.image.accepted = oldTarget.image.accepted ++ suffix := by
+                    calc
+                      target.image.accepted = target.image.accepted.take count ++
+                          target.image.accepted.drop count :=
+                        (List.take_append_drop count target.image.accepted).symm
+                      _ = oldTarget.image.accepted ++ suffix := by rw [prefixExact]
+                  have anchorPrefix : target.image.accepted.take anchor.durable.image.accepted.length =
+                      anchor.durable.image.accepted := by
+                    rw [acceptedExact, List.take_append_of_le_length old.anchorWithin]
+                    exact old.prefixExact
+                  have suffixExact : target.image.accepted.drop anchor.durable.image.accepted.length =
+                      oldTarget.image.accepted.drop anchor.durable.image.accepted.length ++ suffix := by
+                    rw [acceptedExact, List.drop_append_of_le_length old.anchorWithin]
+                  have admitted : AdmittedSuffix config anchor
+                      (target.image.accepted.drop anchor.durable.image.accepted.length)
+                      walked.final receipts := by
+                    rw [suffixExact]
+                    exact old.admitted.append walked.trace
+                  return .ok
+                    { origin := old.origin
+                      opened := walked.final
+                      exactImage := exactImage
+                      seedExact := sameSeed.trans old.seedExact
+                      anchorWithin := old.anchorWithin.trans within
+                      prefixExact := anchorPrefix
+                      logStartExact := sameLogStart.trans old.logStartExact
+                      openedLogStartExact := openedLogStartExact
+                      receipts := receipts
+                      countExact := countExact
+                      admitted := admitted
+                      issues := walked.context.issues
+                      reserves := walked.context.reserves
+                      begins := walked.context.begins
+                      beginsV2 := walked.context.beginsV2
+                      claimsV2 := walked.context.claimsV2
+                      frontier := walked.context.frontier
+                      releases := walked.context.releases
+                      beginsV3 := walked.context.beginsV3
+                      claimsV3 := walked.context.claimsV3
+                      createdV3 := walked.context.createdV3
+                      runningV3 := walked.context.runningV3
+                      grants := walked.context.grants }
+                else return .error ⟨target.image.accepted.length, "extended suffix receipt count mismatch"⟩
+              else return .error ⟨target.image.accepted.length, "extended suffix final log anchor differs"⟩
+            else return .error ⟨target.image.accepted.length, "extended suffix canonical tip mismatch"⟩
+        else return .error ⟨count, "extended suffix log anchor changed"⟩
+      else return .error ⟨count, "verified suffix prefix changed"⟩
+    else return .error ⟨target.image.accepted.length, "verified suffix rolled back"⟩
+  else return .error ⟨count, "verified suffix genesis seed changed"⟩
+
 
 /-- Read-only bytes entrypoint for independent verification. No storage driver
 or network publication is called by this module. -/

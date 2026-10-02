@@ -131,6 +131,13 @@ import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
 import Host.ApplicationStreamContinuityInspection
 import Host.ApplicationRouteAdmissionInspection
+import Host.CarryInspection
+import Host.NeutralCarryReceiving
+import Host.KeyCommitmentAdoptionInspection
+import Host.RetainedSegmentInspection
+import Kernel.CarriedNativeHostSession
+import Kernel.CarriedSessionEnrollmentReceiver
+import Kernel.CarriedApplicationDispatchReceiver
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -517,6 +524,10 @@ def AgentLifetimeDispatchFixedSettings.selectors
     grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
 
 structure Settings where
+  /-- Operator-local carry registry and independently authorized handoff key.
+  Neither value can be selected by a network frame. -/
+  carryRegistry : Option String := none
+  carryOperatorKey : Option String := none
   domain : Nat
   federation : Nat
   factoryId : Nat
@@ -709,6 +720,10 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleClaimInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
+  else if kind == "subject-key-adoption-plan" then
+    KeyCommitmentAdoptionInspection.inspectPlan bytes
+  else if kind == "subject-key-adoption-ingress" then
+    KeyCommitmentAdoptionInspection.inspectIngress bytes
   else if kind == "application-session-enrollment-request" then
     ApplicationGrainSessionEnrollmentInspection.inspectRequest bytes
   else if kind == "application-session-enrollment-plan" then
@@ -1705,24 +1720,7 @@ def dispatchSession (config : NativeHost.Config)
       match ← NativeHost.prepareAuthorizedLoaded config opened payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, refusalFrame "prepare" detail)
-  | 2 =>
-      let t0 ← IO.monoMsNow
-      let session ← sessionCurrent config state
-      phaseTrace "op2 refresh" t0
-      let result ← match callCodec.decode payload with
-        | none => pure (NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
-            "noncanonical or unsupported native host call".toUTF8.toList, NativeHost.Disclosure.uniform)
-        | some call =>
-            NativeHost.submitDisclosedWith config session.opened call
-              (sessionConfirmed config state)
-      NativeHost.logOperatorRefusal result.1
-      return (2, outcomeCodec.encode (NativeHost.disclose result))
-  | 3 =>
-      let opened ← sessionOpened config state
-      let result := match callCodec.decode payload with
-        | none => NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
-        | some call => NativeHost.lookupLoaded config opened call
-      return (3, outcomeCodec.encode result)
+  | 2 | 3 => fnDispatch operation payload
   | 4 =>
       let opened ← sessionOpened config state
       ReceiptContinuity.remember config opened.durable
@@ -1810,11 +1808,7 @@ def dispatchSession (config : NativeHost.Config)
   | 150 =>
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
-  | 151 =>
-      let opened ← sessionOpened config state
-      match ← ReceiptContinuity.serve config opened.durable payload with
-      | .ok response => return (151, response)
-      | .error detail => return (255, failure .operationRejected "receipt-continuity" detail)
+  | 151 => fnDispatch operation payload
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -1836,20 +1830,14 @@ def dispatchSession (config : NativeHost.Config)
   | 25 =>
       return (25, outcomeCodec.encode
         (← selectedSourcePublicationLookupSession config state payload))
-  | 35 =>
-      return (35, outcomeCodec.encode
-        (← applicationDispatchLookupSession config state payload))
+  | 35 => fnDispatch operation payload
   | 47 =>
       return (47, outcomeCodec.encode
         (← applicationAgentDispatchLookupSession config state payload))
   | 77 =>
       return (77, outcomeCodec.encode
         (← applicationAgentLifetimeDispatchLookupSession config state payload))
-  | 36 =>
-      let session ← sessionWalked config state
-      match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
-      | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
-      | .error detail => return (255, failure .operationRejected "application-dispatch-author" detail)
+  | 36 => fnDispatch operation payload
   | 37 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationDispatchAuthoring.planCodec.decode planBytes
@@ -2275,19 +2263,18 @@ def serveFrame (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
     (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let wrote ← IO.mkRef false
   let tracked : IO.FS.Stream :=
     { output with write := fun bytes => do wrote.set true; output.write bytes }
   try
-    if operation == 164 then
-      dispatchApplicationSubmitSession config state payload tracked true
+    if operation == 34 || operation == 164 then
+      applicationDispatch (operation == 164) payload tracked
     else if operation == 154 then
       dispatchRouteAdmissionSession config state payload tracked
     else if operation == 152 then
       dispatchStreamContinuitySession config state payload tracked
-    else if operation == 34 then
-      dispatchApplicationSubmitSession config state payload tracked
     else if operation == 46 then
       dispatchAgentSubmitSession config state payload tracked
     else if operation == 76 then
@@ -2318,6 +2305,7 @@ partial def serveSession (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
@@ -2326,16 +2314,23 @@ partial def serveSession (config : NativeHost.Config)
   if length == 0 then
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native host frame"))
-  else if length > maxFrame then
+  else if length > RetainedSegmentInspection.maxLookupFrame then
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "native host frame exceeds frame bound"))
   else
-    match (← readExactly input length).toList with
-    | [] => pure ()
-    | operation :: payload =>
-        serveFrame config state meteringProfile providerRoutes fnDispatch operation payload output
-  serveSession config state meteringProfile providerRoutes fnDispatch input output
+    let opcode ← readExactly input 1
+    let operation := opcode[0]!
+    -- Only carried exact-call recovery needs the bounded identity-header
+    -- overhead. Refuse other oversized operations before allocating payload.
+    if length > maxFrame && operation != 153 then
+      discardExactly input (length - 1)
+      writeSessionFrame output 255 (RequestRefusal.frame operation
+        (RequestRefusal.malformed "native host frame exceeds operation bound"))
+    else
+      let payload ← readExactly input (length - 1)
+      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
+  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
@@ -3454,6 +3449,252 @@ def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
 
 def readJson (path : String) : IO Lean.Json :=
   return ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile path))
+
+/-- Carry administration has bounded local inputs and independent configured
+operator authority. The request or target capsule cannot introduce that key. -/
+def readCarryJson (path : String) : IO Lean.Json := do
+  let bytes ← readBoundedBytes path (1024 * 1024)
+  let some source := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "carry input is not UTF-8")
+  IO.ofExcept (Minidregg.Host.Json.parse source)
+
+def carryOperator (settings : Settings) : IO (List UInt8) := do
+  let some text := settings.carryOperatorKey
+    | throw (IO.userError "carry requires independently configured operator authority")
+  let key ← IO.ofExcept (Minidregg.Host.Json.decodeHex "carryOperatorKey" (.str text))
+  if key.length != 32 || CarryInspection.encodeHex key != text then
+    throw (IO.userError "carry operator key must be canonical lowercase 32-byte hexadecimal")
+  pure key
+
+/-- The registry is operator-local custody. Never send private paths or audit
+process diagnostics through a public protocol failure. -/
+def loadCarryRegistry (settings : Settings) : IO RetainedSegmentInspection.Registry := do
+  try
+    let some path := settings.carryRegistry
+      | throw (IO.userError "missing registry")
+    let operator ← carryOperator settings
+    let json ← readCarryJson path
+    IO.ofExcept (RetainedSegmentInspection.parseRegistry json operator)
+  catch _ => throw (IO.userError "retained carry custody unavailable")
+
+/-- A distinct cache holds actual target-suffix re-admission. Neither an old
+record nor this certificate is cast to a genesis-walked target certificate. -/
+def sessionCarriedWalked (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) : IO (CarriedNativeHostSession.Walked config) := do
+  try
+    let current ← sessionCurrent config state
+    let result ← match ← carried.get with
+      | some prior => CarriedNativeHostSession.refresh config prior current.opened.durable
+      | none => do
+          let registry ← loadCarryRegistry settings
+          let custody ← IO.ofExcept (← RetainedSegmentInspection.validate config
+            current.opened.durable registry)
+          CarriedNativeHostSession.start config current.opened.durable custody
+    let walked ← IO.ofExcept result
+    carried.set (some walked)
+    return walked
+  catch _ =>
+    carried.set none
+    state.set none
+    throw (IO.userError "carried suffix validation failed")
+
+def carriedEnrollmentSubmit (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCarriedWalked config state carried settings
+  match ← CarriedSessionEnrollmentReceiver.receiveVerified session.verified payload with
+  | .confirmed confirmed =>
+      carried.set (some ⟨session.anchor, confirmed.target, confirmed.verified⟩)
+      return .confirmed confirmed.confirmation confirmed.receipt
+  | .historical receipt => return .confirmed .replayed receipt
+  | .rejected _ =>
+      return .refused .operationRejected "application-session-enrollment".toUTF8.toList
+        "carried enrollment refused".toUTF8.toList
+  | .transactionConflict =>
+      return .refused .conflict "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .contention => return .contention
+  | .unavailable _ => return .unavailable "carried enrollment unavailable".toUTF8.toList
+  | .uncertain _ => return .uncertain "carried enrollment readback uncertain".toUTF8.toList
+
+def carriedEnrollmentLookup (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode payload
+    | return .refused .malformed "application-session-enrollment".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
+    return .refused .malformed "application-session-enrollment".toUTF8.toList
+      "noncanonical ingress".toUTF8.toList
+  let session ← sessionCarriedWalked config state carried settings
+  match CarriedSessionEnrollmentReceiver.lookupVerified session.verified ingress with
+  | none => return .absent
+  | some (.ok receipt) => return .confirmed .replayed receipt
+  | some (.error _) =>
+      return .refused .conflict "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+
+/-- A target identity starts at its authorized carry endpoint. Earlier
+history is served only by its retained interpreter and original identity. -/
+def carriedContinuitySession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (payload : List UInt8) : IO (Except String (List UInt8)) := do
+  let some text := String.fromUTF8? payload.toByteArray
+    | return .error "receipt continuity request is not UTF-8"
+  let request ← match Lean.Json.parse text >>= ReceiptContinuity.parseRequest with
+    | .ok request => pure request
+    | .error _ => return .error "receipt continuity request malformed"
+  if request.query.identity != ReceiptContinuity.identityOf config then
+    let registry ← loadCarryRegistry settings
+    let opened ← sessionOpened config state
+    RetainedSegmentInspection.serveContinuity config opened.durable registry payload
+  else if settings.carryRegistry.isSome then
+    let session ← sessionCarriedWalked config state carried settings
+    if request.query.target.height < session.anchor.durable.height ||
+        request.query.anchor.any (fun point => point.height < session.anchor.durable.height) then
+      return .error "historical continuity requires its original profile"
+    ReceiptContinuity.serve config session.verified.opened.durable payload
+  else
+    let opened ← sessionOpened config state
+    ReceiptContinuity.serve config opened.durable payload
+
+/-- Receipt selection never crosses a profile boundary. The carry record
+itself is the authorized anchor; ordinary later records come from real replay. -/
+def carriedReceipt (config : NativeHost.Config) (session : CarriedNativeHostSession.Walked config)
+    (transactionId eventId : Minidregg.Theory.TypedAuthorization.Digest) :
+    Option NativeHostCodec.Receipt := do
+  let index ← session.verified.opened.durable.image.accepted.findIdx?
+    (fun record => record.transactionId == transactionId)
+  let record ← session.verified.opened.durable.image.accepted[index]?
+  if record.event.eventId != eventId then none else do
+    if index + 1 == session.anchor.durable.height then
+      let origin ← session.verified.origin
+      if transactionId != origin.edge.body.id || eventId != origin.edge.body.id then none else
+      some ⟨transactionId, eventId, index + 1, session.anchor.durable.worldRoot⟩
+    else session.verified.receiptAt index
+
+/-- Old exact recovery precedes any target submission. A retained original is
+never submitted again, and target confirmation is reselected under its actual
+suffix certificate before the reply crosses the native boundary. -/
+def carriedOrdinaryCall (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (submit : Bool) (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCarriedWalked config state carried settings
+  let registry ← loadCarryRegistry settings
+  match ← RetainedSegmentInspection.serveOriginalCall config session.verified.opened.durable
+      registry payload with
+  | .error _ => return .unavailable "retained original lookup unavailable".toUTF8.toList
+  | .ok .absent => pure ()
+  | .ok (.refused .malformed _ _) => pure ()
+  | .ok outcome => return outcome
+  let some call := callCodec.decode payload
+    | return .refused .malformed "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
+  let outcome ← if submit then do
+    let result ← NativeHost.submitDisclosedWith config session.verified.opened call
+      (fun kind transaction event => do
+        let current ← sessionCarriedWalked config state carried settings
+        match carriedReceipt config current transaction event with
+        | some receipt => return .confirmed kind receipt
+        | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList)
+    NativeHost.logOperatorRefusal result.1
+    pure (NativeHost.disclose result)
+  else pure (NativeHost.lookupLoaded config session.verified.opened call)
+  match outcome with
+  | .confirmed kind candidate =>
+      let current ← sessionCarriedWalked config state carried settings
+      match carriedReceipt config current candidate.transactionId candidate.eventId with
+      | some receipt => return .confirmed kind receipt
+      | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList
+  | other => return other
+
+/-- Select retained dispatch only by exact authenticated old event bytes.
+Absence from this segment leaves target lookup/admission to its own receiver. -/
+def retainedDispatchReceipt (config : NativeHost.Config)
+    (session : CarriedNativeHostSession.Walked config) (settings : Settings)
+    (payload : List UInt8) : IO (Option NativeHostCodec.Outcome) := do
+  let some origin := session.verified.origin | return none
+  unless origin.source.durable.image.accepted.any (fun record =>
+      record.event.codecVersion == 11 && record.event.canonicalBytes == payload) do
+    return none
+  let registry ← loadCarryRegistry settings
+  match ← RetainedSegmentInspection.serveDispatchLookup config
+      session.verified.opened.durable registry payload with
+  | .ok receipt => return some (.confirmed .replayed receipt)
+  | .error _ => return some (.uncertain "retained dispatch receipt unavailable".toUTF8.toList)
+
+/-- A real carried dispatch keeps the same private permit handoff boundary.
+Route mismatch is classified before CAS; no post-durable branch claims absence. -/
+def carriedApplicationSubmit (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (routeBound : Bool) (payload : List UInt8)
+    (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCarriedWalked config state carried settings
+  let original := if routeBound then
+    ((ApplicationDispatchReceiver.routeBoundCodec.decode payload).map Prod.snd).getD []
+    else payload
+  if let some receipt ← retainedDispatchReceipt config session settings original then
+    writeSessionFrame output 34 (outcomeCodec.encode receipt)
+    return
+  let result ← if routeBound then
+    CarriedApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
+  else CarriedApplicationDispatchReceiver.receiveVerified config session.verified payload
+  match result with
+  | .permitted permit =>
+      let handed ← permit.withFreshTip (fun bytes => writeSessionFrame output 34 bytes)
+      match handed with
+      | .ok _ => carried.set (some ⟨session.anchor, permit.committed.target, permit.verified⟩)
+      | .error _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
+          .uncertain "carried dispatch physical handoff uncertain".toUTF8.toList
+  | .committed committed =>
+      carried.set (some ⟨session.anchor, committed.target, committed.verified⟩)
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        .confirmed .replayed committed.receipt
+  | .noRecordRefused token =>
+      let cleared ← token.withFreshTip (fun bytes => writeSessionFrame output 164 bytes)
+      match cleared with
+      | .ok _ => pure ()
+      | .error _ => writeSessionFrame output 34 (outcomeCodec.encode
+          (.uncertain "dispatch absence tip changed before handoff".toUTF8.toList))
+  | .historical receipt =>
+      writeSessionFrame output 34 (outcomeCodec.encode (.confirmed .replayed receipt))
+  | .rejected _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
+      NativeHost.publicSubmissionOutcome (.refused .operationRejected
+        "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  | .contention => writeSessionFrame output 34 (outcomeCodec.encode .contention)
+  | .unavailable _ =>
+      writeSessionFrame output 34 (outcomeCodec.encode
+        (.unavailable "carried dispatch unavailable".toUTF8.toList))
+  | .uncertain _ =>
+      writeSessionFrame output 34 (outcomeCodec.encode
+        (.uncertain "carried dispatch readback uncertain".toUTF8.toList))
+
+/-- A suffix receipt is selected at its original accepted count. A retained
+old-profile dispatch requires its source interpreter and never gets a new root. -/
+def carriedApplicationLookup (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
+    (settings : Settings) (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCarriedWalked config state carried settings
+  if let some original ← retainedDispatchReceipt config session settings payload then
+    return original
+  match CarriedApplicationDispatchReceiver.lookupVerified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused .malformed "application-dispatch".toUTF8.toList
+        "noncanonical lookup ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused .conflict "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "dispatch original history requires retained profile".toUTF8.toList
 
 def readDispatchAuthorJson (path : String) : IO Lean.Json := do
   let bytes ← readBoundedBytes path maxDispatchAuthorJsonBytes
@@ -5244,6 +5485,24 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "carry-plan", [requestPath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.plan config configPath operator request)
+          writeJson outputPath result
+          pure 0
+      | "carry-receive", [requestPath, edgePath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let edge ← readCarryJson edgePath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.receive config configPath operator request edge)
+          writeJson outputPath result
+          pure 0
+      | "carry-edge-verify", [requestPath, outputPath] =>
+          let request ← readJson requestPath
+          let result ← IO.ofExcept (← CarryInspection.verifyRequest config request)
+          writeJson outputPath result
+          pure 0
       | "continuity-point", [challengePath, outputPath] =>
           let challenge ← readJson challengePath
           let result ← IO.ofExcept (ReceiptContinuity.challengePointJson config challenge)
@@ -5454,10 +5713,34 @@ def run (arguments : List String) : IO UInt32 := do
                 withFnReplyCatalogService settings fun catalogService => do
                   let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
                   let state ← IO.mkRef (some session)
+                  let carriedState ← IO.mkRef (none : Option (CarriedNativeHostSession.Walked pinnedConfig))
                   let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) :=
                     fun operation payload => do
                       try
                         match operation with
+                        | 2 | 3 =>
+                            if settings.carryRegistry.isSome then
+                              let outcome ← carriedOrdinaryCall pinnedConfig state carriedState
+                                settings (operation == 2) payload
+                              return (operation, outcomeCodec.encode outcome)
+                            else if operation == 2 then
+                              let session ← sessionCurrent pinnedConfig state
+                              let result ← match callCodec.decode payload with
+                                | none => pure (NativeHostCodec.Outcome.refused .malformed
+                                    "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
+                                    NativeHost.Disclosure.uniform)
+                                | some call =>
+                                  NativeHost.submitDisclosedWith pinnedConfig session.opened call
+                                    (sessionConfirmed pinnedConfig state)
+                              NativeHost.logOperatorRefusal result.1
+                              return (2, outcomeCodec.encode (NativeHost.disclose result))
+                            else
+                              let opened ← sessionOpened pinnedConfig state
+                              let outcome := match callCodec.decode payload with
+                                | none => NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
+                                    "noncanonical native host call".toUTF8.toList
+                                | some call => NativeHost.lookupLoaded pinnedConfig opened call
+                              return (3, outcomeCodec.encode outcome)
                         | 12 | 13 =>
                             let some selected := service
                               | return ((255 : UInt8), failure .operationRejected "fn-poll"
@@ -5498,6 +5781,20 @@ def run (arguments : List String) : IO UInt32 := do
                               return ((255 : UInt8), failure .operationRejected "fn-origin-outbox"
                                 "A origin outbox service is not configured")
                             runFnOriginOutboxExportSession pinnedConfig state payload
+                        | 151 =>
+                            let result ← carriedContinuitySession pinnedConfig state carriedState settings payload
+                            match result with
+                            | .ok response => return (151, response)
+                            | .error _ => return (255, failure .operationRejected "receipt-continuity"
+                                "receipt continuity request refused")
+                        | 153 =>
+                            let registry ← loadCarryRegistry settings
+                            let opened ← sessionOpened pinnedConfig state
+                            let result ← RetainedSegmentInspection.serveLookup pinnedConfig opened.durable registry payload
+                            match result with
+                            | .ok response => return (153, response)
+                            | .error _ => return (255, failure .operationRejected "carried-history"
+                                "retained historical request refused")
                         | 19 =>
                             let services ← IO.ofExcept settings.providerServicePins
                             let legacy ← IO.ofExcept settings.providerMeteringPin
@@ -5535,12 +5832,14 @@ def run (arguments : List String) : IO UInt32 := do
                               pinnedConfig state payload
                             return ((73 : UInt8), outcomeCodec.encode outcome)
                         | 84 =>
-                            let outcome ← applicationSessionEnrollmentSubmitSession
-                              pinnedConfig state payload
+                            let outcome ← if settings.carryRegistry.isSome then
+                              carriedEnrollmentSubmit pinnedConfig state carriedState settings payload
+                            else applicationSessionEnrollmentSubmitSession pinnedConfig state payload
                             return ((84 : UInt8), outcomeCodec.encode outcome)
                         | 85 =>
-                            let outcome ← applicationSessionEnrollmentLookupSession
-                              pinnedConfig state payload
+                            let outcome ← if settings.carryRegistry.isSome then
+                              carriedEnrollmentLookup pinnedConfig state carriedState settings payload
+                            else applicationSessionEnrollmentLookupSession pinnedConfig state payload
                             return ((85 : UInt8), outcomeCodec.encode outcome)
                         | 88 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -5630,11 +5929,33 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (IO.userError "transaction id must be canonical decimal")
                             unless toString transactionId == text do
                               throw (IO.userError "transaction id must be canonical decimal")
-                            let opened ← sessionOpened pinnedConfig state
-                            let receipt := NativeHost.receiptByTransactionLoaded pinnedConfig opened
-                              ⟨transactionId⟩
-                            return ((102 : UInt8), (Minidregg.Host.Json.fleetReceiptLookupJson
-                              transactionId receipt).compress.toUTF8.toList)
+                            if settings.carryRegistry.isSome then
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              let registry ← loadCarryRegistry settings
+                              let index := session.verified.opened.durable.image.accepted.findIdx?
+                                (fun record => record.transactionId.value == transactionId)
+                              match index with
+                              | some i =>
+                                  if i < registry.edge.body.cut.height then
+                                    let result ← IO.ofExcept (← RetainedSegmentInspection.serveReceiptByTransaction
+                                      pinnedConfig session.verified.opened.durable registry transactionId)
+                                    return (102, result.compress.toUTF8.toList)
+                                  else
+                                    let some record := session.verified.opened.durable.image.accepted[i]?
+                                      | throw (IO.userError "receipt index unavailable")
+                                    let some receipt := carriedReceipt pinnedConfig session
+                                        ⟨transactionId⟩ record.event.eventId
+                                      | throw (IO.userError "target suffix receipt unavailable")
+                                    return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                                      transactionId (some receipt)).compress.toUTF8.toList)
+                              | none => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                                  transactionId none).compress.toUTF8.toList)
+                            else
+                              let opened ← sessionOpened pinnedConfig state
+                              let receipt := NativeHost.receiptByTransactionLoaded pinnedConfig opened
+                                ⟨transactionId⟩
+                              return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                                transactionId receipt).compress.toUTF8.toList)
                         | 103 =>
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept (NativeHost.payPlanLoaded pinnedConfig opened payload)
@@ -5662,6 +5983,36 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 187 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let bytes ← IO.ofExcept <|
+                              KeyCommitmentAdoptionInspection.planLoaded pinnedConfig opened payload
+                            return ((187 : UInt8), bytes)
+                        | 188 =>
+                            let (planBytes, signatures) ← splitPair payload
+                            let (currentSignature, nextSignature) ← splitPair signatures
+                            let some plan := SubjectKeyCommitmentAdoption.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical key commitment plan")
+                            let bytes ← IO.ofExcept <|
+                              NativeHostKeyCommitmentAdoption.assemble plan currentSignature nextSignature
+                            return ((188 : UInt8), bytes)
+                        | 189 | 190 =>
+                            let opened ← if settings.carryRegistry.isSome then do
+                              pure (← sessionCarriedWalked pinnedConfig state carriedState settings).verified.opened
+                            else sessionOpened pinnedConfig state
+                            let outcome ← if operation == 189 then
+                              NativeHostKeyCommitmentAdoption.submitLoaded pinnedConfig opened payload
+                            else pure (NativeHostKeyCommitmentAdoption.lookupLoaded pinnedConfig opened payload)
+                            let outcome ← if settings.carryRegistry.isSome then do
+                              match outcome with
+                              | .confirmed kind receipt =>
+                                  let current ← sessionCarriedWalked pinnedConfig state carriedState settings
+                                  match carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
+                                  | some exact => pure (.confirmed kind exact)
+                                  | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
+                              | other => pure other
+                            else pure outcome
+                            return (operation, outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 140 =>
                             let opened ← sessionOpened pinnedConfig state
                             match NativeHost.rotationPlanLoaded pinnedConfig opened payload with
@@ -6377,11 +6728,33 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
                             return ((75 : UInt8), ingress)
+                        | 35 =>
+                            let outcome ← if settings.carryRegistry.isSome then
+                              carriedApplicationLookup pinnedConfig state carriedState settings payload
+                            else applicationDispatchLookupSession pinnedConfig state payload
+                            return (35, outcomeCodec.encode outcome)
+                        | 36 =>
+                            let prepared ← if settings.carryRegistry.isSome then do
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              pure (ApplicationDispatchAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload)
+                            else do
+                              let session ← sessionWalked pinnedConfig state
+                              pure (ApplicationDispatchAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified payload)
+                            match prepared with
+                            | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
+                            | .error detail => return (255, failure .operationRejected
+                                "application-dispatch-author" detail)
                         | 82 =>
-                            let session ← sessionWalked pinnedConfig state
-                            let plan ← IO.ofExcept <|
-                              ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified payload
+                            let plan ← if settings.carryRegistry.isSome then do
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload)
+                            else do
+                              let session ← sessionWalked pinnedConfig state
+                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified payload)
                             let bytes := ApplicationGrainSessionEnrollmentAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "session enrollment plan exceeds host frame bound")
@@ -6392,10 +6765,14 @@ def run (arguments : List String) : IO UInt32 := do
                                 planBytes
                               | throw (RequestRefusal.malformed "noncanonical session enrollment plan")
                             let signatures ← decodeSignatures signaturesBytes
-                            let session ← sessionWalked pinnedConfig state
-                            let ingress ← IO.ofExcept <|
-                              ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
-                                pinnedConfig session.verified plan signatures
+                            let ingress ← if settings.carryRegistry.isSome then do
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
+                                pinnedConfig session.verified plan signatures)
+                            else do
+                              let session ← sessionWalked pinnedConfig state
+                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
+                                pinnedConfig session.verified plan signatures)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "session enrollment ingress exceeds host frame bound")
                             return ((83 : UInt8), ingress)
@@ -6465,12 +6842,20 @@ def run (arguments : List String) : IO UInt32 := do
                             agentLifetimeDispatchAuthorSession pinnedConfig state
                               custody operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
-                      catch error => return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
+                      catch error =>
+                        if operation == 151 || operation == 153 then
+                          return ((255 : UInt8), failure .operationRejected "carried-history"
+                            "retained historical request refused")
+                        else return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
+                  let applicationDispatch := fun routeBound payload output =>
+                    if settings.carryRegistry.isSome then
+                      carriedApplicationSubmit pinnedConfig state carriedState settings routeBound payload output
+                    else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
                   serveSession pinnedConfig state meteringProfile
-                    (← IO.ofExcept settings.providerRoutes) fnDispatch
+                    (← IO.ofExcept settings.providerRoutes) fnDispatch applicationDispatch
                     (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
@@ -6559,7 +6944,15 @@ def run (arguments : List String) : IO UInt32 := do
             pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
-            let (count, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+            let (count, index, links) ← if settings.carryRegistry.isSome then do
+              let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
+              let registry ← loadCarryRegistry settings
+              let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
+                opened.durable registry)
+              let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
+              pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
+                 walked.verified.opened.durable.links)
+            else IO.ofExcept (← NativeHost.audit pinnedConfig)
             IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
             IO.println s!"index {(presenceIndexJson index).compress}"
             IO.println s!"links {(linkIndexJson links).compress}"

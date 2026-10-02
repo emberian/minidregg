@@ -44,6 +44,8 @@ theorem decodeLE_encodeLE (width value : Nat) (bound : value < 256 ^ width) :
       (fun digit member => UInt8.toNat_ofNat_of_lt
         (Bignum.digitsLE_ranged (by decide) width value digit member))
     simpa only [List.map_id, id_eq] using hcongr
+  change Bignum.denoteNat 256
+    ((Bignum.digitsLE 256 width value).map (fun digit => (UInt8.ofNat digit).toNat)) = value
   rw [hmap]
   exact Bignum.denoteNat_digitsLE (by decide) width value bound
 
@@ -51,8 +53,8 @@ theorem decodeLE_encodeLE (width value : Nat) (bound : value < 256 ^ width) :
 The variable-width escape branch of its total codec is NOT legal in this memo. -/
 theorem digest_representation (digest : Digest) (bound : digest.value < 256 ^ 32) :
     encodeLE 32 digest.value = Sp800185Cshake256.digestBytesLE digest := by
-  simp [Sp800185Cshake256.digestBytesLE, bound,
-    Sp800185Cshake256.fixedDigestBytesLE, encodeLE]
+  rw [Sp800185Cshake256.digestBytesLE, if_pos bound]
+  rfl
 
 inductive Mode where
   | enroll | renew | renewWithoutCommitment
@@ -194,12 +196,12 @@ instance (memo : Memo) : Decidable memo.WellFormed := by
 
 def binaryLength : Nat := PayReceivingContract.binaryMemoBytes
 def memoLength : Nat := PayReceivingContract.textMemoBytes
-def prefix : List UInt8 := PayReceivingContract.memoPrefix
+def memoPrefix : List UInt8 := PayReceivingContract.memoPrefix
 
 def binary (memo : Memo) : List UInt8 :=
   [unsignedBytes memo.unsigned, memo.miniSignature].flatten ++ memo.sshSignature
 
-def encode (memo : Memo) : List UInt8 := prefix ++ b64Encode (binary memo)
+def encode (memo : Memo) : List UInt8 := memoPrefix ++ b64Encode (binary memo)
 
 def decodeBinary (bytes : List UInt8) : Option Memo :=
   match cut [unsignedLength, 64] bytes with
@@ -209,9 +211,9 @@ def decodeBinary (bytes : List UInt8) : Option Memo :=
   | _ => none
 
 def rawParse (bytes : List UInt8) : Option Memo :=
-  match cut [prefix.length] bytes with
+  match cut [memoPrefix.length] bytes with
   | [tag, body] =>
-      if tag = prefix then b64Decode body >>= decodeBinary else none
+      if tag = memoPrefix then b64Decode body >>= decodeBinary else none
   | _ => none
 
 inductive Refusal where
@@ -257,7 +259,7 @@ theorem decodeBinary_binary {memo : Memo} (wf : memo.WellFormed) :
 
 theorem rawParse_encode {memo : Memo} (wf : memo.WellFormed) :
     rawParse (encode memo) = some memo := by
-  have pieces := cut_append [prefix.length] [prefix] (b64Encode (binary memo)) (by simp)
+  have pieces := cut_append [memoPrefix.length] [memoPrefix] (b64Encode (binary memo)) (by simp)
   have divisible : (binary memo).length % 3 = 0 := by rw [binary_length wf]; decide
   unfold rawParse encode
   simp only [List.flatten_cons, List.flatten_nil, List.append_nil] at pieces

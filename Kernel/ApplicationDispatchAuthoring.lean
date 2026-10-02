@@ -1,3 +1,4 @@
+import Compiler.CarriedDispatchProvenance
 /-
 Detached, source-owned authoring for one special application dispatch. A fixed
 participant custodian selects its admitted ticket and submits exact HTTP bytes;
@@ -135,13 +136,11 @@ def prepareObservationSlot (config : Config) (opened : Opened config)
 selected a verified historical issue and parent. This is private because a
 raw Parent alone is not lifetime authorization. Both public wrappers below
 apply their distinct historical/current parent checks first. -/
-private def prepareForSelectedIssue (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (request : Request)
-    (prior : NativeHostReplay.PriorIssue config)
+private def prepareForIssue (config : Config) (opened : Opened config)
+    (request : Request) (spec : ApplicationShareIssueSource.Spec)
+    (issueIngressBytes originalSourceBytes : List UInt8)
     (parent : Option ApplicationDispatchCommand.Parent) :
     Except String Plan := do
-  let opened := verified.opened
-  let spec := prior.evidence.spec
   if spec.ticket.resource != request.ticketResource then
     throw "custodian ticket differs from admitted issue"
   let ticket := spec.ticket
@@ -220,7 +219,7 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
       ticketRoot := ticketCell.payload.root
       ticketObserveCapability := ticket.participant.ticketObserveCapability
       ticketObservationEnvelope := []
-      issueIngressBytes := prior.evidence.ingressBytes }
+      issueIngressBytes := issueIngressBytes }
   let selection : Selection :=
     ⟨sessionCell.payload.root, request.sessionObserveCapability⟩
   let command := ApplicationDispatchCommand.command base selection parent
@@ -235,9 +234,9 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       opened.durable unsigned spec selection prepared then
     throw "current app/session/ticket policy linkage refused"
-  if !ApplicationDispatchAdmission.issuerLineageCurrent config.deployment config.profile
+  if !ApplicationDispatchAdmission.issuerLineageCurrentFromSourceBytes config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable unsigned spec selection prior.evidence.descriptor prepared then
+      opened.durable unsigned spec selection originalSourceBytes prepared then
     throw "current issuer delegation lineage refused"
   let invocation ← NativeHost.prepareLoaded config opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
@@ -254,6 +253,15 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
     ticket.resource ticket.participant.ticketObserveCapability unsigned.ticketRoot
   pure ⟨request, unsigned.canonicalBytes, invocation,
     [appSlot, manifestSlot, enrollmentSlot, ticketSlot]⟩
+
+
+private def prepareForSelectedIssue (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request)
+    (prior : NativeHostReplay.PriorIssue config)
+    (parent : Option ApplicationDispatchCommand.Parent) :
+    Except String Plan :=
+  prepareForIssue config verified.opened request prior.evidence.spec prior.evidence.ingressBytes
+    (ApplicationShareIssueSource.sourceBytes prior.evidence.spec prior.evidence.descriptor) parent
 
 /-- The v1/v2 authoring surface retains its exact original-generation rule
 and bytes. An agent session cannot use this wrapper after a hard reconnect. -/
@@ -311,6 +319,37 @@ def prepareVerified (config : Config) {target : Durable}
   if prior.evidence.spec.ticket.participant.origin != .human then
     throw "agent dispatch authoring requires an explicit parent plan"
   prepareWithParent config verified request none
+
+/-- Human dispatch on a carried service retains exact old source commitments.
+Agent tickets still need their separate authenticated reserve/lifetime path. -/
+def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
+    Except String Plan := do
+  let (spec, issueBytes, originalSourceBytes) ←
+    if request.issueIndex < anchor.durable.image.accepted.length then do
+      let some origin := verified.origin
+        | throw "old dispatch issue lacks authenticated carried origin"
+      let custody ← origin.rebindChecked verified.opened.durable
+      let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+      let selected ← CarriedDispatchProvenance.fromIssue issue
+      pure (issue.spec, issue.ingress.canonicalBytes, selected.originalSourceBytes)
+    else do
+      let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
+        | throw "target-suffix share issue index unavailable"
+      pure (prior.evidence.spec, prior.evidence.ingressBytes,
+        ApplicationShareIssueSource.sourceBytes prior.evidence.spec prior.evidence.descriptor)
+  if spec.ticket.participant.origin != .human then
+    throw "agent dispatch authoring requires an authenticated parent plan"
+  if !ApplicationDispatchCommand.parentMatches spec.ticket.participant.origin none then
+    throw "dispatch parent differs from admitted ticket origin"
+  prepareForIssue config verified.opened request spec issueBytes originalSourceBytes none
+
+def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
+    Except String Plan := do
+  let some request := requestCodec.decode bytes
+    | throw "noncanonical dispatch authoring request"
+  prepareSuffix config verified request
 
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :

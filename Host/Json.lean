@@ -13,6 +13,7 @@ import Kernel.AgentGrain
 import Kernel.ProviderRoute
 import Kernel.CapabilityRevocationController
 import Kernel.ContentResource
+import Host.LegacyContentView
 import Kernel.ApplicationGrainBirth
 import Kernel.ApplicationGrainSessionBirth
 import Kernel.ApplicationShareIssueAuthoring
@@ -4537,7 +4538,7 @@ private def transclusionRecordJson (record : Hyperdocument.TransclusionRecord) :
    ("mode", modeJson record.reference.mode),
    ("opening", ((ContentResource.openingOfReference record.reference).map openingJson).getD .null),
    ("reference", decimal record.reference.referenceRoot.value),
-   ("disclosurePolicy", decimal record.disclosurePolicy.value)]
+   ("disclosurePolicy", decimal record.disclosurePolicy.value)] ++ LegacyContentView.referenceFields record.reference
 
 private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
   | .container children => .mkObj [("type", "container"),
@@ -4627,11 +4628,12 @@ private def contentEntryJson (store : ContentResource.ContentStore)
   | ⟨⟨.annotations, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AnnotationId := identifier
       let record : Hyperdocument.AnnotationRecord := record
-      .mkObj [("type", "annotation"), ("id", decimal identifier.digest.value),
+      .mkObj (([("type", "annotation"), ("id", decimal identifier.digest.value),
         ("anchor", annotationAnchorJson record.anchor), ("body", annotationBodyJson record.body),
         ("author", principalJson record.author),
         ("fresh", .bool (ContentResource.annotationFresh store record)),
-        ("canonical", canonical)]
+        ("canonical", canonical)] : List (String × Lean.Json)) ++
+          LegacyContentView.markFields stableRangeJson record)
   | ⟨⟨.links, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.LinkId := identifier
       let record : Hyperdocument.LinkRecord := record
@@ -4827,16 +4829,16 @@ private def transclusionViewJson : ContentResource.TransclusionView → Lean.Jso
 /-- A content cell holds one document (`ContentLaw`); a view does not carry the
 cell's identifier, so the document is the one record of `documents`. -/
 private def documentOf? (store : ContentResource.ContentStore) : Option Hyperdocument.DocumentId :=
-  (StoreCodec.entries HyperdocumentCell.contentWire store).findSome? fun entry =>
+  ((StoreCodec.entries HyperdocumentCell.contentWire store).findSome? fun entry =>
     match entry with
     | ⟨⟨.documents, identifier⟩, _⟩ => some identifier
-    | _ => none
+    | _ => none).orElse fun _ => LegacyContentView.documentOf? store
 
 /-- The page's lines: `DocumentHistory.lines`, the kernel's document order. -/
 private def pageLines (store : ContentResource.ContentStore) :
     List (Hyperdocument.ElementId × DocumentHistory.Line) :=
   match documentOf? store with
-  | some document => DocumentHistory.lines store document (marksOf store)
+  | some document => LegacyContentView.lines store document (marksOf store)
   | none => []
 
 /-- What stands at one place: a line's atom (bytes, revision, author, struck or
@@ -4885,7 +4887,7 @@ private def orderEntryJson (store : ContentResource.ContentStore)
 private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
     List (String × Lean.Json) :=
   let store := page.2.2.2
-  let root := (documentOf? store).bind (ContentResource.rootOf store)
+  let root := (documentOf? store).bind (LegacyContentView.rootOf? store)
   [("height", (page.1.map decimal).getD .null), ("state", .str page.2.1),
     ("cellRoot", (page.2.2.1.map fun root => decimal root.value).getD .null),
     ("root", (root.map fun element => decimal element.digest.value).getD .null),
@@ -4926,7 +4928,15 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
         let identifier : Hyperdocument.TransclusionId := identifier
         let record : Hyperdocument.TransclusionRecord := record
         some <| match ContentResource.openingOfReference record.reference with
-          | none => .mkObj [("id", decimal identifier.digest.value), ("render", .mkObj [("view", "unresolved")])]
+          | none =>
+              match LegacyContentCarry.inspectReference record.reference with
+              | none => .mkObj [("id", decimal identifier.digest.value),
+                  ("render", .mkObj [("view", "unresolved")])]
+              | some legacy =>
+                  let source := (sources.find? (fun pair => pair.1 = legacy.document.digest.value)).map Prod.snd
+                  .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson legacy.mode),
+                    ("legacyReference", LegacyContentView.referenceJson legacy),
+                    ("render", LegacyContentView.renderReference source legacy)]
           | some opening =>
               let source := (sources.find? (fun pair => pair.1 = opening.source)).map Prod.snd
               .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson record.reference.mode),
@@ -5243,6 +5253,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let plan ← decoded "subject-key-rotation-plan" SubjectKeyRotation.signingPlanCodec bytes
       let some command := SubjectKeyRotation.commandCodec.decode plan.commandBytes
         | failAt "subject-key-rotation-plan" "noncanonical nested command"
+      if plan.possessionHeader != SubjectKeyRotation.possessionFrame plan.domain plan.semantics command then
+        failAt "subject-key-rotation-plan" "possession header differs from described command"
       pure <| .mkObj
         [("type", "subject-key-rotation-plan-v1"),
          ("canonical", hexJson bytes),
@@ -5250,6 +5262,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("semantics", decimal plan.semantics.value),
          ("commandBytes", hexJson plan.commandBytes),
          ("command", subjectKeyRotationJson command),
+         ("possessionFrameValidated", .bool true),
          ("possessionHeader", hexJson plan.possessionHeader)]
   | "subject-key-rotation-ingress" => do
       let some parsed := SubjectKeyRotation.decodeIngress bytes

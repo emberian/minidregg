@@ -16,6 +16,8 @@ premises are explicit here. Concrete native field/range selection lives in
 import Compiler.CanonicalPolicyAdmission
 import Compiler.NativeProtocolFrames
 import Compiler.WorldExecutionContract
+import Compiler.ApplicationReceivingDomain
+import Kernel.PayReceivingContract
 import Compiler.ObjectAudienceRoster
 import Compiler.WorldKindDescriptor
 import Compiler.WorldKindCell
@@ -95,11 +97,16 @@ Committed hiding-key material is excluded from the predicate view. -/
 def contentProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CONTENT.FULL-DOCUMENT-TREE-REVISIONED-ATOMS-MARKS-TRANSCLUSION-HISTORY-LINKS.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS.NO-HIDING-KEY-PROJECTION/v5".toUTF8.toList
 
+/-- The initial next-key commitment is an explicit current-key-authorized
+admission with a separate next-key possession signature and exact record pin. -/
+def keyCommitmentAdoptionVersion : List UInt8 :=
+  "DREGG.SUBJECT-KEY.ADOPT-NEXT/current-live-exact-record+two-signatures+first-commitment-only/v1".toUTF8.toList
+
 /-- Factory, initial source, grants and newborn share one prepared tuple. The authored
 height window, inherited lineage, current kind/descriptor/ROM guards and composed
 exports all contribute; a newborn local law is installed without self-gating birth. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS/v4".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS.EXPLICIT-PLACEMENT-OR-UNRESTRICTED-MUTATION/v5".toUTF8.toList
 
 /-- Delegation checks current composed resource law and exact parent/child authority
 against authenticated dependencies from the same image. -/
@@ -207,6 +214,24 @@ def sourceComponents : List (List UInt8) :=
    WorldExecutionContract.freshActivationCustomization,
    StreamCodec.nat.encode WorldExecutionContract.freeStepsPerDay,
    WorldExecutionContract.receivingContract,
+   -- Actual paid codec/policy constants share an Init-only leaf with receivers.
+   (StreamCodec.list bytesStream).encode Kernel.PayReceivingContract.frames,
+   (StreamCodec.list StreamCodec.nat).encode Kernel.PayReceivingContract.parameters,
+   -- Application frames are the very values used by their receiving codecs.
+   ApplicationReceivingDomain.receivingContract,
+   (StreamCodec.list bytesStream).encode
+     [ApplicationReceivingDomain.streamContinuityChallengeFrame,
+      ApplicationReceivingDomain.streamContinuityRequestFrame,
+      ApplicationReceivingDomain.streamContinuityAttestationFrame,
+      ApplicationReceivingDomain.routeAdmissionChallengeFrame,
+      ApplicationReceivingDomain.routeAdmissionRequestFrame,
+      ApplicationReceivingDomain.routeAdmissionAttestationFrame,
+      ApplicationReceivingDomain.routeBoundDispatchFrame,
+      ApplicationReceivingDomain.noRecordRefusalFrame,
+      ApplicationReceivingDomain.dispatchCommittedPermitFrame,
+      ApplicationReceivingDomain.agentDispatchCommittedPermitFrame,
+      ApplicationReceivingDomain.streamContinuityProbeProtocol,
+      ApplicationReceivingDomain.routeAdmissionProbeProtocol],
    CanonicalCellRegistry.logicalLawVersion, observationProjectionVersion,
    CredentialSignatureAdmission.signatureDomain,
    CredentialSignatureAdmission.requestFrame,
@@ -279,7 +304,7 @@ def sourceComponents : List (List UInt8) :=
         (CanonicalCellRegistry.schemaRef kind).version,
         requestKindTag (CanonicalCellRegistry.resourceKindOf kind)]),
    StreamCodec.nat.encode CanonicalCellRegistry.factoryKind.tag.toNat,
-   installProjectionVersion, invocationProjectionVersion, birthProjectionVersion,
+   installProjectionVersion, invocationProjectionVersion, birthProjectionVersion, keyCommitmentAdoptionVersion,
    delegationProjectionVersion, revocationProjectionVersion, renounceVersion, contentProjectionVersion,
    (StreamCodec.list (StreamCodec.list StreamCodec.nat)).encode
      [[requestKindTag .object,

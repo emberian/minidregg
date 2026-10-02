@@ -263,9 +263,9 @@ instance (terms : Terms) : Decidable terms.valid := by unfold Terms.valid; infer
 
 theorem AcceptRequest.terms_valid (request : AcceptRequest) (valid : request.valid) :
     request.terms.valid := by
-  rcases valid with ⟨idLength, prefix, identity, key, epoch, epochBound, pricing,
+  rcases valid with ⟨idLength, claimPrefix, identity, key, epoch, epochBound, pricing,
     weeks, weeksBound, starter, expiry⟩
-  exact ⟨idLength, prefix, identity, pricing, weeks, weeksBound, starter, expiry⟩
+  exact ⟨idLength, claimPrefix, identity, pricing, weeks, weeksBound, starter, expiry⟩
 
 /-- Original memo/term coherence is checked against the retained origin by the
 PayCell law. Current-quote coherence is fully local to this source index row. -/
@@ -384,8 +384,8 @@ def termsStream : StreamCodec Terms :=
         (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
     (fun value => (value.mode, value.claimId, value.ownerIdentityKey, value.pricingCommitment,
       value.requestedWeeks, value.minimumStarterCredit, value.expiresAtProcessingChainHour))
-    (fun (mode, id, owner, pricing, weeks, starter, expiry) =>
-      ⟨mode, id, owner, pricing, weeks, starter, expiry⟩)
+    (fun (mode, claimIdentifier, owner, pricing, weeks, starter, expiry) =>
+      ⟨mode, claimIdentifier, owner, pricing, weeks, starter, expiry⟩)
     (by intro value; cases value; rfl)
 
 /-- None tags original memo; Some carries the exact fresh acceptance command. -/
@@ -528,9 +528,9 @@ theorem quoteFixed_success_split (amount : Nat) (tariff : Tariff)
 
 theorem quoteFixed_over_cap (amount : Nat) (tariff : Tariff)
     (birthFee weeks starter : Nat) (valid : tariff.valid) (nonzero : amount ≠ 0)
-    (over : tariff.maxPerObservation < amount) :
+    (overCap : tariff.maxPerObservation < amount) :
     quoteFixed amount tariff birthFee weeks starter = .error .observationCapExceeded := by
-  simp [quoteFixed, valid, nonzero, over]
+  simp [quoteFixed, valid, nonzero, overCap]
 
 /-! ## Current-custody authorization and one-time acceptance -/
 
@@ -630,16 +630,11 @@ theorem checkClaim_success_identity (claim : Claim) (owner : CurrentOwner)
     split at accepted
     · cases accepted
     rename_i modeMatches
-    split at accepted
-    · cases accepted
-    split at accepted
-    · cases accepted
-    split at accepted
-    · cases accepted
-    split at accepted
-    · cases accepted
-    exact ⟨by simpa using idMatches,
-      authority.1.trans (by simpa using ownerMatches), by simpa using modeMatches⟩
+    -- These three earlier gates already establish identity; later pricing and
+    -- expiry branches are immaterial to this projection of successful checks.
+    exact ⟨by simpa only [ne_eq, not_not] using idMatches,
+      authority.1.trans (by simpa only [ne_eq, not_not] using ownerMatches),
+      by simpa only [ne_eq, not_not] using modeMatches⟩
 
 theorem checkClaim_success_pending (claim : Claim) (owner : CurrentOwner)
     (tariff : Tariff) (birth : Nat) (mode : Mode) (pricing : Digest) (hour : Nat)
@@ -800,8 +795,13 @@ theorem pending_next_not_acceptance_authority (owner : PendingOwner) (next : Dig
 /-! ## Concrete quote poles: no signature oracle or invented admission witness -/
 
 private def fixtureTariff : Tariff :=
-  { exampleTariff with version := 3, creditPerAtomic := 1, maxPerObservation := 100000,
-      nodeHourRate := 1, enrolIndex := some 0, journalFloor := 1 }
+  { exampleTariff with
+    version := 3
+    creditPerAtomic := 1
+    maxPerObservation := 100000
+    nodeHourRate := 1
+    enrolIndex := some 0
+    journalFloor := 1 }
 
 /-- 343 credits after a nonzero birth fee: one requested week leaves a full
 175 credits spendable. V1 would have consumed two weeks. -/

@@ -110,3 +110,8 @@ name = "AxiomCensusResearch"
 [[lean_exe]]
 name = "cshake-bench"
 root = "Host.CshakeBench"
+
+# Narrow explicit old-capsule carry verifier; no full Host receiving surface.
+[[lean_exe]]
+name = "minidregg-carry-verifier"
+root = "Host.CarryVerifierMain"
