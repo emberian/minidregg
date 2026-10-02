@@ -474,8 +474,11 @@ ENC_NEW=$(jq -r .encryptionKey "$OUT")
 check rotkey "carl's encryption key changed with the seed" test "$ENC_NEW" != "$ENC_OLD"
 T_RK="PRIVATE-GOLF alice says this after carl rotated"
 ok rotkey alice "room rotate r-pc pc"
-check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2)" \
-  sh -c "jq -e --arg c \"\$1\" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom | endswith(\$c))] | length == 1' \"\$2\"/proposals/r-pc/intent.json >/dev/null && jq -r '.purpose.draft.command.targets[0].payload.actions[].payload' \"\$2\"/proposals/r-pc/intent.json | grep -q \"^\$3\"" _ "$C" "$WS/alice" "$ENC_NEW"
+# pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
+RK_ID=$(echo "2 * 2^96 + 2 * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
+  jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
+    "$WS/alice/proposals/r-pc/intent.json"
 ok rotkey alice "say $T_RK"
 ok rotkey carl "tail --json -n 100"
 check rotkey "carl opens the epoch sealed after his rotation, and still the line before it" \
@@ -486,9 +489,9 @@ raw rotkey carl "plans alice's record (atom id = alice) in pc's keys cell" ok "$
   --dir "$WS/carl" --request "$RQ/foreign-record.json" --proposal-id foreign-record
 raw rotkey carl "submits it: refused (each subject writes only its own record)" "law-denied" "$MINI" workspace --action submit \
   --dir "$WS/carl" --intent "$WS/carl/proposals/foreign-record/intent.json" --attempt "$WS/carl/attempts/foreign-record"
-jq -n --arg c "$C" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"pc-keys",
-  payload:{type:"content",actions:[{type:"createAtom",atom:$c,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/squat-record.json"
-raw rotkey alice "the founder plans carl's record (atom id = carl)" ok "$MINI" workspace --action propose \
+jq -n --arg d "$D" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"pc-keys",
+  payload:{type:"content",actions:[{type:"createAtom",atom:$d,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/squat-record.json"
+raw rotkey alice "the founder plans dave's record (atom id = dave; dave has none yet)" ok "$MINI" workspace --action propose \
   --dir "$WS/alice" --request "$RQ/squat-record.json" --proposal-id squat-record
 raw rotkey alice "submits it: refused (the founder cannot write a member's record either)" "law-denied" "$MINI" workspace --action submit \
   --dir "$WS/alice" --intent "$WS/alice/proposals/squat-record/intent.json" --attempt "$WS/alice/attempts/squat-record"

@@ -45,17 +45,20 @@ says `mode=closed`, every friend gets `mini-closed` and exit 69.
    `seal` sign with the sponsor's key and the newcomer's key in one process:
    ```
    ssh $BOX "install -d -o mini -g mini -m 0700 $S/ember/keys && \
-             install -o mini -g mini -m 0600 $S/NAME/keys/mini.key $S/ember/keys/NAME.key && \
-             install -o mini -g mini -m 0644 $S/NAME/keys/mini.key.next.pub $S/ember/keys/NAME.key.next.pub"
+             install -o mini -g mini -m 0600 $S/NAME/keys/mini.key $S/ember/keys/NAME.key"
    ```
-   The second file is the friend's NEXT public key (K-PREROTATE): enrollment commits to its
-   digest, and `enroll plan` refuses without it. Only the public half travels; the next
-   secret (`mini.key.next`) stays with the friend, who should move it off the box. A key
-   made before pre-rotation has no `mini.key.next.pub`: the friend runs `keygen` again
-   under a new name (keygen never overwrites), and you enroll that one.
+   Only the daily key is copied. The friend's NEXT key (K-PREROTATE) enters the enrollment
+   as two hex words the FRIEND gives you -- `keygen` printed them ("next public key",
+   "co-signature"); `mini enroll --action cosign --key mini.key` prints them again. The
+   co-signature is the next key's signature of (daily key, next key): the Host admits a
+   record that commits to a next key only with it (FIX-IDENTITY), and the friend's `init`
+   refuses a subject whose commitment is not the digest of THEIR next key. Never take the
+   next key from a file in a sponsor home: whoever writes that file could commit a key it
+   holds and later rotate the friend's subject to itself. The next secret (`mini.key.next`)
+   stays with the friend, who should move it off the box.
 5. **Enroll, from the sponsor session.**
    ```
-   mini> enroll plan NAME NAME.key
+   mini> enroll plan NAME NAME.key NEXT-PUB-HEX COSIGN-HEX     # the friend's two words
    mini> enroll seal NAME
    mini> enroll submit NAME        # "authority": "admitted-key-only", "subject": "<SUBJECT>"; note SUBJECT
    ```
