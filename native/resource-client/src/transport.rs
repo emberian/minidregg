@@ -2667,7 +2667,8 @@ done"#;
             ));
         }
         // Neighboring unreserved numbers are not introduced as aliases.
-        assert!(!allowed_operation(&[187, b'{', b'}'], false));
+        // 187 now belongs to key adoption; 191 remains reserved without a receiver.
+        assert!(!allowed_operation(&[191, b'{', b'}'], false));
         assert!(!allowed_operation(&[188, 1], false));
     }
 

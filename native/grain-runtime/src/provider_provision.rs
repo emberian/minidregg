@@ -151,8 +151,9 @@ pub(crate) fn run(template: &Path, operator_policy: &Path, output: &Path) -> Res
         .provider_task
         .as_ref()
         .ok_or("provider task absent")?;
-    let tariff = runtime.provider_tariff(provider)?;
-    let tariff_pin = provider_route_pin(&tariff, provider, "user")?;
+    let profile = runtime.provider_native_profile()?;
+    let tariff = select_provider_metering(&profile, &provider.task)?;
+    let tariff_pin = provider_route_pin(tariff, provider, "user")?;
     let mut authorities = vec![("parent", runtime.parent())];
     if runtime.config.tool_task.is_some() {
         authorities.push(("tool", runtime.tool()?));
