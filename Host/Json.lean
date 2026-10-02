@@ -5204,6 +5204,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("semantics", decimal plan.semantics.value),
          ("commandBytes", hexJson plan.commandBytes),
          ("command", subjectKeyRotationJson command),
+         ("possessionFrameValidated", .bool true),
          ("possessionHeader", hexJson plan.possessionHeader)]
   | "subject-key-rotation-ingress" => do
       let some parsed := SubjectKeyRotation.decodeIngress bytes
