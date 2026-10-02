@@ -1989,6 +1989,11 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 46 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .committed committed =>
+      -- Exact receipt recovery is not another physical agent dispatch permit.
+      writeSessionFrame output 46 <| outcomeCodec.encode <|
+        .confirmed committed.confirmation committed.receipt
+      sessionSetWalked state committed.verified
   | .rejected _ =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
