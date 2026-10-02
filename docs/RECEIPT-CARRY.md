@@ -25,10 +25,46 @@ or executable is learned from an endpoint response. No Store/helper replay is
 performed on the client; the copied signature helper is a pinned cryptographic
 dependency of the source-owned public seal verifier.
 
-If the original verifier lacks `carry-edge-verify`, upgrade it using the existing
-same-identity `continuity-verifier` command. This keeps the registered capsule and
-operator pin. The capsule retains the original local interpretation for historical
-receipts; it is distinct from the operator's server-side semantic capsule.
+If the original Host cannot verify carry edges, install the generic public carry
+verifier explicitly, using its independently selected artifact hash:
+
+```
+mini workspace --action continuity-carry-verifier --dir WORKSPACE \
+  --verifier /absolute/path/to/portable-carry-verifier --sha256 HEX64
+```
+
+The installer checks that hash **before executing** the artifact, holds current
+custody and authority locked, and invokes:
+
+```
+PORTABLE REGISTERED-OLD-CONFIG carry-verifier-profile REQUEST.json RESULT.json
+```
+
+The request contains client-owned `oldIdentity`, `sourceCapsulePath`, and
+`sourceCapsulePins`. The portable artifact validates those registered source
+files, derives identity from the retained old profile, and returns exactly
+`{algorithm:"minidregg-carry-verifier-v1",identity,sourceCapsulePins,
+edgeAlgorithm:"minidregg-carry-edge-v1"}`. The client requires an exact match before
+writing its independent private `carry-verifier.json` pin:
+
+```
+{type:"minidregg-carry-verifier-pin-v1",verifier,verifierSha256,
+ identity,sourceCapsulePath,sourceCapsulePins}
+```
+
+Ordinary `Settings.verifier`, deployment identity, anchor bytes, authority record,
+and registered source capsule remain unchanged. Only carry-edge verification uses
+the new executable. The workspace's `receiptCarryVerifier` marker is synced before
+the pin, so interruption disables carry until explicit reinstall. A missing,
+changed, unmarked, or stale pin refuses; it never silently falls back to another
+executable. A pin inherited by a different identity or capsule needs an explicit
+new install. Neither an edge nor an endpoint selects this executable.
+
+The existing same-identity `continuity-verifier` action still upgrades ordinary
+proof interpretation when explicitly requested; it is not required to bootstrap
+the independent carry verifier. The source capsule retains the original local
+interpretation for historical receipts and is distinct from the operator's
+server-side semantic capsule.
 
 Registry files are `verifier`, `signature-verifier`, `original-config.json`,
 `profile.json`, and `pins.json`. The client-owned `sourceCapsulePins` object is:
@@ -51,11 +87,12 @@ mini workspace --action continuity-carry --dir WORKSPACE \
 ```
 
 Under the custody lock, the client snapshots the explicit edge and configs. It
-hashes the target binary without executing it, then invokes the **currently
-trusted, checksum-pinned** verifier:
+hashes the target binary without executing it, then invokes the separately
+installed portable verifier if present, otherwise the already trusted source
+Host. Both paths remain checksum-pinned:
 
 ```
-CURRENT-HOST OLD-CONFIG carry-edge-verify REQUEST.json RESULT.json
+PINNED-CARRY-VERIFIER OLD-CONFIG carry-edge-verify REQUEST.json RESULT.json
 ```
 
 The request contains `oldIdentity`, the full current `oldAnchor`, locally pinned
@@ -67,8 +104,8 @@ The accepted result uses algorithm `minidregg-carry-edge-v1`, `oldIdentity`,
 `newIdentity`, full `oldCut` and `newStart`, `bodyDigest`, `originIndexDigest`,
 `operatorPublicKey`, and `targetVerifierDigest`. The client independently binds
 these fields to local custody and explicit target selections. The new height must
-be exactly old cut height plus one. Only after the old verifier accepts that seal
-and the client checks its bindings may the target binary's profile run. Its
+be exactly old cut height plus one. Only after the pinned carry verifier accepts that seal under the registered old
+profile and the client checks its bindings may the target binary's profile run. Its
 identity must equal the signed new identity.
 
 The old verifier checks ordinary paginated continuity from the pinned authority
@@ -156,8 +193,8 @@ refusal of direct execution or resubmission. It also verifies that a refused sou
 code. Its proof/signature verdicts are deliberately **injected test fixtures**.
 These tests establish custody/control flow, not native cryptographic correctness.
 
-Native EdgeSeal, old-identity history dispatch, and read-only old-capsule lookup
-are owned by the carry receiver implementation. An actual native end-to-end journey must use those components;
+Native EdgeSeal, portable source-profile validation, old-identity history dispatch,
+and read-only old-capsule lookup are separate native integration obligations. An actual native end-to-end journey must use those components;
 the prior `3b1f628a` Host does not implement `carry-edge-verify` and correctly
 refuses adoption. Process-exit tests do not simulate hardware power loss.
 
@@ -171,3 +208,11 @@ The op153 follow-up also passed all 26 transport tests, including full old call
 capacity with maximum header/config, new maximum plus one refusal, and unchanged
 ordinary opcode bounds. The independent debug client build passed. Native
 cryptographic and read-only capsule execution remain separate integration tests.
+
+Portable bootstrap follow-up validation in the independent
+`codex-carry-verifier-client` checkout: 33 receipt-continuity tests passed. The
+receiving fixture additionally selects an explicitly installed portable verifier
+while the old Host deliberately refuses carry-edge commands, and exercises both
+portable approval and refusal. Hash mismatch executes no artifact; rejected
+portable authorization executes no target. Fixture descriptions/verdicts are
+injected and do not establish a native cryptographic end-to-end pass.

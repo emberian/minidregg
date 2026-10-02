@@ -1,7 +1,9 @@
 //! Explicit operator-authorized identity transitions. The trusted local verifier
 //! checks public signatures and commitments; private semantic audit remains with
 //! the operator receiver. This module owns client custody and durable adoption.
+mod verifier;
 use super::*;
+pub(crate) use verifier::install as install_verifier;
 
 const EDGE: &str = "minidregg-carry-edge-v1";
 const WAL: &str = "carry-pending.json";
@@ -276,6 +278,14 @@ pub(crate) fn migrate(
     copy_config(&config, &lineage.join("new-config.json"))?;
     copy_config(edge, &lineage.join("edge-manifest.json"))?;
     old.check(&lineage.join("old-config.json"))?;
+    let carry_verifier = verifier::select(
+        &custody,
+        workspace,
+        &old,
+        &capsule,
+        &capsule_pins,
+        &lineage.join("old-config.json"),
+    )?;
     let request = json!({"oldIdentity":old.identity,"oldAnchor":full(&retained)?,
         "operatorPublicKey":pin["operatorPublicKey"],"edgeManifestPath":lineage.join("edge-manifest.json"),
         "sourceCapsulePath":capsule,"sourceCapsulePins":capsule_pins,"newConfigPath":lineage.join("new-config.json"),
@@ -283,10 +293,11 @@ pub(crate) fn migrate(
     save(&lineage, "request.json", &request)?;
     let output = lineage.join("verified-edge.json");
     create_file(&output, b"")?;
-    // The old, already trusted executable authenticates its own retained source
-    // capsule registry and the signature. No executable from the manifest runs.
-    let status = Command::new(&old.verifier)
-        .arg(lineage.join("old-config.json"))
+    // An explicitly installed portable verifier, or the already trusted source
+    // Host, authenticates the registered old profile and public signature.
+    // No executable selected by the edge manifest runs.
+    let status = Command::new(&carry_verifier.executable)
+        .arg(&carry_verifier.config)
         .arg("carry-edge-verify")
         .arg(lineage.join("request.json"))
         .arg(&output)
@@ -328,6 +339,19 @@ pub(crate) fn migrate(
     walk(&mut source, &retained, &cut, |_| Ok(()))?;
     // Re-check executable/config identities after external verifier invocations.
     old.check(&lineage.join("old-config.json"))?;
+    let still_selected = verifier::select(
+        &custody,
+        workspace,
+        &old,
+        &capsule,
+        &capsule_pins,
+        &lineage.join("old-config.json"),
+    )?;
+    if still_selected.pin != carry_verifier.pin
+        || still_selected.executable != carry_verifier.executable
+    {
+        return Err(fail("carry verifier selection changed during verification"));
+    }
     replacement.check(&lineage.join("new-config.json"))?;
     let mut next_manifest = workspace.clone();
     next_manifest["config"] = json!(lineage.join("new-config.json"));
@@ -339,7 +363,7 @@ pub(crate) fn migrate(
     next_manifest["receiptCarryLineage"] = json!(id);
     let transition = json!({"old":{"settings":old.json(),"anchor":anchor_json(&old, &retained)?,"manifest":workspace,"authority":pin},
         "next":{"settings":replacement.json(),"anchor":anchor_json(&replacement, &start)?,"manifest":next_manifest,"authority":null},
-        "verifiedEdge":result,"request":request,"prefixProofAttempt":source.local.scratch,
+        "verifiedEdge":result,"request":request,"prefixProofAttempt":source.local.scratch,"carryVerifier":carry_verifier.pin,
         "historySettings":{"identity":old.identity,"verifier":capsule.join("verifier"),"verifierSha256":capsule_pins["verifierSha256"]},
         "historicalConfig":capsule.join("original-config.json"),
         "oldConfig":lineage.join("old-config.json"),"sourceCapsule":capsule});
@@ -950,7 +974,8 @@ mod tests {
         let Ok(mode) = std::env::var("MINI_CARRY_RECEIVING_FIXTURE") else {
             return;
         };
-        let reject = mode == "refuse";
+        let reject = mode.ends_with("refuse");
+        let portable_mode = mode.starts_with("portable");
         let root = Temp::new();
         let custody = root.0.join(DIRECTORY);
         workspace::make_private_dir(&custody).unwrap();
@@ -964,7 +989,7 @@ mod tests {
         let edgefile = root.0.join("edge-verdict.json");
         let marker = root.0.join("target-executed");
         executable(&helper, "#!/bin/sh\nexit 0\n");
-        executable(&host,&format!("#!/bin/sh\ncase \"$2\" in\nprofile) cat \"$1\" ;;\ncontinuity-verify) cp \"$4\" \"$5\" ;;\ncontinuity-point) cp \"$3\" \"$4\" ;;\ncarry-edge-verify) {} ;;\n*) exit 9 ;;\nesac\n",if reject {"exit 71".into()}else{format!("cp '{}' \"$4\"",edgefile.display())}));
+        executable(&host,&format!("#!/bin/sh\ncase \"$2\" in\nprofile) cat \"$1\" ;;\ncontinuity-verify) cp \"$4\" \"$5\" ;;\ncontinuity-point) cp \"$3\" \"$4\" ;;\ncarry-edge-verify) {} ;;\n*) exit 9 ;;\nesac\n",if reject || portable_mode {"exit 71".into()}else{format!("cp '{}' \"$4\"",edgefile.display())}));
         executable(
             &target,
             &format!(
@@ -987,11 +1012,34 @@ mod tests {
         save(&custody, "enabled.json", &old.json()).unwrap();
         let socket = root.0.join("s");
         SOCKET.set(socket.clone()).unwrap();
-        let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"1","key":root.0.join("unused-key"),"receiptContinuity":ALGORITHM,"config":root.0.join("old-config.json"),"host":host,"hostSha256":old.verifier_sha256,"socket":socket,
+        let mut manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"1","key":root.0.join("unused-key"),"receiptContinuity":ALGORITHM,"config":root.0.join("old-config.json"),"host":host,"hostSha256":old.verifier_sha256,"socket":socket,
             "freshContinuity":{"id":"first-enrollment","state":"complete"}});
         save(&root.0, "workspace.json", &manifest).unwrap();
         let pinned = pin_authority(&root.0, &manifest, &"b".repeat(64)).unwrap();
         let capsule = PathBuf::from(text(&pinned, "sourceCapsulePath").unwrap());
+        let portable_invoked = root.0.join("portable-carry-invoked");
+        if portable_mode {
+            let portable = root.0.join("portable-verifier");
+            let description = root.0.join("portable-description.json");
+            let pins = read_json(&capsule.join("pins.json")).unwrap();
+            save(&root.0,"portable-description.json",&json!({"algorithm":"minidregg-carry-verifier-v1","identity":old.identity,"sourceCapsulePins":pins,"edgeAlgorithm":EDGE})).unwrap();
+            executable(&portable,&format!("#!/bin/sh\ncase \"$2\" in\ncarry-verifier-profile) cp '{}' \"$4\" ;;\ncarry-edge-verify) printf invoked > '{}'; {} ;;\n*) exit 91 ;;\nesac\n",description.display(),portable_invoked.display(),if reject {"exit 71".into()}else{format!("cp '{}' \"$4\"",edgefile.display())}));
+            let before = fs::read(custody.join("anchor.json")).unwrap();
+            let settings_before = fs::read(custody.join("enabled.json")).unwrap();
+            install_verifier(
+                &root.0,
+                &manifest,
+                &portable,
+                &crate::host_image_sha256(&portable).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(fs::read(custody.join("anchor.json")).unwrap(), before);
+            assert_eq!(
+                fs::read(custody.join("enabled.json")).unwrap(),
+                settings_before
+            );
+            manifest = read_json(&root.0.join("workspace.json")).unwrap();
+        }
         let mut verdict = edge();
         verdict["targetVerifierDigest"] = json!(crate::host_image_sha256(&target).unwrap());
         save(&root.0, "edge-verdict.json", &verdict).unwrap();
@@ -1084,6 +1132,12 @@ mod tests {
             &root.0.join("target-config.json"),
             &target,
         );
+        if portable_mode {
+            assert!(
+                portable_invoked.exists(),
+                "carry must invoke explicitly pinned portable verifier"
+            );
+        }
         if reject {
             assert!(result
                 .unwrap_err()
@@ -1156,7 +1210,7 @@ mod tests {
     }
     #[test]
     fn carry_receiving_fixture_new_endpoint_old_proof_and_refused_target_execution() {
-        for mode in ["accept", "refuse"] {
+        for mode in ["accept", "refuse", "portable", "portable-refuse"] {
             let output = Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",

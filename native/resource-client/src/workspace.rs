@@ -5395,6 +5395,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             print_json(&receipt_continuity::replace_verifier(&root, &workspace, &verifier)?)
         }
+        "continuity-carry-verifier" => {
+            let verifier = path(args.required("verifier")?);
+            let sha256 = os_string(args.required("sha256")?, "carry verifier SHA-256")?;
+            args.finish()?;
+            print_json(&receipt_continuity::carry::install_verifier(&root, &workspace, &verifier, &sha256)?)
+        }
         "continuity-carry-authority" => {
             let key = os_string(args.required("operator-key")?, "carry operator key")?;
             args.finish()?;
@@ -6159,7 +6165,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             crate::market::show(&root, &workspace, &name)
         }
         _ => Err(
-            "workspace action must be init, onboard, continuity-init, continuity-verifier, continuity-carry-authority, continuity-carry, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
+            "workspace action must be init, onboard, continuity-init, continuity-verifier, continuity-carry-authority, continuity-carry-verifier, continuity-carry, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }
