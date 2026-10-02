@@ -313,7 +313,7 @@ def hook(request, state_path, result_path):
     inventory = {member['subject']: member for member in state['members']}
     for artifact in state['artifacts']:
         require(digest(absolute(artifact['path'])) == artifact['sha256'], 'retained paid construction evidence changed')
-    credited, non_paid = [], []
+    credited, non_paid = {}, {}
     for key, subject in request['subjects'].items():
         selected_workspace = absolute(request['members'][key]['workspace'])
         pin = read(selected_workspace / 'workspace.json')
@@ -323,7 +323,7 @@ def hook(request, state_path, result_path):
         if subject not in inventory:
             # Mixed construction is ordinary. This partition makes no payment
             # claim for selected sponsored members or independently joined ones.
-            non_paid.append(subject)
+            non_paid[key] = subject
             continue
         member = inventory[subject]
         for artifact in member['observerArtifacts']:
@@ -335,12 +335,12 @@ def hook(request, state_path, result_path):
         before = read(absolute(member['statusArtifact']))
         require(status['payment'] == before['payment'], 'retained payment consumption changed')
         source.mini(key + '-credits', 'pay', 'status', '--dir', member['workspace'])
-        credited.append(subject)
+        credited[key] = subject
     save(root / 'selected-partition.json', dict(identity=source.identity, subjects=request['subjects'],
                                                creditedSubjects=credited, nonPaidSubjects=non_paid))
     save(result_path, dict(type='mini-joined-member-hook-result-v1', role='paid-entry', phase='run', status='pass',
                           identity=source.identity, rail='synthetic-rpc', creditedSubjects=credited,
-                          nonPaidSubjects=non_paid, selectedSubjects=list(request['subjects'].values()),
+                          nonPaidSubjects=non_paid, selectedSubjects=request['subjects'],
                           execution='native receiving with two synthetic finalized RPC fixtures', artifacts=artifacts(root)))
 
 
