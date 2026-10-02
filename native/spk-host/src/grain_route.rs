@@ -4,7 +4,9 @@
 //! Everything the entrance pins is read from the participant's retained,
 //! Mini-accepted evidence: the session birth (session, descriptor, subject,
 //! kind, owner capabilities) and the event22 ticket issue (ticket resource,
-//! admitted issue index). The session enrollment is not an input: it binds the
+//! admitted issue index). A delegated participant may explicitly select its
+//! manifest observation capability; that selector grants no authority. The
+//! session enrollment is not an input: it binds the
 //! session to one serving app generation, so the participant enrolls (and
 //! renews after every restart) against the running app, after START. None of
 //! this confers authority: every HTTP request is still authored, signed and
@@ -109,6 +111,10 @@ struct RouteRequest {
     session_source: PathBuf,
     session_receipt: PathBuf,
     ticket_issue: PathBuf,
+    /// A participant's delegated manifest observation grant. Omission preserves
+    /// the legacy owner entrance selector. Native admission checks authority.
+    #[serde(default)]
+    manifest_observe_capability: Option<String>,
     participant_key: ParticipantKey,
 }
 
@@ -129,6 +135,14 @@ fn derive(
     selector: &crate::lifecycle_selector::LifecycleSelector,
     request: &RouteRequest,
 ) -> io::Result<Derived> {
+    let manifest_observe = request
+        .manifest_observe_capability
+        .as_ref()
+        .unwrap_or(&selector.package_observe_capability)
+        .clone();
+    if !decimal(&manifest_observe) {
+        return Err(invalid("manifest observation capability is not canonical"));
+    }
     let session_source = read_json(&request.session_source)?;
     let session = session_source
         .pointer("/applicationSessionGrainBirth/applicationSessionBirth/session")
@@ -151,7 +165,8 @@ fn derive(
     if accepted == 0 {
         return Err(invalid("ticket receipt count is zero"));
     }
-    let participant = |name: &str| number(&ticket_request, &format!("/spec/ticket/participant/{name}"));
+    let participant =
+        |name: &str| number(&ticket_request, &format!("/spec/ticket/participant/{name}"));
     if number(&ticket_request, "/spec/ticket/scope/app")? != app
         || participant("session")? != session_id
         || participant("descriptorResource")? != descriptor
@@ -170,7 +185,7 @@ fn derive(
         ticket,
         issue_index,
         session_observe: number(session, "/sessionOwnerCapability")?,
-        manifest_observe: selector.package_observe_capability.clone(),
+        manifest_observe,
         enrollment_observe: number(session, "/descriptorOwnerCapability")?,
     })
 }
@@ -199,6 +214,24 @@ fn custody_json(
             "role":role,"index":index,"keyId":key.key_id,"keyEpoch":key.key_epoch,
             "publicKeyHex":key.public_key_hex,"seedPath":key.seed_path})).collect::<Vec<_>>(),
     })
+}
+
+fn check_retained_custody(custody: &Value, derived: &Derived, route_name: &str) -> io::Result<()> {
+    for (field, expected) in [
+        ("/subject", &derived.subject),
+        ("/session", &derived.session),
+        ("/ticketResource", &derived.ticket),
+        ("/issueIndex", &derived.issue_index),
+        ("/manifestObserveCapability", &derived.manifest_observe),
+    ] {
+        if text(custody, field)? != expected {
+            return Err(invalid(format!(
+                "existing route {} differs from retained participant evidence",
+                route_name
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::Result<Value> {
@@ -290,19 +323,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
         File::open(&routes)?.sync_all()?;
     }
     let custody = read_json(&directory.join("dispatch-custody.json"))?;
-    for (field, expected) in [
-        ("/subject", &derived.subject),
-        ("/session", &derived.session),
-        ("/ticketResource", &derived.ticket),
-        ("/issueIndex", &derived.issue_index),
-    ] {
-        if text(&custody, field)? != expected {
-            return Err(invalid(format!(
-                "existing route {} differs from retained participant evidence",
-                request.name
-            )));
-        }
-    }
+    check_retained_custody(&custody, &derived, &request.name)?;
     Ok(json!({
         "protocol":"mini-spk-grain-route-v1",
         "app":app,
@@ -318,4 +339,146 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
         "tokenFile":directory.join(if derived.kind == "api" { "api.token" } else { "bootstrap.token" }),
         "signedApiPath":bridge.api_path,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle_selector::LifecycleSelector;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    struct Evidence(PathBuf);
+    impl Evidence {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "spk-route-delegate-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            DirBuilder::new().mode(0o700).create(&path).unwrap();
+            Self(path)
+        }
+        fn write(&self, name: &str, value: Value) -> PathBuf {
+            use std::io::Write;
+            let path = self.0.join(name);
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap();
+            file.write_all(&serde_json::to_vec(&value).unwrap())
+                .unwrap();
+            path
+        }
+    }
+    impl Drop for Evidence {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn selector() -> LifecycleSelector {
+        LifecycleSelector {
+            app: "4601".into(),
+            package_manifest: "4602".into(),
+            snapshot_manifest: "4603".into(),
+            app_capability: "3101".into(),
+            app_observe_capability: "3101".into(),
+            package_capability: "3103".into(),
+            package_observe_capability: "3103".into(),
+        }
+    }
+    fn request(e: &Evidence, subject: &str, manifest: Option<&str>) -> RouteRequest {
+        let session_source = e.write(
+            "session.json",
+            json!({"applicationSessionGrainBirth":{"applicationSessionBirth":{"session":{
+            "app":"4601","session":"4610","descriptor":"4611","participant":subject,"kind":"web",
+            "sessionOwnerCapability":"3211","descriptorOwnerCapability":"3213"}}}}),
+        );
+        let session_receipt = e.write(
+            "birth.json",
+            json!({"type":"confirmed","confirmation":"installed"}),
+        );
+        e.write(
+            "request.json",
+            json!({"spec":{"ticket":{"resource":"4620","scope":{"app":"4601"},"participant":{
+            "session":"4610","descriptorResource":"4611","subject":subject,"kind":"web"}}}}),
+        );
+        e.write(
+            "receipt-anchor.json",
+            json!({"receipt":{"acceptedCount":"42"}}),
+        );
+        RouteRequest {
+            protocol: "mini-spk-grain-route-request-v1".into(),
+            name: "delegate".into(),
+            expected_host: "grain.test".into(),
+            display_name: "Delegate".into(),
+            preferred_handle: "delegate".into(),
+            session_source,
+            session_receipt,
+            ticket_issue: e.0.clone(),
+            manifest_observe_capability: manifest.map(str::to_owned),
+            participant_key: ParticipantKey {
+                key_id: format!("{subject}00{subject}"),
+                key_epoch: "2".into(),
+                public_key_hex: "00".repeat(32),
+                seed_path: e.0.join("seed"),
+            },
+        }
+    }
+
+    #[test]
+    fn delegate_manifest_selector_reaches_dispatch_custody() {
+        for (subject, cap) in [("7", "3231"), ("9", "3241")] {
+            let evidence = Evidence::new();
+            let request = request(&evidence, subject, Some(cap));
+            let selector = selector();
+            let derived = derive("4601", &selector, &request).unwrap();
+            assert_eq!(derived.subject, subject);
+            assert_eq!(derived.manifest_observe, cap);
+            let custody = custody_json("4601", &selector, &derived, &request.participant_key, &[]);
+            assert_eq!(custody["manifestObserveCapability"], cap);
+        }
+    }
+
+    #[test]
+    fn absent_selector_preserves_owner_entrance() {
+        let evidence = Evidence::new();
+        let request = request(&evidence, "8", None);
+        assert_eq!(
+            derive("4601", &selector(), &request)
+                .unwrap()
+                .manifest_observe,
+            "3103"
+        );
+    }
+
+    #[test]
+    fn noncanonical_manifest_selector_is_refused() {
+        for bad in ["", "03231", "+3231", "-1", " 3231", "3.2"] {
+            let evidence = Evidence::new();
+            let request = request(&evidence, "7", Some(bad));
+            assert!(derive("4601", &selector(), &request).is_err());
+        }
+    }
+
+    #[test]
+    fn existing_route_cannot_silently_change_manifest_selector() {
+        let evidence = Evidence::new();
+        let request = request(&evidence, "7", Some("3231"));
+        let selector = selector();
+        let mut derived = derive("4601", &selector, &request).unwrap();
+        let retained = custody_json("4601", &selector, &derived, &request.participant_key, &[]);
+        check_retained_custody(&retained, &derived, "delegate").unwrap();
+        derived.manifest_observe = "3241".into();
+        assert!(check_retained_custody(&retained, &derived, "delegate").is_err());
+        assert_eq!(retained["manifestObserveCapability"], "3231");
+    }
 }
