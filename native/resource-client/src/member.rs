@@ -191,7 +191,7 @@ fn lifecycle_operations(root: &Path, pin: &Value) -> Result<Vec<Value>> {
                 for field in ["complete","phase","prepared","owner","manager","selectorPublicationPending"] {
                     if let Some(value) = status.get(field) { row[field] = value.clone(); }
                 }
-                row["status"] = json!(if status["complete"] == true {"complete"} else {"in-progress"});
+                row["status"] = json!(if status["selectorPublicationPending"] == true {"needs-recovery"} else if status["complete"] == true {"complete"} else {"in-progress"});
                 if let Some(action) = status["nextAction"].as_str() {
                     row["actions"].as_array_mut().unwrap().push(json!({"label":action,
                         "command":format!("app delegate-lifecycle {action} {id}")}));
