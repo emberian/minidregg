@@ -10,7 +10,6 @@ import Compiler.ObjectAudienceRoster
 import Kernel.ResourceTransaction
 import Compiler.PhysicalLawResolution
 import Compiler.WorldKindLawDependencies
-import Kernel.WorldKindProjection
 namespace Minidregg.Kernel.RecipientReadEntitlement
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
@@ -69,14 +68,6 @@ certifies that indexed view, not its provenance or permission to publish. -/
 def viewRequest (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : Request .object :=
   { wanted with preStateRoot := view.payload.root }
 
-/-- Reuse the descriptor projection with this recipient's subject; no caller
-may supply its policy slots. Ordinary resource views keep their shared projector. -/
-def viewResourceSlots (subject : SubjectId) (target : Nat) :
-    (kind : CanonicalCellRegistry.Kind) →
-    Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout kind) → List (String × Int)
-  | .worldInstance, logical => WorldKindProjection.project subject logical logical
-  | kind, logical => ResourceObservationAdmission.resourceSlots target kind logical
-
 def viewProject (prepared : Preparation)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
     (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) : Minidregg.Pred.State :=
@@ -87,7 +78,7 @@ def viewProject (prepared : Preparation)
       ((CanonicalCellRegistry.materializer view.1).codec.encode logical) ++
     ResourceAuthorityProjection.bytesSlots "account/bytes" 0
       (CanonicalAccountView.balanceStream.encode []) ++
-    viewResourceSlots wanted.subject wanted.target.value view.1 logical⟩
+    ResourceObservationAdmission.resourceSlots wanted.subject wanted.target.value view.1 logical⟩
 
 def viewStep (prepared : Preparation)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : PolicyStepContext :=
