@@ -1153,6 +1153,34 @@ theorem accepted_footprint_exact
     (accepted : AuthorizedIntent context profile federation height intent) :
     footprintExact context intent = .ok () := accepted.footprint
 
+/-- A grant naming an absent slot is not selected. -/
+theorem select_absent (context : Context deployment durable) (grant : GrantRef)
+    (absent : context.directory.directory.slots grant.target = .absent) :
+    select context grant = none := by
+  unfold select
+  split
+  · rfl
+  · rename_i packed present
+    rw [absent] at present
+    cases present
+
+/-- **The refuting pole, kept as the authenticated half.** The challenge itself still reads
+the target: for a single-grant intent whose footprint matches, an absent target is refused
+(`noGrant`, told as `undisclosed` by `preAuthentication`), while a present one is issued.
+Before FIX-DISCLOSE this was op 4's whole answer, to any key; now only an authenticated
+subject reaches it (`authorize`, `NativeHost.challengeAnswer`). -/
+theorem challenge_absent_target_refused (context : Context deployment durable)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
+    (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) (grant : GrantRef)
+    (single : intent.grants = [grant]) (foot : footprintExact context intent = .ok ())
+    (absent : context.directory.directory.slots grant.target = .absent) :
+    (challenge context profile federation genesisHeight intent intentSignature).mapError
+      preAuthentication = .error (.of .undisclosed) := by
+  unfold challenge
+  simp only [foot, single, headerAt, select_absent context grant absent, need, List.mapM_cons,
+    bind, Except.bind, Except.mapError, pure, Except.pure]
+  rfl
+
 /-- **Challenge binding (DATAMODEL §3.4).**  A challenge carries the world root
 and the height of the one loaded image it was computed from. -/
 theorem challenge_bound {context : Context deployment durable}
