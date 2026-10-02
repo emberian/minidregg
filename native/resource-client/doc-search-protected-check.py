@@ -7,7 +7,6 @@ key imports, membership changes, service restarts, or build. Put --out outside t
 workspace: it deliberately retains plaintext response evidence with mode 0600.
 """
 import argparse
-import hashlib
 import html
 import json
 import os
@@ -37,6 +36,7 @@ assert not args.out.resolve().is_relative_to(args.workspace.resolve()), "keep pl
 patterns = (needle.encode(), needle.encode().hex().encode())
 rows = []
 web = None
+completed = False
 
 def fingerprint():
     files = {}
@@ -45,7 +45,8 @@ def fingerprint():
         if directory.exists():
             for file in directory.rglob("*"):
                 if file.is_file() and not file.is_symlink():
-                    files[str(file)] = hashlib.sha256(file.read_bytes()).hexdigest()
+                    stat = file.stat()
+                    files[str(file)] = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
     return files
 before = fingerprint()
 
@@ -65,8 +66,8 @@ def call(label, action, success=True):
         raise RuntimeError(label + ": " + result.stderr.decode(errors="replace")[-1200:])
     return result, round(time.monotonic() - start, 3)
 
-def follow(hit, success=True):
-    return call("follow", ["--action", "doc-search-follow", "--name", hit["name"], "--target", hit["target"],
+def follow(hit, success=True, label="follow"):
+    return call(label, ["--action", "doc-search-follow", "--name", hit["name"], "--target", hit["target"],
                            "--atom", hit["atom"], "--revision", hit["revision"]], success)
 
 try:
@@ -89,7 +90,7 @@ try:
         record("current-authority-refuses-text", not search["hits"] and not search["pageComplete"] and docs[0]["status"] == "unavailable" and re.search(args.refusal_pattern, error, re.I), seconds=seconds)
     if args.prior_hit:
         prior = json.loads(args.prior_hit.read_text())
-        result, seconds = follow(prior, success=args.expect == "present")
+        result, seconds = follow(prior, success=args.expect == "present", label="retained-hit-follow")
         if args.expect == "present":
             record("retained-hit-currently-readable", needle.lower() in json.loads(result.stdout)["text"].lower(), seconds=seconds)
         else:
@@ -134,9 +135,10 @@ try:
     leaks = [str(path.relative_to(args.workspace)) for path in changed
              if any(pattern in path.read_bytes() for pattern in patterns)]
     record("read-attempts-retain-no-plaintext-marker", not leaks, files_checked=len(changed), unexpected_paths=leaks)
+    completed = True
     print("Protected search phase passed", args.expect, len(rows), flush=True)
 finally:
-    if web is not None and (not args.retain_browser or any(not row["passed"] for row in rows)):
+    if web is not None and (not args.retain_browser or not completed):
         web.terminate()
         try:
             web.wait(timeout=10)
