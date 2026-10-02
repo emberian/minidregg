@@ -47,6 +47,8 @@ impl SchedulerFixture {
         let mut config = sc::Config {
             version: 1,
             max_jobs: 100,
+            max_terminal_receipts: 1_000_000,
+            max_receipt_bytes: 8 * 1024 * 1024 * 1024,
             max_queued_per_principal: 8,
             max_active_per_principal: 1,
             lease_ms: 60_000,
