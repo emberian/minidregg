@@ -14,6 +14,8 @@ import Compiler.CanonicalRuntimeProfile
 import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
+import Compiler.WorldKindLawDependencies
+import Compiler.WorldKindProjection
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
 import Compiler.ResourceTargetAdmission
@@ -104,11 +106,13 @@ def readCandidate {kind : ResourceKind} (wanted : Request kind)
       (readPatch physical) rfl trivial).choose
     postcondition := rfl }
 
-def resourceSlots (target : Nat) : (kind : CanonicalCellRegistry.Kind) →
+def resourceSlots (subject : SubjectId) (target : Nat) : (kind : CanonicalCellRegistry.Kind) →
     Store (CanonicalCellRegistry.layout kind) → List (String × Int)
   | .content, logical => ContentResource.project logical logical ⟨[]⟩
   | .declaredObject, logical | .accountMetadata, logical | .declaredProgram, logical =>
       DeclaredResourceProjection.project target logical logical
+  | .worldInstance, logical => WorldKindProjection.project subject logical logical
+  | .worldKind, logical => WorldKindProjection.definitionProject logical logical
   | _, _ => []
 
 def sourceStore (context : Context deployment durable) : CanonicalPolicyRegistry.PayloadStore where
@@ -135,6 +139,9 @@ structure Prepared (context : Context deployment durable) (profile : CanonicalRu
   /-- The deployment clock of the snapshot the read is answered from. -/
   clock : Kernel.ClockCellDomain.Loaded deployment durable.snapshot
   clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot = some clock
+  kindDependencies : WorldKindLawDependencies.Dependencies
+  kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory.directory
+    wanted.target.value = some kindDependencies
 
 /-- Each refusing branch names its reason. The request is host-built from the
 same image, so a component mismatch means the caller asked for something other
@@ -158,9 +165,13 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
                   | some values =>
                     match clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
                     | none => .error (.of .operationRejected)
-                    | some clock => .ok ⟨observed, observeExact, domainExact, semanticsExact,
-                        policyExact, epochExact, revisionExact, values, balancesExact, clock,
-                        clockLoaded⟩
+                    | some clock =>
+                        match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
+                            context.directory.directory wanted.target.value with
+                        | none => .error (.of .operationRejected)
+                        | some dependencies => .ok ⟨observed, observeExact, domainExact, semanticsExact,
+                            policyExact, epochExact, revisionExact, values, balancesExact, clock,
+                            clockLoaded, dependencies, dependenciesExact⟩
                 else .error (.of .staleRoot)
               else .error (.of .staleRoot)
             else .error (.of .malformed)
@@ -186,7 +197,7 @@ def projectWith (clock : Kernel.ClockCell.Clock) {kind : ResourceKind} (wanted :
     ResourceAuthorityProjection.bytesSlots "account/bytes" 0
       (CanonicalAccountView.balanceStream.encode accountBalances) ++
     accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2)) ++
-    resourceSlots wanted.target.value physical logical⟩
+    resourceSlots wanted.subject wanted.target.value physical logical⟩
 
 def project (prepared : Prepared context profile wanted marker capability contextBytes)
     (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
@@ -199,6 +210,7 @@ def step (prepared : Prepared context profile wanted marker capability contextBy
 def policyConfig (prepared : Prepared context profile wanted marker capability contextBytes) : ComposedPolicyAdmission.Config F :=
   PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot context.directory.directory
     (sourceCapabilityPortal context.authority.snapshot marker) (step prepared) wanted.target.value
+    prepared.kindDependencies.additional
 
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
@@ -211,7 +223,8 @@ def capabilityEvidenceChecked (prepared : Prepared context profile wanted marker
 def lawReadGuards (prepared : Prepared context profile wanted marker capability contextBytes) :
     Option (List (Nat × Digest)) :=
   PhysicalLawResolution.readGuards context.authority.snapshot context.directory.directory
-    profile.semantics wanted.target.value
+    profile.semantics wanted.target.value prepared.kindDependencies.additional |>.map
+      (· ++ prepared.kindDependencies.readGuards)
 
 /-- The fields the reader's capability names (K-FIELDS), which narrow what a law refusal
 tells it (`Refusal.lawDeniedFor`, FIX-DISCLOSE). A capability that does not read names no
@@ -667,7 +680,8 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
       | key => some (declaredField key)
   -- A stream's entries are its body: a scope naming fields reads and appends a
   -- stream only when it names `body`.
-  | .stream, _ => some .body
+  | .stream, _ | .worldKind, _ => some .body
+  | .worldInstance, _ => none
   -- Exhaustive on purpose: a new registry kind must say whether it has fields.
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _
   | .nockProgram, _ | .clock, _ => none

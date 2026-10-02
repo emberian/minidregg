@@ -4,6 +4,9 @@ Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
+import Compiler.PhysicalLawResolution
+import Compiler.ComposedLawDiagnostics
+import Compiler.WorldKindLawDependencies
 import Kernel.ResourceObservationAdmission
 import Compiler.ResourceAuthorityProjection
 import Kernel.JointSlots
@@ -152,6 +155,13 @@ def runSlots : Option CheckedRun → List (String × Int)
        ("run/steps", Int.ofNat checked.verdict.steps),
        ("run/fuel", Int.ofNat checked.fuel)]
 
+/-- Physical selector input is derived from the authenticated directory. -/
+def storageKind (prepared : PreparedInvocation deployment profile ambient durable command)
+    (incidence : Incidence command) : Nat :=
+  match prepared.directory.directory.slots (incidenceTarget command incidence).target with
+  | .present cell => cell.kind.tag.toNat
+  | _ => 0
+
 /- These slots depend on the admitted tuple and incidence, but not on which
 old/new logical state the policy examines. Derive them here once per step;
 the caller cannot inject an independent request or command projection. -/
@@ -161,6 +171,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   let preRoot := match primary with
     | some i => (prepared.targets i).pre.root
     | none => prepared.authority.snapshot.cell.root
+  [("target/storageKind", Int.ofNat (storageKind prepared primary))] ++
   Kernel.ClockCell.slots prepared.clock.clock ++
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
@@ -264,7 +275,9 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
     Unjoint (projectCommonSlots prepared primary source) :=
   unjoint_append _ _
     (unjoint_append _ _
-      (unjoint_append _ _ (clockSlots_unjoint _) (requestSlots_unjoint _))
+      (unjoint_append _ _
+        (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; decide)
+          (clockSlots_unjoint _)) (requestSlots_unjoint _))
       (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
     (runSlots_unjoint _)
 
@@ -410,23 +423,30 @@ theorem step_prepared_exact
 examining. A leg must not project and hash its same old/new cells twice merely
 to resolve the committed law. This helper is only fed the current prepared
 step below; no context is retained across requests or accepted from a client. -/
+def kindDependencies (prepared : PreparedInvocation deployment profile ambient durable command)
+    (incidence : Incidence command) : Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
+    (incidenceTarget command incidence).target
+
 def policyConfigFromStep [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (context : PolicyStepContext) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
+    (incidence : Incidence command) (context : PolicyStepContext) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
-      (operationMarker prepared.authority.snapshot.domain profile.semantics command)) context
+      (operationMarker prepared.authority.snapshot.domain profile.semantics command))
+    context (incidenceTarget command incidence).target
+    ((kindDependencies prepared incidence).map (·.additional) |>.getD [])
 
 def policyConfig [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
-  policyConfigFromStep prepared (step prepared tuple incidence)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : ComposedPolicyAdmission.Config F :=
+  policyConfigFromStep prepared incidence (step prepared tuple incidence)
 
 theorem policyConfigFromStep_exact [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
-    policyConfigFromStep prepared (step prepared tuple incidence) =
+    policyConfigFromStep prepared incidence (step prepared tuple incidence) =
       policyConfig prepared tuple incidence := rfl
 
 def portals [DecidableEq F]
@@ -456,20 +476,18 @@ def authorizeLeg [DecidableEq F]
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let config := policyConfigFromStep prepared context
+  let config := policyConfigFromStep prepared incidence context
   let capability := (incidenceTarget command incidence).capability
-  let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
-    (operationMarker prepared.authority.snapshot.domain profile.semantics command)
-    context wanted capability signature)
-  let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate witness.oldState witness.newState != true then
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared incidence)
+  let evidence ← requireSome .capabilityRejected
+    (config.capabilityEvidenceChecked wanted capability () signature () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate context.oldState context.newState != true then
     throw .policyInputRange
-  if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
+  if !decide (castInjOn F (intsOf law.predicate context.oldState context.newState)) then
     throw .policyCastAlias
-  requireSome .policyRejected (CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted evidence witness
+  requireSome .policyRejected (ComposedPolicyAdmission.admit config wanted evidence witness
     (.policy wanted.policyId wanted.policyRevision)
     (source_request_epoch_current prepared tuple incidence)
     (source_request_revision_current prepared tuple incidence))
@@ -481,174 +499,100 @@ name the clause when it refuses to plan a write its law rejects. -/
 def lawLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
-  let wanted := (tuple.request incidence).2
-  let context := step prepared tuple incidence
-  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
-  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  LawLeaf.of committed.record.predicate witness.oldState witness.newState
+  let law ← (policyConfig prepared tuple incidence).resolve?
+  LawLeaf.of law.predicate (step prepared tuple incidence).oldState (step prepared tuple incidence).newState
 
-/-- A named clause is a leaf of the leg's resolved committed law, at its path,
-and it is false on the witness states `authorizeLeg` evaluates that law on. -/
+/-- Internal full-closure provenance. Public consumers use lawRefusal below. -/
 theorem lawLeaf_fails [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (leaf : LawLeaf)
     (named : lawLeaf prepared tuple incidence = some leaf) :
-    ∃ committed, (policyConfig prepared tuple incidence).registry.resolve
-        (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed ∧
-      committed.record.predicate.subterm leaf.path = some leaf.clause ∧
+    ∃ law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence),
+      (policyConfig prepared tuple incidence).resolve? = some law ∧
+      law.predicate.subterm leaf.path = some leaf.clause ∧
       Minidregg.Pred.eval leaf.clause
-        (canonicalWitness (F := F) profile.compilerProfile.compiler committed
-          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState).oldState
-        (canonicalWitness (F := F) profile.compilerProfile.compiler committed
-          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState).newState = false := by
+        (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = false := by
   unfold lawLeaf at named
-  cases resolved : (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
+  cases resolved : (policyConfig prepared tuple incidence).resolve? with
   | none => simp [resolved] at named
-  | some committed =>
+  | some law =>
       simp only [resolved, Option.bind_eq_bind, Option.bind_some] at named
       obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf named
-      exact ⟨committed, rfl, at_, fails⟩
+      exact ⟨law, rfl, at_, fails⟩
 
-/-- **One evaluation, two call sites.** The Host's prepare-time refusal
-(`lawLeaf`, run before it plans a write) and the submission verdict (the
-compiled check `config.verifies` inside `CanonicalPolicyAdmission.admit`, which
-`authorizeLeg` reaches) read the same resolved committed law on the same
-canonical witness. Under the binding facts a resolved leg carries (exactly the
-premises of `canonical_verifies_iff_eval`), prepare names no clause exactly
-when submission's compiled check accepts. -/
+/-- Prepare and admission evaluate the same complete resolved restriction. -/
 theorem lawLeaf_none_iff_verifies [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
-    {committed : CommittedPolicy}
-    (resolved : (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed)
-    (policyIdExact : committed.record.policyId = (tuple.request incidence).2.policyId)
-    (versionExact : committed.record.version = (tuple.request incidence).2.policyRevision)
-    (domainExact : committed.record.domain = (tuple.request incidence).2.domain)
-    (semanticsExact : committed.record.semantics = (tuple.request incidence).2.semantics)
-    (recordDigestExact :
-      (policyConfig prepared tuple incidence).recordDigest committed.record = committed.address)
-    (stepExact : (policyConfig prepared tuple incidence).stepBinding.matches
-      (tuple.request incidence).2 (step prepared tuple incidence).oldState
-      (step prepared tuple incidence).newState = true)
-    (profileCompatible : (policyConfig prepared tuple incidence).compilerProfile.compatible
-      (policyConfig prepared tuple incidence).stepBinding = true)
-    (profileSemanticsExact :
-      (tuple.request incidence).2.semantics = profile.compilerProfile.semantics)
-    (supportedExact : supported profile.compilerProfile.compiler committed.record.predicate = true)
-    (rangesExact : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence))
+    (resolved : (policyConfig prepared tuple incidence).resolve? = some law)
+    (bound : law.binding (tuple.request incidence).2 = true)
+    (supportedExact : supported profile.compilerProfile.compiler law.predicate = true)
+    (rangesExact : inputsInRange profile.compilerProfile.compiler law.predicate
       (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true)
-    (castExact : castInjOn F (intsOf committed.record.predicate
+    (casts : castInjOn F (intsOf law.predicate
       (step prepared tuple incidence).oldState (step prepared tuple incidence).newState)) :
     lawLeaf prepared tuple incidence = none ↔
-      (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2
-        (canonicalWitness profile.compilerProfile.compiler committed
-          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) = true := by
-  have verdict := canonical_verifies_iff_eval (config := policyConfig prepared tuple incidence)
-    resolved policyIdExact versionExact domainExact semanticsExact recordDigestExact stepExact
-    profileCompatible profileSemanticsExact supportedExact rangesExact castExact
+      (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2 law.witness = true := by
+  have verdict := law.verifies_iff_eval (tuple.request incidence).2 bound supportedExact rangesExact casts
   refine Iff.trans ?_ verdict.symm
   unfold lawLeaf
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.of_none_iff _ _ _
 
-/-- The same fact from the refusing side: on a resolved, bound leg the Host
-refuses to plan the write (names a clause) exactly when the submission's
-compiled policy check rejects the same witness, so `admit` returns `none` and
-`authorizeLeg` answers `policyRejected`. -/
 theorem lawLeaf_refuses_iff_verifies_rejects [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
-    {committed : CommittedPolicy}
-    (resolved : (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed)
-    (policyIdExact : committed.record.policyId = (tuple.request incidence).2.policyId)
-    (versionExact : committed.record.version = (tuple.request incidence).2.policyRevision)
-    (domainExact : committed.record.domain = (tuple.request incidence).2.domain)
-    (semanticsExact : committed.record.semantics = (tuple.request incidence).2.semantics)
-    (recordDigestExact :
-      (policyConfig prepared tuple incidence).recordDigest committed.record = committed.address)
-    (stepExact : (policyConfig prepared tuple incidence).stepBinding.matches
-      (tuple.request incidence).2 (step prepared tuple incidence).oldState
-      (step prepared tuple incidence).newState = true)
-    (profileCompatible : (policyConfig prepared tuple incidence).compilerProfile.compatible
-      (policyConfig prepared tuple incidence).stepBinding = true)
-    (profileSemanticsExact :
-      (tuple.request incidence).2.semantics = profile.compilerProfile.semantics)
-    (supportedExact : supported profile.compilerProfile.compiler committed.record.predicate = true)
-    (rangesExact : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence))
+    (resolved : (policyConfig prepared tuple incidence).resolve? = some law)
+    (bound : law.binding (tuple.request incidence).2 = true)
+    (supportedExact : supported profile.compilerProfile.compiler law.predicate = true)
+    (rangesExact : inputsInRange profile.compilerProfile.compiler law.predicate
       (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true)
-    (castExact : castInjOn F (intsOf committed.record.predicate
+    (casts : castInjOn F (intsOf law.predicate
       (step prepared tuple incidence).oldState (step prepared tuple incidence).newState)) :
     (lawLeaf prepared tuple incidence).isSome = true ↔
-      (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2
-        (canonicalWitness profile.compilerProfile.compiler committed
-          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) = false := by
-  have same := lawLeaf_none_iff_verifies prepared tuple incidence resolved policyIdExact
-    versionExact domainExact semanticsExact recordDigestExact stepExact profileCompatible
-    profileSemanticsExact supportedExact rangesExact castExact
+      (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2 law.witness = false := by
+  have same := lawLeaf_none_iff_verifies prepared tuple incidence law resolved bound supportedExact rangesExact casts
   cases named : lawLeaf prepared tuple incidence <;>
-    cases verdict : (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2
-      (canonicalWitness profile.compilerProfile.compiler committed
-        (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) <;>
+    cases verdict : (policyConfig prepared tuple incidence).verifies (tuple.request incidence).2 law.witness <;>
     simp_all
 
-/-- The out-of-range order clause of this leg's committed law, read on exactly the
-witness `authorizeLeg` range-checks before it refuses with `policyInputRange`. It
-decides nothing; the Host uses it to name the clause and its two values. -/
 def rangeLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
-  let wanted := (tuple.request incidence).2
-  let context := step prepared tuple incidence
-  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
-  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
-    witness.oldState witness.newState
+  let law ← (policyConfig prepared tuple incidence).resolve?
+  LawLeaf.ofRange profile.compilerProfile.compiler law.predicate
+    (step prepared tuple incidence).oldState (step prepared tuple incidence).newState
 
-/-- The leg names an out-of-range clause exactly when `authorizeLeg`'s range check
-on its resolved law fails: the named refusal and `policyInputRange` agree. -/
 theorem rangeLeaf_none_iff_inputsInRange [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
-    {committed : CommittedPolicy}
-    (resolved : (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed) :
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence))
+    (resolved : (policyConfig prepared tuple incidence).resolve? = some law) :
     rangeLeaf prepared tuple incidence = none ↔
-      inputsInRange profile.compilerProfile.compiler committed.record.predicate
+      inputsInRange profile.compilerProfile.compiler law.predicate
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true := by
   unfold rangeLeaf
-  simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
+  simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.ofRange_none_iff _ _ _ _
 
-/-- Two integers of this leg's step with one field image, read on exactly the
-integers `authorizeLeg`'s cast check covers before it refuses with
-`policyCastAlias`. -/
 def castAliasLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option (Int × Int) := do
-  let wanted := (tuple.request incidence).2
-  let context := step prepared tuple incidence
-  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
-  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  castAlias F (intsOf committed.record.predicate witness.oldState witness.newState)
+  let law ← (policyConfig prepared tuple incidence).resolve?
+  castAlias F (intsOf law.predicate (step prepared tuple incidence).oldState (step prepared tuple incidence).newState)
 
-/-- The leg names a pair exactly when `authorizeLeg`'s cast check on its resolved law fails. -/
 theorem castAliasLeg_none_iff_castInjOn [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
-    {committed : CommittedPolicy}
-    (resolved : (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed) :
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence))
+    (resolved : (policyConfig prepared tuple incidence).resolve? = some law) :
     castAliasLeg prepared tuple incidence = none ↔
-      castInjOn F (intsOf committed.record.predicate
+      castInjOn F (intsOf law.predicate
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) := by
   unfold castAliasLeg
-  simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
+  simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact castAlias_none_iff F _
 
 /-- The first leg whose step carries two integers with one field image. -/
@@ -679,39 +623,25 @@ states as `lawLeaf`, explained only through slots that grant covers
 def lawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option Refusal := do
-  let wanted := (tuple.request incidence).2
-  let context := step prepared tuple incidence
-  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
-  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  if Minidregg.Pred.eval committed.record.predicate witness.oldState witness.newState then none
-  else some (Refusal.lawDeniedFor (fieldsOf incidence) committed.record.predicate
-    witness.oldState witness.newState)
+  let law ← (policyConfig prepared tuple incidence).resolve?
+  if Minidregg.Pred.eval law.predicate (step prepared tuple incidence).oldState (step prepared tuple incidence).newState then none
+  else some (ComposedLawDiagnostics.publicRefusal (fieldsOf incidence) law)
 
-/-- Narrowing changes what a refusal says, never whether there is one: a leg is refused
-exactly when its law names a failing clause (`lawLeaf`, hence exactly when submission's
-compiled check rejects, `lawLeaf_refuses_iff_verifies_rejects`). -/
+/-- Disclosure changes the explanation, never the complete effective verdict. -/
 theorem lawRefusal_isSome [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
-    (lawRefusal fieldsOf prepared tuple incidence).isSome =
-      (lawLeaf prepared tuple incidence).isSome := by
+    (lawRefusal fieldsOf prepared tuple incidence).isSome = (lawLeaf prepared tuple incidence).isSome := by
   unfold lawRefusal lawLeaf
-  dsimp only
-  cases (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
+  cases (policyConfig prepared tuple incidence).resolve? with
   | none => simp
-  | some committed =>
+  | some law =>
       simp only [Option.bind_eq_bind, Option.bind_some]
       split
-      · next accepts =>
-          rw [(LawLeaf.of_none_iff _ _ _).mpr accepts]
-          rfl
+      · next accepts => rw [(LawLeaf.of_none_iff _ _ _).mpr accepts]; rfl
       · next rejects =>
-          cases named : LawLeaf.of committed.record.predicate _ _ with
-          | none =>
-              have := (LawLeaf.of_none_iff _ _ _).mp named
-              exact absurd this rejects
+          cases named : LawLeaf.of law.predicate _ _ with
+          | none => exact absurd ((LawLeaf.of_none_iff _ _ _).mp named) rejects
           | some _ => rfl
 
 /-- The first leg (targets in order, then the authority leg) whose law refuses, as the
@@ -726,14 +656,18 @@ def firstLawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Fi
 def firstRangeRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
-    (rangeLeaf prepared tuple i).map (Refusal.lawInputRangeFor (fieldsOf i))
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i => do
+    let _ ← rangeLeaf prepared tuple i
+    let law ← (policyConfig prepared tuple i).resolve?
+    pure (ComposedLawDiagnostics.publicRefusal (fieldsOf i) law)
 
 def firstCastRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
-  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
-    (castAliasLeg prepared tuple i).map fun (x, y) => Refusal.castAliasFor (fieldsOf i) x y
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i => do
+    let _ ← castAliasLeg prepared tuple i
+    let law ← (policyConfig prepared tuple i).resolve?
+    pure (ComposedLawDiagnostics.publicRefusal (fieldsOf i) law)
 
 structure SignedCommand where
   commandBytes : List UInt8
@@ -1199,9 +1133,22 @@ def sourceGuards (prepared : PreparedInvocation deployment profile ambient durab
   (List.finRange command.targets.length).filterMap fun i =>
     if command.targets[i].isRead then some (targetReadGuard prepared i) else none
 
+/-- Full current/pinned source chains and structural kind bindings used by every
+incidence. An unavailable dependency is retained as failure, never silently
+converted to an admissible empty set. -/
+def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Option (List ReadGuard) := do
+  let groups ← ((List.finRange command.targets.length).map some ++ [none]).mapM fun incidence => do
+    let structural ← kindDependencies prepared incidence
+    let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+      prepared.directory.directory profile.semantics (incidenceTarget command incidence).target
+      structural.additional
+    pure ((sources ++ structural.readGuards).map fun (id, root) => (⟨⟨id⟩, root⟩ : ReadGuard))
+  pure groups.flatten
+
 /-- The domain reads of every invocation: the authority cell and the clock. -/
 def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  prepared.authority.readGuards ++ [prepared.clock.readGuard]
+  prepared.authority.readGuards ++ [prepared.clock.readGuard] ++ (lawSourceGuards prepared).getD []
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
@@ -1212,7 +1159,8 @@ def PhysicalShape (prepared : PreparedInvocation deployment profile ambient dura
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (lawSourceGuards prepared).isSome = true
 
 /- Construct the full target writes once for the five physical-shape clauses.
 The ordinary proposition below remains the receiver's authority condition;
@@ -1226,7 +1174,8 @@ def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient
   decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
   decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
   decide (∀ guard ∈ source, guard.cellId ∉ ids) &&
-  decide (∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+  decide (∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) &&
+  (lawSourceGuards prepared).isSome
 
 theorem physicalShapeCheck_iff
     (prepared : PreparedInvocation deployment profile ambient durable command) :
