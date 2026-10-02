@@ -142,7 +142,7 @@ theorem authorized_resolved_exact
   have policyAccepted := authorized_verifies authorized
   rcases (verifies_iff_verified config request authorized.policyWitness).mp
       policyAccepted with
-    ⟨selected, selectedResolved, policyIdExact, epochExact, domainExact,
+    ⟨selected, selectedResolved, _neutral, policyIdExact, epochExact, domainExact,
       semanticsExact, recordAddress, witnessAddress, _, _, _, _⟩
   rw [resolved] at selectedResolved
   cases selectedResolved
