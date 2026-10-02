@@ -34,6 +34,10 @@ struct Queue {
     last_author: Option<String>,
     #[serde(default)]
     cursors:std::collections::BTreeMap<String,u64>,
+    #[serde(default)]
+    maintenance_revision:Option<String>,
+    #[serde(default)]
+    maintenance_pending:Option<Value>,
 }
 fn digest(value: &impl Serialize) -> Result<String> {
     sha256_bytes(&serde_json::to_vec(value).map_err(|e|e.to_string())?)
@@ -174,6 +178,18 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
     brief["recentMemberEntries"]=json!([selected.entry]);
     Ok(Some(brief))
 }
+pub(crate) fn refuse_selected(state:&Path,evidence:Value)->Result<()> {
+    let mut q=open(state)?;let r=q.selected.as_ref().ok_or("request refusal has no selection")?;
+    if r.started.is_some() {return Err("started request cannot be refused without exact native terminal evidence".into());}
+    record(state,r,"refused",evidence)?;q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;
+    atomic_json(&path(state),&q)
+}
+pub(crate) fn maintenance_needed(state:&Path,revision:&str)->Result<bool> {
+    Ok(open(state)?.maintenance_revision.as_deref()!=Some(revision))
+}
+pub(crate) fn maintenance_started(state:&Path,prompt_id:&str,revision:&str)->Result<()> {
+    let mut q=open(state)?;q.maintenance_pending=Some(json!({"residentPromptId":prompt_id,"revision":revision}));atomic_json(&path(state),&q)
+}
 pub(crate) fn started(state:&Path,prompt_id:&str,input:&str)->Result<()> {
     let mut q=open(state)?;
     if let Some(r)=q.selected.as_mut() {r.started=Some(json!({"residentPromptId":prompt_id,"inputSha256":input}));}
@@ -192,22 +208,31 @@ pub(crate) fn dismiss(state:&Path)->Result<()> {
 /// not run a second model or silently classify an uncertain write as done.
 pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)->Result<()> {
     let mut q=open(state)?;
+    if let (Some(pending),Some(frame))=(&q.maintenance_pending,completion) {
+        if frame["outcome"]=="completed" && frame["residentOrigin"]["residentPromptId"]==pending["residentPromptId"] {
+            q.maintenance_revision=Some(pending["revision"].as_str().ok_or("maintenance revision absent")?.to_owned());
+            q.maintenance_pending=None;atomic_json(&path(state),&q)?;
+        }
+    }
     let Some(r)=q.selected.as_ref() else{return Ok(())};
     if terminal(state,r)? {q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;return atomic_json(&path(state),&q);}
     let Some(start)=&r.started else{return Ok(())};
     let Some(frame)=completion else{return Ok(())};
     if frame["residentOrigin"]["residentPromptId"]!=start["residentPromptId"] {return Ok(())};
     let op=frame["residentOrigin"]["promptOperationId"].as_u64().ok_or("request completion origin absent")?;
-    let receipt_path=controller.join(format!("resident-delivered-{op:016}.json"));
-    if !receipt_path.exists() {return Err("selected request completed without final delivery receipt; recovery required".into());}
+    let performed_path=controller.join(format!("resident-delivered-{op:016}.json"));
+    let refused_path=controller.join(format!("resident-final-refused-{op:016}.json"));
+    if performed_path.exists() && refused_path.exists() {return Err("request has conflicting native terminal receipts".into());}
+    let refused=refused_path.exists();let receipt_path=if refused {refused_path} else {performed_path};
+    if !receipt_path.exists() {return Err("selected request completed without native terminal receipt; recovery required".into());}
     let receipt:Value=serde_json::from_slice(&bounded_regular_file(&receipt_path,1_048_576)?).map_err(|e|e.to_string())?;
-    if receipt["type"]!="mini-resident-delivered-v1" || receipt["origin"]!=frame["residentOrigin"]
-        || receipt["result"]["result"]["resolution"]!="performed"
+    if receipt["type"]!=if refused {"mini-resident-final-refused-v1"} else {"mini-resident-delivered-v1"} || receipt["origin"]!=frame["residentOrigin"]
+        || receipt["result"]["result"]["resolution"]!=if refused {"refused"} else {"performed"}
         || receipt["result"]["expectedReply"]!=json!([r.entry["cell"],r.entry["sequence"]])
         || receipt["result"]["arguments"]["to"]!=r.entry["author"] {
         return Err("request receipt does not confirm selected source identity".into());
     }
-    record(state,r,"completed",json!({"deliveryReceipt":receipt_path,"sha256":digest(&receipt)?,"origin":receipt["origin"]}))?;
+    record(state,r,if refused {"refused"} else {"completed"},json!({"deliveryReceipt":receipt_path,"sha256":digest(&receipt)?,"origin":receipt["origin"]}))?;
     q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;
     atomic_json(&path(state),&q)
 }
@@ -291,6 +316,28 @@ mod tests {
         let q=open(&state).unwrap();assert!(q.pending.len()<249);assert!(q.pending.len()>64);
         assert!(fs::metadata(path(&state)).unwrap().len()<MAX_STATE_BYTES as u64);
         select(&p,&state,Limits {pending:1024,per_author:1024,page_size:256}).unwrap();open(&state).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]fn deterministic_prompt_refusal_advances_author_without_provider_dispatch() {
+        let state=fixture("prompt-refusal");let p=prepared(vec![entry("20",1),entry("21",2)]);
+        select(&p,&state,Limits::default()).unwrap();refuse_selected(&state,json!({"basis":"prompt-frame-byte-bound"})).unwrap();
+        assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
+        started(&state,"source-id","input").unwrap();assert!(refuse_selected(&state,json!({})).is_err());
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]fn selected_completion_satisfies_unchanged_maintenance_without_another_prompt() {
+        let state=fixture("maintenance");let controller=state.join("controller");fs::create_dir(&controller).unwrap();
+        let p=prepared(vec![entry("20",1)]);select(&p,&state,Limits::default()).unwrap();
+        started(&state,"selected-source","request-input").unwrap();maintenance_started(&state,"selected-source","maintenance-revision").unwrap();
+        let frame=json!({"outcome":"completed","residentOrigin":{"residentPromptId":"selected-source","promptOperationId":1}});
+        let receipt=json!({"type":"mini-resident-delivered-v1","origin":frame["residentOrigin"],"result":{"expectedReply":["20",1],"arguments":{"to":"20"},"result":{"resolution":"performed"}}});
+        atomic_json(&controller.join("resident-delivered-0000000000000001.json"),&receipt).unwrap();
+        reconcile(&state,&controller,Some(&frame)).unwrap();
+        assert!(select(&p,&state,Limits::default()).unwrap().is_none());
+        assert!(!maintenance_needed(&state,"maintenance-revision").unwrap(),"empty queue does not dispatch another provider for unchanged maintenance");
+        assert!(maintenance_needed(&state,"changed-program-revision").unwrap());
         fs::remove_dir_all(state).unwrap();
     }
 

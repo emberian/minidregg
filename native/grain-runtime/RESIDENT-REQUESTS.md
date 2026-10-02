@@ -39,6 +39,8 @@ same-height entries and interleaved streams therefore cannot skip one another.
 Unreadable streams retain their cursors while other eligible authors advance.
 There is no total room-history admission ceiling.
 
+A request whose escaped prompt plus program exceeds the framed control byte bound receives a retained refusal before provider dispatch, allowing the next author to advance.
+
 Selection is fsynced before the unique resident prompt enters the existing framed
 controller. Exactly one addressed entry enters its prompt and final routing.
 Current membership is revalidated before generation; revoked queued work receives
@@ -49,7 +51,7 @@ another model call. This blocks only that resident/controller.
 The queue completes only from the source completion plus native final-delivery
 receipt with the exact author and stable stream-cell/sequence reply proof. A lost
 driver completion frame is recovered by the existing no-model source receiver.
-Exact final retries preserve operation IDs, charges and native receipts. The
+Exact final retries preserve operation IDs, charges and native receipts. An exact allocated native final operation that is proven refused receives a distinct `mini-resident-final-refused-v1` receipt, clears its pending marker and lets the next author advance; uncertain operations retain the marker. The refused receipt preserves any already paid model/tool/account charges and does not claim a delivered answer. The
 source-only `tail --entry CELL:SEQUENCE` reads that exact native stream window,
 updates the observed reply cache, and does not depend on the entry remaining in a
 recent tail or on replaying the entire room's history. The ordinal in the observed
@@ -57,4 +59,4 @@ feed is transient; the native stable reply guard remains mandatory.
 
 When no addressed request is waiting, the summoned program can still perform
 maintenance on changed role/document inputs. Such work has no invented addressed
-recipient. Native tools continue to enforce grants, budgets and exact effects.
+recipient. A separate maintenance revision is committed from the matching source completion, including addressed turns, so an unchanged empty queue does not buy a second model turn solely because the last turn addressed a request. Native tools continue to enforce grants, budgets and exact effects.

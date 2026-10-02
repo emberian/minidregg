@@ -316,6 +316,16 @@ fn reply_number(resolution: &Value) -> Result<u64> {
     resolution["arguments"]["re"].as_str().and_then(|s|s.parse::<u64>().ok())
         .filter(|n|*n>0 && *n<=9_999_999_999).ok_or_else(||"retained final reply number invalid".into())
 }
+fn validate_terminal_resolution(record:&FinalRecord,resolution:&Value)->Result<()> {
+    match resolution["result"]["resolution"].as_str() {
+        Some("performed")=>validate_final_resolution(record,resolution),
+        Some("refused")=>{
+            let mut performed=resolution.clone();performed["result"]["resolution"]=json!("performed");
+            validate_final_resolution(record,&performed)
+        },
+        _=>Err("final effect is uncertain; retain exact source operation without replay".into()),
+    }
+}
 fn validate_final_resolution(record: &FinalRecord, resolution: &Value) -> Result<()> {
     let n=reply_number(resolution)?;
     let expected=json!([record.source_entry["cell"],record.source_entry["sequence"]]);
@@ -643,7 +653,7 @@ impl Runtime {
             reply_number(&receipt["result"])?
         } else { self.delivery_reply_number(&record)? };
         Ok(
-            json!({"type":"mini-resident-delivery-plan-v1","status":if done.is_some(){"delivered"}else{"pending"},
+            json!({"type":"mini-resident-delivery-plan-v1","status":if done.as_ref().is_some_and(|r|r["type"]=="mini-resident-final-refused-v1") {"refused"} else if done.is_some(){"delivered"}else{"pending"},
             "plan":record,"planSha256":hash(&record)?,"residentState":state,"residentSha256":sha256_bytes(guard.bytes()?)?,
             "receipt":done,"replyEntryNumber":reply_entry_number,"arguments":record.arguments(reply_entry_number),"modelRequests":0}),
         )
@@ -664,7 +674,7 @@ impl Runtime {
         if let Some(id) = self.journal.resident_delivery.as_ref().and_then(|p|p.operation_id) {
             let result = self.journal.room_resolutions.iter().find(|r|r["operationId"]==id.to_string()).cloned();
             if let Some(ref resolution)=result {
-                validate_final_resolution(record,resolution)?;
+                validate_terminal_resolution(record,resolution)?;
                 let n=self.journal.resident_delivery.as_ref().and_then(|p|p.reply_entry_number)
                     .ok_or("allocated reply number absent")?;
                 if resolution["arguments"]!=record.arguments(n) { return Err("allocated final arguments changed".into()); }
@@ -765,24 +775,19 @@ impl Runtime {
     }
 
     fn delivery_receipt(&self, record: &FinalRecord) -> Result<Option<Value>> {
-        let path = self
-            .config
-            .state_dir
-            .join(format!("resident-delivered-{:016}.json", record.prompt()?));
-        if !path.try_exists().map_err(|e| e.to_string())? {
-            return Ok(None);
+        let mut found=None;
+        for (prefix,kind,status) in [("resident-delivered","mini-resident-delivered-v1","performed"),
+            ("resident-final-refused","mini-resident-final-refused-v1","refused")] {
+            let path=self.config.state_dir.join(format!("{prefix}-{:016}.json",record.prompt()?));
+            if !path.try_exists().map_err(|e|e.to_string())? {continue;}
+            let value:Value=serde_json::from_slice(&bounded_regular_file(&path,65_536)?).map_err(|e|e.to_string())?;
+            if value["type"]!=kind || value["planSha256"]!=hash(record)? || value["origin"]!=record.origin
+                || value["result"]["result"]["resolution"]!=status || found.is_some() {
+                return Err("resident terminal receipt differs from final identity or conflicts".into());
+            }
+            validate_terminal_resolution(record,&value["result"])?;found=Some(value);
         }
-        let value: Value = serde_json::from_slice(&bounded_regular_file(&path, 65_536)?)
-            .map_err(|e| e.to_string())?;
-        if value["type"] != "mini-resident-delivered-v1"
-            || value["planSha256"] != hash(record)?
-            || value["origin"] != record.origin
-            || value["result"]["result"]["resolution"] != "performed"
-        {
-            return Err("resident delivery receipt differs from final identity".into());
-        }
-        validate_final_resolution(record,&value["result"])?;
-        Ok(Some(value))
+        Ok(found)
     }
 
     pub(crate) fn deliver_resident_final(&mut self, path: &Path) -> Result<Value> {
@@ -867,9 +872,11 @@ impl Runtime {
             .reply_entry_number = Some(request.reply_entry_number);
         self.save()?;
         let id = self.allocate_delivery_operation()?;
-        self.room_call_with_id("mini_say", &arguments, Some(id))?;
-        let resolution = self.journal.room_resolutions.iter()
-            .find(|r|r["operationId"]==id.to_string()).cloned().ok_or("delivery exact room result absent")?;
+        let attempt=self.room_call_with_id("mini_say", &arguments, Some(id));
+        let resolution = match self.journal.room_resolutions.iter().find(|r|r["operationId"]==id.to_string()).cloned() {
+            Some(exact)=>exact,
+            None=>return Err(attempt.err().unwrap_or_else(||"delivery exact room result absent".into())),
+        };
         self.finish_delivery(&record, &arguments, resolution)
     }
 
@@ -902,16 +909,24 @@ impl Runtime {
         arguments: &Value,
         resolution: Value,
     ) -> Result<Value> {
-        validate_final_resolution(record,&resolution)?;
+        validate_terminal_resolution(record,&resolution)?;
+        let refused=resolution["result"]["resolution"]=="refused";
+        if refused {
+            let allocated=self.journal.resident_delivery.as_ref().and_then(|p|p.operation_id).ok_or("refused final has no allocated source operation")?;
+            if resolution["operationId"]!=allocated.to_string()
+                || !self.journal.room_resolutions.iter().any(|r|*r==resolution) {
+                return Err("refused final lacks exact retained native operation".into());
+            }
+        }
         if resolution["arguments"] != *arguments {
             return Err("delivery exact arguments differ; no fresh payment or resend".into());
         }
-        let receipt = json!({"type":"mini-resident-delivered-v1","origin":record.origin,
+        let receipt = json!({"type":if refused {"mini-resident-final-refused-v1"} else {"mini-resident-delivered-v1"},"origin":record.origin,
             "planSha256":hash(&record)?,"result":resolution,"modelRequests":0,"textIsModelOutput":true});
         let done = self
             .config
             .state_dir
-            .join(format!("resident-delivered-{:016}.json", record.prompt()?));
+            .join(format!("{}-{:016}.json",if refused {"resident-final-refused"} else {"resident-delivered"},record.prompt()?));
         retain(&done, &receipt)?;
         self.journal.resident_delivery = None;
         self.save()?;
@@ -946,7 +961,7 @@ pub(crate) fn drain_completed(config: &Config, state: &Path, lock: &File) -> Res
         if plan["type"] != "mini-resident-delivery-plan-v1" {
             return Err("delivery plan response refused".into());
         }
-        if plan["status"] != "pending" && plan["status"] != "delivered" {
+        if plan["status"] != "pending" && plan["status"] != "delivered" && plan["status"] != "refused" {
             return Err("pending delivery has no exact addressed final".into());
         }
         let request = json!({"type":"mini-resident-delivery-request-v1","residentState":state,
@@ -958,7 +973,7 @@ pub(crate) fn drain_completed(config: &Config, state: &Path, lock: &File) -> Res
             &format!("resident deliver-final {}", path.display()),
         )?;
         let result: Value = serde_json::from_str(&response).map_err(|_| response.clone())?;
-        if result["type"] != "mini-resident-delivered-v1" {
+        if result["type"] != "mini-resident-delivered-v1" && result["type"] != "mini-resident-final-refused-v1" {
             return Err("delivery did not return its exact receipt".into());
         }
         Ok(())
@@ -983,7 +998,7 @@ pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
     };
     let response=control::admin_call(Path::new(&args[1]),&format!("resident {verb} {text}"))?;
     let value:Value=serde_json::from_str(&response).map_err(|_|response.clone())?;
-    if value["type"]!=kind { return Err("delivery response type differs from requested operation".into()); }
+    if value["type"]!=kind && !(action=="deliver" && value["type"]=="mini-resident-final-refused-v1") { return Err("delivery response type differs from requested operation".into()); }
     println!("{response}");
     Ok(())
 }
@@ -1276,6 +1291,23 @@ mod tests {
             let mut wrong=proof.clone(); *wrong.pointer_mut(pointer).unwrap()=json!("wrong");
             assert!(attach_native_reply_proof(&record,&resolution,&wrong,&operation).is_err(),"{pointer}");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_refused_final_is_terminal_and_uncertain_final_retains_marker() {
+        let (root,mut rt,record)=receiving_fixture("delivery-refused");
+        rt.install_final(record.clone()).unwrap();rt.journal.resident_delivery.as_mut().unwrap().reply_entry_number=Some(7);
+        let id=rt.allocate_delivery_operation().unwrap();let mut resolution=performed(&record,id);
+        resolution["result"]=json!({"resolution":"uncertain","basis":"lost-native-result"});
+        rt.journal.room_resolutions.push(resolution.clone());
+        assert!(rt.finish_delivery(&record,&record.arguments(7),resolution.clone()).is_err());assert!(rt.journal.resident_delivery.is_some());
+        resolution["result"]=json!({"resolution":"refused","basis":"exact-operation-record","notResent":true});
+        rt.journal.room_resolutions[0]=resolution.clone();
+        let receipt=rt.finish_delivery(&record,&record.arguments(7),resolution).unwrap();
+        assert_eq!(receipt["type"],"mini-resident-final-refused-v1");assert!(rt.journal.resident_delivery.is_none());
+        assert_eq!(rt.delivery_receipt(&record).unwrap().unwrap(),receipt);
+        assert!(!rt.config.state_dir.join("resident-delivered-0000000000000001.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

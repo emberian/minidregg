@@ -101,7 +101,7 @@ fn next_frame(reader: &mut impl BufRead, attachment: u64) -> Result<Value> {
 
 /// The controller's source-owned completion event, never model text, decides
 /// completion. A lost connection leaves pending durable and is not replayed.
-fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState, state: &Path) -> Result<()> {
+fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState, state: &Path, maintenance_revision:Option<&str>) -> Result<()> {
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; inspect the controller before another invocation".into()); }
     let mut socket = UnixStream::connect(&config.control_socket).map_err(|e| format!("resident connect: {e}"))?;
     socket.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
@@ -129,6 +129,9 @@ fn prompt(config: &crate::Config, prepared: &Value, journal: &mut ResidentState,
     let input = assignment_fingerprint(prepared)?;
     if prepared.get("selectedRequest").is_some() {
         resident_requests::started(state.parent().ok_or("resident state parent absent")?, &resident_prompt_id, &input)?;
+    }
+    if let Some(revision)=maintenance_revision {
+        resident_requests::maintenance_started(state.parent().ok_or("resident state parent absent")?,&resident_prompt_id,revision)?;
     }
     journal.pending = Some(json!({"selectedRequest":prepared["selectedRequest"],"residentPromptId":resident_prompt_id,
         "inputSha256":input,"promptSha256":prompt_sha256, "attachmentId":attachment,"requestId":2}));
@@ -252,6 +255,10 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             println!("{}", json!({"type":"resident-dismissed","room":room.room,"budgetReturn":journal.returned}));
             return Ok(());
         }
+        let mut maintenance=prepared.clone();
+        maintenance.as_object_mut().unwrap().remove("sourceRequests");
+        maintenance.as_object_mut().unwrap().remove("sourceRoom");
+        let maintenance_input=assignment_fingerprint(&maintenance)?;
         let prepared = match resident_requests::select(&prepared,&options.state,limits)? {
             Some(selected) => selected,
             None => {
@@ -263,9 +270,13 @@ pub(crate) fn main(path: &Path) -> Result<()> {
                 maintenance
             }
         };
-        let input = assignment_fingerprint(&prepared)?;
-        if journal.last_input.as_ref() != Some(&input) {
-            prompt(&config, &prepared, &mut journal, &state)?;
+        if prepared.get("selectedRequest").is_some() || resident_requests::maintenance_needed(&options.state,&maintenance_input)? {
+            let prompt_bytes=format!("{ASSIGNMENT_PREFIX}{}",prompt_assignment(&prepared)).len();
+            if prepared.get("selectedRequest").is_some() && prompt_bytes+256>16_384 {
+                resident_requests::refuse_selected(&options.state,json!({"basis":"prompt-frame-byte-bound","promptBytes":prompt_bytes,"frameBytes":16384,"metadataReserve":256}))?;
+                continue;
+            }
+            prompt(&config, &prepared, &mut journal, &state, Some(&maintenance_input))?;
             resident_completion::drain(&config, &options.state, &lock)?;
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
@@ -307,7 +318,7 @@ mod tests {
     fn pending_resident_prompt_is_not_replayed_on_new_attachment() {
         let (root, rt) = crate::tests::restart_resolution_fixture("resident-pending");
         let mut state = ResidentState { pending:Some(json!({"requestId":2})), ..ResidentState::default() };
-        assert!(prompt(&rt.config, &json!({}), &mut state, &root.join("journal.json")).unwrap_err().contains("uncertain"));
+        assert!(prompt(&rt.config, &json!({}), &mut state, &root.join("journal.json"),None).unwrap_err().contains("uncertain"));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -351,7 +362,7 @@ mod tests {
         });
         let mut journal = ResidentState { last_completion:Some(json!({"type":"prompt-complete",
             "attachmentId":7,"requestId":2,"outcome":"failed"})), ..ResidentState::default() };
-        let result = prompt(&rt.config, &json!({"room":"lab"}), &mut journal, &journal_path);
+        let result = prompt(&rt.config, &json!({"room":"lab"}), &mut journal, &journal_path,None);
         server.join().unwrap();
         if lose_reply {
             assert!(result.is_err()); assert!(journal.pending.is_some()); assert_eq!(journal.completed,0);
