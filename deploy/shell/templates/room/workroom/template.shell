@@ -15,7 +15,8 @@ room new $ROOM --law open
 
 # The map. Everyone in the room may read it; only you write it, and it only
 # grows (no line edited, none struck). Its links are the room's map.
-doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]' --in $ROOM
+doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0, slot "content/names/unique" == 1 ] ]' --in $ROOM
+room index $ROOM-map-index $ROOM $ROOM/index
 
 # What the room says: a stream. An entry, once appended, stays (the store's own discipline).
 create $ROOM/wall stream open --in $ROOM
@@ -31,10 +32,13 @@ doc append $ROOM-map $ROOM/index 'workroom $ROOM: wall is what we say, notes is 
 submit $ROOM-map
 doc link $ROOM-map-wall $ROOM/index $ROOM/wall
 submit $ROOM-map-wall
+room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 doc link $ROOM-map-notes $ROOM/index $ROOM/notes
 submit $ROOM-map-notes
+room bind $ROOM-name-notes $ROOM notes $ROOM/notes
 doc link $ROOM-map-tasks $ROOM/index $ROOM/tasks
 submit $ROOM-map-tasks
+room bind $ROOM-name-tasks $ROOM tasks $ROOM/tasks
 
 # And back: notes points at the map.
 doc link $ROOM-notes-map $ROOM/notes $ROOM/index

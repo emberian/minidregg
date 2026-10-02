@@ -8,7 +8,8 @@
 room new $ROOM --law open
 
 # The map: everyone reads it, only you write it, and it only grows.
-doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]' --in $ROOM
+doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0, slot "content/names/unique" == 1 ] ]' --in $ROOM
+room index $ROOM-map-index $ROOM $ROOM/index
 
 # The room talking: a stream any member who may append speaks on.
 create $ROOM/wall stream open --in $ROOM
@@ -20,5 +21,7 @@ doc append $ROOM-map $ROOM/index 'social room $ROOM: wall is the room talking, i
 submit $ROOM-map
 doc link $ROOM-map-wall $ROOM/index $ROOM/wall
 submit $ROOM-map-wall
+room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 doc link $ROOM-map-intro $ROOM/index $ROOM/intro
 submit $ROOM-map-intro
+room bind $ROOM-name-intro $ROOM intro $ROOM/intro
