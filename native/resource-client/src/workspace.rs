@@ -3134,7 +3134,14 @@ fn propose_summary_once(
     let intent_bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     let intent_sha = format!("{:x}", Sha256::digest(&intent_bytes));
     let proposal_dir = root.join("proposals").join(proposal_id);
-    make_private_dir(&proposal_dir)?;
+    if proposal_dir.exists() {
+        private_dir(&proposal_dir)?;
+        for entry in fs::read_dir(&proposal_dir).map_err(|error| error.to_string())? {
+            if entry.map_err(|error| error.to_string())?.file_name() != crate::replan::REPLANNED {
+                return Err("proposal already holds authored input".into());
+            }
+        }
+    } else { make_private_dir(&proposal_dir)?; }
     private_file(
         &proposal_dir.join("request.json"),
         &serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?,
@@ -3184,6 +3191,48 @@ pub(crate) fn submit_intent(
         bind_delegation_attempt(root, workspace, &source, &attempt)?;
     }
     eprintln!("workspace attempt: {}", attempt.display());
+    if let Some((request, proposal_dir, proposal_id)) = append_recovery_input(root, &source, kind, prepare_only)? {
+        crate::create_dir(&attempt)?;
+        let refresh = std::cell::Cell::new(false);
+        let result = crate::replan::replan(
+            "document append",
+            || {
+                // Select the new preimage after backoff, so waiting cannot
+                // itself stale the newly authored append command.
+                if refresh.get() {
+                    propose_request(root, workspace, &request, &proposal_id, None, false)?;
+                    refresh.set(false);
+                }
+                crate::submit_once(&workspace_host(workspace)?, &member_path(workspace, "config")?,
+                    &source, OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
+            },
+            |_, decision| {
+                if crate::replan::is_stale_root(decision) { return true; }
+                let final_refused = crate::replan::is_final_admission_refusal(decision)
+                    && attempt.join("call.bin").is_file();
+                if !final_refused && !crate::replan::is_prepare_stale_target(decision) { return false; }
+                // A refusal alone does not establish preimage drift. The
+                // original observer proves it independently through a signed read.
+                match append_preimage_moved(root, workspace, &request, &source) {
+                    Ok(moved) => { refresh.set(moved); moved },
+                    Err(error) => { eprintln!("append recovery read failed: {error}"); false }
+                }
+            },
+            |_| {
+                crate::replan::retire_next(&attempt)?;
+                if refresh.get() && source.exists() {
+                    crate::replan::retire_next(&proposal_dir)?;
+                }
+                Ok(())
+            },
+        );
+        // Intermediate final refusals remain retained evidence, not additional
+        // stdout documents. A caller sees exactly the final native outcome.
+        if attempt.join("outcome.json").exists() {
+            crate::print_json(&bounded_json(&attempt.join("outcome.json"))?)?;
+        }
+        return result;
+    }
     submit(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
@@ -3197,6 +3246,85 @@ pub(crate) fn submit_intent(
         renounce_note(&source);
     }
     Ok(())
+}
+
+/// Automatic root selection is safe to refresh only for an append-only
+/// high-level request. An explicit CAS, edit, push, raw content command or run
+/// claim keeps the exact authored semantics and is never regenerated here.
+fn append_request_name(request: &Value) -> Option<&str> {
+    let object = request.as_object()?;
+    if object.len() != 3 || request["type"] != "minidregg-workspace-proposal-v1"
+        || request["action"] != "invoke" { return None; }
+    let targets = request["targets"].as_array()?;
+    if targets.len() != 1 { return None; }
+    let target = &targets[0];
+    if target.as_object()?.len() != 2 || target.get("expectedTargetRoot").is_some() { return None; }
+    let payload = &target["payload"];
+    if payload.as_object()?.len() != 2 || payload["type"] != "document" { return None; }
+    let actions = payload["actions"].as_array()?;
+    if actions.is_empty() || actions.len() > 16 || !actions.iter().all(|action|
+        action.as_object().is_some_and(|row| row.len() == 2)
+        && action["type"] == "append" && action["text"].is_string()) { return None; }
+    target["name"].as_str()
+}
+
+fn append_recovery_input(root: &Path, source: &Path, kind: &str, prepare_only: bool)
+    -> Result<Option<(Value, PathBuf, String)>> {
+    if prepare_only || kind != "intent" || source.file_name() != Some(OsStr::new("intent.json")) {
+        return Ok(None);
+    }
+    let source = fs::canonicalize(source).map_err(|error| error.to_string())?;
+    let Some(dir) = source.parent() else { return Ok(None) };
+    let proposals = fs::canonicalize(root.join("proposals")).map_err(|error| error.to_string())?;
+    if dir.parent() != Some(proposals.as_path()) { return Ok(None); }
+    if !dir.join("request.json").exists() || !dir.join("proposal.json").exists() { return Ok(None); }
+    let request = bounded_json(&dir.join("request.json"))?;
+    if append_request_name(&request).is_none() { return Ok(None); }
+    let summary = bounded_json(&dir.join("proposal.json"))?;
+    let bytes = fs::read(&source).map_err(|error| error.to_string())?;
+    if member(&summary, "intentSha256")? != format!("{:x}", Sha256::digest(&bytes)) {
+        return Err("append proposal intent differs from retained authoring".into());
+    }
+    let id = dir.file_name().and_then(OsStr::to_str).ok_or("proposal ID is not UTF-8")?;
+    if member(&summary, "proposalId")? != id { return Err("append proposal ID differs from path".into()); }
+    Ok(Some((request, dir.to_owned(), id.to_owned())))
+}
+
+fn append_preimage_moved(root: &Path, workspace: &Value, request: &Value, source: &Path) -> Result<bool> {
+    let name = append_request_name(request).ok_or("append recovery requires an unpinned append")?;
+    let intent = bounded_json(source)?;
+    let command = &intent["purpose"]["draft"]["command"];
+    let targets = command["targets"].as_array().ok_or("append intent lacks targets")?;
+    if targets.len() != 1 || intent["purpose"]["draft"]["type"] != "invoke"
+        || !command.as_object().is_some_and(|row| row.len() == 3)
+        || command["subject"] != workspace["subject"] { return Err("append intent differs from request".into()); }
+    let target = &targets[0];
+    if !append_lowering_matches(request, target) { return Ok(false); }
+    let reference = reference(root, name)?;
+    if target["target"] != reference["target"] || target["kind"] != reference["kind"]
+        || target["capability"] != reference["operationCapability"]
+        || target["observeCapability"] != reference["observeCapability"] {
+        return Err("append reference changed since authoring".into());
+    }
+    let (view, _, _) = signed_view(root, workspace, &reference, "resource")?;
+    let actual = member(&view["cell"], "root")?;
+    field_decimal(actual, "signed resource root")?;
+    Ok(actual != member(target, "expectedTargetRoot")?)
+}
+
+/// Bind the retained high-level text to the original command. This first
+/// recovery path covers ordinary text appends; encrypted/protected payloads
+/// and other content operations retain their exact-call behavior.
+fn append_lowering_matches(request: &Value, target: &Value) -> bool {
+    let Some(wanted) = request["targets"][0]["payload"]["actions"].as_array() else { return false };
+    let Some(actual) = target["payload"]["actions"].as_array() else { return false };
+    target["payload"]["type"] == "content" && actual.len() == wanted.len()
+        && actual.iter().zip(wanted).all(|(got, input)| {
+            got.as_object().is_some_and(|row| row.len() == 4)
+                && got["type"] == "createAtom" && got["kind"] == json!({"type":"text"})
+                && got["atom"].as_str().is_some_and(|atom| field_decimal(atom, "append atom").is_ok())
+                && input["text"].as_str().is_some_and(|text| got["payload"] == hex(text.as_bytes()))
+        })
 }
 
 /// The grants this workspace delegated from `capability`, transitively, as
@@ -6286,6 +6414,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn append_recovery_preserves_explicit_pins_and_other_document_operations() {
+        let request = serde_json::json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+            "targets":[{"name":"room/notes","payload":{"type":"document","actions":[{"type":"append","text":"hello"}]}}]});
+        assert_eq!(super::append_request_name(&request), Some("room/notes"));
+        let mut pinned = request.clone(); pinned["targets"][0]["expectedTargetRoot"] = serde_json::json!("8");
+        assert!(super::append_request_name(&pinned).is_none());
+        for kind in ["edit", "push", "annotate", "link"] {
+            let mut other = request.clone(); other["targets"][0]["payload"]["actions"][0]["type"] = serde_json::json!(kind);
+            assert!(super::append_request_name(&other).is_none());
+        }
+        let mut raw = request.clone(); raw["targets"][0]["payload"]["type"] = serde_json::json!("content");
+        assert!(super::append_request_name(&raw).is_none());
+        let mut run = request.clone(); run["run"] = serde_json::json!({});
+        assert!(super::append_request_name(&run).is_none());
+        let mut multiple = request.clone(); multiple["targets"].as_array_mut().unwrap().push(request["targets"][0].clone());
+        assert!(super::append_request_name(&multiple).is_none());
+        let target = serde_json::json!({"payload":{"type":"content","actions":[
+            {"type":"createAtom","atom":"3","kind":{"type":"text"},"payload":"68656c6c6f"}]}});
+        assert!(super::append_lowering_matches(&request, &target));
+        let mut changed = request.clone(); changed["targets"][0]["payload"]["actions"][0]["text"] = serde_json::json!("different");
+        assert!(!super::append_lowering_matches(&changed, &target));
+        let mut encrypted = target.clone(); encrypted["payload"]["actions"][0]["kind"] = serde_json::json!({"type":"sealed"});
+        assert!(!super::append_lowering_matches(&request, &encrypted));
+    }
+
     use super::*;
 
     fn atom(id: &str, text: &str, by: &str) -> Value {
