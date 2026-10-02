@@ -56,6 +56,8 @@ mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
+mod query_refusal;
+#[cfg(unix)]
 mod provider_continuity;
 mod replan;
 #[cfg(unix)]
@@ -1172,6 +1174,9 @@ fn socket_process(
         if command == "prepare" {
             let destination = Path::new(arguments[2]);
             prepare_refusal::retain(destination, &payload, config, &reply)?;
+        }
+        if command == "query" {
+            query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
         }
         return Err(match line {
             Some(line) => format!(
