@@ -108,6 +108,7 @@ class World:
         finally: os.close(directory)
 
     def run(self, label, argv, env=None):
+        argv = [str(value) for value in argv]
         self.serial += 1
         base = self.root / "logs" / f"{self.serial:04d}-{label}"
         save(base.with_suffix(".command.json"), argv)

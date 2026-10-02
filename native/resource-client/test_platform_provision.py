@@ -49,6 +49,12 @@ class ProvisioningContract(unittest.TestCase):
     def test_pin_change_refused_before_launch(self):
         (self.root/'binary').write_text('changed')
         with self.assertRaises(ValueError):p.validate(self.plan)
+    def test_command_retains_path_arguments(self):
+        run=self.root/'commands';run.mkdir();(run/'logs').mkdir()
+        world=p.World(run)
+        self.assertEqual(world.run('path-argument',[Path(sys.executable),'-c','print("ok")']), 'ok\n')
+        command=json.loads((run/'logs/0001-path-argument.command.json').read_text())
+        self.assertEqual(command[0],str(Path(sys.executable)))
     @unittest.skipUnless(Path('/proc').exists(),'Linux owned process groups')
     def test_owned_process_stop_and_pid_reuse_refusal(self):
         run=self.root/'runtime';run.mkdir();(run/'logs').mkdir()
