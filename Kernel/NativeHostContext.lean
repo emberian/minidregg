@@ -134,7 +134,9 @@ def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.Cel
 /-- The Store transport for this deployment: every new commit is judged by the
 tail law over this deployment's system cell. -/
 def Config.transport (config : Config) : DurableReceiverIO.Transport :=
-  config.storage.transport config.logStart config.systemCell
+  let storage := { config.storage with anchorIdentity :=
+    s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}" }
+  storage.transport config.logStart config.systemCell
 
 theorem Config.transport_systemCell (config : Config) :
     config.transport.systemCell = some config.systemCell := rfl

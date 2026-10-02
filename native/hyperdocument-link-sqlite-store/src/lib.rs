@@ -10,6 +10,8 @@
 //! proof of SQLite, POSIX locks, filesystem ordering, `fsync`, stable media,
 //! power-loss survival, or behavior under hostile directory mutation.
 
+mod anchor;
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::fmt;
 use std::fs;
@@ -94,25 +96,36 @@ pub enum PublishPhase {
     Begun,
     Inserted,
     Committed,
+    AnchorPrepared,
+    AnchorRenamed,
+    Anchored,
 }
 
 #[derive(Debug)]
 pub enum StoreError {
     Missing,
-    TooLarge { actual: usize, maximum: usize },
+    Anchor(&'static str),
+    TooLarge {
+        actual: usize,
+        maximum: usize,
+    },
     Conflict,
     /// The Store holds the retired single whole-image record. It is never
     /// reinterpreted as a durable log; the deployment must re-genesis.
     RetiredImage,
     InvalidRoot(PathBuf),
     InvalidPath,
-    Sqlite { code: i32, message: String },
+    Sqlite {
+        code: i32,
+        message: String,
+    },
     Io(io::Error),
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Anchor(reason) => write!(formatter, "durable head anchor refused: {reason}"),
             Self::Missing => formatter.write_str("published byte record is missing"),
             Self::TooLarge { actual, maximum } => {
                 write!(formatter, "record has {actual} bytes; maximum is {maximum}")
@@ -120,9 +133,8 @@ impl fmt::Display for StoreError {
             Self::Conflict => {
                 formatter.write_str("current bytes differ from expected and proposed bytes")
             }
-            Self::RetiredImage => formatter.write_str(
-                "store holds a retired whole-image record; re-genesis (no migration)",
-            ),
+            Self::RetiredImage => formatter
+                .write_str("store holds a retired whole-image record; re-genesis (no migration)"),
             Self::InvalidRoot(path) => {
                 write!(
                     formatter,
@@ -361,6 +373,7 @@ impl Drop for Transaction<'_> {
 }
 
 pub struct SqliteByteStore {
+    anchor_identity: Vec<u8>,
     root: PathBuf,
     database_path: PathBuf,
     database: Database,
@@ -372,6 +385,14 @@ pub type SqliteLinkStore = SqliteByteStore;
 
 impl SqliteByteStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
+        Self::open_with_identity(root, &[])
+    }
+
+    /// Opaque deployment identity supplied by the semantic Host; never parsed here.
+    pub fn open_with_identity(root: impl AsRef<Path>, identity: &[u8]) -> Result<Self, StoreError> {
+        if identity.len() > 65536 {
+            return Err(StoreError::Anchor("identity exceeds 64 KiB"));
+        }
         fs::create_dir_all(root.as_ref())?;
         // Canonicalize the already-created directory before asking SQLite for
         // `SQLITE_OPEN_NOFOLLOW`.  On macOS `/var` itself is a compatibility
@@ -424,6 +445,7 @@ impl SqliteByteStore {
         database.exec(b"PRAGMA fullfsync=ON\0")?;
         database.exec(b"PRAGMA checkpoint_fullfsync=ON\0")?;
         let store = Self {
+            anchor_identity: identity.to_vec(),
             root,
             database_path,
             database,
@@ -582,7 +604,6 @@ impl SqliteByteStore {
     }
 }
 
-
 /// The durable log interface: a seed, an append-only log of opaque
 /// `(record, tag)` entries at consecutive heights from 1, and opaque
 /// checkpoints keyed by height. Lean owns every byte's meaning, the chain and
@@ -647,10 +668,66 @@ impl SqliteByteStore {
         }
     }
 
+    /// Explicit first enrollment of an existing, separately audited Store.
+    /// Never called by ordinary reads: loss of an established anchor must refuse.
+    pub fn durable_anchor_enroll(&self) -> Result<(), StoreError> {
+        let guard = anchor::Guard::lock(&self.root)?;
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let head = if guard.read()?.is_some() {
+            self.anchor_head(&guard, &seed)?
+        } else {
+            self.current_anchor_head(&seed)?
+        };
+        transaction.commit()?;
+        guard.publish(&head)
+    }
+
+    fn current_anchor_head(&self, seed: &[u8]) -> Result<anchor::Head, StoreError> {
+        let height = self.durable_head()?;
+        let entry = if height == 0 {
+            None
+        } else {
+            self.durable_entry(height)?
+        };
+        Ok(anchor::Head::new(
+            &self.anchor_identity,
+            seed,
+            entry.as_ref(),
+        ))
+    }
+
+    fn anchor_head(&self, guard: &anchor::Guard, seed: &[u8]) -> Result<anchor::Head, StoreError> {
+        let retained = guard.read()?.ok_or(StoreError::Anchor(
+            "missing anchor; existing Stores require explicit audited enrollment",
+        ))?;
+        if self.durable_head()? < retained.height {
+            return Err(StoreError::Anchor("Store is behind retained head"));
+        }
+        let entry = if retained.height == 0 {
+            None
+        } else {
+            Some(
+                self.durable_entry(retained.height)?
+                    .ok_or(StoreError::Anchor("retained entry is missing"))?,
+            )
+        };
+        if retained != anchor::Head::new(&self.anchor_identity, seed, entry.as_ref()) {
+            return Err(StoreError::Anchor("genesis or retained head conflicts"));
+        }
+        self.current_anchor_head(seed)
+    }
+
     /// Install the seed once. The same seed again is `AlreadyPresent`; a
     /// different seed, or any seed over an existing log, is a conflict.
     pub fn durable_init(&self, seed: &[u8]) -> Result<PublishStatus, StoreError> {
         Self::validate_bound(seed)?;
+        let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
@@ -659,7 +736,9 @@ impl SqliteByteStore {
         self.refuse_retired_image()?;
         match self.durable_seed()? {
             Some(current) if current == seed => {
+                let head = self.anchor_head(&guard, seed)?;
                 transaction.commit()?;
+                guard.publish(&head)?;
                 return Ok(PublishStatus::AlreadyPresent);
             }
             Some(_) => return Err(StoreError::Conflict),
@@ -668,6 +747,15 @@ impl SqliteByteStore {
         if self.durable_head()? != 0 {
             return Err(StoreError::Conflict);
         }
+        let initial = anchor::Head::new(&self.anchor_identity, seed, None);
+        if guard.read()?.is_some_and(|retained| retained != initial) {
+            return Err(StoreError::Anchor(
+                "new seed conflicts with retained genesis",
+            ));
+        }
+        // Publish genesis first. An interrupted seed transaction may retry the
+        // exact same genesis; it cannot substitute a different one.
+        guard.publish(&initial)?;
         let statement = self
             .database
             .prepare(b"INSERT INTO durable_seed(slot,bytes) VALUES(1,?1)\0")?;
@@ -683,6 +771,7 @@ impl SqliteByteStore {
     /// One consistent read: the head, optionally the seed and the latest
     /// checkpoint, and every entry at `from` or above.
     pub fn durable_read(&self, from: u64, with_base: bool) -> Result<DurableRead, StoreError> {
+        let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN DEFERRED\0")?;
         let transaction = Transaction {
             store: self,
@@ -690,6 +779,7 @@ impl SqliteByteStore {
         };
         self.refuse_retired_image()?;
         let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let anchor_head = self.anchor_head(&guard, &seed)?;
         let head = self.durable_head()?;
         let base = if with_base {
             let statement = self.database.prepare(
@@ -721,6 +811,7 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()?;
+        guard.publish(&anchor_head)?;
         Ok(DurableRead {
             head,
             base,
@@ -753,6 +844,7 @@ impl SqliteByteStore {
         if height == 0 || tag.len() > 4096 {
             return Err(StoreError::Conflict);
         }
+        let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
@@ -760,13 +852,14 @@ impl SqliteByteStore {
         };
         hook(PublishPhase::Begun);
         self.refuse_retired_image()?;
-        if self.durable_seed()?.is_none() {
-            return Err(StoreError::Missing);
-        }
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let current_head = self.anchor_head(&guard, &seed)?;
         if let Some(existing) = self.durable_entry(height)? {
             if existing.record == record && existing.tag == tag {
                 transaction.commit()?;
                 hook(PublishPhase::Committed);
+                guard.publish_with_hook(&current_head, &mut hook)?;
+                hook(PublishPhase::Anchored);
                 return Ok(PublishStatus::AlreadyPresent);
             }
             return Err(StoreError::Conflict);
@@ -787,6 +880,17 @@ impl SqliteByteStore {
         hook(PublishPhase::Inserted);
         transaction.commit()?;
         hook(PublishPhase::Committed);
+        let head = anchor::Head::new(
+            &self.anchor_identity,
+            &seed,
+            Some(&DurableEntry {
+                height,
+                record: record.to_vec(),
+                tag: tag.to_vec(),
+            }),
+        );
+        guard.publish_with_hook(&head, &mut hook)?;
+        hook(PublishPhase::Anchored);
         Ok(PublishStatus::Installed)
     }
 
@@ -794,12 +898,15 @@ impl SqliteByteStore {
     /// same height (a key rotation re-seals), and keep only the latest two.
     pub fn durable_checkpoint(&self, height: u64, bytes: &[u8]) -> Result<(), StoreError> {
         Self::validate_bound(bytes)?;
+        let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
             active: true,
         };
         self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let head = self.anchor_head(&guard, &seed)?;
         if height == 0 || height > self.durable_head()? {
             return Err(StoreError::Conflict);
         }
@@ -820,7 +927,8 @@ impl SqliteByteStore {
             return Err(self.database.error(SQLITE_DONE));
         }
         drop(prune);
-        transaction.commit()
+        transaction.commit()?;
+        guard.publish(&head)
     }
 }
 
@@ -910,24 +1018,60 @@ mod tests {
     fn durable_log_appends_only_at_the_head() {
         let root = fresh_root("append");
         let store = SqliteByteStore::open(&root).unwrap();
-        assert!(matches!(store.durable_append(1, b"r", b"t"), Err(StoreError::Missing)));
-        assert_eq!(store.durable_init(b"seed").unwrap(), PublishStatus::Installed);
-        assert_eq!(store.durable_init(b"seed").unwrap(), PublishStatus::AlreadyPresent);
-        assert!(matches!(store.durable_init(b"other"), Err(StoreError::Conflict)));
-        assert!(matches!(store.durable_append(2, b"r", b"t"), Err(StoreError::Conflict)));
-        assert_eq!(store.durable_append(1, b"r1", b"t1").unwrap(), PublishStatus::Installed);
-        assert_eq!(store.durable_append(1, b"r1", b"t1").unwrap(), PublishStatus::AlreadyPresent);
-        assert!(matches!(store.durable_append(1, b"r1", b"tX"), Err(StoreError::Conflict)));
-        assert_eq!(store.durable_append(2, b"r2", b"t2").unwrap(), PublishStatus::Installed);
-        assert!(matches!(store.durable_checkpoint(3, b"c"), Err(StoreError::Conflict)));
+        assert!(matches!(
+            store.durable_append(1, b"r", b"t"),
+            Err(StoreError::Missing)
+        ));
+        assert_eq!(
+            store.durable_init(b"seed").unwrap(),
+            PublishStatus::Installed
+        );
+        assert_eq!(
+            store.durable_init(b"seed").unwrap(),
+            PublishStatus::AlreadyPresent
+        );
+        assert!(matches!(
+            store.durable_init(b"other"),
+            Err(StoreError::Conflict)
+        ));
+        assert!(matches!(
+            store.durable_append(2, b"r", b"t"),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(
+            store.durable_append(1, b"r1", b"t1").unwrap(),
+            PublishStatus::Installed
+        );
+        assert_eq!(
+            store.durable_append(1, b"r1", b"t1").unwrap(),
+            PublishStatus::AlreadyPresent
+        );
+        assert!(matches!(
+            store.durable_append(1, b"r1", b"tX"),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(
+            store.durable_append(2, b"r2", b"t2").unwrap(),
+            PublishStatus::Installed
+        );
+        assert!(matches!(
+            store.durable_checkpoint(3, b"c"),
+            Err(StoreError::Conflict)
+        ));
         store.durable_checkpoint(1, b"c1").unwrap();
         store.durable_checkpoint(2, b"c2").unwrap();
         store.durable_append(3, b"r3", b"t3").unwrap();
         store.durable_checkpoint(3, b"c3").unwrap();
         let read = store.durable_read(2, true).unwrap();
         assert_eq!(read.head, 3);
-        assert_eq!(read.base, Some((b"seed".to_vec(), Some((3, b"c3".to_vec())))));
-        assert_eq!(read.entries.iter().map(|e| e.height).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(
+            read.base,
+            Some((b"seed".to_vec(), Some((3, b"c3".to_vec()))))
+        );
+        assert_eq!(
+            read.entries.iter().map(|e| e.height).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
         let tail = store.durable_read(4, false).unwrap();
         assert_eq!((tail.head, tail.base, tail.entries.len()), (3, None, 0));
         drop(store);
@@ -939,10 +1083,147 @@ mod tests {
         let root = fresh_root("retired");
         let store = SqliteByteStore::open(&root).unwrap();
         store.publish(b"DREGG.DURABLE.IMAGE whole image").unwrap();
-        assert!(matches!(store.durable_init(b"seed"), Err(StoreError::RetiredImage)));
-        assert!(matches!(store.durable_read(1, true), Err(StoreError::RetiredImage)));
-        assert!(matches!(store.durable_append(1, b"r", b"t"), Err(StoreError::RetiredImage)));
+        assert!(matches!(
+            store.durable_init(b"seed"),
+            Err(StoreError::RetiredImage)
+        ));
+        assert!(matches!(
+            store.durable_read(1, true),
+            Err(StoreError::RetiredImage)
+        ));
+        assert!(matches!(
+            store.durable_append(1, b"r", b"t"),
+            Err(StoreError::RetiredImage)
+        ));
         drop(store);
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    fn store() -> SqliteByteStore {
+        let path = std::env::temp_dir().join(format!(
+            "mini-anchor-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteByteStore::open(path.join("store")).unwrap();
+        store.durable_init(b"domain-and-genesis").unwrap();
+        store.durable_append(1, b"one", b"tag-one").unwrap();
+        store.durable_checkpoint(1, b"checkpoint-one").unwrap();
+        store.durable_append(2, b"two", b"tag-two").unwrap();
+        store
+    }
+    #[test]
+    fn explicit_deployment_identity_changes_refuse_at_genesis_and_head() {
+        let s = store();
+        let root = s.root().to_owned();
+        drop(s);
+        let foreign = SqliteByteStore::open_with_identity(&root, b"another-domain").unwrap();
+        assert!(matches!(
+            foreign.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+        let initial = root.parent().unwrap().join("initial");
+        let s =
+            SqliteByteStore::open_with_identity(&initial, b"domain:1;semantics:2;seed:3").unwrap();
+        s.durable_init(b"same-seed").unwrap();
+        drop(s);
+        let s =
+            SqliteByteStore::open_with_identity(initial, b"domain:2;semantics:2;seed:3").unwrap();
+        assert!(matches!(
+            s.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+    }
+    #[test]
+    fn truncation_above_checkpoint_refuses_reads_and_writes() {
+        let s = store();
+        s.database
+            .exec(b"DELETE FROM durable_log WHERE height=2\0")
+            .unwrap();
+        assert!(matches!(
+            s.durable_read(1, true),
+            Err(StoreError::Anchor("Store is behind retained head"))
+        ));
+        assert!(matches!(
+            s.durable_append(2, b"other", b"tag-other"),
+            Err(StoreError::Anchor(_))
+        ));
+        assert!(matches!(
+            s.durable_checkpoint(1, b"cp"),
+            Err(StoreError::Anchor(_))
+        ));
+        assert!(matches!(
+            s.durable_anchor_enroll(),
+            Err(StoreError::Anchor(_))
+        ));
+    }
+    #[test]
+    fn same_height_record_and_genesis_conflicts_refuse() {
+        let s = store();
+        s.database
+            .exec(b"UPDATE durable_log SET record=X'00' WHERE height=2\0")
+            .unwrap();
+        assert!(matches!(
+            s.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+        let s = store();
+        s.database
+            .exec(b"UPDATE durable_seed SET bytes=X'00'\0")
+            .unwrap();
+        assert!(matches!(
+            s.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+    }
+    #[test]
+    fn anchor_loss_refuses_until_explicit_enrollment_and_foreign_anchor_refuses() {
+        let a = store();
+        let b = store();
+        b.durable_append(3, b"third", b"tag-three").unwrap();
+        fs::copy(anchor::path(b.root()), anchor::path(a.root())).unwrap();
+        assert!(matches!(
+            a.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+        fs::rename(
+            anchor::path(a.root()),
+            a.root().join("retained-test-anchor"),
+        )
+        .unwrap();
+        assert!(matches!(
+            a.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
+        assert!(matches!(
+            a.durable_init(b"domain-and-genesis"),
+            Err(StoreError::Anchor(_))
+        ));
+        a.durable_anchor_enroll().unwrap();
+        assert_eq!(a.durable_read(3, false).unwrap().head, 2);
+    }
+    #[test]
+    fn whole_database_replacement_is_detected_by_sibling_anchor() {
+        let s = store();
+        let backup = s.root().join("earlier.sqlite3");
+        fs::copy(s.database_path(), &backup).unwrap();
+        s.durable_append(3, b"third", b"tag-three").unwrap();
+        let root = s.root().to_owned();
+        let database = s.database_path().to_owned();
+        drop(s);
+        fs::copy(&backup, &database).unwrap();
+        let reopened = SqliteByteStore::open(root).unwrap();
+        assert!(matches!(
+            reopened.durable_read(1, true),
+            Err(StoreError::Anchor(_))
+        ));
     }
 }
