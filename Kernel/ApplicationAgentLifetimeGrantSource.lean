@@ -331,8 +331,17 @@ def initialGrantPolicy (owner : SubjectId) : Pred := .any [
 def Ready.policyRecord {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) : PolicyRecord :=
-  ⟨⟨spec.grant.source.resource⟩, 0, config.deployment.domain, profile.semantics,
-    none, initialGrantPolicy spec.grant.approval.issuer⟩
+  { policyId := ⟨spec.grant.source.resource⟩
+    version := 0
+    domain := config.deployment.domain
+    semantics := profile.semantics
+    previous := none
+    predicate := initialGrantPolicy spec.grant.approval.issuer
+    localSelector := {}
+    parents := []
+    descendants := none
+    audience := none
+    objectDescriptor := none }
 
 def Ready.initialPolicies {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)

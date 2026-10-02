@@ -158,7 +158,7 @@ def packageRequest {F : Type} [Field F]
       (command deployment.domain profile.semantics source)) :=
   let target : DeclaredResourceController.Target :=
     ⟨.object, source.packageManifest, source.packageObserveCapability, 1,
-      source.packageRoot, .content ⟨[]⟩, none⟩
+      source.packageRoot, .content ⟨[]⟩, none, none, none⟩
   { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
       ambient (command deployment.domain profile.semantics source) target source.packageRoot with
     verb := .observeObject }

@@ -2355,6 +2355,7 @@ private def walk (config : Config) (opened : Opened config)
       frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
+      AuditTiming.beginRecord timing index (fun _ => admissionPhase record)
       match ← AuditTiming.measure timing (fun _ => admissionPhase record)
           (derive config opened issues reserves begins beginsV2 claimsV2
             beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
@@ -2363,8 +2364,8 @@ private def walk (config : Config) (opened : Opened config)
       | .ok derived =>
         let compared ← AuditTiming.value timing (fun _ => "record-compare")
           (fun _ => recordMatches record derived.intent)
-        if matches : compared.val = true then
-          have matched : recordMatches record derived.intent = true := compared.property.symm.trans matches
+        if comparisonMatched : compared.val = true then
+          have matched : recordMatches record derived.intent = true := compared.property.symm.trans comparisonMatched
           let advancedValue ← AuditTiming.value timing (fun _ => "advance")
             (fun _ => advance opened derived)
           match advancedResult : advancedValue.val with

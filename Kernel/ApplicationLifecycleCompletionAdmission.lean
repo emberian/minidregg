@@ -111,7 +111,7 @@ def packageRequest (config : Config) (opened : Opened config)
   let target : DeclaredResourceController.Target :=
     ⟨.object, source.originalBegin.base.source.packageManifest,
       source.packageObserveCapability, ContentResource.commandVersion,
-      source.currentPackageRoot, .content ⟨[]⟩, none⟩
+      source.currentPackageRoot, .content ⟨[]⟩, none, none, none⟩
   { DeclaredResourceController.requestFor prepared.authority.snapshot
       config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
       (source.command config.deployment.domain config.profile.semantics)

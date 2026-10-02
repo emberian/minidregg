@@ -595,9 +595,9 @@ def authorize [DecidableEq F]
   let wanted := request prepared.authority.snapshot prepared.book.payload profile.semantics ambient
     command
   let config := policyConfig prepared
-  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
   let evidence ← requireSome .noGrant
     (config.capabilityEvidenceChecked wanted command.capability () receipt () (fun _ => ())).toOption
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
   let law ← requireSome .policyUnavailable config.resolve?
   let witness := law.witness
   if inputsInRange profile.compilerProfile.compiler law.predicate
@@ -688,11 +688,9 @@ evidence for the request, `authorize` refuses `noGrant` before any law. -/
 theorem no_grant_refused [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
-    (none : sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
+    (none : ((policyConfig prepared).capabilityEvidenceChecked
       (request prepared.authority.snapshot prepared.book.payload profile.semantics ambient command)
-      command.capability receipt = none) :
+      command.capability () receipt () (fun _ => ())).toOption = none) :
     authorize prepared receipt = .error .noGrant := by
   unfold authorize
   simp only [none, requireSome, bind, Except.bind]

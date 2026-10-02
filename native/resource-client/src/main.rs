@@ -1007,9 +1007,16 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     if host.as_os_str().is_empty() {
         return Err("no Host image and no socket: pass --remote or --socket".into());
     }
-    let output = Command::new(host)
-        .arg(config)
-        .args(arguments)
+    let mut command = Command::new(host);
+    command.arg(config).args(arguments);
+    // Audit progress must survive a timeout. Keep ordinary requests and
+    // their captured error diagnostics unchanged; socket calls returned above.
+    if arguments == [OsStr::new("audit")]
+        && std::env::var_os("MINI_AUDIT_TIMING").as_deref() == Some(OsStr::new("1"))
+    {
+        command.stderr(std::process::Stdio::inherit());
+    }
+    let output = command
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {

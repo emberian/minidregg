@@ -151,13 +151,13 @@ def progressCommand (domain semantics : Digest) (report : Report) :
     progressNonce domain semantics report.evidence,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩], none⟩
+        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none, none, none⟩], none⟩
 
 theorem progressCommand_exact_action (domain semantics : Digest) (report : Report) :
     (progressCommand domain semantics report).targets =
       [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
         .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-          (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩] := rfl
+          (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none, none, none⟩] := rfl
 
 /-- Only the complete original signed command is historical evidence. Current
 gateway mutation law is deliberately not needed to settle an accepted cursor. -/

@@ -62,7 +62,11 @@ all receiving judgments are exactly the same arguments as ordinary audit. -/
 def audit (config : Config) :
     IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
   let timing ← AuditTiming.fromEnvironment
-  try auditWithTiming config timing finally AuditTiming.report timing
+  let result ← try auditWithTiming config timing catch error =>
+    AuditTiming.report timing "exception"
+    throw error
+  AuditTiming.report timing (match result with | .ok _ => "complete" | .error _ => "refused")
+  return result
 
 /-- Operator read of the whole presence index after an ordinary (checkpoint +
 suffix) open. Local administration only: the operator holds the Store. -/
@@ -752,7 +756,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
         envelopes.drop targetCount |>.take observeCount, authority⟩)
   | .install subject control bytes =>
       match envelopes with
-      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope⟩))
+      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope, none⟩))
       | _ => .error "install signing slots mismatch"
   | .birth bytes capabilities => do
       if let some finalized := GrainResourceBirthHostCodec.finalizedCodec.decode bytes then

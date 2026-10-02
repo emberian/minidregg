@@ -3209,7 +3209,7 @@ def gatewayContentTargetRoot (config : NativeHost.Config)
   IO.ofExcept <| (do
     let probe : DeclaredResourceController.Target :=
       ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-        .content ⟨[]⟩, none⟩
+        .content ⟨[]⟩, none, none, none⟩
     let .present cell := opened.directory.directory.slots policy.target
       | throw "fn gateway content target is absent"
     let some pre := DeclaredResourceController.selectTarget
@@ -4102,7 +4102,7 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
   let policy := policySource.policy
   let probeTarget : DeclaredResourceController.Target :=
     ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-      .content ⟨[]⟩, none⟩
+      .content ⟨[]⟩, none, none, none⟩
   let targetRoot ← IO.ofExcept <| (do
     let .present cell := opened.directory.directory.slots policy.target
       | throw "poll consumer target is absent"
@@ -4212,7 +4212,7 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
   let policy := policySource.policy
   let probeTarget : DeclaredResourceController.Target :=
     ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-      .content ⟨[]⟩, none⟩
+      .content ⟨[]⟩, none, none, none⟩
   let targetRoot ← IO.ofExcept <| (do
     let .present cell := opened.directory.directory.slots policy.target
       | throw "A reply consumer target is absent"
@@ -4525,7 +4525,7 @@ def runFnEmptyPageDecisionLoaded (config : NativeHost.Config)
   let selectedScope ← IO.ofExcept scope.progressScope
   let probeTarget : DeclaredResourceController.Target :=
     ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-      .content ⟨[]⟩, none⟩
+      .content ⟨[]⟩, none, none, none⟩
   let targetRoot ← IO.ofExcept <| (do
     let .present cell := opened.directory.directory.slots policy.target
       | throw "empty-page consumer target is absent"
@@ -7307,7 +7307,7 @@ def run (arguments : List String) : IO UInt32 := do
           let afterConsumer : Nat ← IO.monoNanosNow
           let probeTarget : DeclaredResourceController.Target :=
             ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-              .content ⟨[]⟩, none⟩
+              .content ⟨[]⟩, none, none, none⟩
           let targetRoot ← IO.ofExcept <| (do
             let .present cell := opened.directory.directory.slots policy.target
               | throw "portable consumer target is absent"
