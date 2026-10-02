@@ -7819,7 +7819,7 @@ mod tests {
         assert!(content_actions(&json!([{"type":"quote","element":"1","link":"2",
             "reference":{}}]), false).is_err());
         assert!(content_actions(&json!([{"type":"transclude","transclusion":"1","link":"2",
-            "request":{}}]), false).is_ok());
+            "request":{}}]), false).is_err());
         assert!(content_actions(&json!([{"type":"unlink","link":"9"}]), false).is_ok());
         assert!(content_actions(&json!([{"type":"unlink","link":"9","before":"1"}]), false).is_err());
         assert!(content_actions(&json!([{"type":"mark","mark":"1","target":{"type":"atom","atom":"2"},
