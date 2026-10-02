@@ -3115,12 +3115,23 @@ pub(crate) fn room_kick(
         return Err(format!("{subject} holds no live grant in {name}: there is nothing to kick"));
     }
     let room_target = member(&reference(root, name)?, "target")?.to_owned();
+    // A grant whose policy this workspace controls is revoked here (the room,
+    // or a cell under it this workspace bore). Any other is the member's own
+    // (a doc it bore, its delegations): it carries a revoked grant among its
+    // ancestors and falls with the kick, which `kick_remaining` confirms.
     let mut ids = Vec::new();
     let mut named = Vec::new();
-    for (index, (capability, policy)) in held.iter().enumerate() {
-        let id = if index == 0 { proposal_id.to_owned() } else { format!("{proposal_id}-c{index}") };
+    let mut falls = Vec::new();
+    for (capability, policy) in &held {
+        let via = match controlling_reference(root, name, &room_target, policy) {
+            Ok(via) => via,
+            Err(_) => {
+                falls.push(json!({"capability":capability,"policy":policy}));
+                continue;
+            }
+        };
+        let id = if ids.is_empty() { proposal_id.to_owned() } else { format!("{proposal_id}-c{}", ids.len()) };
         validate_name(&id)?;
-        let via = controlling_reference(root, name, &room_target, policy)?;
         named.push(json!({"capability":capability,"policy":policy,"via":via,"proposal":id}));
         let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
             "name":via,"recipient":subject,"capability":capability});
@@ -3128,8 +3139,9 @@ pub(crate) fn room_kick(
         let mut bytes = serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?;
         bytes.push(b'\n');
         private_file(&source, &bytes)?;
-        if index > 0 && !submit_now {
-            ids.push(id);
+        let first = ids.is_empty();
+        ids.push(id.clone());
+        if !first && !submit_now {
             continue;
         }
         propose_summary(root, workspace, &source, &id, None, false).map_err(|error| frozen_roster(name, error))?;
@@ -3137,21 +3149,45 @@ pub(crate) fn room_kick(
             submit_intent(root, workspace, &root.join("proposals").join(&id).join("intent.json"), "intent", false,
                 Some(&root.join("attempts").join(&id)))?;
         }
-        ids.push(id);
     }
-    if !submit_now && ids.len() > 1 {
-        let companions = json!({"type":"minidregg-proposal-companions-v1","proposals":&ids[1..]});
+    if ids.is_empty() {
+        return Err(format!(
+            "{subject} holds live grants in {name} ({}), none of them on a resource whose control this workspace holds",
+            falls.iter().filter_map(|g| g["capability"].as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !submit_now {
+        let companions = json!({"type":"minidregg-proposal-companions-v1","room":name,"member":subject,
+            "proposals":&ids[1..]});
         private_file(
             &root.join("proposals").join(proposal_id).join("companions.json"),
             &serde_json::to_vec_pretty(&companions).map_err(|error| error.to_string())?,
         )?;
     }
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-kick-v1","room":name,
-        "member":subject,"capabilities":named,"proposals":ids,"submitted":submit_now,
-        "note":if submit_now { "every standing grant the member held under the room is revoked" }
-            else { "submit the first proposal: it submits every one of them" }}))
+        "member":subject,"capabilities":named,"fallsWithTheKick":falls,"proposals":ids,"submitted":submit_now,
+        "note":if submit_now { "every grant the member held in the room is revoked" }
+            else { "submit the first proposal: it submits every one of them, then checks the member holds nothing live in the room" }}))
         .map_err(|error| error.to_string())?);
+    if submit_now {
+        kick_remaining(root, workspace, name, subject)?;
+    }
     Ok(ids)
+}
+
+/// After a kick: the member must hold no live grant anywhere in the room (the
+/// Host's signed `who` view). A grant still standing is named, with whose it
+/// is to revoke.
+pub(crate) fn kick_remaining(root: &Path, workspace: &Value, name: &str, subject: &str) -> Result<()> {
+    let left = standing_grants(root, workspace, name, subject)?;
+    if left.is_empty() {
+        eprintln!("kick: {subject} holds no live grant in {name}");
+        return Ok(());
+    }
+    Err(format!(
+        "the kick left {subject} holding live grants in {name}: {} (each is revoked by the holder of its policy's control grant)",
+        left.iter().map(|(cap, policy)| format!("{cap} (policy {policy})")).collect::<Vec<_>>().join(", ")
+    ))
 }
 
 fn delegated_capability(root: &Path, name: &str, target: &str, recipient: &str) -> Result<String> {
@@ -3432,6 +3468,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     }
                     submit_intent(&root, &workspace, &root.join("proposals").join(id).join("intent.json"),
                         "intent", false, Some(&attempt))?;
+                }
+                if let (Some(room), Some(kicked)) =
+                    (listed.get("room").and_then(Value::as_str), listed.get("member").and_then(Value::as_str))
+                {
+                    kick_remaining(&root, &workspace, room, kicked)?;
                 }
             }
             Ok(())
