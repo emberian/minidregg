@@ -61,7 +61,7 @@ Environment:
   MINIDREGG_LEAN_THREADS=1|2       threads in each serialized Lean process (default: 2)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
-  MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats-UID)
+  MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
 EOF
 }
 
@@ -273,9 +273,9 @@ case "$native_jobs" in 1|2) ;; *) printf 'MINIDREGG_NATIVE_JOBS must be 1 or 2\n
 case "$lean_threads" in 1|2) ;; *) printf 'MINIDREGG_LEAN_THREADS must be 1 or 2\n' >&2; exit 64 ;; esac
 
 cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
-# Compiler capacity belongs to the host/user, not to one candidate's evidence.
+# Compiler capacity belongs to the host, not to one candidate's evidence.
 # Every candidate and scoped build on this host must use this same root.
-seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats-$(id -u)}
+seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats}
 mkdir -p "$seat_root" "$cycle_dir/build"
 seat_root=$(cd "$seat_root" && pwd -P)
 if [[ -z "$output_dir" ]]; then

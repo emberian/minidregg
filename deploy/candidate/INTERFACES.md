@@ -1,8 +1,16 @@
 # Mini candidate: interfaces an operator depends on
 
-This directory builds and runs one Mini Store from source. Everything below is
-what the procedure reads, writes, executes or listens on. Anything not listed
-here is not part of the candidate contract.
+This directory builds a source-pinned Mini family and supplies a standalone Store
+bootstrap. The bootstrap below starts the public Store socket; a complete hosted
+service also provisions the private operator socket, public relay, member entrance,
+controllers, app broker and their configuration. The manifest records shipped
+executables; their presence does not establish that those services are configured
+or that a combined deployment has passed its receiving journeys.
+
+Updated October 2, 2026. Protocol allocations and socket exposure are owned by
+[`protocol/host-operations.json`](../../protocol/host-operations.json), checked
+against the actual receivers. Use that registry from the selected source archive
+when examining a deployed image.
 
 Procedure, from a clean Linux x86-64 account:
 
@@ -22,7 +30,7 @@ M7_REFERENCE=/srv/mini/other-build/provenance.json \
 
 `/srv/mini/...` stands for any directory the operator chooses. No script
 writes outside `--out`, `--state` or the journey's run root, except the
-toolchain managers' own caches (below).
+toolchain managers' own caches (below) and the shared compiler-seat root.
 
 ## 1. Build (`build.sh`)
 
@@ -52,11 +60,16 @@ that can find the versioned one) for the Store helper.
 
 | path | what |
 | --- | --- |
-| `OUT/bin/minidregg-host` | Lean-authored native Host, built by `scripts/build-native-host.sh` (bounded, serialized Lean compiler; seat directory `OUT/work/host-cycle`) |
+| `OUT/bin/minidregg-host` | Lean-authored native Host, built by `scripts/build-native-host.sh` (bounded Lean compiler; shared seats in `MINIDREGG_LEAN_SEAT_ROOT`, independent of per-build evidence) |
 | `OUT/bin/mini` | client (`native/resource-client`); also the Linux x86-64 friend client (`provenance.json` `.clients["x86_64-unknown-linux-gnu"]`) |
 | `OUT/bin/clients/TARGET/mini` | friend clients for each target in `MINI_CLIENT_TARGETS` (default `aarch64-apple-darwin`, cross-linked with `zig cc -target aarch64-macos`, ad-hoc signed by the linker; `zig` is then required). Hashed in `provenance.json` `.clients`, `SHA256SUMS`, and `manifest.json` `.clients` (absolute paths). `MINI_CLIENT_TARGETS=` builds none. `--client-only` builds only `bin/mini` and these, writes `provenance.json` of type `minidregg-client-provenance-v1` and `SHA256SUMS`, and no manifest |
 | `OUT/bin/minidregg-link-sqlite-store` | Store helper (`native/hyperdocument-link-sqlite-store`) |
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
+| `OUT/bin/grain-runtime`, `OUT/bin/grain-provider-bridge` | Durable agent controller and sandbox provider bridge (`native/grain-runtime`) |
+| `OUT/bin/mini-inference-scheduler` | Shared inference admission, placement and fairness (`native/inference-scheduler`) |
+| `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy` | Application custody/broker and browser entrance (`native/spk-host`) |
+| `OUT/bin/pay-watcher` | Solana payment observer (`native/pay-watcher`) |
+| `OUT/bin/mini-discord` | Optional Discord entrance (`native/discord-entrance`) |
 | `OUT/run.sh`, `OUT/lib.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
 | `OUT/source.tar` | the exact source archive |
 | `OUT/provenance.json` | source, toolchains, relative binary paths and hashes, timings (below) |
@@ -64,6 +77,13 @@ that can find the versioned one) for the Store helper.
 | `OUT/manifest.json` | the journey-format manifest (below) |
 | `OUT/logs/` | build log, per-step logs, `source-files.sha256` (every archived file) |
 | `OUT/work/` | extracted source, Lean/cargo build trees, mathlib cache. Not needed at run time; the Host build evidence is `OUT/work/host-build/`. |
+
+All concurrent native builds on a host must select the same compiler-seat root.
+Its default is `/tmp/minidregg-lean-seats`; operators coordinating multiple
+accounts must configure its custody explicitly.
+`MINIDREGG_CYCLE_DIR` selects evidence, not additional compiler capacity. The
+candidate builder compiles the Host import closure; separately qualify the
+required umbrella/assurance targets when those interfaces change.
 
 Rust binaries are built with `--remap-path-prefix` for the source tree
 (`/minidregg`) and `$CARGO_HOME` (`/cargo`), so their bytes do not depend on
@@ -84,6 +104,11 @@ the provenance file.
  "candidate": "/abs/OUT/provenance.json",
  "sha256": {"host": "<64 hex>", "mini": "...", "store": "...", "verifier": "...", "candidate": "..."}}
 ```
+
+The full manifest also contains `grainRuntime` (alias `hermes`),
+`grainProviderBridge`, `inferenceScheduler`, `spkHost`, `spkBrowserProxy`
+(alias `browserProxy`), `discord` and `payWatcher`, with SHA-256 pins. The JSON
+above shows the core roles only. `--client-only` produces no service manifest.
 
 Every consumer (`run.sh`, `journey.sh`,
 `native/resource-client/newparticipant-from-manifest.sh`) refuses a file whose
@@ -111,7 +136,8 @@ used where it was built; moving it means rebuilding or rewriting `manifest.json`
 Paths here are relative to `OUT`.
 
 **Reproducing.** Two builds from archives with the same compiled inputs, in
-different directories, yield the same four SHA-256s (measured: see
+different directories, yielded the same four core SHA-256s in the dated baseline
+(measured: see
 `docs/evidence/2026-09-30-candidate/`). The journey's M7 step
 (`native/resource-client/journey.d/m7.sh`) checks exactly that against a
 reference build named by `M7_REFERENCE` (or `.m7Reference` in the manifest).
@@ -134,7 +160,8 @@ clients: mini ... --socket STATE/public/mini.sock   (connect, one request, one r
   systemd unit should use `KillMode=control-group` (the template does).
 * The Host and helpers write scratch files through the process temp directory.
   `run.sh` sets `TMPDIR=STATE/tmp` for everything it starts.
-* No process opens a network socket. There is **no TCP port**. Remote access
+* The standalone Store process opens no TCP port. The optional browser proxy,
+  provider and entrance services have their own network configuration. Remote access
   (SSH to the Store's account, a forwarded Unix socket, a gateway) is an
   operator decision; the socket protocol below is local and authenticates by
   file-system ownership and the config/Host pins, not by a network handshake.
@@ -177,51 +204,19 @@ unavailable on selected socket`, `host frame exceeds bound`). Deadlines: the
 server allows 10 s to receive a request and 10 s to write a reply; the client
 waits up to 600 s for a reply.
 
-**Operations on the public socket** (`mini serve`). The server forwards only
-these; everything else is `254 operation unavailable`:
+**Operation allocation and exposure.** The selected source's
+[`host-operations.json`](../../protocol/host-operations.json) owns request bytes,
+status, purpose and public/operator routes. The registry checker compares it with
+Host dispatch and client selectors. A reserved byte is not a callable endpoint.
+Consult the named receiver and codec for payload shape; keeping a second manual
+wire-version table here would drift from those consumers.
 
-| op | name | payload | reply payload |
-| --- | --- | --- | --- |
-| 0 | describe | empty | JSON description of the served image |
-| 1 | prepare (authorized) | `OBSERVE-SIGNED/v5` whose intent purpose is a draft | `SIGNING-PLAN/v4` |
-| 2 | submit | `SIGNED-CALL/v3` | `OUTCOME/v4` |
-| 3 | lookup | `SIGNED-CALL/v3` | `OUTCOME/v4` (`absent` if never admitted) |
-| 4 | challenge | `OBSERVE-INTENT/v3` | `OBSERVE-CHALLENGE/v6` |
-| 5 | query (authorized) | `OBSERVE-SIGNED/v5` whose purpose is a query | the view bytes |
-| 6 | profile | empty | JSON metering/semantics profile |
-| 7 | author | kind frame: u16 LE kind length, UTF-8 kind, UTF-8 JSON source | canonical bytes |
-| 8 | inspect | kind frame with binary input | JSON |
-| 9 | signatures | UTF-8 JSON list of hex signatures | canonical signature list |
-| 10 | observe-assemble | pair: u32 LE length, challenge bytes, signature list | `OBSERVE-SIGNED/v5` |
-| 11 | assemble | pair: signing plan, signature list | `SIGNED-CALL/v3` |
-| 12–19 | fn consumer/reply/catalog/outbox, provider continuity and metering | per service | only when the matching optional config section is set; otherwise a refusal |
-| 20, 21 | selected-release submit / lookup | ingress | `OUTCOME/v4` |
-| 28, 29 | application share-issue submit / lookup | ingress | `OUTCOME/v4` |
-| 30, 31 | current application / session birth intent | JSON object ≤ 256 KiB | intent bytes |
-| 86 | participant key enrollment plan | pair: signed factory observation, command | plan |
-| 87 | participant key enrollment assembly | pair: plan, pair(sponsor sig 64 B, possession sig 64 B) | ingress |
-| 88, 89 | participant key enrollment submit / lookup | ingress | `OUTCOME/v4` |
-| 91 | current resource birth intent | pair: signed observation, JSON source ≤ 256 KiB | intent bytes |
-| 92, 93 | factory-observation provisioning plan / assembly (M3) | pair: signed observation, command / pair: plan, signature | plan / ingress |
-| 94, 95 | factory-observation provisioning submit / lookup | ingress | `OUTCOME/v4` |
-| 96, 97 | fleet turn plan (behind a signed account observation) / assembly (M8) | pair: signed observation, draft / pair: plan, signature | plan / ingress |
-| 98, 99 | fleet turn submit / lookup | ingress | `OUTCOME/v4` |
-| 100 | fleet topic poll since a cursor (behind a signed account observation): the stream head and its entry cells, `minidregg-fleet-topic-poll-v2` (each event carries `height`, `parent`, `author`) | pair: signed observation, JSON request | JSON |
-| 101 | agent fleet head (behind a signed account observation) | signed observation | JSON |
-| 102 | exact receipt by transaction id | canonical decimal | JSON |
-| 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |
-| 105, 106 | pay submit (blind: every refusal is `undisclosed`) / lookup | ingress | `OUTCOME/v4` |
-| 107 | public pay-cell view (no assignment map, no clock) | empty | `DREGG/PAY/VIEW/v2` |
-| 126, 127 | clock tick signing plan / assembly (K-CLOCK); the command is `DREGG/CLOCK/TICK/v2` (sponsor, `C_tick`, nonce, authority root, clock root, now, slot) | command / pair: plan, 64-byte signature | `DREGG/CLOCK/PLAN/v1` / ingress |
-| 128 | clock tick submit (refusals name their reason: `clockNotAdvancing`, `capabilityRejected`, ...) | ingress | `OUTCOME/v4` |
-| 129 | public clock view: now, slot and the two roots a tick pins (clock, authority) | empty | `DREGG/CLOCK/VIEW/v2` |
-| 150 | law-sat (C-SAT-2): does a law admit any step, any write, a write from the cell's current values — `Sat.decide` on the decoded law; reads no Store | `{"type":"minidregg-law-sat-v1","predicate":LAW,"extra":CLAUSE?,"fromHere":BOOL?}` (the predicate JSON `law` proposes and the `policy` view returns) | UTF-8 JSON: `outside` (the leaf, by path) / `unrealizable` (slot) / `witness` (old, new slot lists) / `unsat` (per case: clash or cycle, each constraint with the law clauses it came from) / `unknown` (`reason: cap`, 1024) |
-| 130 | dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2 over a Store writer that never appends — commits nothing, consumes no nullifier | pair: signed observation (as op 1), signature list over the plan op 1 derives | admitted: `SIGNING-PLAN/v4` (the would-be footprint); otherwise byte 255 + `OUTCOME/v4` naming the reason (a plan-time law refusal names its clause) |
-
-`mini serve-operator` serves a separate owner-private socket (same framing,
-peer UID must equal the server's) with the lifecycle, dispatch, share-issue,
-fn-namespace/frontier and agent-reserve routes. The candidate does not start
-one; the bake-off journey needs none.
+`mini serve-operator` serves a separate owner-private socket with the lifecycle,
+dispatch and other operator routes. `mini serve-public-proxy` supplies public
+access through that private Host using the registry's allowed public routes. The
+standalone `run.sh` recipe above does not provision this composed topology. A
+hosted installation must select it explicitly and bind controllers, payment
+observers and app custodians to the correct socket.
 
 **Host stdio.** `mini serve` speaks the same frames to the Host child without
 the envelope: `u32 LE length` then `operation byte + payload`; the Host
@@ -438,31 +433,43 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
    `workspace.json` key path.
 4. **Supervision**: systemd (`run.sh unit`) or another supervisor running
    `run.sh serve`; restart policy; log retention.
-5. **Access**: who can reach the socket. The socket and its directory are
-   owner-only, so every client (sponsor, participants, agents) currently runs as
-   the Store's Unix account on the Store's machine; group or other-user access
-   is refused by design. There is no network listener. Letting participants on
-   other machines or under other accounts in needs an operator-chosen entrance
-   (for example an SSH forced command or a gateway that speaks this protocol),
-   and that entrance is not part of this candidate.
+5. **Access**: public and operator Unix sockets retain owner-only custody.
+   Remote members enter through the forced Mini-shell/proxy protocol; they do
+   not need Unix shell accounts. See [shell deployment](../shell/README.md) and
+   its [operator guide](../shell/OPERATOR.md). Member credentials and signing
+   authority remain distinct from the service account running the transport.
+   The standalone bootstrap does not install SSH or browser ingress policy.
 6. **Backups**: the state directory holds several owners' records — the durable
    image (`store/`), the sponsor's workspace and attempts, namespace
    reservations, keys. Participants' own workspaces and keys live wherever they
    keep them. Restoring one of these does not restore the others consistently.
    Back up with the service stopped.
-7. **Capacity**: measured on one development machine (bake-off 2026-09-29):
-   signed write ~2.6 s at 10 records, ~13 s at 100, ~25 s at 150; cold reopen
-   ~5 s at 10, ~121 s at 100, ~243 s at 150; Host RSS ~750 MB at ~100 records;
-   the Host is CPU-bound and single-threaded per request. A declared resource
-   page holds at most 4 scalar entries. The whole image is one ≤ 64 MiB SQLite
-   record. Size a Store for tens to low hundreds of accepted records, not
-   thousands.
-8. **Upgrades**: a state directory is pinned to one Host image; a new Host
-   build means a new candidate directory and, with this candidate, a new Store.
-   There is no migration path.
+7. **Capacity**: measure the selected family with its real workload, population,
+   admission limits and resource settings. The September 29 measurements in
+   `docs/evidence/2026-09-30-candidate/` describe that earlier source and are not
+   current capacity limits. Distinguish cold history audit, cached reopen,
+   interactive writes, app work and provider contention. Fixture populations do
+   not define the number of platform users; configured limits must produce
+   explicit admission/refusal and allow normal continued operation.
+8. **Upgrades**: current service deployment uses full teardown/rebuild from the
+   selected family, with repeatable provisioning. Legacy migration or rolling
+   transition is not a release prerequisite. Ordinary restart, exact retry,
+   payment conservation and backup/restore still require their own evidence.
+   Preserve old state deliberately before teardown when its data is wanted.
 
-## 10. Not in this candidate
+## 10. Hosted service composition
 
-fn transport and selected release across nodes, the operator socket, Hermes /
-grain runtime agents, `spk-host` application hosting, inference, and any
-network entrance. Each has its own interfaces and qualification record.
+This build ships the controller/provider bridge, scheduler, SPK hosting/browser
+proxy, payment watcher and optional Discord entrance. Their operator contracts
+are in [Hermes](../hermes/README.md), [SPK hosting](../spk-host/README.md),
+[payments](../pay/README.md) and [member access](../shell/README.md), together with
+the matching source's command/config parsers. Deployment unit templates and
+root-owned service provisioning must be pinned separately when supplied by the
+infrastructure repository.
+
+Qualification belongs to the actual configuration and executable family: one
+Store/world shared by enrolled members, residents and apps; current authority and
+independent budgets; concurrent admission; ordinary crash/retry; and a usable
+checkpoint/resume path. Component or fixture success alone does not establish
+that combined service. Cross-node operation and participant hosting similarly
+require their own configured topology and receiving evidence.
