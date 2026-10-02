@@ -59,6 +59,30 @@ class MaterializationTests(unittest.TestCase):
             self.assertNotIn('sealSupervisor',m.load(ready['fixtureInput']))
             self.assertFalse((root/'operator/new-run').exists())
 
+    def test_sealed_source_archive_materializes_without_git_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);plan,manifest,revision,archive=self.fixture(root)
+            full=io.BytesIO()
+            with tarfile.open(fileobj=io.BytesIO(archive)) as original,tarfile.open(fileobj=full,mode='w') as output:
+                info=tarfile.TarInfo('README.md');data=b'other tracked source';info.size=len(data);output.addfile(info,io.BytesIO(data))
+                for item in original:
+                    output.addfile(item,original.extractfile(item) if item.isfile() else None)
+            source=root/'source.tar';source.write_bytes(full.getvalue());value=m.load(manifest)
+            value.update(sourceArchive=str(source),sourceArchiveSha256=m.sha(source));manifest.write_text(json.dumps(value))
+            with patch.object(m,'root_file',side_effect=Path),patch.object(m.subprocess,'check_output',side_effect=AssertionError('no Git checkout needed')):
+                result=m.materialize(plan,manifest,revision)
+            ready=m.load(result['ready']);self.assertFalse((Path(ready['capsule'])/'source/README.md').exists())
+            self.assertTrue((Path(ready['capsule'])/'source/scripts/spk-platform/ws-continuity-fixture.py').is_file())
+
+    def test_changed_sealed_archive_refuses_before_effect(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);plan,manifest,revision,archive=self.fixture(root)
+            source=root/'source.tar';source.write_bytes(archive);value=m.load(manifest)
+            value.update(sourceArchive=str(source),sourceArchiveSha256=m.sha(source));manifest.write_text(json.dumps(value));source.write_bytes(archive+b'changed')
+            with patch.object(m,'root_file',side_effect=Path),self.assertRaisesRegex(RuntimeError,'archive pin'):
+                m.materialize(plan,manifest,revision)
+            self.assertFalse((root/('candidate-'+revision[:12])).exists())
+
     def test_changed_binary_refuses_before_capsule_creation(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);plan,manifest,revision,_=self.fixture(root)

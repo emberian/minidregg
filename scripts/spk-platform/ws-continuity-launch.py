@@ -83,6 +83,20 @@ def fixture_coordinates(f,expected,plan):
     return state
 
 
+def candidate_archive(manifest,expected):
+    require(manifest['sourceCommit']==expected,'candidate source pin differs')
+    if manifest.get('sourceArchive'):
+        path=Path(manifest['sourceArchive'])
+        require(path.is_absolute() and path.is_file() and not path.is_symlink() and path.stat().st_size<=128*1024*1024,'candidate source archive custody differs')
+        archive=path.read_bytes()
+        require(hashlib.sha256(archive).hexdigest()==manifest['sourceArchiveSha256'],'candidate source archive pin differs')
+        return archive
+    source=Path(manifest['sourcePath'])
+    actual=subprocess.check_output(['git','-C',str(source),'rev-parse',expected+'^{commit}'],text=True).strip()
+    require(actual==expected,'source commit not present in candidate repository')
+    return subprocess.check_output(['git','-C',str(source),'archive',expected,'scripts'])
+
+
 def materialize(plan_path,manifest_path,expected):
     plan=load(root_file(plan_path)); root=Path(plan['root'])
     require(plan['state']=='dependencies-staged-no-candidate-no-services','not a fresh dependency plan')
@@ -97,10 +111,7 @@ def materialize(plan_path,manifest_path,expected):
     for asset in plan['assets'].values(): require(sha(root_file(asset['path']))==asset['sha256'],'dependency changed')
     account=pwd.getpwnam(plan['operator']['name'])
     require((account.pw_uid,account.pw_gid)==(plan['operator']['uid'],plan['operator']['gid']),'operator identity changed')
-    source=Path(manifest['sourcePath'])
-    actual=subprocess.check_output(['git','-C',str(source),'rev-parse',expected+'^{commit}'],text=True).strip()
-    require(actual==expected,'source commit not present in candidate repository')
-    archive=subprocess.check_output(['git','-C',str(source),'archive',expected,'scripts'])
+    archive=candidate_archive(manifest,expected)
     capsule=root/('candidate-'+expected[:12])
     require(not capsule.exists() and not capsule.is_symlink(),'candidate capsule already staged; inspect, never overwrite')
     directory(capsule);directory(capsule/'bin');directory(capsule/'source')
@@ -119,6 +130,7 @@ def materialize(plan_path,manifest_path,expected):
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         for item in tar:
             parts=Path(item.name).parts
+            if not parts or parts[0]!='scripts': continue
             require(parts and parts[0]=='scripts' and '..' not in parts and not Path(item.name).is_absolute(), 'unsafe source archive path')
             target=capsule/'source'/item.name
             if item.isdir(): directory(target)
@@ -161,6 +173,7 @@ class Driver:
                                   ('fixtureInput','fixtureInputSha256'),('scriptHashes','scriptHashesSha256')]:
             require(sha(root_file(r[path_key]))==r[hash_key],'staged pin changed: '+path_key)
         self.plan=load(r['setupPlan']); self.manifest=load(r['manifest']); self.broker=load(r['brokerConfig']); self.input=load(r['fixtureInput'])
+        require(not self.plan.get('receivingMode'),'same-world plan supports materialize only; use same-store helpers')
         self.root=Path(self.plan['root']); self.capsule=Path(r['capsule']); self.scripts=Path(r['scripts'])
         for role in ROLES: require(sha(root_file(self.manifest[role]))==self.manifest['sha256'][role],'staged executable changed')
         for name,digest in load(r['scriptHashes']).items(): require(sha(root_file(self.capsule/'source'/name))==digest,'staged source changed')
