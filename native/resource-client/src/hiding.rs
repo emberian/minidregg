@@ -298,6 +298,68 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
+/// One `StreamCodec.nat` prefix: base-255 digits up to the terminator 255.
+fn nat_prefix(bytes: &[u8]) -> Result<(Nat, &[u8])> {
+    let end = bytes.iter().position(|byte| *byte == 255).ok_or("unterminated natural")?;
+    let mut value = Nat::zero();
+    for digit in bytes[..end].iter().rev() {
+        value = value.mul_add(255, *digit as u32);
+    }
+    if end > 0 && bytes[end - 1] == 0 {
+        return Err("noncanonical natural".to_owned());
+    }
+    Ok((value, &bytes[end + 1..]))
+}
+
+/// Check an opened declaration (state-key tags 4 `fieldDeclared` and 5
+/// `fieldsOpen`, value 0) against the view's displayed `cell.declaration`:
+/// `"open"` is exactly one tag-5 entry; a list of field numbers is exactly the
+/// tag-4 entries, one per field.  Every declaration entry names one cell.
+fn check_declaration(displayed: Option<&Value>, opened: &[&Vec<u8>]) -> Result<()> {
+    let refuse = |why: &str| Err(format!("view refused: {why}"));
+    let mut object: Option<Nat> = None;
+    let mut fields = Vec::new();
+    let mut open = 0usize;
+    for entry in opened {
+        let (cell, rest) = nat_prefix(&entry[1..])?;
+        let rest = if entry[0] == 4 {
+            let (field, rest) = nat_prefix(rest)?;
+            fields.push(field.to_decimal());
+            rest
+        } else {
+            open += 1;
+            rest
+        };
+        if rest != [255u8].as_slice() {
+            return refuse("a declaration entry holds a value other than 0");
+        }
+        if object.get_or_insert_with(|| cell.clone()) != &cell {
+            return refuse("declaration entries name two cells");
+        }
+    }
+    match displayed {
+        Some(Value::String(text)) if text == "open" => {
+            if open != 1 || !fields.is_empty() {
+                return refuse("it displays an open cell and opens a different declaration");
+            }
+        }
+        Some(Value::Array(list)) => {
+            let mut shown = list
+                .iter()
+                .map(|field| field.as_str().map(str::to_owned).ok_or("declared field is not a decimal"))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            shown.sort();
+            fields.sort();
+            if open != 0 || shown != fields {
+                return refuse("its displayed declaration is not its opened declaration");
+            }
+        }
+        None if opened.is_empty() => {}
+        _ => return refuse("it opens a declaration it does not display"),
+    }
+    Ok(())
+}
+
 /// The canonical entry bytes of one displayed declared entry.
 fn declared_entry_bytes(entry: &Value) -> Result<Vec<u8>> {
     let key = entry.get("key").ok_or("declared entry lacks key")?;
@@ -399,16 +461,24 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
     });
     let mut checked = false;
     if let (Some(list), true) = (entries, declared) {
-        if list.len() != opened.len() {
+        // K-FIELD-CLOSURE: the cell's declaration is displayed apart from its
+        // values (`cell.declaration`), and its entries are opened with the
+        // fields they declare.  Every opened declaration entry must be the
+        // displayed declaration, and every displayed declaration opened.
+        let displayed = resource.get("cell").and_then(|cell| cell.get("declaration"));
+        let (declarations, values): (Vec<&Vec<u8>>, Vec<&Vec<u8>>) =
+            opened.iter().partition(|entry| matches!(entry.first(), Some(4 | 5)));
+        check_declaration(displayed, &declarations)?;
+        if list.len() != values.len() {
             return Err(format!(
                 "view refused: it displays {} entries and opens {}",
                 list.len(),
-                opened.len()
+                values.len()
             ));
         }
         for entry in list {
             let bytes = declared_entry_bytes(entry)?;
-            if !opened.contains(&bytes) {
+            if !values.contains(&&bytes) {
                 return Err("view refused: a displayed entry is not an opened entry".to_owned());
             }
         }
@@ -438,6 +508,36 @@ mod tests {
             hex(&kmac256(&key, b"DREGG/NATIVE-HOST/CHECKPOINT-MAC/v1", b"abc")),
             "b1862dc66901cf8ad0de93235e93a487ec110f46a668a9b5122e0dcb1efa711f"
         );
+    }
+
+    #[test]
+    fn declaration_entries_must_be_the_displayed_declaration() {
+        let declared = |cell: u64, field: u64| {
+            let mut bytes = vec![4u8];
+            bytes.extend(nat_bytes(cell));
+            bytes.extend(nat_bytes(field));
+            bytes.extend(int_bytes("0").unwrap());
+            bytes
+        };
+        let mut open = vec![5u8];
+        open.extend(nat_bytes(7));
+        open.extend(int_bytes("0").unwrap());
+        let (one, two, other_cell) = (declared(7, 1), declared(7, 2), declared(8, 2));
+        let encoded = nat_bytes(300);
+        let (value, rest) = nat_prefix(&encoded).unwrap();
+        assert_eq!((value.to_decimal().as_str(), rest), ("300", &[][..]));
+        assert!(check_declaration(Some(&json!(["2", "1"])), &[&one, &two]).is_ok());
+        assert!(check_declaration(Some(&json!("open")), &[&open]).is_ok());
+        assert!(check_declaration(None, &[]).is_ok());
+        assert!(check_declaration(Some(&json!(["1"])), &[&one, &two]).is_err());
+        assert!(check_declaration(Some(&json!(["1", "2"])), &[&one, &other_cell]).is_err());
+        assert!(check_declaration(Some(&json!("open")), &[&one]).is_err());
+        assert!(check_declaration(None, &[&one]).is_err());
+        let mut nonzero = vec![4u8];
+        nonzero.extend(nat_bytes(7));
+        nonzero.extend(nat_bytes(1));
+        nonzero.extend(int_bytes("3").unwrap());
+        assert!(check_declaration(Some(&json!(["1"])), &[&nonzero]).is_err());
     }
 
     #[test]
