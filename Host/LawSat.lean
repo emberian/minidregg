@@ -506,6 +506,71 @@ theorem lawSat_unsat_from_here (q : Query) (d : DiffProblem) (c : Certificate)
 #assert_axioms lawSat_unsat_admits_nothing
 #assert_axioms lawSat_unsat_from_here
 
+/-! ## §5b. Self-lockout (FIX-DISCLOSE)
+
+`law check` and the install guard used to ask only whether ANY subject's step passes. A law
+that only another subject can satisfy (`subject == 12345`) passed, and its installer was
+locked out of the cell as completely as by `sealed`. The client now asks two more questions,
+each the law conjoined with the installer's own request slots:
+
+* `lockoutQuery law installer none`: `all [law, subject == installer]`. A certificate means
+  the installer is never admitted, for any verb (`self_lockout_detected`): install refuses
+  without `--i-lock-myself-out`.
+* `lockoutQuery law installer (some 4)`: `all [law, subject == installer, verb == install]`.
+  A certificate means the law can never be changed by its installer (`relaw_lockout_detected`):
+  a warning, since that may be meant (`sealed` is). -/
+
+/-- The verb tag of a re-law (`request/verb` 4 is `install`, `CredentialAuthorityEntryCodec.verbTag`). -/
+def installVerb : Int := 4
+
+/-- The installer's own question: the law, with the request subject pinned to `installer`
+and, when given, the verb pinned to `verb`. -/
+def lockoutExtra (installer : Int) : Option Int → Pred
+  | none => .eq "request/subject" installer
+  | some verb => Pred.all [.eq "request/subject" installer, .eq "request/verb" verb]
+
+def lockoutQuery (law : Pred) (installer : Int) (verb : Option Int) : Query :=
+  ⟨law, lockoutExtra installer verb, false⟩
+
+/-- **`self_lockout_detected`** — a certificate to the installer's question: on every step
+whose request names the installer, the law refuses. No request by the installer, of any
+verb, is ever admitted. -/
+theorem self_lockout_detected (law : Pred) (installer : Int) (d : DiffProblem) (c : Certificate)
+    (h : answer (lockoutQuery law installer none) = .decided d (.unsat c)) :
+    ∀ o n, n.get "request/subject" = some installer → eval law o n = false := by
+  intro o n subject
+  have refused := lawSat_unsat_admits_nothing (lockoutQuery law installer none) d c rfl h o n
+  have pinned : eval (lockoutExtra installer none) o n = true := by
+    simp [lockoutExtra, eval, evalWith, subject]
+  simpa [lockoutQuery, pinned] using refused
+
+/-- **`relaw_lockout_detected`** — a certificate to the installer's re-law question: no
+re-law by the installer is ever admitted, so the law can never be changed by it. -/
+theorem relaw_lockout_detected (law : Pred) (installer : Int) (d : DiffProblem) (c : Certificate)
+    (h : answer (lockoutQuery law installer (some installVerb)) = .decided d (.unsat c)) :
+    ∀ o n, n.get "request/subject" = some installer → n.get "request/verb" = some installVerb →
+      eval law o n = false := by
+  intro o n subject verb
+  have refused := lawSat_unsat_admits_nothing (lockoutQuery law installer (some installVerb)) d c rfl h o n
+  have pinned : eval (lockoutExtra installer (some installVerb)) o n = true := by
+    rw [lockoutExtra, eval, evalWith_all]
+    simp [evalWith, subject, verb]
+  simpa [lockoutQuery, pinned] using refused
+
+/-- The accepting pole: a witness to the installer's question is a step by the installer
+that the law admits, so the guard is silent exactly when it has one. -/
+theorem lockout_witness_admits_installer (law : Pred) (installer : Int) (d : DiffProblem)
+    (o n : State) (h : answer (lockoutQuery law installer none) = .decided d (.witness o n)) :
+    eval law o n = true ∧ n.get "request/subject" = some installer := by
+  have both := lawSat_witness_admits (lockoutQuery law installer none) d o n rfl h
+  refine ⟨both.1, ?_⟩
+  have := both.2
+  simpa [lockoutQuery, lockoutExtra, eval, evalWith] using this
+
+#assert_axioms self_lockout_detected
+#assert_axioms relaw_lockout_detected
+#assert_axioms lockout_witness_admits_installer
+
 /-! ## §6. Poles -/
 
 namespace Sample
@@ -569,6 +634,41 @@ theorem admitting_stuck_from_three :
       | _ => false) = true := by
   decide
 
+/-- The audit's lockout (`item6a`): `subject == 12345` admits some step (the old check
+passed it), and none by the installer (alice). -/
+def pinLaw : Pred := .eq "request/subject" 12345
+
+theorem pin_satisfiable_for_someone :
+    (match answer ⟨pinLaw, Pred.all [], false⟩ with
+      | .decided _ (.witness _ _) => true
+      | _ => false) = true := by
+  decide
+
+theorem pin_locks_out_alice :
+    (match answer (lockoutQuery pinLaw 9676064099912148378 none) with
+      | .decided _ (.unsat _) => true
+      | _ => false) = true := by
+  decide
+
+/-- The accepting pole: the subject the law names is not locked out. -/
+theorem pin_admits_its_subject :
+    (match answer (lockoutQuery pinLaw 12345 none) with
+      | .decided _ (.witness _ _) => true
+      | _ => false) = true := by
+  decide
+
+/-- `sealed` locks out every installer and every re-law: the guard flags it, and the
+client's existing `--allow-unsatisfiable` remains its override. -/
+theorem sealed_relaw_locked :
+    (match answer (lockoutQuery (Pred.any []) 7 (some installVerb)) with
+      | .decided _ (.unsat _) => true
+      | _ => false) = true := by
+  decide
+
+#assert_axioms pin_satisfiable_for_someone
+#assert_axioms pin_locks_out_alice
+#assert_axioms pin_admits_its_subject
+#assert_axioms sealed_relaw_locked
 #assert_axioms falsifier_answer
 #assert_axioms sealed_answer
 #assert_axioms ran_outside

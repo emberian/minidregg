@@ -871,7 +871,7 @@ fn socket_process(
         "prepare" if arguments.len() == 3 => (1, read(1)?, Some(arguments[2])),
         "submit" if arguments.len() == 3 => (2, read(1)?, Some(arguments[2])),
         "lookup" if arguments.len() == 3 => (3, read(1)?, Some(arguments[2])),
-        "challenge" if arguments.len() == 3 => (4, read(1)?, Some(arguments[2])),
+        "challenge" if arguments.len() == 4 => (4, pair(read(1)?, read(2)?)?, Some(arguments[3])),
         "query" if arguments.len() == 3 => (5, read(1)?, Some(arguments[2])),
         "author" if arguments.len() == 4 => {
             (7, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
@@ -1388,6 +1388,7 @@ fn authorize_observation(
     directory: &Path,
 ) -> Result<Observed> {
     let intent_bin = directory.join("intent.bin");
+    let intent_signature = directory.join("intent-signature.bin");
     let challenge_bin = directory.join("challenge.bin");
     let challenge_json = directory.join("challenge.json");
     let signatures_json = directory.join("observation-signatures.json");
@@ -1398,10 +1399,15 @@ fn authorize_observation(
     } else {
         author(host, config, intent_kind, intent, &intent_bin)?;
     }
+    // The Host answers an observation only for a request its subject signed: the
+    // signature over the intent's own framed bytes is checked before any target is read.
+    let intent_bytes = fs::read(&intent_bin)
+        .map_err(|error| format!("cannot read {}: {error}", intent_bin.display()))?;
+    write_new(&intent_signature, &signing.sign(&intent_bytes).to_bytes())?;
     host_files(
         host,
         config,
-        &[Path::new("challenge"), &intent_bin, &challenge_bin],
+        &[Path::new("challenge"), &intent_bin, &intent_signature, &challenge_bin],
     )?;
     let presentation = inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
     encode_signatures(
