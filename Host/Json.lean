@@ -1172,11 +1172,17 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
       pure (.install ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
         ⟨← nat (path ++ ".control") (← field path "control" obj)⟩ declaration)
   | "install-source" =>
-      let obj ← exactObject path ["type", "subject", "control", "declaration"] json
+      let raw ← object path json
+      let obj ← exactObject path (["type", "subject", "control", "declaration"] ++
+        if (raw.get? "audienceRoster").isSome then ["audienceRoster"] else []) json
       let declaration ← policyInstall (path ++ ".declaration") (← field path "declaration" obj)
-      pure (.install ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
-        ⟨← nat (path ++ ".control") (← field path "control" obj)⟩
-        (PolicyInstallController.declarationCodec.encode declaration))
+      let subject : SubjectId := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+      let control : CapabilityId := ⟨← nat (path ++ ".control") (← field path "control" obj)⟩
+      let bytes := PolicyInstallController.declarationCodec.encode declaration
+      match obj.get? "audienceRoster" with
+      | none | some .null => pure (.install subject control bytes)
+      | some value => pure (.installWithRoster subject control bytes
+          (Compiler.ObjectAudienceRoster.encode (← audienceRoster (path ++ ".audienceRoster") value)))
   | "delegate" =>
       let obj ← exactObject path ["type", "command"] json
       let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
@@ -3279,6 +3285,9 @@ def author (kind : String) (json : Lean.Json)
       let obj ← exactObject "$" ["generation"] json
       let generation ← int "$.generation" (← field "$" "generation" obj)
       pure (NativeHostGenesis.predicateStream.encode (AgentGrain.executionCaveat generation))
+  | "object-audience-roster" => Compiler.ObjectAudienceRoster.encode <$> audienceRoster "$" json
+  | "object-device-catalog" =>
+      (fun r => (StreamCodec.list Compiler.ObjectAudienceRoster.entryStream).encode r.entries) <$> audienceRoster "$" json
   | "policy" => PolicyRecordCodec.encode <$> policyRecord "$" json
   | "policy-install" => PolicyInstallController.declarationCodec.encode <$> policyInstall "$" json
   | "policy-install-draft" => draftCodec.encode <$> policyInstallDraft "$" json
@@ -3395,6 +3404,10 @@ private def draftJson : Draft → Lean.Json
   | .invoke bytes => .mkObj [("type", "invoke"), ("command", hexJson bytes)]
   | .install subject control bytes => .mkObj [("type", "install"), ("subject", decimal subject.value),
       ("control", decimal control.value), ("declaration", hexJson bytes)]
+  | .installWithRoster subject control bytes roster => .mkObj
+      [("type", "install-with-roster"), ("subject", decimal subject.value),
+       ("control", decimal control.value), ("declaration", hexJson bytes),
+       ("rosterBytes", hexJson roster)]
   | .delegate bytes => .mkObj [("type", "delegate"), ("command", hexJson bytes)]
   | .revoke bytes => .mkObj [("type", "revoke"), ("command", hexJson bytes)]
   | .renounce bytes => .mkObj [("type", "renounce"), ("command", hexJson bytes)]
@@ -5205,6 +5218,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       pure <| (policyRecordJson value).mergeObj (.mkObj
         [("type", "policy"), ("canonical", hexJson (PolicyRecordCodec.encode value)),
          ("address", decimal (PolicyRecordCodec.digest value).value),
+         ("semanticLawDigest", decimal (PolicyRecordCodec.semanticLawDigest value).value),
          ("text", .str (LawLeaf.renderClause value.predicate))])
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes

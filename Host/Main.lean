@@ -83,6 +83,7 @@ The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
+import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
@@ -6276,6 +6277,69 @@ def run (arguments : List String) : IO UInt32 := do
           let purse ← IO.ofExcept (← NativeHost.payPurse config task)
           writeJson output (Minidregg.Host.Json.payPurseJson purse)
           pure 0
+      | "object-roster-inspect", [input, output] =>
+          let bytes ← readBoundedBytes input maxFrame
+          let some roster := Compiler.ObjectAudienceRoster.decode bytes
+            | throw (IO.userError "roster is not canonical")
+          writeJson output (.mkObj [("roster", Minidregg.Host.Json.audienceRosterJson roster),
+            ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex bytes)),
+            ("audience", toJson (toString (Compiler.ObjectAudienceRoster.digest roster).value)),
+            ("devices", toJson (toString (Compiler.ObjectAudienceRoster.deviceDigest roster).value))])
+          pure 0
+      | "object-audience-roster", [sourceObservation, catalogObservation, plannedPath, rosterPath, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let planned ← IO.ofExcept (Minidregg.Host.Json.audienceState "$" (← readJson plannedPath))
+            let rosterBytes ← readBoundedBytes rosterPath maxFrame
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let walked ← sessionWalked pinnedConfig state
+            let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded pinnedConfig
+              walked.target walked.verified (← readBoundedBytes sourceObservation maxFrame)
+              (← readBoundedBytes catalogObservation maxFrame) rosterBytes planned)
+            writeJson output (.mkObj [("type", toJson "minidregg-checked-object-roster-v1"),
+              ("audienceState", Minidregg.Host.Json.audienceStateJson audience),
+              ("roster", Minidregg.Host.Json.audienceRosterJson roster),
+              ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex rosterBytes)),
+              ("deviceSnapshot", toJson (toString audience.deviceSnapshot))])
+            pure 0
+      | "object-audience", [observationPath, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let walked ← sessionWalked pinnedConfig state
+            let signed ← readBoundedBytes observationPath maxFrame
+            let result ← NativeHost.objectAudienceLoaded pinnedConfig walked.target walked.verified signed
+            let view ← match result with
+              | .ok view => pure view
+              | .error reason => throw (IO.userError s!"object audience observation refused: {repr reason}")
+            let fields : List (String × Lean.Json) :=
+              [("type", toJson "minidregg-object-audience-v1"),
+               ("subject", toJson (toString view.subject.value)),
+               ("object", toJson (toString view.object)),
+               ("worldRoot", toJson (toString view.worldRoot.value)),
+               ("policyAddress", toJson (toString view.policyAddress.value)),
+               ("semanticLawDigest", toJson (toString (PolicyRecordCodec.semanticLawDigest view.sourceRecord).value)),
+               ("policyEpoch", toJson (toString view.policyEpoch)),
+               ("policyRevision", toJson (toString view.policyRevision)),
+               ("currentAuthorityRoot", toJson (toString view.currentAuthorityRoot.value)),
+               ("currentObjectRoot", toJson (toString view.currentObjectRoot.value)),
+               ("source", toJson (Minidregg.Host.Json.encodeHex view.sourceBytes)),
+               ("sourceRecord", Minidregg.Host.Json.policyRecordJson view.sourceRecord)]
+            let metadata := match view.audience with
+              | none => [("audienceState", Lean.Json.null), ("active", toJson false)]
+              | some a =>
+                [("audienceState", Minidregg.Host.Json.audienceStateJson a),
+                 ("epoch", toJson (toString a.epoch)),
+                 ("transition", toJson (toString a.transition)),
+                 ("audience", toJson (toString a.audience)),
+                 ("devices", toJson (toString a.devices)),
+                 ("history", toJson (toString a.history)),
+                 ("manifest", toJson (toString a.manifest)),
+                 ("authoritySnapshot", toJson (toString a.authoritySnapshot)),
+                 ("deviceSnapshot", toJson (toString a.deviceSnapshot)),
+                 ("active", toJson (a.mode == .active))]
+            writeJson output (Lean.Json.mkObj (fields ++ metadata))
+            pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
             let (count, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)

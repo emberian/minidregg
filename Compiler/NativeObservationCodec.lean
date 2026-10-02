@@ -151,13 +151,8 @@ def intentStream : StreamCodec Intent :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro intent; cases intent; rfl)
 
-/-- v6 (DOCUVERSE-ON-FINAL): ONE view sum past both lines that had bumped from
-K-INDEX's v4: final kept v4 and added the stream `tail` window (K-STREAM), the
-docuverse line went to v5 with `backlinks` and `links` (K-DOC-INDEX). Both
-refuse: a v4 intent (`v4_intent_refused`, final's shape) and a v5 intent
-(`v5_intent_refused`, the docuverse shape). v4 (K-INDEX) added `who`,
-`since h` and `at h`. -/
-def intentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v6".toUTF8.toList
+/-- v7 retains the full docuverse query sum and signs roster-bound install drafts. -/
+def intentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v7".toUTF8.toList
 
 /-- final's intent frame before the union (who/since/at + tail). -/
 def retiredIntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v4".toUTF8.toList
@@ -168,7 +163,7 @@ def retiredDocuverseIntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTEN
 def intentCodec : LawfulCodec Intent := NativeHostCodec.framed intentFrame intentStream
 
 def intentIdentity (intent : Intent) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-INTENT/v6".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-INTENT/v7".toUTF8.toList
     (intentCodec.encode intent)).digest
 
 def federationStream : StreamCodec FederationId :=
@@ -183,8 +178,8 @@ def challengeStream : StreamCodec Challenge :=
     (by intro value; cases value; rfl)
 
 /-- The union of document views, committed clock fields, and the early intent
-signature. Both independent v7 layouts and the prior v8 layout are retired. -/
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v9".toUTF8.toList
+signature. v10 adds the roster-bound draft encoding without changing tuple order. -/
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v10".toUTF8.toList
 
 def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6".toUTF8.toList
 
@@ -197,7 +192,7 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v9".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v10".toUTF8.toList
 
 def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6".toUTF8.toList
 
@@ -232,25 +227,31 @@ theorem signed_canonical {bytes : List UInt8} {signed : Signed}
     (decoded : signedCodec.decode bytes = some signed) : signedCodec.encode signed = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
 
+private theorem framed_refuses_prefix {A : Type} (frame old : List UInt8)
+    (stream : StreamCodec A) (payload : List UInt8)
+    (shorter : old.length ≤ frame.length) (different : frame.take old.length ≠ old) :
+    (NativeHostCodec.framed frame stream).decode (old ++ payload) = none := by
+  have mismatch : (old ++ payload).take frame.length ≠ frame := by
+    intro equal
+    have prefix := congrArg (List.take old.length) equal
+    have exact : old = frame.take old.length := by
+      simpa [List.take_take, Nat.min_eq_left shorter] using prefix
+    exact different exact.symm
+  have raw : (NativeHostCodec.framedRaw frame stream).decode (old ++ payload) = none := by
+    simp [NativeHostCodec.framedRaw, mismatch]
+  simp [NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+
 /-- A v6 challenge refuses to decode. -/
 theorem v6_challenge_refused (payload : List UInt8) :
     challengeCodec.decode (retiredChallengeFrame ++ payload) = none := by
-  have lengthExact : challengeFrame.length = retiredChallengeFrame.length := by decide +kernel
-  have different : retiredChallengeFrame ≠ challengeFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw challengeFrame challengeStream).decode
-      (retiredChallengeFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix challengeFrame retiredChallengeFrame challengeStream payload
+    (by decide +kernel) (by decide +kernel)
 
 /-- A v6 signed observation refuses to decode. -/
 theorem v6_signed_refused (payload : List UInt8) :
     signedCodec.decode (retiredSignedFrame ++ payload) = none := by
-  have lengthExact : signedFrame.length = retiredSignedFrame.length := by decide +kernel
-  have different : retiredSignedFrame ≠ signedFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw signedFrame signedStream).decode
-      (retiredSignedFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [signedCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix signedFrame retiredSignedFrame signedStream payload
+    (by decide +kernel) (by decide +kernel)
 
 /-- A v4 intent refuses to decode. -/
 def retiredV3IntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v3".toUTF8.toList
@@ -286,44 +287,28 @@ theorem v4_intent_refused (payload : List UInt8) :
 /-- A v7 challenge (the docuverse line's frame) refuses to decode. -/
 theorem v7_challenge_refused (payload : List UInt8) :
     challengeCodec.decode (retiredDocuverseChallengeFrame ++ payload) = none := by
-  have lengthExact : challengeFrame.length = retiredDocuverseChallengeFrame.length := by decide +kernel
-  have different : retiredDocuverseChallengeFrame ≠ challengeFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw challengeFrame challengeStream).decode
-      (retiredDocuverseChallengeFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix challengeFrame retiredDocuverseChallengeFrame challengeStream payload
+    (by decide +kernel) (by decide +kernel)
 
 /-- A v7 signed observation (the docuverse line's frame) refuses to decode. -/
 theorem v7_signed_refused (payload : List UInt8) :
     signedCodec.decode (retiredDocuverseSignedFrame ++ payload) = none := by
-  have lengthExact : signedFrame.length = retiredDocuverseSignedFrame.length := by decide +kernel
-  have different : retiredDocuverseSignedFrame ≠ signedFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw signedFrame signedStream).decode
-      (retiredDocuverseSignedFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [signedCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix signedFrame retiredDocuverseSignedFrame signedStream payload
+    (by decide +kernel) (by decide +kernel)
 
 def retiredV8ChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v8".toUTF8.toList
 def retiredV8SignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v8".toUTF8.toList
 
 theorem v8_challenge_refused (payload : List UInt8) :
     challengeCodec.decode (retiredV8ChallengeFrame ++ payload) = none := by
-  have lengthExact : challengeFrame.length = retiredV8ChallengeFrame.length := by decide +kernel
-  have different : retiredV8ChallengeFrame ≠ challengeFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw challengeFrame challengeStream).decode
-      (retiredV8ChallengeFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix challengeFrame retiredV8ChallengeFrame challengeStream payload
+    (by decide +kernel) (by decide +kernel)
 
 /-- A v7 signed observation (the docuverse line's frame) refuses to decode. -/
 theorem v8_signed_refused (payload : List UInt8) :
     signedCodec.decode (retiredV8SignedFrame ++ payload) = none := by
-  have lengthExact : signedFrame.length = retiredV8SignedFrame.length := by decide +kernel
-  have different : retiredV8SignedFrame ≠ signedFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw signedFrame signedStream).decode
-      (retiredV8SignedFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [signedCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  exact framed_refuses_prefix signedFrame retiredV8SignedFrame signedStream payload
+    (by decide +kernel) (by decide +kernel)
 
 /-- A v5 intent (the docuverse line's frame) refuses to decode. -/
 theorem v5_intent_refused (payload : List UInt8) :
@@ -340,5 +325,22 @@ theorem v5_intent_refused (payload : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms v7_signed_refused
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v5_intent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v5_intent_refused
+
+def retiredV9ChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v9".toUTF8.toList
+def retiredV9SignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v9".toUTF8.toList
+def retiredV6IntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v6".toUTF8.toList
+
+theorem v9_challenge_refused (payload : List UInt8) :
+    challengeCodec.decode (retiredV9ChallengeFrame ++ payload) = none := by
+  exact framed_refuses_prefix challengeFrame retiredV9ChallengeFrame challengeStream payload
+    (by decide +kernel) (by decide +kernel)
+theorem v9_signed_refused (payload : List UInt8) :
+    signedCodec.decode (retiredV9SignedFrame ++ payload) = none := by
+  exact framed_refuses_prefix signedFrame retiredV9SignedFrame signedStream payload
+    (by decide +kernel) (by decide +kernel)
+theorem v6_intent_refused (payload : List UInt8) :
+    intentCodec.decode (retiredV6IntentFrame ++ payload) = none := by
+  exact framed_refuses_prefix intentFrame retiredV6IntentFrame intentStream payload
+    (by decide +kernel) (by decide +kernel)
 
 end Minidregg.Compiler.NativeObservationCodec

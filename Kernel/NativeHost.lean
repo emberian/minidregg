@@ -182,6 +182,20 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
         let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
         pure (.install subject control bytes, [signature])
+    | .installWithRoster subject control bytes rosterBytes => do
+        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
+        let context : PolicyInstallController.RequestContext :=
+          { federation := config.federation, subject := subject
+            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
+            height := height
+            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
+            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
+        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
+          (fun reason => s!"install preparation: {repr reason}")
+        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
+        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
+        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
+        pure (.installWithRoster subject control bytes rosterBytes, [signature])
     | .delegate bytes => do
         let packed ← need "noncanonical delegation command" (CapabilityDelegationController.commandCodec.decode bytes)
         let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
@@ -779,6 +793,10 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
         ({ capability := some capability, envelope := envelope } : ResourceBirthPolicyController.Concrete.BranchCredential)
       pure (.birth (ResourceBirthPolicyController.Concrete.ingressCodec.encode
         ⟨bytes, ⟨⟨none, factory⟩, ⟨none, authority⟩, allocations, sources⟩⟩))
+  | .installWithRoster subject control bytes rosterBytes =>
+      match envelopes with
+      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope, some rosterBytes⟩))
+      | _ => .error "install signing slots mismatch"
   | .delegate bytes =>
       match envelopes with
       | [envelope] => pure (.delegate (CapabilityDelegationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))

@@ -146,6 +146,11 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
       let declaration ← need .malformed (PolicyInstallController.decodeDeclaration bytes)
       let kind ← need .noGrant (declaredKind context declaration.source.policyId.value)
       pure [(kind, declaration.source.policyId.value)]
+  | .prepare (.installWithRoster subject _ bytes _) =>
+      require .malformed (subject == intent.subject)
+      let declaration ← need .malformed (PolicyInstallController.decodeDeclaration bytes)
+      let kind ← need .noGrant (declaredKind context declaration.source.policyId.value)
+      pure [(kind, declaration.source.policyId.value)]
   | .prepare (.birth bytes _) =>
       if let some source := GrainResourceBirthHostCodec.sourceCodec.decode bytes then
         require .malformed (source.birth.creator == intent.subject)
