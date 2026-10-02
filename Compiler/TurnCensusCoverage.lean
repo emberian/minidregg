@@ -1,5 +1,5 @@
 /-
-# Kernel.TurnCensusCoverage — the census rows track the admission constructors
+# Compiler.TurnCensusCoverage — the census rows track the admission constructors
 
 `Kernel.TurnCensus` writes one row per `NativeHostReplay.NativeAdmission`
 constructor in its own `Ctor` enumeration (it does not import the replay).
@@ -11,13 +11,15 @@ cannot land without its census row, its negation and its refusal.
 
 It is a build-time structural check over declaration names, not a theorem:
 what it relates is the shape of two inductive types, which no proposition
-about their values states.
+about their values states.  It lives in `Compiler` because it is a `Lean`
+metaprogram over Kernel declarations, and the import-tier table admits `Lean`
+in Compiler (and Host), not in Kernel.
 -/
 import Lean
 import Kernel.TurnCensus
 import Kernel.NativeHostReplay
 
-namespace Minidregg.Kernel.TurnCensusCoverage
+namespace Minidregg.Compiler.TurnCensusCoverage
 
 open Lean Elab Command
 
@@ -37,4 +39,4 @@ elab "#assert_census_covers_admissions" : command => do
 
 #assert_census_covers_admissions
 
-end Minidregg.Kernel.TurnCensusCoverage
+end Minidregg.Compiler.TurnCensusCoverage

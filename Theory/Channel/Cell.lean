@@ -547,7 +547,7 @@ def profileOfId : UInt8 → Option Profile
   | 3 => some P2
   | _ => none
 
-/-- The codec as a byte function: `decodeCellBytes id bytes` refuses with the empty array (unknown class
+/-- The codec as a byte function: `decodeCellBytesList id bytes` refuses with the empty array (unknown class
 or not `C` bytes) and otherwise answers `[kind] ++ bytes`, `kind` `1` regular · `2` duty — the input
 echoed is the cell's unique encoding (`cell_decode_canonical`). -/
 def decodeCellBytesList (pid : UInt8) (bytes : List UInt8) : List UInt8 :=
@@ -557,10 +557,6 @@ def decodeCellBytesList (pid : UInt8) (bytes : List UInt8) : List UInt8 :=
     match Cell.decode P bytes with
     | none => []
     | some c => (if c.body.isDuty then 2 else 1) :: c.encode
-
-@[export minidregg_channel_cell_decode]
-def decodeCellBytes (pid : UInt8) (bytes : ByteArray) : ByteArray :=
-  ⟨(decodeCellBytesList pid bytes.toList).toArray⟩
 
 /-- Encode from fields: `header 8 ++ body (C − 8)` assembled through `Cell.ofRaw` (the tick selects the
 layout); the empty array when the class is unknown or the lengths are wrong. -/

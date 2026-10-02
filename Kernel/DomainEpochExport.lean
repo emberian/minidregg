@@ -12,7 +12,6 @@ re-implements cSHAKE256 framing, the tick root, the record codec or the opening:
 | `minidregg_channel_header` | `headerBytes` | `headerBytesList_is_headerAt` |
 | `minidregg_channel_tick_root` | `tickRootBytes` | `tickRootBytesList_is_vectorRoot`, `tickRoot_of_assemble` |
 | `minidregg_channel_seal` | `sealBytes` | `sealBytesList_is_sealEpoch`, `relay_pipeline_is_sealEpoch` |
-| `minidregg_channel_commit_absent` | `commitAbsentBytes` | `commitAbsentBytesList_is_commitAbsent` |
 | `minidregg_channel_open` | `openBytes` | `openBytesList_is_openRecord`, `sealed_opening_opens` |
 | `minidregg_channel_topic` | `topicBytes` | `topicBytesList_is_recordAppend` (in `Kernel.DomainEpochAudit`) |
 
@@ -377,10 +376,6 @@ theorem relay_pipeline_is_sealEpoch {pid : UInt8} {P : Profile} (hp : profileOfI
 
 def commitAbsentBytesList (mask salt : List UInt8) : List UInt8 :=
   if mask.all (· ≤ 1) = true ∧ salt.length = 32 then (commitAbsent (openingOf mask salt)).val else []
-
-@[export minidregg_channel_commit_absent]
-def commitAbsentBytes (mask salt : ByteArray) : ByteArray :=
-  ⟨(commitAbsentBytesList mask.toList salt.toList).toArray⟩
 
 /-- **The commitment export is `commitAbsent`** of the opening the bytes encode. -/
 theorem commitAbsentBytesList_is_commitAbsent (o : AbsentOpening) :

@@ -4,7 +4,7 @@
 SURPASS §2(b), lane T1.  The Host admits through the 37 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
-the BRAID-PROOF merge).  `Kernel.TurnCensusCoverage` fails the build when
+the BRAID-PROOF merge).  `Compiler.TurnCensusCoverage` fails the build when
 `Ctor` and `NativeAdmission` disagree on their constructor names.  T0's census
 (`planning/surpass/t0-receiver-census.md`) lists, per constructor, the cells it
 reads and writes, its nullifiers, its charge and its clock pin.  This module

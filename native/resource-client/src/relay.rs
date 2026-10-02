@@ -5,7 +5,7 @@
 //! keys, the fill PRF stream (outside Lean by design, CH-CELL §6), and the client subprocess that appends
 //! each epoch record. Everything with a meaning in the kernel is a call into the Lean library
 //! (`--lean-lib`, built by `channel-lib/build.sh` from `Kernel.DomainEpochExport` and its imports: `Init` and
-//! nine package modules, no Mathlib — 0.56 MB, ~10 ms and ~21 MB to initialise):
+//! eleven package modules, no Mathlib — 0.73 MB, ~10 ms and ~21 MB to initialise):
 //!
 //! | step | Lean export | definition |
 //! |---|---|---|
