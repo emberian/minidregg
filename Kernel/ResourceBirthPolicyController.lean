@@ -50,6 +50,10 @@ inductive Reject where
   | signature
   | policyUnavailable
   | policyRejected
+  /-- A born grant's `ancestors` are not the lineage its birth requires: none
+  for a root birth; for a birth under a room, the creator's presented placing
+  capability and that capability's own ancestors (`BornLineage`). -/
+  | roomLineage
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -345,7 +349,6 @@ def RootGrantShape (template : CanonicalRuntimeProfile.FactoryTemplate)
   grant.capability.head.issuerEpoch = authority.issuerEpoch template.issuer ∧
   grant.capability.head.root = grant.capability.head.id ∧
   grant.capability.head.parent = none ∧
-  grant.capability.head.ancestors = ∅ ∧
   grant.capability.head.channels = ∅ ∧
   grant.capability.ancestry = [] ∧
   grant.capability.head.notBefore = height ∧
@@ -372,6 +375,77 @@ def TemplateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
   (∀ grant ∈ descriptor.grants, ∃ item ∈ descriptor.births,
     NativeOwnerGrant grant item ∨ PolicyOwnerGrant grant item) ∧
   descriptor.grants.length = 2 * descriptor.births.length
+
+/-! ### A born grant's revocation lineage (PLACE §2.2: a kick takes down the docs)
+
+Authority over a cell born in a room is an attenuation of the creator's room
+grant. The born owner and control grants cannot be `Attenuates`-children of it:
+`Capability` is kind-indexed (the control grant is `.program`, the room grant
+`.object`) and `Attenuates.policyId` keeps the parent's policy while
+`AuthorityGrant.NativeForBirth` gives every newborn its own (`policyId = cell`).
+So they are roots (`parent = none`, `root = id`, `RootGrantShape`) whose
+`ancestors` are the presented room grant's lineage: the placing capability and
+its own ancestors. `Admissible.ancestorNotRevoked` then refuses them, and every
+attenuation or delegation of them (each copies its parent's ancestors), once
+that room grant or anything above it is revoked. A root birth names no placing
+capability and its grants carry no ancestors. -/
+
+/-- The revocation lineage of a stored object capability: its own ancestors,
+read from the authority cell (`none`: no such capability). -/
+def placementLineage {M : CellState.Materializer CredentialAuthorityState.layout Digest}
+    (cell : CredentialAuthorityState.Cell M) (placement : CapabilityId) :
+    Option (Finset CapabilityId) :=
+  (CredentialAuthorityState.readCapability cell .object placement).map (·.head.ancestors)
+
+/-- What a born grant's `ancestors` must be: empty for a root birth; for a
+birth under a room, `insert placement (ancestors of placement)`. `none` when
+the placement is not a stored capability (the room gate refuses that birth). -/
+def bornAncestors (lineage : CapabilityId → Option (Finset CapabilityId))
+    (item : BirthItem Registry) : Option (Finset CapabilityId) :=
+  match item.placement with
+  | none => some ∅
+  | some placement => (lineage placement).map (insert placement)
+
+/-- Every grant born for an item carries exactly that item's `bornAncestors`. -/
+def BornLineage (lineage : CapabilityId → Option (Finset CapabilityId))
+    (descriptor : Descriptor Registry) : Prop :=
+  ∀ item ∈ descriptor.births, ∀ grant ∈ descriptor.grants, grant.ForBirth item →
+    bornAncestors lineage item = some grant.capability.head.ancestors
+
+instance bornLineageDecidable (lineage : CapabilityId → Option (Finset CapabilityId))
+    (descriptor : Descriptor Registry) : Decidable (BornLineage lineage descriptor) := by
+  unfold BornLineage
+  infer_instance
+
+/-- A grant born under a room carries the creator's placing capability among
+its ancestors. -/
+theorem placement_mem_born_ancestors {lineage : CapabilityId → Option (Finset CapabilityId)}
+    {descriptor : Descriptor Registry} (bound : BornLineage lineage descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {placement : CapabilityId} (placed : item.placement = some placement)
+    {grant : AuthorityGrant} (grantMember : grant ∈ descriptor.grants)
+    (forBirth : grant.ForBirth item) :
+    placement ∈ grant.capability.head.ancestors := by
+  have pinned := bound item member grant grantMember forBirth
+  simp only [bornAncestors, placed] at pinned
+  cases found : lineage placement with
+  | none => simp [found] at pinned
+  | some ancestors =>
+      simp only [found, Option.map_some, Option.some.injEq] at pinned
+      rw [← pinned]
+      exact Finset.mem_insert_self placement ancestors
+
+/-- A root birth's grants carry no ancestors. -/
+theorem root_born_ancestors_empty {lineage : CapabilityId → Option (Finset CapabilityId)}
+    {descriptor : Descriptor Registry} (bound : BornLineage lineage descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    (root : item.placement = none)
+    {grant : AuthorityGrant} (grantMember : grant ∈ descriptor.grants)
+    (forBirth : grant.ForBirth item) :
+    grant.capability.head.ancestors = ∅ := by
+  have pinned := bound item member grant grantMember forBirth
+  simp only [bornAncestors, root] at pinned
+  exact (Option.some.inj pinned).symm
 
 instance rootGrantShapeDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) (height : Height) (grant : AuthorityGrant) :
@@ -795,6 +869,7 @@ structure Pending
     (height : Height) : Prop where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   templateBound : TemplateBound profile.template (oldAuthority prepared) height descriptor
+  bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
 
@@ -803,6 +878,8 @@ def preparePending
     (height : Height) : Except Reject (PLift (Pending prepared height)) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   let templateBound ← checkTemplate prepared height
+  let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
+    descriptor) .roomLineage
   letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
     decidable_of_iff
       (((policyBranches descriptor.createRequests.length descriptor.resourceBatch.operations.length).map
@@ -810,7 +887,7 @@ def preparePending
       (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
   if cells : Function.Injective (layout prepared).cellId then
     if requests : Function.Injective (branchIdentity prepared height) then
-      .ok ⟨⟨checked.down, templateBound.down, cells, requests⟩⟩
+      .ok ⟨⟨checked.down, templateBound.down, bornLineage.down, cells, requests⟩⟩
     else .error .ambiguousRequests
   else .error .duplicateCell
 

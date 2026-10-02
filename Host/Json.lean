@@ -1373,7 +1373,9 @@ private theorem birthRootCapability_time_window {kind : ResourceKind}
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
-    (authority : Option AuthState := none) : Result BirthParts := do
+    (authority : Option AuthState := none)
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) :
+    Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -1461,6 +1463,20 @@ private def birthParts (path : String)
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program)), []⟩⟩
   let control : Capability .program := birthRootCapabilityAt profile source height authority
     controlId owner target {.installPolicy, .revokeCapability}
+  -- A room birth's grants carry the creator's placing capability and its
+  -- ancestors (`ResourceBirthPolicyController.Concrete.BornLineage`): a kick
+  -- that revokes that grant takes down the born cell's owner and control
+  -- grants and every delegation of them. Offline authoring (no loaded
+  -- authority) leaves them empty and the receiver refuses a room birth.
+  let ancestors : Finset CapabilityId ← match placement, lineage with
+    | none, _ => pure ∅
+    | some _, none => pure ∅
+    | some named, some find => match find named with
+      | some above => pure (insert named above)
+      | none => throw s!"{path}.placement: capability {named.value} is not a stored object capability"
+  let ownerGrant : ResourceBirth.AuthorityGrant := match ownerGrant with
+    | ⟨kind, stored⟩ => ⟨kind, { stored with head := { stored.head with ancestors := ancestors } }⟩
+  let control : Capability .program := { control with ancestors := ancestors }
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,
     ⟨rule.policyId, PolicyRecordCodec.digest rule, PolicyRecordCodec.encode rule⟩⟩
 
@@ -1471,7 +1487,8 @@ private def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
     (deployed : Option NativeHost.Config := none)
     (currentHeight : Option Nat := none)
-    (authority : Option AuthState := none) : Result Draft := do
+    (authority : Option AuthState := none)
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1520,7 +1537,7 @@ private def birth (path : String) (json : Lean.Json)
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
   let parts ← list (path ++ ".resources")
-    (fun itemPath value => birthParts itemPath profile source height value authority)
+    (fun itemPath value => birthParts itemPath profile source height value authority lineage)
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
@@ -1543,7 +1560,8 @@ checks the supplied genesis against the pinned seed before using it for
 immutable deployment coordinates. Current grant epochs come only from the
 loaded authority, never from that genesis description. -/
 def birthCurrent (path : String) (json : Lean.Json)
-    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState) :
+    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
+    (lineage : CapabilityId → Option (Finset CapabilityId)) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -1551,7 +1569,7 @@ def birthCurrent (path : String) (json : Lean.Json)
     (fun reason => s!"{path}.genesis: refused: {repr reason}")
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
-  birth path json none (some deployed) (some height) (some authority)
+  birth path json none (some deployed) (some height) (some authority) (some lineage)
 
 structure ApplicationBirthContext where
   source : NativeHostGenesis.Config
@@ -4233,8 +4251,9 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("predicate", predicateJson value.predicate)]
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
-      pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen) =>
-        .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null)])]
+      pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen, held) =>
+        .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null),
+          ("capabilities", .arr <| held.toArray.map decimal)])]
   | "view-since" => do
       let value ← decoded "view-since" NativeObservationController.sinceViewCodec bytes
       pure <| .mkObj [("type", "since"), ("entries", .arr <| value.toArray.map fun entry =>

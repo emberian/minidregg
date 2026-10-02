@@ -706,8 +706,8 @@ pub(crate) fn rotate(
 /// `room kick` in a private room: the K-ROOM revoke, then the rotation.
 pub(crate) fn kick(root: &Path, workspace: &Value, room_name: &str, subject: &str, proposal_id: &str) -> Result<()> {
     private_room(root, room_name)?;
-    turn(root, workspace, proposal_id, &json!({"type":"minidregg-workspace-proposal-v1",
-        "action":"revoke","name":room_name,"recipient":subject}))?;
+    // Every standing grant the member holds under the room, then the rotation.
+    super::room_kick(root, workspace, room_name, subject, proposal_id, true)?;
     rotate(root, workspace, room_name, Some(subject), &format!("{proposal_id}-rotate"))
 }
 

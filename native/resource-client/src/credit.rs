@@ -35,7 +35,9 @@ pub(crate) const ROOM_FIELDS_START: u64 = 1001;
 /// length in heights; `runner`: the concierge's own account (`topup …
 /// concierge` funds it); `concierge`: the concierge's subject; `hermes`: the
 /// subject `summon` put on the roster (0 after `dismiss`); `hermes/account`:
-/// Hermes's budget account `A_P` (`topup` funds it).
+/// Hermes's budget account `A_P` (`topup` funds it); `open`: 1 when a paid
+/// room sells a week to anyone who pays, 0 (the default) when the concierge
+/// sells only to a subject the room already admits (a standing grant under R).
 pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
     ("week", "1001"),
     ("birth", "1002"),
@@ -46,6 +48,7 @@ pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
     ("concierge", "1007"),
     ("hermes", "1008"),
     ("hermes/account", "1009"),
+    ("open", "1010"),
 ];
 
 /// The topic a Hermes turn's payment publishes on Hermes's account.
@@ -53,7 +56,10 @@ pub(crate) const HERMES_TOPIC: &str = "hermes";
 
 /// Fields a founder sets by `tariff ROOM set FIELD N`; the rest are written
 /// by `room concierge` (install) and name accounts and subjects.
-const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period"];
+const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period", "open"];
+
+/// The topic a concierge's refund publishes on the till.
+pub(crate) const REFUND_TOPIC: &str = "refund";
 
 pub(crate) const RENEW_TOPIC: &str = "renew";
 
@@ -173,6 +179,15 @@ pub(crate) fn room(root: &Path, ws: &Value, name: &str) -> Result<Room> {
     let (view, challenge, _) = workspace::signed_view(root, ws, &reference, "resource")?;
     let height = number(workspace::member(&challenge, "height")?, "signed height")?;
     let cell = view.get("cell").ok_or("signed room view lacks its cell")?;
+    Ok(Room {
+        target: workspace::member(&reference, "target")?.to_owned(),
+        height,
+        root: cell.get("root").and_then(Value::as_str).unwrap_or("").to_owned(),
+        fields: tariff_fields(cell),
+    })
+}
+
+fn tariff_fields(cell: &Value) -> BTreeMap<&'static str, String> {
     let mut fields = BTreeMap::new();
     for entry in cell.get("entries").and_then(Value::as_array).into_iter().flatten() {
         let (Some(key), Some(value)) = (
@@ -185,12 +200,35 @@ pub(crate) fn room(root: &Path, ws: &Value, name: &str) -> Result<Room> {
             fields.insert(*field, value.to_owned());
         }
     }
+    fields
+}
+
+/// The room's tariff as it stood at absolute height `at`: one signed `at`
+/// read of `R` (Host K-HISTORY-READ). A payment quotes the height it read the
+/// price at; the concierge decides against this read, never the current one.
+pub(crate) fn room_at(root: &Path, ws: &Value, name: &str, at: &str) -> Result<Room> {
+    decimal(at, "--at")?;
+    let reference = workspace::reference(root, &read_ref(root, name))?;
+    let view = workspace::signed_view_at(root, ws, &reference, at)?;
+    if view.get("state").and_then(Value::as_str) != Some("live") {
+        return Err(format!("room {name} was not live at height {at}"));
+    }
+    let cell = view
+        .get("resource")
+        .and_then(|resource| resource.get("cell"))
+        .ok_or("signed at view lacks the room cell")?;
     Ok(Room {
         target: workspace::member(&reference, "target")?.to_owned(),
-        height,
+        height: number(at, "--at")?,
         root: cell.get("root").and_then(Value::as_str).unwrap_or("").to_owned(),
-        fields,
+        fields: tariff_fields(cell),
     })
+}
+
+/// The memo a week's payment carries on `renew`: the room, the price it read
+/// and the height it read it at, signed with the payment.
+pub(crate) fn renew_memo(room: &str, week: &str, height: u128) -> String {
+    format!("room {room} week {week} at {height}")
 }
 
 /// One proposal file and its id under this workspace; `stem` names it.
@@ -558,9 +596,11 @@ fn install(
         &outbox.join(concierge).join(format!("{name}.json")),
         &workspace::bounded_json(&root.join("proposals").join(&grant).join("recipient-reference.json"))?,
     )?;
+    // The concierge reads the till's ledger and refunds a payment it will not
+    // honour from the till itself (`transfer`).
     let reads = format!("{name}-till-concierge");
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":till_name,"recipient":concierge,"verbs":["observe"],"maxCost":MAX_COST});
+        "name":till_name,"recipient":concierge,"verbs":["observe","transfer"],"maxCost":MAX_COST});
     let attempt = propose_and_submit(root, ws, &reads, &request)?;
     workspace::publish_delegation(root, &reads, &attempt)?;
     write_json(
@@ -571,7 +611,7 @@ fn install(
         "room":current.target,"founder":me,"concierge":concierge,"till":till_target,
         "runner":runner_target,"topic":RENEW_TOPIC,"memberVerbs":MEMBER_VERBS,
         "refs":{"room":name,"till":till_name,"runner":runner_name},
-        "program":"for each renew entry on the till's incoming ledger whose asset is the pinned credit asset: amount >= tariff.week issues `member` under the room to the payer's signer with notAfter = max(entry.height, the payer's current notAfter) + tariff.period; a smaller amount is journaled underpaid and issues nothing; when tariff.week = 0 every filed request from a standing room member issues height + period"});
+        "program":"for each renew entry on the till's incoming ledger: the entry's memo names the room, the week price and the height H it was read at; the entry must land within 64 heights of H; the tariff is read AT H; when the asset is the pinned credit asset, the quoted price is the tariff's week at H, the amount is at least that week, and the signer is a subject the room admits (a standing grant under the room, or tariff.open = 1 at H), issue `member` under the room with notAfter = max(entry.height, the signer's current notAfter) + tariff.period at H; otherwise refund the amount from the till to the payer on topic refund, journaled with the reason; when tariff.week = 0 every filed request from a standing room member issues height + period"});
     write_json(program, &value)?;
     print_json(&value)
 }
@@ -661,8 +701,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "room" => {
             let name = text(args.required("room")?, "room")?;
+            let at = opt(&mut args, "at")?;
             args.finish()?;
-            print_json(&room(&root, &ws, &name)?.json())
+            match at {
+                None => print_json(&room(&root, &ws, &name)?.json()),
+                Some(at) => print_json(&room_at(&root, &ws, &name, &at)?.json()),
+            }
         }
         "tariff" => {
             let name = text(args.required("room")?, "room")?;
@@ -715,7 +759,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 return Ok(());
             }
             let account = my_account(&root, &ws, account.as_deref())?;
-            let payload = format!("room {}", current.target);
+            // The price and the height it was read at travel with the payment:
+            // the concierge decides against the tariff at that height.
+            let payload = renew_memo(&current.target, &week, current.height);
             let result = crate::fleet::pay_turn(
                 &root,
                 &account,
@@ -725,8 +771,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some((RENEW_TOPIC, payload.as_bytes())),
             )?;
             println!(
-                "paid {amount} to {name}'s till (account {till}) with {RENEW_TOPIC} #{} (fee {}, transaction {}); the concierge issues your window",
+                "paid {amount} to {name}'s till (account {till}) with {RENEW_TOPIC} #{} at the price {week} read at height {} (fee {}, transaction {}); the concierge issues your window or refunds it",
                 result["publication"]["sequence"].as_str().unwrap_or("?"),
+                current.height,
                 result["fee"].as_str().unwrap_or("?"),
                 result["receipt"]["transactionId"].as_str().unwrap_or("?")
             );
@@ -876,6 +923,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             }
             Ok(())
         }
+        // The concierge's refund: AMOUNT of ASSET from the till reference
+        // ACCOUNT to account TO, publishing MEMO on the till's `refund` topic.
+        "refund" => {
+            let account = text(args.required("account")?, "account reference")?;
+            let to = text(args.required("to")?, "to")?;
+            let amount = text(args.required("amount")?, "amount")?;
+            let asset = opt(&mut args, "asset")?;
+            let memo = text(args.required("memo")?, "memo")?;
+            args.finish()?;
+            decimal(&to, "refund account")?;
+            decimal(&amount, "refund amount")?;
+            let result = crate::fleet::pay_turn(&root, &account, &to, &amount, asset.as_deref(),
+                Some((REFUND_TOPIC, memo.as_bytes())))?;
+            print_json(&json!({"type":"minidregg-refund-v1","from":account,"to":to,"amount":amount,
+                "memo":memo,"fee":result["fee"],"transaction":result["receipt"]["transactionId"]}))
+        }
         "ledger" => {
             let account = text(args.required("account")?, "account reference")?;
             let since = opt(&mut args, "since")?.unwrap_or_else(|| "0".into());
@@ -898,7 +961,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             adopt(&root, &ws, &inbox)
         }
-        _ => Err("credit action must be balance, room, tariff, pay, topup, turn, return, renew, status, ledger, install or adopt".into()),
+        _ => Err("credit action must be balance, room, tariff, pay, topup, turn, return, refund, renew, status, ledger, install or adopt".into()),
     }
 }
 

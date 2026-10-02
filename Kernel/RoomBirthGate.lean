@@ -20,8 +20,16 @@ realm, i.e. cannot issue a "realm asset" the realm's ledger would list
 (`Kernel.RealmWellReceiver`: a realm well is any account with a parent row).
 
 Refusals are named: `notRoomMember R reason` (the capability component that
-decided it: `noGrant`, `revoked`, `staleGrant`, `outsideValidity`) and
-`birthRefused R leaf` (the failing clause of `R`'s law). The gate runs in
+decided it: `noGrant`, `revoked`, `staleGrant`, `outsideValidity`),
+`birthRefused R leaf` (the failing clause of `R`'s law) and `ownerNotCreator R`.
+
+A birth into a room is owned by its creator. Authority over a cell born in a
+room is an attenuation of the creator's room grant: the born grants carry that
+grant's lineage as their `ancestors`
+(`ResourceBirthPolicyController.Concrete.BornLineage`), so a kick of the
+creator takes them down. A cell born for another owner would carry the
+creator's lineage, not the owner's, and survive the owner's kick; it is
+refused. A founder who wants a member to hold a cell births it and delegates. The gate runs in
 `ResourceBirthController.preparePreAuthority`, the one preparation every birth
 route (bare, grain, draft) passes through, at the admission height.
 -/
@@ -57,6 +65,8 @@ inductive Refusal where
   /-- The creator is a member and the room's own law refuses the placement:
   its failing clause (`none`: the room has no committed law). -/
   | birthRefused (room : Nat) (leaf : Option LawLeaf)
+  /-- A birth into the room names an owner other than its creator. -/
+  | ownerNotCreator (room : Nat)
   deriving DecidableEq, Repr
 
 /-! ## The pure decision -/
@@ -190,7 +200,7 @@ def checkRoom (pins : FactoryPins)
         (lawOf directory authority room) (viewOf request observed)
 
 /-- One birth item: a root birth names no placing capability; a room birth
-names one and passes `checkRoom`. -/
+names one, is owned by its creator, and passes `checkRoom`. -/
 def checkItem (pins : FactoryPins)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
@@ -198,7 +208,10 @@ def checkItem (pins : FactoryPins)
     Except Refusal Unit :=
   match item.parent, item.placement with
   | none, none => .ok ()
-  | some room, some placement => checkRoom pins directory authority height descriptor room placement
+  | some room, some placement =>
+      if item.owner = descriptor.creator then
+        checkRoom pins directory authority height descriptor room placement
+      else .error (.ownerNotCreator room)
   | _, _ => .error .placementShape
 
 /-- First refusal over a list, in order. -/
@@ -264,7 +277,9 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
   | none => simp [checkItem, inRoom, placed] at passed
   | some placement =>
       have step : checkRoom pins directory authority height descriptor room placement = .ok () := by
-        simpa [checkItem, inRoom, placed] using passed
+        by_cases owner : item.owner = descriptor.creator
+        · simpa [checkItem, inRoom, placed, owner] using passed
+        · simp [checkItem, inRoom, placed, owner] at passed
       unfold checkRoom at step
       split at step
       · cases step
@@ -273,6 +288,24 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
           (decideRoom_ok_iff _ _ _ _ _ _).mp step
         exact ⟨placement, cap, rfl, stored, admissible.holder, admissible, observed, law,
           resolved, accepts⟩
+
+/-- **`room_birth_owner_is_creator`.** Every admitted birth into a room is
+owned by its creator, so its grants are held by the subject whose placing
+capability they descend from. -/
+theorem room_birth_owner_is_creator {pins : FactoryPins}
+    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {height : Height} {descriptor : Descriptor Registry}
+    (admitted : Admitted pins directory authority height descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) : item.owner = descriptor.creator := by
+  have passed := admitted item member
+  cases placed : item.placement with
+  | none => simp [checkItem, inRoom, placed] at passed
+  | some placement =>
+      by_cases owner : item.owner = descriptor.creator
+      · exact owner
+      · simp [checkItem, inRoom, placed, owner] at passed
 
 /-- A root birth names no placing capability. -/
 theorem root_birth_names_no_placement {pins : FactoryPins}

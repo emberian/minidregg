@@ -348,7 +348,7 @@ def principal : AuthenticatedPrincipal authorityPre
   opened := capability_opened
   idBound := rfl
   holderBound := rfl
-  lineage := .root capability rfl rfl rfl
+  lineage := .root capability rfl rfl
   validFrom := by decide
   validUntil := by decide
   issuerCurrent := rfl

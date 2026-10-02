@@ -579,6 +579,8 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     authority.snapshot.authState ambient.height descriptor
+  bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor
   keyFresh : KeyFresh authority.snapshot (enrolKey deployment authority plan)
   observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority plan)
   entriesDistinct : ((authorityEntries descriptor (enrolKey deployment authority plan)
@@ -606,6 +608,8 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
   let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     authority.snapshot.authState ambient.height descriptor) .birthShape
+  let lineage ← require (ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor) .birthShape
   let key ← require (KeyFresh authority.snapshot (enrolKey deployment authority plan)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
     (enrolObserve deployment profile ambient authority plan)) .observeGrantTaken
@@ -623,7 +627,7 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
     let admission ← require ((enrolBatch tariff ambient.tariff.collector plan descriptor).Admission
       (CanonicalResourceKernel.logicalBook book.payload.logical)) .bookAdmission
     pure ⟨descriptor, rfl, grants, (ResourceBirthController.Concrete.sameCreates_iff _ _).mp aux.down,
-      initials.down, template.down, key.down, observe.down,
+      initials.down, template.down, lineage.down, key.down, observe.down,
       distinct.down, validated, allocated,
       CanonicalResourceKernel.AcceptedBatch.ofAdmission admission.down⟩
 

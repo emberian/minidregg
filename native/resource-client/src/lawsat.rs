@@ -269,13 +269,14 @@ pub(super) fn law_check(root: &Path, workspace: &Value, predicate: &Path) -> Res
 
 /// The install-time check, run before an install-policy proposal is authored.
 /// Refuses (locally; nothing is proposed) a law that admits no step unless
-/// `allow_unsatisfiable`; warns on a law no write can pass.
+/// `allow_unsatisfiable`; warns on a law no write can pass. Answers whether the
+/// law admits nothing (the caller's room check: sealing a room freezes it).
 pub(super) fn install_check(
     root: &Path,
     workspace: &Value,
     law: &Value,
     allow_unsatisfiable: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let checked = check(root, workspace, law)?;
     let lines = check_lines(&checked);
     if verdict(&checked.any) == "unsat" && !allow_unsatisfiable {
@@ -296,7 +297,7 @@ pub(super) fn install_check(
     if verdict(&checked.any) == "unsat" {
         eprintln!("law check: installing it anyway (--allow-unsatisfiable): every request on this cell will be refused");
     }
-    Ok(())
+    Ok(verdict(&checked.any) == "unsat")
 }
 
 // ------------------------------------------------------------------ can --any

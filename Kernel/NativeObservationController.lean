@@ -660,6 +660,22 @@ def members (context : Context deployment durable) (kind : ResourceKind) (room h
     | none => ∅
   (held.sort (· ≤ ·)).map SubjectId.mk
 
+/-- The standing capabilities over `room` that `subject` holds, in id order:
+what a kick must revoke for the room to stop admitting the subject (the
+founder's invite, a concierge's window, any other grant under the room), and
+exactly what makes `members` list it. -/
+def grantsOf (context : Context deployment durable) (kind : ResourceKind) (room height : Nat)
+    (subject : SubjectId) : List Nat :=
+  let state := context.authority.snapshot.authState
+  let cell := context.authority.snapshot.cell
+  let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored =>
+        if stored.head.holder = .subject subject ∧ standing state height room stored.head = true then
+          {named.value} else ∅
+    | none => ∅
+  held.sort (· ≤ ·)
+
 /-- A cell the reader may learn about: under the room, and covered by the
 reader's own grant (a member with an explicit `{R}` grant learns nothing
 about cells born in `R` it cannot read). -/
@@ -810,12 +826,15 @@ theorem at_current_eq_read (directory : CredentialAuthorityDomainReceiver.Loaded
   rw [atBytes_current, ← directory.bytes_exact target]
   simp [ResourceBirthCodec.LifecycleImage.view, present]
 
-def whoViewStream : StreamCodec (List (Nat × Option Nat)) :=
-  StreamCodec.list (StreamCodec.product StreamCodec.nat (StreamCodec.option StreamCodec.nat))
+/-- One member: subject, last seen, and the standing capabilities over the
+room it holds (`grantsOf`). -/
+def whoViewStream : StreamCodec (List (Nat × Option Nat × List Nat)) :=
+  StreamCodec.list (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product (StreamCodec.option StreamCodec.nat) (StreamCodec.list StreamCodec.nat)))
 
-def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v1".toUTF8.toList
+def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v2".toUTF8.toList
 
-def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat)) :=
+def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat × List Nat)) :=
   NativeHostCodec.framed whoViewFrame whoViewStream
 
 def sinceEntryStream : StreamCodec SinceEntry :=
@@ -910,7 +929,8 @@ def AuthorizedIntent.queryResult
         let visible := sees state.parent stored.head query.target
         let height := genesisHeight + durable.height
         pure (whoViewCodec.encode ((members context grant.kind query.target height).map fun subject =>
-          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·))))
+          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·),
+            grantsOf context grant.kind query.target height subject)))
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target

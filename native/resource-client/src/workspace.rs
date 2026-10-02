@@ -671,6 +671,29 @@ pub(crate) fn signed_view(
     Ok((result, challenge, attempt.join("signed-observation.bin")))
 }
 
+/// A signed `at` read of `reference` at absolute height `height`
+/// (K-HISTORY-READ): the cell as it stood then, cut by the reader's grant.
+pub(crate) fn signed_view_at(root: &Path, workspace: &Value, reference: &Value, height: &str) -> Result<Value> {
+    field_decimal(height, "at height")?;
+    let (attempt, nonce) = new_attempt(root)?;
+    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+        "purpose":{"type":"query","kind":member(reference,"kind")?,
+            "target":member(reference,"target")?,"view":"at","height":height},
+        "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
+            "capability":member(reference,"observeCapability")?}]});
+    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    private_file(&source, &serde_json::to_vec(&intent).map_err(|error| error.to_string())?)?;
+    query_retained(
+        &workspace_host(workspace)?,
+        &member_path(workspace, "config")?,
+        &source,
+        OsStr::new("intent"),
+        &member_path(workspace, "key")?,
+        "view-at",
+        &attempt,
+    )
+}
+
 fn signed_authority_root(challenge: &Value) -> Result<&str> {
     let root = challenge
         .get("authorityRoot")
@@ -1333,9 +1356,13 @@ fn propose_summary(
                 "grants":[{"kind":kind,"target":target,"capability":parent_id}]})
         }
         "revoke" => {
+            // `capability` (optional): the grant to revoke, by number (`room
+            // kick` names each standing grant the recipient holds under the
+            // room); absent, the one this workspace delegated to the recipient.
             let obj = request.as_object().ok_or("proposal must be an object")?;
-            if obj.len() != 4 || !obj.contains_key("name") || !obj.contains_key("recipient") {
-                return Err("revoke proposal may contain only type, action, name, recipient".into());
+            let explicit = obj.contains_key("capability");
+            if obj.len() != 4 + usize::from(explicit) || !obj.contains_key("name") || !obj.contains_key("recipient") {
+                return Err("revoke proposal may contain only type, action, name, recipient [capability]".into());
             }
             let reference = reference(root, member(&request, "name")?)?;
             let recipient = member(&request, "recipient")?;
@@ -1343,7 +1370,13 @@ fn propose_summary(
             let kind = member(&reference, "kind")?;
             let target = member(&reference, "target")?;
             let control = member(&reference, "controlCapability")?;
-            let victim = delegated_capability(root, member(&request, "name")?, target, recipient)?;
+            let victim = if explicit {
+                let named = member(&request, "capability")?;
+                decimal(named, "revoked capability")?;
+                named.to_owned()
+            } else {
+                delegated_capability(root, member(&request, "name")?, target, recipient)?
+            };
             let (resource, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
             let target_root = resource
                 .get("cell")
@@ -2967,6 +3000,120 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
 
 /// The child capability this workspace delegated on `name` to `recipient`,
 /// from its own retained delegation proposals.
+/// A law that admits nothing, on a cell others hold standing grants under (a
+/// room), freezes its membership forever: every kick and invite is a request
+/// on that cell. Refused unless the founder says `--freeze-roster`.
+fn sealing_a_room(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let marked = reference(root, name)?.get("room").is_some();
+    let me = member(workspace, "subject")?;
+    let others: Vec<String> = match reference(root, name).and_then(|r| signed_view(root, workspace, &r, "who")) {
+        Ok((who, _, _)) => who
+            .get("members")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m.get("subject").and_then(Value::as_str))
+            .filter(|subject| *subject != me)
+            .map(str::to_owned)
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    if !marked && others.is_empty() {
+        return Ok(());
+    }
+    let holders = if others.is_empty() { "no one yet".to_owned() } else { others.join(", ") };
+    Err(format!(
+        "{name} is a room (members now: {holders}): a law that admits nothing freezes its membership forever. \
+         Every invite and every kick is a request on {name}, and this law refuses them all, so no one could \
+         ever be added or removed while members keep the cells under it. To seal it anyway, repeat the line \
+         with --freeze-roster."
+    ))
+}
+
+/// A refusal on a sealed room cell, said as what it means: the room cell's law
+/// is `sealed`, which refuses every request on it, kick and invite included.
+pub(crate) fn frozen_roster(room: &str, error: String) -> String {
+    if error.contains("law-denied") && error.contains("sealed") {
+        format!(
+            "this room's membership is frozen: {room}'s law is `sealed`, which refuses every request on the room cell, \
+             so no one can be invited or kicked (sealing a room freezes its roster forever) [{error}]"
+        )
+    } else {
+        error
+    }
+}
+
+/// The standing grants over room `name` that `subject` holds, by the Host's
+/// signed `who` view: exactly the grants that make `room members` list it.
+pub(crate) fn standing_grants(root: &Path, workspace: &Value, name: &str, subject: &str) -> Result<Vec<String>> {
+    let reference = reference(root, name)?;
+    let (who, _, _) = signed_view(root, workspace, &reference, "who").map_err(|error| frozen_roster(name, error))?;
+    let mut held = Vec::new();
+    for entry in who.get("members").and_then(Value::as_array).into_iter().flatten() {
+        if entry.get("subject").and_then(Value::as_str) == Some(subject) {
+            for capability in entry.get("capabilities").and_then(Value::as_array).into_iter().flatten() {
+                held.push(capability.as_str().ok_or("who view capability is not a decimal")?.to_owned());
+            }
+        }
+    }
+    Ok(held)
+}
+
+/// `room kick`: one revoke proposal per standing grant `subject` holds under
+/// room `name` (the founder's invite, a concierge's window, any other grant
+/// under the room), enumerated from the Host's signed `who` view, never
+/// guessed. The first is `proposal_id`; the rest `proposal_id-cN`, listed in
+/// the first's `companions.json`, so `submit proposal_id` submits them all
+/// (`submit_now` submits each here: the private-room kick rotates after).
+pub(crate) fn room_kick(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    subject: &str,
+    proposal_id: &str,
+    submit_now: bool,
+) -> Result<Vec<String>> {
+    validate_name(proposal_id)?;
+    decimal(subject, "kicked member")?;
+    if member(workspace, "subject")? == subject {
+        return Err("you cannot kick yourself (room leave renounces your own grant)".into());
+    }
+    let held = standing_grants(root, workspace, name, subject)?;
+    if held.is_empty() {
+        return Err(format!("{subject} holds no standing grant under {name}: there is nothing to kick"));
+    }
+    let mut ids = Vec::new();
+    for (index, capability) in held.iter().enumerate() {
+        let id = if index == 0 { proposal_id.to_owned() } else { format!("{proposal_id}-c{index}") };
+        validate_name(&id)?;
+        let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
+            "name":name,"recipient":subject,"capability":capability});
+        let source = root.join("sources").join(format!("kick-{id}.json"));
+        let mut bytes = serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?;
+        bytes.push(b'\n');
+        private_file(&source, &bytes)?;
+        propose_summary(root, workspace, &source, &id, None, false).map_err(|error| frozen_roster(name, error))?;
+        if submit_now {
+            submit_intent(root, workspace, &root.join("proposals").join(&id).join("intent.json"), "intent", false,
+                Some(&root.join("attempts").join(&id)))?;
+        }
+        ids.push(id);
+    }
+    if !submit_now && ids.len() > 1 {
+        let companions = json!({"type":"minidregg-proposal-companions-v1","proposals":&ids[1..]});
+        private_file(
+            &root.join("proposals").join(proposal_id).join("companions.json"),
+            &serde_json::to_vec_pretty(&companions).map_err(|error| error.to_string())?,
+        )?;
+    }
+    println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-kick-v1","room":name,
+        "member":subject,"capabilities":held,"proposals":ids,"submitted":submit_now,
+        "note":if submit_now { "every standing grant the member held under the room is revoked" }
+            else { "submit the first proposal: it submits every one of them" }}))
+        .map_err(|error| error.to_string())?);
+    Ok(ids)
+}
+
 fn delegated_capability(root: &Path, name: &str, target: &str, recipient: &str) -> Result<String> {
     let mut found = std::collections::BTreeSet::new();
     if let Ok(entries) = fs::read_dir(root.join("proposals")) {
@@ -3225,7 +3372,31 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &kind,
                 prepare_only,
                 attempt.as_deref(),
-            )
+            )?;
+            // A kick's companions (`room_kick`): every other standing grant
+            // the member held under the room, revoked by the same submit.
+            let companions = source.parent().map(|dir| dir.join("companions.json"));
+            if let (false, Some(companions)) = (prepare_only, companions.filter(|path| path.exists())) {
+                let listed = bounded_json(&companions)?;
+                for id in listed.get("proposals").and_then(Value::as_array).into_iter().flatten() {
+                    let id = id.as_str().ok_or("companion proposal id")?;
+                    validate_name(id)?;
+                    let attempt = root.join("attempts").join(id);
+                    if attempt.exists() {
+                        continue;
+                    }
+                    submit_intent(&root, &workspace, &root.join("proposals").join(id).join("intent.json"),
+                        "intent", false, Some(&attempt))?;
+                }
+            }
+            Ok(())
+        }
+        "room-kick" => {
+            let name = os_string(args.required("name")?, "room name")?;
+            let subject = os_string(args.required("member")?, "kicked member")?;
+            let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            room_kick(&root, &workspace, &name, &subject, &proposal_id, false).map(|_| ())
         }
         "can" => {
             let name = args
@@ -3276,12 +3447,25 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 args.optional("allow-unsatisfiable").as_deref().and_then(OsStr::to_str),
                 Some("true")
             );
+            let freeze = matches!(
+                args.optional("freeze-roster").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
             args.finish()?;
             let source = bounded_json(&request)?;
-            if source.get("action").and_then(Value::as_str) == Some("install-policy") {
-                lawsat::install_check(&root, &workspace, &source["predicate"], allow)?;
+            let action = source.get("action").and_then(Value::as_str).unwrap_or("");
+            if action == "install-policy" {
+                let unsat = lawsat::install_check(&root, &workspace, &source["predicate"], allow || freeze)?;
+                if unsat && !freeze {
+                    sealing_a_room(&root, &workspace, member(&source, "name")?)?;
+                }
             }
-            propose(&root, &workspace, &request, &proposal_id, room.as_deref())
+            let roster_act = action == "revoke" || (action == "delegate" && source.get("room") == Some(&json!(true)));
+            let result = propose(&root, &workspace, &request, &proposal_id, room.as_deref());
+            match (roster_act, source.get("name").and_then(Value::as_str)) {
+                (true, Some(name)) => result.map_err(|error| frozen_roster(name, error)),
+                _ => result,
+            }
         }
         "create" => {
             let name = os_string(args.required("name")?, "resource name")?;

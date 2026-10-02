@@ -5,12 +5,14 @@
 //! holds the ROSTER: field 2 is the founder's subject, and member `k` (from 1)
 //! is field `2k+1` (subject) and field `2k+2` (that member's stream cell); field
 //! 1 is the one every declared cell is born with. Every
-//! member has ONE stream, a `stream` cell born `--in R`, owned by the member
-//! and under the member's author law (every write is signed by its owner). The
-//! founder births every stream and pays for it (K-STREAM: workspaces without a
-//! birth context cannot birth). A member speaks with its room grant
-//! (`observe`+`append` `under R`), which the Host accepts on its own stream and
-//! the author law refuses on anyone else's.
+//! member has ONE stream, a `stream` cell born `--in R` under the member's
+//! author law (every write is signed by that member). The founder births every
+//! stream, owns it and pays for it (K-STREAM: workspaces without a birth
+//! context cannot birth; a birth into a room is owned by its creator,
+//! `RoomBirthGate.room_birth_owner_is_creator`). A member speaks with its room
+//! grant (`observe`+`append` `under R`), which the Host accepts on its own
+//! stream and the author law refuses on anyone else's; a kick revokes that
+//! grant, and the member holds nothing else on the stream.
 //!
 //! Every utterance is one append to the speaker's own stream. The entry's
 //! kernel fields are the room topic (`topic`), an optional recipient (`to`) and
@@ -1791,7 +1793,7 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
     }
     let invitation = room_grant(session, name, subject, verbs)?;
     let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
-    let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), Some(subject))?;
+    let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), None)?;
     let stream_target = member(&stream, "target").map_err(error)?.to_owned();
     roster_write(session, name, &[(slot, subject), (slot + 1, &stream_target)])?;
     if let Some(enc) = &enc {

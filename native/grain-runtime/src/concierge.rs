@@ -1,15 +1,23 @@
 //! The room CONCIERGE (PLACE §2.10, §5 row 6): a deterministic program the
 //! controller binary runs as a runner holding `delegate` under a room R.
 //!
-//! Program: read R's tariff (`week`, `period`) and the till's incoming ledger
-//! (Host op 180: fleet turns that paid `A_R`, topic `renew`); for each entry
-//! whose asset is the pinned credit asset and whose amount is at least
-//! `week`, delegate `member` under R to the entry's signer with
+//! Program: read the till's incoming ledger (Host op 180: fleet turns that
+//! paid `A_R`, topic `renew`). Each payment's memo (`credit::renew_memo`,
+//! signed with it) names the room, the week price the payer read and the
+//! height `H` it read it at. The decision reads R's tariff AT `H` (a signed
+//! `at` read), never the current one, so it does not depend on when this pass
+//! runs. A payment is honoured when the asset is the pinned credit asset, it
+//! landed within `PRICE_SLACK` heights of `H`, the quoted price is the tariff's
+//! `week` at `H`, the amount covers it, and the signer is a subject the room
+//! admits (a standing grant under R in the Host's signed `who` view, or
+//! `open = 1` at `H`): delegate `member` under R to the signer with
 //! `notAfter = max(entry.height, that subject's current notAfter) + period`
-//! (a re-issue extends). A smaller payment is journaled `underpaid` and issues
-//! nothing. When `week = 0` the room is free: each filed request from a
-//! subject the Host lists as a standing member of R (`who`, a signed read)
-//! issues `height + period`.
+//! (period at `H`; a re-issue extends). Any other payment is REFUNDED from the
+//! till to the payer (topic `refund`), journaled with its reason: the till
+//! never keeps a payment it did not honour. A kicked subject holds no standing
+//! grant (`room kick` revokes every one), so its payment is refunded. When
+//! `week = 0` the room is free: each filed request from a subject the Host
+//! lists as a standing member of R issues `height + period`.
 //!
 //! Like M5's tools, every act is the pinned `mini` client run against the
 //! concierge's own workspace: signed reads, proposals, submissions, exact
@@ -81,24 +89,93 @@ pub(crate) struct Entry {
     pub amount: u128,
 }
 
+/// How many heights a payment may land after the height its price was read
+/// at: the same honest authoring-to-admission gap a birth's `birthSlack`
+/// tolerates (64 admissions; the deployed clock ticks once a minute).
+pub(crate) const PRICE_SLACK: u128 = 64;
+
+/// What a payment's signed memo quotes: `room R week W at H`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Quote {
+    pub room: String,
+    pub week: u128,
+    pub at: u128,
+}
+
+pub(crate) fn parse_quote(payload: Option<&str>) -> Option<Quote> {
+    let words: Vec<&str> = payload?.split_whitespace().collect();
+    match words.as_slice() {
+        ["room", room, "week", week, "at", at] => Some(Quote {
+            room: (*room).to_owned(),
+            week: week.parse().ok()?,
+            at: at.parse().ok()?,
+        }),
+        _ => None,
+    }
+}
+
+/// The tariff as it stood at the quoted height.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Priced {
+    pub week: u128,
+    pub period: u128,
+    pub open: bool,
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum Decision {
-    Issue { not_after: u128 },
-    Underpaid { week: u128 },
-    WrongAsset { asset: String },
+    Issue { not_after: u128, period: u128, week: u128 },
+    Refund { reason: &'static str },
+}
+
+/// Whether a payment's quote can be priced at all: it names this room and
+/// landed within `PRICE_SLACK` heights after the height it quotes.
+pub(crate) fn quote_in_window(entry: &Entry, room: &str, quote: Option<&Quote>) -> Option<&'static str> {
+    let Some(quote) = quote else { return Some("unquoted") };
+    if quote.room != room {
+        return Some("unquoted");
+    }
+    if quote.at > entry.height || entry.height - quote.at > PRICE_SLACK {
+        return Some("stale-quote");
+    }
+    None
 }
 
 /// The program's rule for one paid entry. Pure: the journal and the Host
-/// supply every input.
-pub(crate) fn decide(entry: &Entry, credit_asset: &str, week: u128, period: u128, current: Option<u128>) -> Decision {
+/// supply every input; `priced` is the tariff AT the quoted height, so the
+/// rule's answer is the same whenever the pass runs.
+pub(crate) fn decide(
+    entry: &Entry,
+    credit_asset: &str,
+    room: &str,
+    quote: Option<&Quote>,
+    priced: Option<&Priced>,
+    admitted: bool,
+    current: Option<u128>,
+) -> Decision {
     if entry.asset != credit_asset {
-        return Decision::WrongAsset { asset: entry.asset.clone() };
+        return Decision::Refund { reason: "wrong-asset" };
     }
-    if entry.amount < week {
-        return Decision::Underpaid { week };
+    if let Some(reason) = quote_in_window(entry, room, quote) {
+        return Decision::Refund { reason };
+    }
+    let (Some(quote), Some(priced)) = (quote, priced) else {
+        return Decision::Refund { reason: "no-tariff-at-height" };
+    };
+    if priced.week == 0 {
+        return Decision::Refund { reason: "free-room" };
+    }
+    if quote.week != priced.week {
+        return Decision::Refund { reason: "quote-differs" };
+    }
+    if entry.amount < priced.week {
+        return Decision::Refund { reason: "underpaid" };
+    }
+    if !admitted && !priced.open {
+        return Decision::Refund { reason: "not-admitted" };
     }
     let from = current.map_or(entry.height, |after| after.max(entry.height));
-    Decision::Issue { not_after: from + period }
+    Decision::Issue { not_after: from + priced.period, period: priced.period, week: priced.week }
 }
 
 fn number(value: &Value, key: &str) -> Result<u128> {
@@ -129,19 +206,31 @@ struct Journal {
     decided: BTreeSet<String>,
     /// Subject → greatest notAfter this concierge issued it.
     windows: BTreeMap<String, u128>,
+    /// Keys whose refund was begun (`deciding` with a `refund`) and not
+    /// finished: never re-sent (a refund is a transfer, not an exact lookup).
+    refunding: BTreeSet<String>,
     /// The greatest ledger height decided.
     cursor: u128,
 }
 
 impl Journal {
     fn open(path: &Path) -> Result<Self> {
-        let mut journal = Journal { path: path.to_owned(), decided: BTreeSet::new(), windows: BTreeMap::new(), cursor: 0 };
+        let mut journal = Journal {
+            path: path.to_owned(),
+            decided: BTreeSet::new(),
+            windows: BTreeMap::new(),
+            refunding: BTreeSet::new(),
+            cursor: 0,
+        };
         let Ok(text) = fs::read_to_string(path) else { return Ok(journal) };
         for (number_, line) in text.lines().enumerate() {
             let value: Value = serde_json::from_str(line)
                 .map_err(|error| format!("journal line {}: {error}", number_ + 1))?;
             let decision = value.get("decision").and_then(Value::as_str).unwrap_or("");
             if decision == "deciding" {
+                if value.get("refund").is_some() {
+                    journal.refunding.insert(string(&value, "key")?);
+                }
                 continue;
             }
             let key = string(&value, "key")?;
@@ -171,6 +260,9 @@ impl Journal {
             .map_err(|e| format!("{}: {e}", self.path.display()))?;
         file.write_all(&line).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
         if let Some(decision) = value.get("decision").and_then(Value::as_str) {
+            if decision == "deciding" && value.get("refund").is_some() {
+                self.refunding.insert(string(&value, "key")?);
+            }
             if decision != "deciding" {
                 let key = string(&value, "key")?;
                 if decision == "issued" {
@@ -270,6 +362,9 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
     if string(&tariff, "till")? != program.till {
         return Err("the room's till field differs from the program's till".into());
     }
+    // The subjects the room admits now: a standing grant under R in the Host's
+    // signed `who` view (a kicked subject holds none).
+    let mut members: Option<BTreeSet<String>> = None;
     let height = number(&room, "height")?;
     let asset = credit_asset(&config.workspace)?;
     let verbs = program.member_verbs.join(",");
@@ -299,19 +394,71 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
             "subject":entry.subject,"payer":entry.payer,"asset":entry.asset,
             "amount":entry.amount.to_string(),"payload":raw.get("payloadText"),
             "ledgerTip":ledger_tip.to_string()});
-        let decision = decide(&entry, &asset, week, period, journal.windows.get(&entry.subject).copied());
+        if journal.refunding.contains(&key) {
+            // A refund begun and not recorded: never sent twice. The operator
+            // reads the till's `refund` topic and settles it by hand.
+            let line = json!({"key":key,"decision":"refund-unresolved","entry":basis,"subject":entry.subject,
+                "note":"a refund for this payment was begun and its result was not journaled; it is not re-sent: check the till's refund topic"});
+            journal.append(line.clone())?;
+            decisions.push(line);
+            continue;
+        }
+        let quote = parse_quote(raw.get("payloadText").and_then(Value::as_str));
+        let priced = match (&quote, quote_in_window(&entry, &program.room, quote.as_ref())) {
+            (Some(quote), None) => {
+                let at = quote.at.to_string();
+                let (then, _) = run.mini(&["credit", "--action", "room", "--dir", &dir, "--room", &program.refs.room, "--at", &at])?;
+                let then = then.get("tariff").cloned().unwrap_or(Value::Null);
+                Some(Priced {
+                    week: number(&then, "week").unwrap_or(0),
+                    period: number(&then, "period").unwrap_or(period),
+                    open: then.get("open").and_then(Value::as_str) == Some("1"),
+                })
+            }
+            _ => None,
+        };
+        if members.is_none() {
+            let (who, _) = run.mini(&["workspace", "--action", "who", "--dir", &dir, "--name", &program.refs.room])?;
+            members = Some(
+                who.get("members")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|m| m.get("subject").and_then(Value::as_str).map(str::to_owned))
+                    .collect(),
+            );
+        }
+        let admitted = members.as_ref().is_some_and(|set| set.contains(&entry.subject));
+        let decision = decide(&entry, &asset, &program.room, quote.as_ref(), priced.as_ref(), admitted,
+            journal.windows.get(&entry.subject).copied());
         let line = match decision {
-            Decision::Underpaid { week } => json!({"key":key,"decision":"underpaid","entry":basis,
-                "week":week.to_string(),"subject":entry.subject}),
-            Decision::WrongAsset { asset: paid } => json!({"key":key,"decision":"wrong-asset","entry":basis,
-                "creditAsset":asset,"paidAsset":paid,"subject":entry.subject}),
-            Decision::Issue { not_after } => {
+            Decision::Refund { reason } => {
+                let memo = format!("refund room {} ledger:{} {reason}", program.room, entry.height);
+                let refund = json!({"to":entry.payer,"amount":entry.amount.to_string(),"asset":entry.asset,"memo":memo});
+                journal.append(json!({"key":key,"decision":"deciding","entry":basis,"subject":entry.subject,
+                    "reason":reason,"refund":refund}))?;
+                let amount = entry.amount.to_string();
+                match run.mini(&["credit", "--action", "refund", "--dir", &dir, "--account", &program.refs.till,
+                    "--to", &entry.payer, "--amount", &amount, "--asset", &entry.asset, "--memo", &memo]) {
+                    Ok((done, _)) => json!({"key":key,"decision":"refunded","reason":reason,"entry":basis,
+                        "subject":entry.subject,"quote":quote.as_ref().map(|q| json!({"room":q.room,"week":q.week.to_string(),"at":q.at.to_string()})),
+                        "tariffAtQuote":priced.as_ref().map(|p| json!({"week":p.week.to_string(),"period":p.period.to_string(),"open":p.open})),
+                        "admitted":admitted,"refund":refund,"transaction":done.get("transaction")}),
+                    Err(error) => {
+                        journal.append(json!({"key":key,"decision":"refund-failed","entry":basis,"subject":entry.subject,
+                            "reason":reason,"error":error}))?;
+                        return Err(format!("refunding ledger:{}: {error}", entry.height));
+                    }
+                }
+            }
+            Decision::Issue { not_after, period, week } => {
                 let id = format!("renew-h{}", entry.height);
                 journal.append(json!({"key":key,"decision":"deciding","entry":basis,"subject":entry.subject,
                     "notAfter":not_after.to_string(),"proposal":id}))?;
                 match issue(&run, &dir, &program, &entry.subject, not_after, &id, &verbs, &outbox) {
                     Ok(window) => json!({"key":key,"decision":"issued","entry":basis,"subject":entry.subject,
                         "notAfter":not_after.to_string(),"period":period.to_string(),"week":week.to_string(),
+                        "priceReadAt":quote.as_ref().map(|q| q.at.to_string()),
                         "proposal":id,"window":window}),
                     Err(error) => {
                         // Not final: the next pass re-runs the same proposal
@@ -345,7 +492,6 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
             }
         }
         requests.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut members: Option<BTreeSet<String>> = None;
         for (name, request) in requests {
             let key = format!("request:{name}");
             if journal.decided.contains(&key) {
@@ -475,31 +621,95 @@ mod tests {
         Entry { height, transaction: "9".into(), subject: "77".into(), payer: "5".into(), asset: "0".into(), amount }
     }
 
+    fn quote(week: u128, at: u128) -> Quote {
+        Quote { room: "9".into(), week, at }
+    }
+
+    fn priced(week: u128) -> Priced {
+        Priced { week, period: 12, open: false }
+    }
+
+    fn issue(not_after: u128) -> Decision {
+        Decision::Issue { not_after, period: 12, week: 100 }
+    }
+
     #[test]
     fn a_week_is_issued_from_the_paying_height() {
-        assert_eq!(decide(&entry(40, 100), "0", 100, 12, None), Decision::Issue { not_after: 52 });
+        let q = quote(100, 38);
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&q), Some(&priced(100)), true, None), issue(52));
     }
 
     #[test]
     fn a_renewal_after_expiry_starts_again_from_its_height() {
-        assert_eq!(decide(&entry(70, 100), "0", 100, 12, Some(52)), Decision::Issue { not_after: 82 });
+        let q = quote(100, 69);
+        assert_eq!(decide(&entry(70, 100), "0", "9", Some(&q), Some(&priced(100)), true, Some(52)), issue(82));
     }
 
     #[test]
     fn an_early_renewal_extends_the_window() {
-        assert_eq!(decide(&entry(45, 100), "0", 100, 12, Some(52)), Decision::Issue { not_after: 64 });
+        let q = quote(100, 44);
+        assert_eq!(decide(&entry(45, 100), "0", "9", Some(&q), Some(&priced(100)), true, Some(52)), issue(64));
     }
 
     #[test]
-    fn an_underpayment_issues_nothing() {
-        assert_eq!(decide(&entry(40, 99), "0", 100, 12, None), Decision::Underpaid { week: 100 });
+    fn an_underpayment_is_refunded() {
+        let q = quote(100, 38);
+        assert_eq!(decide(&entry(40, 99), "0", "9", Some(&q), Some(&priced(100)), true, None),
+            Decision::Refund { reason: "underpaid" });
     }
 
     #[test]
-    fn another_asset_is_not_credit() {
+    fn another_asset_is_refunded() {
         let mut paid = entry(40, 1000);
         paid.asset = "3".into();
-        assert_eq!(decide(&paid, "0", 100, 12, None), Decision::WrongAsset { asset: "3".into() });
+        let q = quote(100, 38);
+        assert_eq!(decide(&paid, "0", "9", Some(&q), Some(&priced(100)), true, None),
+            Decision::Refund { reason: "wrong-asset" });
+    }
+
+    /// The price race: bob reads 100 at height 38 and pays at 40; the founder
+    /// raises the week to 200 at 39. The decision reads the tariff AT 38, so it
+    /// is the same whether the pass runs before or after the raise.
+    #[test]
+    fn a_payment_binds_the_price_it_read() {
+        let q = quote(100, 38);
+        let at_quote = priced(100);
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&q), Some(&at_quote), true, None), issue(52));
+        // A quote that disagrees with the tariff at its own height is refunded,
+        // never kept and never honoured at another price.
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&q), Some(&priced(200)), true, None),
+            Decision::Refund { reason: "quote-differs" });
+    }
+
+    #[test]
+    fn an_unquoted_or_stale_payment_is_refunded() {
+        assert_eq!(decide(&entry(40, 100), "0", "9", None, None, true, None), Decision::Refund { reason: "unquoted" });
+        let other = Quote { room: "8".into(), week: 100, at: 38 };
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&other), Some(&priced(100)), true, None),
+            Decision::Refund { reason: "unquoted" });
+        let old = quote(100, 40 - PRICE_SLACK - 1);
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&old), Some(&priced(100)), true, None),
+            Decision::Refund { reason: "stale-quote" });
+        let future = quote(100, 41);
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&future), Some(&priced(100)), true, None),
+            Decision::Refund { reason: "stale-quote" });
+    }
+
+    /// A kicked or never-invited subject holds no standing grant under the
+    /// room: refunded, unless the tariff said `open` at the quoted height.
+    #[test]
+    fn a_subject_the_room_does_not_admit_is_refunded() {
+        let q = quote(100, 38);
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&q), Some(&priced(100)), false, None),
+            Decision::Refund { reason: "not-admitted" });
+        let open = Priced { week: 100, period: 12, open: true };
+        assert_eq!(decide(&entry(40, 100), "0", "9", Some(&q), Some(&open), false, None), issue(52));
+    }
+
+    #[test]
+    fn the_memo_round_trips() {
+        assert_eq!(parse_quote(Some("room 9 week 100 at 38")), Some(quote(100, 38)));
+        assert_eq!(parse_quote(Some("room 9")), None);
     }
 
     #[test]
@@ -513,7 +723,10 @@ mod tests {
         journal.append(json!({"key":"ledger:40","decision":"issued","subject":"77","notAfter":"52"})).unwrap();
         journal.append(json!({"key":"ledger:44","decision":"underpaid","subject":"78"})).unwrap();
         journal.append(json!({"key":"ledger:50","decision":"deciding","subject":"79","notAfter":"62"})).unwrap();
+        journal.append(json!({"key":"ledger:51","decision":"deciding","subject":"80","refund":{"amount":"100"}})).unwrap();
         let reopened = Journal::open(&path).unwrap();
+        // a begun refund is remembered and never re-sent
+        assert!(reopened.refunding.contains("ledger:51"));
         assert_eq!(reopened.cursor, 44);
         assert_eq!(reopened.windows.get("77"), Some(&52));
         assert!(reopened.decided.contains("ledger:44"));

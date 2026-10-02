@@ -287,8 +287,7 @@ holder narrowing or the static shape of an explicit subject delegation. -/
 inductive Lineage {kind : ResourceKind} (parentage : Parentage) : Capability kind → Type
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
-      (rootSelf : cap.root = cap.id)
-      (ancestorsEmpty : cap.ancestors = ∅) : Lineage parentage cap
+      (rootSelf : cap.root = cap.id) : Lineage parentage cap
   | attenuate (child parent : Capability kind)
       (parentLineage : Lineage parentage parent)
       (edge : child.StrictAttenuates parent parentage) : Lineage parentage child
@@ -299,7 +298,7 @@ inductive Lineage {kind : ResourceKind} (parentage : Parentage) : Capability kin
 
 def Lineage.rootCapability {kind : ResourceKind} {parentage : Parentage}
     {cap : Capability kind} : cap.Lineage parentage → Capability kind
-  | .root rootCap _ _ _ => rootCap
+  | .root rootCap _ _ => rootCap
   | .attenuate _ _ parentLineage _ => parentLineage.rootCapability
   | .delegate _ _ _ parentLineage _ => parentLineage.rootCapability
 
@@ -313,7 +312,7 @@ theorem Lineage.root_bounds {kind : ResourceKind} {parentage : Parentage}
     {cap : Capability kind} (lineage : cap.Lineage parentage) :
     LineageBounds cap lineage.rootCapability parentage := by
   induction lineage with
-  | root rootCap _ _ _ => exact LineageBounds.refl rootCap parentage
+  | root rootCap _ _ => exact LineageBounds.refl rootCap parentage
   | attenuate child parent parentLineage edge induction =>
       exact edge.payload.lineageBounds.trans induction
   | delegate child parent request parentLineage shape induction =>
@@ -574,7 +573,7 @@ def demoDigestScheme : RequestDigestScheme where
   digestWire := fun wire => ⟨wire.domain + wire.semantics + wire.target + wire.nonce⟩
 
 def demoCapabilityLineage : demoCapability.Lineage demoState.parent :=
-  .root demoCapability rfl rfl rfl
+  .root demoCapability rfl rfl
 
 /-- This is deliberately only a semantic/API pole.  `demoDigestScheme` is not a
 cryptographic digest, and `demoPortal` is not a production verifier. -/
