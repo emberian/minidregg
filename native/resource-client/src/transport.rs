@@ -14,8 +14,18 @@ use std::time::{Duration, Instant};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
-const MAX_CONFIG: usize = 65_536;
-const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG + 32;
+pub(crate) const MAX_CONFIG: usize = 65_536;
+// Op153 wraps every formerly valid raw call without reducing its capacity.
+pub(crate) const MAX_CARRIED_CALL: usize = HOST_MAX_FRAME - 1;
+pub(crate) const CARRIED_LOOKUP_MAX_FRAME: usize = HOST_MAX_FRAME + 4 + 1024;
+const MAX_FRAME: usize = CARRIED_LOOKUP_MAX_FRAME + 5 + MAX_CONFIG + 32;
+
+fn request_within_bound(request: &[u8]) -> bool {
+    match request {
+        [153, payload @ ..] => carried_lookup_request(payload),
+        _ => request.len() <= HOST_MAX_FRAME,
+    }
+}
 
 pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
     let mut file = fs::File::open(path)
@@ -174,7 +184,7 @@ pub(crate) fn public_envelope(
     catalog_enabled: bool,
 ) -> Result<(), &'static str> {
     let (_, request) = split_envelope(envelope, config)?;
-    if request.len() > HOST_MAX_FRAME {
+    if !request_within_bound(request) {
         return Err("host frame exceeds bound");
     }
     if !allowed_operation(request, catalog_enabled) {
@@ -197,6 +207,25 @@ fn continuity_request(payload: &[u8]) -> bool {
         && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object())
 }
 
+// Public, read-only carried SignedCall lookup: bounded JSON header and raw call.
+fn carried_lookup_request(payload: &[u8]) -> bool {
+    if payload.len() < 6 || payload.len() >= CARRIED_LOOKUP_MAX_FRAME {
+        return false;
+    }
+    let length = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+    if length == 0
+        || length > 1024
+        || length >= payload.len() - 4
+        || payload.len() - 4 - length > MAX_CARRIED_CALL
+    {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(&payload[4..4 + length]).is_ok_and(|value| {
+        value["algorithm"] == "minidregg-carried-call-lookup-v1"
+            && value["originIdentity"].is_object()
+    })
+}
+
 pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         // Source-owned enrollment quote and exact paid claim status/quote. Host validates fields;
@@ -211,6 +240,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         ),
         [185 | 186, ingress @ ..] => !ingress.is_empty() && ingress.len() <= 4096,
         [151, payload @ ..] => continuity_request(payload),
+        [153, payload @ ..] => carried_lookup_request(payload),
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
         [123..=125, _, ..] => true,
@@ -376,6 +406,7 @@ fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         [151, payload @ ..] => continuity_request(payload),
+        [153, payload @ ..] => carried_lookup_request(payload),
         // Read-only signed stream authority checks remain operator-private.
         [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // Route-bound164 uses the same mutating dispatch receiver with an extra immutable restriction.
@@ -801,8 +832,13 @@ pub(crate) fn invoke_pinned_deadline(
         return Err("deadline invocation requires a local Unix socket".to_owned());
     };
     let config = read_config(config)?;
-    if payload.len() >= HOST_MAX_FRAME {
-        return Err("host request exceeds frame bound before transmission".to_owned());
+    let oversized = if operation == 153 {
+        !carried_lookup_request(payload)
+    } else {
+        payload.len() >= HOST_MAX_FRAME
+    };
+    if oversized {
+        return Err("host request exceeds frame bound or has malformed carried lookup before transmission".to_owned());
     }
     let mut frame = Vec::with_capacity(config.len() + payload.len() + 38);
     frame.push(2);
@@ -973,8 +1009,13 @@ fn invoke_inner(
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let config = read_config(config)?;
-    if payload.len() >= HOST_MAX_FRAME {
-        return Err("host request exceeds frame bound before transmission".to_owned());
+    let oversized = if operation == 153 {
+        !carried_lookup_request(payload)
+    } else {
+        payload.len() >= HOST_MAX_FRAME
+    };
+    if oversized {
+        return Err("host request exceeds frame bound or has malformed carried lookup before transmission".to_owned());
     }
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
     frame.push(if expected_host_sha256.is_some() { 2 } else { 1 });
@@ -1489,7 +1530,7 @@ fn serve_connection(
     };
     envelope.drain(..request_start);
     let request = envelope;
-    if request.len() > HOST_MAX_FRAME {
+    if !request_within_bound(&request) {
         return refuse(&mut stream, "host frame exceeds bound");
     }
     if !(if rules.operator {
@@ -2054,6 +2095,60 @@ done"#;
         assert!(allowed_operation(&[21, 1], false));
         assert!(!allowed_operation(&[20], false));
         assert!(!allowed_operation(&[21], false));
+    }
+
+    #[test]
+    fn carried_lookup_keeps_full_old_call_capacity_with_narrow_frame_exception() {
+        let mut header =
+            br#"{"algorithm":"minidregg-carried-call-lookup-v1","originIdentity":{}}"#.to_vec();
+        header.resize(1024, b' ');
+        let mut request = vec![153];
+        request.extend_from_slice(&(header.len() as u32).to_le_bytes());
+        request.extend(&header);
+        request.resize(CARRIED_LOOKUP_MAX_FRAME, 7);
+        assert_eq!(request.len() - 1 - 4 - header.len(), MAX_CARRIED_CALL);
+        assert!(request_within_bound(&request));
+        assert!(allowed_operation(&request, false));
+        assert!(allowed_operator_operation(&request));
+        let config = vec![b'x'; MAX_CONFIG];
+        let mut envelope = vec![2];
+        envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
+        envelope.extend(&config);
+        envelope.extend_from_slice(&[0; 32]);
+        envelope.extend(&request);
+        assert_eq!(envelope.len(), MAX_FRAME);
+        assert!(public_envelope(&envelope, &config, false).is_ok());
+        let mut framed = Vec::new();
+        write_frame(&mut framed, &envelope).unwrap();
+        assert_eq!(
+            read_frame(&mut std::io::Cursor::new(&framed))
+                .unwrap()
+                .unwrap(),
+            envelope
+        );
+        request.push(7);
+        assert!(!request_within_bound(&request));
+        assert!(!allowed_operation(&request, false));
+        assert!(!allowed_operator_operation(&request));
+        let oversized = ((MAX_FRAME + 1) as u32).to_le_bytes();
+        assert!(read_frame(&mut oversized.as_slice()).is_err());
+        // The ordinary call opcode retains exactly its old body limit.
+        let mut ordinary = vec![3; HOST_MAX_FRAME];
+        assert!(request_within_bound(&ordinary));
+        ordinary.push(1);
+        assert!(!request_within_bound(&ordinary));
+        for header in [
+            br#"[]"#.as_slice(),
+            br#"{"algorithm":"wrong","originIdentity":{}}"#,
+            br#"{"algorithm":"minidregg-carried-call-lookup-v1"}"#,
+        ] {
+            let mut bad = vec![153];
+            bad.extend_from_slice(&(header.len() as u32).to_le_bytes());
+            bad.extend(header);
+            bad.push(1);
+            assert!(!allowed_operation(&bad, false));
+            assert!(!allowed_operator_operation(&bad));
+        }
     }
 
     #[test]

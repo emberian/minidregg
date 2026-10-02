@@ -2124,6 +2124,10 @@ fn retry_with_upgrade(
         return Err(format!("attempt has no retained {}", call.display()));
     }
     sync_retained_call(directory, &call)?;
+    #[cfg(unix)]
+    if let Some(outcome) = receipt_continuity::carry::retry_lookup(directory, mode, direct)? {
+        return print_confirmed_outcome(&outcome);
+    }
     let (original_host, config, socket) = manifest_paths(directory)?;
     if !direct && SOCKET.get().is_none() {
         if let Some(socket) = socket {

@@ -955,13 +955,16 @@ mod tests {
         let custody = root.0.join(DIRECTORY);
         workspace::make_private_dir(&custody).unwrap();
         workspace::make_private_dir(&root.0.join("attempts")).unwrap();
+        for name in ["refs", "sources", "proposals"] {
+            workspace::make_private_dir(&root.0.join(name)).unwrap();
+        }
         let host = root.0.join("old-host");
         let target = root.0.join("target-host");
         let helper = root.0.join("sig");
         let edgefile = root.0.join("edge-verdict.json");
         let marker = root.0.join("target-executed");
         executable(&helper, "#!/bin/sh\nexit 0\n");
-        executable(&host,&format!("#!/bin/sh\ncase \"$2\" in\nprofile) cat \"$1\" ;;\ncontinuity-verify) cp \"$4\" \"$5\" ;;\ncarry-edge-verify) {} ;;\n*) exit 9 ;;\nesac\n",if reject {"exit 71".into()}else{format!("cp '{}' \"$4\"",edgefile.display())}));
+        executable(&host,&format!("#!/bin/sh\ncase \"$2\" in\nprofile) cat \"$1\" ;;\ncontinuity-verify) cp \"$4\" \"$5\" ;;\ncontinuity-point) cp \"$3\" \"$4\" ;;\ncarry-edge-verify) {} ;;\n*) exit 9 ;;\nesac\n",if reject {"exit 71".into()}else{format!("cp '{}' \"$4\"",edgefile.display())}));
         executable(
             &target,
             &format!(
@@ -984,7 +987,7 @@ mod tests {
         save(&custody, "enabled.json", &old.json()).unwrap();
         let socket = root.0.join("s");
         SOCKET.set(socket.clone()).unwrap();
-        let manifest = json!({"receiptContinuity":ALGORITHM,"config":root.0.join("old-config.json"),"host":host,"hostSha256":old.verifier_sha256,"socket":socket,
+        let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"1","key":root.0.join("unused-key"),"receiptContinuity":ALGORITHM,"config":root.0.join("old-config.json"),"host":host,"hostSha256":old.verifier_sha256,"socket":socket,
             "freshContinuity":{"id":"first-enrollment","state":"complete"}});
         save(&root.0, "workspace.json", &manifest).unwrap();
         let pinned = pin_authority(&root.0, &manifest, &"b".repeat(64)).unwrap();
@@ -1002,7 +1005,7 @@ mod tests {
             let config = fs::read(root.0.join("target-config.json")).unwrap();
             let digest = crate::host_image_sha256(&target).unwrap();
             Some(std::thread::spawn(move || {
-                for _ in 0..3 {
+                for request_index in 0..9 {
                     let (mut connection, _) = listener.accept().unwrap();
                     let frame = crate::transport::read_frame(&mut connection)
                         .unwrap()
@@ -1023,6 +1026,38 @@ mod tests {
                         expected.as_slice(),
                         "transport must use signed target image"
                     );
+                    if [3, 5, 6, 7, 8].contains(&request_index) {
+                        assert_eq!(
+                            frame[37 + length],
+                            153,
+                            "old calls must only use carried lookup"
+                        );
+                        let payload = &frame[38 + length..];
+                        let header_length =
+                            u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+                        let header: Value =
+                            serde_json::from_slice(&payload[4..4 + header_length]).unwrap();
+                        assert_eq!(header["algorithm"], LOOKUP);
+                        assert_eq!(header["originIdentity"], selected("2").identity);
+                        assert_eq!(
+                            &payload[4 + header_length..],
+                            b"exact-retained-call-fixture"
+                        );
+                        let mut response = json!({"algorithm":LOOKUP,"originIdentity":selected("2").identity,
+                            "callDigest":call_digest(b"exact-retained-call-fixture"),
+                            "outcome":{"type":"confirmed","confirmation":"replayed","transactionId":"41","eventId":"42","acceptedCount":"2","worldRoot":"34"}});
+                        match request_index {
+                            5 => response["callDigest"] = json!("0".repeat(64)),
+                            6 => response["originIdentity"] = selected("4").identity,
+                            7 => response["outcome"]["detail"] = json!("must not forward content"),
+                            8 => response["outcome"] = json!({"type":"absent"}),
+                            _ => (),
+                        }
+                        let mut reply = vec![153];
+                        reply.extend(serde_json::to_vec(&response).unwrap());
+                        crate::transport::write_frame(&mut connection, &reply).unwrap();
+                        continue;
+                    }
                     assert_eq!(frame[37 + length], 151);
                     let query: Value = serde_json::from_slice(&frame[38 + length..]).unwrap();
                     assert_eq!(
@@ -1077,6 +1112,46 @@ mod tests {
             anchor(&custody, &Settings::load(&custody).unwrap()).unwrap(),
             endpoint(6)
         );
+        let attempt = root.0.join("attempts/old-call");
+        workspace::make_private_dir(&attempt).unwrap();
+        create_file(&attempt.join("call.bin"), b"exact-retained-call-fixture").unwrap();
+        save(
+            &attempt,
+            "challenge.json",
+            &json!({"domain":"1","semantics":"2","height":"1","worldRoot":"17"}),
+        )
+        .unwrap();
+        save(&attempt,"attempt.json",&json!({"format":"minidregg-resource-client-attempt-v1","operation":"submit", "host":"/obsolete-missing-host", "config":"/obsolete-config"})).unwrap();
+        crate::retry(&attempt, "lookup", false).unwrap();
+        assert_eq!(
+            read_json(&attempt.join("retry-0001.json")).unwrap()["confirmation"],
+            "replayed"
+        );
+        for _ in 0..3 {
+            assert!(crate::retry(&attempt, "lookup", false).is_err());
+        }
+        assert!(crate::retry(&attempt, "lookup", false)
+            .unwrap_err()
+            .contains("absent"));
+        assert_eq!(
+            read_json(&attempt.join("retry-0005.json")).unwrap(),
+            json!({"type":"absent"})
+        );
+        assert!(crate::retry(&attempt, "submit", false)
+            .unwrap_err()
+            .contains("never direct execution or resubmission"));
+        assert!(crate::retry(&attempt, "lookup", true)
+            .unwrap_err()
+            .contains("never direct execution or resubmission"));
+        assert_eq!(
+            fs::read(attempt.join("call.bin")).unwrap(),
+            b"exact-retained-call-fixture"
+        );
+        assert_eq!(fs::read(custody.join("anchor.json")).unwrap(), retained);
+        for n in [2, 3, 4] {
+            assert!(attempt.join(format!("retry-{n:04}.bin")).exists());
+            assert!(!attempt.join(format!("retry-{n:04}.json")).exists());
+        }
         service.unwrap().join().unwrap();
     }
     #[test]
@@ -1099,4 +1174,319 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn carried_lookup_rejects_forged_metadata_and_preserves_full_raw_call_bound() {
+        let origin = selected("2").identity;
+        let digest = call_digest(b"original");
+        let good = json!({"algorithm":LOOKUP,"originIdentity":origin,"callDigest":digest,
+            "outcome":{"type":"confirmed","confirmation":"replayed","transactionId":"41","eventId":"42","acceptedCount":"2","worldRoot":"34"}});
+        lookup_outcome(&good, &origin, &digest, "0", &endpoint(5)).unwrap();
+        for (key, bad) in [
+            ("confirmation", json!("installed")),
+            ("acceptedCount", json!("6")),
+            ("worldRoot", json!("01")),
+            ("type", json!("content")),
+        ] {
+            let mut value = good.clone();
+            value["outcome"][key] = bad;
+            assert!(lookup_outcome(&value, &origin, &digest, "0", &endpoint(5)).is_err());
+        }
+        let mut extra = good.clone();
+        extra["outcome"]["leaf"] = json!({"private":"data"});
+        assert!(lookup_outcome(&extra, &origin, &digest, "0", &endpoint(5)).is_err());
+        extra = good.clone();
+        extra["capsule"] = json!("private");
+        assert!(lookup_outcome(&extra, &origin, &digest, "0", &endpoint(5)).is_err());
+        for reason in [
+            "origin-mismatch",
+            "malformed-call",
+            "capsule-unavailable",
+            "lookup-refused",
+            "receipt-invalid",
+        ] {
+            let mut value = good.clone();
+            value["outcome"] = json!({"type":"refused","reason":reason});
+            lookup_outcome(&value, &origin, &digest, "0", &endpoint(5)).unwrap();
+        }
+        let mut call = vec![7; crate::transport::MAX_CARRIED_CALL];
+        let payload = lookup_payload(&origin, &call, crate::transport::MAX_CONFIG).unwrap();
+        let header = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+        assert_eq!(&payload[4 + header..], call.as_slice());
+        call.push(7);
+        assert!(lookup_payload(&origin, &call, 0).is_err());
+        assert!(lookup_payload(&origin, b"valid", crate::transport::MAX_CONFIG + 1).is_err());
+    }
+}
+
+const LOOKUP: &str = "minidregg-carried-call-lookup-v1";
+fn retained_call(path: &Path) -> Result<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(NOFOLLOW)
+        .open(path)
+        .map_err(fail)?;
+    private_metadata(&file, false)?;
+    let maximum = crate::transport::MAX_CARRIED_CALL as u64;
+    if file.metadata().map_err(fail)?.len() > maximum {
+        return Err(fail(
+            "retained call exceeds carried lookup transport bound; exact call retained",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(fail)?;
+    if bytes.is_empty() || bytes.len() as u64 > maximum {
+        return Err(fail(
+            "retained call is empty or exceeds carried lookup bound",
+        ));
+    }
+    Ok(bytes)
+}
+fn call_digest(call: &[u8]) -> String {
+    use sha2::Digest;
+    crate::hex(&sha2::Sha256::digest(call))
+}
+fn lookup_payload(origin: &Value, call: &[u8], config_length: usize) -> Result<Vec<u8>> {
+    let header =
+        serde_json::to_vec(&json!({"algorithm":LOOKUP,"originIdentity":origin})).map_err(fail)?;
+    // v2 envelope: version + config length + config + image digest + opcode.
+    let size = 38usize
+        .checked_add(config_length)
+        .and_then(|n| n.checked_add(4 + header.len()))
+        .and_then(|n| n.checked_add(call.len()));
+    let maximum =
+        crate::transport::CARRIED_LOOKUP_MAX_FRAME + 5 + crate::transport::MAX_CONFIG + 32;
+    if header.len() > 1024
+        || call.is_empty()
+        || call.len() > crate::transport::MAX_CARRIED_CALL
+        || config_length > crate::transport::MAX_CONFIG
+        || size.is_none_or(|n| n > maximum)
+    {
+        return Err(fail(
+            "carried lookup exceeds transport frame; exact call retained without transmission",
+        ));
+    }
+    let mut result = Vec::with_capacity(4 + header.len() + call.len());
+    result.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    result.extend(header);
+    result.extend_from_slice(call);
+    Ok(result)
+}
+fn lookup_outcome(
+    response: &Value,
+    origin: &Value,
+    digest: &str,
+    lower: &str,
+    cut: &Point,
+) -> Result<Value> {
+    let response_fields = response
+        .as_object()
+        .ok_or_else(|| fail("carried lookup response is not an object"))?;
+    if response_fields.len() != 4
+        || response_fields.keys().any(|key| {
+            !["algorithm", "originIdentity", "callDigest", "outcome"].contains(&key.as_str())
+        })
+    {
+        return Err(fail("carried lookup response has unexpected fields"));
+    }
+    if response["algorithm"] != LOOKUP
+        || response["originIdentity"] != *origin
+        || response["callDigest"] != digest
+    {
+        return Err(fail(
+            "carried lookup response does not bind exact call and origin",
+        ));
+    }
+    let outcome = &response["outcome"];
+    let allowed: &[&str] = match text(outcome, "type")? {
+        "confirmed" => &[
+            "type",
+            "confirmation",
+            "transactionId",
+            "eventId",
+            "acceptedCount",
+            "worldRoot",
+        ],
+        "absent" => &["type"],
+        "refused" => &["type", "reason"],
+        _ => return Err(fail("carried lookup returned non-metadata outcome")),
+    };
+    let fields = outcome
+        .as_object()
+        .ok_or_else(|| fail("carried lookup outcome is not an object"))?;
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(fail(
+            "carried lookup returned unexpected content-bearing outcome fields",
+        ));
+    }
+    match text(outcome, "type")? {
+        "confirmed" => {
+            if outcome["confirmation"] != "replayed" {
+                return Err(fail(
+                    "read-only carried lookup returned a non-replay confirmation",
+                ));
+            }
+            for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+                decimal(text(outcome, name)?)?;
+            }
+            let height = text(outcome, "acceptedCount")?;
+            if compare(height, lower) == Ordering::Less
+                || compare(height, &cut.height) == Ordering::Greater
+            {
+                return Err(fail(
+                    "carried lookup receipt lies outside its origin segment",
+                ));
+            }
+        }
+        "absent" => (),
+        "refused" => {
+            let reason = text(outcome, "reason")?;
+            if ![
+                "origin-mismatch",
+                "malformed-call",
+                "capsule-unavailable",
+                "lookup-refused",
+                "receipt-invalid",
+            ]
+            .contains(&reason)
+            {
+                return Err(fail(
+                    "carried lookup refusal contains non-identifier metadata",
+                ));
+            }
+        }
+        _ => {
+            return Err(fail(
+                "carried lookup returned an unknown old-profile outcome",
+            ))
+        }
+    }
+    Ok(outcome.clone())
+}
+/// Intercept only old ordinary workspace calls, before the legacy attempt
+/// manifest can pin an obsolete remote Host image. Always lookup; never submit.
+pub(crate) fn retry_lookup(attempt: &Path, mode: &str, direct: bool) -> Result<Option<Value>> {
+    let attempt = fs::canonicalize(attempt).map_err(fail)?;
+    let Some(attempts) = attempt.parent() else {
+        return Ok(None);
+    };
+    if attempts.file_name().and_then(|name| name.to_str()) != Some("attempts") {
+        return Ok(None);
+    }
+    let Some(root) = attempts.parent() else {
+        return Ok(None);
+    };
+    let manifest = match fs::symlink_metadata(root.join("workspace.json")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(fail(error)),
+        Ok(_) => read_json(&root.join("workspace.json"))?,
+    };
+    if manifest.get("receiptCarryLineage").is_none() {
+        return Ok(None);
+    }
+    let workspace = workspace::load(root)?;
+    let ticket = begin(root, &workspace)?
+        .ok_or_else(|| fail("carried workspace has no current continuity custody"))?;
+    let custody = root.join(DIRECTORY);
+    let archived = {
+        let _lock = lock(&custody)?;
+        recover_locked(root)?;
+        history(root, &ticket.settings)?
+    };
+    let challenge = read_json_mode(&attempt.join("challenge.json"), false)?;
+    let mut lower = "0".to_owned();
+    let mut selected = None;
+    for transition in archived {
+        let origin = &transition["old"]["settings"]["identity"];
+        let cut = point(&transition["verifiedEdge"]["oldCut"])?;
+        if challenge["domain"] == origin["domain"] && challenge["semantics"] == origin["semantics"]
+        {
+            let (old_workspace, settings) = historical_source(root, &workspace, &transition)?;
+            let source = HostProof::new(root, &old_workspace, &settings)?;
+            let at = source.challenge_point(&challenge)?;
+            if compare(&at.height, &lower) != Ordering::Less
+                && compare(&at.height, &cut.height) != Ordering::Greater
+            {
+                selected = Some((origin.clone(), cut, lower.clone()));
+                break;
+            }
+        }
+        lower = point(&transition["verifiedEdge"]["newStart"])?.height;
+    }
+    let Some((origin, cut, lower)) = selected else {
+        if challenge["domain"] == ticket.settings.identity["domain"]
+            && challenge["semantics"] == ticket.settings.identity["semantics"]
+        {
+            return Ok(None);
+        }
+        return Err(fail(
+            "retained attempt has no authenticated origin lineage; exact call retained",
+        ));
+    };
+    if mode != "lookup" || direct {
+        return Err(fail("old carried calls allow only read-only workspace lookup, never direct execution or resubmission"));
+    }
+    let original = read_json_mode(&attempt.join("attempt.json"), false)?;
+    if original["format"] != "minidregg-resource-client-attempt-v1"
+        || original["operation"] != "submit"
+    {
+        return Err(fail(
+            "specialized old-call lookup is not supported; exact attempt retained",
+        ));
+    }
+    let call = retained_call(&attempt.join("call.bin"))?;
+    let digest = call_digest(&call);
+    let config = workspace::member_path(&workspace, "config")?;
+    let payload = lookup_payload(
+        &origin,
+        &call,
+        fs::metadata(&config)
+            .map_err(fail)?
+            .len()
+            .try_into()
+            .map_err(fail)?,
+    )?;
+    let socket = SOCKET
+        .get()
+        .ok_or_else(|| fail("carried lookup requires current pinned socket"))?;
+    let host = workspace::workspace_host(&workspace)?;
+    let (binary, json_path) = crate::next_retry(&attempt)?;
+    let frame = crate::session_invoke(&host, socket, &config, 153, &payload)?;
+    // Reserve this retry evidence even when the returned protocol is malformed.
+    create_file(&binary, &frame)?;
+    save(
+        &attempt,
+        binary
+            .with_extension("transport.json")
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        &json!({"type":"minidregg-carried-call-lookup-transport-v1","originIdentity":origin,
+        "callDigest":digest,"operation":153,"hostSha256":crate::host_image_sha256(&host)?,"config":config,"socket":socket,
+        "responseEncoding":"op153-byte-then-json"}),
+    )?;
+    if frame.first() != Some(&153) || frame.len() as u64 > MAX_JSON + 1 {
+        return Err(fail(
+            "carried lookup response refused or exceeded bound; exact evidence retained",
+        ));
+    }
+    if retained_call(&attempt.join("call.bin"))? != call {
+        return Err(fail("retained exact call changed during lookup"));
+    }
+    let response: Value = serde_json::from_slice(&frame[1..]).map_err(fail)?;
+    let outcome = lookup_outcome(&response, &origin, &digest, &lower, &cut)?;
+    create_file(&json_path, &serde_json::to_vec(&outcome).map_err(fail)?)?;
+    directory(&attempt)?.sync_all().map_err(fail)?;
+    finish_attempt(
+        Some(AttemptTicket {
+            root: root.to_path_buf(),
+            workspace,
+            ticket: Some(ticket),
+        }),
+        &outcome,
+        true,
+    )?;
+    Ok(Some(outcome))
 }

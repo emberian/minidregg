@@ -101,11 +101,46 @@ server transport pins. Durable carry edges connect that cut to current custody.
 Historical verification never replaces the new anchor. A missing or invalid
 old-identity op151 response is a refusal, not a same-profile fallback.
 
-Uncertain **old call lookup** is a separate native integration obligation. The
-existing retry path still selects the original attempt's transport/codec, so a
-fresh lookup after an identity carry requires a source-owned origin-aware lookup
-operation. This client change preserves those bytes and refuses incompatible
-transport; it does not silently reinterpret or resend old calls.
+## Read-only recovery of old ordinary calls
+
+`workspace --action recover --dir WORKSPACE --attempt RETAINED` routes an archived
+ordinary SignedCall through public read-only op153 before the legacy attempt can
+pin an obsolete Host image. The existing central `retry --mode lookup` path uses
+the same adapter. It keeps the current socket/config/image pins, selects the origin
+profile using the retained challenge and authenticated lineage range, and sends
+exact retained `call.bin` bytes. It never executes the original Host path, mutates
+those bytes, signs a replacement, or submits the call. Old direct execution and
+`--mode submit` refuse. Specialized historical calls outside ordinary SignedCall
+need a separate source-owned whitelist and refuse here.
+
+The binary payload is a four-byte little-endian JSON header length, followed by
+`{algorithm:"minidregg-carried-call-lookup-v1",originIdentity}`, followed by the raw
+call bytes. The header is at most 1024 bytes. Every formerly supported raw call up
+to 12,102,759 bytes still fits. Only op153's body allowance grows to 12,103,788 bytes
+(including opcode); every other opcode retains 12,102,760. Config bytes remain
+bounded to 65,536 and the v2 transport envelope has its separate fixed overhead.
+Length prefixes exceeding the resulting frame bound fail before allocation.
+
+The result has exactly `algorithm`, `originIdentity`, `callDigest` (SHA-256 of the
+exact raw call), and `outcome`. The client accepts only these outcome shapes:
+
+- Confirmed: `type`, `confirmation:"replayed"`, `transactionId`, `eventId`,
+  `acceptedCount`, and `worldRoot`.
+- Absent: `type:"absent"`.
+- Refused: `type:"refused"`, and a fixed identifier `reason` from
+  `origin-mismatch`, `malformed-call`, `capsule-unavailable`, `lookup-refused`, or
+  `receipt-invalid`.
+
+Unexpected fields, content, free-form explanations, wrong origin/digest, and
+out-of-segment receipts refuse. Raw response and transport evidence are durably
+retained under the retry number. A confirmed outcome is acknowledged only after
+its old-profile historical continuity proof succeeds; missing or invalid proof
+leaves the exact attempt available. Absent/refused is not authorization to resend.
+
+Op153 exposes only original receipt/outcome metadata, like existing receipt
+lookup; it remains useful after grant revocation. It grants no historical content
+access. Content observations still need current authority. Native old-capsule
+lookup must be read-only and sanitize its inspected outcome to these fields.
 
 ## Evidence and remaining integration
 
@@ -114,19 +149,25 @@ result bindings, missing/unrecorded custody, real child-process exits after each
 transition file sync, stale in-flight tickets, unchanged first-use metadata, and a
 real Unix-socket receiving fixture with the server already on the target config.
 That fixture checks the new transport envelope and old identity payload, imports
-the exact signed target witness, and verifies a historical replay without anchor
-downgrade. It also verifies that a refused source verdict never executes target
+the exact signed target witness, verifies historical replay without anchor
+downgrade, and exercises op153 against exact call bytes. It checks forged call
+hashes/origins, unexpected content fields, absent outcomes, retry evidence, and
+refusal of direct execution or resubmission. It also verifies that a refused source verdict never executes target
 code. Its proof/signature verdicts are deliberately **injected test fixtures**.
 These tests establish custody/control flow, not native cryptographic correctness.
 
-Native EdgeSeal and old-identity history dispatch are owned by the carry receiver
-implementation. An actual native end-to-end journey must use those components;
+Native EdgeSeal, old-identity history dispatch, and read-only old-capsule lookup
+are owned by the carry receiver implementation. An actual native end-to-end journey must use those components;
 the prior `3b1f628a` Host does not implement `carry-edge-verify` and correctly
 refuses adoption. Process-exit tests do not simulate hardware power loss.
 
 Scoped Rust validation in the independent `codex-continuity-carry` checkout:
-`cargo test --jobs 2 receipt_continuity` passed 28 filtered tests (including child
+`cargo test --jobs 2 receipt_continuity` passed 29 filtered tests (including child
 harness entrypoints), and `cargo test --jobs 2 workspace::tests` passed 19 tests.
 Both ran on persvati, nice 10, CPUs 3–4, with an independent Cargo target directory.
 The receiving fixture uses injected proof verdicts as described above; no native
 carry end-to-end pass is claimed here.
+The op153 follow-up also passed all 26 transport tests, including full old call
+capacity with maximum header/config, new maximum plus one refusal, and unchanged
+ordinary opcode bounds. The independent debug client build passed. Native
+cryptographic and read-only capsule execution remain separate integration tests.
