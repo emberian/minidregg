@@ -28,6 +28,9 @@
 //! /var/lib/mini, a stray tarball). It does not hide the secret from root or
 //! from the service user, which must read KEY to use the credential.
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+#[path = "provider_choice.rs"]
+pub mod choice;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -41,6 +44,7 @@ const POOL_NAMESPACE: &str = "_pool";
 const TABLE_TYPE: &str = "mini-provider-table-v2";
 const SEALED_TYPE: &str = "mini-provider-credential-v1";
 const GRANTS_TYPE: &str = "mini-provider-grants-v1";
+const SCOPED_GRANTS_TYPE: &str = "mini-provider-grants-v2";
 const USAGE_TYPE: &str = "mini-provider-usage-v1";
 const MAX_TABLE: u64 = 65_536;
 const MAX_RECORD: u64 = 65_536;
@@ -75,7 +79,9 @@ impl Secret {
             || value.len() > MAX_SECRET
             || value.bytes().any(|b| !(0x21..=0x7e).contains(&b))
         {
-            return Err("provider secret must be 1..4096 printable ASCII bytes without spaces".into());
+            return Err(
+                "provider secret must be 1..4096 printable ASCII bytes without spaces".into(),
+            );
         }
         Ok(Self(value))
     }
@@ -148,6 +154,7 @@ pub struct ProviderRow {
 }
 
 pub struct ProviderTable {
+    pub sha256: String,
     pub rows: Vec<ProviderRow>,
 }
 
@@ -269,7 +276,9 @@ impl ProviderTable {
                 .map(|model| {
                     model
                         .as_str()
-                        .filter(|m| !m.is_empty() && m.len() <= 256 && !m.chars().any(char::is_control))
+                        .filter(|m| {
+                            !m.is_empty() && m.len() <= 256 && !m.chars().any(char::is_control)
+                        })
                         .map(str::to_owned)
                         .ok_or_else(|| format!("provider {name}: invalid model name"))
                 })
@@ -278,7 +287,11 @@ impl ProviderTable {
                 "user" => CredentialSource::User,
                 "pool" => CredentialSource::Pool,
                 "homelab" => CredentialSource::Homelab,
-                _ => return Err(format!("provider {name}: credential must be user|pool|homelab")),
+                _ => {
+                    return Err(format!(
+                        "provider {name}: credential must be user|pool|homelab"
+                    ))
+                }
             };
             let caps = match (credential, entry.get("caps")) {
                 (CredentialSource::Pool, Some(caps)) => {
@@ -298,7 +311,9 @@ impl ProviderTable {
                     })
                 }
                 (CredentialSource::Pool, None) => {
-                    return Err(format!("provider {name}: a pool row needs caps {{perCall, perDay}}"))
+                    return Err(format!(
+                        "provider {name}: a pool row needs caps {{perCall, perDay}}"
+                    ))
                 }
                 (_, Some(_)) => return Err(format!("provider {name}: only a pool row has caps")),
                 (_, None) => None,
@@ -311,7 +326,10 @@ impl ProviderTable {
                 caps,
             });
         }
-        Ok(Self { rows })
+        Ok(Self {
+            rows,
+            sha256: hex(&Sha256::digest(bytes)),
+        })
     }
 
     /// Production callers pass owner 0: the table names where the operator's
@@ -338,7 +356,10 @@ impl ProviderTable {
     pub fn select(&self, model: &str, explicit: Option<&str>) -> Result<&ProviderRow, String> {
         let row = match explicit {
             Some(name) => self.rows.iter().find(|row| row.name == name),
-            None => self.rows.iter().find(|row| row.models.iter().any(|m| m == model)),
+            None => self
+                .rows
+                .iter()
+                .find(|row| row.models.iter().any(|m| m == model)),
         };
         row.filter(|row| row.models.iter().any(|m| m == model))
             .ok_or_else(|| refused("no-route"))
@@ -357,25 +378,57 @@ pub struct Grant {
     pub per_day: u64,
     /// Last block height at which the grant is usable (inclusive).
     pub not_after: u64,
+    /// Optional exact allowed model. None retains the legacy provider-wide grant.
+    pub model: Option<String>,
+    /// Native owner epoch when this grant was authenticated.
+    pub owner_epoch: Option<String>,
 }
 
 impl Grant {
     pub fn validate(&self) -> Result<(), String> {
         decimal(&self.runner, "grant runner")?;
+        if let Some(epoch) = &self.owner_epoch {
+            decimal(epoch, "owner epoch")?;
+        }
         if !(1..=1_000_000).contains(&self.per_call) {
             return Err("grant per-call must be 1..1000000 output tokens".into());
         }
         if !(1..=100_000).contains(&self.per_day) {
             return Err("grant per-day must be 1..100000 calls".into());
         }
+        if self
+            .model
+            .as_ref()
+            .is_some_and(|m| m.is_empty() || m.len() > 256 || m.chars().any(char::is_control))
+        {
+            return Err("grant model must be a nonempty model name of at most 256 bytes".into());
+        }
         Ok(())
     }
-    fn to_json(&self) -> Value {
-        json!({"runner":self.runner,"perCall":self.per_call.to_string(),
-            "perDay":self.per_day.to_string(),"notAfter":self.not_after.to_string()})
+    pub fn to_json(&self) -> Value {
+        let mut value = json!({"runner":self.runner,"perCall":self.per_call.to_string(),
+            "perDay":self.per_day.to_string(),"notAfter":self.not_after.to_string()});
+        if let Some(model) = &self.model {
+            value["model"] = json!(model);
+        }
+        if let Some(epoch) = &self.owner_epoch {
+            value["ownerEpoch"] = json!(epoch);
+        }
+        value
     }
-    fn from_json(value: &Value) -> Result<Self, String> {
-        object_keys(value, &["runner", "perCall", "perDay", "notAfter"], "grant")?;
+    pub fn from_json(value: &Value) -> Result<Self, String> {
+        object_keys(
+            value,
+            &[
+                "runner",
+                "perCall",
+                "perDay",
+                "notAfter",
+                "model",
+                "ownerEpoch",
+            ],
+            "grant",
+        )?;
         let number = |name: &str| -> Result<u64, String> {
             let v = string(value, name, "grant")?;
             decimal(v, name)?;
@@ -386,6 +439,22 @@ impl Grant {
             per_call: number("perCall")?,
             per_day: number("perDay")?,
             not_after: number("notAfter")?,
+            owner_epoch: value
+                .get("ownerEpoch")
+                .map(|m| {
+                    m.as_str()
+                        .map(str::to_owned)
+                        .ok_or("grant owner epoch must be a string")
+                })
+                .transpose()?,
+            model: value
+                .get("model")
+                .map(|m| {
+                    m.as_str()
+                        .map(str::to_owned)
+                        .ok_or("grant model must be a string")
+                })
+                .transpose()?,
         };
         grant.validate()?;
         Ok(grant)
@@ -431,9 +500,7 @@ pub struct CredentialStore {
 
 fn private_dir_check(path: &Path, label: &str) -> Result<(), String> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("{label}: {e}"))?;
-    if !meta.file_type().is_dir()
-        || meta.uid() != euid()
-        || meta.permissions().mode() & 0o077 != 0
+    if !meta.file_type().is_dir() || meta.uid() != euid() || meta.permissions().mode() & 0o077 != 0
     {
         return Err(format!("{label} must be an owned 0700 directory"));
     }
@@ -491,6 +558,25 @@ fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("credential directory sync: {e}"))
 }
 
+// One provider-wide lock orders key replacement, grant changes, revocation
+// and reserve-time authorization. Usage retains its separate counter lock.
+fn provider_lock(dir: &Path, provider: &str) -> Result<File, String> {
+    let path = dir.join(format!("{provider}.authority.lock"));
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|_| "credential authority lock unavailable".to_owned())?;
+    private_file_check(&path, "credential authority lock", 0)?;
+    if unsafe { flock(lock.as_raw_fd(), LOCK_EX) } != 0 {
+        return Err("credential authority lock unavailable".into());
+    }
+    Ok(lock)
+}
+
 fn read_record(path: &Path, label: &str) -> Result<Option<Value>, String> {
     match fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -516,8 +602,8 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn unhex(text: &str) -> Result<Vec<u8>, String> {
-    if text.len() % 2 != 0 {
-        return Err("odd hex length".into());
+    if text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("invalid hex encoding".into());
     }
     (0..text.len())
         .step_by(2)
@@ -534,6 +620,11 @@ pub fn utc_day() -> u64 {
 }
 
 impl CredentialStore {
+    /// Serialize authenticated service actions and their final operator pin check.
+    pub fn member_service_lock(&self) -> Result<File, String> {
+        provider_lock(&self.root, "member-service")
+    }
+
     /// Opens an existing store. The operator creates ROOT (0700) and KEY
     /// (32 bytes, 0600), both owned by the service user.
     pub fn open(root: &Path, key_path: &Path) -> Result<Self, String> {
@@ -593,9 +684,15 @@ impl CredentialStore {
     /// Store (or replace) the namespace's secret for `provider`. Grants on
     /// a replaced secret are kept: the grant names who may use "my
     /// OpenRouter key", not one particular value of it.
-    pub fn set(&self, namespace: Namespace<'_>, provider: &str, secret: &Secret) -> Result<(), String> {
+    pub fn set(
+        &self,
+        namespace: Namespace<'_>,
+        provider: &str,
+        secret: &Secret,
+    ) -> Result<(), String> {
         provider_name(provider)?;
         let dir = self.directory(namespace, true)?;
+        let _lock = provider_lock(&dir, provider)?;
         let mut nonce = [0u8; 12];
         ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
             .map_err(|_| "credential nonce entropy unavailable")?;
@@ -621,7 +718,11 @@ impl CredentialStore {
         else {
             return Ok(None);
         };
-        object_keys(&record, &["type", "provider", "nonce", "sealed"], "sealed credential")?;
+        object_keys(
+            &record,
+            &["type", "provider", "nonce", "sealed"],
+            "sealed credential",
+        )?;
         if record.get("type").and_then(Value::as_str) != Some(SEALED_TYPE)
             || record.get("provider").and_then(Value::as_str) != Some(provider)
         {
@@ -651,8 +752,10 @@ impl CredentialStore {
             return Ok(Vec::new());
         };
         object_keys(&record, &["type", "provider", "grants"], "grants")?;
-        if record.get("type").and_then(Value::as_str) != Some(GRANTS_TYPE)
-            || record.get("provider").and_then(Value::as_str) != Some(provider)
+        if !matches!(
+            record.get("type").and_then(Value::as_str),
+            Some(GRANTS_TYPE | SCOPED_GRANTS_TYPE)
+        ) || record.get("provider").and_then(Value::as_str) != Some(provider)
         {
             return Err("grant record names another provider or version".into());
         }
@@ -664,11 +767,26 @@ impl CredentialStore {
             .iter()
             .map(Grant::from_json)
             .collect::<Result<Vec<_>, _>>()?;
+        if record["type"] == GRANTS_TYPE
+            && grants
+                .iter()
+                .any(|g| g.model.is_some() || g.owner_epoch.is_some())
+        {
+            return Err("model-scoped grants require mini-provider-grants-v2".into());
+        }
         Ok(grants)
     }
 
     fn write_grants(&self, dir: &Path, provider: &str, grants: &[Grant]) -> Result<(), String> {
-        let record = json!({"type":GRANTS_TYPE,"provider":provider,
+        let version = if grants
+            .iter()
+            .any(|g| g.model.is_some() || g.owner_epoch.is_some())
+        {
+            SCOPED_GRANTS_TYPE
+        } else {
+            GRANTS_TYPE
+        };
+        let record = json!({"type":version,"provider":provider,
             "grants":grants.iter().map(Grant::to_json).collect::<Vec<_>>()});
         let mut bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
@@ -681,8 +799,12 @@ impl CredentialStore {
         grant.validate()?;
         let namespace = Namespace::Owner(owner);
         let dir = self.directory(namespace, false)?;
+        private_dir_check(&dir, "credential namespace")?;
+        let _lock = provider_lock(&dir, provider)?;
         if !dir.join(format!("{provider}.key")).exists() {
-            return Err(format!("no stored {provider} credential to grant; run key set first"));
+            return Err(format!(
+                "no stored {provider} credential to grant; run key set first"
+            ));
         }
         let mut grants = self.grants(&dir, provider)?;
         grants.retain(|g| g.runner != grant.runner);
@@ -695,13 +817,19 @@ impl CredentialStore {
 
     /// `runner = None` deletes the secret, every grant and the counters.
     /// Returns whether anything was removed.
-    pub fn revoke(&self, namespace: Namespace<'_>, provider: &str, runner: Option<&str>) -> Result<bool, String> {
+    pub fn revoke(
+        &self,
+        namespace: Namespace<'_>,
+        provider: &str,
+        runner: Option<&str>,
+    ) -> Result<bool, String> {
         provider_name(provider)?;
         let dir = self.directory(namespace, false)?;
         if fs::symlink_metadata(&dir).is_err() {
             return Ok(false);
         }
         private_dir_check(&dir, "credential namespace")?;
+        let _lock = provider_lock(&dir, provider)?;
         match runner {
             Some(runner) => {
                 let mut grants = self.grants(&dir, provider)?;
@@ -714,7 +842,15 @@ impl CredentialStore {
                 Ok(true)
             }
             None => {
-                let mut removed = false;
+                let mut removed = ["key", "grants.json", "usage.json"]
+                    .iter()
+                    .any(|suffix| dir.join(format!("{provider}.{suffix}")).exists());
+                if !removed {
+                    return Ok(false);
+                }
+                // Durable revocation first. A crash while removing custody must
+                // not let a later key set revive an old runner grant.
+                self.write_grants(&dir, provider, &[])?;
                 for suffix in ["key", "grants.json", "usage.json"] {
                     match fs::remove_file(dir.join(format!("{provider}.{suffix}"))) {
                         Ok(()) => removed = true,
@@ -765,6 +901,39 @@ impl CredentialStore {
         max_tokens: Option<u64>,
         day: u64,
     ) -> Result<Secret, String> {
+        self.authorize_model(owner, provider, runner, None, height, max_tokens, day)
+    }
+
+    /// Model-aware reserve-time authorization. Legacy callers cannot use a
+    /// scoped grant because they supply no model. Refusal never consumes a call.
+    pub fn authorize_model(
+        &self,
+        owner: &Owner,
+        provider: &str,
+        runner: &str,
+        model: Option<&str>,
+        height: u64,
+        max_tokens: Option<u64>,
+        day: u64,
+    ) -> Result<Secret, String> {
+        self.authorize_model_epoch(
+            owner, provider, runner, model, None, height, max_tokens, day,
+        )
+    }
+
+    /// Production use supplies a freshly verified native epoch. Legacy grants
+    /// and old epochs cannot regain authority when a public key is reused.
+    pub fn authorize_model_epoch(
+        &self,
+        owner: &Owner,
+        provider: &str,
+        runner: &str,
+        model: Option<&str>,
+        owner_epoch: Option<&str>,
+        height: u64,
+        max_tokens: Option<u64>,
+        day: u64,
+    ) -> Result<Secret, String> {
         provider_name(provider)?;
         let namespace = Namespace::Owner(owner);
         let dir = self.directory(namespace, false)?;
@@ -774,20 +943,64 @@ impl CredentialStore {
             return Err(refused("no-credential"));
         }
         private_dir_check(&dir, "credential namespace")?;
+        let _lock = provider_lock(&dir, provider)?;
         let grant = self
             .grants(&dir, provider)?
             .into_iter()
             .find(|g| g.runner == runner)
             .ok_or_else(|| refused("no-credential"))?;
+        if grant.owner_epoch.as_deref() != owner_epoch {
+            return Err(refused("owner-epoch-not-granted"));
+        }
+        if grant
+            .model
+            .as_deref()
+            .is_some_and(|allowed| Some(allowed) != model)
+        {
+            return Err(refused("model-not-granted"));
+        }
         if height > grant.not_after {
             return Err(refused("grant-expired"));
         }
         if max_tokens.is_none_or(|tokens| tokens > grant.per_call) {
             return Err(refused("per-call-cap"));
         }
+        let secret = self
+            .secret(namespace, provider)?
+            .ok_or_else(|| refused("no-credential"))?;
         self.count_call(&dir, provider, runner, grant.per_day, day)?;
-        self.secret(namespace, provider)?
-            .ok_or_else(|| refused("no-credential"))
+        Ok(secret)
+    }
+
+    /// Validate the current member grant without charging daily usage. Used by
+    /// typed owner migration, which must never manufacture replacement authority.
+    pub fn verify_grant(
+        &self,
+        owner: &Owner,
+        provider: &str,
+        runner: &str,
+        model: &str,
+        epoch: &str,
+        height: u64,
+    ) -> Result<Grant, String> {
+        provider_name(provider)?;
+        let dir = self.directory(Namespace::Owner(owner), false)?;
+        private_dir_check(&dir, "credential namespace")?;
+        let _lock = provider_lock(&dir, provider)?;
+        let grant = self
+            .grants(&dir, provider)?
+            .into_iter()
+            .find(|g| g.runner == runner)
+            .ok_or_else(|| refused("no-credential"))?;
+        if grant.model.as_deref() != Some(model) || grant.owner_epoch.as_deref() != Some(epoch) {
+            return Err(refused("owner-model-epoch-not-granted"));
+        }
+        if height > grant.not_after {
+            return Err(refused("grant-expired"));
+        }
+        self.secret(Namespace::Owner(owner), provider)?
+            .ok_or_else(|| refused("no-credential"))?;
+        Ok(grant)
     }
 
     /// The pool secret, for one call of `runner` within the row's caps: a
@@ -810,15 +1023,25 @@ impl CredentialStore {
             return Err(refused("no-credential"));
         }
         private_dir_check(&dir, "pool credential namespace")?;
+        let _lock = provider_lock(&dir, provider)?;
         if max_tokens.is_none_or(|tokens| tokens > caps.per_call) {
             return Err(refused("per-call-cap"));
         }
+        let secret = self
+            .secret(Namespace::Pool, provider)?
+            .ok_or_else(|| refused("no-credential"))?;
         self.count_call(&dir, provider, runner, caps.per_day, day)?;
-        self.secret(Namespace::Pool, provider)?
-            .ok_or_else(|| refused("no-credential"))
+        Ok(secret)
     }
 
-    fn count_call(&self, dir: &Path, provider: &str, runner: &str, per_day: u64, day: u64) -> Result<(), String> {
+    fn count_call(
+        &self,
+        dir: &Path,
+        provider: &str,
+        runner: &str,
+        per_day: u64,
+        day: u64,
+    ) -> Result<(), String> {
         let lock_path = dir.join(format!("{provider}.usage.lock"));
         let lock = OpenOptions::new()
             .create(true)
@@ -852,7 +1075,10 @@ impl CredentialStore {
             .map(|entry| {
                 (
                     entry.get("day").and_then(Value::as_u64).unwrap_or(0),
-                    entry.get("calls").and_then(Value::as_u64).unwrap_or(u64::MAX),
+                    entry
+                        .get("calls")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(u64::MAX),
                 )
             })
             .unwrap_or((day, 0));
@@ -899,7 +1125,12 @@ mod credential_tests {
         let root = base.join("credentials");
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let key = base.join("credentials.key");
-        let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&key).unwrap();
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&key)
+            .unwrap();
         f.write_all(&[7u8; 32]).unwrap();
         let opened = CredentialStore::open(&root, &key).unwrap();
         (base, opened)
@@ -910,7 +1141,14 @@ mod credential_tests {
     }
 
     fn grant(runner: &str) -> Grant {
-        Grant { runner: runner.into(), per_call: 64, per_day: 2, not_after: 100 }
+        Grant {
+            runner: runner.into(),
+            per_call: 64,
+            per_day: 2,
+            not_after: 100,
+            model: None,
+            owner_epoch: None,
+        }
     }
 
     fn walk(dir: &Path, out: &mut Vec<Vec<u8>>) {
@@ -929,17 +1167,51 @@ mod credential_tests {
         let (base, store) = store();
         let a = owner("11", 'a');
         let b = owner("12", 'b');
-        store.set(Namespace::Owner(&a), "openrouter", &Secret::new("sk-A-token".into()).unwrap()).unwrap();
-        store.set(Namespace::Owner(&b), "openrouter", &Secret::new("sk-B-token".into()).unwrap()).unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("sk-A-token".into()).unwrap(),
+            )
+            .unwrap();
+        store
+            .set(
+                Namespace::Owner(&b),
+                "openrouter",
+                &Secret::new("sk-B-token".into()).unwrap(),
+            )
+            .unwrap();
         store.grant(&a, "openrouter", grant("9")).unwrap();
         store.grant(&b, "openrouter", grant("9")).unwrap();
-        assert_eq!(store.authorize(&a, "openrouter", "9", 5, Some(64), 1).unwrap().expose(), "sk-A-token");
-        assert_eq!(store.authorize(&b, "openrouter", "9", 5, Some(64), 1).unwrap().expose(), "sk-B-token");
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 5, Some(64), 1)
+                .unwrap()
+                .expose(),
+            "sk-A-token"
+        );
+        assert_eq!(
+            store
+                .authorize(&b, "openrouter", "9", 5, Some(64), 1)
+                .unwrap()
+                .expose(),
+            "sk-B-token"
+        );
         // A workspace that claims subject 11 with another key is a different namespace.
         let impostor = owner("11", 'c');
-        assert_eq!(store.authorize(&impostor, "openrouter", "9", 5, Some(64), 1).unwrap_err(), refused("no-credential"));
+        assert_eq!(
+            store
+                .authorize(&impostor, "openrouter", "9", 5, Some(64), 1)
+                .unwrap_err(),
+            refused("no-credential")
+        );
         // A runner without a grant gets nothing.
-        assert_eq!(store.authorize(&a, "openrouter", "10", 5, Some(64), 1).unwrap_err(), refused("no-credential"));
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "10", 5, Some(64), 1)
+                .unwrap_err(),
+            refused("no-credential")
+        );
         // Nothing on disk holds a plaintext secret.
         let mut files = Vec::new();
         walk(&base, &mut files);
@@ -956,13 +1228,33 @@ mod credential_tests {
         let (base, store) = store();
         let a = owner("11", 'a');
         let b = owner("12", 'b');
-        store.set(Namespace::Owner(&a), "openrouter", &Secret::new("sk-A-token".into()).unwrap()).unwrap();
-        store.set(Namespace::Owner(&b), "openrouter", &Secret::new("sk-B-token".into()).unwrap()).unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("sk-A-token".into()).unwrap(),
+            )
+            .unwrap();
+        store
+            .set(
+                Namespace::Owner(&b),
+                "openrouter",
+                &Secret::new("sk-B-token".into()).unwrap(),
+            )
+            .unwrap();
         store.grant(&b, "openrouter", grant("9")).unwrap();
-        let from = base.join("credentials/11").join("a".repeat(64)).join("openrouter.key");
-        let to = base.join("credentials/12").join("b".repeat(64)).join("openrouter.key");
+        let from = base
+            .join("credentials/11")
+            .join("a".repeat(64))
+            .join("openrouter.key");
+        let to = base
+            .join("credentials/12")
+            .join("b".repeat(64))
+            .join("openrouter.key");
         fs::copy(&from, &to).unwrap();
-        let error = store.authorize(&b, "openrouter", "9", 5, Some(64), 1).unwrap_err();
+        let error = store
+            .authorize(&b, "openrouter", "9", 5, Some(64), 1)
+            .unwrap_err();
         assert!(error.contains("does not open"), "{error}");
         fs::remove_dir_all(base).unwrap();
     }
@@ -971,22 +1263,68 @@ mod credential_tests {
     fn caps_expiry_and_revocation_refuse_by_name() {
         let (base, store) = store();
         let a = owner("11", 'a');
-        store.set(Namespace::Owner(&a), "openrouter", &Secret::new("sk-A-token".into()).unwrap()).unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("sk-A-token".into()).unwrap(),
+            )
+            .unwrap();
         store.grant(&a, "openrouter", grant("9")).unwrap();
-        assert_eq!(store.authorize(&a, "openrouter", "9", 101, Some(64), 1).unwrap_err(), refused("grant-expired"));
-        assert_eq!(store.authorize(&a, "openrouter", "9", 100, Some(65), 1).unwrap_err(), refused("per-call-cap"));
-        assert_eq!(store.authorize(&a, "openrouter", "9", 100, None, 1).unwrap_err(), refused("per-call-cap"));
-        store.authorize(&a, "openrouter", "9", 100, Some(64), 1).unwrap();
-        store.authorize(&a, "openrouter", "9", 100, Some(64), 1).unwrap();
-        assert_eq!(store.authorize(&a, "openrouter", "9", 100, Some(64), 1).unwrap_err(), refused("per-day-cap"));
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 101, Some(64), 1)
+                .unwrap_err(),
+            refused("grant-expired")
+        );
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 100, Some(65), 1)
+                .unwrap_err(),
+            refused("per-call-cap")
+        );
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 100, None, 1)
+                .unwrap_err(),
+            refused("per-call-cap")
+        );
+        store
+            .authorize(&a, "openrouter", "9", 100, Some(64), 1)
+            .unwrap();
+        store
+            .authorize(&a, "openrouter", "9", 100, Some(64), 1)
+            .unwrap();
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 100, Some(64), 1)
+                .unwrap_err(),
+            refused("per-day-cap")
+        );
         // A new day resets the counter.
-        store.authorize(&a, "openrouter", "9", 100, Some(64), 2).unwrap();
+        store
+            .authorize(&a, "openrouter", "9", 100, Some(64), 2)
+            .unwrap();
         // Revoking one runner leaves the secret; revoking all removes it.
-        assert!(store.revoke(Namespace::Owner(&a), "openrouter", Some("9")).unwrap());
-        assert_eq!(store.authorize(&a, "openrouter", "9", 1, Some(1), 3).unwrap_err(), refused("no-credential"));
+        assert!(store
+            .revoke(Namespace::Owner(&a), "openrouter", Some("9"))
+            .unwrap());
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 1, Some(1), 3)
+                .unwrap_err(),
+            refused("no-credential")
+        );
         store.grant(&a, "openrouter", grant("9")).unwrap();
-        assert!(store.revoke(Namespace::Owner(&a), "openrouter", None).unwrap());
-        assert_eq!(store.authorize(&a, "openrouter", "9", 1, Some(1), 3).unwrap_err(), refused("no-credential"));
+        assert!(store
+            .revoke(Namespace::Owner(&a), "openrouter", None)
+            .unwrap());
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 1, Some(1), 3)
+                .unwrap_err(),
+            refused("no-credential")
+        );
         assert!(store.grant(&a, "openrouter", grant("9")).is_err());
         let listed = store.list(Namespace::Owner(&a)).unwrap();
         assert_eq!(listed["credentials"], json!([]));
@@ -997,44 +1335,376 @@ mod credential_tests {
     fn list_shows_names_and_caps_and_debug_never_shows_values() {
         let (base, store) = store();
         let a = owner("11", 'a');
-        store.set(Namespace::Owner(&a), "openrouter", &Secret::new("sk-A-token".into()).unwrap()).unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("sk-A-token".into()).unwrap(),
+            )
+            .unwrap();
         store.grant(&a, "openrouter", grant("9")).unwrap();
         let listed = store.list(Namespace::Owner(&a)).unwrap().to_string();
         assert!(listed.contains("openrouter") && listed.contains("\"perDay\":\"2\""));
         assert!(!listed.contains("sk-A-token"));
-        let secret = store.authorize(&a, "openrouter", "9", 1, Some(1), 1).unwrap();
+        let secret = store
+            .authorize(&a, "openrouter", "9", 1, Some(1), 1)
+            .unwrap();
         let rendered = format!("{secret:?} {:?}", Some(&secret));
         assert!(!rendered.contains("sk-A-token"), "{rendered}");
-        store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();
-        let caps = Caps { per_call: 64, per_day: 1 };
-        assert_eq!(store.pool("pool", "9", Some(65), caps, 1).unwrap_err(), refused("per-call-cap"));
-        assert_eq!(store.pool("pool", "9", None, caps, 1).unwrap_err(), refused("per-call-cap"));
-        assert_eq!(store.pool("pool", "9", Some(64), caps, 1).unwrap().expose(), "sk-POOL");
-        assert_eq!(store.pool("pool", "9", Some(64), caps, 1).unwrap_err(), refused("per-day-cap"));
-        assert_eq!(store.pool("pool", "9", Some(64), caps, 2).unwrap().expose(), "sk-POOL");
-        assert_eq!(store.pool("other", "9", Some(1), caps, 1).unwrap_err(), refused("no-credential"));
+        store
+            .set(
+                Namespace::Pool,
+                "pool",
+                &Secret::new("sk-POOL".into()).unwrap(),
+            )
+            .unwrap();
+        let caps = Caps {
+            per_call: 64,
+            per_day: 1,
+        };
+        assert_eq!(
+            store.pool("pool", "9", Some(65), caps, 1).unwrap_err(),
+            refused("per-call-cap")
+        );
+        assert_eq!(
+            store.pool("pool", "9", None, caps, 1).unwrap_err(),
+            refused("per-call-cap")
+        );
+        assert_eq!(
+            store.pool("pool", "9", Some(64), caps, 1).unwrap().expose(),
+            "sk-POOL"
+        );
+        assert_eq!(
+            store.pool("pool", "9", Some(64), caps, 1).unwrap_err(),
+            refused("per-day-cap")
+        );
+        assert_eq!(
+            store.pool("pool", "9", Some(64), caps, 2).unwrap().expose(),
+            "sk-POOL"
+        );
+        assert_eq!(
+            store.pool("other", "9", Some(1), caps, 1).unwrap_err(),
+            refused("no-credential")
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn native_epoch_never_upgrades_legacy_or_reused_key_grants() {
+        let (base, store) = store();
+        let a = owner("20", char::from(97));
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-epoch".into()).unwrap(),
+            )
+            .unwrap();
+        let mut g = grant("9");
+        g.model = Some("m".into());
+        store.grant(&a, "chutes", g.clone()).unwrap();
+        assert!(store
+            .authorize_model_epoch(&a, "chutes", "9", Some("m"), Some("1"), 1, Some(2), 1)
+            .is_err());
+        g.owner_epoch = Some("1".into());
+        store.grant(&a, "chutes", g.clone()).unwrap();
+        assert!(store.verify_grant(&a, "chutes", "9", "m", "2", 1).is_err());
+        assert!(store
+            .authorize_model(&a, "chutes", "9", Some("m"), 1, Some(2), 1)
+            .is_err());
+        assert!(store
+            .authorize_model_epoch(&a, "chutes", "9", Some("m"), Some("2"), 1, Some(2), 1)
+            .is_err());
+        assert!(store.verify_grant(&a, "chutes", "9", "m", "1", 1).is_ok());
+        assert!(store.verify_grant(&a, "chutes", "9", "m", "1", 1).is_ok());
+        // Observations and refusals consumed neither of the two daily calls.
+        for _ in 0..2 {
+            store
+                .authorize_model_epoch(&a, "chutes", "9", Some("m"), Some("1"), 1, Some(2), 1)
+                .unwrap();
+        }
+        assert!(store
+            .authorize_model_epoch(&a, "chutes", "9", Some("m"), Some("1"), 1, Some(2), 1)
+            .is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn model_scope_refuses_before_counting_and_survives_replacement() {
+        let (base, store) = store();
+        let a = owner("11", 'a');
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-first".into()).unwrap(),
+            )
+            .unwrap();
+        let mut g = grant("9");
+        g.model = Some("chosen/model".into());
+        g.per_day = 1;
+        store.grant(&a, "chutes", g).unwrap();
+        assert_eq!(
+            store
+                .authorize(&a, "chutes", "9", 1, Some(64), 1)
+                .unwrap_err(),
+            refused("model-not-granted")
+        );
+        assert_eq!(
+            store
+                .authorize_model(&a, "chutes", "9", Some("other/model"), 1, Some(64), 1)
+                .unwrap_err(),
+            refused("model-not-granted")
+        );
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-replacement".into()).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .authorize_model(&a, "chutes", "9", Some("chosen/model"), 1, Some(64), 1)
+                .unwrap()
+                .expose(),
+            "synthetic-replacement"
+        );
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-third".into()).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .authorize_model(&a, "chutes", "9", Some("chosen/model"), 1, Some(64), 1)
+                .unwrap_err(),
+            refused("per-day-cap")
+        );
+        assert_eq!(
+            store.list(Namespace::Owner(&a)).unwrap()["credentials"][0]["grants"][0]["model"],
+            "chosen/model"
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn interrupted_revoke_cannot_resurrect_authority_on_replacement() {
+        let (base, store) = store();
+        let a = owner("11", 'a');
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("synthetic-before".into()).unwrap(),
+            )
+            .unwrap();
+        store.grant(&a, "openrouter", grant("9")).unwrap();
+        let dir = store.directory(Namespace::Owner(&a), false).unwrap();
+        // Durable first step of whole-provider revoke, then process loss.
+        store.write_grants(&dir, "openrouter", &[]).unwrap();
+        drop(store);
+        let store = CredentialStore::open(&base.join("credentials"), &base.join("credentials.key"))
+            .unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "openrouter",
+                &Secret::new("synthetic-after".into()).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .authorize(&a, "openrouter", "9", 1, Some(1), 1)
+                .unwrap_err(),
+            refused("no-credential")
+        );
+        assert!(store
+            .revoke(Namespace::Owner(&a), "openrouter", None)
+            .unwrap());
+        assert!(!store
+            .revoke(Namespace::Owner(&a), "openrouter", None)
+            .unwrap());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn scoped_grants_are_versioned_and_never_coerced_from_malformed_values() {
+        let legacy = json!({"runner":"9","perCall":"64","perDay":"2","notAfter":"100"});
+        assert_eq!(Grant::from_json(&legacy).unwrap().model, None);
+        for model in [
+            json!(null),
+            json!(42),
+            json!(""),
+            json!("bad\nmodel"),
+            json!("x".repeat(257)),
+        ] {
+            let mut bad = legacy.clone();
+            bad["model"] = model;
+            assert!(Grant::from_json(&bad).is_err());
+        }
+        let (base, store) = store();
+        let a = owner("11", 'a');
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-key".into()).unwrap(),
+            )
+            .unwrap();
+        let mut g = grant("9");
+        g.model = Some("m".into());
+        store.grant(&a, "chutes", g).unwrap();
+        let path = store
+            .directory(Namespace::Owner(&a), false)
+            .unwrap()
+            .join("chutes.grants.json");
+        let mut record: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(record["type"], SCOPED_GRANTS_TYPE);
+        record["type"] = json!(GRANTS_TYPE);
+        replace_private(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
+        assert!(store
+            .authorize_model(&a, "chutes", "9", Some("m"), 1, Some(1), 1)
+            .is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn concurrent_grants_retain_both_runners_and_lock_symlinks_refuse() {
+        let (base, store) = store();
+        let a = owner("11", 'a');
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-key".into()).unwrap(),
+            )
+            .unwrap();
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for runner in ["9", "10", "11", "12"] {
+                let base = &base;
+                let a = &a;
+                handles.push(scope.spawn(move || {
+                    CredentialStore::open(&base.join("credentials"), &base.join("credentials.key"))
+                        .unwrap()
+                        .grant(a, "chutes", grant(runner))
+                        .unwrap();
+                }));
+            }
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+        assert_eq!(
+            store.list(Namespace::Owner(&a)).unwrap()["credentials"][0]["grants"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        let dir = store.directory(Namespace::Owner(&a), false).unwrap();
+        std::os::unix::fs::symlink(
+            base.join("credentials.key"),
+            dir.join("evil.authority.lock"),
+        )
+        .unwrap();
+        assert!(store
+            .set(
+                Namespace::Owner(&a),
+                "evil",
+                &Secret::new("synthetic-key".into()).unwrap()
+            )
+            .is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn signed_choice_is_task_owner_route_and_catalogue_bound() {
+        use ring::signature::KeyPair;
+        let (base, store) = store();
+        let seed = [42u8; 32];
+        let signing = ring::signature::Ed25519KeyPair::from_seed_unchecked(&seed).unwrap();
+        let a = Owner::new("11", &hex(signing.public_key().as_ref())).unwrap();
+        let table=ProviderTable::parse(br#"{"type":"mini-provider-table-v2","providers":[{"name":"chutes","endpoint":"https://example.test/v1/chat/completions","kind":"openai-compatible","models":["m","n"],"credential":"user"}]}"#).unwrap();
+        store
+            .set(
+                Namespace::Owner(&a),
+                "chutes",
+                &Secret::new("synthetic-choice-key".into()).unwrap(),
+            )
+            .unwrap();
+        let mut g = grant("9");
+        g.model = Some("m".into());
+        store.grant(&a, "chutes", g).unwrap();
+        let selected =
+            choice::Choice::signed(a.clone(), "9", "88", "chutes", "m", &table, &seed).unwrap();
+        store.choose(&selected, &table).unwrap();
+        assert_eq!(store.selected(&a, "9", "88", &table).unwrap(), selected);
+        assert!(store.selected(&a, "10", "88", &table).is_err());
+        assert!(store.selected(&a, "9", "89", &table).is_err());
+        assert!(store
+            .selected(&owner("11", 'c'), "9", "88", &table)
+            .is_err());
+        for field in ["task", "runner", "model", "provider", "tableSha256"] {
+            let mut changed = selected.to_json();
+            changed[field] = json!("tampered");
+            assert!(choice::Choice::from_json(&changed).is_err(), "{field}");
+        }
+        let mut bad = selected.to_json();
+        bad["signature"] = json!("é".repeat(64));
+        assert!(choice::Choice::from_json(&bad).is_err());
+        let mut changed_table = table;
+        changed_table.sha256 = "b".repeat(64);
+        assert!(store.selected(&a, "9", "88", &changed_table).is_err());
+        store
+            .revoke(Namespace::Owner(&a), "chutes", Some("9"))
+            .unwrap();
+        assert!(store.selected(&a, "9", "88", &changed_table).is_err());
+        let mut disk = Vec::new();
+        walk(&base, &mut disk);
+        for bytes in disk {
+            assert!(!bytes.windows(20).any(|w| w == b"synthetic-choice-key"));
+        }
         fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn table_selects_one_row_without_payer_fallthrough() {
-        let table = ProviderTable::parse(br#"{"type":"mini-provider-table-v2","providers":[
+        let table = ProviderTable::parse(
+            br#"{"type":"mini-provider-table-v2","providers":[
             {"name":"openrouter","endpoint":"https://openrouter.ai/api/v1/chat/completions",
              "kind":"openai-compatible","models":["m1","shared"],"credential":"user"},
             {"name":"pool","endpoint":"https://openrouter.ai/api/v1/chat/completions",
              "kind":"openai-compatible","models":["shared"],"credential":"pool",
              "caps":{"perCall":"1024","perDay":"50"}},
             {"name":"homelab","endpoint":"http://127.0.0.1:18081/v1/chat/completions",
-             "kind":"openai-compatible","models":["bonsai"],"credential":"homelab"}]}"#).unwrap();
+             "kind":"openai-compatible","models":["bonsai"],"credential":"homelab"}]}"#,
+        )
+        .unwrap();
         assert_eq!(table.select("shared", None).unwrap().name, "openrouter");
         assert_eq!(table.select("shared", Some("pool")).unwrap().name, "pool");
-        assert_eq!(table.select("bonsai", None).unwrap().credential, CredentialSource::Homelab);
+        assert_eq!(
+            table.select("bonsai", None).unwrap().credential,
+            CredentialSource::Homelab
+        );
         assert_eq!(
             table.select("shared", Some("pool")).unwrap().caps,
-            Some(Caps { per_call: 1024, per_day: 50 })
+            Some(Caps {
+                per_call: 1024,
+                per_day: 50
+            })
         );
-        assert_eq!(table.select("m1", Some("pool")).unwrap_err(), refused("no-route"));
-        assert_eq!(table.select("absent", None).unwrap_err(), refused("no-route"));
+        assert_eq!(
+            table.select("m1", Some("pool")).unwrap_err(),
+            refused("no-route")
+        );
+        assert_eq!(
+            table.select("absent", None).unwrap_err(),
+            refused("no-route")
+        );
         for bad in [
             r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions?x=1","kind":"openai-compatible","models":["m"],"credential":"user"}]}"#,
             r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"http://10.0.0.1/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"homelab"}]}"#,
@@ -1057,7 +1727,9 @@ mod credential_tests {
     #[test]
     fn endpoint_is_exact_and_openrouter_path_is_supported() {
         assert!(validate_endpoint("https://openrouter.ai/api/v1/chat/completions").is_ok());
-        assert!(validate_endpoint("https://openrouter.ai/api/v1/chat/completions?model=x").is_err());
+        assert!(
+            validate_endpoint("https://openrouter.ai/api/v1/chat/completions?model=x").is_err()
+        );
         assert!(validate_endpoint("http://openrouter.ai/api/v1/chat/completions").is_err());
         assert!(validate_endpoint("https://openrouter.ai/other").is_err());
         assert!(validate_endpoint("http://127.0.0.1:9/v1/chat/completions").is_ok());

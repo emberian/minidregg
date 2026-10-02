@@ -440,7 +440,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
     .unwrap();
     assert_eq!(
         signed_source["grain"]["context"]["operationId"],
-        signed_reserve_id
+        grain_source::operation_id(&runtime.config.task, "7103", "9", signed_reserve_id.parse().unwrap())
     );
     assert!(
         runtime

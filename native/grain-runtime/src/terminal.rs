@@ -47,6 +47,7 @@ fn selected_state(journal: &Value) -> (&'static str, bool, bool) {
         "dispatchHold",
         "dispatchAttempt",
         "settlementDue",
+        "roomAttempt",
     ]
     .iter()
     .any(|key| present(key));
@@ -138,7 +139,18 @@ pub fn parse_prompt_command(line: &str) -> Option<(u64, u64, &str)> {
     Some((attachment.parse().ok()?, request.parse().ok()?, prompt))
 }
 
-fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
+pub(crate) fn parse_resident_prompt_command(line:&str)->Option<(u64,u64,&str,&str,&str)> {
+    let rest=line.strip_prefix("terminal hermes-resident ")?;
+    let (attachment,rest)=rest.split_once(' ')?;
+    let (request,rest)=rest.split_once(' ')?;
+    let (resident_id,rest)=rest.split_once(' ')?;
+    let (digest,prompt)=rest.split_once(' ')?;
+    if prompt.is_empty() || prompt.bytes().any(|b|b==b'\r'||b==b'\n')
+        || !crate::resident_origin::valid_digest(resident_id) || !crate::resident_origin::valid_digest(digest) {return None;}
+    Some((attachment.parse().ok()?,request.parse().ok()?,resident_id,digest,prompt))
+}
+
+pub(crate) fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
     let mut bytes = Vec::new();
     loop {
         let available = reader.fill_buf().map_err(|e| e.to_string())?;
@@ -575,4 +587,14 @@ mod tests {
         assert!(matches_request(&previous, Some(11)).unwrap());
         assert!(matches_request(&json!({}), Some(11)).is_err());
     }
+    #[test]
+    fn resident_wire_preserves_exact_identity_and_rejects_malformed_fields() {
+        let id="a".repeat(64);let digest=crate::sha256_bytes(b"Read the room").unwrap();
+        let command=format!("terminal hermes-resident 7 12 {id} {digest} Read the room");
+        assert_eq!(parse_resident_prompt_command(&command),Some((7,12,id.as_str(),digest.as_str(),"Read the room")));
+        assert!(parse_resident_prompt_command(&command.replace(&id,"bad")).is_none());
+        assert!(parse_resident_prompt_command(&(command.clone()+"\n")).is_none());
+        assert!(parse_prompt_command(&command).is_none());
+    }
+
 }

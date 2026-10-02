@@ -289,6 +289,11 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
         json!({"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns a historical signed publication receipt; current content requires a fresh signed read.",
             "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}),
     ];
+    // A restricted room catalog deliberately omits the general workspace.
+    // The controller applies the same restriction to calls, not only discovery.
+    if catalog.room_tools && !catalog.resource_workspace {
+        tools.clear();
+    }
     if catalog.resource_workspace {
         tools.extend([
             json!({"name":"mini_workspace_list",
@@ -322,6 +327,9 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
     }
     if catalog.room_tools {
         tools.extend(crate::resource_tools::room_tool_specs());
+        tools.push(json!({"name":"mini_room_attempts",
+            "description":"Inspect retained room writes and payments, including uncertain operations that must not be repeated. Read-only controller journal; no resource authority is granted.",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}));
     }
     if catalog.resource_workspace_create {
         tools.push(json!({"name":"mini_workspace_create",
@@ -890,6 +898,17 @@ mod tests {
         assert!(result["text"].as_str().unwrap().contains("outcome unknown"));
         server.join().unwrap();
         fs::remove_file(socket).unwrap();
+    }
+
+    #[test]
+    fn restricted_room_catalog_contains_only_room_tools() {
+        let catalog = tools_for_catalog(&ToolCatalog { room_tools: true, ..Default::default() });
+        let tools = catalog["tools"].as_array().unwrap();
+        assert!(!tools.is_empty());
+        for tool in tools {
+            let name = tool["name"].as_str().unwrap();
+            assert!(crate::resource_tools::is_room_tool(name) || name == "mini_room_attempts", "{name}");
+        }
     }
 
     #[test]

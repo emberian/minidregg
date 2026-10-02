@@ -4,9 +4,24 @@ mod application_api_tools;
 mod application_tools;
 mod concierge;
 mod hermes_room;
+mod room_task;
+mod room_resident;
+mod quiescence;
+mod quiescence_transport;
+mod config_migration;
+mod resident_reconcile;
+mod hermes_outcome;
+mod hermes_session_verify;
+mod session_failure;
+mod resident_outcomes;
+mod resident_origin;
+mod resident_delivery;
+mod resident_completion;
 #[cfg(test)]
 mod birth_lifecycle_tests;
 mod control;
+mod cgroup_stop;
+mod systemd_manager;
 // One source shared with `mini key` (resource-client includes it by path):
 // the write verbs are used there, the reserve-time lookups here.
 #[allow(dead_code)]
@@ -16,10 +31,20 @@ mod dispatch_custody;
 #[cfg(test)]
 mod dispatch_runtime_tests;
 mod gitweb_worker;
+mod grain_source;
+mod homelab;
+mod pending_prepare;
 mod legacy_custody_audit;
 mod mcp;
+#[cfg(test)]
+mod hermes_catalogue_probe;
 mod provider;
 mod provider_profile;
+mod provider_provision;
+mod provider_owner;
+mod provider_retirement;
+mod provider_recovery;
+mod query_observation;
 #[cfg(test)]
 mod publication_refusal_tests;
 mod resource_tools;
@@ -219,6 +244,8 @@ fn lifetime_purse_signers(
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    homelab: Option<homelab::Config>,
     task: String,
     subject: String,
     capability: String,
@@ -237,6 +264,10 @@ struct ProviderTask {
     /// contract, not inferred from request byte length.
     max_input_tokens: u32,
     max_output_tokens: u32,
+    /// Actual model context capacity for the ACP client, distinct from this
+    /// task's request/billing ceilings. Never changes gateway enforcement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_window_tokens: Option<u32>,
     model: String,
     /// The operator's provider table (`/etc/mini/providers.json`,
     /// root-owned). Endpoints, credential kinds and tariffs live there.
@@ -463,6 +494,16 @@ struct Journal {
     /// prompt. SDK retries receive these bytes without another upstream send.
     #[serde(default)]
     provider_replays: Vec<ProviderReplay>,
+    /// Fresh upstream reservations in this prompt, including failed attempts.
+    /// Persisted independently of replay cache and cleared only for a new prompt.
+    #[serde(default)]
+    provider_prompt_requests: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resident_prompt_origin: Option<resident_origin::ResidentPromptOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resident_delivery: Option<resident_delivery::Pending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resident_completion: Option<resident_completion::Pending>,
     #[serde(default)]
     foreground_attempt: Option<ForegroundAttempt>,
     #[serde(default)]
@@ -486,6 +527,10 @@ struct Journal {
     workspace_proposals: Vec<WorkspaceProposal>,
     #[serde(default)]
     workspace_attempt: Option<WorkspaceAttempt>,
+    #[serde(default)]
+    room_attempt: Option<room_task::Attempt>,
+    #[serde(default)]
+    room_resolutions: Vec<Value>,
     #[serde(default)]
     workspace_birth: Option<WorkspaceBirth>,
     /// Terminal resolution of every workspace submission, newest last and
@@ -620,7 +665,7 @@ fn derivable_effect_note(note: &str) -> bool {
 
 /// Startup proof that no process of an earlier run of this controller's
 /// unit survives: this process is the unit's active MainPID and the unit
-/// cgroup lists only this process.
+/// cgroup lists only this process and every stable descendant is empty.
 fn prove_prior_run_stopped(task: &str) -> Result<()> {
     prove_controller_unit(task)?;
     let cgroup = fs::read_to_string("/proc/self/cgroup")
@@ -632,16 +677,7 @@ fn prove_prior_run_stopped(task: &str) -> Result<()> {
     if !path.ends_with(&format!("/mini-grain-controller@{task}.service")) || path.contains("..") {
         return Err("controller cgroup is not its unit".into());
     }
-    let procs = fs::read_to_string(format!("/sys/fs/cgroup{path}/cgroup.procs"))
-        .map_err(|e| format!("controller cgroup members: {e}"))?;
-    let members: Vec<&str> = procs.split_whitespace().collect();
-    if members != [std::process::id().to_string().as_str()] {
-        return Err(format!(
-            "controller unit cgroup holds other processes: {}",
-            members.join(",")
-        ));
-    }
-    Ok(())
+    cgroup_stop::prove(Path::new(&format!("/sys/fs/cgroup{path}")),task)
 }
 
 /// The retained terminal state of one workspace submission. `basis` names
@@ -1164,6 +1200,8 @@ impl ReserveAnchor {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderAttempt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement: Option<homelab::Placement>,
     id: u64,
     prompt_operation_id: u64,
     parent_generation: String,
@@ -1844,6 +1882,9 @@ struct HermesSession {
 
 impl Journal {
     fn validate_workspace(&self, config: &Config) -> Result<()> {
+        self.validate_room(config)?;
+        resident_delivery::validate_pending(self)?;
+        resident_completion::validate_pending(self)?;
         if self.workspace_proposals.len() > 64 {
             return Err("workspace proposal retention bound exceeded".into());
         }
@@ -2184,6 +2225,10 @@ impl Journal {
             provider_attempt: None,
             provider_settlement: None,
             provider_replays: Vec::new(),
+            provider_prompt_requests: 0,
+            resident_prompt_origin: None,
+            resident_delivery: None,
+            resident_completion: None,
             foreground_attempt: None,
             foreground_history: Vec::new(),
             publication_receipts: Vec::new(),
@@ -2193,6 +2238,8 @@ impl Journal {
             born_resources: Vec::new(),
             workspace_proposals: Vec::new(),
             workspace_attempt: None,
+            room_attempt: None,
+            room_resolutions: Vec::new(),
             workspace_birth: None,
             workspace_resolutions: Vec::new(),
             managed_law_generation: None,
@@ -2714,6 +2761,9 @@ fn hermes_state_fingerprint(home: &Path) -> Result<Option<String>> {
 }
 
 fn validate(c: &Config) -> Result<()> {
+    validate_with_workspace(c, None)
+}
+fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
     for (name, p) in [
         ("mini", &c.mini),
         ("host", &c.host),
@@ -2949,8 +2999,9 @@ fn validate(c: &Config) -> Result<()> {
         }
     }
     if let Some(t) = &c.tool_task {
+        room_task::validate_pins_with_workspace(c, t, prospective_workspace)?;
         if t.resource_workspace.is_some() {
-            validate_resource_workspace(c, t)?;
+            validate_resource_workspace_record(c, t, prospective_workspace)?;
         }
         if t.task == c.task {
             return Err("toolTask must be a distinct Mini resource".into());
@@ -3194,6 +3245,9 @@ fn validate(c: &Config) -> Result<()> {
                     .into(),
             );
         }
+        if p.context_window_tokens.is_some_and(|window|
+            window < p.max_input_tokens.saturating_add(p.max_output_tokens) || window > 2_097_152)
+        { return Err("providerTask contextWindowTokens must fit input plus output within 2097152".into()); }
         provider_max_iterations(p.max_iterations)?;
         let bind = p
             .gateway_bind
@@ -3236,6 +3290,9 @@ fn validate(c: &Config) -> Result<()> {
 }
 
 fn validate_resource_workspace(c: &Config, tool: &ToolTask) -> Result<PathBuf> {
+    validate_resource_workspace_record(c, tool, None)
+}
+fn validate_resource_workspace_record(c: &Config, tool: &ToolTask, prospective: Option<&[u8]>) -> Result<PathBuf> {
     let root = tool
         .resource_workspace
         .as_ref()
@@ -3265,7 +3322,11 @@ fn validate_resource_workspace(c: &Config, tool: &ToolTask) -> Result<PathBuf> {
     if !meta.file_type().is_file() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
         return Err("resourceWorkspace config must be an owner-private regular file".into());
     }
-    let record: Value = serde_json::from_slice(&bounded_regular_file(&config_path, 65_536)?)
+    let current;
+    let bytes = if let Some(bytes) = prospective { bytes } else {
+        current = bounded_regular_file(&config_path, 65_536)?; &current
+    };
+    let record: Value = serde_json::from_slice(bytes)
         .map_err(|e| format!("resourceWorkspace config JSON: {e}"))?;
     if record["type"] != "minidregg-participant-workspace-v1"
         || record["subject"].as_str() != Some(tool.subject.as_str())
@@ -3439,8 +3500,9 @@ impl Runtime {
         spec: &AllowedCommand,
         unit: &Option<String>,
         broker: Option<&Path>,
-    ) {
+    ) -> Result<()> {
         if let Some(unit) = unit {
+            systemd_manager::lifetime_environment(&self.config.task, command)?;
             command
                 .env("MINI_GRAIN_UNIT", unit)
                 .env(
@@ -3479,6 +3541,7 @@ impl Runtime {
                 command.env("MINI_GRAIN_BROKER_SOCKET", broker);
             }
         }
+        Ok(())
     }
     fn parent(&self) -> Authority {
         Authority {
@@ -3906,10 +3969,7 @@ impl Runtime {
                 .pointer("/grain/operation/amount")
                 .and_then(Value::as_str)
                 != Some(hold.reserve.as_str())
-            || source
-                .pointer("/grain/context/operationId")
-                .and_then(Value::as_str)
-                != Some(id.to_string().as_str())
+            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, id)
             || source
                 .pointer("/grain/context/payload")
                 .and_then(Value::as_str)
@@ -6799,11 +6859,14 @@ impl Runtime {
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
-        validate(&config)?;
+        Self::open_mode(config, config_path, None)
+    }
+    // The migration entrypoint never calls serve or any worker/provider action.
+    // Its only relaxed seam is cross-file transport validation before publication.
+    fn open_mode(config: Config, config_path: PathBuf, migration: Option<&Path>) -> Result<Self> {
         if !config_path.is_absolute() {
             return Err("controller config path must be absolute".into());
         }
-        let binding = json!({"config":config,"configPath":config_path});
         fs::create_dir_all(&config.state_dir).map_err(|e| format!("state directory: {e}"))?;
         let state_meta = fs::symlink_metadata(&config.state_dir).map_err(|e| e.to_string())?;
         if !state_meta.file_type().is_dir()
@@ -6826,6 +6889,17 @@ impl Runtime {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err("another controller owns this task".into());
         }
+        let locked_state_dir = config.state_dir.clone();
+        systemd_manager::initialize(&config, &config_path)?;
+        session_failure::ensure_publication_known(&config.state_dir)?;
+        let startup = config_migration::recover_startup(&config, &config_path)?;
+        let config: Config = if startup.is_some() {
+            serde_json::from_slice(&bounded_regular_file(&config_path, 262_144)?)
+                .map_err(|e| format!("controller config after migration recovery: {e}"))?
+        } else { config };
+        if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
+        if migration.is_none() { validate(&config)?; }
+        let binding = json!({"config":config,"configPath":config_path});
         let path = config.state_dir.join("journal.json");
         let journal = if path.exists() {
             let bytes = fs::read(&path).map_err(|e| format!("journal read: {e}"))?;
@@ -6840,13 +6914,17 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
-            j.validate_workspace(&config)?;
+            if let Some(request) = migration {
+                config_migration::check_stopped_open(&config, &config_path, &j, request)?;
+            } else { j.validate_workspace(&config)?; }
             j
         } else {
+            if migration.is_some() { return Err("configuration migration requires an existing journal".into()); }
             let j = Journal::fresh(binding);
             atomic_json(&path, &j)?;
             j
         };
+        config_migration::activate_startup(&config.state_dir, startup)?;
         let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
@@ -6874,10 +6952,10 @@ impl Runtime {
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
-        if rt.journal.child.is_some()
+        if migration.is_none() && (rt.journal.child.is_some()
             || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
-            || rt.journal.hard_reconnect_pending
+            || rt.journal.hard_reconnect_pending)
         {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
@@ -6885,6 +6963,8 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
+        config_migration::ensure_process_current(&self.config.state_dir)?;
+        session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
     fn confirmed_publication_receipt(
@@ -7292,10 +7372,7 @@ impl Runtime {
                 .pointer("/grain/operation/type")
                 .and_then(Value::as_str)
                 != Some("settle")
-            || source
-                .pointer("/grain/context/operationId")
-                .and_then(Value::as_str)
-                != Some(pending.operation_id.to_string().as_str())
+            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, pending.operation_id)
         {
             return Err("provider settlement source differs from pinned operation".into());
         }
@@ -7711,103 +7788,16 @@ impl Runtime {
         self.query_as(&a)
     }
     fn query_as(&mut self, authority: &Authority) -> Result<Value> {
-        let id = self.next_id()?;
-        let dir = self.config.state_dir.join(format!("query-{id:016}"));
-        fs::create_dir(&dir).map_err(|e| format!("query directory: {e}"))?;
-        let intent = json!({"subject": authority.subject, "nonce": id.to_string(),
-            "purpose": {"type":"query","kind":"object","target":authority.task,"view":"resource"},
-            "grants":[{"kind":"object","target":authority.task,"capability":authority.query_capability}]});
-        let intent_path = dir.join("intent-source.json");
-        write_new(
-            &intent_path,
-            serde_json::to_string_pretty(&intent).unwrap().as_bytes(),
-        )?;
-        let cfg = &self.config;
-        let query_attempt = dir.join("attempt");
-        let mut args = vec![
-            "query",
-            "--host",
-            cfg.host.to_str().ok_or("host path UTF-8")?,
-            "--config",
-            cfg.host_config.to_str().ok_or("config path UTF-8")?,
-            "--intent",
-            intent_path.to_str().ok_or("intent path UTF-8")?,
-            "--key",
-            authority.custody_key.to_str().ok_or("key path UTF-8")?,
-            "--view",
-            "resource",
-            "--dir",
-            query_attempt.to_str().ok_or("attempt path UTF-8")?,
-        ];
-        if let Some(socket) = &cfg.host_socket {
-            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
-        }
-        self.command_output(&cfg.mini, &args)?;
-        let attempt = dir.join("attempt");
-        let view: Value = serde_json::from_slice(
-            &fs::read(attempt.join("view.json")).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let challenge: Value = serde_json::from_slice(
-            &fs::read(attempt.join("challenge.json")).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let grain = view
-            .pointer("/cell/grain")
-            .ok_or("signed resource view has no grain")?;
-        if grain.get("task").and_then(Value::as_str) != Some(authority.task.as_str()) {
-            return Err("signed resource view names another task".into());
-        }
-        Ok(
-            json!({"grain":grain, "targetRoot":view.pointer("/cell/root"),
-            "authorityRoot":challenge.pointer("/authorityRoot"),
-            "worldRoot":challenge.get("worldRoot"),
-            "height":challenge.get("height")}),
-        )
+        self.query_as_via(authority, None)
+    }
+    // Only the query-only topology receiver can construct this transport token.
+    // The shared bounded read path preserves this exact admitted socket on retries.
+    fn query_as_via(&mut self, authority: &Authority,
+        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
+        self.query_observation_via(authority, transport)
     }
     fn query_policy(&mut self) -> Result<Value> {
-        let id = self.next_id()?;
-        let dir = self.config.state_dir.join(format!("policy-query-{id:016}"));
-        fs::create_dir(&dir).map_err(|e| format!("policy query directory: {e}"))?;
-        let source = json!({"subject":self.config.subject,"nonce":id.to_string(),
-            "purpose":{"type":"query","kind":"object","target":self.config.task,"view":"policy"},
-            "grants":[{"kind":"object","target":self.config.task,
-                "capability":self.config.query_capability}]});
-        let path = dir.join("intent-source.json");
-        write_new(&path, serde_json::to_string(&source).unwrap().as_bytes())?;
-        let attempt = dir.join("attempt");
-        let cfg = &self.config;
-        let mut args = vec![
-            "query",
-            "--host",
-            cfg.host.to_str().ok_or("host path UTF-8")?,
-            "--config",
-            cfg.host_config.to_str().ok_or("config path UTF-8")?,
-            "--intent",
-            path.to_str().ok_or("intent path UTF-8")?,
-            "--key",
-            cfg.custody_key.to_str().ok_or("key path UTF-8")?,
-            "--view",
-            "policy",
-            "--dir",
-            attempt.to_str().ok_or("attempt path UTF-8")?,
-        ];
-        if let Some(socket) = &cfg.host_socket {
-            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
-        }
-        self.command_output(&cfg.mini, &args)?;
-        let view: Value = serde_json::from_slice(
-            &fs::read(attempt.join("view.json")).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let challenge: Value = serde_json::from_slice(
-            &fs::read(attempt.join("challenge.json")).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        if view.get("policyId").and_then(Value::as_str) != Some(cfg.task.as_str()) {
-            return Err("signed policy view names another task".into());
-        }
-        Ok(json!({"view":view,"authorityRoot":challenge.pointer("/authorityRoot")}))
+        self.query_policy_observation()
     }
     fn managed_worker_subjects(&self) -> Result<Vec<String>> {
         let mut workers = Vec::new();
@@ -8264,23 +8254,10 @@ impl Runtime {
             })
             .transpose()?;
         let grants = grain_observation_grants(authority, parent_observation, &publications)?;
-        let mut grain = json!({"task":authority.task,"subject":authority.subject,
-            "capability":authority.capability,"schemaVersion":"1",
-            "expectedTargetRoot":observed.get("targetRoot").ok_or("missing target root")?,
-            "context":{"operationId":id.to_string(),"payload":payload},
-            "before":{"generation":before.get("generation"),"status":before.get("status"),
-                "remaining":before.get("remaining"),"reserved":before.get("reserved")},
-            "operation":op,"publications":publications,
-            "observeCapability":authority.query_capability});
-        // A provider purse carries its fifth coordinate: every transition
-        // compares the recorded route against the durable store.
-        if let Some(route) = before.get("route") {
-            grain["before"]["route"] = route.clone();
-        }
-        if let Some(witness) = parent_witness {
-            grain["parentWitness"] = witness;
-        }
-        let source = json!({"grain":grain,"grants":grants,"intentNonce":id.to_string()});
+        let identity = grain_source::operation_id(&self.config.task, &authority.task, &authority.subject, id);
+        let source = grain_source::source(authority, &observed, grain_source::Transition {
+            identity: &identity, payload, operation: op.clone(), publications, parent_witness, grants,
+        })?;
         let publication = if slot == AuthoritySlot::Tool
             && label == "tool settle"
             && source["grain"]["publications"]
@@ -9232,6 +9209,10 @@ impl Runtime {
     }
     fn handle_provider(&mut self, command: provider::ProviderCommand) {
         match command {
+            provider::ProviderCommand::Prepare { request, reply } => {
+                let result = self.provider_prepare(&request);
+                let _ = reply.send(result);
+            }
             provider::ProviderCommand::Reserve { request, reply } => {
                 let result = self.provider_reserve(request);
                 // Audit line per decision. Neither side can carry a bearer:
@@ -9348,6 +9329,51 @@ impl Runtime {
             thread::sleep(Duration::from_millis(20));
         }
     }
+    fn provider_prompt_budget(&self, task: &ProviderTask) -> Result<()> {
+        if self.journal.provider_prompt_requests >= provider_max_iterations(task.max_iterations)? {
+            return Err("provider prompt fresh-request limit reached".into());
+        }
+        Ok(())
+    }
+
+    fn provider_prepare(&self, request: &provider::ProviderRequest) -> Result<Option<homelab::Plan>> {
+        self.provider_lease_current(&request.lease)?;
+        let task = self.config.provider_task.as_ref().ok_or("providerTask absent")?;
+        if request.model != task.model || request.exact_body.is_empty()
+            || request.exact_body.len() > task.max_request_bytes {
+            return Err("provider scheduling request differs from pinned task".into());
+        }
+        if Self::provider_replay(&self.journal.provider_replays, request)?.is_some() {
+            return Ok(None); // Historical response consumes no new physical slot.
+        }
+        self.provider_prompt_budget(task)?;
+        let Some(config) = task.homelab.as_ref() else { return Ok(None); };
+        let table = credentials::ProviderTable::load(&task.providers, 0)?;
+        let row = provider_task_row(task, &table)?;
+        let principal = task.on_behalf_of.as_ref().map(|owner| owner.subject.as_str())
+            .unwrap_or(task.subject.as_str());
+        if row.credential != credentials::CredentialSource::Homelab || config.principal != principal
+            || config.domain.is_empty() || config.domain.len() > 256
+            || config.backends.is_empty() || config.queue_timeout_ms == 0
+            || config.queue_timeout_ms > task.timeout_seconds.saturating_mul(1000) {
+            return Err("homelab scheduling differs from pinned route/principal/deadline".into());
+        }
+        let body: Value = serde_json::from_slice(&request.exact_body).map_err(|e| e.to_string())?;
+        let request_digest = minidregg_inference_scheduler::digest(&request.exact_body);
+        let identity = serde_json::to_vec(&(config.domain.as_str(), self.config.task.as_str(),
+            task.task.as_str(), &request.lease.parent_generation, request.lease.prompt_operation_id,
+            &request_digest)).map_err(|e| e.to_string())?;
+        Ok(Some(homelab::Plan { config: config.clone(), request: minidregg_inference_scheduler::core::Request {
+            id: minidregg_inference_scheduler::digest(&identity), request_digest, model: task.model.clone(),
+            max_input: task.max_input_tokens, max_output: task.max_output_tokens,
+            tools: body.get("tools").and_then(Value::as_array).is_some_and(|tools| !tools.is_empty()),
+            queue_deadline_ms: minidregg_inference_scheduler::service::now_ms().saturating_add(config.queue_timeout_ms),
+            allowed_endpoints: table.rows.iter().filter(|row| config.backends.contains(&row.name)
+                && row.credential == credentials::CredentialSource::Homelab && row.models.contains(&task.model))
+                .map(|row| row.endpoint.clone()).collect(),
+        }}))
+    }
+
     fn provider_reserve(
         &mut self,
         request: provider::ProviderRequest,
@@ -9374,6 +9400,7 @@ impl Runtime {
         if let Some(replay) = Self::provider_replay(&self.journal.provider_replays, &request)? {
             return Ok(replay);
         }
+        self.provider_prompt_budget(&task)?;
         if self.journal.provider_replays.len() >= 16 {
             return Err("provider prompt response replay bound reached".into());
         }
@@ -9402,8 +9429,36 @@ impl Runtime {
             .ok_or("signed parent read has no height")?
             .parse::<u64>()
             .map_err(|_| "signed parent height exceeds u64")?;
-        let (route, route_record, source) =
+        let (mut route, mut route_record, source) =
             self.provider_route(&task, &request.exact_body, height)?;
+        match (&task.homelab, &request.placement) {
+            (None, None) => {},
+            (Some(config), Some(placement)) if source == credentials::CredentialSource::Homelab => {
+                if serde_json::to_vec(config).map_err(|e| e.to_string())?
+                    != serde_json::to_vec(&placement.config).map_err(|e| e.to_string())?
+                    || placement.request.model != task.model {
+                    return Err("placement configuration differs from operator pin".into());
+                }
+                let expected = self.provider_prepare(&request)?.ok_or("placement has no current scheduling plan")?;
+                if expected.request.id != placement.request.id
+                    || expected.request.max_input != placement.request.max_input
+                    || expected.request.max_output != placement.request.max_output
+                    || expected.request.tools != placement.request.tools
+                    || expected.request.allowed_endpoints != placement.request.allowed_endpoints {
+                    return Err("placement differs from exact current provider operation".into());
+                }
+                placement.verify(&request.exact_body)?;
+                let table = credentials::ProviderTable::load(&task.providers, 0)?;
+                let selected = table.rows.iter().find(|row| config.backends.contains(&row.name)
+                    && row.endpoint == placement.endpoint && row.models.contains(&task.model)
+                    && row.credential == credentials::CredentialSource::Homelab)
+                    .ok_or("placement endpoint is not an allowed homelab provider row")?;
+                route.endpoint = selected.endpoint.clone();
+                route_record.endpoint = selected.endpoint.clone();
+                route_record.provider = selected.name.clone();
+            }
+            _ => return Err("provider request lacks its configured homelab placement".into()),
+        }
         // The route fixes the payer, so it fixes the price: the attempt's
         // slice of the Host's per-route tariff, and the hold it takes.
         let metering_pin = provider_route_pin(&tariff, &task, source.route())?;
@@ -9446,7 +9501,11 @@ impl Runtime {
         write_new(&request_path, &request.exact_body)?;
         let request_sha256 = sha256_file(&request_path)?;
         self.journal.provider_settlement = None;
+        // Count before the durable attempt can acquire a permit. Failure or a
+        // later no-send reconciliation never restores this prompt allowance.
+        self.journal.provider_prompt_requests += 1;
         self.journal.provider_attempt = Some(ProviderAttempt {
+            placement: request.placement,
             id,
             prompt_operation_id: request.lease.prompt_operation_id,
             parent_generation: request.lease.parent_generation.clone(),
@@ -9557,10 +9616,13 @@ impl Runtime {
                     .as_ref()
                     .ok_or_else(|| credentials::refused("no-credential"))?;
                 let owner = credentials::Owner::new(&pinned.subject, &pinned.public_key)?;
-                let bearer = store()?.authorize(
+                let proof = provider_owner::observe(&self.config, &owner.subject, &owner.public_key)?;
+                let bearer = store()?.authorize_model_epoch(
                     &owner,
                     &row.name,
                     &task.subject,
+                    Some(&task.model),
+                    Some(proof.epoch()),
                     height,
                     max_tokens,
                     credentials::utc_day(),
@@ -9739,6 +9801,9 @@ impl Runtime {
             || attempt.outcome.is_some()
         {
             return Err("provider send boundary differs from durable attempt".into());
+        }
+        if let Some(placement) = &attempt.placement {
+            placement.dispatch(format!("{}:{}", placement.request.id, attempt.id))?;
         }
         attempt.send_started = true;
         self.save()
@@ -11037,7 +11102,7 @@ impl Runtime {
     }
 
     fn workspace_propose(&mut self, arguments: &Value) -> Result<Value> {
-        if self.journal.workspace_attempt.is_some() || self.journal.workspace_proposals.len() >= 64
+        if (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some()) || self.journal.workspace_proposals.len() >= 64
         {
             return Err("workspace has an unresolved effect or 64 retained proposals".into());
         }
@@ -11111,6 +11176,82 @@ impl Runtime {
         )
     }
 
+    /// One ToolTask purse lifecycle for both workspace and room effects.
+    fn reserve_tool_operation(&mut self) -> Result<()> {
+        if self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some() {
+            return Err("tool operation requires exact recovery before reservation".into());
+        }
+        let tool = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask absent")?
+            .clone();
+        let authority = self.tool()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("delegated tool status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "tool attach",
+                "delegated operation attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err("delegated tool needs signed idle/attached state".into());
+        }
+        self.check_not_cancelled()?;
+        self.mark_hold(true, &tool.reserve, &tool.charge)?;
+        self.transition_as(
+            &authority,
+            json!({"type":"reserve","amount":tool.reserve}),
+            "tool reserve",
+            "delegated operation reserve",
+            vec![],
+        )?;
+        self.check_not_cancelled()?;
+        Ok(())
+    }
+
+    fn finish_tool_operation(&mut self, charge: &str) -> Result<()> {
+        self.retry_pending(true)?;
+        let authority = self.tool()?;
+        if let Some(hold) = self.journal.tool_hold.clone() {
+            if hold.reserve_confirmed {
+                self.transition_as(&authority, json!({"type":"settle","charge":charge}),
+                    "tool settle", "delegated operation settlement", vec![])?;
+            } else if hold.reserve_refused || hold.reserve_attempt.is_none() {
+                let current = self.query_as(&authority)?;
+                if current.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                    || current.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                    || current.get("targetRoot").and_then(Value::as_str) != Some(hold.before_target_root.as_str())
+                { return Err("unsubmitted tool reserve differs from held origin".into()); }
+                self.journal.tool_hold = None;
+                self.save()?;
+            } else {
+                return Err("tool reserve may have committed; exact lookup required".into());
+            }
+        }
+        let state = self.query_as(&authority)?;
+        match state.pointer("/grain/status").and_then(Value::as_str) {
+            Some("1") => self.transition_as(&authority, json!({"type":"disconnect"}),
+                "tool disconnect", "delegated operation complete", vec![])?,
+            Some("0" | "6") => {},
+            _ => return Err("operation settlement lacks signed terminal tool status".into()),
+        }
+        let terminal = self.query_as(&authority)?;
+        if terminal.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || !matches!(terminal.pointer("/grain/status").and_then(Value::as_str), Some("0" | "6"))
+        { return Err("tool remains reserved after settlement".into()); }
+        Ok(())
+    }
+
     fn workspace_submit(&mut self, arguments: &Value) -> Result<Value> {
         let object = arguments
             .as_object()
@@ -11133,7 +11274,7 @@ impl Runtime {
             .find(|proposal| proposal.id == proposal_id && !proposal.submitted)
             .ok_or("workspace proposal is absent or already submitted")?
             .clone();
-        if self.journal.workspace_attempt.is_some() {
+        if self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some() {
             return Err("workspace effect requires exact recovery before another submit".into());
         }
         let root = self.workspace_root()?;
@@ -11161,41 +11302,7 @@ impl Runtime {
         root.to_str().ok_or("workspace path UTF-8")?;
         intent_path.to_str().ok_or("workspace intent path UTF-8")?;
         attempt.to_str().ok_or("workspace attempt path UTF-8")?;
-        let tool = self
-            .config
-            .tool_task
-            .as_ref()
-            .ok_or("toolTask absent")?
-            .clone();
-        let authority = self.tool()?;
-        let status = self
-            .query_as(&authority)?
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            .ok_or("delegated tool status absent")?
-            .to_owned();
-        if status == "0" {
-            self.check_not_cancelled()?;
-            self.transition_as(
-                &authority,
-                json!({"type":"attach","soft":false}),
-                "tool attach",
-                "workspace delegated attach",
-                vec![],
-            )?;
-        } else if status != "1" {
-            return Err("workspace delegated tool needs signed idle/attached state".into());
-        }
-        self.check_not_cancelled()?;
-        self.mark_hold(true, &tool.reserve, &tool.charge)?;
-        self.transition_as(
-            &authority,
-            json!({"type":"reserve","amount":tool.reserve}),
-            "tool reserve",
-            "workspace typed submission reserve",
-            vec![],
-        )?;
-        self.check_not_cancelled()?;
+        self.reserve_tool_operation()?;
         self.journal
             .workspace_proposals
             .iter_mut()
@@ -11455,39 +11562,7 @@ impl Runtime {
             .ok_or("workspace attempt disappeared")?
             .definite = true;
         self.save()?;
-        let authority = self.tool()?;
-        if self.journal.tool_hold.is_some() {
-            self.transition_as(
-                &authority,
-                json!({"type":"settle","charge":charge}),
-                "tool settle",
-                "workspace typed operation settlement",
-                vec![],
-            )?;
-        }
-        let state = self.query_as(&authority)?;
-        match state.pointer("/grain/status").and_then(Value::as_str) {
-            Some("1") => self.transition_as(
-                &authority,
-                json!({"type":"disconnect"}),
-                "tool disconnect",
-                "workspace operation complete",
-                vec![],
-            )?,
-            Some("0" | "6") => {}
-            // A fenced or held tool purse after controller loss: settle the
-            // retained hold before the definite result can be released.
-            _ => return Err("workspace settlement lacks signed terminal tool status".into()),
-        }
-        let terminal = self.query_as(&authority)?;
-        if terminal.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-            || !matches!(
-                terminal.pointer("/grain/status").and_then(Value::as_str),
-                Some("0" | "6")
-            )
-        {
-            return Err("workspace tool remains reserved after settlement".into());
-        }
+        self.finish_tool_operation(&charge)?;
         let resolved_by = if !lookup {
             "submit"
         } else if self.startup_recovery_active {
@@ -11868,7 +11943,7 @@ impl Runtime {
                 .join(format!("create-{name}"))
                 .exists()
             || self.journal.workspace_birth.is_some()
-            || self.journal.workspace_attempt.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
         {
             return Err("workspace birth name or native effect is already retained".into());
         }
@@ -12164,6 +12239,12 @@ impl Runtime {
     }
 
     fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
+        if self.room_tools_restricted()
+            && !resource_tools::is_room_tool(name)
+            && name != "mini_room_attempts"
+        {
+            return Err("this resident accepts only room tools".into());
+        }
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
             || (self.journal.child.is_none() && self.foreground_operation.is_none())
@@ -12181,10 +12262,13 @@ impl Runtime {
         if name == "mini_workspace_recover" {
             return self.workspace_recover(arguments);
         }
+        if name == "mini_room_attempts" {
+            return self.room_attempts(arguments);
+        }
         if name == "mini_workspace_attempts" {
             return self.workspace_attempts(arguments);
         }
-        if self.journal.workspace_attempt.is_some()
+        if (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
             || self.journal.workspace_birth.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
@@ -12198,14 +12282,7 @@ impl Runtime {
         let authority = self.tool()?;
         match name {
             room if resource_tools::is_room_tool(room) => {
-                let config = self
-                    .config
-                    .tool_task
-                    .as_ref()
-                    .and_then(|tool| tool.room.clone())
-                    .ok_or("this grain's Hermes is in no room (toolTask.room)")?;
-                let op = format!("g{}", self.next_id()?);
-                resource_tools::RoomTools { config: &config }.call(&op, room, arguments)
+                self.room_call(room, arguments)
             }
             "mini_workspace_list" => self.workspace_readonly("list", arguments),
             "mini_workspace_describe" => self.workspace_readonly("describe", arguments),
@@ -12926,7 +13003,7 @@ impl Runtime {
             || self.journal.parent_hold.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
-            || self.journal.workspace_attempt.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
             || self.journal.workspace_birth.is_some()
             || self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
@@ -13790,6 +13867,18 @@ impl Runtime {
         if self.config.provider_task.is_none() {
             return Ok(());
         }
+        // A completed request does not own later idle attachments of this
+        // member's purse. Verify its original receipt on this image before
+        // skipping any mutation; marker absence alone is insufficient.
+        if self.journal.provider_hold.is_none() && self.journal.provider_pending.is_none() {
+            if let Some(attempt) = self.journal.provider_attempt.clone() {
+                if self.journal.provider_settlement.is_some() {
+                    self.require_delivered_provider_response()?;
+                    self.lookup_provider_settlement(&attempt)?;
+                    return Ok(());
+                }
+            }
+        }
         let authority = self.provider()?;
         let state = self.query_as(&authority)?;
         let status = state
@@ -13849,7 +13938,7 @@ impl Runtime {
             return Err(format!("unexpected tool status {status}"));
         }
         let after = self.query_as(&authority)?;
-        if self.journal.workspace_attempt.is_some() || self.journal.workspace_birth.is_some() {
+        if (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some()) || self.journal.workspace_birth.is_some() {
             return Err("workspace submission remains retained for exact recovery".into());
         }
         match after.pointer("/grain/status").and_then(Value::as_str) {
@@ -13873,7 +13962,7 @@ impl Runtime {
         }
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
-            || self.journal.workspace_attempt.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
             || self.journal.workspace_birth.is_some()
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
@@ -13899,6 +13988,7 @@ impl Runtime {
         if spec.systemd_scope {
             prove_controller_unit(&self.config.task)?;
             Self::prove_launcher_gate(&spec.program)?;
+            systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
         }
         self.mark_hold(false, &spec.reserve, &spec.charge)?;
         self.transition(
@@ -13934,6 +14024,7 @@ impl Runtime {
         let unit = self.worker_unit(id, &spec);
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
+            systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
             self.launch_gate(&spec.program, unit, "init")?;
         }
         let mut command = Command::new(&spec.program);
@@ -13943,7 +14034,7 @@ impl Runtime {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        self.worker_env(&mut command, &spec, &unit, None);
+        self.worker_env(&mut command, &spec, &unit, None)?;
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() < 0 {
@@ -14123,7 +14214,15 @@ impl Runtime {
     }
     /// Prepare bounded tool-discovery names from exact retained Mini births.
     /// The catalog never substitutes for admission on a later tool call.
+    fn room_tools_restricted(&self) -> bool {
+        self.config.tool_task.as_ref().and_then(|tool| tool.room.as_ref())
+            .is_some_and(|room| room.restrict_tools)
+    }
+
     fn tool_catalog(&self) -> Result<mcp::ToolCatalog> {
+        if self.room_tools_restricted() {
+            return Ok(mcp::ToolCatalog { room_tools: true, ..Default::default() });
+        }
         let Some(tool) = self.config.tool_task.as_ref() else {
             return Ok(mcp::ToolCatalog::default());
         };
@@ -14231,7 +14330,32 @@ impl Runtime {
     /// tools are still present upstream, so OS confinement is mandatory.
     /// The wrapper's fixed args must launch hermes-acp inside its sandbox.
     fn hermes(&mut self, prompt: &str, input: &Receiver<Input>) -> Result<()> {
-        if prompt.is_empty() || prompt.len() > 16_384 {
+        self.hermes_session(hermes_session_verify::Invocation::Prompt(prompt), input)
+    }
+
+    fn hermes_session(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
+        let outcome=self.hermes_session_inner(invocation,input);
+        if !invocation.is_prompt() { return outcome; }
+        let retirement=self.retire_refused_provider_request();
+        match (outcome,retirement) {
+            (result,Ok(())) => result,
+            (Ok(()),Err(error)) => Err(format!("provider refusal remains retained: {error}")),
+            (Err(original),Err(error)) => Err(format!("{original}; provider refusal remains retained: {error}")),
+        }
+    }
+    fn hermes_session_inner(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
+        let prompt = invocation.prompt().unwrap_or("");
+        if invocation.is_prompt() && (self.journal.resident_delivery.is_some() || self.journal.resident_completion.is_some()) {
+            return Err("resident final delivery remains pending; drain it without another model turn".into());
+        }
+        if let Some((resident_id,digest))=invocation.resident_identity() {
+            resident_origin::validate(resident_id,digest,prompt)?;
+            if self.config.state_dir.join(format!("resident-origin-id-{resident_id}.json"))
+                .try_exists().map_err(|e|e.to_string())? {
+                return Err("resident prompt identity was already admitted; inspect its retained origin instead of resubmitting".into());
+            }
+        }
+        if invocation.is_prompt() && (prompt.is_empty() || prompt.len() > 16_384) {
             return Err("prompt length is outside profile".into());
         }
         if !matches!(self.journal.connection, Connection::Hard | Connection::Soft) {
@@ -14239,7 +14363,7 @@ impl Runtime {
         }
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
-            || self.journal.workspace_attempt.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
             || self.journal.workspace_birth.is_some()
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
@@ -14365,6 +14489,7 @@ impl Runtime {
             let endpoint = provider::GatewayEndpoint::start(
                 provider::GatewayConfig {
                     bind,
+                    scheduled_homelab: task.homelab.is_some(),
                     unix_socket: (!task.local_fixture_host_network)
                         .then(|| self.config.state_dir.join("provider-gateway.sock")),
                     pinned_model: task.model.clone(),
@@ -14385,7 +14510,8 @@ impl Runtime {
                 &token,
                 spec.wall_time_seconds.unwrap_or(600) - 60,
                 provider_max_iterations(task.max_iterations)?,
-                Some(task.max_input_tokens),
+                task.context_window_tokens,
+                self.room_tools_restricted(),
             )?;
             *self
                 .provider_control
@@ -14418,8 +14544,9 @@ impl Runtime {
         if spec.systemd_scope {
             prove_controller_unit(&self.config.task)?;
             Self::prove_launcher_gate(&spec.program)?;
+            systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
         }
-        self.reserve_parent_work_lease(&spec.reserve, &spec.charge, "hermes-acp prompt")?;
+        self.reserve_parent_work_lease(&spec.reserve, invocation.charge(&spec.charge), invocation.label())?;
         if self.journal.connection == Connection::Hard {
             match input.try_recv() {
                 Ok(Input::Disconnect) => {
@@ -14445,15 +14572,26 @@ impl Runtime {
             }
         }
         let id = self.next_id()?;
-        if !self.journal.provider_replays.is_empty() {
+        if invocation.is_prompt() {
+            self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
+                resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),
+                    prompt_sha256:digest.into(),prompt_operation_id:id,session_id:None});
+            if let Some(origin)=&self.journal.resident_prompt_origin {
+                origin.archive(&self.config.state_dir,"admitted")?;
+            }
+            self.save()?;
+        }
+        if invocation.is_prompt() && (!self.journal.provider_replays.is_empty() || self.journal.provider_prompt_requests != 0) {
             // A new explicit prompt rotates the gateway token and its replay
             // scope. Prior exact artifacts remain on disk for audit.
             self.journal.provider_replays.clear();
+            self.journal.provider_prompt_requests = 0;
             self.save()?;
         }
         let unit = self.worker_unit(id, &spec);
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
+            systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
             self.launch_gate(&spec.program, unit, "init")?;
         }
         let broker_path = self.config.state_dir.join(format!("mcp-{id:016}.sock"));
@@ -14483,7 +14621,7 @@ impl Runtime {
         if !spec.systemd_scope {
             command.env("HERMES_HOME", &hermes_home);
         }
-        self.worker_env(&mut command, &spec, &unit, Some(&broker_path));
+        self.worker_env(&mut command, &spec, &unit, Some(&broker_path))?;
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -14619,6 +14757,7 @@ impl Runtime {
             acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker, None)?;
+            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response)?; }
             if let Some(previous) = &existing_session {
                 if !response.is_object() {
                     return Err("Hermes did not reload the retained session".into());
@@ -14658,7 +14797,13 @@ impl Runtime {
         })();
         let mut reported_publications = Vec::new();
         let outcome = match &session {
+            Ok(_) if !invocation.is_prompt() => Ok(json!({"type":"mini-hermes-session-verified-v1"})),
             Ok(session_id) => {
+                if let Some(origin)=self.journal.resident_prompt_origin.as_mut() {
+                    origin.session_id=Some(session_id.clone());
+                    origin.archive(&self.config.state_dir,"session")?;
+                }
+                self.save()?;
                 self.prompt_active = true;
                 let prompt_sent = (|| -> Result<()> {
                     let (receipt_report, receipt_ids) =
@@ -14700,7 +14845,8 @@ impl Runtime {
                         3,
                         "session/prompt",
                         json!({
-                            "sessionId":session_id,"prompt":[{"type":"text","text":prompt_text}]
+                            "sessionId":session_id,"prompt":[{"type":"text","text":prompt_text}],
+                            "_meta":{"miniResidentOrigin":self.journal.resident_prompt_origin}
                         }),
                     )
                 })();
@@ -14726,13 +14872,40 @@ impl Runtime {
             Ok(())
         };
         self.revoke_provider_gateway();
+        let mut stopped_for_refusal = None;
+        let mut failure_retained_before_retirement = false;
+        let refused_completion = if invocation.is_prompt() && provider_drained.is_ok() && session.is_ok()
+            && !self.cancelled.load(Ordering::SeqCst)
+            && self.journal.connection != Connection::Fenced
+            && outcome.as_ref().ok().is_some_and(|value| hermes_outcome::failure(value).is_some())
+            && self.refused_provider_for_prompt(id) {
+            (|| -> Result<()> {
+                hermes_outcome::validate_refusal_stop(&self.journal)?;
+                hermes_outcome::retain_failure(&self.config.state_dir,&self.journal,id,
+                    outcome.as_ref().map_err(|e|e.clone())?)?;
+                failure_retained_before_retirement = true;
+                // No fence/disconnect may change the signed idle provider
+                // origin before its exact unsent-refusal proof is checked.
+                stopped_for_refusal = Some(self.stop_and_reap_owned()?);
+                self.retire_refused_provider_request()
+            })()
+        } else { Ok(()) };
+        let provider_drained = provider_drained.and(refused_completion);
         let outcome = match (outcome, provider_drained) {
+            (Ok(value), Ok(())) if invocation.is_prompt() => hermes_outcome::validate_completion(
+                value, &self.journal, id, self.config.provider_task.is_some()),
             (Ok(value), Ok(())) => Ok(value),
             (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
             (Err(acp), Err(provider)) => {
                 Err(format!("ACP outcome: {acp}; provider drain: {provider}"))
             }
         };
+        let outcome = outcome.and_then(|value| {
+            if !failure_retained_before_retirement {
+                hermes_outcome::retain_failure(&self.config.state_dir, &self.journal, id, &value)?;
+            }
+            Ok(value)
+        });
         if self.cancelled.load(Ordering::SeqCst) && self.hard_connection.load(Ordering::SeqCst) {
             self.disconnect()?;
             return Err("hard disconnect while Hermes was running".into());
@@ -14766,7 +14939,9 @@ impl Runtime {
             return Err(format!("Hermes setup failed before prompt: {error}"));
         }
         if let Err(error) = &outcome {
-            let stopped = self.stop_and_reap_owned();
+            let stopped = match stopped_for_refusal.take() {
+                Some(exit) => Ok(exit), None => self.stop_and_reap_owned(),
+            };
             self.journal
                 .unresolved_external
                 .push(format!("Hermes prompt {id}: {error}"));
@@ -14781,13 +14956,15 @@ impl Runtime {
         // process. Provider usage may still be uncertain; charge is explicitly
         // the configured budget unit, not an attested invoice.
         drop(child_stdin);
-        let exit = self.stop_and_reap_owned()?;
-        if !self.claim_completion(&spec.charge)? {
+        let exit = match stopped_for_refusal {
+            Some(exit) => exit, None => self.stop_and_reap_owned()?,
+        };
+        if !self.claim_completion(invocation.charge(&spec.charge))? {
             self.disconnect()?;
             return Err("hard disconnect before Hermes settlement".into());
         }
         self.transition(
-            json!({"type":"settle","charge":spec.charge}),
+            json!({"type":"settle","charge":invocation.charge(&spec.charge)}),
             "settle",
             &format!("hermes-acp exit:{exit}"),
         )?;
@@ -14796,6 +14973,14 @@ impl Runtime {
         self.save()?;
         self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
         self.finish_reconnected_mode()?;
+        if invocation.resident_identity().is_some() {
+            if let Ok(value) = &outcome {
+                if value["stopReason"] == "end_turn" {
+                    self.stage_resident_completion(value)?;
+                    self.stage_resident_final(value)?;
+                }
+            }
+        }
         let retention = hermes_state_fingerprint(&hermes_home);
         if let Some(current) = self.journal.hermes_session.as_mut() {
             current.pending_prompt = false;
@@ -14826,6 +15011,12 @@ impl Runtime {
             self.save()?;
         }
         retention?;
+        if let Ok(value) = &outcome {
+            if let Some(failure) = hermes_outcome::failure(value) {
+                hermes_outcome::close_failure(&self.config.state_dir, &self.journal, id)?;
+                return Err(format!("Hermes turn failed at a settled boundary: {failure}"));
+            }
+        }
         outcome.map(|_| ())
     }
     #[allow(clippy::too_many_arguments)] // ACP dispatch needs independent bounded input, output, broker, and provider channels.
@@ -14841,6 +15032,7 @@ impl Runtime {
     ) -> Result<Value> {
         let mut application_api_call: Option<ActiveApplicationApi> = None;
         let mut completed_acp: Option<Value> = None;
+        let mut resident_final_capture = resident_delivery::AcpCapture::default();
         let mut completed_acp_error: Option<String> = None;
         let mut acp_failure_deadline: Option<Instant> = None;
         loop {
@@ -15014,6 +15206,9 @@ impl Runtime {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
             };
+            if id == 3 && self.journal.resident_prompt_origin.is_some() {
+                resident_final_capture.observe(&msg, self.journal.hermes_session.as_ref().map(|s| s.id.as_str()));
+            }
             if msg.get("id") == Some(&json!(id)) {
                 if let Some(error) = msg.get("error") {
                     if application_api_call.is_some() {
@@ -15024,14 +15219,22 @@ impl Runtime {
                         ));
                         continue;
                     }
+                    if id == 3 {
+                        if let Some(failure) = hermes_outcome::typed_failure(error) {
+                            return Ok(failure);
+                        }
+                    }
                     return Err(format!("Hermes ACP: {error}"));
                 }
                 if let Some(result) = msg.get("result") {
+                    let result = if id == 3 && self.journal.resident_prompt_origin.is_some() {
+                        resident_final_capture.bind(result.clone())
+                    } else { result.clone() };
                     if application_api_call.is_some() {
-                        completed_acp = Some(result.clone());
+                        completed_acp = Some(result);
                         continue;
                     }
-                    return Ok(result.clone());
+                    return Ok(result);
                 }
             }
             if msg.get("method").and_then(Value::as_str) == Some("session/request_permission") {
@@ -15782,6 +15985,7 @@ impl Runtime {
             return Err("no-submit birth marker conflicts with a pending native birth".into());
         }
         self.retry_pending(true)?;
+        self.recover_room()?;
         if let Some(operation_id) = self
             .journal
             .workspace_attempt
@@ -15847,6 +16051,8 @@ impl Runtime {
                 self.save()?;
             }
         }
+        self.retire_refused_provider_request()?;
+        self.recover_delivered_provider_response()?;
         if self.journal.connection == Connection::Fenced {
             let tool_fence = self.fence_tool();
             let dispatch_fence = self.fence_dispatch();
@@ -16223,6 +16429,16 @@ impl Runtime {
         self.save()
     }
     fn reconcile_provider_audited(&mut self) -> Result<()> {
+        self.reconcile_provider_evidence(false)
+    }
+    fn reconcile_provider_evidence(&mut self, automatic: bool) -> Result<()> {
+        if automatic {
+            self.require_delivered_provider_response()?;
+            self.quiescence_stop_proof()?;
+            if self.journal.provider_hold.is_some() {
+                return Err("automatic held provider settlement requires native history-bound admission".into());
+            }
+        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -16270,37 +16486,7 @@ impl Runtime {
             )?;
         }
         let already_settled = if self.journal.provider_hold.is_none() {
-            let settled = self.verified_provider_settlement(&attempt)?;
-            let retry_result = next_retry_json(&settled.attempt)?;
-            let mut args = vec![
-                "retry",
-                "--attempt",
-                settled
-                    .attempt
-                    .to_str()
-                    .ok_or("provider settlement attempt path UTF-8")?,
-                "--mode",
-                "lookup",
-            ];
-            if let Some(socket) = &self.config.host_socket {
-                args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
-            }
-            self.command_output(&self.config.mini, &args)?;
-            let lookup: Value =
-                serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
-                    .map_err(|e| format!("provider settlement lookup: {e}"))?;
-            if lookup.get("type").and_then(Value::as_str) != Some("confirmed")
-                || !matches!(
-                    lookup.get("confirmation").and_then(Value::as_str),
-                    Some("installed" | "replayed")
-                )
-                || ReserveAnchor::from_confirmed(&lookup)? != settled.receipt
-            {
-                return Err(
-                    "provider settlement is not confirmed on the current native image".into(),
-                );
-            }
-            Some(settled)
+            Some(self.lookup_provider_settlement(&attempt)?)
         } else {
             None
         };
@@ -16328,11 +16514,19 @@ impl Runtime {
                 }
             }
         };
+        if let Some(placement) = &attempt.placement {
+            let outcome = match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
+                MeteredAuditPath::ProvenNoSend => minidregg_inference_scheduler::core::Outcome::NotSent,
+                MeteredAuditPath::CompleteResponse => minidregg_inference_scheduler::core::Outcome::Ended,
+            };
+            placement.finish(outcome)?;
+        }
         let id = self.next_id()?;
         self.journal.reconciliation_log.push(json!({
             "decisionId":id.to_string(), "authority":"provider",
             "action":"settle-provider-source-metered-charge",
-            "stage":"operator-audited-requested",
+            "stage":if automatic { "delivered-response-recovery-requested" } else { "operator-audited-requested" },
+            "automatic":automatic,
             "providerAttemptId":attempt.id.to_string(),
             "requestPath":attempt.request_path,
             "requestBytes":attempt.request_bytes,
@@ -16426,7 +16620,10 @@ impl Runtime {
             return Err("provider attempt has no hold but signed grain remains reserved".into());
         }
         let after = self.query_as(&authority)?;
-        if after.pointer("/grain/status").and_then(Value::as_str) == Some("1") {
+        // Automatic recovery owns the retained request, not a subsequent
+        // attach by this purse's owner. Its exact prior settlement receipt
+        // permits retiring that request without mutating an idle resource.
+        if !automatic && after.pointer("/grain/status").and_then(Value::as_str) == Some("1") {
             self.transition_as(
                 &authority,
                 json!({"type":"disconnect"}),
@@ -16439,7 +16636,7 @@ impl Runtime {
             "provider request {} external effects require explicit acknowledgement",
             attempt.id
         );
-        if !self.journal.unresolved_external.contains(&effects) {
+        if !automatic && !self.journal.unresolved_external.contains(&effects) {
             self.journal.unresolved_external.push(effects);
         }
         self.journal.provider_attempt = None;
@@ -16451,11 +16648,15 @@ impl Runtime {
         self.journal.reconciliation_log.push(json!({
             "decisionId":id.to_string(), "authority":"provider",
             "stage":settlement_stage, "providerAttemptId":attempt.id.to_string(),
+            "automatic":automatic,
             "externalEffectsAcknowledged":false
         }));
         self.save()
     }
     fn abort_refused_provider_request(&mut self) -> Result<()> {
+        self.abort_refused_provider_request_with(false,None)
+    }
+    fn abort_refused_provider_request_with(&mut self, automatic: bool, refusal: Option<Value>) -> Result<()> {
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -16501,17 +16702,27 @@ impl Runtime {
         {
             return Err("signed provider grain differs from definitively unreserved origin".into());
         }
+        if let Some(placement) = &attempt.placement {
+            // The proof above establishes no send for this request. Exact
+            // old-lease acknowledgements are idempotent and cannot release
+            // a replacement placement.
+            placement.finish(minidregg_inference_scheduler::core::Outcome::NotSent)?;
+        }
         let id = self.next_id()?;
         self.journal.reconciliation_log.push(json!({
             "decisionId":id.to_string(), "authority":"provider",
             "action":"abort-definitively-unreserved-provider-request",
+            "automatic":automatic,"refusal":refusal,
             "stage":"signed-origin-confirmed", "providerAttemptId":attempt.id.to_string(),
             "requestPath":attempt.request_path,
             "reserveAttempt":hold.as_ref().and_then(|hold| hold.reserve_attempt.as_ref()),
             "sendBoundaryDurable":false, "signedStatus":status,
             "externalEffectsAcknowledged":false
         }));
-        if status == "1" {
+        // Ordinary refusal retirement does not need a native disconnect: the
+        // signed purse is already idle and unreserved. Commit its terminal
+        // journal decision atomically, without a disconnect/clear crash gap.
+        if status == "1" && !automatic {
             self.transition_as(
                 &authority,
                 json!({"type":"disconnect"}),
@@ -16582,7 +16793,7 @@ impl Runtime {
             || j.provider_attempt.is_some()
             || j.dispatch_attempt.is_some()
             || j.settlement_due.is_some()
-            || j.workspace_attempt.is_some()
+            || (j.workspace_attempt.is_some() || j.room_attempt.is_some())
             || j.workspace_birth.is_some()
             || j.birth_pending.is_some()
             || j.birth_operation.is_some()
@@ -16647,7 +16858,7 @@ impl Runtime {
             return Err("a configured worker has network access; effects need operator acknowledgement".into());
         }
         if self.journal.foreground_attempt.is_some()
-            || self.journal.workspace_attempt.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
             || self.journal.workspace_birth.is_some()
             || self.journal.application_api_attempt.is_some()
         {
@@ -16676,6 +16887,7 @@ impl Runtime {
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
             || self.journal.settlement_due.is_some()
+            || self.journal.room_attempt.is_some()
         {
             return Err(
                 "settle and reconcile every held operation before acknowledging external effects"
@@ -16814,6 +17026,9 @@ impl Runtime {
                     Err(reason) => {
                         return Err(format!("pending custody attempt has no call.bin and invalid prepare-refusal marker: {reason}; manual reconciliation required"));
                     }
+                }
+                if self.reprepare_parent_settlement(slot, &p)? {
+                    return self.retry_pending_slot(slot);
                 }
                 // A crashed custody subprocess may still assemble the call and
                 // dispatch later. Absence right now is not a negative receipt.
@@ -16971,9 +17186,8 @@ fn signal_group(pgid: i32, signal: i32) -> Result<()> {
 
 fn prove_controller_unit(task: &str) -> Result<()> {
     let unit = format!("mini-grain-controller@{task}.service");
-    let output = Command::new("/usr/bin/systemctl")
+    let output = systemd_manager::controller_command(task)?
         .args([
-            "--user",
             "show",
             "-p",
             "MainPID",
@@ -17002,9 +17216,8 @@ fn prove_controller_unit(task: &str) -> Result<()> {
 
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
-    let output = Command::new("/usr/bin/systemctl")
+    let output = systemd_manager::worker_command(unit)?
         .args([
-            "--user",
             "kill",
             "--signal=SIGKILL",
             "--kill-whom=all",
@@ -17028,11 +17241,10 @@ fn kill_unit(unit: &str) -> Result<()> {
 
 fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Result<()> {
     let helper = program.with_file_name("launch-gate");
-    let output = Command::new(&helper)
-        .arg(action)
-        .arg(state_dir)
-        .arg(unit)
-        .output()
+    let mut command = Command::new(&helper);
+    command.arg(action).arg(state_dir).arg(unit);
+    systemd_manager::gate_environment(unit, action, &mut command)?;
+    let output = command.output()
         .map_err(|e| format!("launch gate {}: {e}", helper.display()))?;
     if !output.status.success() {
         return Err(format!(
@@ -17045,8 +17257,8 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
 
 fn unit_inactive(unit: &str) -> Result<bool> {
     let name = format!("{unit}.service");
-    let output = Command::new("/usr/bin/systemctl")
-        .args(["--user", "show", "-p", "ActiveState", "--value", &name])
+    let output = systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ActiveState", "--value", &name])
         .output()
         .map_err(|e| format!("systemd unit observation: {e}"))?;
     if !output.status.success() {
@@ -17057,81 +17269,51 @@ fn unit_inactive(unit: &str) -> Result<bool> {
 }
 
 fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Result<()> {
-    prove_controller_unit(task)?;
     if unit != format!("mini-grain-t{task}-o{}", record.operation_id) {
         return Err("saved worker unit does not match its durable operation ID".into());
     }
-    if !unit_inactive(unit)? {
-        return Err("recorded worker unit remains active".into());
-    }
     let name = format!("{unit}.service");
-    let output = Command::new("/usr/bin/systemctl")
-        .args([
-            "--user",
-            "show",
-            "-p",
-            "ControlGroup",
-            "-p",
-            "MainPID",
-            &name,
-        ])
-        .output()
-        .map_err(|e| format!("worker cgroup observation: {e}"))?;
-    if !output.status.success() {
-        return Err("worker cgroup observation failed".into());
-    }
-    let view = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-    let main_pid = view
-        .lines()
-        .find_map(|s| s.strip_prefix("MainPID="))
-        .ok_or("worker MainPID observation absent")?;
-    if main_pid != "0" {
-        return Err("recorded worker unit still has a MainPID".into());
-    }
-    let control_group = view
-        .lines()
-        .find_map(|s| s.strip_prefix("ControlGroup="))
-        .ok_or("worker ControlGroup observation absent")?;
-    if !control_group.is_empty() {
-        let relative = Path::new(control_group)
-            .strip_prefix("/")
-            .map_err(|_| "worker ControlGroup is not absolute")?;
-        if relative
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
-        {
-            return Err("worker ControlGroup has invalid components".into());
+    let observe = || -> Result<String> {
+        prove_controller_unit(task)?;
+        let output = systemd_manager::worker_command(unit)?
+            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name])
+            .output().map_err(|e| format!("worker cgroup observation: {e}"))?;
+        if !output.status.success() || output.stdout.len() > 16384 {
+            return Err("worker cgroup observation failed".into());
         }
-        let cgroup = Path::new("/sys/fs/cgroup").join(relative);
-        let mut pending = vec![cgroup];
-        let mut visited = 0usize;
-        while let Some(path) = pending.pop() {
-            visited += 1;
-            if visited > 4096 {
-                return Err("worker cgroup tree exceeds audit bound".into());
-            }
-            let entries = match fs::read_dir(&path) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(format!("worker cgroup inspect: {error}")),
-            };
-            let procs = fs::read_to_string(path.join("cgroup.procs"))
-                .map_err(|e| format!("worker cgroup.procs inspect: {e}"))?;
-            if !procs.trim().is_empty() {
-                return Err("recorded worker cgroup still contains processes".into());
-            }
-            for entry in entries {
-                let entry = entry.map_err(|e| e.to_string())?;
-                if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-                    pending.push(entry.path());
-                }
+        let view = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+        let mut properties = std::collections::BTreeMap::new();
+        for line in view.lines() {
+            let (key, value) = line.split_once('=').ok_or("invalid worker unit property")?;
+            if properties.insert(key, value).is_some() {
+                return Err("duplicate worker unit property".into());
             }
         }
+        if properties.get("MainPID").copied() != Some("0")
+            || !matches!(properties.get("ActiveState").copied(), Some("inactive" | "failed" | "dead")) {
+            return Err("recorded worker unit remains active or has a MainPID".into());
+        }
+        properties.get("ControlGroup").map(|value| value.to_string())
+            .ok_or_else(|| "worker ControlGroup observation absent".into())
+    };
+    let control_group = observe()?;
+    let recheck = || -> Result<()> {
+        if observe()? != control_group {
+            return Err("worker ControlGroup changed during physical audit".into());
+        }
+        Ok(())
+    };
+    if control_group.is_empty() {
+        return recheck();
     }
-    if !unit_inactive(unit)? {
-        return Err("worker unit became active during physical audit".into());
+    let relative = Path::new(&control_group).strip_prefix("/")
+        .map_err(|_| "worker ControlGroup is not absolute")?;
+    if relative.components().any(|part| !matches!(part, std::path::Component::Normal(_)))
+        || relative.file_name().and_then(|part| part.to_str()) != Some(name.as_str()) {
+        return Err("worker ControlGroup does not name its exact canonical unit".into());
     }
-    Ok(())
+    let cgroup = Path::new("/sys/fs/cgroup").join(relative);
+    cgroup_stop::prove_worker_empty(&cgroup, recheck)
 }
 
 /// Read-only process table inspection. This counts all non-zombie members,
@@ -17385,6 +17567,14 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
+        if let Err(error) = config_migration::ensure_process_current(&rt.config.state_dir)
+            .and_then(|()|session_failure::ensure_publication_known(&rt.config.state_dir)) {
+            if let Input::Admin(request) = next {
+                request.phase.store(2, Ordering::SeqCst);
+                let _ = request.reply.send(format!("error: {error}"));
+            } else { rt.emit(format!("error: {error}\n")); }
+            continue;
+        }
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
@@ -17442,6 +17632,101 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let _ = request
                         .reply
                         .send("admin action expired before dispatch".into());
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("config migrate ") {
+                    let result = rt.migrate_config(Path::new(path), false);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("resident completion-plan ") {
+                    let result = rt.plan_resident_completion(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("resident receive-completion ") {
+                    let result = rt.receive_resident_completion(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("resident delivery-plan ") {
+                    let result = rt.plan_resident_delivery(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("resident deliver-final ") {
+                    let result = rt.deliver_resident_final(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("resident supersede-completion ") {
+                    let result = rt.supersede_unsupported_completion(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("session reconcile-failure ") {
+                    let result = rt.reconcile_session_failure(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("quiescence transport ") {
+                    let result = rt.inspect_quiescence_transport(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
+                    let result = if request.command == "quiescence status" {
+                        rt.quiescence_status()
+                    } else {
+                        let path = request.command.trim_start_matches("quiescence inspect ");
+                        rt.inspect_quiescence(if path == "none" { None } else { Some(Path::new(path)) })
+                    };
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if let Some(rest) = request.command.strip_prefix("resident reconcile-failed ") {
+                    let result = match rest.rsplit_once(' ') {
+                        Some((path,expected)) => rt.reconcile_failed_resident(Path::new(path),expected),
+                        None => Err("failed resident reconciliation needs path and expected state digest".into()),
+                    };
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
+                if request.command == "hermes verify-session" {
+                    let result = rt.verify_hermes_session(&input);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
                     continue;
                 }
                 if request.command == "inspect application api" {
@@ -17511,10 +17796,13 @@ fn serve(mut rt: Runtime) -> Result<()> {
             Input::TerminalLine {
                 attachment_id,
                 line,
-            } if line.starts_with("terminal hermes ") => {
+            } if line.starts_with("terminal hermes ") || line.starts_with("terminal hermes-resident ") => {
                 (|| -> Result<()> {
-                    let (attachment, request, prompt) = terminal::parse_prompt_command(&line)
-                        .ok_or("invalid terminal prompt command")?;
+                    let resident = terminal::parse_resident_prompt_command(&line);
+                    let (attachment, request, prompt) = match resident {
+                        Some((attachment,request,_,_,prompt)) => (attachment,request,prompt),
+                        None => terminal::parse_prompt_command(&line).ok_or("invalid terminal prompt command")?,
+                    };
                     if attachment != attachment_id
                         || !rt.output.as_ref().is_some_and(|output| {
                             output.is_active_framed_attachment(attachment_id)
@@ -17522,18 +17810,25 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     {
                         return Err("terminal prompt attachment changed before dispatch".into());
                     }
-                    let result = rt.hermes(prompt, &input);
+                    let first_operation=rt.journal.next_operation_id;
+                    let result = match resident {
+                        Some((_,_,resident_id,digest,_)) => rt.hermes_session(
+                            hermes_session_verify::Invocation::ResidentPrompt{prompt,resident_id,digest},&input),
+                        None => rt.hermes(prompt, &input),
+                    };
                     rt.stdin_gone = false;
                     let journal = serde_json::to_value(&rt.journal)
                         .map_err(|e| format!("terminal completion projection: {e}"))?;
-                    let delivered = rt.output.as_ref().is_some_and(|output| {
-                        output.try_terminal_event_for(
-                            attachment,
-                            terminal::completion(&journal, attachment, request, result.is_ok(),
-                                rt.config.tool_task.as_ref().map_or(0, |tool|
-                                    tool.registered_shared_applications.len())),
-                        )
-                    });
+                    let mut completion=terminal::completion(&journal, attachment, request, result.is_ok(),
+                        rt.config.tool_task.as_ref().map_or(0, |tool|tool.registered_shared_applications.len()));
+                    if let Some((_,_,resident_id,digest,_))=resident {
+                        if let Some(origin)=rt.journal.resident_prompt_origin.as_ref().filter(|origin|
+                            origin.is_current(resident_id,digest,first_operation)) {
+                            completion["residentOrigin"]=serde_json::to_value(origin).map_err(|e|e.to_string())?;
+                        }
+                    }
+                    let delivered = rt.output.as_ref().is_some_and(|output|
+                        output.try_terminal_event_for(attachment,completion));
                     if delivered {
                         result
                     } else {
@@ -17576,6 +17871,65 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() == 2 && args[1] == "--controller-manager-protocol" {
+        println!("{}", systemd_manager::PROTOCOL);
+        return ExitCode::SUCCESS;
+    }
+    if args.len() >= 2 && args[1] == "config-migrate" {
+        return match config_migration::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime config-migrate: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "resident-completion" {
+        return match resident_completion::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime resident-completion: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "resident-delivery" {
+        return match resident_delivery::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime resident-delivery: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "resident-outcome" {
+        return match resident_outcomes::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime resident-outcome: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "session-failure" {
+        return match session_failure::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "quiescence-transport" {
+        return match quiescence_transport::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime quiescence-transport: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "quiescence" {
+        return match quiescence::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime quiescence: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "resident-reconcile" {
+        return match resident_reconcile::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime resident-reconcile: {error}"); ExitCode::from(1) }
+        };
+    }
+    if args.len() >= 2 && args[1] == "provider-provision" {
+        if args.len()!=5 { eprintln!("usage: grain-runtime provider-provision TEMPLATE OPERATOR_POLICY NEW_CONTROLLER"); return ExitCode::from(2); }
+        return match provider_provision::run(Path::new(&args[2]),Path::new(&args[3]),Path::new(&args[4])) {
+            Ok(report)=>{ println!("{report}"); ExitCode::SUCCESS },
+            Err(error)=>{ eprintln!("provider provisioning refused: {error}"); ExitCode::from(1) },
+        };
+    }
     if args.len() >= 2 && args[1] == "provider-table" {
         if args.len() != 4 || args[2] != "check" {
             eprintln!("usage: grain-runtime provider-table check FILE");
@@ -17590,6 +17944,12 @@ fn main() -> ExitCode {
                 eprintln!("provider table refused: {error}");
                 ExitCode::from(1)
             }
+        };
+    }
+    if args.len() == 4 && args[1] == "hermes-room" && args[2] == "resident" {
+        return match room_resident::main(Path::new(&args[3])) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("room resident: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 3 && args[1] == "hermes-room" {
@@ -17778,6 +18138,12 @@ fn main() -> ExitCode {
             }
         };
         return match control::admin_call(&PathBuf::from(&args[2]), command) {
+            Ok(response) if command == "hermes verify-session" => {
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-hermes-session-readiness-v1" && value["ready"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if response == "ok" => {
                 println!("{response}");
                 ExitCode::SUCCESS
@@ -18923,6 +19289,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             metered_charge: None,
         };
         let request = provider::ProviderRequest {
+            placement: None,
             lease: provider::LeaseId {
                 prompt_operation_id: 42,
                 parent_generation: "3".into(),
@@ -18937,6 +19304,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             _ => panic!("same-body retry must use retained response"),
         }
         let mut other_prompt = provider::ProviderRequest {
+            placement: None,
             lease: provider::LeaseId {
                 prompt_operation_id: 43,
                 parent_generation: "4".into(),
@@ -19220,6 +19588,16 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
     }
 
     #[test]
+    fn provider_prompt_attempt_count_survives_restart_without_a_replay() {
+        let mut journal = Journal::fresh(json!({}));
+        journal.provider_prompt_requests = 1;
+        let restored: Journal = serde_json::from_slice(&serde_json::to_vec(&journal).unwrap()).unwrap();
+        assert!(restored.provider_replays.is_empty());
+        assert_eq!(restored.provider_prompt_requests, 1);
+        assert!(restored.provider_prompt_requests >= provider_max_iterations(Some(1)).unwrap());
+    }
+
+    #[test]
     fn provider_iteration_limit_preserves_default_and_refuses_invalid_values() {
         assert_eq!(provider_max_iterations(None).unwrap(), 6);
         assert_eq!(provider_max_iterations(Some(1)).unwrap(), 1);
@@ -19394,7 +19772,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         }
     }
 
-    fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {
+    pub(super) fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {
         let root = std::env::temp_dir().join(format!(
             "grain-restart-resolution-{tag}-{}-{}",
             std::process::id(),

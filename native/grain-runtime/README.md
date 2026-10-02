@@ -386,3 +386,19 @@ continuity consumer requires a separate source-matched native run before its
 receiving claim. The existing
 Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;
 this runtime does not reinterpret that synthetic acceptance as a hosted agent.
+
+A delivered provider response whose original settlement already committed can be
+retired by ordinary `recover`. The controller requires exact replay/response/quote
+custody, physical quiescence, and lookup of the original settlement receipt on the
+current native image. It preserves a newer member-owned idle attachment and all
+unrelated parent/session/external uncertainty; no HTTP request or charge repeats.
+This path does not automatically settle a still-held response: that requires the
+separate native history-bound admission work. Native scripted fixture `him5` proved
+newer attachment preservation and repeated recovery with one settlement/request.
+
+Physical prior-controller proofs inspect every descendant cgroup, not only the
+service's direct process list. Empty descendants are allowed; populated, unreadable,
+symlinked or changed subtrees refuse. Two fd-relative inventories preserve directory
+identity, recheck the sole current process and active MainPID, and use actual cgroup
+v2 population state. The proof remains a read-only snapshot under the controller's
+no-concurrent-launch gate. The shared helper is also used by migration recovery.

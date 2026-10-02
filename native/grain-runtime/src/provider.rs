@@ -27,6 +27,7 @@ const MAX_TOKEN: usize = 128;
 const MAX_BUSY_RESPONDERS: usize = 4;
 
 pub struct GatewayConfig {
+    pub scheduled_homelab: bool,
     pub bind: SocketAddr,
     /// When set, the worker reaches this private socket through a bind mount
     /// and the host TCP address is used only in its isolated loopback profile.
@@ -57,7 +58,9 @@ pub struct Lease {
     pub worker_token: String,
 }
 
+#[derive(Clone)]
 pub struct ProviderRequest {
+    pub placement: Option<crate::homelab::Placement>,
     pub lease: LeaseId,
     pub model: String,
     /// Exact bounded JSON body. The controller retains it and computes its
@@ -116,6 +119,7 @@ pub enum ProviderOutcome {
 }
 
 pub enum ProviderCommand {
+    Prepare { request: ProviderRequest, reply: Sender<Result<Option<crate::homelab::Plan>, String>> },
     Reserve {
         request: ProviderRequest,
         reply: Sender<Result<ForwardPermit, String>>,
@@ -867,13 +871,37 @@ fn error_reply(stream: &mut GatewayStream, status: u16, message: &str) {
 /// A reserve that did not produce a permit. Named credential refusals and a
 /// purse that Mini refused are told to the worker by code; any other failure
 /// stays the generic 503 (its text may carry controller paths).
+fn native_reserve_refusal(error: &str) -> Option<&'static str> {
+    let encoded=error.strip_prefix("provider reserve refused by Mini: ")?;
+    if encoded.len()>65_536 { return None; }
+    let outcome:Value=serde_json::from_str(encoded).ok()?;
+    if outcome.get("type").and_then(Value::as_str)!=Some("refused") { return None; }
+    // The Host's closed RefusalReason names carry authority-checked facts.
+    // Never infer an empty purse from a generic refusal or expose detail text.
+    match outcome.get("reason").and_then(Value::as_str)? {
+        "malformed" => Some("malformed"),
+        "unknown-key" => Some("unknown-key"),
+        "stale-root" => Some("stale-root"),
+        "bad-signature" => Some("bad-signature"),
+        "no-grant" => Some("no-grant"),
+        "revoked" => Some("revoked"),
+        "outside-validity" => Some("outside-validity"),
+        "stale-grant" => Some("stale-grant"),
+        "law-denied" => Some("law-denied"),
+        "law-input-range" => Some("law-input-range"),
+        "operation-rejected" => Some("operation-rejected"),
+        "conflict" => Some("conflict"),
+        "undisclosed" => Some("undisclosed"),
+        "tail-bound" => Some("tail-bound"),
+        _ => None,
+    }
+}
+
 fn refusal_reply(stream: &mut GatewayStream, error: &str) {
     let code = if let Some(code) = error.strip_prefix(credentials::REFUSED) {
         Some(code)
-    } else if error.starts_with("provider reserve refused by Mini") {
-        Some("no-credit")
     } else {
-        None
+        native_reserve_refusal(error)
     };
     match code {
         Some(code) if code.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') => {
@@ -931,15 +959,27 @@ fn serve_client(
             }
         };
     }
-    let (tx, rx) = mpsc::channel();
-    let reserve = ProviderCommand::Reserve {
-        request: ProviderRequest {
-            lease: lease.clone(),
-            model: config.pinned_model.clone(),
-            exact_body: request.body.clone(),
-        },
-        reply: tx,
+    let mut provider_request = ProviderRequest {
+        placement: None,
+        lease: lease.clone(),
+        model: config.pinned_model.clone(),
+        exact_body: request.body.clone(),
     };
+    let mut placement_guard = if config.scheduled_homelab {
+        let (tx, rx) = mpsc::channel();
+        if commands.try_send(ProviderCommand::Prepare { request: provider_request.clone(), reply: tx }).is_err() {
+            error_reply(stream, 503, "provider controller is busy"); return;
+        }
+        match wait_reply(&rx, &control, &lease).and_then(|plan| {
+            plan.map(|plan| plan.wait(|| control.still_active(&lease))).transpose()
+        }) {
+            Ok(guard) => guard,
+            Err(error) => { refusal_reply(stream, &error); return; }
+        }
+    } else { None };
+    provider_request.placement = placement_guard.as_ref().map(|guard| guard.placement.clone());
+    let (tx, rx) = mpsc::channel();
+    let reserve = ProviderCommand::Reserve { request: provider_request, reply: tx };
     if commands.try_send(reserve).is_err() {
         error_reply(stream, 503, "provider controller is busy");
         return;
@@ -1022,6 +1062,12 @@ fn serve_client(
         error_reply(stream, 503, "provider send boundary was not acknowledged");
         return;
     }
+    if let Some(guard) = &mut placement_guard {
+        if guard.placement.endpoint != route.endpoint {
+            error_reply(stream, 503, "provider route differs from exact homelab placement"); return;
+        }
+        guard.outcome = minidregg_inference_scheduler::core::Outcome::Uncertain;
+    }
     let outcome = forward(
         config,
         &route,
@@ -1031,6 +1077,15 @@ fn serve_client(
         attempt_id,
         &exact_body,
     );
+    if let Some(guard) = &mut placement_guard {
+        guard.outcome = match &outcome {
+            ProviderOutcome::Received { .. } => minidregg_inference_scheduler::core::Outcome::Ended,
+            ProviderOutcome::NotSent { .. } => minidregg_inference_scheduler::core::Outcome::NotSent,
+            ProviderOutcome::Uncertain { .. } => minidregg_inference_scheduler::core::Outcome::Uncertain,
+        };
+    }
+    // Physical completion is independent of response delivery and Mini settlement.
+    drop(placement_guard);
     let reply = match &outcome {
         ProviderOutcome::Received {
             status,
@@ -1589,6 +1644,7 @@ mod tests {
 
     fn config(dir: PathBuf, _upstream: SocketAddr) -> GatewayConfig {
         GatewayConfig {
+            scheduled_homelab: false,
             bind: "127.0.0.1:0".parse().unwrap(),
             unix_socket: None,
             pinned_model: "operator-model".into(),
@@ -2029,6 +2085,7 @@ mod tests {
         let controller = thread::spawn(move || {
             for _ in 0..4 {
                 match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    ProviderCommand::Prepare { reply, .. } => reply.send(Ok(None)).unwrap(),
                     ProviderCommand::Reserve { request, reply } => reply
                         .send(Ok(ForwardPermit::Fresh {
                             attempt_id: 7,
@@ -2099,9 +2156,23 @@ mod tests {
             assert!(response.starts_with("HTTP/1.1 403"), "{response}");
             assert!(response.contains(&format!("\"code\":\"{code}\"")), "{response}");
         }
-        let response = refused_exchange("provider reserve refused by Mini: {\"type\":\"refused\"}");
-        assert!(response.starts_with("HTTP/1.1 402"), "{response}");
-        assert!(response.contains("\"code\":\"no-credit\""), "{response}");
+        for reason in ["revoked", "no-grant", "law-denied", "stale-root"] {
+            let error: &'static str=Box::leak(format!("provider reserve refused by Mini: {{\"type\":\"refused\",\"reason\":\"{reason}\",\"detail\":\"/private/secret\"}}").into_boxed_str());
+            let response=refused_exchange(error);
+            assert!(response.starts_with("HTTP/1.1 403"),"{response}");
+            assert!(response.contains(&format!("\"code\":\"{reason}\"")),"{response}");
+            assert!(!response.contains("no-credit") && !response.contains("/private/secret"),"{response}");
+        }
+        for error in ["provider reserve refused by Mini: {\"type\":\"refused\"}",
+            "provider reserve refused by Mini: {\"type\":\"confirmed\",\"reason\":\"revoked\"}",
+            "provider reserve refused by Mini: {\"type\":\"refused\",\"reason\":\"/private/path\"}",
+            "provider reserve refused by Mini: invalid-json"] {
+            let response=refused_exchange(error);
+            assert!(response.starts_with("HTTP/1.1 503"),"{response}");
+            assert!(!response.contains("no-credit") && !response.contains("/private"),"{response}");
+        }
+        let response=refused_exchange("provider-refused:no-credit");
+        assert!(response.starts_with("HTTP/1.1 402"),"{response}");
         let response = refused_exchange("/private/state/path exploded");
         assert!(response.starts_with("HTTP/1.1 503"), "{response}");
         assert!(!response.contains("/private/state"), "{response}");
@@ -3026,3 +3097,7 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "provider_homelab_tests.rs"]
+mod homelab_tests;

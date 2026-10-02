@@ -30,6 +30,8 @@ mod fn_frontier;
 #[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
+mod append_proof;
+#[cfg(unix)]
 mod fleet_sign;
 #[cfg(unix)]
 mod fn_namespace;
@@ -463,6 +465,7 @@ usage:
   mini workspace --action continuity-carry-verifier --dir WORKSPACE --verifier ABSOLUTE-PORTABLE-VERIFIER --sha256 HEX64
   mini workspace --action continuity-carry --dir WORKSPACE --edge MANIFEST --source-capsule PATH --new-config CONFIG --new-verifier HOST
   mini workspace --action continuity-check --dir WORKSPACE --attempt RETAINED [--historical true|false]
+  mini operation-proof --dir WORKSPACE --operation-record ABSOLUTE-FILE
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
@@ -3009,6 +3012,8 @@ fn run(mut args: Args) -> Result<()> {
         "workspace" => workspace::run(args),
         #[cfg(unix)]
         "web" => web::run(args),
+        #[cfg(unix)]
+        "operation-proof" => append_proof::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),

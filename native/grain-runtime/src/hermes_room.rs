@@ -55,7 +55,7 @@ pub(crate) struct Config {
     inbox: PathBuf,
     /// The journal and the transcript.
     state: PathBuf,
-    provider: Provider,
+    provider: Option<Provider>,
     #[serde(default = "default_rounds")]
     max_rounds: u32,
 }
@@ -467,10 +467,11 @@ impl Runner<'_> {
         let mut summary = String::new();
         for round in 1..=self.config.max_rounds {
             let k = self.journal.next_request;
-            let body = json!({"model":self.config.provider.model,"messages":messages,"tools":functions(),
+            let provider = self.config.provider.as_ref().ok_or("legacy room runner requires a provider")?;
+            let body = json!({"model":provider.model,"messages":messages,"tools":functions(),
                 "stream":false,"user":format!("hermes-room-{k}")});
             self.journal.append(json!({"event":"send","request":k,"attach":attach,"round":round,"messages":messages.len()}))?;
-            let message = complete(&self.config.provider, &body)?;
+            let message = complete(provider, &body)?;
             self.journal.append(json!({"event":"recv","request":k,"message":message}))?;
             let calls: Vec<Value> = message.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default();
             if calls.is_empty() {
@@ -503,11 +504,50 @@ impl Runner<'_> {
     }
 }
 
+/// Read a room assignment for the durable ACP controller. No provider call
+/// or room write occurs here. The existing ordinary participant adoption is
+/// shared with the legacy runner; the worker receives only the signed text.
+pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Path) -> Result<Value> {
+    let dismissal = inbox.join(format!("dismiss-{}.json", tools.room));
+    if dismissal.exists() {
+        let notice = read_json(&dismissal).ok_or("dismissal notice is not readable JSON")?;
+        let manifest = read_json(&inbox.join(format!("summon-{}.json", tools.room)))
+            .ok_or("dismissal has no retained summon manifest")?;
+        let to = notice["returnTo"].as_str().ok_or("dismissal lacks return destination")?;
+        if notice["type"] != "mini-hermes-dismiss-v1" || notice["room"] != tools.room
+            || notice["hermes"] != manifest["hermes"] || notice["founder"] != manifest["founder"]
+            || notice["account"] != manifest["account"] || manifest["founderAccount"] != to
+            || notice["account"]["name"].as_str() != tools.account.as_deref()
+        { return Err("dismissal differs from this room's retained summon assignment".into()); }
+        return Ok(json!({"dismissed":true,"returnTo":to}));
+    }
+    let config = Config { kind:"mini-hermes-room-runner-v1".into(),tools:tools.clone(),
+        inbox:inbox.to_owned(),state:state.to_owned(),
+        provider:None,max_rounds:1 };
+    let journal = Journal::open(&state.join("adoption.jsonl"))?;
+    let mut runner = Runner { config:&config,tools:RoomTools { config:tools },journal };
+    let manifest = runner.adopt()?;
+    let name = manifest["program"]["name"].as_str().ok_or("resident program name absent")?;
+    let program = runner.tools.read("mini_doc_show", &json!({"doc":name}))?;
+    let me = runner.me()?;
+    let tail = runner.tools.read("mini_stream_tail", &json!({"n":"100"}))?;
+    let entries: Vec<Value> = tail["entries"].as_array().into_iter().flatten()
+        .filter(|entry| entry["author"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
+    let room = runner.tools.read("mini_room_ls", &json!({}))?;
+    let member_changes: Vec<Value> = room["entries"].as_array().into_iter().flatten()
+        .filter(|entry| entry["subject"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
+    let room_status = runner.tools.read("mini_room_status", &json!({}))?;
+    Ok(json!({"type":"mini-hermes-resident-assignment-v1","room":tools.room,"me":me,
+        "role":manifest["role"],"programName":name,"program":program["text"],
+        "docs":manifest["docs"],"every":manifest["every"],"account":tools.account,
+        "recentMemberEntries":entries,"recentMemberChanges":member_changes,"roomStatus":room_status}))
+}
+
 /// One attach: recover, adopt, return the budget when dismissed, else run the
 /// program once.
 pub(crate) fn step(config: &Config) -> Result<()> {
-    if config.kind != "mini-hermes-room-runner-v1" {
-        return Err("config is not a mini-hermes-room-runner-v1".into());
+    if config.kind != "mini-hermes-room-runner-v1" || config.provider.is_none() {
+        return Err("legacy config requires mini-hermes-room-runner-v1 and a provider".into());
     }
     fs::create_dir_all(&config.state).map_err(|e| format!("{}: {e}", config.state.display()))?;
     let journal = Journal::open(&config.state.join("journal.jsonl"))?;

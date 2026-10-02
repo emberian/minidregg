@@ -4,6 +4,7 @@
 use crate::{write_new, Config, PublicationGrant, Result, ToolTask};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -694,6 +695,10 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RoomToolsConfig {
+    /// Offer and accept only room tools for this resident. Generic workspace
+    /// mutations would bypass the room turn payment. Existing setups opt in.
+    #[serde(default)]
+    pub restrict_tools: bool,
     /// The pinned `mini` client.
     pub mini: PathBuf,
     pub host: PathBuf,
@@ -712,7 +717,8 @@ pub(crate) struct RoomToolsConfig {
 
 /// The room tools' MCP schemas (also the provider's function list).
 pub(crate) fn room_tool_specs() -> Vec<Value> {
-    let name = json!({"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"});
+    let name = json!({"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$",
+        "description":"An existing workspace reference alias (for example lab-index), or a canonical resource ID with exactly one existing workspace binding. Unknown or ambiguous IDs refuse; IDs do not import authority."});
     vec![
         json!({"name":"mini_room_ls",
             "description":"The cells written under this room, from the Host's signed history (since HEIGHT, default 0): each cell's first and last height, its writers, whether it is a member's stream, and the names this workspace holds for it (unnamed cells are named ROOM-cell-ID under your room grant). Read-only.",
@@ -721,7 +727,7 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
             "description":"This room's tariff (what a turn costs), its till, and your budget account's balance. Signed reads; read-only.",
             "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}),
         json!({"name":"mini_stream_tail",
-            "description":"Every stream in this room merged in one order every reader sees (height, author, cell, sequence); entry numbers #N never change. Only entries whose text the Host verified are shown with text. Read-only.",
+            "description":"Visible streams merged by height, author, cell and sequence. Reply number #N refers to this observed feed; the cell/sequence pair is the stable identity if newly visible history changes numbering. Only Host-verified text is shown. Read-only.",
             "inputSchema":{"type":"object","properties":{
                 "n":{"type":"string","pattern":"^[0-9]+$","maxLength":6},
                 "since":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"additionalProperties":false}}),
@@ -733,10 +739,10 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
                 "re":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
                 "required":["text"],"additionalProperties":false}}),
         json!({"name":"mini_doc_show",
-            "description":"A signed read of one document: its lines (who created each) and its links (to which cells). Read-only.",
+            "description":"Read a document’s current signed lines and links. After a confirmed write, read again to verify the change. Use document aliases in replies; renderer headers and hashes are observation metadata, not document prose. Read-only.",
             "inputSchema":{"type":"object","properties":{"doc":name},"required":["doc"],"additionalProperties":false}}),
         json!({"name":"mini_doc_link",
-            "description":"Add a link from document `from` to the cell `to` (a turn). Admitted only where you hold a grant to write `from` and its law admits you; otherwise the Host refuses and says why.",
+            "description":"Add a link from document reference `from` to existing workspace reference `to` (a turn). Use the programName from the assignment for the librarian program; aliases are preferred. A resource ID is accepted only when it uniquely names an existing binding. Admitted only where you hold a grant to write `from` and its law admits you; otherwise the Host refuses and says why.",
             "inputSchema":{"type":"object","properties":{"from":name,"to":name,
                 "relation":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
                 "required":["from","to"],"additionalProperties":false}}),
@@ -745,6 +751,39 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":{"doc":name,"text":{"type":"string","maxLength":3000}},
                 "required":["doc","text"],"additionalProperties":false}}),
     ]
+}
+
+/// Validate the complete write before a room turn is charged.
+pub(crate) fn validate_room_write(name: &str, arguments: &Value) -> Result<()> {
+    match name {
+        "mini_say" => {
+            only_keys(arguments, &["text", "to", "re"])?;
+            bounded_text(arguments, "text")?;
+            bounded_decimal(arguments, "to", 20)?;
+            bounded_decimal(arguments, "re", 10)?;
+        }
+        "mini_doc_append" => {
+            only_keys(arguments, &["doc", "text"])?;
+            bounded_name(arguments, "doc")?;
+            bounded_text(arguments, "text")?;
+        }
+        "mini_doc_link" => {
+            only_keys(arguments, &["from", "to", "relation"])?;
+            bounded_name(arguments, "from")?;
+            bounded_name(arguments, "to")?;
+            bounded_decimal(arguments, "relation", 10)?;
+        }
+        _ => return Err(format!("{name} is not a room write tool")),
+    }
+    Ok(())
+}
+
+/// Remove only the renderer's fixed 38-column continuation gutter. The
+/// signed header, atom creator/line labels and every content byte remain.
+pub(crate) fn compact_doc_rendering(text: &str) -> String {
+    if !text.starts_with("# doc ") { return text.to_owned(); }
+    text.split_inclusive('\n').map(|line|
+        line.strip_prefix("                                      ").unwrap_or(line)).collect()
 }
 
 /// The room tools that write (each one a metered turn).
@@ -938,10 +977,52 @@ impl RoomTools<'_> {
                 only_keys(arguments, &["doc"])?;
                 let doc = bounded_name(arguments, "doc")?;
                 let run = Self::ok_or_ending(self.line(&format!("doc show {doc}"))?)?;
-                Ok(json!({"doc":doc,"text":run.stdout,"links":rendered_links(&run.stdout)}))
+                Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&run.stdout)}))
             }
             _ => Err(format!("{name} is not a room read tool")),
         }
+    }
+
+    /// One controller-chosen operation record, retained before the client's
+    /// send boundary. Paths never come from model tool arguments.
+    pub fn operation_record(&self, op: &str, effect: &str) -> Result<PathBuf> {
+        if op.is_empty() || !op.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || !matches!(effect, "payment" | "write") {
+            return Err("invalid room operation identity".into());
+        }
+        let dir = self.config.workspace.join("room-operations");
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let meta = fs::symlink_metadata(&dir).map_err(|e| e.to_string())?;
+        if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } {
+            return Err("room operation directory must be an owned real directory".into());
+        }
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        Ok(dir.join(format!("{op}-{effect}.json")))
+    }
+
+    /// Exact client lookup only. The controller must already have proved the
+    /// submitter stopped before interpreting a missing record/call as absent.
+    pub fn lookup_operation(&self, op: &str, effect: &str) -> Result<Value> {
+        let record = self.operation_record(op, effect)?;
+        match fs::symlink_metadata(&record) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+                return Ok(json!({"resolution":"refused","basis":"operation-not-started","effect":effect})),
+            Err(error) => return Err(format!("operation record metadata: {error}")),
+            Ok(_) => {}
+        }
+        let output = Command::new(&self.config.mini)
+            .args(["credit", "--action", "lookup-operation", "--dir"])
+            .arg(&self.config.workspace).arg("--operation-record").arg(&record)
+            .arg("--socket").arg(&self.config.socket)
+            .stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+        let recovered = last_json(&String::from_utf8_lossy(&output.stdout));
+        let resolution = match recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str()) {
+            Some("confirmed") => "performed",
+            Some("refused" | "not-submitted") => "refused",
+            _ => "uncertain",
+        };
+        Ok(json!({"resolution":resolution,"basis":"exact-operation-record","effect":effect,
+            "lookup":recovered,"exitCode":output.status.code()}))
     }
 
     /// Pay one turn for `tool` as operation `op`. Ok: the payment (or the
@@ -963,6 +1044,8 @@ impl RoomTools<'_> {
             .arg(account)
             .arg("--memo")
             .arg(format!("op {op} {tool}"))
+            .arg("--operation-record")
+            .arg(self.operation_record(op, "payment")?)
             .arg("--socket")
             .arg(&self.config.socket)
             .stdin(Stdio::null())
@@ -988,18 +1071,34 @@ impl RoomTools<'_> {
     /// A write tool as operation `op`, already paid for. `spawned` sees each
     /// child's pid (the submitter).
     pub fn write(&self, op: &str, name: &str, arguments: &Value, spawned: &mut dyn FnMut(u32)) -> Result<Value> {
+        self.write_with_reply_guard(op,name,arguments,spawned,None)
+    }
+
+    /// Source-only stable thread guard; never taken from model tool arguments.
+    pub fn write_with_reply_guard(&self, op: &str, name: &str, arguments: &Value,
+        spawned: &mut dyn FnMut(u32), expected_reply: Option<(&str,u64)>) -> Result<Value> {
+        if expected_reply.is_some() && (name != "mini_say" || arguments["re"].as_str().is_none()) {
+            return Err("stable reply guard requires a threaded room say".into());
+        }
         let id = Self::proposal(op);
         match name {
             "mini_say" => {
                 only_keys(arguments, &["text", "to", "re"])?;
                 let text = bounded_text(arguments, "text")?;
                 let file = self.request_file(&format!("{id}.txt"), &text)?;
-                let mut line = format!("say --in {}", self.config.room);
+                let mut line = format!("say --in {} --operation-record {}", self.config.room, self.operation_record(op, "write")?.display());
                 if let Some(to) = bounded_decimal(arguments, "to", 20)? {
                     line.push_str(&format!(" --to {to}"));
                 }
                 if let Some(re) = bounded_decimal(arguments, "re", 10)? {
                     line.push_str(&format!(" --re {re}"));
+                }
+                if let Some((cell,sequence)) = expected_reply {
+                    if cell.is_empty() || cell.len()>39 || !cell.bytes().all(|b|b.is_ascii_digit())
+                        || (cell.len()>1 && cell.starts_with('0')) || sequence==0 {
+                        return Err("invalid stable reply reference".into());
+                    }
+                    line.push_str(&format!(" --expect-re-cell {cell} --expect-re-sequence {sequence}"));
                 }
                 line.push_str(&format!(" --file {file}"));
                 let run = Self::ok_or_ending(self.line_with(&line, spawned)?)?;
@@ -1029,19 +1128,6 @@ impl RoomTools<'_> {
         }
     }
 
-    /// Pay, then write: one turn (the MCP path; the room runner journals
-    /// between the two).
-    pub fn call(&self, op: &str, name: &str, arguments: &Value) -> Result<Value> {
-        if ROOM_WRITE_TOOLS.contains(&name) {
-            let paid = self.pay(op, name)?;
-            let mut result = self.write(op, name, arguments, &mut |_| {})?;
-            result["turn"] = paid;
-            Ok(result)
-        } else {
-            self.read(name, arguments)
-        }
-    }
-
     /// Exact lookup of operation `op`'s submission (never a resend): its
     /// attempt's outcome after `mini workspace --action recover`.
     pub fn lookup(&self, op: &str) -> Result<Value> {
@@ -1052,11 +1138,11 @@ impl RoomTools<'_> {
         }
         let run = self.line(&format!("lookup {id}"))?;
         let outcome: Option<Value> = fs::read(attempt.join("outcome.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
-        let accepted = outcome.as_ref().and_then(|o| o.get("type")).and_then(Value::as_str).is_some_and(|t| t != "refused");
+        let accepted = outcome.as_ref().is_some_and(|o| o["type"] == "confirmed" && matches!(o["confirmation"].as_str(), Some("installed" | "replayed")));
         if accepted {
             return Ok(json!({"resolution":"performed","basis":"exact-lookup","proposal":id,"outcome":outcome}));
         }
-        if run.stdout.contains("absent") || run.stderr.contains("absent") {
+        if last_json(&run.stdout).as_ref().is_some_and(|o| o["type"] == "absent") {
             return Ok(json!({"resolution":"refused","basis":"absent-after-submitter-stop","proposal":id}));
         }
         if run.code == 3 || outcome.as_ref().and_then(|o| o.get("type")).and_then(Value::as_str) == Some("refused") {

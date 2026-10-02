@@ -512,6 +512,8 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         reserve_signer: None,
     });
     runtime.config.provider_task = Some(ProviderTask {
+        context_window_tokens: None,
+        homelab: None,
         task: "7104".into(),
         subject: "10".into(),
         capability: "101".into(),
