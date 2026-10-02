@@ -424,6 +424,17 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Publish complete owner-private bytes with durable atomic replacement.
+/// Callers own the destination and decide whether replacement is authorized.
+pub(crate) fn replace_private_file(path:&Path,bytes:&[u8])->Result<()> {
+    let parent=path.parent().ok_or("atomic publication parent absent")?;
+    private_dir(parent)?;
+    let staged=parent.join(format!(".write-{}",random_nonce()?));
+    private_file(&staged,bytes)?;
+    fs::rename(&staged,path).map_err(|e|format!("cannot publish {}: {e}",path.display()))?;
+    File::open(parent).and_then(|directory|directory.sync_all()).map_err(|e|format!("cannot sync atomic publication: {e}"))
+}
+
 /// Publish the verified commitment after adoption or rotation.
 pub(crate) fn record_next_public(root: &Path, next: &[u8; 32]) -> Result<()> {
     let path = root.join("workspace.json");
@@ -432,11 +443,7 @@ pub(crate) fn record_next_public(root: &Path, next: &[u8; 32]) -> Result<()> {
     value["nextPublicKey"] = json!(hex(next));
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let staged = root.join(format!(".workspace.json.{}", random_nonce()?));
-    private_file(&staged, &bytes)?;
-    fs::rename(&staged, &path).map_err(|error| format!("cannot update {}: {error}", path.display()))?;
-    File::open(root).and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("cannot sync workspace commitment: {error}"))
+    replace_private_file(&path,&bytes)
 }
 
 pub(crate) struct InitIdentity<'a> {

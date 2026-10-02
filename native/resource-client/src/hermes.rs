@@ -317,40 +317,25 @@ fn put(path: &Path, value: &Value) -> Result<(), Done> {
     chat::put_json(path, value).map_err(err)
 }
 
-/// The node's Hermes subject: `--hermes`, else `HOME/hermes/node.json`.
-fn hermes_subject(session: &Session, explicit: Option<String>) -> Result<String, Done> {
-    if let Some(subject) = explicit {
-        return Ok(subject);
-    }
-    let path = session.home.join(NODE_FILE);
-    let value = chat::get_json(&path).ok_or_else(|| {
-        err(format!("this node names no Hermes ({} is absent; the operator enrolls the node's Hermes and writes it there), or pass --hermes SUBJECT", path.display()))
-    })?;
-    let subject = member(&value, "subject").map_err(err)?.to_owned();
-    chat::decimal(&subject, "the node's Hermes subject").map_err(err)?;
-    Ok(subject)
+/// Resolve one operator-advertised registration before any grants or funding.
+/// A display alias is never a custody coordinate; tasks are room-bound.
+fn registration(session: &Session, explicit: Option<String>, room_cell: &str) -> Result<Value, Done> {
+    let registry = chat::get_json(&session.home.join("hermes/registry.json")).or_else(||chat::get_json(Path::new("/etc/mini/hermes-residents.json")));
+    let default = chat::get_json(&session.home.join(NODE_FILE));
+    let selected = explicit.or_else(|| default.as_ref().and_then(|v|v["subject"].as_str()).map(str::to_owned))
+        .ok_or_else(||err("this node has no registered Hermes"))?;
+    let mut records: Vec<Value> = registry.as_ref().and_then(|v|v["residents"].as_array())
+        .into_iter().flatten().cloned().collect();
+    if records.is_empty() { if let Some(default) = default {records.push(default);} }
+    let matches: Vec<_> = records.into_iter().filter(|v|v["subject"]==selected && v["roomCell"]==room_cell).collect();
+    if matches.len()!=1 {return Err(err("Hermes subject and room must select exactly one registered task"));}
+    let record=matches[0].clone();
+    for k in ["subject","task","roomCell"] {chat::decimal(member(&record,k).map_err(err)?,k).map_err(err)?;}
+    let enc=member(&record,"encryptionKey").map_err(err)?;
+    if enc.len()!=64 || !enc.bytes().all(|b|b.is_ascii_hexdigit()) {return Err(err("registered Hermes encryptionKey must be 64 hex digits"));}
+    Ok(record)
 }
-
-/// Is this room private (PRIVATE-ROOMS: `chat new ROOM --private`)? PRIVACY
-/// B6: a hosted Hermes in a private room makes the room readable on the box,
-/// so `summon` refuses without `--i-know`.
-fn room_is_private(session: &Session, room: &str) -> bool {
-    chat::room_is_private(session, room)
-}
-
-/// The node's Hermes encryption public key (`encryptionKey` in
-/// HOME/hermes/node.json): a private room wraps its key to it.
-fn hermes_enc(session: &Session) -> Result<String, Done> {
-    let path = session.home.join(NODE_FILE);
-    let value = chat::get_json(&path).ok_or_else(|| err(format!("{} is absent", path.display())))?;
-    let enc = value.get("encryptionKey").and_then(Value::as_str).ok_or_else(|| {
-        usage(format!("this room is private: its key is wrapped to Hermes's encryption key, and {} names none (\"encryptionKey\": 64 hex)", path.display()))
-    })?;
-    if enc.len() != 64 || !enc.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(usage(format!("{}: encryptionKey is 64 hex digits", path.display())));
-    }
-    Ok(enc.to_owned())
-}
+fn room_is_private(session: &Session, room: &str) -> bool {chat::room_is_private(session, room)}
 
 fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
     chat::propose_submit(session, prefix, request)
@@ -427,26 +412,35 @@ fn summon(
     }
     let private = room_is_private(session, room);
     crate::workspace::roomkey::hosted_private_invite(private, true, i_know).map_err(usage)?;
-    let enc = if private { Some(hermes_enc(session)?) } else { None };
-    let h = hermes_subject(session, hermes)?;
+    let room_cell=target(session,&chat_room.name)?;
+    let resident=registration(session,hermes,&room_cell)?;
+    let h=member(&resident,"subject").map_err(err)?.to_owned();
+    let task=member(&resident,"task").map_err(err)?.to_owned();
+    let enc=private.then(||resident["encryptionKey"].as_str().unwrap().to_owned());
     let root = session.workspace.clone();
     let ws = workspace::load(&root).map_err(err)?;
     let fund = budget.unwrap_or_else(|| role.fund.clone());
     let every = every.unwrap_or_else(|| "3".into());
-    let state_file = state_path(session, room);
+    let state_file = state_path(session, &room_cell);
     let mut state = chat::get_json(&state_file).unwrap_or_else(|| json!({"type":"mini-hermes-summon-state-v1","room":room,"steps":{}}));
-    if let Some(prior) = state.get("hermes").and_then(Value::as_str) {
-        if prior != h || state.get("role").and_then(Value::as_str) != Some(role_name) {
-            return Err(usage(format!("{room} already has Hermes {prior} as {}; dismiss it first", state["role"].as_str().unwrap_or("?"))));
+    if state["steps"].get("dismissed").is_some() {
+        let retained=session.home.join("hermes/history").join(format!("room-{room_cell}-assignment-{}.json",state["assignment"].as_str().unwrap_or("0")));
+        put(&retained,&state)?;
+        state=json!({"type":"mini-hermes-summon-state-v1","room":room,"steps":{}});
+    }
+    if let Some(prior)=state.get("hermes").and_then(Value::as_str) {
+        if prior!=h || state["role"]!=role_name || state["task"]!=task {
+            return Err(usage(format!("{room} already has a different registered assignment; dismiss it first")));
         }
     }
-    if state["steps"].get("dismissed").is_some() {
-        return Err(usage(format!("Hermes was dismissed from {room}; a new summon starts from a fresh room record (remove {})", state_file.display())));
-    }
+    if state["assignment"].is_null() {state["assignment"]=json!(workspace::random_nonce().map_err(err)?);}
+    state["roomCell"]=json!(room_cell);state["task"]=json!(task);
+    put(&state_file,&state)?;
     state["hermes"] = json!(h);
     state["role"] = json!(role_name);
     let done = |state: &Value, step: &str| state["steps"].get(step).is_some();
-    let out = outbox(session, &h);
+    let assignment=state["assignment"].as_str().unwrap().to_owned();
+    let out = outbox(session, &h).join(format!("room-{room_cell}")).join(format!("assignment-{assignment}"));
     let mut tariff = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
     // 1. the till
     if tariff.fields.get("till").is_none() {
@@ -463,7 +457,8 @@ fn summon(
     }
     let turn = tariff.fields.get("hermes/turn").cloned().unwrap_or_else(|| "0".into());
     // 2. the budget account
-    let account_name = format!("{room}-hermes");
+    if state["accountName"].is_null(){state["accountName"]=json!(format!("h-a{assignment}-hermes"));put(&state_file,&state)?;}
+    let account_name=state["accountName"].as_str().unwrap().to_owned();
     if !done(&state, "account") {
         let handoff = quietly(|| workspace::create_funded_account(&root, &ws, &account_name, &json!({"type":"all","predicates":[]}), &h, &fund))
             .map_err(err)?;
@@ -511,7 +506,7 @@ fn summon(
                 println!("{room}: {name} {how} (its law admits you and Hermes)");
             }
             let reference = delegate(session, &name, &h, &doc.verbs)?;
-            put(&out.join(format!("{name}.json")), &reference)?;
+            put(&out.join(format!("{}.json",workspace::ref_file(&name))), &reference)?;
             state["steps"][&key] = json!(target(session, &name)?);
             put(&state_file, &state)?;
             println!("{room}: Hermes holds {} on {name}", doc.verbs.join(","));
@@ -542,20 +537,23 @@ fn summon(
     // 6. the room's hermes fields
     if !done(&state, "fields") {
         let current = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
-        quietly(|| crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", h.clone()), ("hermes/account", account.clone())])).map_err(err)?;
-        state["steps"]["fields"] = json!(true);
+        let origin=quietly(|| crate::credit::set_fields_exact(&root,&ws,room,&current,
+            &[("hermes",h.clone()),("hermes/account",account.clone()),("hermes/assignment",assignment.clone())],&format!("summon-{assignment}"))).map_err(err)?;
+        state["steps"]["fields"] = json!(origin.to_string_lossy());
         put(&state_file, &state)?;
     }
     // 7. the hand-off for Hermes's controller
     let my_account = quietly(|| crate::credit::my_account(&root, &ws, None)).map_err(err)?;
     let founder_account = target(session, &my_account)?;
     let manifest = json!({"type":"mini-hermes-summon-v1","room":room,"roomCell":target(session, &chat_room.name)?,
-        "role":role_name,"hermes":h,"founder":me,"founderAccount":founder_account,
+        "role":role_name,"hermes":h,"task":task,"assignment":assignment,"encryptionKey":resident["encryptionKey"],"founder":me,"founderAccount":founder_account,
         "account":{"name":account_name,"target":account},"stream":state["steps"]["invite"],
         "program":{"name":program_name,"target":state["steps"]["program"]},"docs":granted,
         "every":every,"tariff":{"hermes/turn":turn,"till":tariff.fields.get("till")},
         "authority":"hint-only: every use is a signed request the Host judges"});
     put(&out.join(format!("summon-{room}.json")), &manifest)?;
+    let origin=PathBuf::from(state["steps"]["fields"].as_str().ok_or_else(||err("summon origin missing"))?);
+    crate::hermes_handoff::seal(&root,&ws,&out,&manifest,&origin,&task).map_err(err)?;
     state["manifest"] = manifest.clone();
     put(&state_file, &state)?;
     println!(
@@ -590,7 +588,8 @@ fn ask(session: &Session, room: Option<String>, text: String) -> Result<(), Done
 
 fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
     let me = chat::me(session)?;
-    let state_file = state_path(session, room);
+    let room_cell=target(session,room)?;
+    let state_file = state_path(session, &room_cell);
     let mut state = chat::get_json(&state_file).ok_or_else(|| usage(format!("you did not summon Hermes into {room}")))?;
     if state["steps"].get("dismissed").is_some() {
         return Err(usage(format!("Hermes was already dismissed from {room}")));
@@ -616,11 +615,14 @@ fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
     let root = session.workspace.clone();
     let ws = workspace::load(&root).map_err(err)?;
     let current = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
-    quietly(|| crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", "0".into()), ("hermes/account", "0".into())])).map_err(err)?;
+    let assignment=state["assignment"].as_str().ok_or_else(||err("assignment absent"))?;
+    let origin=quietly(||crate::credit::set_fields_exact(&root,&ws,room,&current,&[("hermes","0".into()),("hermes/account","0".into()),("hermes/assignment","0".into())],&format!("dismiss-{assignment}"))).map_err(err)?;
+    let out=outbox(session,&h).join(format!("room-{room_cell}")).join(format!("assignment-{assignment}"));
+    crate::hermes_handoff::seal_dismiss(&ws,&out,&origin).map_err(err)?;
     let notice = json!({"type":"mini-hermes-dismiss-v1","room":room,"hermes":h,"founder":me,
         "returnTo":state["manifest"]["founderAccount"],"account":state["manifest"]["account"],
         "revoked":revoked});
-    put(&outbox(session, &h).join(format!("dismiss-{room}.json")), &notice)?;
+    put(&outbox(session,&h).join(format!("room-{room_cell}")).join(format!("assignment-{}",state["assignment"].as_str().unwrap())).join(format!("dismiss-{room}.json")), &notice)?;
     state["steps"]["dismissed"] = json!(true);
     put(&state_file, &state)?;
     println!(

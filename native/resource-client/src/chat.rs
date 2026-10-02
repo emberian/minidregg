@@ -509,12 +509,9 @@ pub(crate) fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         private_dirs(parent)?;
     }
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    let _ = fs::remove_file(&tmp);
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
+    let mut bytes=serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?;
     bytes.push(b'\n');
-    private_file(&tmp, &bytes)?;
-    fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
+    crate::workspace::replace_private_file(path,&bytes)
 }
 
 pub(crate) fn get_json(path: &Path) -> Option<Value> {
@@ -1832,18 +1829,21 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
     if roster.founder.as_deref() != Some(me.as_str()) {
         return Err(usage(format!("only the founder of {name} invites")));
     }
-    if roster.members.iter().any(|(s, _)| s == subject) {
-        return Err(usage(format!("{subject} is already a member of {name}")));
-    }
-    let slot = 2 * (roster.members.len() as u64 + 1) + 1;
-    if slot + 1 >= crate::credit::ROOM_FIELDS_START {
-        return Err(usage(format!("the roster of {name} is full")));
+    // A kick/leave revokes grants but retains the stream and roster history.
+    // Re-invitation gives fresh source authority and reuses that subject's slot.
+    let prior=roster.members.iter().find(|(s,_)|s==subject).map(|(_,stream)|stream.clone());
+    if prior.is_none() && roster.members.len()>=crate::room_schema::ROSTER_MEMBER_CAPACITY {
+        return Err(usage(format!("the roster of {name} has reached its {} historical member slots; re-inviting an existing subject reuses its slot",crate::room_schema::ROSTER_MEMBER_CAPACITY)));
     }
     let invitation = room_grant(session, name, subject, verbs)?;
-    let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
-    let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), None)?;
-    let stream_target = member(&stream, "target").map_err(error)?.to_owned();
-    roster_write(session, name, &[(slot, subject), (slot + 1, &stream_target)])?;
+    let stream_target=if let Some(stream)=prior {stream}else {
+        let slot=2*(roster.members.len() as u64+1)+1;
+        let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
+        let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), None)?;
+        let stream_target=member(&stream,"target").map_err(error)?.to_owned();
+        roster_write(session,name,&[(slot,subject),(slot+1,&stream_target)])?;
+        stream_target
+    };
     if let Some(enc) = &enc {
         // The room key, wrapped to the invitee's encryption key, in one write
         // to the keys cell (only the founder writes it).

@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub(crate) const INDEX_FIELD: &str = "1010";
+pub(crate) const INDEX_FIELD: &str = crate::room_schema::NAMES_FIELD;
 pub(crate) const SCHEME: &str = "mini-name";
 
 #[derive(Clone, Debug, PartialEq, Eq)]

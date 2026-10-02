@@ -19,47 +19,9 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The first declared field key of the room cell's OWN fields (this table).
-/// A chat room's roster holds the fields below it (founder 2, member k at
-/// 2k+1 / 2k+2: `chat::roster_of`), so one room cell carries both a roster
-/// and a tariff; until 2026-10-01 the tariff sat at 1..7 and `hermes/turn`
-/// (3) was the first member's subject.
-pub(crate) const ROOM_FIELDS_START: u64 = 1001;
-
-/// The room cell's own fields: name → declared field key of `R` (the one
-/// list; a declared-cell birth that names its fields names these).
-/// `week`: credit a week costs (0 = free: the concierge issues on request);
-/// `birth`: the room's birth price (stored, not charged by anything here);
-/// `hermes/turn`: what each Hermes turn pays the till (`credit --action
-/// turn`); `till`: the room account `A_R` payments go to; `period`: a week's
-/// length in heights; `runner`: the concierge's own account (`topup …
-/// concierge` funds it); `concierge`: the concierge's subject; `hermes`: the
-/// subject `summon` put on the roster (0 after `dismiss`); `hermes/account`:
-/// Hermes's budget account `A_P` (`topup` funds it); `open`: 1 when a paid
-/// room sells a week to anyone who pays, 0 (the default) when the concierge
-/// sells only to a subject the room already admits (a standing grant under R).
-pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
-    ("week", "1001"),
-    ("birth", "1002"),
-    ("hermes/turn", "1003"),
-    ("till", "1004"),
-    ("period", "1005"),
-    ("runner", "1006"),
-    ("concierge", "1007"),
-    ("hermes", "1008"),
-    ("hermes/account", "1009"),
-    ("open", "1010"),
-];
-
-/// The finite roster and tariff fields a room may hold. Keep the birth
-/// declaration tied to the same boundary used by roster reads and invitations.
-pub(crate) fn room_declared_fields() -> String {
-    std::iter::once(format!("2-{}", ROOM_FIELDS_START - 1))
-        .chain(TARIFF_FIELDS.iter().map(|(_, key)| (*key).to_owned()))
-        .chain(std::iter::once(crate::workspace::shared_names::INDEX_FIELD.to_owned()))
-        .collect::<Vec<_>>()
-        .join(",")
-}
+pub(crate) use crate::room_schema::{ROOM_FIELDS_START,TARIFF_FIELDS};
+/// Fresh rooms declare one central schema, including names, paid-open and assignment.
+pub(crate) fn room_declared_fields() -> String { crate::room_schema::declared_fields() }
 
 /// The topic a Hermes turn's payment publishes on Hermes's account.
 pub(crate) const HERMES_TOPIC: &str = "hermes";
@@ -276,6 +238,23 @@ fn propose_and_submit(root: &Path, ws: &Value, id: &str, request: &Value) -> Res
 /// Write tariff fields of `R` in one scalar turn: `create` for a field `R`
 /// lacks, `write` (expecting the signed value just read) for one it holds.
 pub(crate) fn set_fields(root: &Path, ws: &Value, name: &str, room: &Room, values: &[(&str, String)]) -> Result<PathBuf> {
+    let id = format!("tariff-{}-{}", room.height, workspace::random_nonce()?);
+    set_fields_exact(root,ws,name,room,values,&id)
+}
+/// Persist one assignment intent before sending; retries recover its original call.
+pub(crate) fn set_fields_exact(root:&Path,ws:&Value,name:&str,room:&Room,values:&[(&str,String)],id:&str)->Result<PathBuf> {
+    let retained=root.join("sources").join(format!("credit-{id}.request.json"));
+    if retained.exists() {
+        let request=workspace::bounded_json(&retained)?;
+        let target=&request["targets"][0];
+        let actions=target["payload"]["actions"].as_array().ok_or("retained assignment actions absent")?;
+        if target["name"]!=name || actions.len()!=values.len() {return Err("retained assignment target differs".into())}
+        for (field,value)in values {
+            let key=field_key(field)?;
+            if actions.iter().filter(|a|a["key"]["field"]==key && a["value"]==*value).count()!=1 {return Err("retained assignment value differs".into())}
+        }
+        return propose_and_submit(root,ws,id,&request)
+    }
     let mut actions = Vec::new();
     for (field, value) in values {
         let key = field_key(field)?;
@@ -287,8 +266,7 @@ pub(crate) fn set_fields(root: &Path, ws: &Value, name: &str, room: &Room, value
     }
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":name,"payload":{"type":"scalar","actions":actions}}]});
-    let id = format!("tariff-{}-{}", room.height, workspace::random_nonce()?);
-    propose_and_submit(root, ws, &id, &request)
+    propose_and_submit(root, ws, id, &request)
 }
 
 /// The permit-all predicate an account birth names (accounts are governed by

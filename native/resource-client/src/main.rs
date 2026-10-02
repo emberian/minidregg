@@ -108,6 +108,9 @@ mod chat;
 #[cfg(unix)]
 mod hermes;
 #[cfg(unix)]
+mod hermes_handoff;
+mod room_schema;
+#[cfg(unix)]
 mod credit;
 #[cfg(unix)]
 mod story;
@@ -3055,6 +3058,7 @@ fn run(mut args: Args) -> Result<()> {
         "key-status" => key_rotation::key_status(args),
         #[cfg(unix)]
         "credit" => credit::run(args),
+        "hermes-handoff" => hermes_handoff::run(args),
         #[cfg(unix)]
         "story-law" => story::law_command(args),
         "well" => well::run(args),
