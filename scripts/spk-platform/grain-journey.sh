@@ -39,13 +39,35 @@ CONFIG=$WR/deployment/pinned-config.json
 PSOCK=$RUN/sock/participant/host.sock
 OSOCK=$RUN/sock/operator/host.sock
 EV=$RUN/evidence
-# The grain host state lives below the broker's grains root under the Store
-# key (the first 16 hex of the pinned genesis config's SHA-256).
+# Store identity belongs to the native host/broker. Retain its exact result;
+# never reconstruct a Store key from configuration bytes or scan directories.
+PROFILE_RESULT=$EV/profile-result.json
+STATE= PROFILE=
 state_paths() {
-  if [ -e "$CONFIG" ]; then
-    KEY=$(sha256sum "$CONFIG" | cut -c1-16)
-    STATE=$GRAINS_ROOT/$KEY/host
-    PROFILE=$STATE/grain-host.json
+  if [ -f "$PROFILE_RESULT" ]; then
+    jq -e --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" --arg init "$EV/init-store.json" '
+      .protocol == "mini-spk-grain-profile-result-v1" and
+      .miniConfig == $config and .miniConfigSha256 == $configSha and
+      .grainsRoot == $grains and .initStoreResult == $init and (.stateRoot | startswith($grains + "/")) and
+      .profilePath == (.stateRoot + "/grain-host.json")' "$PROFILE_RESULT" >/dev/null || {
+        echo "grain journey: retained profile result differs from this fixture" >&2; exit 1;
+      }
+    STATE=$(jq -er .stateRoot "$PROFILE_RESULT")
+    PROFILE=$(jq -er .profilePath "$PROFILE_RESULT")
+    jq -e --arg state "$STATE" '
+      .protocol == "mini-spk-grain-init-store-v1" and .stateRoot == $state' "$EV/init-store.json" >/dev/null || {
+        echo "grain journey: retained profile differs from native Store initialization" >&2; exit 1;
+      }
+    [ "$(realpath -- "$STATE")" = "$STATE" ] && [ -f "$PROFILE" ] || {
+      echo "grain journey: retained profile path is absent or noncanonical" >&2; exit 1;
+    }
+    jq -e --arg state "$STATE" --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" '
+      .stateRoot == $state and .miniConfig == $config and
+      .miniConfigSha256 == $configSha and .grainsRoot == $grains' "$PROFILE" >/dev/null || {
+        echo "grain journey: retained profile contradicts its result" >&2; exit 1;
+      }
   fi
 }
 state_paths
@@ -92,12 +114,22 @@ service_up() {
   name=$1 socket=$2 mode=$3
   pidfile=$RUN/sock/$name.pid
   if [ -S "$socket" ] && [ -s "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    # Do not accept the old independent public native session as this proxy.
+    [ -s "$pidfile.mode" ] && [ "$(cat "$pidfile.mode")" = "$mode" ] ||
+      fail "$name service mode differs; retain this fixture and use a fresh one"
     return 0
   fi
   mkdir -p -m 700 "${socket%/*}"
   rm -f "$socket"
-  setsid "$MINI" "$mode" --host "$HOST" --config "$CONFIG" --socket "$socket" \
-    >"$RUN/sock/$name.log" 2>&1 </dev/null &
+  case "$mode" in
+    serve-operator)
+      set -- "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$socket" ;;
+    serve-public-proxy)
+      set -- "$MINI" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG" ;;
+    *) fail "unsupported fixture service mode $mode" ;;
+  esac
+  printf '%s\n' "$mode" >"$pidfile.mode"
+  setsid "$@" >"$RUN/sock/$name.log" 2>&1 </dev/null &
   echo "$!" >"$pidfile"
   tick=0
   until [ -S "$socket" ]; do
@@ -108,8 +140,12 @@ service_up() {
 }
 
 services() {
-  service_up participant "$PSOCK" serve
+  # One Host owns the Store. The public socket relays only its public envelope
+  # subset to that same private owner, with the exact config pin.
   service_up operator "$OSOCK" serve-operator
+  service_up participant "$PSOCK" serve-public-proxy
+  # workroom_ready performs signed source reads in the following phase;
+  # socket existence here is process readiness, not native qualification.
 }
 
 stop_services() {
@@ -538,9 +574,17 @@ floor() (
 
 write_profile() {
   state_paths
-  [ ! -e "$PROFILE" ] || return 0
+  if [ -n "$PROFILE" ]; then
+    printf '%s\n' "$PROFILE_RESULT"
+    return 0
+  fi
+  [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
   "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" >"$EV/init-store.json"
-  mkdir -p -m 700 "$STATE"
+  STATE=$(jq -er 'select(.protocol == "mini-spk-grain-init-store-v1") | .stateRoot' "$EV/init-store.json")
+  case "$STATE" in "$GRAINS_ROOT"/*) ;; *) fail "native Store root is outside the pinned grains root" ;; esac
+  [ -d "$STATE" ] && [ "$(realpath -- "$STATE")" = "$STATE" ] || fail "native Store root is absent or noncanonical"
+  PROFILE=$STATE/grain-host.json
+  [ ! -e "$PROFILE" ] || fail "profile already exists without this fixture result; preserve it"
   semantics=$(jq -er .semantics "$WR/operator-profile.json")
   jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" \
     --arg hostSha "$(sha "$HOST")" \
@@ -556,6 +600,13 @@ write_profile() {
      completionCustodianSeed:$completion,completionSemantics:$semantics,
      bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha}' >"$PROFILE"
   chmod 600 "$PROFILE"
+  jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" \
+    --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
+    --arg init "$EV/init-store.json" '
+    {protocol:"mini-spk-grain-profile-result-v1",profilePath:$profile,stateRoot:$state,
+     grainsRoot:$grains,miniConfig:$config,miniConfigSha256:$configSha,
+     initStoreResult:$init}' >"$PROFILE_RESULT"
+  printf '%s\n' "$PROFILE_RESULT"
 }
 
 

@@ -67,6 +67,34 @@ def grant(target, cap, kind="object"):
     return {"kind": kind, "target": str(target), "capability": str(cap)}
 
 
+def discover_profile(root, config, grains, artifacts):
+    """Consume the retained native/profile result, without deriving Store identity."""
+    result_path = root / "evidence/profile-result.json"
+    result = load(result_path)
+    require(result.get("protocol") == "mini-spk-grain-profile-result-v1", "unknown profile result protocol")
+    state = absolute(result["stateRoot"])
+    profile_path = absolute(result["profilePath"])
+    init_path = root / "evidence/init-store.json"
+    require(state.is_relative_to(grains) and state != grains and state.resolve() == state,
+            "native profile state is outside the pinned grains root or noncanonical")
+    require(profile_path == state / "grain-host.json" and profile_path.resolve() == profile_path,
+            "native profile path differs from its retained state")
+    require(result.get("miniConfig") == str(config) and result.get("miniConfigSha256") == sha(config)
+            and result.get("grainsRoot") == str(grains) and result.get("initStoreResult") == str(init_path),
+            "profile result differs from fixture/config pins")
+    initialized = load(init_path)
+    require(initialized.get("protocol") == "mini-spk-grain-init-store-v1" and initialized.get("stateRoot") == str(state),
+            "profile result differs from native Store initialization")
+    profile = load(profile_path)
+    require(profile.get("stateRoot") == str(state) and profile.get("miniConfig") == str(config)
+            and profile.get("miniConfigSha256") == sha(config) and profile.get("grainsRoot") == str(grains),
+            "profile differs from retained fixture/config pins")
+    for role, path_field, hash_field in [("host","miniHost","miniHostSha256"),("spkHost","spkHost","spkHostSha256")]:
+        require(profile.get(path_field) == artifacts[role]["path"] and profile.get(hash_field) == artifacts[role]["sha256"],
+                "profile differs from pinned candidate artifacts")
+    return state, profile_path, profile
+
+
 def check_registration(reply, request, delegate):
     fields = {"protocol","registrationNonceHex","routeIndex","app","appGeneration","session",
               "sessionGeneration","subject","ticketResource","sessionFingerprintHex","admittedHeight","admittedWorldRoot"}
@@ -99,8 +127,9 @@ class Fixture:
         self.m = self.f["artifacts"]
         for a in self.m.values():
             require(sha(a["path"]) == a["sha256"], "candidate artifact changed")
-        self.state = Path(self.f["state"])
-        self.profile = self.state / "grain-host.json"
+        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m)
+        require(str(self.state) == self.f["state"] and str(self.profile) == self.f["profilePath"],
+                "fixture state differs from retained native profile result")
         self.app = self.f["app"]
         self.appcap = "3101"
         self.pkgcap = "3103"
@@ -480,18 +509,16 @@ def prepare(path):
         with open(str(p)+".stdout","xb") as out,open(str(p)+".stderr","xb") as err:
             r = subprocess.run([str(HERE/"grain-journey.sh"),"phase",str(root),*names],env=env,stdout=out,stderr=err,timeout=7200)
         require(r.returncode == 0,f"fixture phase failed; inspect {p}.stderr; preserve all evidence")
-    phases("store","services","workroom","profile","birth-a","install-a")
+    phases("store","services","workroom","profile")
     config = root/"store/base/workroom/deployment/pinned-config.json"
-    state = grains/sha(config)[:16]/"host"
-    profile_path = state/"grain-host.json"
-    profile = load(profile_path)
-    require(profile["stateRoot"] == str(state) and profile["miniConfig"] == str(config), "profile does not name fresh fixture")
+    state, profile_path, profile = discover_profile(root,config,grains,artifacts)
+    phases("birth-a","install-a")
     save(root/"profile-before-lease.json",profile)
     profile["wsAuthorityLeaseSeconds"] = lease
     tmp = state/("profile-"+secrets.token_hex(8)+".json")
     save(tmp,profile)
     os.replace(tmp,profile_path)
-    f = {"schema":SCHEMA,"root":str(root),"app":prefix+"01","artifacts":artifacts,"state":str(state),
+    f = {"schema":SCHEMA,"root":str(root),"app":prefix+"01","artifacts":artifacts,"state":str(state),"profilePath":str(profile_path),"grainsRoot":str(grains),
          "candidateSource":m["sourceCommit"],"leaseSeconds":lease,"enableHotRegrant":c.get("enableHotRegrant",False),"delegates":{}}
     for label,subject,session,cap,base in [("a","7",prefix+"10","3211",3230),("b","9",prefix+"12","3221",3240)]:
         f["delegates"][label] = {"subject":subject,"session":session,"cap":cap,"ticket":prefix+("20" if label=="a" else "22"),

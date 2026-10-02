@@ -43,6 +43,21 @@ python3 scripts/spk-platform/ws-continuity-journey.py \
   --output /var/lib/minidregg/spk/fixtures/continuity-common-UNIQUE/journey-result.json
 ```
 
+The service phase starts one private `mini serve-operator` with the pinned Host
+and config, then `mini serve-public-proxy` with that same config and the private
+socket as its upstream. It never opens a second native Host over the Store. The
+following workroom phase uses actual signed reads through the proxy; socket
+existence alone is not source qualification.
+
+The profile phase consumes the actual `spk-host grain init-store` result and emits
+`evidence/profile-result.json`, naming the exact profile path and native state
+root. Neither script derives Store identity from a config hash or scans for a
+likely directory. The adapter binds that retained result to the initialization
+result, config bytes, grains root and candidate binary pins before installation,
+and checks it again on every hook. Deployment-specific identities therefore
+remain the native host/broker's decision. A mismatched or noncanonical path fails
+without overwriting another profile.
+
 The existing `grain-store.sh` constructs the ordinary workroom genesis, including
 controller 7, app owner/tool 8 and member 9. The adapter uses source-authored
 session births for **participant 7 and participant 9**, delegates separate app and
@@ -68,7 +83,7 @@ its own session is owner 8 revoking a share. B's ticket and route are independen
 resident in status, a retained STOP receipt anchor and a fresh signed app read
 showing stopped phase 2. It leaves the stopped app and all evidence in place.
 Store participant/operator services remain running for subsequent inspection.
-There is no cleanup command that erases data or terminates a potentially unrelated
+The adapter has no cleanup command that erases data or terminates a potentially unrelated
 process from an old PID file.
 
 By default the generated journey omits `regrantA`. With `enableHotRegrant:true`,
