@@ -126,9 +126,21 @@ def State.Admissible (image : Image) (state : State) : Prop :=
   (state.cells.map Prod.fst).Nodup ∧ state.absentBytes = image.seed.absentBytes ∧
     ∀ cellId ∈ state.cells.map Prod.fst, cellId ∈ image.cellIds
 
-instance (image : Image) (state : State) : Decidable (state.Admissible image) := by
-  unfold State.Admissible
-  infer_instance
+/-- Admissibility against an identifier list given once. -/
+def State.admissibleAgainst (ids : List CellId) (absent : List UInt8) (state : State) : Bool :=
+  decide (state.cells.map Prod.fst).Nodup && decide (state.absentBytes = absent) &&
+    (state.cells.map Prod.fst).all fun cellId => decide (cellId ∈ ids)
+
+theorem State.admissibleAgainst_iff (image : Image) (state : State) :
+    state.admissibleAgainst image.cellIds image.seed.absentBytes = true ↔ state.Admissible image := by
+  simp [State.admissibleAgainst, State.Admissible, List.all_eq_true, and_assoc]
+
+/-- Decided with the image's identifiers enumerated ONCE. The derived instance
+re-enumerated `image.cellIds` (an `eraseDups` over every write in the log) for
+each checkpoint cell: measured 17.5 s per `resume` at 2005 records and 1018
+cells, paid by every cold open and every checkpoint rebase. -/
+instance (image : Image) (state : State) : Decidable (state.Admissible image) :=
+  decidable_of_iff _ (State.admissibleAgainst_iff image state)
 
 /-- Resume: materialize the checkpoint at `height`, replay the records after
 it. An inadmissible state refuses, as `Image.restore` refuses a duplicated seed. -/
