@@ -342,6 +342,9 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
   | .refused .undisclosed _ _ none =>
       (["refused: undisclosed — a blind submission names no reason, by design"],
        [("reason", "undisclosed")])
+  | .refused .lawDenied _ _ none =>
+      (["refused: law-denied: the law refused, and the refusal names no clause (the cell has no committed law, or every failing clause reads fields outside your grant)"],
+       [("reason", "law-denied")])
   | .refused reason _ _ none =>
       ([s!"refused: {reason.name}: {reason.describe}"], [("reason", reason.name)])
   | .confirmed _ receipt => ([s!"not refused: confirmed at height {receipt.acceptedCount}"], [("reason", .null)])

@@ -151,7 +151,12 @@ pub(crate) fn unsat_lines(answer: &Value, query_part: &str) -> Vec<String> {
                         sources_text(constraint, query_part)
                     ));
                 }
-                let sum = entry.get("sum").and_then(Value::as_i64).unwrap_or(0);
+                let sum = entry
+                    .get("sumText")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| entry.get("sum").map(Value::to_string))
+                    .unwrap_or_else(|| "?".into());
                 lines.push(format!(
                     "  (added up, they say 0 <= {sum}, which no value can make true)"
                 ));
