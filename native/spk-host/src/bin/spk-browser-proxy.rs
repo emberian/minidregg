@@ -443,6 +443,64 @@ mod linux {
         tls.flush()
     }
 
+    pub fn main() -> io::Result<()> {
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() != 3 {
+            return Err(invalid(
+                "usage: spk-browser-proxy ABS_PRIVATE_CUSTODIAN_DIR LOOPBACK_PORT",
+            ));
+        }
+        let directory = Path::new(&args[1]);
+        let _ = Journal::open(directory)?;
+        let port = args[2]
+            .parse::<u16>()
+            .map_err(|_| invalid("TLS port refused"))?;
+        if port == 0 || args[2].starts_with('0') {
+            return Err(invalid("TLS port refused"));
+        }
+        let config_file = private_file(&directory.join("custodian.json"))?;
+        let config_value: serde_json::Value = serde_json::from_reader(config_file)?;
+        let expected_host = config_value
+            .get("expectedHost")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid("custodian expectedHost missing"))?;
+        if !expected_host.ends_with(&format!(":{port}")) {
+            return Err(invalid("TLS loopback port differs from custodian origin"));
+        }
+        let config = tls_config(directory)?;
+        let socket = directory.join("http.sock");
+        let meta = fs::symlink_metadata(&socket)?;
+        if !meta.file_type().is_socket()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+        {
+            return Err(invalid("custodian Unix socket identity drift"));
+        }
+        let listener = TcpListener::bind(("127.0.0.1", port))?;
+        let active = Arc::new(AtomicUsize::new(0));
+        for connection in listener.incoming() {
+            match connection {
+                Ok(connection) => {
+                    let Some(slot) = ConnectionSlot::reserve(&active) else {
+                        continue;
+                    };
+                    let socket = socket.clone();
+                    let config = Arc::clone(&config);
+                    std::thread::Builder::new()
+                        .name("spk-browser".into())
+                        .spawn(move || {
+                            let _slot = slot;
+                            if let Err(error) = handle(&socket, connection, config) {
+                                eprintln!("spk-browser-proxy: connection: {error}");
+                            }
+                        })?;
+                }
+                Err(_) => continue,
+            }
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -683,64 +741,6 @@ mod linux {
             drop(slots);
             assert_eq!(count.load(Ordering::Relaxed), 0);
         }
-    }
-
-    pub fn main() -> io::Result<()> {
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() != 3 {
-            return Err(invalid(
-                "usage: spk-browser-proxy ABS_PRIVATE_CUSTODIAN_DIR LOOPBACK_PORT",
-            ));
-        }
-        let directory = Path::new(&args[1]);
-        let _ = Journal::open(directory)?;
-        let port = args[2]
-            .parse::<u16>()
-            .map_err(|_| invalid("TLS port refused"))?;
-        if port == 0 || args[2].starts_with('0') {
-            return Err(invalid("TLS port refused"));
-        }
-        let config_file = private_file(&directory.join("custodian.json"))?;
-        let config_value: serde_json::Value = serde_json::from_reader(config_file)?;
-        let expected_host = config_value
-            .get("expectedHost")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| invalid("custodian expectedHost missing"))?;
-        if !expected_host.ends_with(&format!(":{port}")) {
-            return Err(invalid("TLS loopback port differs from custodian origin"));
-        }
-        let config = tls_config(directory)?;
-        let socket = directory.join("http.sock");
-        let meta = fs::symlink_metadata(&socket)?;
-        if !meta.file_type().is_socket()
-            || meta.uid() != unsafe { libc::geteuid() }
-            || meta.permissions().mode() & 0o777 != 0o600
-        {
-            return Err(invalid("custodian Unix socket identity drift"));
-        }
-        let listener = TcpListener::bind(("127.0.0.1", port))?;
-        let active = Arc::new(AtomicUsize::new(0));
-        for connection in listener.incoming() {
-            match connection {
-                Ok(connection) => {
-                    let Some(slot) = ConnectionSlot::reserve(&active) else {
-                        continue;
-                    };
-                    let socket = socket.clone();
-                    let config = Arc::clone(&config);
-                    std::thread::Builder::new()
-                        .name("spk-browser".into())
-                        .spawn(move || {
-                            let _slot = slot;
-                            if let Err(error) = handle(&socket, connection, config) {
-                                eprintln!("spk-browser-proxy: connection: {error}");
-                            }
-                        })?;
-                }
-                Err(_) => continue,
-            }
-        }
-        Ok(())
     }
 }
 
