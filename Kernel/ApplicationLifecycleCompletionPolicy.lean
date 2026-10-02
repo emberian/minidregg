@@ -80,14 +80,10 @@ def policyConfig {F : Type} [Field F] [DecidableEq F]
     (incidence : DeclaredResourceController.Incidence command)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleBeginV2Ingress.Ingress}
-    (checked : Checked domain semantics publicKey begin) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (DeclaredResourceController.sourceStore prepared.authority.snapshot.domain
-      prepared.directory.directory)
-    (sourceCapabilityPortal prepared.authority.snapshot
-      (DeclaredResourceController.operationMarker
-        prepared.authority.snapshot.domain profile.semantics command))
+    (checked : Checked domain semantics publicKey begin) : ComposedPolicyAdmission.Config F :=
+  DeclaredResourceController.policyConfigFromStep prepared incidence
     (step prepared tuple incidence checked)
+
 
 def portals {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
@@ -127,26 +123,20 @@ def authorizeLeg {F : Type} [Field F] [DecidableEq F]
   let context := step prepared tuple incidence checked
   let config := policyConfig prepared tuple incidence checked
   let capability := (DeclaredResourceController.incidenceTarget command incidence).capability
-  let evidence ← DeclaredResourceController.requireSome
-    .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (DeclaredResourceController.sourceStore prepared.authority.snapshot.domain
-        prepared.directory.directory)
-      (DeclaredResourceController.operationMarker
-        prepared.authority.snapshot.domain profile.semantics command)
-      context wanted capability signature)
-  let committed ← DeclaredResourceController.requireSome
-    .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    context.oldState context.newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+  let _ ← DeclaredResourceController.requireSome .policyUnavailable
+    (DeclaredResourceController.kindDependencies prepared incidence)
+  let evidence ← DeclaredResourceController.requireSome .capabilityRejected
+    (config.capabilityEvidenceChecked wanted capability () signature () (fun _ => ())).toOption
+  let law ← DeclaredResourceController.requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      context.oldState context.newState != true then
     throw .policyInputRange
-  if !decide (castInjOn F (intsOf committed.record.predicate
-      witness.oldState witness.newState)) then
+  if !decide (castInjOn F (intsOf law.predicate
+      context.oldState context.newState)) then
     throw .policyCastAlias
   let authorization ← DeclaredResourceController.requireSome .policyRejected
-    (CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState
+    (ComposedPolicyAdmission.admit config
       wanted evidence witness (.policy wanted.policyId wanted.policyRevision)
       (DeclaredResourceController.source_request_epoch_current prepared tuple incidence)
       (DeclaredResourceController.source_request_revision_current prepared tuple incidence))
