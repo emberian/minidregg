@@ -284,6 +284,17 @@ fn replace_public(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::rename(&staged, path).map_err(|error| format!("cannot install {}: {error}", path.display()))
 }
 
+/// The workspace subject's current key epoch, as the Host reports it.
+pub(crate) fn current_key_epoch(root: &Path) -> Result<String> {
+    let ws = workspace(root)?;
+    let daily = key(&ws.key)?.verifying_key().to_bytes();
+    let view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &daily)?;
+    view.get("keyEpoch")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "key status lacks keyEpoch".to_owned())
+}
+
 /// `mini key-status --workspace WS [--next-public-key PUB]`
 pub(crate) fn key_status(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("workspace")?))?;

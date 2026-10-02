@@ -1130,6 +1130,26 @@ mod tests {
     }
 
     #[test]
+    fn the_encryption_keyring_keeps_every_past_secret_across_seed_rotations() {
+        let dir = scratch("enc-ring");
+        let key = dir.join("mini.key");
+        fs::write(&key, [1u8; 32]).unwrap();
+        assert_eq!(enc_secrets(&key).unwrap().len(), 1, "no ring: the current secret only");
+        keyring_remember(&key, "1").unwrap();
+        keyring_remember(&key, "1").unwrap();
+        // rotate-key overwrites the seed; the old secret stays openable.
+        fs::write(&key, [2u8; 32]).unwrap();
+        let secrets: Vec<[u8; 32]> = enc_secrets(&key).unwrap().iter()
+            .map(|s| *PublicKey::from(s).as_bytes()).collect();
+        assert_eq!(secrets, vec![*enc_public(&[2; 32]).as_bytes(), *enc_public(&[1; 32]).as_bytes()]);
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(enc_ring_path(&key)).unwrap().mode() & 0o777, 0o600);
+        let text = fs::read_to_string(enc_ring_path(&key)).unwrap();
+        assert!(!text.contains(&hex(&[1u8; 32])), "the ring holds no signing seed");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn enc_key_is_deterministic_from_the_seed_and_not_the_signing_key() {
         let seed = [9u8; 32];
         assert_eq!(enc_public(&seed), enc_public(&seed));

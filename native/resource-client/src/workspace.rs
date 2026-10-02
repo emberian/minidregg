@@ -14,6 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
@@ -321,13 +322,71 @@ pub(crate) fn load(root: &Path) -> Result<Value> {
         (None, Some(_)) => return Err("workspace has no pinned socket".into()),
         _ => {}
     }
+    recheck_commitment(root, &value)?;
     Ok(value)
+}
+
+/// The commitment this workspace recorded at init: its next public key, or
+/// `--no-prerotation`. A workspace without the record predates the check and
+/// refuses to load.
+fn recorded_commitment(value: &Value) -> Result<crate::key_rotation::Commitment> {
+    match value.get("prerotation") {
+        Some(Value::Bool(false)) => Ok(crate::key_rotation::Commitment::Without),
+        Some(Value::Bool(true)) => {
+            let next: [u8; 32] = private::decode_hex(member(value, "nextPublicKey")?)?
+                .try_into()
+                .map_err(|_| "workspace nextPublicKey is not 32 bytes")?;
+            Ok(crate::key_rotation::Commitment::Mine(next))
+        }
+        _ => Err("this workspace records no key commitment (it predates the check that refuses a subject someone else can rotate): run `workspace --action init` again".into()),
+    }
+}
+
+/// Once per process for each workspace: the subject's commitment is still this
+/// workspace's own next key (FIX-IDENTITY). Every verb that loads a workspace
+/// passes here; a friend never builds on a subject someone else can rotate.
+fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
+    static CHECKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    if CHECKED.lock().map_err(|_| "commitment check lock poisoned")?.iter().any(|known| known == root) {
+        return Ok(());
+    }
+    let commitment = recorded_commitment(value)?;
+    let socket = SOCKET.get().ok_or("workspace has no socket to check its key commitment over")?;
+    let key = member_path(value, "key")?;
+    let daily = ed25519_dalek::SigningKey::from_bytes(&*roomkey::seed_of(&key)?).verifying_key().to_bytes();
+    crate::key_rotation::check_commitment(
+        &workspace_host(value)?,
+        socket,
+        &member_path(value, "config")?,
+        member(value, "subject")?,
+        &daily,
+        &commitment,
+    )?;
+    CHECKED.lock().map_err(|_| "commitment check lock poisoned")?.push(root.to_path_buf());
+    Ok(())
+}
+
+/// After a rotation: the workspace's next key is now the key after next.
+pub(crate) fn record_next_public(root: &Path, next: &[u8; 32]) -> Result<()> {
+    let path = root.join("workspace.json");
+    let mut value = bounded_json(&path)?;
+    value["prerotation"] = json!(true);
+    value["nextPublicKey"] = json!(hex(next));
+    let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    let staged = root.join(format!(".workspace.json.{}", random_nonce()?));
+    private_file(&staged, &bytes)?;
+    fs::rename(&staged, &path).map_err(|error| format!("cannot update {}: {error}", path.display()))
 }
 
 pub(crate) struct InitIdentity<'a> {
     pub(crate) key: Option<&'a Path>,
     pub(crate) subject: Option<&'a str>,
     pub(crate) enrollment: Option<&'a Path>,
+    /// This friend's NEXT public key (default: KEY.next.pub beside the key).
+    pub(crate) next_public: Option<&'a Path>,
+    /// `--no-prerotation`: the friend holds no next key, knowingly.
+    pub(crate) without_prerotation: bool,
 }
 
 /// `host` is `None` for a remote workspace: it pins the Host's SHA-256 (from
@@ -344,6 +403,8 @@ pub(crate) fn init(
         key,
         subject,
         enrollment,
+        next_public,
+        without_prerotation,
     } = identity;
     let enrolled = enrollment
         .map(|path| {
@@ -421,6 +482,41 @@ pub(crate) fn init(
         let _ = bounded_json(context)?;
     }
     let namespace = namespace_root.map(absolute).transpose()?;
+    // FIX-IDENTITY: the subject's pre-rotation commitment must be the digest of
+    // THIS friend's next key (or none, knowingly), before anything is built on it.
+    let next_public = match (next_public, without_prerotation) {
+        (Some(_), true) => return Err("--next-pub and --no-prerotation exclude each other".into()),
+        (Some(path), false) => Some(absolute(path)?),
+        (None, true) => None,
+        (None, false) => {
+            let conventional = crate::key_rotation::conventional_next_public(&key);
+            if !conventional.is_file() {
+                return Err(format!(
+                    "init checks that your subject commits to YOUR next key: {} is missing; pass --next-pub NEXT.pub, or --no-prerotation if this key has no next key",
+                    conventional.display()
+                ));
+            }
+            Some(conventional)
+        }
+    };
+    let commitment = match &next_public {
+        Some(path) => {
+            let next: [u8; 32] = fs::read(path)
+                .map_err(|error| format!("cannot read next public key {}: {error}", path.display()))?
+                .try_into()
+                .map_err(|_| format!("next public key {} must be 32 raw bytes", path.display()))?;
+            crate::key_rotation::Commitment::Mine(next)
+        }
+        None => crate::key_rotation::Commitment::Without,
+    };
+    {
+        let socket = SOCKET.get().ok_or("workspace init checks the subject's key commitment at the Host: pass --socket or --remote")?;
+        let host_path = host.clone().unwrap_or_default();
+        let daily = ed25519_dalek::SigningKey::from_bytes(&*roomkey::seed_of(&key)?).verifying_key().to_bytes();
+        if crate::key_rotation::check_commitment(&host_path, socket, &config, subject, &daily, &commitment)?.is_none() {
+            eprintln!("the Host holds no current key for subject {subject} yet: its commitment is checked when this workspace is next used");
+        }
+    }
     let root = absolute(root)?;
     make_private_dir(&root)?;
     make_private_dir(&root.join("refs"))?;
@@ -447,6 +543,13 @@ pub(crate) fn init(
         "config":config,"key":key,"subject":subject,"socket":socket,
         "birthContext":retained_context,"namespaceRoot":namespace,
         "enrollment":retained_enrollment});
+    match &commitment {
+        crate::key_rotation::Commitment::Mine(next) => {
+            value["prerotation"] = json!(true);
+            value["nextPublicKey"] = json!(hex(next));
+        }
+        crate::key_rotation::Commitment::Without => value["prerotation"] = json!(false),
+    }
     if let Some(sha) = host_sha {
         value["hostSha256"] = json!(sha);
     }
@@ -3007,6 +3110,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         let enrollment = args.optional("enrollment").map(path);
         let context = args.optional("birth-context").map(path);
         let namespace = args.optional("namespace-root").map(path);
+        let next_public = args.optional("next-pub").map(path);
+        let without_prerotation = args.optional("no-prerotation").is_some();
         args.finish()?;
         return init(
             &root,
@@ -3016,6 +3121,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 key: key.as_deref(),
                 subject: subject.as_deref(),
                 enrollment: enrollment.as_deref(),
+                next_public: next_public.as_deref(),
+                without_prerotation,
             },
             context.as_deref(),
             namespace.as_deref(),
@@ -3200,7 +3307,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     args.finish()?;
                     roomkey::forget(&root, &name, epoch)
                 }
-                _ => Err("room-key --op is found, sync, invite, rotate, kick, list, open or forget".into()),
+                "register" => {
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    args.finish()?;
+                    let epoch = crate::key_rotation::current_key_epoch(&root)?;
+                    let done = roomkey::register(&root, &workspace, &name, &epoch, &proposal_id)?;
+                    println!("{}", serde_json::to_string_pretty(&done).map_err(|e| e.to_string())?);
+                    Ok(())
+                }
+                "rewrap" => {
+                    let subject = os_string(args.required("member")?, "member")?;
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    args.finish()?;
+                    roomkey::rewrap(&root, &workspace, &name, &subject, &proposal_id)
+                }
+                _ => Err("room-key --op is found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
             }
         }
         "submit" => {
