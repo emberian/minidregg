@@ -5,7 +5,7 @@ import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CredentialAuthorityReplay
 import Compiler.DeclaredEffectCell
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 import Kernel.MultiCellHyperedge
 import Kernel.ResourceBirthController
 import Kernel.DeclaredResourceProjection

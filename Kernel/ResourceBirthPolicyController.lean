@@ -11,7 +11,7 @@ import Compiler.DeclaredEffectCell
 import Theory.PolicyInstall
 import Kernel.ResourceBirthController
 import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 import Compiler.CanonicalAccountView
 import Compiler.PhysicalLawResolution
 import Compiler.WorldKindLawDependencies

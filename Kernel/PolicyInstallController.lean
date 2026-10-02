@@ -13,7 +13,7 @@ result.
 -/
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.TypedCellHyperedgeArtifact
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 import Theory.PolicyInstall
 import Compiler.PhysicalLawResolution
 import Compiler.CandidateLawResolution

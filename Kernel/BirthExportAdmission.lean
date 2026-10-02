@@ -3,7 +3,7 @@ The old factory law remains the authorizer. A newborn's own local component is
 not an export root and is never self-evaluated by this gate. -/
 import Compiler.PhysicalLawResolution
 import Compiler.WorldKindLawDependencies
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 import Kernel.WorldKindProjection
 import Kernel.ContentResource
 import Kernel.DeclaredResourceProjection

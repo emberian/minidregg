@@ -59,6 +59,21 @@ def profile (template : CanonicalRuntimeProfile.FactoryTemplate)
   .source template fieldIdentity mersenne127P inferInstance orderWidth noWrap receiverParameters
     disabledEvaluators
 
+/-- Interface separation preserves the exact pre-existing receiver hash inputs.
+The manifest remains compiled into this constructor, never supplied by a call. -/
+theorem profile_receiverSemantics_exact (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (parameters : List UInt8) (disabled : List Digest) :
+    (profile template parameters disabled).compilerProfile.descriptor?.map (·.receiverSemantics) =
+      some (CanonicalRuntimeProfile.receiverSemantics template parameters disabled) := rfl
+
+/-- The complete compiler profile, hence its final semantics digest, is unchanged. -/
+theorem profile_compilerProfile_exact (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (parameters : List UInt8) (disabled : List Digest) :
+    (profile template parameters disabled).compilerProfile =
+      CanonicalPolicyAdmission.PolicyCompilerProfile.source
+        (CanonicalRuntimeProfile.receiverSemantics template parameters disabled)
+        fieldIdentity mersenne127P inferInstance (.scalar orderWidth) noWrap := rfl
+
 theorem profile_order (template : CanonicalRuntimeProfile.FactoryTemplate)
     (parameters : List UInt8) :
     (profile template parameters).compilerProfile.compiler = .scalar 125 := rfl
@@ -193,6 +208,8 @@ theorem accepted_integer_inputs_checked
 
 #assert_axioms order_agrees_with_eval_on_R
 #assert_axioms native_verifies_iff_eval_on_R
+#assert_axioms profile_receiverSemantics_exact
+#assert_axioms profile_compilerProfile_exact
 #assert_axioms profile_characteristic
 #assert_axioms upper_endpoint_refused
 

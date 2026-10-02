@@ -10,7 +10,7 @@ A read commits nothing, so the clock it was judged at is not pinned by a CAS:
 it is the clock cell of the very snapshot the read is answered from, and the
 read's challenge names it beside the world root and height
 (`NativeObservationController.challenge_names_clock`). -/
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry

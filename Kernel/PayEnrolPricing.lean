@@ -7,7 +7,7 @@ birth descriptor, and uses these same constructors when receiving payment.
 -/
 import Kernel.PayEnrolClaim
 import Kernel.PayEnrolQuote
-import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalRuntimeProfileCore
 
 namespace Minidregg.Kernel.PayEnrolPricing
 
