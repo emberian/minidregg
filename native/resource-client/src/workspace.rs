@@ -890,7 +890,31 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
+/// The client's own observations of one plan named different world or
+/// authority roots: another admission landed between them. Nothing was
+/// authored or sent; the plan is made again from fresh reads (`replan`).
+const OBSERVATIONS_MOVED: &str =
+    "the plan's signed reads saw the Host state move between them (another admission landed)";
+
+/// Author a proposal from fresh signed reads. A Host `stale-root` on one read
+/// is re-observed inside that read; reads that disagree with each other are
+/// re-planned here, all of them, under the same `--replan-max` bound.
 pub(crate) fn propose(
+    root: &Path,
+    workspace: &Value,
+    request_path: &Path,
+    proposal_id: &str,
+    private_room_name: Option<&str>,
+) -> Result<()> {
+    crate::replan::replan(
+        "propose",
+        || propose_once(root, workspace, request_path, proposal_id, private_room_name),
+        |error, _| error == OBSERVATIONS_MOVED,
+        |_| Ok(()),
+    )
+}
+
+fn propose_once(
     root: &Path,
     workspace: &Value,
     request_path: &Path,
@@ -965,7 +989,7 @@ pub(crate) fn propose(
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
-                        return Err("target reads have different image boundaries".into());
+                        return Err(OBSERVATIONS_MOVED.into());
                     }
                 }
                 image = Some(current_image);
@@ -1121,9 +1145,7 @@ pub(crate) fn propose(
                 if member(challenge, "worldRoot")? != image
                     || signed_authority_root(challenge)? != authority
                 {
-                    return Err(
-                        "delegation observations disagree on current image or authority".into(),
-                    );
+                    return Err(OBSERVATIONS_MOVED.into());
                 }
             }
             let head = capability
@@ -3465,6 +3487,37 @@ mod tests {
         assert_eq!(observed.get(), 2);
         assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replan_propose_reads_that_disagree_are_made_again_and_nothing_else_is() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let race = |error: &str, _: Option<&crate::HostDecision>| error == OBSERVATIONS_MOVED;
+        let calls = std::cell::Cell::new(0);
+        let made = crate::replan::replan(
+            "propose",
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() < 3 { Err(OBSERVATIONS_MOVED.to_owned()) } else { Ok(calls.get()) }
+            },
+            race,
+            |_| Ok(()),
+        );
+        assert_eq!(made, Ok(3));
+        calls.set(0);
+        let refused = crate::replan::replan(
+            "propose",
+            || {
+                calls.set(calls.get() + 1);
+                Err::<(), _>("parent capability lacks delegation verb".to_owned())
+            },
+            race,
+            |_| Ok(()),
+        );
+        assert_eq!(refused, Err("parent capability lacks delegation verb".into()));
+        assert_eq!(calls.get(), 1);
+        let _ = crate::take_host_decision();
     }
 
     #[test]
