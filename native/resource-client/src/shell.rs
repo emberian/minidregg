@@ -54,7 +54,8 @@ pub(crate) struct Verb {
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
-    Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether HOME/keys/<key>.next.pub matches it" },
+    Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
+    Verb { name: "adopt-next-key", usage: "adopt-next-key NEXTFILE | adopt-next-key lookup ATTEMPT", operation: "commit a next key for an existing identity; recover a retained attempt without signing again" },
     Verb { name: "rotate-key", usage: "rotate-key NEXTFILE", operation: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
     Verb { name: "init", usage: "init KEYFILE SUBJECT [--no-prerotation]", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
     Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
@@ -1776,6 +1777,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             arity(&w, 0, 0, u)?;
             client("key-status", vec![flag("workspace", ws())])
         }
+        "adopt-next-key" => {
+            arity(&w, 1, 2, u)?;
+            if w[1] == "lookup" {
+                arity(&w, 2, 2, u)?;
+                session_file(&w[2], "adoption attempt")?;
+                client("adopt-next-key", vec![flag("workspace", ws()), flag("action", "lookup"), flag("attempt", w[2].clone())])
+            } else {
+                arity(&w, 1, 1, u)?;
+                session_file(&w[1], "next key file")?;
+                client("adopt-next-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(&w[1]))])
+            }
+        }
         "rotate-key" => {
             arity(&w, 1, 1, u)?;
             session_file(&w[1], "next key file")?;
@@ -3038,6 +3051,19 @@ mod tests {
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
         items.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn adoption_shell_pins_home_key_and_named_lookup_attempt() {
+        let s = session();
+        let prepared = client(plan(&s, "adopt-next-key future.key").unwrap());
+        assert_eq!(prepared.0, "adopt-next-key");
+        assert_eq!(prepared.1, pairs(&[("workspace", "/w"), ("next-key", "/h/keys/future.key")]));
+        let recovery = client(plan(&s, "adopt-next-key lookup adopt-next-4-0").unwrap());
+        assert_eq!(recovery.1, pairs(&[("workspace", "/w"), ("action", "lookup"), ("attempt", "adopt-next-4-0")]));
+        for line in ["adopt-next-key", "adopt-next-key ../secret", "adopt-next-key /tmp/key", "adopt-next-key lookup", "adopt-next-key lookup ../attempt"] {
+            assert!(plan(&s, line).is_err(), "accepted {line}");
+        }
     }
 
     #[test]

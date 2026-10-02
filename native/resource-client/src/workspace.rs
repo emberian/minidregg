@@ -318,6 +318,14 @@ pub(crate) fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
 }
 
 pub(crate) fn load(root: &Path) -> Result<Value> {
+    let value = load_for_key_transition(root)?;
+    recheck_commitment(root, &value)?;
+    Ok(value)
+}
+
+/// Exact key-transition recovery must bind transport even when source acceptance
+/// preceded the local commitment update. Ordinary workspace loads still recheck.
+pub(crate) fn load_for_key_transition(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -352,7 +360,6 @@ pub(crate) fn load(root: &Path) -> Result<Value> {
         (None, Some(_)) => return Err("workspace has no pinned socket".into()),
         _ => {}
     }
-    recheck_commitment(root, &value)?;
     Ok(value)
 }
 
@@ -396,7 +403,7 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
     Ok(())
 }
 
-/// After a rotation: the workspace's next key is now the key after next.
+/// Publish the verified commitment after adoption or rotation.
 pub(crate) fn record_next_public(root: &Path, next: &[u8; 32]) -> Result<()> {
     let path = root.join("workspace.json");
     let mut value = bounded_json(&path)?;
@@ -406,7 +413,9 @@ pub(crate) fn record_next_public(root: &Path, next: &[u8; 32]) -> Result<()> {
     bytes.push(b'\n');
     let staged = root.join(format!(".workspace.json.{}", random_nonce()?));
     private_file(&staged, &bytes)?;
-    fs::rename(&staged, &path).map_err(|error| format!("cannot update {}: {error}", path.display()))
+    fs::rename(&staged, &path).map_err(|error| format!("cannot update {}: {error}", path.display()))?;
+    File::open(root).and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("cannot sync workspace commitment: {error}"))
 }
 
 pub(crate) struct InitIdentity<'a> {

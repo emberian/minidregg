@@ -349,6 +349,14 @@ pub(crate) struct Ticket {
     baseline: Point,
     settings: Settings,
 }
+/// Explicit key commitment adoption requires an already authenticated lineage.
+/// This never enrolls an unprotected workspace or trusts an endpoint profile.
+pub(crate) fn key_transition_identity(root: &Path, workspace: &Value) -> Result<Value> {
+    begin(root, workspace)?
+        .map(|ticket| ticket.settings.identity)
+        .ok_or_else(|| fail("key adoption requires existing authenticated continuity custody"))
+}
+
 static LEGACY_WARNING: AtomicBool = AtomicBool::new(false);
 pub(crate) fn begin(root: &Path, workspace: &Value) -> Result<Option<Ticket>> {
     // A long-lived shell can hold an older manifest while another process enables

@@ -7,7 +7,7 @@
 //! command bytes and the possession frame all come from the Host. Whoever holds
 //! the current daily key cannot rotate -- the Host refuses a key whose digest is
 //! not the commitment, whatever the current key signed.
-use crate::participant_enrollment::{json_private, key, member_path, pair, pinned};
+use crate::participant_enrollment::{json_private, key, member_path, pair};
 use crate::*;
 use ed25519_dalek::Signer;
 use serde_json::{json, Value};
@@ -208,7 +208,7 @@ pub(crate) fn check_commitment(
         }
         (Commitment::Mine(_), false) => {
             return Err(format!(
-                "refused: subject {subject}'s record commits to no next key, but you hold one: this subject can never rotate, and your next key protects nothing. {redo}, or init with --no-prerotation if a key that can never rotate is what you meant"
+                "refused: subject {subject}'s record commits to no next key, but you hold one: initialize with --no-prerotation, then explicitly commit it with `mini adopt-next-key --workspace WORKSPACE --next-key NEXT` before rotating"
             ));
         }
         (Commitment::Without, true) => {
@@ -244,14 +244,10 @@ struct Workspace {
 }
 
 fn workspace(root: &Path) -> Result<Workspace> {
-    let pin = json_private(&root.join("workspace.json"))?;
-    pinned(&pin, "type", "minidregg-participant-workspace-v1")?;
-    let socket = match SOCKET.get() {
-        Some(socket) => absolute(socket)?,
-        None => member_path(&pin, "socket")?,
-    };
+    let pin = workspace::load_for_key_transition(root)?;
+    let socket = SOCKET.get().ok_or("workspace has no pinned key-transition socket")?.clone();
     Ok(Workspace {
-        host: member_path(&pin, "host")?,
+        host: workspace::workspace_host(&pin)?,
         config: member_path(&pin, "config")?,
         socket,
         key: member_path(&pin, "key")?,
@@ -309,12 +305,18 @@ pub(crate) fn key_status(mut args: Args) -> Result<()> {
     let ws = workspace(&root)?;
     let daily = key(&ws.key)?.verifying_key().to_bytes();
     let mut view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &daily)?;
-    let next_public = next_public.or_else(|| {
-        let conventional = conventional_next_public(&ws.key);
-        conventional.exists().then_some(conventional)
-    });
+    let next_public = if let Some(file) = next_public {
+        Some(public_file(&file)?)
+    } else {
+        let manifest = participant_enrollment::json_private(&root.join("workspace.json"))?;
+        if let Some(text) = manifest.get("nextPublicKey").and_then(Value::as_str) {
+            Some(workspace::private::decode_hex(text)?.try_into().map_err(|_| "workspace nextPublicKey is not 32 bytes")?)
+        } else {
+            let file = conventional_next_public(&ws.key);
+            if file.exists() { Some(public_file(&file)?) } else { None }
+        }
+    };
     if let Some(next) = next_public {
-        let next = public_file(&next)?;
         let next_view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &next)?;
         view["nextKeyMatchesCommitment"] = next_view["isCommittedNext"].clone();
     }
@@ -333,6 +335,8 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     let next_to = args.optional("next-to").map(|value| absolute(&path(value))).transpose()?;
     let named = args.optional("to-public-key").map(path);
     args.finish()?;
+    workspace::private_dir(&root)?;
+    let _transition = transport::service_lock(&root.join("key-transition.lock"))?;
     let ws = workspace(&root)?;
     let signer = key(&next_key)?;
     let signer_public = signer.verifying_key().to_bytes();

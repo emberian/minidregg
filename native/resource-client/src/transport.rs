@@ -341,6 +341,14 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [141, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }
+        // Explicit next commitment adoption: source plan, distinct current/next
+        // signatures, and exact ingress submit/lookup. Semantic checks are native.
+        [187, payload @ ..] => !payload.is_empty() && payload.len() <= 4096
+            && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|v| v.is_object()),
+        [188, payload @ ..] if payload.len() < HOST_MAX_FRAME => exact_pair(payload)
+            .and_then(|(plan, signatures)| exact_pair(signatures).map(|(current, next)| (plan, current, next)))
+            .is_some_and(|(plan, current, next)| !plan.is_empty() && current.len() == 64 && next.len() == 64),
+        [189 | 190, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [144, payload @ ..] => {
             !payload.is_empty()
                 && payload.len() <= 1024
@@ -1628,6 +1636,30 @@ pub(crate) fn effective_uid() -> u32 {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn adoption_routes_bound_plan_and_two_role_signatures() {
+        let mut request = vec![187];
+        request.extend_from_slice(b"{}");
+        request.resize(4097, b' ');
+        assert!(allowed_operation(&request, false));
+        request.push(b' ');
+        assert!(!allowed_operation(&request, false));
+        assert!(!allowed_operation(&[187, b'[', b']'], false));
+        let signatures = crate::participant_enrollment::pair(&[1;64], &[2;64]).unwrap();
+        let payload = crate::participant_enrollment::pair(b"plan", &signatures).unwrap();
+        let assembly = [vec![188],payload].concat();
+        assert!(allowed_operation(&assembly, false));
+        assert!(!allowed_operation(&assembly[..assembly.len()-1], false));
+        let malformed = [vec![188],crate::participant_enrollment::pair(b"plan", &[1;128]).unwrap()].concat();
+        assert!(!allowed_operation(&malformed, false));
+        for opcode in [189,190] {
+            assert!(allowed_operation(&[opcode,1], false));
+            assert!(!allowed_operation(&[opcode], false));
+            let mut oversized = vec![opcode]; oversized.resize(HOST_MAX_FRAME+1,1);
+            assert!(!allowed_operation(&oversized, false));
+        }
+    }
 
     #[test]
     fn enrollment_quote_is_public_only_with_bounded_json_object() {

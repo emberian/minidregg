@@ -16,6 +16,8 @@ mod agent_lifetime_grant;
 #[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]
+mod key_adoption;
+#[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
 mod agent_reserve;
@@ -436,6 +438,7 @@ usage:
     its use, the Host answers stale-root; mini observes again up to N times (default 5;
     MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
+  mini adopt-next-key --workspace WORKSPACE [--next-key NEXT-KEY] [--attempt CHILD] [--action prepare|submit|lookup]
   mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
   mini key-status --workspace WORKSPACE [--next-public-key NEXT.pub]
   mini join --key KEY
@@ -2960,6 +2963,8 @@ fn run(mut args: Args) -> Result<()> {
         "relay-key" => relay::run_key(args),
         #[cfg(unix)]
         "channel" => channel::run(args),
+        #[cfg(unix)]
+        "adopt-next-key" => key_adoption::run(args),
         #[cfg(unix)]
         "rotate-key" => key_rotation::rotate_key(args),
         #[cfg(unix)]
