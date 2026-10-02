@@ -251,100 +251,249 @@ fn rewrite_reference(root:&std::path::Path,name:&str,value:&Value)->Result<()> {
     std::fs::File::open(&refs).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
 }
 
-/// Source-owned owner-only enrollment for a new empty document. Existing text
-/// is retained and refused here; its upgrade needs explicit history entitlement.
-/// Each phase and its exact retry artifacts live beside the durable key journal.
+/// Publish an immutable complete record before performing any operation it names.
+/// Interrupted temporary files are never interpreted as committed enrollment state.
+fn retain_record(path:&std::path::Path,bytes:&[u8])->Result<()> {
+    use std::fs;
+    if path.exists() { return write_same(path,bytes); }
+    let parent=path.parent().ok_or("retained record lacks a parent")?;
+    let temporary=parent.join(format!(".enrollment-{}",super::random_nonce()?));
+    super::private_file(&temporary,bytes)?;
+    match fs::hard_link(&temporary,path) {
+        Ok(()) => {},
+        Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists => write_same(path,bytes)?,
+        Err(error) => return Err(error.to_string()),
+    }
+    fs::File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+    fs::remove_file(&temporary).map_err(|e|e.to_string())?;
+    Ok(())
+}
+fn retain_json(path:&std::path::Path,value:&Value)->Result<()> {
+    retain_record(path,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)
+}
+fn retain_authored(host:&std::path::Path,config:&std::path::Path,kind:&str,
+    source:&std::path::Path,output:&std::path::Path)->Result<()> {
+    if output.exists() {return Ok(());}
+    let parent=output.parent().ok_or("authored enrollment artifact lacks a parent")?;
+    let temporary=parent.join(format!(".authoring-{}",super::random_nonce()?));
+    crate::author(host,config,std::ffi::OsStr::new(kind),source,&temporary)?;
+    retain_record(output,&std::fs::read(&temporary).map_err(|e|e.to_string())?)?;
+    std::fs::remove_file(&temporary).map_err(|e|e.to_string())
+}
+fn stage_path(root:&std::path::Path,target:&str)->Result<std::path::PathBuf> {
+    nat32(target)?;
+    Ok(root.join("protected-documents").join(format!("enrollment-{target}.json")))
+}
+fn enrollment_identity(reference:&Value,workspace:&Value,name:&str)->Result<Value> {
+    Ok(json!({"name":name,"object":super::member(reference,"target")?,
+        "subject":super::member(workspace,"subject")?,
+        "observeCapability":super::member(reference,"observeCapability")?,
+        "controlCapability":super::member(reference,"controlCapability")?}))
+}
+fn validate_stage(stage:&Value,identity:&Value)->Result<()> {
+    if stage["type"]!="mini-protected-document-stage-v1" || stage["identity"]!=*identity {
+        return Err("retained enrollment differs from this document, subject, or capabilities".into());
+    }
+    super::validate_ref_name(text(stage,"catalog")?)?;
+    nat32(text(stage,"transition")?)?;
+    nat32(text(stage,"catalogNonce")?)?;
+    nat32(text(stage,"catalogQueryNonce")?)?;
+    let operation=private::decode_hex(text(stage,"operation")?)?;
+    if operation.len()!=32 {return Err("retained enrollment operation must be 32 bytes".into());}
+    if !stage["device"].is_object() {return Err("retained enrollment lacks its device publication".into());}
+    Ok(())
+}
+/// A call is persisted before emission. An interrupted preparation with no call
+/// can use a new attempt directory around the SAME retained intent, never a new
+/// catalog write or nonce. An emitted call always wins over later preparation.
+fn retained_attempt(root:&std::path::Path,label:&str)->Result<(std::path::PathBuf,bool)> {
+    super::validate_ref_name(label)?;
+    for generation in 0..1000 {
+        let attempt=root.join("attempts").join(format!("{label}-{generation}"));
+        if attempt.join("call.bin").is_file() {return Ok((attempt,true));}
+        if !attempt.exists() {return Ok((attempt,false));}
+    }
+    Err("retained enrollment exhausted preparation attempts".into())
+}
+fn submit_retained(root:&std::path::Path,workspace:&Value,intent:&std::path::Path,label:&str)->Result<()> {
+    let (attempt,emitted)=retained_attempt(root,label)?;
+    if emitted {crate::retry(&attempt,"submit",true)} else {
+        super::submit_intent(root,workspace,intent,"intent",false,Some(&attempt))
+    }
+}
+
+/// Source-owned owner-only enrollment for a new empty document. A complete
+/// immutable stage is durable before the catalog birth or any source mutation.
 pub(crate) fn protect_empty(root:&std::path::Path,workspace:&Value,name:&str) -> Result<()> {
     use std::path::Path;
     let reference=super::reference(root,name)?;
-    if reference.get("protectedDocument").is_some() { return Err("document already has protected custody".into()); }
     let target=super::member(&reference,"target")?.to_owned();
+    let retained=stage_path(root,&target)?;
+    if retained.exists() {return recover(root,workspace,name);}
+    if reference.get("protectedDocument").is_some() {return Err("document already has protected custody".into());}
     let (view,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
     if super::entries(&view)?.iter().any(|entry| entry["type"]=="atom") {
         return Err("existing document text is retained; protect-empty requires an empty document, not implicit historical disclosure".into());
     }
     let host=super::workspace_host(workspace)?;
     let config=super::member_path(workspace,"config")?;
-    let writer=super::member_path(workspace,"key")?;
-    // Verify the actual receiving profile exists before constructing any keys/catalog.
     let supported=signed.parent().ok_or("missing observation directory")?.join("audience-supported.json");
     crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&supported])?;
     let initial=super::bounded_json(&supported)?;
-    if !initial["audienceState"].is_null() { return Err("document audience already enrolled; recover its retained enrollment".into()); }
-    let (state,storage)=ensure_custody(root)?;
+    if !initial["audienceState"].is_null() {return Err("document audience already enrolled; recover its retained enrollment".into());}
+    ensure_custody(root)?;
     let public=device(root)?;
     let home=root.join("protected-documents").join(&target);
-    if home.exists() { return Err(format!("protected enrollment already retained at {}; recover that exact phase before creating another",home.display())); }
-    super::make_private_dir(&home)?;
-    let catalog_name=format!("pd-catalog-{}",super::random_nonce()?);
+    if home.exists() {return Err(format!("older enrollment retained at {}; recover its exact artifacts",home.display()));}
+    let stage=json!({"type":"mini-protected-document-stage-v1",
+        "identity":enrollment_identity(&reference,workspace,name)?,
+        "catalog":format!("pd-catalog-{}",super::random_nonce()?),
+        "transition":super::random_nonce()?,"operation":crate::hex(&nat32(&super::random_nonce()?)?),
+        "catalogNonce":super::random_nonce()?,"catalogQueryNonce":super::random_nonce()?,"device":public});
+    retain_json(&retained,&stage)?;
+    continue_enrollment(root,workspace,name,&stage)
+}
+
+/// Resume pre-phase construction from retained identities. Every existing birth,
+/// catalog command, roster and phase request is reused, never replaced.
+fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&Value)->Result<()> {
+    use std::path::Path;
+    let reference=super::reference(root,name)?;
+    validate_stage(stage,&enrollment_identity(&reference,workspace,name)?)?;
+    let target=super::member(&reference,"target")?;
+    let home=root.join("protected-documents").join(target);
+    if home.exists() {super::private_dir(&home)?;} else {super::make_private_dir(&home)?;}
+    if home.join("enrollment.json").exists() {return recover_phase(root,workspace,name,&home);}
+    let (state,storage)=ensure_custody(root)?;
+    let public=&stage["device"];
+    // Reopen the exact retained device; losing it is not permission to keygen.
+    let generation: [u8;32]=private::decode_hex(text(public,"generation")?)?.try_into().map_err(|_|"invalid retained device generation")?;
+    let store=custody(root)?;
+    let (_,retained_public)=store.load_device(&generation)?;
+    if public["kemPublic"]!=crate::hex(&retained_public.kem) || public["dhPublic"]!=crate::hex(&retained_public.dh) {
+        return Err("retained enrollment device differs from durable custody".into());
+    }
+    drop(store);
+    let (view,_,_)=super::signed_view(root,workspace,&reference,"resource")?;
+    if super::entries(&view)?.iter().any(|entry|entry["type"]=="atom") {
+        return Err("document gained text before enrollment; retained empty-document request cannot disclose it".into());
+    }
+    let host=super::workspace_host(workspace)?;
+    let config=super::member_path(workspace,"config")?;
+    let writer=super::member_path(workspace,"key")?;
+    let catalog_name=text(stage,"catalog")?;
     let predicate=home.join("catalog-law.json");
-    super::private_file(&predicate,br#"{"type":"all","predicates":[]}"#)?;
-    super::create(root,workspace,&catalog_name,"content",&predicate,None,"object",None,None,None)?;
-    let catalog=super::reference(root,&catalog_name)?;
+    retain_record(&predicate,br#"{"type":"all","predicates":[]}"#)?;
+    // create reopens the same namespace reservation, birth source and exact call.
+    super::create(root,workspace,catalog_name,"content",&predicate,None,"object",None,None,None)?;
+    let catalog=super::reference(root,catalog_name)?;
     let catalog_id=super::member(&catalog,"target")?;
     let me=super::member(workspace,"subject")?;
-    let transition=super::random_nonce()?;
-    let roster=json!({"object":target,"epoch":"0","transition":transition,"entries":[{
+    let roster=json!({"object":target,"epoch":"0","transition":stage["transition"],"entries":[{
         "subject":me,"capability":super::member(&reference,"observeCapability")?,"deviceSource":catalog_id,
         "deviceGeneration":public["deviceGeneration"],"keyCommitment":public["keyCommitment"]}]});
-    let roster_json=home.join("roster.json");
-    super::private_file(&roster_json,&serde_json::to_vec(&roster).map_err(|e|e.to_string())?)?;
+    let roster_json=home.join("roster.json");retain_json(&roster_json,&roster)?;
     let roster_bin=home.join("roster.bin");
-    crate::author(&host,&config,std::ffi::OsStr::new("object-audience-roster"),&roster_json,&roster_bin)?;
+    retain_authored(&host,&config,"object-audience-roster",&roster_json,&roster_bin)?;
     let catalog_bin=home.join("catalog.bin");
-    crate::author(&host,&config,std::ffi::OsStr::new("object-device-catalog"),&roster_json,&catalog_bin)?;
-    super::submit_content(root,workspace,&catalog_name,vec![json!({"type":"createAtom","atom":"0",
-        "kind":{"type":"text"},"payload":crate::hex(&std::fs::read(&catalog_bin).map_err(|e|e.to_string())?)})],"catalog")?;
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
-    let phase_root=signed.parent().ok_or("missing phase observation")?;
-    let source_path=phase_root.join("protected-audience.json");
-    crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&source_path])?;
-    let source=super::bounded_json(&source_path)?;
+    retain_authored(&host,&config,"object-device-catalog",&roster_json,&catalog_bin)?;
+    let catalog_write=home.join("catalog-write-intent.json");
+    if !catalog_write.exists() {
+        let (view,_,_)=super::signed_view(root,workspace,&catalog,"resource")?;
+        let payload=crate::hex(&std::fs::read(&catalog_bin).map_err(|e|e.to_string())?);
+        let nonce=text(stage,"catalogNonce")?;
+        retain_json(&catalog_write,&json!({"subject":me,"nonce":nonce,"purpose":{"type":"prepare",
+            "draft":{"type":"invoke","command":{"subject":me,"nonce":nonce,"targets":[{
+                "kind":"object","target":catalog_id,"capability":super::member(&catalog,"operationCapability")?,
+                "observeCapability":super::member(&catalog,"observeCapability")?,"schemaVersion":super::CONTENT_COMMAND_VERSION,
+                "expectedTargetRoot":text(&view["cell"],"root")?,"payload":{"type":"content","actions":[{
+                    "type":"createAtom","atom":"0","kind":{"type":"text"},"payload":payload}]}}]}}},
+            "grants":[{"kind":"object","target":catalog_id,"capability":super::member(&catalog,"observeCapability")?}]}))?;
+    }
+    submit_retained(root,workspace,&catalog_write,text(stage,"operation")?)?;
     let catalog_intent=home.join("catalog-intent.json");
-    super::private_file(&catalog_intent,&serde_json::to_vec(&json!({"subject":me,"nonce":super::random_nonce()?,
+    retain_json(&catalog_intent,&json!({"subject":me,"nonce":stage["catalogQueryNonce"],
         "purpose":{"type":"query","kind":"object","target":catalog_id,"view":"resource"},
-        "grants":[{"kind":"object","target":catalog_id,"capability":super::member(&catalog,"observeCapability")?}]})).map_err(|e|e.to_string())?)?;
-    let operation=crate::hex(&nat32(&super::random_nonce()?)?);
+        "grants":[{"kind":"object","target":catalog_id,"capability":super::member(&catalog,"observeCapability")?}]}))?;
     let request=json!({"phase":"enroll","control":super::member(&reference,"controlCapability")?,
-        "operation":operation,"transition":transition,"audience":"0","devices":"0","history":"0",
+        "operation":stage["operation"],"transition":stage["transition"],"audience":"0","devices":"0","history":"0",
         "dealerGeneration":public["generation"],"rosterBytes":crate::hex(&std::fs::read(&roster_bin).map_err(|e|e.to_string())?),
         "catalogIntent":catalog_intent,"recipients":[{"subject":me,"capability":super::member(&reference,"observeCapability")?,
         "deviceSource":catalog_id,"generation":public["generation"],"keyCommitment":public["keyCommitment"],
         "kemPublic":public["kemPublic"],"dhPublic":public["dhPublic"]}],
         "grants":[{"kind":"object","target":target,"capability":super::member(&reference,"observeCapability")?}]});
-    let request_path=home.join("enrollment-request.json");
-    super::private_file(&request_path,&serde_json::to_vec_pretty(&request).map_err(|e|e.to_string())?)?;
+    let request_path=home.join("enrollment-request.json");retain_json(&request_path,&request)?;
+    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let phase_root=signed.parent().ok_or("missing phase observation")?;
+    let source_path=phase_root.join("protected-audience.json");
+    crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&source_path])?;
+    let source=super::bounded_json(&source_path)?;
+    if !source["audienceState"].is_null() {return Err("document audience changed before retained enrollment phase".into());}
     let phase_dir=phase_root.join("epoch");
-    super::private_file(&home.join("enrollment.json"),&serde_json::to_vec_pretty(&json!({
+    retain_json(&home.join("enrollment.json"),&json!({
         "type":"mini-protected-document-enrollment-v1","name":name,"object":target,"catalog":catalog_name,
-        "operation":operation,"phaseDirectory":phase_dir.strip_prefix(root).map_err(|_| "phase must remain inside participant workspace")?,
-        "custody":"protected-documents"})).map_err(|e|e.to_string())?)?;
+        "operation":stage["operation"],"phaseDirectory":phase_dir.strip_prefix(root).map_err(|_|"phase must remain inside participant workspace")?,
+        "custody":"protected-documents"}))?;
     crate::object_epoch_cli::run(&source,&request_path,&host,&config,&writer,&state,&storage,&phase_dir)?;
     finish_enrollment(root,workspace,name,&home)
 }
 
-/// Retry the retained exact phase. Once a source confirms the precise installed
-/// audience, recovery finishes its retained protected readiness command instead
-/// of generating new keys or a replacement enrollment.
+/// Pre-phase recovery reuses retained catalog identities and writes. Once epoch
+/// custody exists, only its exact phase command and package manifest may proceed.
 pub(crate) fn recover(root:&std::path::Path,workspace:&Value,name:&str)->Result<()> {
     let reference=super::reference(root,name)?;
-    let home=root.join("protected-documents").join(super::member(&reference,"target")?);
+    let target=super::member(&reference,"target")?;
+    let home=root.join("protected-documents").join(target);
+    if home.join("enrollment.json").exists() {return recover_phase(root,workspace,name,&home);}
+    let stage=super::bounded_json(&stage_path(root,target)?)?;
+    continue_enrollment(root,workspace,name,&stage)
+}
+fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::path::Path)->Result<()> {
+    let reference=super::reference(root,name)?;
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
+    if meta["object"]!=reference["target"] {return Err("retained enrollment names another document".into());}
     let phase=retained_phase(root,&meta)?;
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
     let source=audience_source(workspace,&signed)?;
-    let intent=super::bounded_json(&phase.join("phase-intent.json"))?;
+    let (state,key)=custody_paths(root);
+    if !phase.exists() {
+        // Metadata was durable, but epoch construction had not begun. Reuse its
+        // immutable request and original signed observation directory.
+        if !source["audienceState"].is_null() {return Err("document audience changed before retained phase began".into());}
+        let original=super::bounded_json(&phase.parent().ok_or("phase has no parent")?.join("protected-audience.json"))?;
+        crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
+            &super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
+            &super::member_path(workspace,"key")?,&state,&key,&phase)?;
+        return finish_enrollment(root,workspace,name,home);
+    }
+    let operation: [u8;32]=private::decode_hex(text(&meta,"operation")?)?.try_into().map_err(|_|"invalid enrollment operation")?;
+    let store=custody(root)?;
+    let staged=store.pending_epoch(&operation);
+    drop(store);
+    if let Ok((manifest,command))=&staged {
+        retain_record(&phase.join("phase-intent.bin"),command)?;
+        retain_record(&phase.join("epoch-manifest.bin"),manifest)?;
+    }
+    let intent=super::bounded_json(&phase.join("phase-intent.json")).map_err(|error|
+        format!("epoch preparation has no recoverable intent; retained request and catalog are preserved, no replacement keys created: {error}"))?;
     let expected=&intent["purpose"]["draft"]["declaration"]["source"]["audience"];
     if expected.is_null() {return Err("retained enrollment has no exact audience".into());}
-    if source["audienceState"]!=*expected {
-        if !source["audienceState"].is_null() {
-            return Err("document audience has moved; retained enrollment cannot replace it".into());
-        }
-        let (state,key)=custody_paths(root);
+    if !source["audienceState"].is_null() && source["audienceState"]!=*expected {
+        return Err("document audience has moved; retained enrollment cannot replace it".into());
+    }
+    if staged.is_ok() {
+        // Even an already admitted source must settle the pending key journal.
         crate::object_epoch_cli::retry(&phase,&state,&key,text(&meta,"operation")?,
             Some(&super::member_path(workspace,"key")?))?;
+    } else {
+        let epoch=text(expected,"epoch")?.parse().map_err(|_|"retained epoch exceeds u64")?;
+        let anchor=AdmittedAnchor {object:nat32(text(expected,"object")?)?,epoch,
+            transition:nat32(text(expected,"transition")?)?,active:true};
+        custody(root)?.historical_key(&anchor).map_err(|error|
+            format!("epoch has no durable staged or accepted key; retained artifacts preserved, refusing replacement material: {error}"))?;
+        if source["audienceState"]!=*expected {return Err("source does not confirm retained accepted enrollment".into());}
     }
-    finish_enrollment(root,workspace,name,&home)
+    finish_enrollment(root,workspace,name,home)
 }
 fn retained_phase(root:&std::path::Path,meta:&Value)->Result<std::path::PathBuf> {
     let relative=std::path::Path::new(text(meta,"phaseDirectory")?);
@@ -377,7 +526,7 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
     rewrite_reference(root,name,&reference)?;
     // This retained structural post runs the complete current-entitlement gate.
     // It authorizes only this enrollment's exact empty-document handout.
-    let ready_id=format!("protected-ready-{}",text(&meta,"operation")?);
+    let ready_id=text(&meta,"operation")?.to_owned();
     let request_path=home.join("ready-request.json");
     if !request_path.exists() {
         let request=json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{
@@ -652,4 +801,96 @@ mod tests {
         ensure_custody(&root).unwrap();
         drop(custody(&root).unwrap());std::fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn enrollment_stage_survives_before_home_and_refuses_replacement_identity() {
+        let root=custody_workspace();
+        let reference=json!({"target":"72","observeCapability":"8","controlCapability":"9"});
+        let workspace=json!({"subject":"7"});
+        let identity=enrollment_identity(&reference,&workspace,"paper").unwrap();
+        let stage=json!({"type":"mini-protected-document-stage-v1","identity":identity,
+            "catalog":"pd-catalog-123","transition":"5","operation":crate::hex(&[6;32]),
+            "catalogNonce":"7","catalogQueryNonce":"8","device":{"generation":crate::hex(&[9;32])}});
+        let path=stage_path(&root,"72").unwrap();
+        let bytes=serde_json::to_vec_pretty(&stage).unwrap();
+        // A crash before atomic publication leaves only an uninterpreted orphan.
+        super::super::private_file(&root.join("protected-documents/.enrollment-interrupted"),b"{partial").unwrap();
+        assert!(!path.exists());
+        retain_json(&path,&stage).unwrap();
+        assert!(!root.join("protected-documents/72").exists());
+        // Reopen before home/catalog creation uses exactly the same device,
+        // operation, transition and catalog name without a second allocation.
+        let reopened=super::super::bounded_json(&path).unwrap();
+        validate_stage(&reopened,&identity).unwrap();
+        assert_eq!(reopened,stage);
+        super::super::make_private_dir(&root.join("protected-documents/72")).unwrap();
+        retain_json(&path,&reopened).unwrap();
+        let mut replacement=stage.clone();replacement["catalog"]=json!("pd-catalog-other");
+        assert!(retain_json(&path,&replacement).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(),bytes);
+        let mut changed_identity=identity.clone();changed_identity["controlCapability"]=json!("10");
+        assert!(validate_stage(&reopened,&changed_identity).is_err());
+        assert!(stage_path(&root,"../72").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn catalog_recovery_reuses_immutable_intent_and_exact_emitted_call() {
+        let root=custody_workspace();
+        super::super::make_private_dir(&root.join("attempts")).unwrap();
+        let operation=crate::hex(&[6;32]);
+        super::super::validate_name(&operation).unwrap();
+        let intent=root.join("protected-documents/catalog-write-intent.json");
+        let request=json!({"nonce":"777","payload":"exact retained catalog"});
+        retain_json(&intent,&request).unwrap();
+        let bytes=std::fs::read(&intent).unwrap();
+        let (first,emitted)=retained_attempt(&root,&operation).unwrap();
+        assert!(!emitted);
+        super::super::make_private_dir(&first).unwrap();
+        super::super::private_file(&first.join("config.json"),b"retained preparation").unwrap();
+        // Crash during preparation cannot have emitted without call.bin.
+        let (next,emitted)=retained_attempt(&root,&operation).unwrap();
+        assert!(!emitted);assert_ne!(first,next);
+        super::super::make_private_dir(&next).unwrap();
+        super::super::private_file(&next.join("call.bin"),b"exact signed catalog call").unwrap();
+        // Lost response after emission must select those exact call bytes,
+        // regardless of whether an outcome file was ever written.
+        assert_eq!(retained_attempt(&root,&operation).unwrap(),(next.clone(),true));
+        super::super::private_file(&next.join("outcome.json"),br#"{"type":"confirmed"}"#).unwrap();
+        assert_eq!(retained_attempt(&root,&operation).unwrap(),(next.clone(),true));
+        assert_eq!(std::fs::read(next.join("call.bin")).unwrap(),b"exact signed catalog call");
+        assert_eq!(std::fs::read(&intent).unwrap(),bytes);
+        let mut replacement=request.clone();replacement["nonce"]=json!("778");
+        assert!(retain_json(&intent,&replacement).is_err());
+        assert_eq!(std::fs::read(&intent).unwrap(),bytes);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn staged_epoch_recovers_missing_manifest_without_new_key_material() {
+        let root=custody_workspace();
+        let (state,key)=custody_paths(&root);
+        let (v,c)=source(7,9);let audience=Audience::from_checked(&v,&c,"72").unwrap();
+        let operation=[6;32];
+        let prepared=crate::object_epoch_packages::PreparedEpoch {key:Zeroizing::new([8;32]),
+            manifest:b"exact retained epoch manifest".to_vec(),commitment:[9;32]};
+        let command=b"exact source phase command";
+        let mut store=Store::open(&state,crate::read_secret(&key).unwrap().to_bytes()).unwrap();
+        store.stage_epoch(&audience.anchor,&operation,&prepared,command).unwrap();
+        drop(store);
+        // The process died after journal fsync, before either outward artifact.
+        let phase=root.join("protected-documents/phase");
+        super::super::make_private_dir(&phase).unwrap();
+        let reopened=custody(&root).unwrap();
+        let (manifest,retained_command)=reopened.pending_epoch(&operation).unwrap();
+        drop(reopened);
+        retain_record(&phase.join("phase-intent.bin"),&retained_command).unwrap();
+        retain_record(&phase.join("epoch-manifest.bin"),&manifest).unwrap();
+        assert_eq!(std::fs::read(phase.join("phase-intent.bin")).unwrap(),command);
+        assert_eq!(std::fs::read(phase.join("epoch-manifest.bin")).unwrap(),prepared.manifest);
+        let mut reopened=custody(&root).unwrap();
+        assert!(reopened.stage_epoch(&audience.anchor,&operation,&prepared,command).is_err());
+        reopened.settle(&operation,true).unwrap();drop(reopened);
+        let reopened=custody(&root).unwrap();
+        assert_eq!(*reopened.historical_key(&audience.anchor).unwrap(),*prepared.key);
+        drop(reopened);std::fs::remove_dir_all(root).unwrap();
+    }
+
 }
