@@ -19,6 +19,23 @@ def foreign_reference(refs, target):
     return matches[0]
 
 
+def native_refusal(result):
+    """Decode the CLI's retained Host outcome, never an rc-only refusal."""
+    j.require(result.returncode == 3, 'boundary read did not return native refusal rc3')
+    stdout = result.stdout.decode(errors='replace').strip()
+    if stdout:
+        outcome = json.loads(stdout)
+    else:
+        matches = re.findall(r'^  outcome \(decoded by the Host\): (\{[^\n]*\})$',
+                             result.stderr.decode(errors='replace'), re.MULTILINE)
+        j.require(len(matches) == 1, 'boundary refusal lacks one exact Host-decoded outcome')
+        outcome = json.loads(matches[0])
+    j.require(outcome.get('type') == 'refused' and outcome.get('reason') == 'no-grant'
+              and outcome.get('phase') == 'observation'.encode().hex(),
+              'boundary read did not receive the source observation no-grant refusal')
+    return outcome
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state',required=True);parser.add_argument('--request',required=True);parser.add_argument('--result',required=True)
@@ -56,11 +73,11 @@ def main():
     j.save(evidence,{'identity':identity,'roomTarget':request['roomTarget'],'documentTarget':request['documentTarget'],
                      'owner':spec['members'][owner]['subject'],'outsider':spec['members'][outsider]['subject'],
                      'foreignCapability':reference['observeCapability'],'commands':records})
-    outcome=json.loads(refused.stdout) if refused.stdout else {}
-    j.require(refused.returncode==3 and outcome.get('type')=='refused', 'uninvited member did not receive a definitive native refusal')
+    outcome=native_refusal(refused)
     j.save(Path(a.result),{'type':'mini-joined-member-hook-result-v1','role':request['role'],'phase':request['phase'],'status':'pass',
                           'identity':identity,'refused':True,'refusedSubject':spec['members'][outsider]['subject'],
                           'roomTarget':request['roomTarget'],'documentTarget':request['documentTarget'],
+                          'outcome':outcome,
                           'artifacts':[{'path':str(evidence),'sha256':j.digest(evidence)}]})
 
 if __name__=='__main__':main()

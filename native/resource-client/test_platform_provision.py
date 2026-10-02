@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -55,6 +56,17 @@ class ProvisioningContract(unittest.TestCase):
         refs={'references':[{'target':'100','observeCapability':'20'},{'target':'101','observeCapability':'21'}]}
         self.assertEqual(boundary.foreign_reference(refs,'101')['observeCapability'],'21')
         with self.assertRaises(ValueError):boundary.foreign_reference(refs,'102')
+    def test_boundary_requires_exact_host_no_grant_outcome(self):
+        m=importlib.util.spec_from_file_location('boundary',Path(__file__).with_name('platform-native-hooks.py'))
+        boundary=importlib.util.module_from_spec(m);m.loader.exec_module(boundary)
+        outcome={'type':'refused','reason':'no-grant','phase':'observation'.encode().hex()}
+        line=('  outcome (decoded by the Host): '+json.dumps(outcome)+'\n').encode()
+        result=lambda rc=3,out=b'',err=line:subprocess.CompletedProcess([],rc,out,err)
+        self.assertEqual(boundary.native_refusal(result()),outcome)
+        self.assertEqual(boundary.native_refusal(result(out=json.dumps(outcome).encode())),outcome)
+        for invalid in (result(rc=1),result(err=b'undisclosed\n'),result(err=line+line),
+                        result(out=b'{"type":"refused","reason":"stale-root"}')):
+            with self.assertRaises(ValueError):boundary.native_refusal(invalid)
     def test_hook_bundle_retains_independent_pinned_copies(self):
         run=self.root/'hooks-test';run.mkdir()
         retained=p.retain_hooks(run)
