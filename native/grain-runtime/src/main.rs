@@ -45,6 +45,7 @@ mod provider_owner;
 mod provider_retirement;
 mod provider_recovery;
 mod provider_history;
+mod provider_resolution;
 mod provider_continuity_rejection;
 mod query_observation;
 #[cfg(test)]
@@ -17073,16 +17074,28 @@ impl Runtime {
                 // dispatch later. Absence right now is not a negative receipt.
                 return Err("pending custody attempt has no call.bin; child lifetime is uncertain; manual reconciliation required".into());
             }
-            let attempt = p.attempt.to_str().ok_or("attempt path UTF-8")?;
-            let retry_result = next_retry_json(&p.attempt)?;
-            let mut args = vec!["retry", "--attempt", attempt, "--mode", "lookup"];
-            if let Some(socket) = &self.config.host_socket {
-                args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
-            }
-            // A refused lookup describes the current image, not necessarily
-            // the original submit. A prior branch may have committed this
-            // exact call before a fork was replaced. Keep the pending attempt.
-            self.command_output(&self.config.mini, &args)?;
+            let resolution = if slot == AuthoritySlot::Provider {
+                self.resolve_guarded_provider_pending(&p)?
+            } else {
+                provider_resolution::Resolution::NotApplicable
+            };
+            let retry_result = match resolution {
+                provider_resolution::Resolution::Retired => return Ok(()),
+                provider_resolution::Resolution::Confirmed(receipt) => receipt,
+                provider_resolution::Resolution::NotApplicable => {
+                    let attempt = p.attempt.to_str().ok_or("attempt path UTF-8")?;
+                    let retry_result = next_retry_json(&p.attempt)?;
+                    let mut args = vec!["retry", "--attempt", attempt, "--mode", "lookup"];
+                    if let Some(socket) = &self.config.host_socket {
+                        args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+                    }
+                    // Generic lookup refusal is not evidence that an old call
+                    // could never commit. Only the guarded resolver above has
+                    // the additional exact-prefix and expired-call witness.
+                    self.command_output(&self.config.mini, &args)?;
+                    retry_result
+                }
+            };
             let provider_settlement = if slot == AuthoritySlot::Provider
                 && matches!(
                     p.operation.as_str(),
