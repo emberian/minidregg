@@ -42,13 +42,18 @@ instance (e : Entry) (s : StoredCapability .object) : Decidable (entryMatches (w
   unfold entryMatches; infer_instance
 /-- Kind exports are derived from the actual old physical instance. The outer
 controller proves the candidate post preserves that immutable descriptor. -/
-def composedConfig (prepared : Preparation) (step : PolicyStepContext) :
-    Option (ComposedPolicyAdmission.Config F) := do
-  let dependencies ← WorldKindLawDependencies.loadTarget deployment
-    context.directory.directory wanted.target.value
-  pure (PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-    context.directory.directory (sourceCapabilityPortal context.authority.snapshot marker)
-    step wanted.target.value dependencies.additional)
+def composedConfig (prepared : Preparation)
+    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (step : PolicyStepContext) : Option (ComposedPolicyAdmission.Config F) := do
+  if preserved : CanonicalCellRegistry.instanceBinding prepared.observed.before =
+      CanonicalCellRegistry.instanceBinding view then
+    let dependencies ← WorldKindLawDependencies.loadPost deployment
+      context.directory.directory wanted.target.value prepared.observed.before view
+      prepared.observed.present preserved
+    pure (PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
+      context.directory.directory (sourceCapabilityPortal context.authority.snapshot marker)
+      step wanted.target.value dependencies.additional)
+  else none
 
 /-- Guard the full authenticated closure (including historical source chains),
 kind definition/instance lifecycle, authority, clock and current resource image.
@@ -71,7 +76,8 @@ def viewRequest (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRe
 def viewProject (prepared : Preparation)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
     (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) : Minidregg.Pred.State :=
-  ⟨Kernel.ClockCell.slots prepared.clock.clock ++
+  ⟨[("target/storageKind", Int.ofNat view.1.tag.toNat)] ++
+    Kernel.ClockCell.slots prepared.clock.clock ++
     CanonicalRuntimeProfile.requestSlots (viewRequest (wanted := wanted) view) ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 contextBytes ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
@@ -89,7 +95,7 @@ def viewStep (prepared : Preparation)
 def viewConfig (prepared : Preparation)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
     Option (ComposedPolicyAdmission.Config F) :=
-  composedConfig prepared (viewStep prepared view)
+  composedConfig prepared view (viewStep prepared view)
 
 structure CheckedView (genesisHeight : Nat) (prepared : Preparation) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) where

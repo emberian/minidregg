@@ -11,6 +11,7 @@ import Kernel.ResourceObservationAdmission
 import Compiler.ResourceAuthorityProjection
 import Kernel.JointSlots
 import Kernel.StreamWrite
+import Kernel.ConfidentialAudienceAdmission
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -1000,6 +1001,137 @@ def collectIO {n : Nat} {E : Type} {P : Fin n → Type}
                         simpa only [equal] using current))
   loop n (Nat.le_refl n)
 
+/-! One physical plan and one exact replay identity. -/
+def targetWrite (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : DataWrite :=
+  ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
+    (packTarget command.targets[i] (prepared.targets i).candidate.post)
+
+/-- The fresh entry cell of each stream-append target (`StreamWrite.entryWrite`):
+the target write is the stream's head, this is its one new entry. -/
+def entryWrites (prepared : PreparedInvocation deployment profile ambient durable command) :
+    List DataWrite :=
+  (List.finRange command.targets.length).filterMap fun i =>
+    (appendedEntry prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+      (prepared.targets i).pre).map StreamWrite.entryWrite
+
+/-- An observe-only read target is read, not written. -/
+def Target.isRead (target : Target) : Bool := decide (target.payload = .read)
+
+/-- A read target enters as a read guard on its cell's current root, as the
+authority cell does: the commit refuses if the cell moved, and nothing of it
+is stored or charged. -/
+def targetReadGuard (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : ReadGuard :=
+  ⟨⟨command.targets[i].target⟩,
+    ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live (prepared.targets i).before)⟩
+
+/-- The physical writes are the written targets plus fresh append entries: the authority incidence
+and every observe-only read target are reads, so their cells enter as read
+guards (`readGuards`). -/
+def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
+  ((List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared
+
+
+/-- Audience checks use the same loaded directory and authority as the signed
+invocation. The inspected view is the validated target post, including the
+unchanged post of observe-only targets. -/
+def audienceContext (prepared : PreparedInvocation deployment profile ambient durable command) :
+    ResourceObservationAdmission.Context deployment durable :=
+  ⟨prepared.directory, prepared.authority⟩
+
+def audienceView (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : PackedCell CanonicalCellRegistry.registry :=
+  RecipientReadEntitlement.transactionPost (prepared.targets i)
+
+/-- The validated post keeps its world-kind binding. Recipient entitlement
+checks this same preservation before choosing current kind exports. -/
+theorem audienceView_binding_preserved
+    (prepared : PreparedInvocation deployment profile ambient durable command) (i : TargetIndex command) :
+    CanonicalCellRegistry.instanceBinding (prepared.targets i).before =
+      CanonicalCellRegistry.instanceBinding (audienceView prepared i) :=
+  (prepared.targets i).postLaw.2.2.2.1
+
+def audienceDisclosure (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : List UInt8 :=
+  let view := audienceView prepared i
+  (CanonicalCellRegistry.materializer view.1).codec.encode view.payload.logical
+
+inductive TargetAudience [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (i : TargetIndex command) where
+  | publicView (absent : (prepared.targets i).source.record.audience = none)
+  | protectedView (state : Minidregg.Theory.ObjectAudience.State)
+      (present : (prepared.targets i).source.record.audience = some state)
+      (roster : Minidregg.Theory.ObjectAudienceRoster.Roster)
+      (signedRoster : command.targets[i].audienceRoster = some roster)
+      (checked : ConfidentialAudienceAdmission.Checked (profile := profile)
+        (audienceContext prepared) ambient command.targets[i].target
+        (prepared.targets i).pre.root state roster (audienceView prepared i)
+        (audienceDisclosure prepared i))
+
+def TargetAudience.guards [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {i : TargetIndex command} :
+    TargetAudience prepared i → List ReadGuard
+  | .publicView _ => []
+  | .protectedView _ _ _ _ checked => checked.readGuards
+
+def TargetAudience.deviceSources [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {i : TargetIndex command} :
+    TargetAudience prepared i → List CellId
+  | .publicView _ => []
+  | .protectedView _ _ _ _ checked => [⟨checked.source⟩]
+
+def checkTargetAudience [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (i : TargetIndex command) :
+    Except Reject (TargetAudience prepared i) :=
+  match present : (prepared.targets i).source.record.audience with
+  | none => .ok (.publicView present)
+  | some state =>
+    match signedRoster : command.targets[i].audienceRoster with
+    | none => .error (.audience .malformed)
+    | some roster =>
+      match ConfidentialAudienceAdmission.check (profile := profile) (audienceContext prepared)
+          ambient command.targets[i].target (prepared.targets i).pre.root state roster
+          (audienceView prepared i) (audienceDisclosure prepared i) with
+      | none => .error (.audience .transition)
+      | some checked => .ok (.protectedView state present roster signedRoster checked)
+
+def audienceGuards [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    (targets : (i : TargetIndex command) → TargetAudience prepared i) : List ReadGuard :=
+  (List.finRange command.targets.length).flatMap fun i => (targets i).guards
+
+/-- Physical evidence is retained with every all-holder entitlement. Catalogs
+cannot be written in this invocation; target guards may be discharged only by
+an actual write checking that same old root. -/
+structure AudienceChecks [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) where
+  targets : (i : TargetIndex command) → TargetAudience prepared i
+  roots : ∀ guard ∈ audienceGuards targets,
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+  catalogReadOnly : ∀ i, ∀ source ∈ (targets i).deviceSources,
+    source ∉ (writes prepared).map DataWrite.cellId
+  writeDischarge : ∀ guard ∈ audienceGuards targets, ∀ write ∈ writes prepared,
+    guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre
+
+def checkAudiences [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) :
+    IO (Except Reject (AudienceChecks prepared)) := do
+  match ← collectIO (fun i : TargetIndex command => pure (checkTargetAudience prepared i)) with
+  | .error reason => return .error reason
+  | .ok targets =>
+    if roots : ∀ guard ∈ audienceGuards targets,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+      if separate : ∀ i, ∀ source ∈ (targets i).deviceSources,
+          source ∉ (writes prepared).map DataWrite.cellId then
+        if discharge : ∀ guard ∈ audienceGuards targets, ∀ write ∈ writes prepared,
+            guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre then
+          return .ok ⟨targets, roots, separate, discharge⟩
+        else return .error .physicalPreparation
+      else return .error (.audience .transition)
+    else return .error .physicalPreparation
+
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
   private mk ::
@@ -1009,6 +1141,7 @@ structure AcceptedInvocation [DecidableEq F]
     (if command.requiresObservation then command.targets.length else 0)
   observations : command.requiresObservation = true → (i : TargetIndex command) →
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
+  audience : AudienceChecks prepared
   tuple : PreparedTuple (plan prepared)
   checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
@@ -1054,8 +1187,11 @@ def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
               | .ok targets =>
                   match ← verifyAndAuthorizeLeg native prepared tuple none signed.authorityEnvelope with
                   | .error reason => return .error reason
-                  | .ok authority => return .ok ⟨ingress, count, readCount, observations, tuple,
-                      fun incidence => match incidence with | some i => targets i | none => authority⟩
+                  | .ok authority =>
+                    match ← checkAudiences prepared with
+                    | .error reason => return .error reason
+                    | .ok audience => return .ok ⟨ingress, count, readCount, observations, audience, tuple,
+                        fun incidence => match incidence with | some i => targets i | none => authority⟩
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
@@ -1152,37 +1288,6 @@ theorem AcceptedInvocation.policy_view_exact [DecidableEq F]
     (accepted.tuple.accepted_posts_exact (portals prepared accepted.tuple)
       accepted.apex accepted.evidence incidence)
 
-/-! One physical plan and one exact replay identity. -/
-def targetWrite (prepared : PreparedInvocation deployment profile ambient durable command)
-    (i : TargetIndex command) : DataWrite :=
-  ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
-    (packTarget command.targets[i] (prepared.targets i).candidate.post)
-
-/-- The fresh entry cell of each stream-append target (`StreamWrite.entryWrite`):
-the target write is the stream's head, this is its one new entry. -/
-def entryWrites (prepared : PreparedInvocation deployment profile ambient durable command) :
-    List DataWrite :=
-  (List.finRange command.targets.length).filterMap fun i =>
-    (appendedEntry prepared.authority.snapshot profile.semantics ambient command command.targets[i]
-      (prepared.targets i).pre).map StreamWrite.entryWrite
-
-/-- An observe-only read target is read, not written. -/
-def Target.isRead (target : Target) : Bool := decide (target.payload = .read)
-
-/-- A read target enters as a read guard on its cell's current root, as the
-authority cell does: the commit refuses if the cell moved, and nothing of it
-is stored or charged. -/
-def targetReadGuard (prepared : PreparedInvocation deployment profile ambient durable command)
-    (i : TargetIndex command) : ReadGuard :=
-  ⟨⟨command.targets[i].target⟩,
-    ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live (prepared.targets i).before)⟩
-
-/-- The physical writes are the written targets plus fresh append entries: the authority incidence
-and every observe-only read target are reads, so their cells enter as read
-guards (`readGuards`). -/
-def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  ((List.finRange command.targets.length).filterMap fun i =>
-    if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   (List.finRange command.targets.length).map (fun i =>
@@ -1266,6 +1371,45 @@ theorem readGuards_readonly (prepared : PreparedInvocation deployment profile am
   · exact shape.2.2.2.1 guard source
   · simpa using (List.mem_filter.mp authority).2
 
+/-- Every dependency of every retained holder remains a final read guard unless
+this very intent writes that cell under the identical old-root CAS. -/
+def AcceptedInvocation.readGuards [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) : List ReadGuard :=
+  readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
+    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
+theorem AcceptedInvocation.readGuards_readonly [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    ∀ guard ∈ accepted.readGuards, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
+  intro guard member
+  rcases List.mem_append.mp member with ordinary | audience
+  · exact DeclaredResourceController.readGuards_readonly prepared shape guard ordinary
+  · simpa using (List.mem_filter.mp audience).2
+
+theorem AcceptedInvocation.readGuards_roots [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    ∀ guard ∈ accepted.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  intro guard member
+  rcases List.mem_append.mp member with ordinary | audience
+  · exact shape.2.2.2.2.1 guard ordinary
+  · exact accepted.audience.roots guard (List.mem_filter.mp audience).1
+
+theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (guard : ReadGuard)
+    (used : guard ∈ audienceGuards accepted.audience.targets) :
+    guard ∈ accepted.readGuards ∨ ∃ write ∈ writes prepared,
+      guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre := by
+  by_cases written : guard.cellId ∈ (writes prepared).map DataWrite.cellId
+  · obtain ⟨write, member, same⟩ := List.mem_map.mp written
+    exact Or.inr ⟨write, member, same.symm,
+      accepted.audience.writeDischarge guard used write member same.symm⟩
+  · exact Or.inl (List.mem_append.mpr (Or.inr
+      (List.mem_filter.mpr ⟨used, by simpa using written⟩)))
+
 def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
 abbrev SignedIngress := Digest × Digest × SignedCommand
 
@@ -1328,13 +1472,18 @@ def sourceCharge (prepared : PreparedInvocation deployment profile ambient durab
     (signed : SignedCommand) : ResourceCost.Charge :=
   sourceChargeFrom prepared signed (writes prepared) (readGuards prepared)
 
+/-- The receiving charge includes the actual retained all-holder dependencies. -/
+def AcceptedInvocation.sourceCharge [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) : ResourceCost.Charge :=
+  sourceChargeFrom prepared signed (writes prepared) accepted.readGuards
+
 def AcceptedInvocation.dataIntent [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ws := writes prepared
-  let guards := sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
-    guard.cellId ∉ ws.map DataWrite.cellId
+  let guards := accepted.readGuards
   { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
     writes := ws
     readGuards := guards
@@ -1344,7 +1493,7 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
     subject := some command.subject
     postRootsBound := writes_roots_bound prepared
-    guardsReadOnly := readGuards_readonly prepared shape }
+    guardsReadOnly := accepted.readGuards_readonly shape }
 
 /-- **Charging rule: a record is charged the bytes it writes.**  The storage
 charge of an accepted invocation is exactly the canonical bytes of the cells
@@ -1363,7 +1512,7 @@ theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
-    (accepted.dataIntent shape).exactCharge = sourceCharge prepared signed := by
+    (accepted.dataIntent shape).exactCharge = accepted.sourceCharge := by
   rfl
 
 /-- Sharing the runtime write and guard values leaves the complete original
@@ -1374,14 +1523,14 @@ theorem AcceptedInvocation.dataIntent_original_exact [DecidableEq F]
     accepted.dataIntent shape =
       { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
         writes := writes prepared
-        readGuards := readGuards prepared
+        readGuards := accepted.readGuards
         nullifiers := [invocationNullifier prepared.authority.snapshot.domain
           (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
-        exactCharge := sourceCharge prepared signed
+        exactCharge := accepted.sourceCharge
         event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
         subject := some command.subject
         postRootsBound := writes_roots_bound prepared
-        guardsReadOnly := readGuards_readonly prepared shape } := by
+        guardsReadOnly := accepted.readGuards_readonly shape } := by
   rfl
 
 def recordedInvocation (domain semantics : Digest) (command : Command) (signed : SignedCommand)
