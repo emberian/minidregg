@@ -439,6 +439,12 @@ theorem kindGuards_exact (durable : Durable) (descriptor : Descriptor Registry)
   obtain ⟨kind, _, rfl⟩ := List.mem_map.mp member
   rfl
 
+theorem kindGuards_cover (durable : Durable) (descriptor : Descriptor Registry)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
+    ∃ guard ∈ kindGuards durable descriptor, guard.cellId = ⟨kind⟩ :=
+  ⟨_, List.mem_map.mpr ⟨kind, List.mem_filterMap.mpr ⟨item, member, selected⟩, rfl⟩, rfl⟩
+
 inductive PreparationReject where
   | deployment
   | compilerProfile
@@ -892,6 +898,27 @@ theorem birth_parent_must_exist {deployment : Deployment} {pins : FactoryPins}
       by simpa using written⟩, guardCell, ?_⟩
     rw [← guardCell]
     exact parentGuards_exact durable descriptor guard guardMember
+
+/-- Every prepared world-instance birth checks its chosen definition against
+actual old source and retains that source as a commit dependency. -/
+theorem birth_kind_source_bound {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
+    CanonicalCellRegistry.kindBirthValid deployment prepared.directory.directory item.create.cell = true ∧
+      (⟨kind⟩ ∈ prepared.writes.map DataWrite.cellId ∨
+        ∃ guard ∈ prepared.readGuards, guard.cellId = ⟨kind⟩ ∧
+          guard.expectedRoot = durable.snapshot.model.roots ⟨kind⟩) := by
+  refine ⟨prepared.kindsPresent item member, ?_⟩
+  obtain ⟨guard, guardMember, guardCell⟩ := kindGuards_cover durable descriptor member selected
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl (guardCell ▸ written)
+  · refine Or.inr ⟨guard, List.mem_filter.mpr
+        ⟨List.mem_append_right _ (List.mem_append_right _ guardMember),
+          by simpa using written⟩, guardCell, ?_⟩
+    rw [← guardCell]
+    exact kindGuards_exact durable descriptor guard guardMember
 
 /-- **`birth_under_room_requires_grant`**, at the one preparation every birth
 route passes: a prepared birth of an item into room `R` names the creator's
