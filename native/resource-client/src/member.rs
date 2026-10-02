@@ -127,6 +127,69 @@ fn pending_attempts(root: &Path) -> Result<Vec<Value>> {
     Ok(pending)
 }
 
+/// Connector state belongs to this member and uses the connector's own exact
+/// phase classifier. Its export custody is never surfaced as discovery data.
+fn connector_operation(root: &Path, pin: &Value, id: &str) -> Value {
+    let mut row = json!({"id":id,"origin":"member-retained-connector",
+        "currentness":"retained-evidence","actions":[{"label":"status",
+        "command":format!("doc app-export status {id}")}]});
+    match workspace::app_document::status(root, pin, id) {
+        Ok(state) => {
+            for field in [
+                "status", "subject", "document", "target", "receipt", "message",
+            ] {
+                if let Some(value) = state.get(field) {
+                    row[field] = value.clone();
+                }
+            }
+            let next = match state["status"].as_str() {
+                Some("captured") => Some(("publish", format!("doc app-export publish {id}"))),
+                Some("uncertain") => Some(("recover", format!("doc app-export recover {id}"))),
+                Some("failed" | "refused") => {
+                    Some(("repair", format!("doc app-export rebase {id} NEXT")))
+                }
+                _ => None,
+            };
+            if let Some((label, command)) = next {
+                row["actions"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"label":label,"command":command}));
+            }
+        }
+        Err(_) => row["status"] = json!("unavailable"),
+    }
+    row
+}
+
+fn connector_operations(root: &Path, pin: &Value) -> Result<Vec<Value>> {
+    let parent = root.join("app-documents");
+    let metadata = match std::fs::symlink_metadata(&parent) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.to_string()),
+    };
+    if !metadata.file_type().is_dir() {
+        return Ok(vec![]);
+    }
+    let mut rows = vec![];
+    for entry in std::fs::read_dir(&parent).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if workspace::validate_name(&id).is_err() {
+            continue;
+        }
+        rows.push(connector_operation(root, pin, &id));
+    }
+    rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    Ok(rows)
+}
+
 fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
     let pin = workspace::load(root)?;
     let config = workspace::bounded_json(&workspace::member_path(&pin, "config")?)?;
@@ -153,6 +216,7 @@ fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
         "origin":"member-workspace","currentness":"discovery-only",
         "world":{"domain":config["domain"],"expectedSeed":config["expectedSeed"],"origin":"pinned-member-config"},"resources":resources,
         "unavailable":unavailable,"recovery":pending_attempts(root)?,
+        "documentExports":connector_operations(root,&pin)?,
         "actions":[{"label":"providers","command":"key providers"},
             {"label":"provider grants","command":"key ls"},
             {"label":"credits","command":"pay status"},
@@ -260,6 +324,19 @@ fn render(value: &Value) -> String {
             "\nRecover pending work: {}\n",
             recovery["actions"][0]["command"].as_str().unwrap_or("")
         ));
+    }
+    for operation in value["documentExports"].as_array().into_iter().flatten() {
+        text.push_str(&format!(
+            "\nDocument export {} · {}\n",
+            operation["id"].as_str().unwrap_or("?"),
+            operation["status"].as_str().unwrap_or("unavailable")
+        ));
+        for action in operation["actions"].as_array().into_iter().flatten() {
+            text.push_str(&format!("  {}\n", action["command"].as_str().unwrap_or("")));
+        }
+        if let Some(message) = operation["message"].as_str() {
+            text.push_str(&format!("  {message}\n"));
+        }
     }
     text.push_str("\nProviders: key providers · Credits: pay status · Recent work: history\n");
     if value.get("observation").is_none() {
@@ -381,6 +458,35 @@ mod tests {
             Resource::from_reference(&json!({"name":"lab;cat","kind":"object","target":"7"}))
                 .is_err()
         );
+    }
+    #[test]
+    fn connector_source_uncertainty_uses_owner_status_and_never_recaptures() {
+        let root = fixture();
+        let op = root.join("app-documents/export-a");
+        std::fs::create_dir_all(&op).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&op, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(op.join("fetch-started.json"),br#"{"type":"mini-app-document-fetch-v1","capture":"a","subject":"8","app":"9","generation":"1","document":"10"}"#).unwrap();
+        let rows = connector_operations(&root, &json!({"subject":"8"})).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["status"], "source-uncertain");
+        assert_eq!(rows[0]["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            rows[0]["actions"][0]["command"],
+            "doc app-export status export-a"
+        );
+        assert!(rows[0].get("custody").is_none());
+        let foreign = connector_operations(&root, &json!({"subject":"11"})).unwrap();
+        assert_eq!(foreign[0]["status"], "unavailable");
+        assert!(foreign[0].get("message").is_none());
+        std::os::unix::fs::symlink(&op, root.join("app-documents/export-symlink")).unwrap();
+        assert_eq!(
+            connector_operations(&root, &json!({"subject":"8"}))
+                .unwrap()
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn assignment_never_claims_runtime_liveness_and_uses_shared_schema() {

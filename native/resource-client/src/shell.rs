@@ -1230,6 +1230,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 return Err(u.to_owned());
             };
             match action.as_str() {
+                "app-export" => {
+                    let op = w.get(2).map(String::as_str).ok_or("doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT")?;
+                    let id = w.get(3).ok_or("doc app-export needs an operation ID")?;
+                    workspace_name(id,"operation ID")?;
+                    let mut flags = vec![flag("action","app-document"),flag("dir",ws()),flag("op",op),flag("id",id)];
+                    match op {
+                        "capture" if w.len()==5 => {
+                            let file=w[4].strip_prefix('@').ok_or("doc app-export capture takes @FILE in HOME/requests")?;
+                            session_file(file,"app export binding")?;
+                            flags.push(flag("binding",session.home.join("requests").join(file)));
+                        }
+                        "publish" | "status" | "recover" if w.len()==4 => {}
+                        "rebase" if w.len()==5 => {
+                            workspace_name(&w[4],"next operation ID")?;
+                            flags.push(flag("next",&w[4]));
+                        }
+                        _ => return Err("doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT".into()),
+                    }
+                    Plan::Client {command:"workspace".into(),flags,writes:vec![]}
+                }
                 "device" => {
                     arity(&w, 1, 1, u)?;
                     client("workspace", vec![flag("action", "doc-device"), flag("dir", ws())])
@@ -2810,7 +2830,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let enrolled = || stems(&session.home.join("enroll"), "", |_| false);
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
-        (_, 0) => command_catalog().map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
+        (_, 0) => command_catalog().map(|v| v.name.to_owned()).collect(),
         ("room" | "key" | "chat", 1) => subcommands(verb),
         ("ask" | "dismiss" | "summon", 1) => refs(),
         ("home" | "read" | "describe", 1) => refs(),
@@ -2828,12 +2848,13 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
         ("revoke" | "renounce", 2) => refs(),
-        ("doc", 1) => ["search", "hit", "device", "share", "accept", "revoke", "membership-recover", "protect", "protect-current", "protect-recover", "epoch-export", "epoch-import", "new", "show", "outline", "history", "diff", "pull", "push", "append", "edit", "insert", "move",
+        ("doc", 1) => ["app-export", "search", "hit", "device", "share", "accept", "revoke", "membership-recover", "protect", "protect-current", "protect-recover", "epoch-export", "epoch-import", "new", "show", "outline", "history", "diff", "pull", "push", "append", "edit", "insert", "move",
             "remove", "mark", "unmark", "annotate", "link", "links", "backlinks", "range", "transclude",
             "transclusions", "follow", "quote"]
             .map(String::from)
             .to_vec(),
         ("room", 2) if !matches!(w[1].as_str(), "new" | "welcome" | "template" | "invite" | "kick" | "seal" | "rotate" | "register" | "rewrap" | "leave" | "index" | "bind" | "rename" | "unbind") => refs(),
+        ("doc", 2) if w[1]=="app-export" => ["capture","publish","status","recover","rebase"].map(String::from).to_vec(),
         ("doc", 2) if !matches!(w[1].as_str(), "new" | "append" | "edit" | "annotate" | "link" | "push") => refs(),
         ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "annotate" | "link" | "push" | "transclude") => refs(),
         ("doc", 4) if w[1] == "link" => refs(),
@@ -4050,6 +4071,17 @@ mod tests {
         assert_eq!(plan(&s, "help guide").unwrap(), Plan::Guide);
         assert_eq!(plan(&s, "help doc").unwrap(), Plan::Help(Some("doc".into())));
         assert!(plan(&s, "inbox all").is_err());
+    }
+
+    #[test]
+    fn app_export_uses_the_existing_exact_connector_operation() {
+        let s=session();
+        assert_eq!(client(plan(&s,"doc app-export capture sheet-one @binding.json").unwrap()),
+            ("workspace".into(),pairs(&[("action","app-document"),("dir","/w"),("op","capture"),("id","sheet-one"),("binding","/h/requests/binding.json")]),vec![]));
+        assert_eq!(client(plan(&s,"doc app-export recover sheet-one").unwrap()),
+            ("workspace".into(),pairs(&[("action","app-document"),("dir","/w"),("op","recover"),("id","sheet-one")]),vec![]));
+        assert!(plan(&s,"doc app-export capture sheet-one @../foreign.json").is_err());
+        assert!(plan(&s,"doc app-export publish sheet-one extra").is_err());
     }
 
     #[test]

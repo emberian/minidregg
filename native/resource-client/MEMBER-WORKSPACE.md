@@ -24,6 +24,15 @@ Incomplete retained signed calls offer `lookup ID` to recover the exact operatio
 A confirmed receipt or typed native refusal is terminal. The view never suggests
 submitting a new operation to resolve uncertain work.
 
+Retained app exports appear in `home` with the connector's existing exact status.
+Use `doc app-export capture ID @FILE` with an explicitly delegated connector
+binding, then `doc app-export publish ID`, `status ID`, or `recover ID`. A proven
+refusal or unsubmitted write can use `doc app-export rebase ID NEXT`: it keeps the
+original export and receipt while refreshing only the document editing base.
+Incomplete source capture cannot fetch again under the same identity. The view
+shows neither export bytes nor API credentials. Creating the delegated app API
+session and connector binding still requires the source provisioning path.
+
 The shell's command catalog uses the owning modules' existing grammars. Help and
 completion share the same catalog; room, key and chat subcommand completion comes
 from those actual usage strings.
@@ -36,12 +45,18 @@ All five members loaded their own workspace projection (0.14–0.59 seconds) and
 read the shared room through their own current grants (3.54–3.96 seconds, height
 54 and the same world root). An isolated copied member workspace containing the
 founder's reference refused with native `no-grant`, exit 3, and produced no
-projection. These are actual native reads; forced-SSH receiving of the new member
-client and registered app/resident handoff remain separate qualification work.
+projection. These are actual native reads. The final client also passed all five
+members
+through a separate forced Mini SSH listener over that same Store (2.52–2.88
+seconds per default workspace view, debug client). A selected room read reported
+source-checked domain 8501 and height 54. The original platform SSH service and
+wrappers remained pinned; the isolated qualification listener was stopped.
+Registered app/resident handoff remains separate qualification work.
 
 The next connected app view must consume an existing member app reference,
 source-current session/ticket/app authority and an actual registered browser
 handoff. SPK receiving operations 34/164 create physical dispatch permits and are
-unsuitable for readiness reads. Generic native dry-run 130 is the intended
-no-effect authority check. No browser URL or reconnect capability is invented by
-this workspace view.
+unsuitable for readiness reads. Generic native dry-run 130 does not include the
+complete application ticket/lifetime admission, so the next app selector requires
+a dedicated read-only projection of current native dispatch admission. No browser
+URL or reconnect capability is invented by this workspace view.
