@@ -107,7 +107,12 @@ The existing post-commit physical guard remains as a final integration check.
 Initial/restarted routes continue to use ordinary dispatch opcode 34 and
 per-request current admission, without the hot registration pin.
 
-Mini reports a definitively pre-CAS refusal from either operation as opcode 164
+Mini first looks up the exact signed call before current admission. An accepted
+call returns its original receipt without another delivery permit; conflicting
+or unavailable history remains non-clearing. A marker-clearing refusal requires
+a typed proof that the exact canonical transaction is absent from authenticated
+history, followed by a physical-tip check at emission. A changed or unavailable
+tip returns uncertainty instead. Only that qualified refusal uses opcode 164
 with the exact payload `DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1` (no
 newline). Only this complete response from the fresh private invocation releases
 the matching generation-wide submit marker. The attempt marker, ingress,

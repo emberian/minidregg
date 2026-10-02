@@ -197,10 +197,9 @@ private def Attestation.canonicalBytes {config : Config} (a : Attestation config
 physical tip. Only read/key are used; no append, checkpoint, initialization,
 app RPC or billing operation occurs. This is point-in-time, not a lock against
 later revocation. The physical lease must keep its bounded fallback. -/
-def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
-    (old : NativeHostReplay.Verified config target) (handoff : IO α) :
-    IO (Except String α) := do
-  let durable := old.opened.durable
+def withOpenedFreshTip {config : Config} {α : Type}
+    (opened : Opened config) (handoff : IO α) : IO (Except String α) := do
+  let durable := opened.durable
   let some record := durable.image.accepted.getLast?
     | return .error "authority handoff requires nonempty history"
   let .ok key ← config.transport.key
@@ -213,6 +212,10 @@ def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
     | return .error "authority physical tip unavailable"
   if current then return .ok (← handoff)
   else return .error "authority physical tip changed before handoff"
+
+def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
+    (old : NativeHostReplay.Verified config target) (handoff : IO α) :
+    IO (Except String α) := withOpenedFreshTip old.opened handoff
 
 def Attestation.withFreshTip {config : Config} {α : Type} (a : Attestation config)
     (handoff : List UInt8 → IO α) : IO (Except String α) :=
