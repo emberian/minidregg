@@ -5,6 +5,7 @@
 use super::{decimal, member, validate_name, validate_ref_name};
 use crate::Result;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -324,8 +325,21 @@ fn finish(root: &Path, workspace: &Value, id: &str, request: &Value) -> Result<(
     if !proposal.join("proposal.json").exists() {
         super::propose(root, workspace, &source, id, None)?;
     }
+    if super::bounded_json(&proposal.join("request.json"))? != *request {
+        return Err("naming operation ID belongs to a different retained proposal".into());
+    }
+    let summary = super::bounded_json(&proposal.join("proposal.json"))?;
+    let intent = std::fs::read(proposal.join("intent.json")).map_err(|e| e.to_string())?;
+    if member(&summary, "proposalId")? != id
+        || member(&summary, "intentSha256")? != format!("{:x}", Sha256::digest(&intent))
+    {
+        return Err("naming proposal identity or intent digest differs".into());
+    }
     let attempt = root.join("attempts").join(id);
     if attempt.join("call.bin").exists() {
+        if std::fs::read(attempt.join("intent.json")).map_err(|e| e.to_string())? != intent {
+            return Err("naming attempt does not contain this exact retained proposal".into());
+        }
         return super::recover(root, &attempt);
     }
     if attempt.exists() {
@@ -376,6 +390,12 @@ pub(crate) fn command(
             return finish(root, workspace, id, &super::bounded_json(&retained)?);
         }
         return Err("naming command stopped before retaining its prepared request; use a new ID after inspecting it".into());
+    }
+    if retained.exists()
+        || root.join("proposals").join(id).exists()
+        || root.join("attempts").join(id).exists()
+    {
+        return Err("naming operation ID is already used by another workspace operation".into());
     }
     // Verify all input before claiming the operation identity.
     let mut room = super::reference(root, room_name)?;
@@ -473,6 +493,51 @@ mod tests {
     }
     fn at(root: &str) -> Value {
         json!({"worldRoot":root,"height":"50"})
+    }
+    #[test]
+    fn naming_id_cannot_recover_another_workspace_operation() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-names-collision-{}",
+            super::super::random_nonce().unwrap()
+        ));
+        std::fs::create_dir_all(root.join("proposals").join("used")).unwrap();
+        let error = command(
+            &root,
+            &Value::Null,
+            "bind",
+            "lab",
+            Some("board"),
+            Some("paper"),
+            Some("used"),
+        )
+        .unwrap_err();
+        assert!(error.contains("already used by another workspace operation"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn exact_recovery_checks_proposal_bytes_before_network() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-names-exact-{}",
+            super::super::random_nonce().unwrap()
+        ));
+        for dir in ["sources", "proposals/names", "attempts/names"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let request = json!({"type":"test-request"});
+        json_file(&root.join("proposals/names/request.json"), &request).unwrap();
+        std::fs::write(root.join("proposals/names/intent.json"), b"original intent").unwrap();
+        json_file(
+            &root.join("proposals/names/proposal.json"),
+            &json!({"proposalId":"names",
+            "intentSha256":format!("{:x}",Sha256::digest(b"original intent"))}),
+        )
+        .unwrap();
+        std::fs::write(root.join("attempts/names/call.bin"), b"other call").unwrap();
+        std::fs::write(root.join("attempts/names/intent.json"), b"different intent").unwrap();
+        assert!(finish(&root, &Value::Null, "names", &request)
+            .unwrap_err()
+            .contains("does not contain this exact retained proposal"));
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn narrowed_signed_view_cannot_prove_absence() {
