@@ -25,7 +25,15 @@ Disclosure order. A requester learns only what it is entitled to learn:
   and other-target capabilities are therefore indistinguishable, so a key
   cannot probe another holder's revocation, validity window or epochs;
 * only a covered holder with a verified use learns `revoked`,
-  `outsideValidity`, `staleGrant` or `lawDenied`.
+  `outsideValidity`, `staleGrant` or `lawDenied`;
+* a `lawDenied` names its clause, path and slot values only through the slots the
+  holder's grant covers (`Refusal.lawDeniedFor`, `refusal_leaf_depends_only_on_covered_fields`):
+  a clause over a field outside a `--fields` grant is not named, and no such value is shown.
+
+Before any of this, an observation request is authenticated: the subject's signature over
+the intent's bytes is checked against its current key before a target is read
+(`NativeObservationController.authenticated`), so a key that was never enrolled is answered
+`unknownKey` or `badSignature`, whatever the intent names.
 
 Blind submission keeps its uniform refusal (`undisclosed`); see
 `NativeHost.publicSubmissionOutcome`.
@@ -599,6 +607,401 @@ theorem sample_management_rendered_compiled :
       "any [ verb == read, verb == write, all [ verb in {delegate,install,revoke}, subject == 7 ] ]" := by
   native_decide
 
+/-! ### What a field-narrowed requester is told (FIX-DISCLOSE)
+
+A grant may name the fields it reads (`Scope.fields`, K-FIELDS). The law of a cell is
+readable whole by whoever may observe the cell (the policy view is not narrowed), but which
+clause of it fails, and the values its slot holds, are facts about the cell's state. So a
+requester is told a clause only when the clause reads nothing outside its grant, and a value
+only of a slot its grant covers:
+
+* `slotCovered fields s`: every slot under `fields = none`; under a named set, the request's
+  own coordinates (`request/…`, `target/policyId`, `context/bytes/…`, `command/bytes/…`), the
+  public clock (`clock/now`), `resource/field/N/…` for a named `slot N`,
+  `resource/pair/A/B/delta` for two named slots, `account/balance/A` for a named `balance A`,
+  and nothing else (whole-cell bytes, content, stream and run slots are uncovered).
+* `narrowed fields law old new`: under `fields = none` the full leaf (`of`); otherwise the
+  first top-level conjunct of the law that reads only covered slots and fails, at its own
+  first failing leaf, with a value shown only for a covered slot. `none` when no such conjunct
+  fails: the refusal then names no clause (`Refusal.lawDeniedOutsideGrant`).
+
+`narrowed_congr`: two steps that agree on every covered slot give the same narrowed leaf.
+What it does not hide is the refusal's occurrence: whether the law accepts reads the whole
+cell, so each refused draft still tells the requester one bit (this law rejects this step). -/
+
+/-- The slots a requester whose grant names `fields` may be shown. -/
+def slotCovered (fields : Option (Finset CellField)) (slot : Slot) : Bool :=
+  match fields with
+  | none => true
+  | some named =>
+      match slot.splitOn "/" with
+      | "request" :: _ => true
+      | ["target", "policyId"] => true
+      | "context" :: "bytes" :: _ => true
+      | "command" :: "bytes" :: _ => true
+      | ["clock", "now"] => true
+      | ["resource", "field", n, _] =>
+          match n.toNat? with
+          | some k => decide (CellField.slot k ∈ named)
+          | none => false
+      | ["resource", "pair", a, b, "delta"] =>
+          match a.toNat?, b.toNat? with
+          | some i, some j => decide (CellField.slot i ∈ named) && decide (CellField.slot j ∈ named)
+          | _, _ => false
+      | ["account", "balance", a] =>
+          match a.toNat? with
+          | some k => decide (CellField.balance k ∈ named)
+          | none => false
+      | _ => false
+
+theorem slotCovered_none (slot : Slot) : slotCovered none slot = true := rfl
+
+mutual
+/-- `p` reads only slots `covered` accepts. A `witnessed` leaf reads no slot: first-party
+evaluation fails it closed. -/
+def readsOnly (covered : Slot → Bool) : Pred → Bool
+  | .eq s _ | .le s _ | .memberOf s _ | .writeOnce s | .monotone s => covered s
+  | .eqSlots a b | .leSlots a b | .leSlotsOff a b _ => covered a && covered b
+  | .witnessed _ => true
+  | .hashEq vs b c => covered hashEqCellSlot && vs.all covered && covered b && covered c
+  | .ran program => covered (ranSlot program)
+  | .not q => readsOnly covered q
+  | .allL ps => readsOnlyList covered ps
+  | .anyL ps => readsOnlyList covered ps
+def readsOnlyList (covered : Slot → Bool) : PredList → Bool
+  | .nil => true
+  | .cons q rest => readsOnly covered q && readsOnlyList covered rest
+end
+
+mutual
+theorem readsOnly_all : (p : Pred) → readsOnly (fun _ => true) p = true
+  | .eq _ _ | .le _ _ | .memberOf _ _ | .writeOnce _ | .monotone _ | .eqSlots _ _
+  | .leSlots _ _ | .leSlotsOff _ _ _ | .witnessed _ | .hashEq _ _ _ | .ran _ => by
+      simp [readsOnly, List.all_eq_true]
+  | .not q => by simpa [readsOnly] using readsOnly_all q
+  | .allL ps => by simpa [readsOnly] using readsOnlyList_all ps
+  | .anyL ps => by simpa [readsOnly] using readsOnlyList_all ps
+theorem readsOnlyList_all : (ps : PredList) → readsOnlyList (fun _ => true) ps = true
+  | .nil => rfl
+  | .cons q rest => by
+      simp only [readsOnlyList, readsOnly_all q, readsOnlyList_all rest, Bool.and_self]
+end
+
+/-- Two states agree on the slots `covered` accepts. -/
+def Agree (covered : Slot → Bool) (a b : State) : Prop :=
+  ∀ s, covered s = true → a.get s = b.get s
+
+section Congr
+
+variable {covered : Slot → Bool} {o₁ n₁ o₂ n₂ : State}
+
+/-- Agreement on every covered slot preserves an ordered read of covered values. -/
+theorem getAll_congr {a b : State} (h : Agree covered a b) :
+    (slots : List Slot) → slots.all covered = true → a.getAll slots = b.getAll slots
+  | [], _ => rfl
+  | s :: slots, hs => by
+      simp only [List.all_cons, Bool.and_eq_true] at hs
+      simp only [State.getAll, h s hs.1, getAll_congr h slots hs.2]
+
+mutual
+/-- First-party evaluation of a predicate reading only covered slots is a function of
+those slots. -/
+theorem evalWith_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (p : Pred) → readsOnly covered p = true →
+      evalWith failClosed p o₁ n₁ = evalWith failClosed p o₂ n₂
+  | .eq s _, h | .le s _, h | .memberOf s _, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith, hn _ h]
+  | .ran program, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith, hn _ h]
+  | .writeOnce s, h | .monotone s, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith, ho _ h, hn _ h]
+  | .eqSlots a b, h | .leSlots a b, h | .leSlotsOff a b _, h => by
+      simp only [readsOnly, Bool.and_eq_true] at h
+      simp only [evalWith, hn _ h.1, hn _ h.2]
+  | .witnessed _, _ => rfl
+  | .hashEq vs b c, h => by
+      simp only [readsOnly, Bool.and_eq_true] at h
+      obtain ⟨⟨⟨hc, hv⟩, hb⟩, hk⟩ := h
+      simp only [evalWith, hashEqHolds, hashEqOpening, hn _ hc,
+        getAll_congr hn vs hv, hn _ hb, hn _ hk]
+  | .not q, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith, evalWith_congr ho hn q h]
+  | .allL ps, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith]
+      exact evalWithAll_congr ho hn ps h
+  | .anyL ps, h => by
+      simp only [readsOnly] at h
+      simp only [evalWith]
+      exact evalWithAny_congr ho hn ps h
+theorem evalWithAll_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (ps : PredList) → readsOnlyList covered ps = true →
+      evalWithAll failClosed ps o₁ n₁ = evalWithAll failClosed ps o₂ n₂
+  | .nil, _ => rfl
+  | .cons q rest, h => by
+      simp only [readsOnlyList, Bool.and_eq_true] at h
+      simp only [evalWithAll, evalWith_congr ho hn q h.1, evalWithAll_congr ho hn rest h.2]
+theorem evalWithAny_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (ps : PredList) → readsOnlyList covered ps = true →
+      evalWithAny failClosed ps o₁ n₁ = evalWithAny failClosed ps o₂ n₂
+  | .nil, _ => rfl
+  | .cons q rest, h => by
+      simp only [readsOnlyList, Bool.and_eq_true] at h
+      simp only [evalWithAny, evalWith_congr ho hn q h.1, evalWithAny_congr ho hn rest h.2]
+end
+
+mutual
+/-- The first failing leaf of a predicate reading only covered slots is a function of
+those slots. -/
+theorem leafWith_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (p : Pred) → readsOnly covered p = true →
+      leafWith failClosed p o₁ n₁ = leafWith failClosed p o₂ n₂
+  | .allL ps, h => by
+      simp only [readsOnly] at h
+      simp only [leafWith]
+      exact leafWithAll_congr ho hn ps h
+  | .eq _ _, h | .le _ _, h | .memberOf _ _, h | .writeOnce _, h | .monotone _, h
+  | .witnessed _, h | .eqSlots _ _, h | .leSlots _ _, h | .leSlotsOff _ _ _, h
+  | .hashEq _ _ _, h | .ran _, h | .not _, h | .anyL _, h => by
+      simp only [leafWith]
+      rw [evalWith_congr ho hn _ h]
+theorem leafWithAll_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (ps : PredList) → readsOnlyList covered ps = true →
+      leafWithAll failClosed ps o₁ n₁ = leafWithAll failClosed ps o₂ n₂
+  | .nil, _ => rfl
+  | .cons q rest, h => by
+      simp only [readsOnlyList, Bool.and_eq_true] at h
+      simp only [leafWithAll]
+      rw [leafWith_congr ho hn q h.1, leafWithAll_congr ho hn rest h.2]
+end
+
+theorem firstFailingLeaf_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂)
+    (p : Pred) (h : readsOnly covered p = true) :
+    firstFailingLeaf p o₁ n₁ = firstFailingLeaf p o₂ n₂ :=
+  leafWith_congr ho hn p h
+
+end Congr
+
+/-- The first conjunct from position `i` on that reads only covered slots and fails, as a
+path into the conjunction. -/
+def coveredFailing (covered : Slot → Bool) (old new : State) : Nat → List Pred → Option (List Nat)
+  | _, [] => none
+  | i, q :: rest =>
+      if readsOnly covered q then
+        match firstFailingLeaf q old new with
+        | some path => some (i :: path)
+        | none => coveredFailing covered old new (i + 1) rest
+      else coveredFailing covered old new (i + 1) rest
+
+/-- The path a requester reading `covered` is told: the first covered failing conjunct of
+a conjunction, or a whole covered law's own failing leaf. -/
+def coveredPath (covered : Slot → Bool) (law : Pred) (old new : State) : Option (List Nat) :=
+  match law with
+  | .allL ps => coveredFailing covered old new 0 ps.toList
+  | _ => if readsOnly covered law then firstFailingLeaf law old new else none
+
+/-- The leaf a requester whose grant names `fields` is told. -/
+def narrowed (fields : Option (Finset CellField)) (law : Pred) (old new : State) :
+    Option LawLeaf :=
+  match fields with
+  | none => of law old new
+  | some _ => do
+      let covered := slotCovered fields
+      let path ← coveredPath covered law old new
+      let clause ← law.subterm path
+      let slot := (slotOf (explained clause)).filter covered
+      pure ⟨path, clause, slot.bind old.get, slot.bind new.get⟩
+
+/-- An unnarrowed grant is told the whole explanation. -/
+theorem narrowed_none (law : Pred) (old new : State) : narrowed none law old new = of law old new :=
+  rfl
+
+theorem coveredFailing_congr {covered : Slot → Bool} {o₁ n₁ o₂ n₂ : State}
+    (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) :
+    (i : Nat) → (qs : List Pred) →
+      coveredFailing covered o₁ n₁ i qs = coveredFailing covered o₂ n₂ i qs
+  | _, [] => rfl
+  | i, q :: rest => by
+      unfold coveredFailing
+      cases reads : readsOnly covered q with
+      | false => simp only [Bool.false_eq_true, if_false]; exact coveredFailing_congr ho hn (i + 1) rest
+      | true =>
+          simp only [if_true]
+          rw [firstFailingLeaf_congr ho hn q reads, coveredFailing_congr ho hn (i + 1) rest]
+
+theorem coveredPath_congr {covered : Slot → Bool} {o₁ n₁ o₂ n₂ : State}
+    (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂) (law : Pred) :
+    coveredPath covered law o₁ n₁ = coveredPath covered law o₂ n₂ := by
+  cases law with
+  | allL ps => exact coveredFailing_congr ho hn 0 ps.toList
+  | _ =>
+      simp only [coveredPath]
+      split
+      · next reads => exact firstFailingLeaf_congr ho hn _ reads
+      · rfl
+
+theorem of_congr {o₁ n₁ o₂ n₂ : State} (ho : ∀ s, o₁.get s = o₂.get s)
+    (hn : ∀ s, n₁.get s = n₂.get s) (law : Pred) : of law o₁ n₁ = of law o₂ n₂ := by
+  have path := firstFailingLeaf_congr (covered := fun _ => true) (fun s _ => ho s)
+    (fun s _ => hn s) law (readsOnly_all law)
+  have og : o₁.get = o₂.get := funext ho
+  have ng : n₁.get = n₂.get := funext hn
+  unfold of
+  rw [path, og, ng]
+
+/-- **The narrowed leaf depends only on the covered slots.** Two steps that agree on every
+slot the grant covers give the same leaf, so the requester is told nothing about a slot
+outside its grant through which clause is named or which values are shown. -/
+theorem narrowed_congr (fields : Option (Finset CellField)) (law : Pred) {o₁ n₁ o₂ n₂ : State}
+    (ho : Agree (slotCovered fields) o₁ o₂) (hn : Agree (slotCovered fields) n₁ n₂) :
+    narrowed fields law o₁ n₁ = narrowed fields law o₂ n₂ := by
+  cases fields with
+  | none => exact of_congr (fun s => ho s rfl) (fun s => hn s rfl) law
+  | some named =>
+      simp only [narrowed]
+      rw [coveredPath_congr ho hn law]
+      cases coveredPath (slotCovered (some named)) law o₂ n₂ with
+      | none => rfl
+      | some path =>
+          simp only [Option.bind_eq_bind, Option.bind_some]
+          cases law.subterm path with
+          | none => rfl
+          | some clause =>
+              simp only [Option.bind_some]
+              cases slotted : (slotOf (explained clause)).filter (slotCovered (some named)) with
+              | none => rfl
+              | some s =>
+                  have kept : slotCovered (some named) s = true := by
+                    have := Option.mem_filter_iff.mp slotted
+                    exact this.2
+                  simp only [Option.bind_some, ho s kept, hn s kept]
+
+/-- The named clause of a narrowed leaf is a leaf of the law, at its path, false on the step. -/
+theorem coveredFailing_sound {covered : Slot → Bool} {old new : State} :
+    (i : Nat) → (qs : List Pred) → (path : List Nat) →
+      coveredFailing covered old new i qs = some path →
+      ∃ j sub q, path = (i + j) :: sub ∧ qs[j]? = some q ∧ firstFailingLeaf q old new = some sub
+  | _, [], _, h => by simp [coveredFailing] at h
+  | i, q :: rest, path, h => by
+      unfold coveredFailing at h
+      split at h
+      · cases found : firstFailingLeaf q old new with
+        | some sub =>
+            rw [found] at h
+            cases h
+            exact ⟨0, sub, q, by simp, rfl, found⟩
+        | none =>
+            rw [found] at h
+            obtain ⟨j, sub, q', rfl, at_, fails⟩ := coveredFailing_sound (i + 1) rest path h
+            exact ⟨j + 1, sub, q', by simp [Nat.add_assoc, Nat.add_comm 1 j], by simpa using at_, fails⟩
+      · obtain ⟨j, sub, q', rfl, at_, fails⟩ := coveredFailing_sound (i + 1) rest path h
+        exact ⟨j + 1, sub, q', by simp [Nat.add_assoc, Nat.add_comm 1 j], by simpa using at_, fails⟩
+
+theorem subterm_toList : (ps : PredList) → (j : Nat) → (q : Pred) → (rest : List Nat) →
+    ps.toList[j]? = some q → PredList.subterm ps j rest = q.subterm rest
+  | .nil, _, _, _, h => by simp [PredList.toList] at h
+  | .cons p _, 0, q, rest, h => by
+      simp [PredList.toList] at h
+      subst h
+      simp [PredList.subterm]
+  | .cons _ ps, j + 1, q, rest, h => by
+      simp only [PredList.toList, List.getElem?_cons_succ] at h
+      simp only [PredList.subterm]
+      exact subterm_toList ps j q rest h
+
+theorem narrowed_fails (fields : Option (Finset CellField)) (law : Pred) (old new : State)
+    (leaf : LawLeaf) (named : narrowed fields law old new = some leaf) :
+    law.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
+      Minidregg.Pred.eval leaf.clause old new = false := by
+  cases fields with
+  | none => exact of_fails law old new leaf named
+  | some covered =>
+      simp only [narrowed] at named
+      cases pathFound : coveredPath (slotCovered (some covered)) law old new with
+      | none => simp [pathFound] at named
+      | some path =>
+          cases clauseFound : law.subterm path with
+          | none => simp [pathFound, clauseFound] at named
+          | some clause =>
+              simp only [pathFound, clauseFound, Option.bind_eq_bind, Option.bind_some,
+                Option.pure_def, Option.some.injEq] at named
+              subst named
+              refine ⟨clauseFound, ?_⟩
+              -- the clause is the failing leaf the walk named
+              cases law with
+              | allL ps =>
+                  obtain ⟨j, sub, q, rfl, at_, fails⟩ := coveredFailing_sound 0 ps.toList path pathFound
+                  obtain ⟨leafClause, sub_at, isLeaf, rejects⟩ := firstFailingLeaf_some_leaf q old new sub fails
+                  have same : (Pred.allL ps).subterm ((0 + j) :: sub) = q.subterm sub := by
+                    simp only [Nat.zero_add, Pred.subterm]
+                    exact subterm_toList ps j q sub at_
+                  rw [same, sub_at] at clauseFound
+                  cases clauseFound
+                  exact ⟨isLeaf, rejects⟩
+              | _ =>
+                  simp only [coveredPath] at pathFound
+                  split at pathFound
+                  · obtain ⟨leafClause, sub_at, isLeaf, rejects⟩ :=
+                      firstFailingLeaf_some_leaf _ old new path pathFound
+                    rw [sub_at] at clauseFound
+                    cases clauseFound
+                    exact ⟨isLeaf, rejects⟩
+                  · cases pathFound
+
+/-! #### The three poles, on the audit's `vault`
+
+`vault` has field 2 = 4242 under `any [ not (verb == write), field 2 <= 3 ]`; bob's grant
+names field 1 only and he prepares a write of field 1. -/
+
+namespace NarrowSample
+
+def vaultLaw : Pred := Pred.any [.not (.eq "request/verb" 2), .le "resource/field/2/after" 3]
+
+/-- Bob's write of field 1 to `one`, on a vault whose field 2 holds `two`. -/
+def write (one two : Int) : State :=
+  ⟨[("request/verb", 2), ("resource/field/1/after", one), ("resource/field/2/after", two)]⟩
+
+def bobFields : Option (Finset CellField) := some {CellField.slot 1}
+
+/-- The refuting pole, on the old renderer: two vaults differing only in field 2 give
+different refusals, each carrying field 2's value. -/
+theorem old_leaf_discloses_uncovered :
+    of vaultLaw (write 1 4242) (write 1 4242) = some ⟨[], vaultLaw, some 4242, some 4242⟩ ∧
+      of vaultLaw (write 1 4242) (write 1 4242) ≠ of vaultLaw (write 1 5) (write 1 5) := by
+  decide
+
+/-- The new renderer names no clause to bob: the law reads field 2. -/
+theorem narrowed_hides_uncovered_compiled :
+    narrowed bobFields vaultLaw (write 1 4242) (write 1 4242) = none ∧
+      narrowed bobFields vaultLaw (write 1 5) (write 1 5) = none := by
+  native_decide
+
+def fieldOneLaw : Pred :=
+  Pred.all [Pred.any [.not (.eq "request/verb" 2), .le "resource/field/1/after" 3],
+    Pred.any [.not (.eq "request/verb" 2), .le "resource/field/2/after" 3]]
+
+/-- The accepting pole: a clause over a covered field is still named, with its value,
+whatever the uncovered field holds. -/
+theorem narrowed_shows_covered_compiled :
+    narrowed bobFields fieldOneLaw (write 7 4242) (write 7 4242) =
+      some ⟨[0], Pred.any [.not (.eq "request/verb" 2), .le "resource/field/1/after" 3],
+        some 7, some 7⟩ ∧
+    narrowed bobFields fieldOneLaw (write 7 1) (write 7 1) =
+      narrowed bobFields fieldOneLaw (write 7 4242) (write 7 4242) := by
+  native_decide
+
+/-- An owner (an unnarrowed grant) is told the clause and the value, as before. -/
+theorem owner_told_value :
+    narrowed none vaultLaw (write 1 4242) (write 1 4242) =
+      some ⟨[], vaultLaw, some 4242, some 4242⟩ := by
+  decide
+
+end NarrowSample
+
 end LawLeaf
 
 /-- A named refusal with its display text, and for `lawDenied` the failing clause when the
@@ -625,6 +1028,82 @@ def Refusal.lawInputRange (leaf : LawLeaf) : Refusal :=
 def LawLeaf.explain (reason : RefusalReason) (leaf : LawLeaf) : String :=
   if reason = .lawInputRange then leaf.renderRange else leaf.render
 
+/-- A law refusal to a requester whose grant does not cover any failing clause: the law
+denies, and no clause, path or value is named (FIX-DISCLOSE). -/
+def Refusal.lawDeniedOutsideGrant : Refusal :=
+  ⟨.lawDenied, "a clause of the law over fields outside your grant denies this operation", none⟩
+
+/-- An out-of-range clause is disclosed only when every slot it reads is covered.
+Otherwise its path and operand values remain hidden with the generic law refusal. -/
+def Refusal.lawInputRangeFor (fields : Option (Finset CellField)) (leaf : LawLeaf) : Refusal :=
+  if LawLeaf.readsOnly (LawLeaf.slotCovered fields) leaf.clause then
+    Refusal.lawInputRange leaf
+  else Refusal.lawDeniedOutsideGrant
+
+/-- An uncovered range diagnostic discloses neither its clause nor its operand values. -/
+theorem lawInputRangeFor_hidden (fields : Option (Finset CellField)) (leaf : LawLeaf)
+    (hidden : LawLeaf.readsOnly (LawLeaf.slotCovered fields) leaf.clause = false) :
+    Refusal.lawInputRangeFor fields leaf = Refusal.lawDeniedOutsideGrant := by
+  simp [Refusal.lawInputRangeFor, hidden]
+
+/-- An unnarrowed grant retains the exact range diagnostic. -/
+theorem lawInputRangeFor_none (leaf : LawLeaf) :
+    Refusal.lawInputRangeFor none leaf = Refusal.lawInputRange leaf := by
+  have covered : LawLeaf.slotCovered none = (fun _ => true) := by
+    funext slot
+    rfl
+  simp [Refusal.lawInputRangeFor, covered, LawLeaf.readsOnly_all]
+
+/-- The law refusal told to a requester whose grant names `fields`: the narrowed leaf
+(`LawLeaf.narrowed`), or no clause when every failing clause reads outside the grant. -/
+def Refusal.lawDeniedFor (fields : Option (Finset CellField)) (law : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State) : Refusal :=
+  match LawLeaf.narrowed fields law old new with
+  | some leaf => Refusal.lawDenied (some leaf)
+  | none => Refusal.lawDeniedOutsideGrant
+
+/-- **`refusal_leaf_depends_only_on_covered_fields`.** Two steps that agree on every slot
+the requester's grant covers give the same refusal, field for field (hence the same
+refusal frame bytes). With `fields = some {slot 1}`, two vaults that differ only in field 2
+are refused identically (`LawLeaf.NarrowSample`). -/
+theorem refusal_leaf_depends_only_on_covered_fields (fields : Option (Finset CellField))
+    (law : Minidregg.Pred.Pred) {o₁ n₁ o₂ n₂ : Minidregg.Pred.State}
+    (ho : LawLeaf.Agree (LawLeaf.slotCovered fields) o₁ o₂)
+    (hn : LawLeaf.Agree (LawLeaf.slotCovered fields) n₁ n₂) :
+    Refusal.lawDeniedFor fields law o₁ n₁ = Refusal.lawDeniedFor fields law o₂ n₂ := by
+  unfold Refusal.lawDeniedFor
+  rw [LawLeaf.narrowed_congr fields law ho hn]
+
+/-- An unnarrowed grant is told what it was told before. -/
+theorem lawDeniedFor_none (law : Minidregg.Pred.Pred) (old new : Minidregg.Pred.State)
+    (refused : Minidregg.Pred.eval law old new = false) :
+    Refusal.lawDeniedFor none law old new = Refusal.lawDenied (LawLeaf.of law old new) := by
+  unfold Refusal.lawDeniedFor
+  rw [LawLeaf.narrowed_none]
+  cases named : LawLeaf.of law old new with
+  | some leaf => rfl
+  | none =>
+      have := (LawLeaf.of_none_iff law old new).mp named
+      rw [refused] at this
+      cases this
+
+/-- A clause a narrowed refusal names is a leaf of the law, false on the step. -/
+theorem lawDeniedFor_fails (fields : Option (Finset CellField)) (law : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State) (leaf : LawLeaf)
+    (named : Refusal.lawDeniedFor fields law old new = Refusal.lawDenied (some leaf)) :
+    law.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
+      Minidregg.Pred.eval leaf.clause old new = false := by
+  unfold Refusal.lawDeniedFor at named
+  cases found : LawLeaf.narrowed fields law old new with
+  | none =>
+      rw [found] at named
+      simp [Refusal.lawDeniedOutsideGrant, Refusal.lawDenied] at named
+  | some told =>
+      rw [found] at named
+      simp only [Refusal.lawDenied, Refusal.mk.injEq, Option.some.injEq, true_and] at named
+      subst named
+      exact LawLeaf.narrowed_fails fields law old new told found
+
 instance : ToString Refusal := ⟨fun refusal => match refusal.leaf with
   | some leaf => s!"refused: {refusal.reason.name}: {leaf.explain refusal.reason}"
   | none => s!"refused: {refusal.reason.name}: {refusal.detail}"⟩
@@ -643,3 +1122,12 @@ end Minidregg.Compiler
 
 /-- info: 'Minidregg.Compiler.LawLeaf.of_none_iff' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_none_iff
+
+/-- info: 'Minidregg.Compiler.refusal_leaf_depends_only_on_covered_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.refusal_leaf_depends_only_on_covered_fields
+
+/-- info: 'Minidregg.Compiler.lawDeniedFor_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.lawDeniedFor_fails
+
+/-- info: 'Minidregg.Compiler.LawLeaf.NarrowSample.old_leaf_discloses_uncovered' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.NarrowSample.old_leaf_discloses_uncovered

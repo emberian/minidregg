@@ -104,11 +104,12 @@ def Prepared.wanted (_prepared : Prepared context profile federation height spec
 def project (prepared : Prepared context profile federation height spec)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory spec.packet.release.source.resource ++
+    CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots spec.packet.release.source.resource
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject spec.packet.release.source.resource
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height spec) :
@@ -122,12 +123,23 @@ def step (prepared : Prepared context profile federation height spec) :
       prepared.observed.before.kind prepared.observed.before.payload
       rootExact)
 
+def kindDependencies (prepared : Prepared context profile federation height spec) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment context.directory.directory spec.packet.release.source.resource
+
+def lawReadGuards (prepared : Prepared context profile federation height spec) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
+    context.directory.directory profile.semantics spec.packet.release.source.resource structural.additional
+  pure (sources ++ structural.readGuards)
+
 def policyConfig (prepared : Prepared context profile federation height spec) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile
-    context.authority.snapshot (ResourceObservationAdmission.sourceStore context)
-    (sourceCapabilityPortal context.authority.snapshot (marker spec))
-    (step prepared)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
+    context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker spec))
+    (step prepared) spec.packet.release.source.resource
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 def portal (prepared : Prepared context profile federation height spec) : Portal :=
   (policyConfig prepared).portal
@@ -136,18 +148,22 @@ def authorize (prepared : Prepared context profile federation height spec)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Option (Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted) := do
   let config := policyConfig prepared
-  let evidence ← sourceCapabilityOnlyEvidence profile.compilerProfile
-    context.authority.snapshot (ResourceObservationAdmission.sourceStore context)
-    (marker spec) (step prepared) prepared.wanted
-    spec.delegateCapability signature
-  let committed ← config.registry.resolve prepared.wanted.policyId
-    prepared.wanted.policyRevision
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  CanonicalPolicyAdmission.admit config context.authority.snapshot.authState
-    prepared.wanted evidence witness
+  let _ ← lawReadGuards prepared
+  let evidence ← (config.capabilityEvidenceChecked prepared.wanted
+    spec.delegateCapability () signature () (fun _ => ())).toOption
+  let law ← config.resolve?
+  ComposedPolicyAdmission.admit config prepared.wanted evidence law.witness
     (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
     (by rfl) (by rfl)
+
+/-- A public success cannot be obtained with missing source custody. -/
+theorem authorize_requires_sources (prepared : Prepared context profile federation height spec)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (accepted : (authorize prepared signature).isSome = true) :
+    (lawReadGuards prepared).isSome = true := by
+  cases resolved : lawReadGuards prepared with
+  | none => simp [authorize, resolved] at accepted
+  | some guards => simp [resolved]
 
 attribute [irreducible] portal
 
@@ -173,6 +189,12 @@ def check (native : CredentialSignatureIO.NativeConfig)
         | some authorization =>
             return .ok ⟨signature, exact, authorization, authorized⟩
       else return .error "selected source publication refused"
+
+/-- Complete source and structural custody. Authorization requires this exact
+resolver result to exist before a Checked value can be constructed. -/
+def readGuards (prepared : Prepared context profile federation height spec) :
+    List DurableDataIntent.ReadGuard :=
+  ((lawReadGuards prepared).getD []).map fun guard => ⟨⟨guard.1⟩, guard.2⟩
 
 def readGuard (prepared : Prepared context profile federation height spec) :
     DurableDataIntent.ReadGuard :=

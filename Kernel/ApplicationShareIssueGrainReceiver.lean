@@ -58,7 +58,7 @@ def writes (accepted : Accepted profile config pins durable ambient ingress) :
 def readGuards (accepted : Accepted profile config pins durable ambient ingress) :
     List ReadGuard :=
   accepted.grainAccepted.readGuards ++
-    [ApplicationShareIssueDelegation.readGuard accepted.appPrepared]
+    ApplicationShareIssueDelegation.readGuards accepted.appPrepared
 
 theorem readGuards_readonly
     (accepted : Accepted profile config pins durable ambient ingress)
@@ -67,9 +67,7 @@ theorem readGuards_readonly
   rcases List.mem_append.mp member with grain | app
   · exact accepted.atomic.readonly guard
       (accepted.grainAccepted.readGuards_readonly guard grain)
-  · simp only [List.mem_singleton] at app
-    subst guard
-    exact accepted.atomic.readonly _ accepted.appReadOnly
+  · exact accepted.atomic.readonly guard (accepted.appReadOnly guard app)
 
 theorem readGuards_exact
     (accepted : Accepted profile config pins durable ambient ingress)
@@ -77,9 +75,7 @@ theorem readGuards_exact
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   rcases List.mem_append.mp member with grain | app
   · exact accepted.grainAccepted.readGuards_exact guard grain
-  · simp only [List.mem_singleton] at app
-    subst guard
-    exact ApplicationShareIssueDelegation.readGuard_current accepted.appPrepared
+  · exact accepted.appChecked.guardsCurrent guard app
 
 theorem writes_roots_bound
     (accepted : Accepted profile config pins durable ambient ingress) :

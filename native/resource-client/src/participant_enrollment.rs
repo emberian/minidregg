@@ -120,6 +120,30 @@ pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
+/// Whether an enrollment Host refusal is the Host's own `stale-root`, decoded
+/// by the Host itself over the same session (op8 `inspect outcome`).
+pub(crate) fn stale_refusal(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    decision: Option<&HostDecision>,
+) -> bool {
+    match decision {
+        Some(HostDecision::RefusedFrame { decoded: None, encoded, .. }) => {
+            let kind = b"outcome";
+            let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
+            payload.extend_from_slice(kind);
+            payload.extend_from_slice(encoded);
+            session_invoke(host, socket, config, 8, &payload)
+                .ok()
+                .filter(|frame| frame.first() == Some(&8))
+                .and_then(|frame| serde_json::from_slice::<Value>(&frame[1..]).ok())
+                .is_some_and(|outcome| crate::replan::outcome_is_stale_root(&outcome))
+        }
+        decision => crate::replan::is_stale_root(decision),
+    }
+}
+
 pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
@@ -297,6 +321,9 @@ struct Pin {
     public_key: String,
     plan: Vec<u8>,
     command: Vec<u8>,
+    /// The committed next key and its co-signature (both empty without one).
+    next_public: Vec<u8>,
+    next_cosign: Vec<u8>,
 }
 
 /// A home identity keeps its origin subject number, so only the Store-local
@@ -314,6 +341,49 @@ fn enrollment_roles(home: bool) -> Vec<Role> {
         kind: IdKind::Key,
     });
     roles
+}
+
+fn cosign_file(path: &Path) -> Result<[u8; 64]> {
+    bounded(path, 64)?
+        .try_into()
+        .map_err(|_| format!("the co-signature {} must contain exactly 64 raw bytes", path.display()))
+}
+
+/// `mini enroll --action cosign --key KEY [--next-key NEXT] [--output FILE]`
+/// (or `--public-key PUB` in place of `--key`): the next key's co-signature of
+/// the pair (KEY's public key, NEXT's public key), written to FILE (default
+/// KEY.next.cosign) and printed with both public keys -- the three hex lines a
+/// sponsor's `enroll plan` takes. Run by whoever holds NEXT.
+fn cosign_action(mut args: Args) -> Result<()> {
+    let key_path = args.optional("key").map(|value| absolute(&path(value))).transpose()?;
+    let public_path = args.optional("public-key").map(|value| absolute(&path(value))).transpose()?;
+    let next_path = args.optional("next-key").map(|value| absolute(&path(value))).transpose()?;
+    let output = args.optional("output").map(|value| absolute(&path(value))).transpose()?;
+    args.finish()?;
+    let (public, default_next, default_output) = match (&key_path, &public_path) {
+        (Some(secret), None) => {
+            let mut next = secret.as_os_str().to_owned();
+            next.push(".next");
+            (key(secret)?.verifying_key().to_bytes(), Some(PathBuf::from(next)),
+                Some(crate::key_rotation::conventional_next_cosign(secret)))
+        }
+        (None, Some(public)) => (public_key_file(public)?.to_bytes(), None, None),
+        _ => return Err("cosign takes --key KEY or --public-key PUB".into()),
+    };
+    let next_path = next_path.or(default_next).ok_or("cosign needs --next-key NEXT")?;
+    let next = key(&next_path)?;
+    let output = output.or(default_output).ok_or("cosign with --public-key needs --output")?;
+    let signature = crate::key_rotation::cosign(&public, &next);
+    let next_public = next.verifying_key().to_bytes();
+    crate::key_rotation::verify_cosign(&public, &next_public, &signature)?;
+    match bounded(&output, 64) {
+        Ok(existing) if existing == signature => {}
+        Ok(_) => return Err(format!("{} already holds another co-signature", output.display())),
+        Err(_) => crate::create_public(&output, &signature)?,
+    }
+    print_json(&json!({"type":"minidregg-next-key-cosign-v1","publicKey":hex(&public),
+        "nextPublicKey":hex(&next_public),"cosign":hex(&signature),"cosignAt":utf8_path(&output)?,
+        "next":"give your sponsor nextPublicKey and cosign: `enroll plan NAME KEYFILE NEXT-PUB COSIGN`"}))
 }
 
 fn public_key_file(path: &Path) -> Result<VerifyingKey> {
@@ -402,7 +472,20 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         return Err("enrollment namespace reservation changed".into());
     }
     participant_namespace::bind_attempt(&reservation, directory, &digest(&command))?;
+    let next_public = match request.get("nextPublicKey").and_then(Value::as_str) {
+        Some(text) => decode_hex(text)?,
+        None => Vec::new(),
+    };
+    let next_cosign = match request.get("nextCosign").and_then(Value::as_str) {
+        Some(text) => decode_hex(text)?,
+        None => Vec::new(),
+    };
+    if next_public.is_empty() != next_cosign.is_empty() {
+        return Err("enrollment request names a next key without its co-signature".into());
+    }
     Ok(Pin {
+        next_public,
+        next_cosign,
         host,
         config,
         public_socket,
@@ -457,6 +540,13 @@ pub(crate) fn signed_factory_observation(
         }
         Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
     }
+    // Op 4 is authenticated before the Host reads the factory: the intent's bytes
+    // and the sponsor's signature over them, in the session's pair framing.
+    let intent_signature = signing.sign(&query_bytes).to_bytes();
+    let length: u32 = query_bytes.len().try_into().map_err(|_| "factory intent too large")?;
+    let mut request = length.to_le_bytes().to_vec();
+    request.extend_from_slice(&query_bytes);
+    request.extend_from_slice(&intent_signature);
     let challenge = staged_invoke(
         input.host,
         input.socket,
@@ -464,7 +554,7 @@ pub(crate) fn signed_factory_observation(
         &observation,
         "challenge",
         4,
-        &query_bytes,
+        &request,
     )?;
     let challenge_json = inspect(
         input.host,
@@ -602,6 +692,31 @@ fn plan(mut args: Args) -> Result<()> {
         .map(public_key_file)
         .transpose()?
         .map(|key| key.to_bytes());
+    // FIX-IDENTITY: the committed next key co-signs (Kernel enrollGate). The
+    // co-signature comes from whoever holds the next key: `mini keygen` wrote it
+    // at KEY.next.cosign, `mini enroll --action cosign` makes it again.
+    let next_cosign_arg = args
+        .optional("next-cosign")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let next_cosign: Option<[u8; 64]> = match (&next_public, next_cosign_arg, &new_key) {
+        (None, Some(_), _) => return Err("--next-cosign needs a next key (not --no-prerotation)".into()),
+        (None, None, _) => None,
+        (Some(_), Some(file), _) => Some(cosign_file(&file)?),
+        (Some(_), None, Some(secret)) => {
+            let conventional = crate::key_rotation::conventional_next_cosign(secret);
+            if !conventional.is_file() {
+                return Err(format!(
+                    "the next key must co-sign this enrollment: {} is missing; whoever holds the next key runs `mini enroll --action cosign --key KEY --next-key NEXT` and passes --next-cosign",
+                    conventional.display()
+                ));
+            }
+            Some(cosign_file(&conventional)?)
+        }
+        (Some(_), None, None) => {
+            return Err("a public-key enrollment with a next key needs --next-cosign (the newcomer's `mini join --key` prints it)".into())
+        }
+    };
     let operator_override = args
         .optional("operator-socket")
         .map(path)
@@ -712,7 +827,13 @@ fn plan(mut args: Args) -> Result<()> {
         if hex(next) == public_key {
             return Err("the next key must differ from the key being enrolled".into());
         }
+        let cosign = next_cosign.ok_or("a next key without its co-signature")?;
+        let enrolled: [u8; 32] = decode_hex(&public_key)?
+            .try_into()
+            .map_err(|_| "enrolled public key is not 32 bytes")?;
+        crate::key_rotation::verify_cosign(&enrolled, next, &cosign)?;
         expected_request["nextPublicKey"] = json!(hex(next));
+        expected_request["nextCosign"] = json!(hex(&cosign));
     }
     let request = retained_request(&directory, &expected_request)?;
     let roles = enrollment_roles(home);
@@ -731,80 +852,98 @@ fn plan(mut args: Args) -> Result<()> {
     };
     retain_exact(&directory.join("config.json"), &config_bytes)?;
     let retained_config = directory.join("config.json");
-    let (signed, factory_root, authority_root) = signed_factory_observation(
-        &FactoryObservation {
-            host: &host,
-            socket: &public_socket,
-            config: &retained_config,
-            directory: &directory,
-            sponsor: &sponsor,
-            nonce: field(&request, "nonce")?,
-            factory: &factory_target,
-            observe: &observe,
+    // The factory observation, the command over its roots and the Plan are one
+    // re-plannable unit: nothing is bound or submitted until the Plan is
+    // validated, so a Host stale-root (a tick, certify or write between the
+    // observation and its use) retires them under replanned/ and observes again.
+    let (command, plan, plan_view) = crate::replan::replan(
+        "enroll plan",
+        || {
+            let (signed, factory_root, authority_root) = signed_factory_observation(
+                &FactoryObservation {
+                    host: &host,
+                    socket: &public_socket,
+                    config: &retained_config,
+                    directory: &directory,
+                    sponsor: &sponsor,
+                    nonce: field(&request, "nonce")?,
+                    factory: &factory_target,
+                    observe: &observe,
+                },
+                &sponsor_signing,
+            )?;
+            let factory_root = factory_root.as_str();
+            let authority_root = authority_root.as_str();
+            if let Some(next) = &next_public {
+                let enrolled: [u8; 32] = decode_hex(&public_key)?
+                    .try_into().map_err(|_| "enrolled public key is not 32 bytes")?;
+                crate::key_rotation::host_next_possession_frame(
+                    &host, &public_socket, &retained_config, &enrolled, next)?;
+            }
+            let next_key_digest = match &next_public {
+                Some(next) => json!(crate::key_rotation::next_key_digest(
+                    &host, &public_socket, &retained_config, next
+                )?),
+                None => Value::Null,
+            };
+            let command_source = json!({"sponsor":sponsor,"control":control,
+                "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
+                "expectedAuthorityRoot":authority_root,
+                "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
+                    "subject":subject,"publicKey":public_key,
+                    "activeFrom":"0","activeUntil":u64::MAX.to_string(),
+                    "nextKeyDigest":next_key_digest}});
+            save_json_staged(&directory.join("source.json"), &command_source)?;
+            transform(
+                &host,
+                &public_socket,
+                &retained_config,
+                7,
+                Some(COMMAND_KIND),
+                &directory.join("source.json"),
+                &directory.join("command.bin"),
+            )?;
+            let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
+            let command_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                COMMAND_KIND,
+                &directory.join("command.bin"),
+                &directory.join("command.json"),
+            )?;
+            if field(&command_view, "type")? != "participant-key-enrollment-v1"
+                || field(&command_view, "canonical")? != hex(&command)
+                || command_view.get("key") != Some(&command_source["key"])
+            {
+                return Err("enrollment canonical command differs from reserved source".into());
+            }
+            let plan = staged_invoke(
+                &host,
+                &operation_socket,
+                &retained_config,
+                &directory,
+                "plan",
+                86,
+                &pair(&signed, &command)?,
+            )?;
+            let plan_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                PLAN_KIND,
+                &directory.join("plan.bin"),
+                &directory.join("plan.json"),
+            )?;
+            validate_plan(&plan_view, &command, &plan)?;
+            Ok((command, plan, plan_view))
         },
-        &sponsor_signing,
+        |_, decision| stale_refusal(&host, &public_socket, &retained_config, decision),
+        |number| {
+            crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
+                .map(|_| ())
+        },
     )?;
-    let factory_root = factory_root.as_str();
-    let authority_root = authority_root.as_str();
-    let next_key_digest = match &next_public {
-        Some(next) => json!(crate::key_rotation::next_key_digest(
-            &host,
-            &public_socket,
-            &retained_config,
-            next
-        )?),
-        None => Value::Null,
-    };
-    let command_source = json!({"sponsor":sponsor,"control":control,
-        "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
-        "expectedAuthorityRoot":authority_root,
-        "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
-            "subject":subject,"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string(),
-            "nextKeyDigest":next_key_digest}});
-    save_json_staged(&directory.join("source.json"), &command_source)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        7,
-        Some(COMMAND_KIND),
-        &directory.join("source.json"),
-        &directory.join("command.bin"),
-    )?;
-    let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
-    let command_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        COMMAND_KIND,
-        &directory.join("command.bin"),
-        &directory.join("command.json"),
-    )?;
-    if field(&command_view, "type")? != "participant-key-enrollment-v1"
-        || field(&command_view, "canonical")? != hex(&command)
-        || command_view.get("key") != Some(&command_source["key"])
-    {
-        return Err("enrollment canonical command differs from reserved source".into());
-    }
-    let plan = staged_invoke(
-        &host,
-        &operation_socket,
-        &retained_config,
-        &directory,
-        "plan",
-        86,
-        &pair(&signed, &command)?,
-    )?;
-    let plan_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        PLAN_KIND,
-        &directory.join("plan.bin"),
-        &directory.join("plan.json"),
-    )?;
-    validate_plan(&plan_view, &command, &plan)?;
     pinned(&request, "hostSha256", &host_image_sha256(&host)?)?;
     pinned(
         &request,
@@ -930,6 +1069,7 @@ fn offer(directory: &Path) -> Result<()> {
 /// context their own `workspace create` uses.
 fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
     let directory = absolute(directory)?;
+    let (_pin, ingress) = sealed(&directory)?;
     let enrollment = json_private(&directory.join("enrollment.json"))?;
     pinned(&enrollment, "type", "minidregg-participant-enrollment-result-v1")?;
     pinned(&enrollment, "authority", "admitted-key-only")?;
@@ -946,7 +1086,8 @@ fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
         pinned(context, "type", "minidregg-participant-birth-context-v1")?;
     }
     print_json(&json!({"type":"minidregg-participant-join-welcome-v1",
-        "enrollment":enrollment,"birthContext":context}))
+        "enrollment":enrollment,"birthContext":context,
+        "ingressHex":hex(&ingress),"ingressSha256":digest(&ingress)}))
 }
 
 fn join_dir(path: &Path) -> Result<()> {
@@ -971,6 +1112,10 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     let key_path = absolute(&path(args.required("key")?))?;
     let offer = args.optional("sponsor-plan").map(path);
     let welcome = args.optional("welcome").map(path);
+    let verifier = args.optional("verifier").map(|value| absolute(&path(value))).transpose()?;
+    if verifier.is_some() && welcome.is_none() {
+        return Err("join --verifier is used with --welcome".into());
+    }
     let root = args.optional("dir").map(|dir| absolute(&path(dir))).transpose()?;
     args.finish()?;
     match (offer, welcome, root) {
@@ -986,11 +1131,18 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
             // plan commits to (absent for a key made with --no-prerotation).
             if let Some(next) = own_next_public(&key_path)? {
                 println!("{}", hex(&next));
+                // The third line: the next key's co-signature, which the
+                // sponsor's plan carries (FIX-IDENTITY).
+                let cosign = crate::key_rotation::conventional_next_cosign(&key_path);
+                if cosign.is_file() {
+                    println!("{}", hex(&cosign_file(&cosign)?));
+                }
             }
             Ok(())
         }
         (Some(offer), None, Some(root)) => join_possess(&key_path, &absolute(&offer)?, &root),
-        (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root),
+        (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root,
+            verifier.as_deref().ok_or("join --welcome requires the pinned portable --verifier LOCAL-HOST")?),
         _ => Err("join takes --key alone, or --key with --sponsor-plan or --welcome and --dir".into()),
     }
 }
@@ -1101,25 +1253,113 @@ fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
     print_json(&json!({"type":"minidregg-participant-join-possession-v1",
         "subject":summary["subject"],"publicKey":summary["publicKey"],
         "possessionSignature":hex(&signature),
-        "next":"give possessionSignature to your sponsor; then run join --welcome"}))
+        "next":"give possessionSignature to your sponsor; then run join --welcome with the pinned portable --verifier"}))
 }
 
-fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()> {
-    join_remote()?;
+fn stable_receipt(value: &Value) -> Result<Value> {
+    let mut result = json!({});
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+        decimal(field(value, name)?, name)?;
+        result[name] = value[name].clone();
+    }
+    Ok(result)
+}
+
+/// Only the source Host decodes semantic bytes. A fresh output prevents a stale
+/// successful inspection from surviving a failed verifier invocation.
+fn local_join_inspect(verifier: &Path, pin: &Value, config: &Path, kind: &str,
+    input: &Path, directory: &Path) -> Result<Value> {
+    if host_image_sha256(verifier)? != field(pin, "verifierSha256")? {
+        return Err("join local verifier image changed".into());
+    }
+    let output = directory.join(format!("inspect-{}.json", nonce()?));
+    create_private(&output, b"")?;
+    let result = Command::new(verifier).arg(config).arg("inspect").arg(kind)
+        .arg(input).arg(&output).output().map_err(|error| format!("cannot inspect join evidence: {error}"))?;
+    if !result.status.success() {
+        return Err(format!("local source verifier refused join {kind}"));
+    }
+    json_private(&output)
+}
+fn match_join_ingress(view: &Value, ingress: &[u8], command: &[u8], possession: &[u8], admitted: &Value) -> Result<()> {
+    if view["type"] != "participant-key-enrollment-ingress-v2"
+        || field(view, "canonical")? != hex(ingress)
+        || field(view, "commandBytes")? != hex(command)
+        || field(view, "possessionSignature")? != hex(possession)
+        || field(view, "possessionSignatureLength")? != "64" {
+        return Err("welcome sealed ingress differs from the participant's signed request or possession signature".into());
+    }
+    for name in ["subject", "keyId", "publicKey"] {
+        if view["command"]["key"][name] != admitted[name] {
+            return Err(format!("welcome sealed command {name} differs from admitted identity"));
+        }
+    }
+    Ok(())
+}
+/// The signed command and admitted ingress must name the participant-owned next
+/// key, including its real co-signature. Absence is an explicit signed policy.
+fn match_join_prerotation(view: &Value, own_next: Option<[u8; 32]>, public: &[u8; 32]) -> Result<bool> {
+    let offered = view["command"]["key"].get("nextKeyDigest")
+        .ok_or("welcome command lacks nextKeyDigest")?;
+    let next = decode_hex(field(view,"nextPublicKey")?)?;
+    let cosign = decode_hex(field(view,"nextPossessionSignature")?)?;
+    match own_next {
+        Some(own) => {
+            decimal(offered.as_str().ok_or("welcome removes the participant next-key commitment")?, "next-key digest")?;
+            if next != own {
+                return Err("welcome next key differs from the participant retained next key".into());
+            }
+            let signature: [u8; 64] = cosign.try_into().map_err(|_| "welcome next-key co-signature is malformed")?;
+            crate::key_rotation::verify_cosign(public, &own, &signature)?;
+            Ok(false)
+        }
+        None if offered.is_null() && next.is_empty() && cosign.is_empty() => Ok(true),
+        None => Err("welcome commits to a next key the participant does not hold".into()),
+    }
+}
+
+fn match_join_receipt(outcome: &Value, admitted: &Value) -> Result<Value> {
+    confirmed(outcome)?;
+    let receipt = stable_receipt(outcome)?;
+    if receipt != stable_receipt(&admitted["receipt"])? {
+        return Err("welcome receipt differs from exact read-only enrollment lookup".into());
+    }
+    Ok(receipt)
+}
+
+/// Retain the fact that this join has created custody outside that custody's
+/// directory. Losing the whole workspace must not look like another first use.
+fn retain_join_workspace_marker(state: &Path, root: &Path, evidence: &Value, manifest: &Value) -> Result<()> {
+    let marker = state.join("workspace-created.json");
+    let expected = json!({"type":"minidregg-join-workspace-created-v1",
+        "evidence":evidence,"freshContinuity":manifest["freshContinuity"]});
+    if !marker.exists() {
+        let pending = json_private(&root.join("receipt-continuity.pending.json"))?;
+        if manifest.get("receiptContinuity").is_some() || root.join("receipt-continuity").exists()
+            || pending["state"] != "awaiting-first-read" {
+            return Err("join workspace creation marker is missing; restore retained custody".into());
+        }
+    }
+    crate::receipt_continuity::fresh::retain_workspace_creation(state,&expected)
+}
+
+fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Path) -> Result<()> {
+    let socket = join_remote()?;
     let state = root.join("join");
     drain::private_dir(&state)?;
-    let offer: Value = serde_json::from_slice(&bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?)
-        .map_err(|error| error.to_string())?;
-    if !state.join("possession-signature.bin").is_file() {
-        return Err("join has not signed possession yet: run join --sponsor-plan first".into());
-    }
+    let _lock = transport::service_lock(&state.join("welcome.lock"))?;
+    let offer_bytes = bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?;
+    let offer: Value = serde_json::from_slice(&offer_bytes).map_err(|error| error.to_string())?;
+    pinned(&offer, "type", "minidregg-participant-join-offer-v1")?;
+    let possession = private_bytes(&state.join("possession-signature.bin"), 64)?;
     let welcome: Value = serde_json::from_slice(&bounded(welcome_path, 512 * 1024)?)
         .map_err(|error| format!("invalid welcome: {error}"))?;
     pinned(&welcome, "type", "minidregg-participant-join-welcome-v1")?;
     let admitted = welcome.get("enrollment").ok_or("welcome lacks the enrollment")?;
     pinned(admitted, "type", "minidregg-participant-enrollment-result-v1")?;
     pinned(admitted, "authority", "admitted-key-only")?;
-    let public_key = hex(&key(key_path)?.verifying_key().to_bytes());
+    let signing = key(key_path)?;
+    let public_key = hex(&signing.verifying_key().to_bytes());
     for name in ["subject", "keyId", "publicKey"] {
         if field(admitted, name)? != field(&offer, name)? {
             return Err(format!("welcome {name} differs from the plan this key signed"));
@@ -1128,7 +1368,93 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()>
     if field(admitted, "publicKey")? != public_key {
         return Err("welcome names another key than --key".into());
     }
+    let ingress = decode_hex(field(&welcome, "ingressHex")?)?;
+    if ingress.is_empty() || ingress.len() > LIMIT || digest(&ingress) != field(&welcome, "ingressSha256")? {
+        return Err("welcome ingress exceeds bound or differs from its digest".into());
+    }
+    let workspace_root = root.join("workspace");
+    let evidence_path = state.join("authenticated-receipt.json");
+    if !workspace_root.exists() && fs::symlink_metadata(state.join("workspace-created.json")).is_ok() {
+        return Err("joined workspace custody is missing; restore it instead of trusting another first baseline".into());
+    }
+    if workspace_root.exists() {
+        // Repeated welcome can only finish this workspace's recorded fresh birth.
+        // It cannot adopt legacy state, restore lost anchors or select another head.
+        let evidence = json_private(&evidence_path)?;
+        if evidence["receipt"] != stable_receipt(&admitted["receipt"])?
+            || evidence["ingressSha256"] != digest(&ingress) {
+            return Err("welcome differs from authenticated enrollment evidence".into());
+        }
+        let manifest = crate::workspace::bounded_json(&workspace_root.join("workspace.json"))?;
+        if manifest.get("freshContinuity").is_none()
+            || field(&manifest,"subject")? != field(admitted,"subject")?
+            || crate::workspace::member_path(&manifest,"key")? != key_path {
+            return Err("welcome cannot adopt an existing or changed workspace".into());
+        }
+        let initial = json_private(&workspace_root.join("receipt-continuity.pending.json"))?;
+        if initial["admittedReceipt"] != evidence {
+            return Err("workspace first trust differs from admitted enrollment evidence".into());
+        }
+        retain_join_workspace_marker(&state,&workspace_root,&evidence,&manifest)?;
+        return print_json(&json!({"type":"minidregg-participant-joined-v1","workspace":workspace_root,
+            "continuity":crate::workspace::complete_fresh_onboarding(&workspace_root)?}));
+    }
+    let config = root.join("config.json");
+    let config_bytes = bounded(&config, 65_536)?;
+    if digest(&config_bytes) != field(&offer,"configSha256")?
+        || config_bytes != decode_hex(field(&offer,"configHex")?)? {
+        return Err("join config differs from retained offer".into());
+    }
     pin_remote_host(field(&offer, "hostSha256")?)?;
+    let verifier_pin = crate::receipt_continuity::fresh::verifier_pin(&config, verifier)?;
+    let command = private_bytes(&state.join("command.bin"), LIMIT)?;
+    let plan = private_bytes(&state.join("plan.bin"), LIMIT)?;
+    save_json_staged(&state.join("welcome-pin.json"), &json!({
+        "type":"minidregg-participant-welcome-pin-v1","verifier":verifier_pin,
+        "offerSha256":digest(&offer_bytes),"configSha256":digest(&config_bytes),
+        "remote":socket,"publicKey":public_key,"ingressSha256":digest(&ingress),
+        "commandSha256":digest(&command),"possessionSha256":digest(&possession)}))?;
+    retain_exact(&state.join("welcome-ingress.bin"), &ingress)?;
+    let plan_view = local_join_inspect(verifier,&verifier_pin,&config,PLAN_KIND,&state.join("plan.bin"),&state)?;
+    validate_plan(&plan_view,&command,&plan)?;
+    let header = decode_hex(field(&plan_view,"possessionHeader")?)?;
+    signing.verifying_key().verify(&header, &ed25519_dalek::Signature::from_slice(&possession)
+        .map_err(|_| "retained possession signature is malformed")?)
+        .map_err(|_| "retained possession signature does not verify")?;
+    let ingress_view = local_join_inspect(verifier,&verifier_pin,&config,INGRESS_KIND,&state.join("welcome-ingress.bin"),&state)?;
+    match_join_ingress(&ingress_view,&ingress,&command,&possession,admitted)?;
+    let without_prerotation = match_join_prerotation(&ingress_view, own_next_public(key_path)?, &signing.verifying_key().to_bytes())?;
+    let evidence = if evidence_path.exists() {
+        // The exact confirmed frame is durable before this marker; re-decode it
+        // locally rather than depending on another server response after a crash.
+        let evidence = json_private(&evidence_path)?;
+        let frame = private_bytes(&state.join("welcome-confirmed.frame"), transport::HOST_MAX_FRAME)?;
+        if evidence["lookupFrameSha256"] != digest(&frame) || evidence["ingressSha256"] != digest(&ingress) {
+            return Err("retained admission frame or ingress changed".into());
+        }
+        retain_exact(&state.join("welcome-confirmed.bin"), reply(&frame,89)?)?;
+        let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join("welcome-confirmed.bin"),&state)?;
+        if evidence["receipt"] != match_join_receipt(&outcome,admitted)? {
+            return Err("retained admission receipt changed".into());
+        }
+        evidence
+    } else {
+        // This path has no submit operation. A transport failure, absent result or
+        // refusal leaves retained ingress available for another read-only lookup.
+        let frame = session_invoke(Path::new(""),&socket,&config,89,&ingress)
+            .map_err(|e| format!("join receipt lookup unresolved; retry this exact welcome (no submission): {e}"))?;
+        let stem = format!("welcome-lookup-{}",nonce()?);
+        retained_frame(&state,&stem,&frame,89)?;
+        let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join(format!("{stem}.bin")),&state)?;
+        let receipt = match_join_receipt(&outcome,admitted)?;
+        retain_exact(&state.join("welcome-confirmed.frame"),&frame)?;
+        retain_exact(&state.join("welcome-confirmed.bin"),reply(&frame,89)?)?;
+        let evidence = json!({"type":"minidregg-authenticated-enrollment-receipt-v1",
+            "receipt":receipt,"ingressSha256":digest(&ingress),"lookupFrameSha256":digest(&frame)});
+        save_json_staged(&evidence_path,&evidence)?;
+        evidence
+    };
+    save_json_staged(&state.join("welcome.json"),&welcome)?;
     let mut record = admitted.clone();
     record["keyPath"] = json!(utf8_path(key_path)?);
     save_json_staged(&state.join("enrollment.json"), &record)?;
@@ -1141,18 +1467,13 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()>
     };
     let namespace = root.join("namespace");
     join_dir(&namespace)?;
-    crate::workspace::init(
-        &root.join("workspace"),
-        None,
-        &root.join("config.json"),
-        crate::workspace::InitIdentity {
-            key: None,
-            subject: None,
-            enrollment: Some(&state.join("enrollment.json")),
-        },
-        context.as_deref(),
-        Some(&namespace),
-    )
+    crate::workspace::init_fresh_receipt(&workspace_root,None,&config,
+        crate::workspace::InitIdentity {key:None,subject:None,enrollment:Some(&state.join("enrollment.json")),next_public:None,without_prerotation},
+        context.as_deref(),Some(&namespace),&evidence,verifier)?;
+    let manifest = crate::workspace::bounded_json(&workspace_root.join("workspace.json"))?;
+    retain_join_workspace_marker(&state,&workspace_root,&evidence,&manifest)?;
+    print_json(&json!({"type":"minidregg-participant-joined-v1","workspace":workspace_root,
+        "continuity":crate::workspace::complete_fresh_onboarding(&workspace_root)?}))
 }
 
 fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
@@ -1220,7 +1541,12 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &directory.join("possession-signature.bin"),
         &possession_signature,
     )?;
-    let signatures = pair(&sponsor_signature, &possession_signature)?;
+    // possession (64), then for a pre-rotated record the next key (32) and its
+    // co-signature (64): the second half of the pair is 64 or 160 bytes.
+    let signatures = pair(
+        &sponsor_signature,
+        &[&possession_signature[..], &pin.next_public, &pin.next_cosign].concat(),
+    )?;
     let assembly = pair(&pin.plan, &signatures)?;
     let ingress = staged_invoke(
         &pin.host,
@@ -1239,11 +1565,13 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &directory.join("ingress.bin"),
         &directory.join("ingress.json"),
     )?;
-    if field(&view, "type")? != "participant-key-enrollment-ingress-v1"
+    if field(&view, "type")? != "participant-key-enrollment-ingress-v2"
         || field(&view, "canonical")? != hex(&ingress)
         || field(&view, "commandBytes")? != hex(&pin.command)
         || field(&view, "possessionSignature")? != hex(&possession_signature)
         || field(&view, "possessionSignatureLength")? != "64"
+        || field(&view, "nextPublicKey")? != hex(&pin.next_public)
+        || field(&view, "nextPossessionSignature")? != hex(&pin.next_cosign)
     {
         return Err("enrollment assembled ingress differs from signed exact Plan".into());
     }
@@ -1393,6 +1721,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     match action.as_str() {
         "plan" => plan(args),
         "possess" => possess(args),
+        "cosign" => cosign_action(args),
         "offer" => {
             let directory = path(args.required("dir")?);
             args.finish()?;
@@ -1434,6 +1763,75 @@ mod tests {
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn join_creation_marker_precedes_enablement_and_cannot_be_recreated_afterward() {
+        let base=scratch("welcome-marker");
+        let state=base.join("join");let root=base.join("workspace");
+        crate::workspace::make_private_dir(&state).unwrap();
+        crate::workspace::make_private_dir(&root).unwrap();
+        save_json(&root.join("receipt-continuity.pending.json"),&json!({"state":"awaiting-first-read"})).unwrap();
+        let mut manifest=json!({"freshContinuity":"123"});let evidence=json!({"receipt":"retained"});
+        retain_join_workspace_marker(&state,&root,&evidence,&manifest).unwrap();
+        manifest["receiptContinuity"]=json!("minidregg-continuity-v1");
+        retain_join_workspace_marker(&state,&root,&evidence,&manifest).unwrap();
+        fs::remove_file(state.join("workspace-created.json")).unwrap();
+        assert!(retain_join_workspace_marker(&state,&root,&evidence,&manifest).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn welcome_source_inspection_must_match_exact_participant_preimage() {
+        let admitted=json!({"subject":"20","keyId":"30","publicKey":"aa"});
+        let ingress=[1,2]; let command=[3,4]; let possession=[7;64];
+        let view=json!({"type":"participant-key-enrollment-ingress-v2","canonical":hex(&ingress),
+            "commandBytes":hex(&command),"possessionSignature":hex(&possession),"possessionSignatureLength":"64",
+            "command":{"key":admitted}});
+        match_join_ingress(&view,&ingress,&command,&possession,&admitted).unwrap();
+        for field in ["canonical","commandBytes","possessionSignature","possessionSignatureLength"] {
+            let mut wrong=view.clone(); wrong[field]=json!("00");
+            assert!(match_join_ingress(&wrong,&ingress,&command,&possession,&admitted).is_err(),"{field}");
+        }
+        for field in ["subject","keyId","publicKey"] {
+            let mut wrong=view.clone(); wrong["command"]["key"][field]=json!("999");
+            assert!(match_join_ingress(&wrong,&ingress,&command,&possession,&admitted).is_err(),"{field}");
+        }
+    }
+    #[test]
+    fn welcome_prerotation_requires_owned_next_key_and_real_cosign() {
+        let current=SigningKey::from_bytes(&[11;32]);
+        let next=SigningKey::from_bytes(&[12;32]);
+        let public=current.verifying_key().to_bytes();
+        let own=next.verifying_key().to_bytes();
+        let signature=crate::key_rotation::cosign(&public,&next);
+        let mut view=json!({"command":{"key":{"nextKeyDigest":"123"}},
+            "nextPublicKey":hex(&own),"nextPossessionSignature":hex(&signature)});
+        assert!(!match_join_prerotation(&view,Some(own),&public).unwrap());
+        assert!(match_join_prerotation(&view,None,&public).is_err());
+        assert!(match_join_prerotation(&view,Some([0;32]),&public).is_err());
+        view["nextPossessionSignature"]=json!(hex(&[0;64]));
+        assert!(match_join_prerotation(&view,Some(own),&public).is_err());
+        view=json!({"command":{"key":{"nextKeyDigest":null}},"nextPublicKey":"","nextPossessionSignature":""});
+        assert!(match_join_prerotation(&view,None,&public).unwrap());
+        assert!(match_join_prerotation(&view,Some(own),&public).is_err());
+        view["command"]["key"].as_object_mut().unwrap().remove("nextKeyDigest");
+        assert!(match_join_prerotation(&view,None,&public).is_err());
+    }
+    #[test]
+    fn welcome_receipt_requires_confirmed_exact_lookup() {
+        let receipt=json!({"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+        let admitted=json!({"receipt":receipt});
+        let mut outcome=receipt.clone(); outcome["type"]=json!("confirmed"); outcome["confirmation"]=json!("replayed");
+        assert_eq!(match_join_receipt(&outcome,&admitted).unwrap(),receipt);
+        for name in ["transactionId","eventId","acceptedCount","worldRoot"] {
+            let mut wrong=outcome.clone(); wrong[name]=json!("9");
+            assert!(match_join_receipt(&wrong,&admitted).is_err(),"{name}");
+        }
+        for state in ["absent","uncertain","refused","unavailable"] {
+            let mut wrong=outcome.clone(); wrong["type"]=json!(state);
+            assert!(match_join_receipt(&wrong,&admitted).is_err(),"{state}");
+        }
     }
 
     #[test]
@@ -1591,6 +1989,8 @@ mod tests {
             public_key: "aa".repeat(32),
             plan: vec![],
             command: vec![],
+            next_public: vec![],
+            next_cosign: vec![],
         };
         let installed = json!({"type":"confirmed","confirmation":"installed",
             "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});

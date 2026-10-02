@@ -28,7 +28,7 @@ representation, for every layout at once:
 
 ```
 frame W = "DREGG/STORE"  (11 bytes, UTF-8)
-       ++ [2]            (store-encoding version)
+       ++ [3]            (store-encoding version)
        ++ layoutDigest W (32 bytes)
 layoutDigest W = cSHAKE256(customization "DREGG.STORE.LAYOUT/v1", descriptor W)
 descriptor W   = bytes(name)
@@ -177,9 +177,13 @@ theorem layoutDigest_length : (layoutDigest W).length = 32 :=
 /-- `"DREGG/STORE"` in UTF-8. -/
 def magic : List UInt8 := [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69]
 
-/-- Version 2 (K-NARROW-HIDE): the root is over salted per-entry leaves and the
-layout descriptor names the blinding address.  Version-1 bytes refuse. -/
-def storeVersion : UInt8 := 2
+/-- Version 3 (K-HIDE-ROTATE): the blinding entry is the CURRENT link of a
+per-write ratchet (`Blinding.patch`), not a birth blinding fixed for the cell's
+life.  The bytes of a version-2 store are the same shape with the other
+meaning, so they refuse rather than be read as a ratchet state.  Version 2
+(K-NARROW-HIDE) made the root salted per entry and the layout descriptor name
+the blinding address; version-1 bytes refuse too. -/
+def storeVersion : UInt8 := 3
 
 def frame : List UInt8 := magic ++ storeVersion :: layoutDigest W
 
@@ -589,8 +593,10 @@ collides at the root or at one leaf.  A salt is a function of the cell's key
 and the entry's own canonical bytes, so the owner who holds the key recomputes
 every opening without storing salts, and a reader who once held the salt of
 `(address, v)` learns nothing about the salt of `(address, v')`.  The price of
-that determinism: an entry that returns to an earlier value returns to its
-earlier leaf.
+that determinism would be that an entry returning to an earlier value returns
+to its earlier leaf; the blinding ratchet below (K-HIDE-ROTATE) re-keys every
+salt at every write, so that holds only between two views with no write
+between them.
 
 What the salts hide, and from whom: the host stores the key (it must, to
 serve openings and recompute roots), so this hides uncovered entries from
@@ -813,6 +819,121 @@ theorem root_binds_salted_entries {left right : Store L}
   · exact .inr (.inl ⟨preimages, same⟩)
 
 end Root
+
+/-! ## The blinding ratchet (K-HIDE-ROTATE)
+
+The blinding entry is not fixed for a cell's life: every admitted write leg
+of a blinded cell ends with one more guarded operation, appended by the kernel
+after the source's own patch (`Blinding.patch`), which replaces the blinding
+by the next link of a chain
+
+```
+blinding_h = KMAC256(bytes(blinding_{h-1}), nat(h), 256, "DREGG.CELL.BLIND.RATCHET/v1")
+```
+
+read as a little-endian natural, where `h` is the write's admission height and
+`bytes` is the blinding's canonical value bytes (the KMAC key the salts use).
+Every salt is keyed by the blinding, so every leaf of the cell is re-salted at
+every write: a narrowed reader comparing two views sees every sealed leaf move,
+written or not (`StoreHiding.change_detection_only_via_root`).
+
+The operation is a guarded `write` whose `before` is the PRE-state's blinding:
+if the source patch had moved the blinding, the guard fails and the leg is
+refused, so the post blinding is exactly one step of the pre blinding
+(`Blinding.run_patch_blinding`).  A cell without a blinding gets no operation.
+The client derives the same chain from the birth blinding and the heights of
+the writes (`StoreHiding.ratchet_determined_by_birth`); no new key material. -/
+
+def ratchetCustomization : List UInt8 := "DREGG.CELL.BLIND.RATCHET/v1".toUTF8.toList
+
+/-- A little-endian natural of bytes (the client's `Nat::from_le_bytes`). -/
+def natOfLE : List UInt8 → Nat
+  | [] => 0
+  | byte :: rest => byte.toNat + 256 * natOfLE rest
+
+/-- The next blinding, as a natural: KMAC256 keyed by the current blinding's
+bytes over the height of the write. -/
+def ratchetTag (key : List UInt8) (height : Nat) : Nat :=
+  natOfLE (Sp800185Cshake256.kmac256Bytes key ratchetCustomization (StreamCodec.nat.encode height))
+
+/-- A wire's blinding address, with the value a ratchet natural becomes. -/
+structure Blinding {L : Layout.{0, 0, 0}} (W : Wire L) where
+  space : L.Namespace
+  key : L.Key space
+  isBlinding : W.blinding = some ⟨space, key⟩
+  ofLink : Nat → L.Value space
+
+namespace Blinding
+
+variable {L : Layout.{0, 0, 0}} {W : Wire L} (B : Blinding W)
+
+def address : Address L := ⟨B.space, B.key⟩
+
+/-- One ratchet step on key bytes: the next blinding's canonical value bytes. -/
+def step (height : Nat) (key : List UInt8) : List UInt8 :=
+  (W.valueStream B.space).encode (B.ofLink (ratchetTag key height))
+
+/-- The chain from a birth key over the heights of the writes, in order: what
+the owner's client derives. -/
+def chain (birth : List UInt8) (heights : List Nat) : List UInt8 :=
+  heights.foldl (fun key height => B.step height key) birth
+
+/-- The kernel's ratchet operation for a write at `height` to a cell whose
+pre-state is `pre`: guarded at the pre blinding, so a source patch that moved
+the blinding makes the leg refuse. -/
+def patch (pre : Store L) (height : Nat) : Patch L :=
+  match pre B.address with
+  | some value =>
+      [.write B.space B.key value (B.ofLink (ratchetTag ((W.valueStream B.space).encode value) height))]
+  | none => []
+
+theorem blindingKey_eq (store : Store L) :
+    blindingKey W store = (store B.address).map (W.valueStream B.space).encode := by
+  simp [blindingKey, B.isBlinding, address]
+
+/-- **The post blinding is one step of the pre blinding.**  Whatever store the
+ratchet runs on (the pre-state after the source patch), the post blinding is
+`step` of the PRE blinding: the operation's value is computed from `pre`. -/
+theorem run_patch_blinding (pre mid : Store L) (height : Nat) {key : List UInt8}
+    (blinded : blindingKey W pre = some key) :
+    blindingKey W (Patch.run mid (B.patch pre height)) = some (B.step height key) := by
+  rw [B.blindingKey_eq] at blinded ⊢
+  cases present : pre B.address with
+  | none => rw [present] at blinded; cases blinded
+  | some value =>
+      rw [present] at blinded
+      simp only [Option.map_eq_some_iff] at blinded
+      obtain ⟨found, same, rfl⟩ := blinded
+      cases same
+      simp only [patch, present, Patch.run_cons, Patch.run_nil]
+      simp [Op.apply, address, step]
+
+/-- The same, for a whole leg: the source patch, then the ratchet. -/
+theorem run_leg_blinding (pre : Store L) (source : Patch L) (height : Nat) {key : List UInt8}
+    (blinded : blindingKey W pre = some key) :
+    blindingKey W (Patch.run pre (source ++ B.patch pre height)) = some (B.step height key) := by
+  rw [Patch.run_append]
+  exact B.run_patch_blinding pre _ height blinded
+
+/-- A cell with no blinding gets no ratchet operation. -/
+theorem patch_unblinded (pre : Store L) (height : Nat) (unblinded : blindingKey W pre = none) :
+    B.patch pre height = [] := by
+  rw [B.blindingKey_eq] at unblinded
+  cases present : pre B.address with
+  | none => simp [patch, present]
+  | some value => rw [present] at unblinded; cases unblinded
+
+/-- The ratchet writes the blinding address and nothing else. -/
+theorem run_patch_frame (store pre : Store L) (height : Nat) (address : Address L)
+    (other : address ≠ B.address) :
+    Patch.run store (B.patch pre height) address = store address := by
+  unfold patch
+  split
+  · simp only [Patch.run_cons, Patch.run_nil, Op.apply]
+    exact Store.set_ne _ _ _ _ (by simpa [Blinding.address] using other)
+  · rfl
+
+end Blinding
 
 /-! ## Worked instance: a two-namespace layout -/
 

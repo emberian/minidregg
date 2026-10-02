@@ -8,6 +8,7 @@ The admission gate a committed turn passes is
 `DeclaredHyperedge.execute`.
 -/
 import Kernel.RoomBirthGateAdmission  -- K-ROOM 3c: the room birth gate runs at the admission height; every 3c theorem pinned
+import Kernel.RoomKick  -- FIX-KICK: a kick ends the kicked member room-born authority: born grants carry the creator room-grant lineage; every theorem pinned
 import Kernel.RealmWellReceiver  -- K-WELL: realm wells mint and burn under the well law; the audit identity per realm asset
 import Kernel.PayObservationProofs  -- PAY P3: observed payments mint Book credit; the audit identity, the transfer nullifier, the clock
 import Kernel.PayEnrolProofs  -- PAY P3b-2: one enrollment-index payment is one turn over authority, factory, Book and pay cell
@@ -77,6 +78,8 @@ import Kernel.FnReplyPublication
 import Kernel.FnReplySource
 import Kernel.ContentResource
 import Kernel.ContentResourceAudit
+import Kernel.ContentElementTree
+import Kernel.ContentMarks
 import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
@@ -92,7 +95,9 @@ import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decod
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
+import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff over the two doc show line lists (added_iff, removed_iff, changed_iff)
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
+import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
 import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted
 import Kernel.ApplicationDispatchUpper
 import Kernel.ApplicationGrainLaws
@@ -120,6 +125,6 @@ import Kernel.NockProgramCell.Sample -- NOCK K-NOCK-CELL: sampleOf (targets + AB
 import Kernel.NockEntry -- K-EVAL E2: Nock's entry into the run (N16 subjectFormula, the oracle = the export, decodeWrites, staleField), below Compiler.Evaluator
 import Kernel.Run -- K-RAN made generic (K-EVAL E2): RunClaim, resolve (registry; unknownEvaluator / evaluatorDisabled), checkRun E (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle over E.Spec and at Nock; op 134 dryRun
 import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R
-import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)
+import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 and the blinding ratchet the field-3 reader's opened entries are unchanged by a write to field 4, the root moves, and every sealed leaf moves (narrowed_view_hides_field_four)
 
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge

@@ -51,20 +51,24 @@ def topicWrites (prepared : Prepared deployment profile tariff ambient durable c
 def writes (prepared : Prepared deployment profile tariff ambient durable command) : List DataWrite :=
   bookWrite prepared :: topicWrites prepared
 
-def policyGuard (prepared : Prepared deployment profile tariff ambient durable command) : ReadGuard :=
-  ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
+/-- All authenticated law heads, pinned predecessors and structural roots.
+PhysicalShape requires successful resolution before getD can supply any guards. -/
+def sourceGuards (prepared : Prepared deployment profile tariff ambient durable command) :
+    List ReadGuard :=
+  ((lawReadGuards prepared).getD []).map fun guard => ⟨⟨guard.1⟩, guard.2⟩
 
 def readGuards (prepared : Prepared deployment profile tariff ambient durable command) :
     List ReadGuard :=
-  policyGuard prepared ::
-    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+  (sourceGuards prepared ++ prepared.authority.readGuards).filter fun guard =>
+    guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile tariff ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (lawReadGuards prepared).isSome = true ∧
+    (∀ guard ∈ sourceGuards prepared ++ prepared.authority.readGuards,
+      guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
 instance physicalShapeDecidable
     (prepared : Prepared deployment profile tariff ambient durable command) :
@@ -86,9 +90,7 @@ theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambien
 theorem readGuards_readonly (prepared : Prepared deployment profile tariff ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
-  rcases List.mem_cons.mp member with rfl | rest
-  · exact shape.2.2.2.1
-  · simpa using (List.mem_filter.mp rest).2
+  exact of_decide_eq_true (List.mem_filter.mp member).2
 
 structure AcceptedTurn [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)

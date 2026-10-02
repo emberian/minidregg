@@ -17,7 +17,7 @@ pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG + 32;
 
-fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
     let mut file = fs::File::open(path)
         .map_err(|e| format!("cannot open host image {}: {e}", path.display()))?;
     let mut hash = Sha256::new();
@@ -199,6 +199,10 @@ fn continuity_request(payload: &[u8]) -> bool {
 
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
+        // Source-owned enrollment/renewal quote. Host/Json validates the fields;
+        // ingress only bounds the JSON object before any backend exchange.
+        [121, payload @ ..] => !payload.is_empty() && payload.len() <= 4096
+            && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object()),
         [151, payload @ ..] => continuity_request(payload),
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
@@ -267,10 +271,10 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .and_then(|(plan, signatures)| {
-                exact_pair(signatures).map(|(sponsor, possession)| (plan, sponsor, possession))
+                exact_pair(signatures).map(|(sponsor, rest)| (plan, sponsor, rest))
             })
-            .is_some_and(|(plan, sponsor, possession)| {
-                !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
+            .is_some_and(|(plan, sponsor, rest)| {
+                !plan.is_empty() && sponsor.len() == 64 && matches!(rest.len(), 64 | 160)
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         // Factory-observation provisioning: sponsor-observed plan, one detached
@@ -399,8 +403,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .and_then(|(plan, signatures)| {
-                let (sponsor, possession) = exact_pair(signatures)?;
-                Some(!plan.is_empty() && sponsor.len() == 64 && possession.len() == 64)
+                // possession (64), then for a pre-rotated record the next key
+                // (32) and its co-signature (64).
+                let (sponsor, rest) = exact_pair(signatures)?;
+                Some(!plan.is_empty() && sponsor.len() == 64 && matches!(rest.len(), 64 | 160))
             })
             .unwrap_or(false),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
@@ -454,6 +460,10 @@ pub(crate) fn read_config(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
+    read_frame_bounded(reader, MAX_FRAME)
+}
+
+pub(crate) fn read_frame_bounded<R: Read>(reader: &mut R, bound: usize) -> io::Result<Option<Vec<u8>>> {
     let mut prefix = [0u8; 4];
     let mut read = 0;
     while read < prefix.len() {
@@ -469,7 +479,7 @@ pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>>
         }
     }
     let size = u32::from_le_bytes(prefix) as usize;
-    if !(1..=MAX_FRAME).contains(&size) {
+    if !(1..=MAX_FRAME.min(bound)).contains(&size) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid frame length",
@@ -563,7 +573,7 @@ pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
     Ok(file)
 }
 
-fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
             if !metadata.file_type().is_file()
@@ -604,7 +614,7 @@ fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
+pub(crate) fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
     if operator && !path.exists() && legacy_config_exists {
         return Err("existing public service pin cannot be upgraded to operator mode".into());
     }
@@ -618,7 +628,7 @@ fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> 
     )
 }
 
-fn clear_stale_socket(path: &Path) -> Result<(), String> {
+pub(crate) fn clear_stale_socket(path: &Path) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -660,9 +670,9 @@ pub(crate) fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
     Ok(())
 }
 
-struct DeadlinePipe<'a, R: Read + AsRawFd> {
-    reader: &'a mut R,
-    deadline: Instant,
+pub(crate) struct DeadlinePipe<'a, R: Read + AsRawFd> {
+    pub(crate) reader: &'a mut R,
+    pub(crate) deadline: Instant,
 }
 
 impl<R: Read + AsRawFd> Read for DeadlinePipe<'_, R> {
@@ -695,9 +705,9 @@ impl<R: Read + AsRawFd> Read for DeadlinePipe<'_, R> {
     }
 }
 
-struct DeadlinePipeWrite<'a, W: Write + AsRawFd> {
-    writer: &'a mut W,
-    deadline: Instant,
+pub(crate) struct DeadlinePipeWrite<'a, W: Write + AsRawFd> {
+    pub(crate) writer: &'a mut W,
+    pub(crate) deadline: Instant,
 }
 
 impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
@@ -927,6 +937,9 @@ fn serve_with_mode(
         HostProcess::start(&mut command, &host.display().to_string())
     };
     eprintln!("mini: serving {}", socket.display());
+    if operator {
+        return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, &mut start);
+    }
     supervise(
         &listener,
         operator,
@@ -1102,6 +1115,47 @@ fn supervise_bounded(
     })
 }
 
+/// Close private admission, drain every accepted connection and queued Host
+/// exchange, then retain this exact process/Host instance for explicit unit
+/// stop. A signed read cannot substitute for this channel-disconnection proof.
+fn supervise_operator(
+    listener: UnixListener,
+    socket: &Path,
+    config: &[u8],
+    host_sha256: &[u8; 32],
+    catalog: bool,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+) -> Result<(), String> {
+    let mut process = start()?;
+    let mut control = crate::operator_drain::Control::start(socket, config, host_sha256, process.child.id())?;
+    let state = control.state.clone();
+    let (jobs, queue) = mpsc::sync_channel::<HostJob>(SERVE_BOUNDS.host_queue);
+    let rules = EnvelopeRules { operator: true, config_bytes: config, host_sha256, catalog_enabled: catalog, read_deadline: SERVE_BOUNDS.read_deadline };
+    std::thread::scope(|scope| {
+        let (state, rules) = (&state, &rules);
+        let accept = scope.spawn(move || {
+            accept_connections(scope, &listener, rules, SERVE_BOUNDS, jobs, &state.close, &state.live);
+            // Closing the actual listener precedes the admissionClosed bit.
+            // Existing readers remain counted and may finish their one turn.
+            drop(listener);
+            state.admission_closed.store(true, Ordering::Release);
+        });
+        let ended = serve_host_observed(&mut process, queue, start, Some(state));
+        state.close.store(true, Ordering::Release);
+        let accepted = accept.join().map_err(|_| "operator accept thread panicked");
+        ended?;
+        accepted?;
+        // Every sender lives in the accept loop or an accepted worker. The
+        // receiver ends only after all workers finish response delivery and
+        // drop their sender. Thus no queued or active Host request remains.
+        if !state.admission_closed.load(Ordering::Acquire) || state.live.load(Ordering::Acquire) != 0 {
+            return Err("operator drain ended before admission/worker closure".into());
+        }
+        state.drained.store(true, Ordering::Release);
+        control.hold_closed()
+    })
+}
+
 /// The Host thread: one request at a time, a Host that stops is replaced.
 /// Returns only when a Host cannot be started (or every sender is gone).
 fn serve_host(
@@ -1109,11 +1163,21 @@ fn serve_host(
     queue: mpsc::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
 ) -> Result<(), String> {
+    serve_host_observed(process, queue, start, None)
+}
+
+fn serve_host_observed(
+    process: &mut HostProcess,
+    queue: mpsc::Receiver<HostJob>,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+    state: Option<&crate::operator_drain::State>,
+) -> Result<(), String> {
     for job in queue {
         if process.exited() {
             eprintln!("mini: host process {} exited between requests; restarting", process.child.id());
             process.stop();
             *process = start()?;
+            if let Some(state) = state { state.host_pid.store(process.child.id(), Ordering::Release); }
         }
         match process.exchange(&job.request) {
             Ok(reply) => {
@@ -1127,6 +1191,7 @@ fn serve_host(
                 drop(job);
                 process.stop();
                 *process = start()?;
+                if let Some(state) = state { state.host_pid.store(process.child.id(), Ordering::Release); }
             }
         }
     }
@@ -1135,7 +1200,7 @@ fn serve_host(
 
 fn accept_connections<'scope, 'env>(
     scope: &'scope std::thread::Scope<'scope, 'env>,
-    listener: &'env UnixListener,
+    listener: &UnixListener,
     rules: &'env EnvelopeRules<'env>,
     bounds: ServeBounds,
     jobs: mpsc::SyncSender<HostJob>,
@@ -1234,7 +1299,9 @@ fn serve_connection(
         return refuse(&mut stream, "host frame exceeds bound");
     }
     if !(if rules.operator {
-        allowed_operator_operation(&request)
+        // The owner-private listener is the single Host endpoint for both
+        // lifecycle clients and the separately filtered public ingress relay.
+        allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
         allowed_operation(&request, rules.catalog_enabled)
     }) {
@@ -1261,7 +1328,7 @@ fn serve_connection(
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     unsafe extern "C" {
         fn getpeereid(socket: i32, uid: *mut u32, gid: *mut u32) -> i32;
     }
@@ -1277,7 +1344,7 @@ fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     #[repr(C)]
     struct Ucred {
         pid: i32,
@@ -1311,11 +1378,11 @@ fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     target_os = "openbsd",
     target_os = "netbsd"
 )))]
-fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
     Err("operator peer credentials are unavailable on this platform".into())
 }
 
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -1326,6 +1393,25 @@ fn effective_uid() -> u32 {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn enrollment_quote_is_public_only_with_bounded_json_object() {
+        let mut max = b"{}".to_vec();
+        max.resize(4096, b' ');
+        for payload in [b"{}".as_slice(), max.as_slice()] {
+            let mut request = vec![121];
+            request.extend_from_slice(payload);
+            assert!(allowed_operation(&request, false));
+        }
+        let mut too_large = max;
+        too_large.push(b' ');
+        for payload in [b"".as_slice(), b"[]", b"null", b"x", &[255], too_large.as_slice()] {
+            let mut request = vec![121];
+            request.extend_from_slice(payload);
+            assert!(!allowed_operation(&request, false));
+        }
+        assert!(!allowed_operation(&[152, 1], false), "private renew remains private");
+    }
 
     #[test]
     fn pinned_envelope_checks_config_and_host_before_exposing_request() {
@@ -1855,6 +1941,17 @@ done"#;
         seal.pop();
         assert!(!allowed_operator_operation(&seal));
         assert!(!allowed_operation(&seal, false));
+        // A pre-rotated record: possession, then the next key and its co-signature.
+        let mut signatures = Vec::new();
+        signatures.extend_from_slice(&64u32.to_le_bytes());
+        signatures.extend_from_slice(&[1u8; 64]);
+        signatures.extend_from_slice(&[2u8; 160]);
+        let mut seal = vec![87];
+        seal.extend_from_slice(&1u32.to_le_bytes());
+        seal.push(b'P');
+        seal.extend_from_slice(&signatures);
+        assert!(allowed_operator_operation(&seal));
+        assert!(allowed_operation(&seal, false));
         for operation in [88, 89] {
             assert!(allowed_operator_operation(&[operation, b'I']));
             assert!(!allowed_operator_operation(&[operation]));

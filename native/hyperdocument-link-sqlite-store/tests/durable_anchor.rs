@@ -117,3 +117,75 @@ fn concurrent_publishers_serialize_anchor_with_commit() {
         1
     );
 }
+
+#[test]
+fn coprocess_carries_identity_and_refuses_a_different_deployment() {
+    use std::io::Write;
+    let dir = directory();
+    let root = dir.join("store");
+    let seed = dir.join("seed");
+    let out = dir.join("read");
+    fs::write(&seed, b"seed").unwrap();
+    let commands = vec![
+        vec![
+            "--anchor-identity".to_owned(),
+            "domain:1;semantics:2;seed:3".to_owned(),
+            "durable-init".to_owned(),
+            root.display().to_string(),
+            seed.display().to_string(),
+        ],
+        vec![
+            "--anchor-identity".to_owned(),
+            "domain:1;semantics:2;seed:3".to_owned(),
+            "durable-read".to_owned(),
+            root.display().to_string(),
+            "1".to_owned(),
+            "1".to_owned(),
+            out.display().to_string(),
+        ],
+        vec![
+            "--anchor-identity".to_owned(),
+            "domain:4;semantics:2;seed:3".to_owned(),
+            "durable-read".to_owned(),
+            root.display().to_string(),
+            "1".to_owned(),
+            "1".to_owned(),
+            out.display().to_string(),
+        ],
+    ];
+    let mut child = Command::new(env!("CARGO_BIN_EXE_minidregg-link-sqlite-store"))
+        .arg("serve")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    for command in commands {
+        input
+            .write_all(&(command.len() as u32).to_be_bytes())
+            .unwrap();
+        for arg in command {
+            input.write_all(&(arg.len() as u32).to_be_bytes()).unwrap();
+            input.write_all(arg.as_bytes()).unwrap();
+        }
+    }
+    drop(input);
+    let result = child.wait_with_output().unwrap();
+    assert!(result.status.success());
+    let mut bytes = result.stdout.as_slice();
+    let mut replies = Vec::new();
+    while !bytes.is_empty() {
+        let code = u32::from_be_bytes(bytes[..4].try_into().unwrap());
+        bytes = &bytes[4..];
+        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
+        bytes = &bytes[8 + n..];
+        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
+        replies.push((code, String::from_utf8_lossy(&bytes[8..8 + n]).into_owned()));
+        bytes = &bytes[8 + n..];
+    }
+    assert_eq!(replies.len(), 3);
+    assert_eq!(replies[0].0, 0);
+    assert_eq!(replies[1].0, 0);
+    assert_eq!(replies[2].0, 1);
+    assert!(replies[2].1.contains("genesis or retained head conflicts"));
+}

@@ -21,9 +21,17 @@ realm, i.e. cannot issue a "realm asset" the realm's ledger would list
 (`Kernel.RealmWellReceiver`: a realm well is any account with a parent row).
 
 Refusals are named: `notRoomMember R reason` (the capability component that
-decided it: `noGrant`, `revoked`, `staleGrant`, `outsideValidity`) and
-`birthRefused R leaf` (the failing clause of `R`'s law), and `clockUnavailable`
-(the committed clock could not be loaded). The gate runs in
+decided it: `noGrant`, `revoked`, `staleGrant`, `outsideValidity`),
+`clockUnavailable` when the committed clock cannot be loaded,
+`birthRefused R leaf` (the failing clause of `R`'s law) and `ownerNotCreator R`.
+
+A birth into a room is owned by its creator. Authority over a cell born in a
+room is an attenuation of the creator's room grant: the born grants carry that
+grant's lineage as their `ancestors`
+(`ResourceBirthPolicyController.Concrete.BornLineage`), so a kick of the
+creator takes them down. A cell born for another owner would carry the
+creator's lineage, not the owner's, and survive the owner's kick; it is
+refused. A founder who wants a member to hold a cell births it and delegates. The gate runs in
 `ResourceBirthController.preparePreAuthority`, the one preparation every birth
 route (bare, grain, draft) passes through, at the admission height.
 -/
@@ -62,6 +70,11 @@ inductive Refusal where
   /-- The creator is a member and the room's own law refuses the placement:
   its failing clause (`none`: the room has no committed law). -/
   | birthRefused (room : Nat) (leaf : Option LawLeaf)
+  /-- The creator is a member and the room's law refuses the placement by a clause over
+  fields outside the creator's grant: no clause and no value is named (FIX-DISCLOSE). -/
+  | birthRefusedOutsideGrant (room : Nat)
+  /-- A birth into the room names an owner other than its creator. -/
+  | ownerNotCreator (room : Nat)
   deriving DecidableEq, Repr
 
 /-! ## The pure decision -/
@@ -83,7 +96,11 @@ def decideRoom (room : Nat) (stored : Option (Capability .object)) (state : Auth
           | some law =>
               match LawLeaf.of law view view with
               | none => .ok ()
-              | some leaf => .error (.birthRefused room (some leaf))
+              | some _ =>
+                  -- The clause told is narrowed to the creator's grant (`LawLeaf.narrowed`).
+                  match LawLeaf.narrowed cap.scope.fields law view view with
+                  | some leaf => .error (.birthRefused room (some leaf))
+                  | none => .error (.birthRefusedOutsideGrant room)
 
 /-- The decision admits exactly a member whose capability is admissible and
 whose placement the room's law accepts. -/
@@ -121,7 +138,15 @@ theorem decideRoom_ok_iff (room : Nat) (stored : Option (Capability .object))
                         have := (LawLeaf.of_none_iff pred view view).mpr evaluated
                         rw [leaf] at this
                         cases this
-                  simp [refusal, leaf, rejects]
+                  simp only [refusal, leaf]
+                  constructor
+                  · intro decided
+                    split at decided <;> cases decided
+                  · rintro ⟨_, stored, _, _, found, accepts⟩
+                    cases stored
+                    cases found
+                    rw [rejects] at accepts
+                    cases accepts
 
 /-- A creator naming no stored capability is refused as a non-member. -/
 theorem decideRoom_absent (room : Nat) (state : AuthState) (request : Request .object)
@@ -221,7 +246,7 @@ theorem viewOf_clock_exact (clock : Kernel.ClockCell.Clock) {room : Nat} {root :
   simp [viewOf, ResourceObservationAdmission.projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
 
 /-- One birth item: a root birth names no placing capability; a room birth
-names one and passes `checkRoom`. -/
+names one, is owned by its creator, and passes `checkRoom`. -/
 def checkItem (pins : FactoryPins)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
@@ -229,7 +254,10 @@ def checkItem (pins : FactoryPins)
     Except Refusal Unit :=
   match item.parent, item.placement with
   | none, none => .ok ()
-  | some room, some placement => checkRoom pins directory authority height descriptor room placement
+  | some room, some placement =>
+      if item.owner = descriptor.creator then
+        checkRoom pins directory authority height descriptor room placement
+      else .error (.ownerNotCreator room)
   | _, _ => .error .placementShape
 
 /-- First refusal over a list, in order. -/
@@ -297,7 +325,9 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
   | none => simp [checkItem, inRoom, placed] at passed
   | some placement =>
       have step : checkRoom pins directory authority height descriptor room placement = .ok () := by
-        simpa [checkItem, inRoom, placed] using passed
+        by_cases owner : item.owner = descriptor.creator
+        · simpa [checkItem, inRoom, placed, owner] using passed
+        · simp [checkItem, inRoom, placed, owner] at passed
       cases loaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
       | none => simp [checkRoom, loaded] at step
       | some clock =>
@@ -309,6 +339,24 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
               (decideRoom_ok_iff _ _ _ _ _ _).mp step
             exact ⟨placement, cap, rfl, stored, admissible.holder, admissible, clock, rfl,
               observed, law, resolved, accepts⟩
+
+/-- **`room_birth_owner_is_creator`.** Every admitted birth into a room is
+owned by its creator, so its grants are held by the subject whose placing
+capability they descend from. -/
+theorem room_birth_owner_is_creator {pins : FactoryPins}
+    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {height : Height} {descriptor : Descriptor Registry}
+    (admitted : Admitted pins directory authority height descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) : item.owner = descriptor.creator := by
+  have passed := admitted item member
+  cases placed : item.placement with
+  | none => simp [checkItem, inRoom, placed] at passed
+  | some placement =>
+      by_cases owner : item.owner = descriptor.creator
+      · exact owner
+      · simp [checkItem, inRoom, placed, owner] at passed
 
 /-- A root birth names no placing capability. -/
 theorem root_birth_names_no_placement {pins : FactoryPins}
@@ -429,20 +477,39 @@ theorem nonmember_refused (room : Nat) (cap : Capability .object) (state : AuthS
         inadmissible
   | some reason => exact ⟨reason, by simp [decideRoom, refusal]⟩
 
-/-- A member whose placement the room's law refuses is refused `birthRefused`. -/
+/-- A member whose placement the room's law refuses is refused `birthRefused`, naming
+the clause narrowed to the member's grant (`LawLeaf.narrowed`), or
+`birthRefusedOutsideGrant` when every failing clause reads outside it. -/
 theorem law_refusal_named (room : Nat) (cap : Capability .object) (state : AuthState)
     (request : Request .object) (law : Minidregg.Pred.Pred) (view : Minidregg.Pred.State)
     (admissible : cap.Admissible state request)
     (refuses : Minidregg.Pred.eval law view view = false) :
-    ∃ leaf, decideRoom room (some cap) state request (some law) view =
-      .error (.birthRefused room (some leaf)) := by
+    decideRoom room (some cap) state request (some law) view =
+      match LawLeaf.narrowed cap.scope.fields law view view with
+      | some leaf => .error (.birthRefused room (some leaf))
+      | none => .error (.birthRefusedOutsideGrant room) := by
   have none_ : RefusalReason.capabilityRefusal cap state request = none :=
     (RefusalReason.capabilityRefusal_eq_none_iff_admissible _ _ _).mpr admissible
   cases named : LawLeaf.of law view view with
   | none =>
       have := (LawLeaf.of_none_iff law view view).mp named
       rw [refuses] at this; cases this
-  | some leaf => exact ⟨leaf, by simp [decideRoom, none_, named]⟩
+  | some leaf => simp only [decideRoom, none_, named]
+
+/-- An unnarrowed member (`fields = none`) is told the failing clause, as before. -/
+theorem law_refusal_named_unnarrowed (room : Nat) (cap : Capability .object) (state : AuthState)
+    (request : Request .object) (law : Minidregg.Pred.Pred) (view : Minidregg.Pred.State)
+    (admissible : cap.Admissible state request) (whole : cap.scope.fields = none)
+    (refuses : Minidregg.Pred.eval law view view = false) :
+    ∃ leaf, decideRoom room (some cap) state request (some law) view =
+      .error (.birthRefused room (some leaf)) := by
+  rw [law_refusal_named room cap state request law view admissible refuses, whole,
+    LawLeaf.narrowed_none]
+  cases named : LawLeaf.of law view view with
+  | none =>
+      have := (LawLeaf.of_none_iff law view view).mp named
+      rw [refuses] at this; cases this
+  | some leaf => exact ⟨leaf, rfl⟩
 
 /-- **`fake_realm_asset_refused`.** No one but the realm's founder can bear an
 account (a would-be realm asset) into the realm: a stranger is refused as a
@@ -453,7 +520,8 @@ theorem fake_realm_asset_refused :
         .error (.notRoomMember 7 .noGrant) ∧
       ∃ leaf, decideRoom 7 (some memberGrant) (roomState ∅) (place memberB) (some realmLaw)
         (view memberB) = .error (.birthRefused 7 (some leaf)) :=
-  ⟨rfl, law_refusal_named 7 memberGrant (roomState ∅) (place memberB) realmLaw (view memberB)
-    ((RefusalReason.capabilityRefusal_eq_none_iff_admissible _ _ _).mp (by decide)) (by decide)⟩
+  ⟨rfl, law_refusal_named_unnarrowed 7 memberGrant (roomState ∅) (place memberB) realmLaw
+    (view memberB) ((RefusalReason.capabilityRefusal_eq_none_iff_admissible _ _ _).mp (by decide))
+    rfl (by decide)⟩
 
 end Minidregg.Kernel.RoomBirthGate

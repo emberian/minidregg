@@ -295,7 +295,7 @@ op S "ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:$PORT" setup
 step S 0 newcomer "keygen mini.key"
 op S "CUSTODY: copy newcomer secret into sponsor home (co-signed enrollment)" \
   bash -c "mkdir -p -m 700 '$RUN/homes/sponsor/keys' && install -m 600 '$RUN/homes/newcomer/keys/mini.key' '$RUN/homes/sponsor/keys/newcomer-1.key' && install -m 644 '$RUN/homes/newcomer/keys/mini.key.next.pub' '$RUN/homes/sponsor/keys/newcomer-1.key.next.pub'"
-step S 0 sponsor "enroll plan newcomer-1 newcomer-1.key"
+step S 0 sponsor "enroll plan newcomer-1 newcomer-1.key $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.pub") $(xxd -p -c 256 "$RUN/homes/newcomer/keys/mini.key.next.cosign")"
 step S 0 sponsor "enroll seal newcomer-1"
 step S 0 sponsor "enroll submit newcomer-1"
 B_SUBJ=$(jq -r '.subject' "$LAST")
@@ -307,7 +307,8 @@ op S "PROVISION (OPERATOR step 6): factory observation + a funded account owned 
 op S "DELIVER (OPERATOR step 6): the birth context into newcomer's HOME/provision/" \
   install -D -m 0600 "$R/sponsor/provisions/newcomer/birth-context.json" "$RUN/homes/newcomer/provision/birth-context.json"
 step S 0 newcomer "init mini.key $B_SUBJ"
-step S 0 sponsor 'create board declared {"type":"all","predicates":[]}'
+# The inspector writes fields 1 and 2; field closure requires both at birth.
+step S 0 sponsor 'create board declared {"type":"all","predicates":[]} 1,2'
 world_ok() { [[ $(world) != read-failed ]]; }
 check S "the differential's signed read of board answers" world_ok
 
@@ -399,9 +400,14 @@ WHY_DOWN_TEXT=$V
 
 # ------------------------------------------------------------- T: turn and receipt
 
+# The turn inspector needs an existing field for its compare-and-write. Seed it
+# explicitly; the later blind retry also expects this turn to leave field 1 at 5.
+step T 0 newcomer "invoke t0 board create 1 0"
+step T 0 newcomer "submit t0"
 step T 0 newcomer "read board"
 F1=$(field "$LAST" 1)
-F1N=$((F1 + 5))
+check T "turn: the signed read confirms field 1 was seeded at 0" is "$F1" 0
+F1N=5
 step T 0 newcomer "invoke t1 board write 1 $F1N $F1"
 W0=$(world)
 vstep T newcomer "inspect turn t1 --json"

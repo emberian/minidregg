@@ -27,11 +27,19 @@ private theorem set_field_other (store : Store effectLayout) (task i j : Nat) (v
 
 /-- The purse leg's patch writes exactly the plan's refilled state: whatever
 store it runs on, the task's four coordinates read back as `plan.after`. -/
-theorem pursePatch_readState (command : Command) (d : Declaration) (store : Store effectLayout) :
-    AgentGrain.readState command.task (Patch.run store (pursePatch command d)) =
+theorem pursePatch_readState (command : Command) (d : Declaration) (store pre : Store effectLayout)
+    (height : Nat) :
+    AgentGrain.readState command.task (Patch.run store (pursePatch command d pre height)) =
       some d.plan.after := by
+  rw [pursePatch, Patch.run_append]
+  have ratchet : ∀ s : Store effectLayout, AgentGrain.readState command.task
+      (Patch.run s (Minidregg.Compiler.DeclaredEffectCell.blinding.patch pre height)) =
+        AgentGrain.readState command.task s := by
+    intro s
+    simp only [AgentGrain.readState, DeclaredFields.read_ratchet]
+  rw [ratchet]
   obtain ⟨⟨asset, account, amount, gain, ⟨g, st, r, h⟩⟩, root, nullifier⟩ := d
-  simp [pursePatch, DeclaredResourceScalar.cellPatch, scalarCommand,
+  simp [DeclaredResourceScalar.cellPatch, scalarCommand,
     DeclaredResourceScalar.Command.declaration,
     Minidregg.Theory.DeclaredActionLowering.Declaration.patch,
     AgentGrain.actions, AgentGrain.State.values, Plan.after, AgentGrain.refill_after,
@@ -47,7 +55,7 @@ theorem Prepared.purse_after (prepared : Prepared deployment profile ambient dur
     AgentGrain.readState command.task prepared.pursePost.logical = some prepared.plan.after :=
   pursePatch_readState command
     (declaration prepared.authority.snapshot.domain profile.semantics command prepared.purse.root
-      prepared.plan) prepared.purse.logical
+      prepared.plan) prepared.purse.logical prepared.purse.logical ambient.height
 
 /-- With `refill_conserves`: the purse the receiver commits holds exactly the
 loaded allowance plus the burn. -/

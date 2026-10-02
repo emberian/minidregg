@@ -164,7 +164,7 @@ theorem member_traces_to_root :
           roomState.parent.Descends observeNote.target.value room) ∨
         ∃ ts, root.scope.targets = .explicit ts ∧ observeNote.target ∈ ts) :=
   room_admission_traces_to_root (stored := ⟨memberCapability, []⟩)
-    (.root memberCapability rfl rfl rfl) member_reads
+    (.root memberCapability rfl rfl) member_reads
 
 /-- Dishonest pole: an explicit grant on another cell is refused. -/
 theorem outsider_refused : ¬ outsiderCapability.Admissible roomState observeNote :=

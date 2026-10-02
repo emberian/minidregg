@@ -69,7 +69,7 @@ if [ -n "$OBSERVER" ]; then
   jq -n --arg s "$OBSERVER" --arg public "$OBSERVER_PUBLIC" '
     ($s|tonumber) as $n | def c(k): ($n * 100 + k | tostring);
     [{key: {keyId: c(0), keyEpoch: "2", algorithm: "1", subject: $s, publicKey: $public,
-            activeFrom: "0", activeUntil: "1000000"},
+            activeFrom: "0", activeUntil: "1000000", nextKeyDigest: null},
       accountId: $s, spendCapabilityId: c(2), controlCapabilityId: c(3),
       factoryObserveCapabilityId: c(4), initialBalance: "0",
       accountPredicate: {type: "all", predicates: []}}]' >"$ROOT/observer-enrollment.json"
@@ -152,7 +152,7 @@ done
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$ROOT/sponsor.key" --subject "$SUBJECT" \
   --birth-context "$ROOT/sponsor-birth-context.json" \
-  --namespace-root "$ROOT/namespace" --dir "$ROOT/sponsor" \
+  --namespace-root "$ROOT/namespace" --dir "$ROOT/sponsor" --no-prerotation \
   >"$ROOT/sponsor-workspace.stdout"
 "$MINI" workspace --action import --dir "$ROOT/sponsor" --name factory \
   --kind object --target 10 --observe-capability 54 --control-capability 53 \
@@ -175,7 +175,7 @@ jq -e '.type == "minidregg-participant-reference-v1" and .target == "10" and
   "$ROOT/sponsor/refs/factory.json" >/dev/null
 
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
-  --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 \
+  --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 --no-prerotation \
   --dir "$ROOT/pay/observer" >"$ROOT/pay/observer-workspace.stdout"
 jq -e '.payObserver == {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}' \
   "$ROOT/genesis.json" >/dev/null

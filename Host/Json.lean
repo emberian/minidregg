@@ -40,6 +40,7 @@ import Kernel.PayAssignmentReceiver
 import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
+import Kernel.PayEnrolQuote
 import Compiler.PayEnrolSignatureIO
 import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
@@ -47,6 +48,7 @@ import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
 import Kernel.NockProgramCell
 import Kernel.NockDoor
+import Kernel.DocumentHistory
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -355,16 +357,131 @@ private def resourceKind (path : String) (json : Lean.Json) : Result ResourceKin
   | "program" => pure .program
   | _ => failAt path "expected object, account, or program"
 
+/-- Selectors describe source-owned projection tags. Absence/null selects all;
+`[]` selects none. JSON defaults author v6 only, never reinterpret old wire. -/
+private def lawSelector (path : String) (json : Lean.Json) : Result LawComposition.Selector := do
+  if json.isNull then return {}
+  let raw ← object path json
+  let keys := ["physicalKinds", "requestKinds", "verbs"].filter (fun key => (raw.get? key).isSome)
+  let obj ← exactObject path keys json
+  let values (key : String) : Result (Option (List Nat)) :=
+    match obj.get? key with
+    | none => pure none
+    | some value => optional (path ++ "." ++ key) (fun at => list at nat) value
+  pure { physicalKinds := ← values "physicalKinds", requestKinds := ← values "requestKinds",
+    verbs := ← values "verbs" }
+
+private def lawReference (path : String) (json : Lean.Json) : Result LawComposition.PolicyRef := do
+  let obj ← exactObject path ["policyId", "facet", "selection"] json
+  let facet ← match ← string (path ++ ".facet") (← field path "facet" obj) with
+    | "local" => pure LawComposition.Facet.local
+    | "descendants" => pure LawComposition.Facet.descendants
+    | _ => failAt (path ++ ".facet") "expected local or descendants"
+  let raw ← field path "selection" obj
+  let at := path ++ ".selection"
+  let (tag, _) ← tagged at raw
+  let selection ← match tag with
+    | "head" => exactObject at ["type"] raw *> pure LawComposition.Selection.head
+    | "pinned" => do
+        let selected ← exactObject at ["type", "revision", "sourceDigest"] raw
+        pure (.pinned (← nat (at ++ ".revision") (← field at "revision" selected))
+          ⟨← nat (at ++ ".sourceDigest") (← field at "sourceDigest" selected)⟩)
+    | _ => failAt (at ++ ".type") "expected head or pinned"
+  pure { policyId := ⟨← nat (path ++ ".policyId") (← field path "policyId" obj)⟩,
+    facet := facet, selection := selection }
+
+private def lawComponent (path : String) (json : Lean.Json) : Result LawComposition.Component := do
+  let obj ← exactObject path ["selector", "predicate", "parents"] json
+  pure { selector := ← lawSelector (path ++ ".selector") (← field path "selector" obj),
+    predicate := ← predicate (path ++ ".predicate") (← field path "predicate" obj),
+    parents := ← list (path ++ ".parents") lawReference (← field path "parents" obj) }
+
+private def lawSelectorJson (value : LawComposition.Selector) : Lean.Json :=
+  let selected (values : Option (List Nat)) : Lean.Json :=
+    values.map (fun xs => .arr (xs.toArray.map decimal)) |>.getD .null
+  .mkObj [("physicalKinds", selected value.physicalKinds),
+    ("requestKinds", selected value.requestKinds), ("verbs", selected value.verbs)]
+
+private def lawReferenceJson (value : LawComposition.PolicyRef) : Lean.Json :=
+  .mkObj [("policyId", decimal value.policyId.value),
+    ("facet", match value.facet with | .local => "local" | .descendants => "descendants"),
+    ("selection", match value.selection with
+      | .head => .mkObj [("type", "head")]
+      | .pinned revision digest => .mkObj [("type", "pinned"),
+          ("revision", decimal revision), ("sourceDigest", decimal digest.value)])]
+
+private def lawComponentJson (value : LawComposition.Component) : Lean.Json :=
+  .mkObj [("selector", lawSelectorJson value.selector),
+    ("predicate", predicateJson value.predicate),
+    ("parents", .arr (value.parents.toArray.map lawReferenceJson))]
+
+def audienceStateJson (state : Minidregg.Theory.ObjectAudience.State) : Lean.Json := .mkObj
+  [("object", decimal state.object), ("epoch", decimal state.epoch),
+   ("parent", decimal state.parent), ("transition", decimal state.transition),
+   ("audience", decimal state.audience), ("devices", decimal state.devices),
+   ("history", decimal state.history), ("manifest", decimal state.manifest),
+   ("mode", .str (if state.mode == .active then "active" else "frozen")),
+   ("authoritySnapshot", decimal state.authoritySnapshot),
+   ("deviceSnapshot", decimal state.deviceSnapshot)]
+
+def audienceState (path : String) (json : Lean.Json) :
+    Result Minidregg.Theory.ObjectAudience.State := do
+  let obj ← exactObject path ["object", "epoch", "parent", "transition", "audience",
+    "devices", "history", "manifest", "mode", "authoritySnapshot", "deviceSnapshot"] json
+  let mode ← match ← string (path ++ ".mode") (← field path "mode" obj) with
+    | "active" => pure Minidregg.Theory.ObjectAudience.Mode.active
+    | "frozen" => pure Minidregg.Theory.ObjectAudience.Mode.frozen
+    | _ => failAt (path ++ ".mode") "expected active or frozen"
+  pure {
+    object := ← nat (path ++ ".object") (← field path "object" obj)
+    epoch := ← nat (path ++ ".epoch") (← field path "epoch" obj)
+    parent := ← nat (path ++ ".parent") (← field path "parent" obj)
+    transition := ← nat (path ++ ".transition") (← field path "transition" obj)
+    audience := ← nat (path ++ ".audience") (← field path "audience" obj)
+    devices := ← nat (path ++ ".devices") (← field path "devices" obj)
+    history := ← nat (path ++ ".history") (← field path "history" obj)
+    manifest := ← nat (path ++ ".manifest") (← field path "manifest" obj)
+    mode := mode
+    authoritySnapshot := ← nat (path ++ ".authoritySnapshot") (← field path "authoritySnapshot" obj)
+    deviceSnapshot := ← nat (path ++ ".deviceSnapshot") (← field path "deviceSnapshot" obj) }
+
+/-- Exact authorable combined-v6 record. Every extension facet is explicit in
+signed readback so changing one cannot erase another by omission. -/
+def policyRecordJson (record : PolicyRecord) : Lean.Json := .mkObj
+  [("policyId", decimal record.policyId.value), ("version", decimal record.version),
+   ("domain", decimal record.domain.value), ("semantics", decimal record.semantics.value),
+   ("previous", record.previous.map (fun d => decimal d.value) |>.getD .null),
+   ("predicate", predicateJson record.predicate),
+   ("localSelector", lawSelectorJson record.localSelector),
+   ("parents", .arr (record.parents.toArray.map lawReferenceJson)),
+   ("descendants", record.descendants.map lawComponentJson |>.getD .null),
+   ("audience", record.audience.map audienceStateJson |>.getD .null),
+   ("objectDescriptor", record.objectDescriptor.map (fun d => decimal d.value) |>.getD .null)]
+
 private def policyRecord (path : String) (json : Lean.Json) : Result PolicyRecord := do
+  let raw ← object path json
+  let extras := ["localSelector", "parents", "descendants", "audience", "objectDescriptor"].filter
+    (fun key => (raw.get? key).isSome)
   let obj ← exactObject path
-    ["policyId", "version", "domain", "semantics", "previous", "predicate"] json
+    (["policyId", "version", "domain", "semantics", "previous", "predicate"] ++ extras) json
   pure {
     policyId := ⟨← nat (path ++ ".policyId") (← field path "policyId" obj)⟩
     version := ← nat (path ++ ".version") (← field path "version" obj)
     domain := ⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩
     semantics := ⟨← nat (path ++ ".semantics") (← field path "semantics" obj)⟩
     previous := (← optional (path ++ ".previous") nat (← field path "previous" obj)).map Digest.mk
-    predicate := ← predicate (path ++ ".predicate") (← field path "predicate" obj) }
+    predicate := ← predicate (path ++ ".predicate") (← field path "predicate" obj)
+    localSelector := ← match obj.get? "localSelector" with
+      | none => pure {} | some value => lawSelector (path ++ ".localSelector") value
+    parents := ← match obj.get? "parents" with
+      | none => pure [] | some value => list (path ++ ".parents") lawReference value
+    descendants := ← match obj.get? "descendants" with
+      | none => pure none | some value => optional (path ++ ".descendants") lawComponent value
+    audience := ← match obj.get? "audience" with
+      | none => pure none | some value => optional (path ++ ".audience") audienceState value
+    objectDescriptor := ← match obj.get? "objectDescriptor" with
+      | none => pure none
+      | some value => (·.map Digest.mk) <$> optional (path ++ ".objectDescriptor") nat value }
 
 private def holder (path : String) (json : Lean.Json) : Result Holder := do
   let (tag, _) ← tagged path json
@@ -588,32 +705,6 @@ private def transclusionMode (path : String) (json : Lean.Json) :
   | "snapshot" => pure .snapshot | "live" => pure .live
   | _ => failAt path "expected snapshot or live"
 
-private def embedRef (path : String) (json : Lean.Json) : Result Hyperdocument.EmbedRef := do
-  let obj ← exactObject path ["document", "atom", "revision", "mode"] json
-  pure ⟨← identifier (path ++ ".document") (← field path "document" obj),
-    ← identifier (path ++ ".atom") (← field path "atom" obj),
-    ← identifier (path ++ ".revision") (← field path "revision" obj),
-    ← transclusionMode (path ++ ".mode") (← field path "mode" obj)⟩
-
-private def elementBody (path : String) (json : Lean.Json) : Result Hyperdocument.ElementBody := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "container" | "runs" =>
-      let name := if tag = "container" then "children" else "runs"
-      let obj ← exactObject path ["type", name] json
-      if tag = "container" then
-        pure (.container (← list (path ++ ".children") identifier (← field path "children" obj)))
-      else
-        pure (.runs (← list (path ++ ".runs") identifier (← field path "runs" obj)))
-  | "embed" =>
-      let obj ← exactObject path ["type", "reference"] json
-      pure (.embed (← embedRef (path ++ ".reference") (← field path "reference" obj)))
-  | "opaque" =>
-      let obj ← exactObject path ["type", "schema", "payload"] json
-      pure (.opaque ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
-        (← decodeHex (path ++ ".payload") (← field path "payload" obj)))
-  | _ => failAt (path ++ ".type") "unknown element body"
-
 private def atomRecord (path : String) (json : Lean.Json) : Result Hyperdocument.AtomRecord := do
   let obj ← exactObject path ["document", "kind", "payload", "createdBy", "createdAt", "revision",
     "tombstonedAt"] json
@@ -652,6 +743,20 @@ private def stableRange (path : String) (json : Lean.Json) : Result Hyperdocumen
   pure ⟨← stablePoint (path ++ ".start") (← field path "start" obj),
     ← stablePoint (path ++ ".finish") (← field path "finish" obj)⟩
 
+private def pin (path : String) (json : Lean.Json) :
+    Result (Hyperdocument.AtomId × Hyperdocument.OperationId) := do
+  let obj ← exactObject path ["atom", "revision"] json
+  pure (← identifier (path ++ ".atom") (← field path "atom" obj),
+    ← identifier (path ++ ".revision") (← field path "revision" obj))
+
+private def transcludeRequest (path : String) (json : Lean.Json) :
+    Result ContentResource.TranscludeRequest := do
+  let obj ← exactObject path ["source", "range", "mode", "pins"] json
+  pure ⟨← nat (path ++ ".source") (← field path "source" obj),
+    ← stableRange (path ++ ".range") (← field path "range" obj),
+    ← transclusionMode (path ++ ".mode") (← field path "mode" obj),
+    ← list (path ++ ".pins") pin (← field path "pins" obj)⟩
+
 private def linkTarget (path : String) (json : Lean.Json) : Result Hyperdocument.LinkTarget := do
   let (tag, _) ← tagged path json
   match tag with
@@ -672,14 +777,76 @@ private def linkTarget (path : String) (json : Lean.Json) : Result Hyperdocument
         (← decodeHex (path ++ ".path") (← field path "path" obj)))
   | _ => failAt (path ++ ".type") "unknown link target"
 
+/-- `{"type":"splice","index":N,"child":E}`, `{"type":"move","child":E,"index":N}` or
+`{"type":"remove","child":E}`. -/
+private def elementOp (path : String) (json : Lean.Json) : Result ContentResource.ElementOp := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "splice" =>
+      let obj ← exactObject path ["type", "index", "child"] json
+      pure (.splice (← nat (path ++ ".index") (← field path "index" obj))
+        (← identifier (path ++ ".child") (← field path "child" obj)))
+  | "move" =>
+      let obj ← exactObject path ["type", "child", "index"] json
+      pure (.move (← identifier (path ++ ".child") (← field path "child" obj))
+        (← nat (path ++ ".index") (← field path "index" obj)))
+  | "remove" =>
+      let obj ← exactObject path ["type", "child"] json
+      pure (.remove (← identifier (path ++ ".child") (← field path "child" obj)))
+  | _ => failAt (path ++ ".type") "expected splice, move or remove"
+
+/-- `{"type":"atom","atom":A}` or `{"type":"element","element":E}`. -/
+private def markTarget (path : String) (json : Lean.Json) : Result ContentResource.MarkTarget := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "atom" =>
+      let obj ← exactObject path ["type", "atom"] json
+      pure (.atom (← identifier (path ++ ".atom") (← field path "atom" obj)))
+  | "element" =>
+      let obj ← exactObject path ["type", "element"] json
+      pure (.element (← identifier (path ++ ".element") (← field path "element" obj)))
+  | _ => failAt (path ++ ".type") "noSuchTarget: expected atom or element"
+
+/-- `{"type":"bold"|"italic"|"code"|"heading"}` or
+`{"type":"link","link":L,"target":TARGET}`; any other kind is refused
+`unknownKind` here, since the kernel's grammar cannot carry one. -/
+private def markSpec (path : String) (json : Lean.Json) : Result ContentResource.MarkSpec := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "bold" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.bold
+  | "italic" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.italic
+  | "code" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.code
+  | "heading" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.heading
+  | "link" =>
+      let obj ← exactObject path ["type", "link", "target"] json
+      pure (.link (← identifier (path ++ ".link") (← field path "link" obj))
+        (← linkTarget (path ++ ".target") (← field path "target" obj)))
+  | other =>
+      failAt (path ++ ".type") s!"unknownKind: {other} (expected bold, italic, code, heading or link)"
+
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
   let (tag, _) ← tagged path json
   match tag with
   | "createDocument" =>
-      let obj ← exactObject path ["type", "rootElement", "schema", "body"] json
+      let obj ← exactObject path ["type", "rootElement", "schema"] json
       pure (.createDocument (← identifier (path ++ ".rootElement") (← field path "rootElement" obj))
-        ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
-        (← elementBody (path ++ ".body") (← field path "body" obj)))
+        ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
+  | "createContainer" =>
+      let obj ← exactObject path ["type", "element"] json
+      pure (.createContainer (← identifier (path ++ ".element") (← field path "element" obj)))
+  | "editElement" =>
+      let obj ← exactObject path ["type", "element", "revision", "op"] json
+      pure (.editElement ⟨← identifier (path ++ ".element") (← field path "element" obj),
+        ← identifier (path ++ ".revision") (← field path "revision" obj),
+        ← elementOp (path ++ ".op") (← field path "op" obj)⟩)
   | "createAtom" =>
       let obj ← exactObject path ["type", "atom", "kind", "payload"] json
       pure (.createAtom (← identifier (path ++ ".atom") (← field path "atom" obj))
@@ -708,11 +875,23 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
         (← identifier (path ++ ".atom") (← field path "atom" obj))
         (← identifier (path ++ ".revision") (← field path "revision" obj))
         (← decodeHex (path ++ ".body") (← field path "body" obj)))
-  | "quote" =>
-      let obj ← exactObject path ["type", "element", "link", "reference"] json
-      pure (.quote (← identifier (path ++ ".element") (← field path "element" obj))
+  | "unlink" =>
+      let obj ← exactObject path ["type", "link"] json
+      pure (.unlink (← identifier (path ++ ".link") (← field path "link" obj)))
+  | "mark" =>
+      let obj ← exactObject path ["type", "mark", "target", "revision", "kind"] json
+      pure (.mark (← identifier (path ++ ".mark") (← field path "mark" obj))
+        ⟨← markTarget (path ++ ".target") (← field path "target" obj),
+          ← identifier (path ++ ".revision") (← field path "revision" obj),
+          ← markSpec (path ++ ".kind") (← field path "kind" obj)⟩)
+  | "unmark" =>
+      let obj ← exactObject path ["type", "mark"] json
+      pure (.unmark (← identifier (path ++ ".mark") (← field path "mark" obj)))
+  | "transclude" =>
+      let obj ← exactObject path ["type", "transclusion", "link", "request"] json
+      pure (.transclude (← identifier (path ++ ".transclusion") (← field path "transclusion" obj))
         (← identifier (path ++ ".link") (← field path "link" obj))
-        (← embedRef (path ++ ".reference") (← field path "reference" obj)))
+        (← transcludeRequest (path ++ ".request") (← field path "request" obj)))
   | _ => failAt (path ++ ".type") "unknown content action"
 
 private def contentCommand (path : String) (json : Lean.Json) : Result ContentResource.Command := do
@@ -723,6 +902,144 @@ private def streamRef (path : String) (json : Lean.Json) : Result (Nat × Nat) :
   let obj ← exactObject path ["cell", "sequence"] json
   pure (← nat (path ++ ".cell") (← field path "cell" obj),
     ← nat (path ++ ".sequence") (← field path "sequence" obj))
+
+/-! World-resident descriptor authoring stays in source. JSON values are
+primitive human spellings; StoreCodec supplies every canonical store byte. -/
+private def worldScalarCodec (path : String) (json : Lean.Json) :
+    Result WorldKindDescriptor.ScalarCodec := do
+  match ← string path json with
+  | "nat" => pure .natural
+  | "int" => pure .integer
+  | "bytes" => pure .bytes
+  | _ => failAt path "expected nat, int or bytes"
+
+private def worldDiscipline (path : String) (json : Lean.Json) :
+    Result Store.Discipline := do
+  match ← string path json with
+  | "rom" => pure .rom
+  | "ram" => pure .ram
+  | "append" => pure .appendOnly
+  | _ => failAt path "expected rom, ram or append"
+
+private def worldField (path : String) (json : Lean.Json) : Result WorldKindDescriptor.Field := do
+  let obj ← exactObject path ["id", "name", "meaning", "codec", "discipline"] json
+  pure ⟨← nat (path ++ ".id") (← field path "id" obj),
+    ← string (path ++ ".name") (← field path "name" obj),
+    ← string (path ++ ".meaning") (← field path "meaning" obj),
+    ← worldScalarCodec (path ++ ".codec") (← field path "codec" obj),
+    ← worldDiscipline (path ++ ".discipline") (← field path "discipline" obj)⟩
+
+private def worldDescriptor (path : String) (json : Lean.Json) :
+    Result WorldKindDescriptor.Descriptor := do
+  let obj ← exactObject path ["kind", "revision", "fields"] json
+  let descriptor : WorldKindDescriptor.Descriptor :=
+    ⟨← nat (path ++ ".kind") (← field path "kind" obj),
+      ← nat (path ++ ".revision") (← field path "revision" obj),
+      ← list (path ++ ".fields") worldField (← field path "fields" obj)⟩
+  unless descriptor.Valid do
+    failAt path "descriptor needs unique field ids/names and nonempty names/meanings"
+  pure descriptor
+
+private def worldValue : (codec : WorldKindDescriptor.ScalarCodec) →
+    String → Lean.Json → Result codec.Value
+  | .natural, path, json => nat path json
+  | .integer, path, json => int path json
+  | .bytes, path, json => decodeHex path json
+
+private def worldDefinition (path : String) (json : Lean.Json) :
+    Result WorldKindCell.Definition := do
+  let obj ← exactObject path ["descriptor", "defaults"] json
+  let descriptor ← worldDescriptor (path ++ ".descriptor") (← field path "descriptor" obj)
+  let defaults ← array (path ++ ".defaults") (← field path "defaults" obj)
+  let mut store : Store.Store (WorldKindDescriptor.layout descriptor) := 0
+  for i in [:defaults.size] do
+    let at := s!"{path}.defaults[{i}]"
+    let entry ← exactObject at ["field", "key", "value"] defaults[i]!
+    let id ← nat (at ++ ".field") (← field at "field" entry)
+    let space ← match WorldKindInstance.findField descriptor id with
+      | some space => pure space
+      | none => failAt (at ++ ".field") "unknown descriptor field"
+    let key ← nat (at ++ ".key") (← field at "key" entry)
+    let address : Store.Address (WorldKindDescriptor.layout descriptor) := ⟨space, key⟩
+    if (store address).isSome then failAt at "duplicate default field/key"
+    let value ← worldValue (descriptor.fields.get space).codec
+      (at ++ ".value") (← field at "value" entry)
+    store := store.set address (some value)
+  pure ⟨descriptor, StoreCodec.encode (WorldKindDescriptor.wire descriptor) store⟩
+
+private def worldAction (descriptor : WorldKindDescriptor.Descriptor)
+    (path : String) (json : Lean.Json) : Result WorldKindInstance.Action := do
+  let (tag, _) ← tagged path json
+  let keys ← match tag with
+    | "read" => pure ["type", "field", "key", "expected"]
+    | "create" => pure ["type", "field", "key", "value"]
+    | "write" => pure ["type", "field", "key", "before", "after"]
+    | "erase" => pure ["type", "field", "key", "before"]
+    | _ => failAt (path ++ ".type") "expected read, create, write or erase"
+  let obj ← exactObject path keys json
+  let id ← nat (path ++ ".field") (← field path "field" obj)
+  let key ← nat (path ++ ".key") (← field path "key" obj)
+  let space ← match WorldKindInstance.findField descriptor id with
+    | some space => pure space
+    | none => failAt (path ++ ".field") "unknown descriptor field"
+  let codec := (descriptor.fields.get space).codec
+  let value (key : String) : Result (List UInt8) := do
+    pure (codec.stream.encode (← worldValue codec (path ++ "." ++ key) (← field path key obj)))
+  match tag with
+  | "read" =>
+      let raw ← field path "expected" obj
+      let expected ← if raw.isNull then pure none else some <$> value "expected"
+      pure (.read id key expected)
+  | "create" => pure (.create id key (← value "value"))
+  | "write" => pure (.write id key (← value "before") (← value "after"))
+  | "erase" => pure (.erase id key (← value "before"))
+  | _ => failAt (path ++ ".type") "unknown world action"
+
+private def worldFieldJson (value : WorldKindDescriptor.Field) : Lean.Json :=
+  .mkObj [("id", decimal value.id), ("name", .str value.name), ("meaning", .str value.meaning),
+    ("codec", match value.codec with | .natural => "nat" | .integer => "int" | .bytes => "bytes"),
+    ("discipline", match value.discipline with | .rom => "rom" | .ram => "ram" | .appendOnly => "append")]
+
+private def worldDescriptorJson (value : WorldKindDescriptor.Descriptor) : Lean.Json :=
+  .mkObj [("kind", decimal value.kind), ("revision", decimal value.revision),
+    ("fields", .arr (value.fields.toArray.map worldFieldJson))]
+
+private def worldValueJson : (codec : WorldKindDescriptor.ScalarCodec) → codec.Value → Lean.Json
+  | .natural, value => decimal value
+  | .integer, value => signedDecimal value
+  | .bytes, value => hexJson value
+
+private def worldEntriesJson (descriptor : WorldKindDescriptor.Descriptor)
+    (store : Store.Store (WorldKindDescriptor.layout descriptor)) : Lean.Json :=
+  .arr <| (StoreCodec.entries (WorldKindDescriptor.wire descriptor) store).toArray.map fun entry =>
+    .mkObj [("field", decimal (descriptor.fields.get entry.1.1).id),
+      ("key", decimal entry.1.2),
+      ("value", worldValueJson (descriptor.fields.get entry.1.1).codec entry.2)]
+
+private def worldKindJson (root : Digest) (store : Store.Store WorldKindCell.definitionLayout) :
+    Result Lean.Json := do
+  let definition ← match store WorldKindCell.definitionAddress with
+    | some definition => pure definition
+    | none => failAt "view-resource.worldKind" "missing definition"
+  let value ← match definition.instantiate with
+    | some value => pure value
+    | none => failAt "view-resource.worldKind" "invalid definition/defaults"
+  pure <| .mkObj [("root", decimal root.value), ("worldKind", .mkObj
+    [("descriptor", worldDescriptorJson value.descriptor),
+     ("defaults", worldEntriesJson value.descriptor value.store)])]
+
+private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell.instanceLayout) :
+    Result Lean.Json := do
+  let value ← match WorldKindCell.instanceAt store with
+    | some value => pure value
+    | none => failAt "view-resource.worldInstance" "invalid binding/payload"
+  let binding ← match store WorldKindCell.descriptorAddress with
+    | some binding => pure binding
+    | none => failAt "view-resource.worldInstance" "missing birth binding"
+  pure <| .mkObj [("root", decimal root.value), ("worldInstance", .mkObj
+    [("descriptor", worldDescriptorJson value.descriptor),
+     ("kindRoot", decimal binding.kindRoot.value),
+     ("entries", worldEntriesJson value.descriptor value.store)])]
 
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
@@ -743,13 +1060,49 @@ private def targetPayload (path : String) (json : Lean.Json) :
       let recipient ← optional (path ++ ".to") nat (← field path "to" obj)
       let ref ← optional (path ++ ".ref") streamRef (← field path "ref" obj)
       pure (.append ⟨topic, payload, recipient.map SubjectId.mk, ref⟩)
-  | _ => failAt (path ++ ".type") "expected scalar, content or append"
+  | "world" =>
+      let obj ← exactObject path ["type", "descriptor", "actions"] json
+      let descriptor ← worldDescriptor (path ++ ".descriptor") (← field path "descriptor" obj)
+      pure (.world (← list (path ++ ".actions") (worldAction descriptor) (← field path "actions" obj)))
+  | "kindDefinition" =>
+      let obj ← exactObject path ["type", "definition"] json
+      pure (.kindDefinition (← worldDefinition (path ++ ".definition") (← field path "definition" obj)))
+  | "read" =>
+      let _ ← exactObject path ["type"] json
+      pure .read
+  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, world or kindDefinition"
+
+private def audienceRosterEntry (path : String) (json : Lean.Json) :
+    Result Minidregg.Theory.ObjectAudienceRoster.Entry := do
+  let obj ← exactObject path ["subject", "capability", "deviceSource", "deviceGeneration", "keyCommitment"] json
+  pure ⟨← nat (path ++ ".subject") (← field path "subject" obj),
+    ← nat (path ++ ".capability") (← field path "capability" obj),
+    ← nat (path ++ ".deviceSource") (← field path "deviceSource" obj),
+    ← nat (path ++ ".deviceGeneration") (← field path "deviceGeneration" obj),
+    ← nat (path ++ ".keyCommitment") (← field path "keyCommitment" obj)⟩
+
+def audienceRoster (path : String) (json : Lean.Json) :
+    Result Minidregg.Theory.ObjectAudienceRoster.Roster := do
+  let obj ← exactObject path ["object", "epoch", "transition", "entries"] json
+  pure ⟨← nat (path ++ ".object") (← field path "object" obj),
+    ← nat (path ++ ".epoch") (← field path "epoch" obj),
+    ← nat (path ++ ".transition") (← field path "transition" obj),
+    ← list (path ++ ".entries") audienceRosterEntry (← field path "entries" obj)⟩
+
+def audienceRosterJson (roster : Minidregg.Theory.ObjectAudienceRoster.Roster) : Lean.Json := .mkObj
+  [("object", decimal roster.object), ("epoch", decimal roster.epoch),
+   ("transition", decimal roster.transition), ("entries", .arr (roster.entries.map (fun e =>
+      .mkObj [("subject", decimal e.subject), ("capability", decimal e.capability),
+        ("deviceSource", decimal e.deviceSource), ("deviceGeneration", decimal e.deviceGeneration),
+        ("keyCommitment", decimal e.keyCommitment)])).toArray)]
 
 private def commandTarget (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Target := do
+  let raw ← object path json
+  let extras := ["audienceEpoch", "audienceRoster"].filter (fun key => (raw.get? key).isSome)
   let obj ← exactObject path
-    ["kind", "target", "capability", "observeCapability", "schemaVersion",
-      "expectedTargetRoot", "payload"] json
+    (["kind", "target", "capability", "observeCapability", "schemaVersion",
+      "expectedTargetRoot", "payload"] ++ extras) json
   pure {
     kind := ← resourceKind (path ++ ".kind") (← field path "kind" obj)
     target := ← nat (path ++ ".target") (← field path "target" obj)
@@ -758,7 +1111,11 @@ private def commandTarget (path : String) (json : Lean.Json) :
       (← field path "observeCapability" obj)).map CapabilityId.mk
     schemaVersion := ← nat (path ++ ".schemaVersion") (← field path "schemaVersion" obj)
     expectedTargetRoot := ⟨← nat (path ++ ".expectedTargetRoot") (← field path "expectedTargetRoot" obj)⟩
-    payload := ← targetPayload (path ++ ".payload") (← field path "payload" obj) }
+    payload := ← targetPayload (path ++ ".payload") (← field path "payload" obj)
+    audienceEpoch := ← match obj.get? "audienceEpoch" with
+      | none => pure none | some value => optional (path ++ ".audienceEpoch") nat value
+    audienceRoster := ← match obj.get? "audienceRoster" with
+      | none => pure none | some value => optional (path ++ ".audienceRoster") audienceRoster value }
 
 /-- `DREGG/NOCK/RUN/v1` as JSON: decimal program id and steps, hex jams. -/
 def runClaim (path : String) (json : Lean.Json) : Result Kernel.Run.RunClaim := do
@@ -815,11 +1172,17 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
       pure (.install ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
         ⟨← nat (path ++ ".control") (← field path "control" obj)⟩ declaration)
   | "install-source" =>
-      let obj ← exactObject path ["type", "subject", "control", "declaration"] json
+      let raw ← object path json
+      let obj ← exactObject path (["type", "subject", "control", "declaration"] ++
+        if (raw.get? "audienceRoster").isSome then ["audienceRoster"] else []) json
       let declaration ← policyInstall (path ++ ".declaration") (← field path "declaration" obj)
-      pure (.install ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
-        ⟨← nat (path ++ ".control") (← field path "control" obj)⟩
-        (PolicyInstallController.declarationCodec.encode declaration))
+      let subject : SubjectId := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+      let control : CapabilityId := ⟨← nat (path ++ ".control") (← field path "control" obj)⟩
+      let bytes := PolicyInstallController.declarationCodec.encode declaration
+      match obj.get? "audienceRoster" with
+      | none | some .null => pure (.install subject control bytes)
+      | some value => pure (.installWithRoster subject control bytes
+          (Compiler.ObjectAudienceRoster.encode (← audienceRoster (path ++ ".audienceRoster") value)))
   | "delegate" =>
       let obj ← exactObject path ["type", "command"] json
       let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
@@ -877,6 +1240,8 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
           | "policy", false, false => pure .policy
           | "capability", false, false => pure .capability
           | "who", false, false => pure .who
+          | "backlinks", false, false => pure .backlinks
+          | "links", false, false => pure .links
           | "since", true, false => do pure (.since (← nat (at_ ++ ".height") (← field at_ "height" p)))
           | "at", true, false => do pure (.atHeight (← nat (at_ ++ ".height") (← field at_ "height" p)))
           | "tail", false, true => do
@@ -1409,6 +1774,22 @@ private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) :
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
   else []
 
+/-- The factory template an authoring request names. `birthSlack` is optional
+and defaults to the runtime default; the receiver's own template decides it
+either way, because the template is inside the semantics digest the request
+is pinned to. -/
+private def factoryTemplate (path : String) (json : Lean.Json) :
+    Result CanonicalRuntimeProfile.FactoryTemplate := do
+  let raw ← object path json
+  let slackField := if (raw.get? "birthSlack").isSome then ["birthSlack"] else []
+  let templateObj ← exactObject path (["issuer", "ownerBudget", "lifetime"] ++ slackField) json
+  let birthSlack ← match templateObj.get? "birthSlack" with
+    | none => pure CanonicalRuntimeProfile.defaultBirthSlack
+    | some encoded => nat (path ++ ".birthSlack") encoded
+  pure ⟨⟨← nat (path ++ ".issuer") (← field path "issuer" templateObj)⟩,
+    ← nat (path ++ ".ownerBudget") (← field path "ownerBudget" templateObj),
+    ← nat (path ++ ".lifetime") (← field path "lifetime" templateObj), birthSlack⟩
+
 private def birthRootCapability {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
@@ -1471,7 +1852,8 @@ private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
     (authority : Option AuthState := none)
-    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result BirthParts := do
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -1480,6 +1862,9 @@ private def birthParts (path : String)
   -- K-FIELD-CLOSURE: a declared resource names the fields it may hold, or
   -- `"open"`; absent, it declares none and holds none.
   let fieldsField := if storage = "declared" ∧ (raw.get? "fields").isSome then ["fields"] else []
+  let worldFields := if storage = "world-kind" then ["definition"]
+    else if storage = "world-instance" then
+      ["definition", "fromKind", "expectedKindRoot", "expectedKindRevision"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
@@ -1488,7 +1873,7 @@ private def birthParts (path : String)
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
-      roomField ++ blindingField ++ fieldsField) json
+      roomField ++ blindingField ++ fieldsField ++ worldFields) json
   let declaration : Minidregg.Kernel.FieldClosure.FieldSet ← match obj.get? "fields" with
     | none => pure (.closed [])
     | some (.str "open") => pure .open
@@ -1501,12 +1886,12 @@ private def birthParts (path : String)
     | some value => (some ∘ CapabilityId.mk) <$> nat (path ++ ".placement") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
-      storage = "nock" ∨ storage = "job" do
-    throw s!"{path}.storage: expected declared, content, grain, stream, nock or job"
+      storage = "nock" ∨ storage = "job" ∨ storage = "world-kind" ∨ storage = "world-instance" do
+    throw s!"{path}.storage: expected declared, content, grain, stream, nock, job, world-kind or world-instance"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
       ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock" ∨
-        storage = "job") ∧ kind = .object) do
-    throw s!"{path}: declared storage is object/account; content, grain, stream, nock and job storage are object"
+        storage = "job" ∨ storage = "world-kind" ∨ storage = "world-instance") ∧ kind = .object) do
+    throw s!"{path}: declared storage is object/account; content, grain, stream, nock, job and world storage are object"
   -- A Nock program cell has no chosen identifier: it is born at its content
   -- address, so the request names the program and the source derives the target.
   let program : Option NockProgramCodec.Program ← if storage = "nock" then do
@@ -1533,6 +1918,30 @@ private def birthParts (path : String)
   let cell : PackedCell CanonicalCellRegistry.registry ←
     if let some program := program then
       pure (CanonicalCellRegistry.programCell program)
+    else if storage = "world-kind" then
+      let definition ← worldDefinition (path ++ ".definition") (← field path "definition" obj)
+      unless definition.descriptor.kind = target do
+        failAt (path ++ ".definition.descriptor.kind") "must equal the newborn target"
+      let store := (0 : Store.Store WorldKindCell.definitionLayout).set
+        WorldKindCell.definitionAddress (some definition)
+      pure ⟨.worldKind, CellState.materialize WorldKindCell.definitionMaterializer store⟩
+    else if storage = "world-instance" then
+      let definition ← worldDefinition (path ++ ".definition") (← field path "definition" obj)
+      let fromKind ← nat (path ++ ".fromKind") (← field path "fromKind" obj)
+      let revision ← nat (path ++ ".expectedKindRevision") (← field path "expectedKindRevision" obj)
+      let expectedRoot : Digest := ⟨← nat (path ++ ".expectedKindRoot") (← field path "expectedKindRoot" obj)⟩
+      unless definition.descriptor.kind = fromKind ∧ definition.descriptor.revision = revision do
+        failAt (path ++ ".definition") "descriptor differs from selected kind/revision"
+      let definitionStore := (0 : Store.Store WorldKindCell.definitionLayout).set
+        WorldKindCell.definitionAddress (some definition)
+      let definitionCell := CellState.materialize WorldKindCell.definitionMaterializer definitionStore
+      unless definitionCell.root = expectedRoot do
+        failAt (path ++ ".expectedKindRoot") "supplied definition does not reproduce signed kind root"
+      let value ← match definition.instantiate with
+        | some value => pure value
+        | none => failAt (path ++ ".definition") "invalid defaults"
+      pure ⟨.worldInstance, CellState.materialize WorldKindCell.instanceMaterializer
+        (WorldKindCell.instanceOf expectedRoot value)⟩
     else if storage = "content" then
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
@@ -1563,6 +1972,19 @@ private def birthParts (path : String)
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program)), []⟩⟩
   let control : Capability .program := birthRootCapabilityAt profile source height authority
     controlId owner target {.installPolicy, .revokeCapability}
+  -- A room birth's grants carry the creator's placing capability and its
+  -- ancestors (`ResourceBirthPolicyController.Concrete.BornLineage`): a kick
+  -- that revokes that grant takes down the born cell's owner and control
+  -- grants and every delegation of them. Offline authoring (no loaded
+  -- authority) leaves them empty and the receiver refuses a room birth; so
+  -- does a placement that names no stored capability (the room gate refuses
+  -- it first, `notRoomMember … noGrant`).
+  let ancestors : Finset CapabilityId := match placement, lineage with
+    | some named, some find => ((find named).map (insert named)).getD ∅
+    | _, _ => ∅
+  let ownerGrant : ResourceBirth.AuthorityGrant := match ownerGrant with
+    | ⟨kind, stored⟩ => ⟨kind, { stored with head := { stored.head with ancestors := ancestors } }⟩
+  let control : Capability .program := { control with ancestors := ancestors }
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,
     ⟨rule.policyId, PolicyRecordCodec.digest rule, PolicyRecordCodec.encode rule⟩⟩
 
@@ -1574,7 +1996,8 @@ private def birth (path : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none)
     (currentHeight : Option Nat := none)
     (authority : Option AuthState := none)
-    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Draft := do
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1604,14 +2027,7 @@ private def birth (path : String) (json : Lean.Json)
   if let some expected := currentHeight then
     unless height == expected do
       throw s!"{path}.height: differs from the verified current image"
-  let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
-    (← field path "template" obj)
-  let template : CanonicalRuntimeProfile.FactoryTemplate :=
-    ⟨⟨← nat (path ++ ".template.issuer") (← field (path ++ ".template") "issuer" templateObj)⟩,
-      ← nat (path ++ ".template.ownerBudget")
-        (← field (path ++ ".template") "ownerBudget" templateObj),
-      ← nat (path ++ ".template.lifetime")
-        (← field (path ++ ".template") "lifetime" templateObj)⟩
+  let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
@@ -1624,7 +2040,7 @@ private def birth (path : String) (json : Lean.Json)
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
   let parts ← list (path ++ ".resources")
     (fun itemPath value => birthParts itemPath profile source height value authority
-      providerRoutes)
+      providerRoutes lineage)
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
@@ -1647,7 +2063,8 @@ checks the supplied genesis against the pinned seed before using it for
 immutable deployment coordinates. Current grant epochs come only from the
 loaded authority, never from that genesis description. -/
 def birthCurrent (path : String) (json : Lean.Json)
-    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState) :
+    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
+    (lineage : CapabilityId → Option (Finset CapabilityId)) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -1655,7 +2072,7 @@ def birthCurrent (path : String) (json : Lean.Json)
     (fun reason => s!"{path}.genesis: refused: {repr reason}")
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
-  birth path json none (some deployed) (some height) (some authority)
+  birth path json none (some deployed) (some height) (some authority) [] (some lineage)
 
 structure ApplicationBirthContext where
   source : NativeHostGenesis.Config
@@ -1708,14 +2125,7 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
           unless supplied == current do
             throw s!"{path}.height: differs from verifier-loaded current height"
         pure supplied
-  let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
-    (← field path "template" obj)
-  let template : CanonicalRuntimeProfile.FactoryTemplate :=
-    ⟨⟨← nat (path ++ ".template.issuer") (← field (path ++ ".template") "issuer" templateObj)⟩,
-      ← nat (path ++ ".template.ownerBudget")
-        (← field (path ++ ".template") "ownerBudget" templateObj),
-      ← nat (path ++ ".template.lifetime")
-        (← field (path ++ ".template") "lifetime" templateObj)⟩
+  let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
@@ -2527,13 +2937,24 @@ private def subjectKeyRotation (json : Lean.Json) : Result (List UInt8) := do
   return SubjectKeyRotation.commandCodec.encode command
 
 /-- The pre-rotation commitment to one public key, as the canonical decimal of
-`SubjectKeyRotation.nextKeyDigest` (UTF-8).  The client never hashes; this is
+`ParticipantKeyEnrollment.nextKeyDigest` (UTF-8).  The client never hashes; this is
 the one place the digest is computed for it. -/
 private def signingKeyNextDigest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["publicKey"] json
   let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
   unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
-  return (toString (SubjectKeyRotation.nextKeyDigest publicKey).value).toUTF8.toList
+  return (toString (ParticipantKeyEnrollment.nextKeyDigest publicKey).value).toUTF8.toList
+
+/-- The exact bytes a committed next key co-signs at enrollment
+(`ParticipantKeyEnrollment.nextPossessionFrame`).  A client that made the
+co-signature offline checks it against these bytes before planning. -/
+private def enrollmentNextPossession (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["publicKey", "nextPublicKey"] json
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  let nextPublicKey ← decodeHex "$.nextPublicKey" (← field "$" "nextPublicKey" obj)
+  unless nextPublicKey.length = 32 do failAt "$.nextPublicKey" "expected 32 bytes"
+  return ParticipantKeyEnrollment.nextPossessionFrame publicKey nextPublicKey
 
 /-- Source-owned authoring for a factory-observation provisioning request.
 These bytes name a holder and a fresh identifier; they do not claim that the
@@ -2820,6 +3241,7 @@ def author (kind : String) (json : Lean.Json)
   | "participant-key-enrollment" => participantKeyEnrollment json
   | "subject-key-rotation" => subjectKeyRotation json
   | "signing-key-next-digest" => signingKeyNextDigest json
+  | "participant-key-enrollment-next-possession" => enrollmentNextPossession json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "fleet-turn" => fleetTurnCommand json
   | "pay-book" => payBook json
@@ -2863,6 +3285,9 @@ def author (kind : String) (json : Lean.Json)
       let obj ← exactObject "$" ["generation"] json
       let generation ← int "$.generation" (← field "$" "generation" obj)
       pure (NativeHostGenesis.predicateStream.encode (AgentGrain.executionCaveat generation))
+  | "object-audience-roster" => Compiler.ObjectAudienceRoster.encode <$> audienceRoster "$" json
+  | "object-device-catalog" =>
+      (fun r => (StreamCodec.list Compiler.ObjectAudienceRoster.entryStream).encode r.entries) <$> audienceRoster "$" json
   | "policy" => PolicyRecordCodec.encode <$> policyRecord "$" json
   | "policy-install" => PolicyInstallController.declarationCodec.encode <$> policyInstall "$" json
   | "policy-install-draft" => draftCodec.encode <$> policyInstallDraft "$" json
@@ -2979,6 +3404,10 @@ private def draftJson : Draft → Lean.Json
   | .invoke bytes => .mkObj [("type", "invoke"), ("command", hexJson bytes)]
   | .install subject control bytes => .mkObj [("type", "install"), ("subject", decimal subject.value),
       ("control", decimal control.value), ("declaration", hexJson bytes)]
+  | .installWithRoster subject control bytes roster => .mkObj
+      [("type", "install-with-roster"), ("subject", decimal subject.value),
+       ("control", decimal control.value), ("declaration", hexJson bytes),
+       ("rosterBytes", hexJson roster)]
   | .delegate bytes => .mkObj [("type", "delegate"), ("command", hexJson bytes)]
   | .revoke bytes => .mkObj [("type", "revoke"), ("command", hexJson bytes)]
   | .renounce bytes => .mkObj [("type", "renounce"), ("command", hexJson bytes)]
@@ -3240,6 +3669,70 @@ def payEnrolmentViewJson (view : PayCellDomain.EnrolmentView) : Lean.Json := .mk
       ("amount", .num (Lean.JsonNumber.fromNat row.amount)),
       ("slot", .num (Lean.JsonNumber.fromNat row.slot)),
       ("reason", payJournalReasonName row.reason)]).toArray)]
+
+/-- Public, read-only quote over the same loaded authority and pay cell as the
+receiver. No price is reserved and no admission or mint takes place here. -/
+def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (json : Lean.Json) : Result Lean.Json := do
+  let obj ← exactObject "$" ["miniKey", "mode", "weeks", "starterCredit"] json
+  let miniKey ← decodeHex "$.miniKey" (← field "$" "miniKey" obj)
+  unless miniKey.length = 32 do failAt "$.miniKey" "a Mini key is 32 bytes"
+  let mode ← string "$.mode" (← field "$" "mode" obj)
+  unless mode = "enrol" ∨ mode = "renew" do failAt "$.mode" "expected enrol or renew"
+  let weeks ← nat "$.weeks" (← field "$" "weeks" obj)
+  let view ← NativeHost.payViewLoaded config opened
+  let some tariff := view.tariff | throw "pay quote: tariff unavailable"
+  unless tariff.valid do throw "pay quote: tariff invalid"
+  let some index := tariff.enrolIndex | throw "pay quote: self-enrollment disabled"
+  let some address := view.book[index]? | throw "pay quote: enrollment address unavailable"
+  let some pay := PayCellDomain.load config.deployment opened.durable.snapshot
+    | throw "pay quote: pay cell unavailable"
+  let enrolled := (PayCell.enrolmentAt pay.cell.logical miniKey).isSome
+  if mode = "enrol" ∧ enrolled then throw "pay quote: key already enrolled; request renewal"
+  if mode = "renew" ∧ !enrolled then throw "pay quote: key not enrolled"
+  let height := NativeHost.logicalHeight config opened.durable
+  let identities := PayEnrolReceiver.ids config.deployment.domain miniKey
+  let birthFee := if mode = "renew" then 0 else
+    PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
+      config.tariff opened.authority.snapshot.cell height identities 0
+  -- One room+founder stream, document, application and application session,
+  -- plus one hundred ordinary transaction base charges for an initial work
+  -- session: 105 transactions, eight births, sixteen grants. Provider tokens
+  -- and compute have separate tariffs and are not promised by this allowance.
+  -- Byte-priced deployments choose a budget explicitly; counts cannot quote bytes.
+  let suggestion : Option Nat := if mode = "renew" then some 0 else
+    if config.tariff.perInitialPayloadByte = 0 then
+      some (105 * config.tariff.base + 8 * config.tariff.perBirth + 16 * config.tariff.perGrant)
+    else none
+  let starterInput ← field "$" "starterCredit" obj
+  let starter ← if starterInput == .null then
+      match suggestion with
+      | some amount => pure amount
+      | none => throw "pay quote: byte-priced deployment requires explicit starterCredit"
+    else nat "$.starterCredit" starterInput
+  let quoted ← match PayEnrolQuote.quote tariff birthFee weeks starter with
+    | .ok quoted => pure quoted
+    | .error reason => throw s!"pay quote: {repr reason}; choose an explicit duration/budget or use a separate account deposit"
+  pure <| .mkObj
+    [("type", "minidregg-pay-enrollment-quote-v1"), ("mode", .str mode),
+     ("miniKey", hexJson miniKey), ("domain", decimal config.deployment.domain.value),
+     ("semantics", decimal config.profile.semantics.value),
+     ("payRoot", decimal view.payRoot.value), ("authorityRoot", decimal view.authorityRoot.value),
+     ("factoryRoot", decimal view.factoryRoot.value), ("height", decimal height),
+     ("tariffVersion", decimal tariff.version), ("mint", hexJson tariff.mint),
+     ("tokenProgram", hexJson tariff.tokenProgram), ("decimals", decimal tariff.decimals),
+     ("enrolIndex", decimal index), ("enrolAddress", hexJson address),
+     ("birthFee", decimal quoted.birthFee), ("weekCredit", decimal tariff.weekCredit),
+     ("requestedWeeks", decimal quoted.requestedWeeks), ("grantedWeeks", decimal quoted.actualWeeks),
+     ("membershipCredit", decimal quoted.leaseCredit),
+     ("requestedStarterCredit", decimal quoted.minimumStarterCredit),
+     ("spendableRemainder", decimal quoted.creditedRemainder),
+     ("recommendedStarterCredit", match suggestion with | some n => decimal n | none => .null),
+     ("atomicAmount", decimal quoted.amountAtomic), ("totalCredit", decimal quoted.credit),
+     ("minimumEntryCredit", decimal quoted.minimumEntryCredit),
+     ("roundingCredit", decimal (quoted.credit -
+       (birthFee + weeks * tariff.weekCredit + starter))),
+     ("priceReserved", .bool false)]
 
 /-- The identities a self-enrollment derives from a Mini key in this
 deployment (`PayEnrolReceiver.ids`): what a friend's client needs to act as
@@ -3706,7 +4199,7 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
        ("view", match q.view with
          | .resource => "resource" | .policy => "policy" | .capability => "capability"
          | .who => "who" | .since _ => "since" | .atHeight _ => "at"
-         | .tail _ _ => "tail")] : List (String × Lean.Json)) ++
+         | .tail _ _ => "tail" | .backlinks => "backlinks" | .links => "links")] : List (String × Lean.Json)) ++
        (match q.view with
          | .since h | .atHeight h => [("height", decimal h)]
          | .tail start count => [("start", decimal start), ("count", decimal count)]
@@ -3724,7 +4217,8 @@ private def challengeJson (value : Challenge) : Lean.Json := .mkObj
      ("day", decimal (value.clockNow / Kernel.ClockCell.secondsPerDay)),
      ("slot", decimal value.clockSlot)]),
    ("headers", .arr <| value.headers.toArray.map hexJson),
-   ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
+   ("signing", .arr <| value.headers.toArray.map signedHeaderJson),
+   ("intentSignature", hexJson value.intentSignature)]
 
 /-- The failing clause of a law refusal, as data and as the Host's own rendering
 in the shell's law grammar. -/
@@ -3821,6 +4315,14 @@ private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
 private def optionalOperationJson (value : Option Hyperdocument.OperationId) : Lean.Json :=
   value.map (fun id => decimal id.digest.value) |>.getD .null
 
+private def modeJson : Hyperdocument.TransclusionMode → Lean.Json
+  | .snapshot => "snapshot"
+  | .live => "live"
+
+private def biasJson : Hyperdocument.AnchorBias → Lean.Json
+  | .before => "before"
+  | .after => "after"
+
 private def identifierJson {version : Hyperdocument.CodecVersion} {domain : Hyperdocument.IdDomain}
     (value : Hyperdocument.Identifier version domain) : Lean.Json :=
   decimal value.digest.value
@@ -3831,7 +4333,7 @@ private def optionalIdentifierJson {version : Hyperdocument.CodecVersion}
   | some value => identifierJson value
   | none => .null
 
-private def deathPolicyJson : Hyperdocument.EndpointDeathPolicy → Lean.Json
+private def deathJson : Hyperdocument.EndpointDeathPolicy → Lean.Json
   | .invalidate => "invalidate"
   | .keepTombstone => "keepTombstone"
   | .preferPrevious => "preferPrevious"
@@ -3844,7 +4346,7 @@ content cell sees is exactly what an author would write. -/
 private def stablePointJson (point : Hyperdocument.StablePoint) : Lean.Json := .mkObj
   [("run", identifierJson point.run), ("neighbor", optionalIdentifierJson point.neighbor),
    ("bias", match point.bias with | .before => "before" | .after => "after"),
-   ("death", deathPolicyJson point.death)]
+   ("death", deathJson point.death)]
 
 private def stableRangeJson (range : Hyperdocument.StableRange) : Lean.Json := .mkObj
   [("start", stablePointJson range.start), ("finish", stablePointJson range.finish)]
@@ -3860,18 +4362,30 @@ private def linkTargetJson : Hyperdocument.LinkTarget → Lean.Json
   | .external scheme authority path => .mkObj [("type", "external"),
       ("scheme", hexJson scheme), ("authority", hexJson authority), ("path", hexJson path)]
 
-private def embedRefJson (reference : Hyperdocument.EmbedRef) : Lean.Json :=
-  .mkObj [("document", decimal reference.document.digest.value),
-    ("atom", decimal reference.atom.digest.value),
-    ("revision", decimal reference.revision.digest.value),
-    ("mode", match reference.mode with | .snapshot => "snapshot" | .live => "live")]
+/-- The opening a transclusion record carries: source cell, range, pinned
+atoms at their revisions, and the height; never bytes. -/
+private def openingJson (opening : ContentResource.RangeOpening) : Lean.Json :=
+  .mkObj [("source", decimal opening.source),
+    ("range", stableRangeJson opening.range),
+    ("pins", .arr <| opening.pins.toArray.map fun pin =>
+      .mkObj [("atom", decimal pin.1.digest.value), ("revision", decimal pin.2.digest.value)]),
+    ("atoms", decimal opening.pins.length), ("height", decimal opening.height)]
+
+private def transclusionRecordJson (record : Hyperdocument.TransclusionRecord) : List (String × Lean.Json) :=
+  [("host", decimal record.hostDocument.digest.value),
+   ("mode", modeJson record.reference.mode),
+   ("opening", ((ContentResource.openingOfReference record.reference).map openingJson).getD .null),
+   ("reference", decimal record.reference.referenceRoot.value),
+   ("disclosurePolicy", decimal record.disclosurePolicy.value)]
 
 private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
   | .container children => .mkObj [("type", "container"),
       ("children", .arr <| children.toArray.map fun child => decimal child.digest.value)]
   | .runs runs => .mkObj [("type", "runs"),
       ("runs", .arr <| runs.toArray.map fun run => decimal run.digest.value)]
-  | .embed reference => .mkObj [("type", "embed"), ("reference", embedRefJson reference)]
+  | .embed transclusion => .mkObj [("type", "embed"),
+      ("transclusion", decimal transclusion.digest.value)]
+  | .atom atom => .mkObj [("type", "atom"), ("atom", decimal atom.digest.value)]
   | .opaque schema payload => .mkObj [("type", "opaque"), ("schema", decimal schema.value),
       ("payload", hexJson payload)]
 
@@ -3885,6 +4399,45 @@ private def annotationBodyJson : Hyperdocument.AnnotationBody → Lean.Json
   | .inline bytes => .mkObj [("type", "inline"), ("bytes", hexJson bytes)]
   | .reference document => .mkObj [("type", "reference"),
       ("document", decimal document.digest.value)]
+
+private def markAnchorJson : Hyperdocument.MarkAnchor → Lean.Json
+  | .range range => .mkObj [("type", "range"), ("range", stableRangeJson range)]
+  | .atom atom revision => .mkObj [("type", "atom"), ("atom", decimal atom.digest.value),
+      ("revision", decimal revision.digest.value)]
+  | .element element revision => .mkObj [("type", "element"),
+      ("element", decimal element.digest.value), ("revision", decimal revision.digest.value)]
+
+/-- A mark as a renderer reads it: kind (a link mark with its link record's
+target and whether that link is live), anchor, author, and `fresh` — is its
+target still at the anchored revision in this same store.  A stale mark is
+shown struck; it is never re-anchored. -/
+private def markJson (store : ContentResource.ContentStore) (identifier : Hyperdocument.MarkId)
+    (record : Hyperdocument.MarkRecord) : List (String × Lean.Json) :=
+  let kind : List (String × Lean.Json) := match record.kind with
+    | .bold => [("kind", "bold")]
+    | .italic => [("kind", "italic")]
+    | .code => [("kind", "code")]
+    | .heading => [("kind", "heading")]
+    | .link link =>
+        let linkRecord := Hyperdocument.lookup store .links link
+        [("kind", "link"), ("link", decimal link.digest.value),
+          ("target", (linkRecord.map fun found => linkTargetJson found.target).getD .null),
+          ("linkLive", .bool ((linkRecord.map fun found => found.tombstonedAt.isNone).getD false))]
+  [("mark", decimal identifier.digest.value)] ++ kind ++
+    [("anchor", markAnchorJson record.anchor), ("author", principalJson record.author),
+      ("fresh", .bool (ContentResource.markFresh store record)),
+      ("tombstonedAt", optionalOperationJson record.tombstonedAt)]
+
+/-- The marks of a content store, in canonical entry order. -/
+private def marksOf (store : ContentResource.ContentStore) :
+    List (Hyperdocument.MarkId × Hyperdocument.MarkRecord) :=
+  (StoreCodec.entries HyperdocumentCell.contentWire store).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.marks, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.MarkId := identifier
+        let record : Hyperdocument.MarkRecord := record
+        some (identifier, record)
+    | _ => none
 
 /-- One entry of a content cell. Documents, elements, links, atoms, runs and
 annotations are spelled out (an annotation with `fresh`: is its atom still at
@@ -3908,6 +4461,7 @@ private def contentEntryJson (store : ContentResource.ContentStore)
         ("document", identifierJson record.document), ("parent", optionalIdentifierJson record.parent),
         ("body", elementBodyJson record.body), ("createdBy", principalJson record.createdBy),
         ("createdAt", identifierJson record.createdAt),
+        ("revision", decimal record.revision.digest.value),
         ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
   | ⟨⟨.annotations, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AnnotationId := identifier
@@ -3926,6 +4480,13 @@ private def contentEntryJson (store : ContentResource.ContentStore)
         ("target", linkTargetJson record.target), ("relation", decimal record.relation.value),
         ("createdBy", principalJson record.author), ("createdAt", identifierJson record.operation),
         ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
+  | ⟨⟨.transclusions, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.TransclusionId := identifier
+      let record : Hyperdocument.TransclusionRecord := record
+      .mkObj <| ([("type", "transclusion"), ("id", decimal identifier.digest.value)] :
+          List (String × Lean.Json)) ++
+        transclusionRecordJson record ++
+        [("author", principalJson record.author), ("canonical", canonical)]
   | ⟨⟨.atoms, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AtomId := identifier
       let record : Hyperdocument.AtomRecord := record
@@ -3947,6 +4508,13 @@ private def contentEntryJson (store : ContentResource.ContentStore)
         ("createdAt", decimal record.createdAt.digest.value),
         ("tombstonedAt", optionalOperationJson record.tombstonedAt),
         ("canonical", canonical)]
+  | ⟨⟨.marks, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.MarkId := identifier
+      let record : Hyperdocument.MarkRecord := record
+      .mkObj (([("type", "mark"), ("id", decimal identifier.digest.value),
+        ("document", decimal record.document.digest.value)] : List (String × Lean.Json)) ++
+        markJson store identifier record ++
+        [("canonical", canonical)])
   | ⟨⟨space, _⟩, _⟩ => .mkObj [("type", "namespace"),
       ("namespace", decimal (HyperdocumentCell.namespaceTag space).toNat), ("canonical", canonical)]
 
@@ -4011,11 +4579,13 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
       CanonicalCellRegistry.registry bytes with
     | some packed => pure packed
     | none => failAt "view-resource.cell" "noncanonical packed cell"
-  let view := match packed with
-    | ⟨.content, payload⟩ => contentCellJson root payload.logical
-    | ⟨.declaredObject, payload⟩ => declaredCellJson root payload.logical
-    | ⟨.stream, payload⟩ => streamCellJson root payload.logical
-    | _ => .mkObj [("root", decimal root.value), ("canonical", hexJson bytes)]
+  let view ← match packed with
+    | ⟨.content, payload⟩ => pure (contentCellJson root payload.logical)
+    | ⟨.declaredObject, payload⟩ => pure (declaredCellJson root payload.logical)
+    | ⟨.stream, payload⟩ => pure (streamCellJson root payload.logical)
+    | ⟨.worldKind, payload⟩ => worldKindJson root payload.logical
+    | ⟨.worldInstance, payload⟩ => worldInstanceJson root payload.logical
+    | _ => pure (.mkObj [("root", decimal root.value), ("canonical", hexJson bytes)])
   pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2]),
     ("opening", openingJson opening)]
@@ -4049,51 +4619,210 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   | some value => pure value
   | none => failAt path "noncanonical or wrong-family binary input"
 
-/-- The content store inside one signed resource view. -/
-private def contentOfView (path : String) (bytes : List UInt8) :
-    Result ContentResource.ContentStore := do
-  let value ← decoded path NativeObservationController.resourceViewCodec bytes
-  match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.2.1 with
-  | some ⟨.content, payload⟩ => pure payload.logical
-  | _ => failAt path "not a content cell"
+/-! ## Documents: one renderer for the current page, a page at a height, and history
 
-private def quoteViewJson : ContentResource.QuoteView → Lean.Json
-  | .unavailable => .mkObj [("view", "unavailable")]
-  | .stale => .mkObj [("view", "stale")]
-  | .quoted bytes revised => .mkObj [("view", "quoted"), ("bytes", hexJson bytes),
+Every page is the reader's own signed read of a content cell: a current
+`view-resource` read, or an `at` read, which the Host answers only when the
+reader's grant stood at that height (`NativeObservationController.atCovered`).
+`view-document` renders one page in the kernel's order (`DocumentHistory.lines`,
+whose keys are `ContentResource.documentOrder`) with its transclusions rendered
+against the source reads the reader supplied; `view-diff` and `view-history`
+diff two such pages with `DocumentHistory.diff` over the same line lists, so
+`doc diff`, `doc history` and `doc show [--at H]` cannot disagree on order. -/
+
+/-- One signed page: an `at` read's height, the lifecycle state, the cell root,
+and the content store (empty when the cell is fresh or retired at that height). -/
+private def pageOfView (path : String) (bytes : List UInt8) :
+    Result (Option Nat × String × Option Digest × ContentResource.ContentStore) := do
+  match NativeObservationController.resourceViewCodec.decode bytes with
+  | some value =>
+      match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.2.1 with
+      | some ⟨.content, payload⟩ => pure (none, "live", some value.1, payload.logical)
+      | _ => failAt path "not a content cell"
+  | none =>
+      let (height, root, lifecycle) ← decoded path NativeObservationController.atViewCodec bytes
+      match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
+      | some .fresh => pure (some height, "fresh", none, ContentResource.initialStore)
+      | some .retired => pure (some height, "retired", none, ContentResource.initialStore)
+      | some (.live ⟨.content, payload⟩) => pure (some height, "live", root, payload.logical)
+      | some (.live _) => failAt path "not a content cell"
+      | none => failAt path "noncanonical lifecycle bytes"
+
+private def transclusionViewJson : ContentResource.TransclusionView → Lean.Json
+  | .unavailable atoms source => .mkObj [("view", "unavailable"), ("atoms", decimal atoms),
+      ("source", decimal source)]
+  | .snapshot lines => .mkObj [("view", "snapshot"), ("lines", .arr <| lines.toArray.map hexJson)]
+  | .moved height => .mkObj [("view", "moved"), ("height", decimal height)]
+  | .live lines revised => .mkObj [("view", "live"), ("lines", .arr <| lines.toArray.map hexJson),
       ("revised", .bool revised)]
+  | .invalidated => .mkObj [("view", "invalidated")]
+  | .unresolved => .mkObj [("view", "unresolved")]
 
-/-- `view-quotes`: every embed of the host view rendered by
-`ContentResource.renderQuote` against the source views the reader itself
-obtained.  Input: `{"host": HEX, "sources": [{"target": DEC, "view": HEX}]}`,
-each HEX a signed `view-resource` binary.  An embed whose source document has
-no supplied view renders `unavailable`. -/
-private def quotesJson (bytes : List UInt8) : Result Lean.Json := do
-  let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
-    | some text => pure text | none => failAt "view-quotes" "input is not UTF-8"
-  let json ← match Lean.Json.parse text with
-    | .ok json => pure json | .error message => failAt "view-quotes" message
-  let obj ← exactObject "$" ["host", "sources"] json
-  let host ← contentOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
-  let sources ← list "$.sources" (fun path entry => do
-      let source ← exactObject path ["target", "view"] entry
-      let target ← nat (path ++ ".target") (← field path "target" source)
-      let store ← contentOfView (path ++ ".view") (← decodeHex (path ++ ".view") (← field path "view" source))
-      pure (ContentResource.documentOf target, store)) (← field "$" "sources" obj)
-  let quotes := (StoreCodec.entries HyperdocumentCell.contentWire host).filterMap fun entry =>
+/-- A content cell holds one document (`ContentLaw`); a view does not carry the
+cell's identifier, so the document is the one record of `documents`. -/
+private def documentOf? (store : ContentResource.ContentStore) : Option Hyperdocument.DocumentId :=
+  (StoreCodec.entries HyperdocumentCell.contentWire store).findSome? fun entry =>
     match entry with
-    | ⟨⟨.elements, identifier⟩, record⟩ =>
-        let identifier : Hyperdocument.ElementId := identifier
-        let record : Hyperdocument.ElementRecord := record
-        match record.body with
-        | .embed reference =>
-            let source := (sources.find? (fun pair => pair.1 = reference.document)).map Prod.snd
-            some (.mkObj [("element", decimal identifier.digest.value),
-              ("reference", embedRefJson reference),
-              ("render", quoteViewJson (ContentResource.renderQuote source reference))])
-        | _ => none
+    | ⟨⟨.documents, identifier⟩, _⟩ => some identifier
     | _ => none
-  pure <| .mkObj [("type", "quotes"), ("quotes", .arr quotes.toArray)]
+
+/-- The page's lines: `DocumentHistory.lines`, the kernel's document order. -/
+private def pageLines (store : ContentResource.ContentStore) :
+    List (Hyperdocument.ElementId × DocumentHistory.Line) :=
+  match documentOf? store with
+  | some document => DocumentHistory.lines store document (marksOf store)
+  | none => []
+
+/-- What stands at one place: a line's atom (bytes, revision, author, struck or
+not), a transclusion's embed, or a section (the revision of its children's
+positions), each with the live marks laid on it (`markJson`: kind, anchor,
+author, `fresh` as `ContentResource.markFresh` decides it in this store). -/
+private def lineValueJson (store : ContentResource.ContentStore) :
+    DocumentHistory.Line → List (String × Lean.Json)
+  | .atom atom record marks =>
+      [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++
+      (match record with
+        | some record => [("payload", hexJson record.payload),
+            ("revision", decimal record.revision.digest.value),
+            ("createdBy", principalJson record.createdBy), ("struck", .bool record.tombstonedAt.isSome)]
+        | none => [("payload", .null)]) ++
+      [("marks", marksJson store marks)]
+  | .embed transclusion marks => [("kind", .str "embed"),
+      ("transclusion", decimal transclusion.digest.value), ("marks", marksJson store marks)]
+  | .section revision marks => [("kind", .str "container"), ("revision", decimal revision.digest.value),
+      ("marks", marksJson store marks)]
+  | .runs => [("kind", .str "runs")]
+  | .opaque => [("kind", .str "opaque")]
+  | .missing => [("kind", .str "missing")]
+where
+  marksJson (store : ContentResource.ContentStore)
+      (marks : List (Hyperdocument.MarkId × Hyperdocument.MarkRecord)) : Lean.Json :=
+    .arr <| marks.toArray.map fun (identifier, record) => .mkObj (markJson store identifier record)
+
+/-- One element of the document order: its place (parent), its line, and what
+placing it needs (a section's child count; an embed's element revision, which
+a mark on a transclusion line names). -/
+private def orderEntryJson (store : ContentResource.ContentStore)
+    (row : Hyperdocument.ElementId × DocumentHistory.Line) : Lean.Json :=
+  let element := row.1
+  .mkObj <| [("element", decimal element.digest.value),
+    ("parent", match ContentResource.parentOf store element with
+      | some parent => decimal parent.digest.value
+      | none => .null)] ++ lineValueJson store row.2 ++
+    match row.2 with
+    | .section _ _ => [("children", decimal (ContentResource.childrenOf store element).length)]
+    | .embed _ _ => [("revision", match ContentResource.elementAt store element with
+        | some record => decimal record.revision.digest.value
+        | none => .null)]
+    | _ => []
+
+private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
+    List (String × Lean.Json) :=
+  let store := page.2.2.2
+  let root := (documentOf? store).bind (ContentResource.rootOf store)
+  [("height", (page.1.map decimal).getD .null), ("state", .str page.2.1),
+    ("cellRoot", (page.2.2.1.map fun root => decimal root.value).getD .null),
+    ("root", (root.map fun element => decimal element.digest.value).getD .null),
+    ("rootRevision", match root.bind (ContentResource.elementAt store) with
+      | some record => decimal record.revision.digest.value
+      | none => .null),
+    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store))]
+
+private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json := do
+  let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
+    | some text => pure text | none => failAt kind "input is not UTF-8"
+  match Lean.Json.parse text with
+  | .ok json => pure json | .error message => failAt kind message
+
+/-- `view-document`: one page of the host document (`host`: a signed
+`view-resource` binary, or a signed `view-at` binary of the host at a past
+height) in the kernel's order, and every transclusion record of that page
+rendered by `ContentResource.renderTransclusion` against the source pages the
+reader itself obtained (`sources: [{"target": DEC, "view": HEX} | {"target":
+DEC, "at": HEX}]`). A transclusion whose source has no supplied live page
+renders `unavailable`, with its shape only. -/
+private def documentJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["host", "sources"] (← jsonInput "view-document" bytes)
+  let page ← pageOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+  let host := page.2.2.2
+  let sources ← list "$.sources" (fun path entry => do
+      let atHeight := (entry.getObjVal? "at").toOption.isSome
+      let key := if atHeight then "at" else "view"
+      let source ← exactObject path ["target", key] entry
+      let target ← nat (path ++ ".target") (← field path "target" source)
+      let read ← pageOfView (path ++ "." ++ key) (← decodeHex (path ++ "." ++ key) (← field path key source))
+      unless read.2.1 = "live" do
+        failAt (path ++ "." ++ key) "not a live content cell at that height"
+      pure (target, read.2.2.2)) (← field "$" "sources" obj)
+  let rendered := (StoreCodec.entries HyperdocumentCell.contentWire host).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.transclusions, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.TransclusionId := identifier
+        let record : Hyperdocument.TransclusionRecord := record
+        some <| match ContentResource.openingOfReference record.reference with
+          | none => .mkObj [("id", decimal identifier.digest.value), ("render", .mkObj [("view", "unresolved")])]
+          | some opening =>
+              let source := (sources.find? (fun pair => pair.1 = opening.source)).map Prod.snd
+              .mkObj [("id", decimal identifier.digest.value), ("mode", modeJson record.reference.mode),
+                ("opening", openingJson opening),
+                ("render", transclusionViewJson
+                  (ContentResource.renderTransclusion source opening record.reference.mode))]
+    | _ => none
+  pure <| .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
+    [("transclusions", .arr rendered.toArray)])
+
+private def changeJson (left right : ContentResource.ContentStore) :
+    DocumentHistory.Change Hyperdocument.ElementId DocumentHistory.Line → Lean.Json
+  | .added element after => .mkObj [("type", "added"), ("element", decimal element.digest.value),
+      ("after", .mkObj (lineValueJson right after))]
+  | .removed element before => .mkObj [("type", "removed"), ("element", decimal element.digest.value),
+      ("before", .mkObj (lineValueJson left before))]
+  | .changed element before after => .mkObj [("type", "changed"),
+      ("element", decimal element.digest.value),
+      ("before", .mkObj (lineValueJson left before)), ("after", .mkObj (lineValueJson right after))]
+  | .moved element before after => .mkObj [("type", "moved"),
+      ("element", decimal element.digest.value),
+      ("before", (before.map fun other => decimal other.digest.value).getD .null),
+      ("after", (after.map fun other => decimal other.digest.value).getD .null)]
+
+private def pageDiff (left right : ContentResource.ContentStore) : Lean.Json :=
+  .arr ((DocumentHistory.diff (pageLines left) (pageLines right)).map (changeJson left right)).toArray
+
+/-- `view-diff`: `{"left": HEX, "right": HEX}`, each a signed page; the changes
+from left to right (`DocumentHistory.diff` over the two pages' lines). -/
+private def diffJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["left", "right"] (← jsonInput "view-diff" bytes)
+  let left ← pageOfView "$.left" (← decodeHex "$.left" (← field "$" "left" obj))
+  let right ← pageOfView "$.right" (← decodeHex "$.right" (← field "$" "right" obj))
+  pure <| .mkObj [("type", "diff"), ("from", .mkObj (pageJson left)), ("to", .mkObj (pageJson right)),
+    ("changes", pageDiff left.2.2.2 right.2.2.2)]
+
+/-- `view-history`: `{"target": DEC, "since": HEX, "at": [HEX]}` — a signed
+`since` read and the signed `at` reads the reader obtained. One row per
+`historyOf target` entry; `before`/`after` are the `at` reads at the row's
+height minus one and at its height, when the reader's grant covered them. -/
+private def historyJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["target", "since", "at"] (← jsonInput "view-history" bytes)
+  let target ← nat "$.target" (← field "$" "target" obj)
+  let entries ← decoded "$.since" NativeObservationController.sinceViewCodec
+    (← decodeHex "$.since" (← field "$" "since" obj))
+  let pages ← list "$.at" (fun path entry => do
+      let page ← pageOfView path (← decodeHex path entry)
+      match page.1 with
+      | some height => pure (height, page)
+      | none => failAt path "not an at read") (← field "$" "at" obj)
+  let pageAt := fun (height : Nat) => (pages.find? (·.1 = height)).map Prod.snd
+  let rows := (NativeObservationController.historyOf target entries).map fun entry =>
+    let before := if entry.height = 0 then none else pageAt (entry.height - 1)
+    let after := pageAt entry.height
+    .mkObj ([("height", decimal entry.height), ("subject", (entry.subject.map decimal).getD .null),
+      ("transaction", decimal entry.transaction),
+      ("before", (before.map fun page => Lean.Json.mkObj (pageJson page)).getD .null),
+      ("after", (after.map fun page => Lean.Json.mkObj (pageJson page)).getD .null)] ++
+      match before, after with
+      | some left, some right => [("changes", pageDiff left.2.2.2 right.2.2.2)]
+      | _, _ => [("changes", .null)])
+  pure <| .mkObj [("type", "history"), ("target", decimal target), ("rows", .arr rows.toArray)]
 
 private def launchPhysicalReportJson
     (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
@@ -4372,13 +5101,15 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let some parsed := ParticipantKeyEnrollment.decodeIngress bytes
         | failAt "participant-key-enrollment-ingress" "noncanonical ingress or nested bytes"
       pure <| .mkObj
-        [("type", "participant-key-enrollment-ingress-v1"),
+        [("type", "participant-key-enrollment-ingress-v2"),
          ("canonical", hexJson bytes),
          ("commandBytes", hexJson parsed.ingress.commandBytes),
          ("command", participantKeyCommandJson parsed.command),
          ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
          ("possessionSignature", hexJson parsed.ingress.possessionSignature),
          ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
+         ("nextPublicKey", hexJson parsed.ingress.nextPublicKey),
+         ("nextPossessionSignature", hexJson parsed.ingress.nextPossessionSignature),
          ("signatureVerified", .bool false)]
   | "participant-factory-provisioning" => do
       let command ← decoded "participant-factory-provisioning"
@@ -4474,20 +5205,32 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
         ("entries", .arr <| entries.toArray.map fun (k, r, p) => streamTailEntryJson k r p)]
   | "view-quotes" => quotesJson bytes
+  | "view-document" => documentJson bytes
+  | "view-diff" => diffJson bytes
+  | "view-history" => historyJson bytes
+  | "view-marks" => do
+      let store := (← pageOfView "view-marks" bytes).2.2.2
+      pure <| .mkObj [("type", "marks"), ("marks", .arr <| (marksOf store).toArray.map
+        fun (identifier, record) => .mkObj (markJson store identifier record))]
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
-      pure <| .mkObj [("type", "policy"), ("canonical", hexJson (PolicyRecordCodec.encode value)),
-        ("policyId", decimal value.policyId.value), ("version", decimal value.version),
-        ("address", decimal (PolicyRecordCodec.digest value).value),
-        ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
-        ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
-        ("predicate", predicateJson value.predicate),
-        ("text", .str (LawLeaf.renderClause value.predicate))]
+      pure <| (policyRecordJson value).mergeObj (.mkObj
+        [("type", "policy"), ("canonical", hexJson (PolicyRecordCodec.encode value)),
+         ("address", decimal (PolicyRecordCodec.digest value).value),
+         ("semanticLawDigest", decimal (PolicyRecordCodec.semanticLawDigest value).value),
+         ("text", .str (LawLeaf.renderClause value.predicate))])
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
-      pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen) =>
-        .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null)])]
+      let grants := fun (held : List (Nat × Nat)) => Lean.Json.arr <| held.toArray.map fun (cap, policy) =>
+        Lean.Json.mkObj [("capability", decimal cap), ("policy", decimal policy)]
+      pure <| .mkObj [("type", "who"),
+        ("members", .arr <| (value.filter (·.2.2.1)).toArray.map fun (subject, seen, _, held) =>
+          .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null),
+            ("capabilities", .arr <| held.toArray.map fun grant => decimal grant.1)]),
+        ("holders", .arr <| value.toArray.map fun (subject, seen, member, held) =>
+          .mkObj [("subject", decimal subject), ("member", .bool member),
+            ("lastSeen", (seen.map decimal).getD .null), ("grants", grants held)])]
   | "view-since" => do
       let value ← decoded "view-since" NativeObservationController.sinceViewCodec bytes
       pure <| .mkObj [("type", "since"), ("entries", .arr <| value.toArray.map fun entry =>
@@ -4505,6 +5248,18 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
           pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
             ("canonical", hexJson lifecycle), ("resource", view)]
       | none => failAt "view-at" "noncanonical lifecycle bytes"
+  | "view-backlinks" | "view-links" => do
+      let (backward, rows) ← decoded kind NativeObservationController.linkViewCodec bytes
+      unless backward = (kind == "view-backlinks") do
+        failAt kind s!"the bytes are a {if backward then "backlinks" else "links"} view"
+      pure <| .mkObj [("type", if backward then "backlinks" else "links"),
+        ("rows", .arr <| rows.toArray.map fun row => .mkObj
+          [("source", decimal row.source), ("link", decimal row.link),
+           ("anchor", (row.anchor.map decimal).getD .null), ("revision", decimal row.revision),
+           ("height", decimal row.height),
+           ("kind", match row.kind with
+             | 0 => "document" | 1 => "element" | 2 => "range" | 3 => "transclusion" | _ => "external"),
+           ("target", decimal row.target), ("relation", decimal row.relation)])]
   | "view-object-capability" => CapabilityInspection.inspect .object bytes
   | "view-account-capability" => CapabilityInspection.inspect .account bytes
   | "view-program-capability" => CapabilityInspection.inspect .program bytes
@@ -4521,7 +5276,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "why" => InspectRender.whyView bytes
   | "turn" => InspectRender.turnView "turn" bytes
   | "receipt" => InspectRender.turnView "receipt" bytes
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-tail, view-policy, view-capability, view-who, view-since, view-at, cap-tree, law, why, turn, or receipt"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-diff, view-history, view-marks, view-backlinks, view-links, view-quotes, view-tail, view-policy, view-capability, view-who, view-since, view-at, cap-tree, law, why, turn, or receipt"
 
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),

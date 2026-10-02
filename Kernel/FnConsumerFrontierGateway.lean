@@ -141,11 +141,12 @@ def Prepared.wanted (_prepared : Prepared context profile federation height pin 
 def project (prepared : Prepared context profile federation height pin proposal)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory proposal.target ++
+    CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (signingBytes proposal) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots proposal.target
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject proposal.target
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height pin proposal) :
@@ -155,13 +156,23 @@ def step (prepared : Prepared context profile federation height pin proposal) :
       prepared.observed.before.kind prepared.observed.before.payload
       prepared.observed.rootExact)
 
+def kindDependencies (prepared : Prepared context profile federation height pin proposal) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment context.directory.directory proposal.target
+
+def lawReadGuards (prepared : Prepared context profile federation height pin proposal) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
+    context.directory.directory profile.semantics proposal.target structural.additional
+  pure (sources ++ structural.readGuards)
+
 def policyConfig (prepared : Prepared context profile federation height pin proposal) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile
-    context.authority.snapshot
-    (ResourceObservationAdmission.sourceStore context)
-    (sourceCapabilityPortal context.authority.snapshot (marker proposal))
-    (step prepared)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
+    context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker proposal))
+    (step prepared) proposal.target
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 def portal (prepared : Prepared context profile federation height pin proposal) : Portal :=
   (policyConfig prepared).portal
@@ -171,17 +182,22 @@ def authorize (prepared : Prepared context profile federation height pin proposa
     Option (Authorized (portal prepared) context.authority.snapshot.authState
       prepared.wanted) := do
   let config := policyConfig prepared
-  let evidence ← sourceCapabilityOnlyEvidence profile.compilerProfile
-    context.authority.snapshot (ResourceObservationAdmission.sourceStore context)
-    (marker proposal) (step prepared) prepared.wanted proposal.capability signature
-  let committed ← config.registry.resolve prepared.wanted.policyId
-    prepared.wanted.policyRevision
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  CanonicalPolicyAdmission.admit config context.authority.snapshot.authState
-    prepared.wanted evidence witness
+  let _ ← lawReadGuards prepared
+  let evidence ← (config.capabilityEvidenceChecked prepared.wanted
+    proposal.capability () signature () (fun _ => ())).toOption
+  let law ← config.resolve?
+  ComposedPolicyAdmission.admit config prepared.wanted evidence law.witness
     (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
     (by rfl) (by rfl)
+
+/-- A public success cannot be obtained with missing source custody. -/
+theorem authorize_requires_sources (prepared : Prepared context profile federation height pin proposal)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (accepted : (authorize prepared signature).isSome = true) :
+    (lawReadGuards prepared).isSome = true := by
+  cases resolved : lawReadGuards prepared with
+  | none => simp [authorize, resolved] at accepted
+  | some guards => simp [resolved]
 
 attribute [irreducible] portal
 
@@ -206,6 +222,12 @@ def check (native : CredentialSignatureIO.NativeConfig)
         | none => return .error "fn consumer gateway testimony refused"
         | some authorization => return .ok ⟨signature, exact, authorization, authorized⟩
       else return .error "fn consumer gateway testimony refused"
+
+/-- Complete source and structural custody. Authorization requires this exact
+resolver result to exist before a Checked value can be constructed. -/
+def readGuards (prepared : Prepared context profile federation height pin proposal) :
+    List DurableDataIntent.ReadGuard :=
+  ((lawReadGuards prepared).getD []).map fun guard => ⟨⟨guard.1⟩, guard.2⟩
 
 def readGuard (prepared : Prepared context profile federation height pin proposal) :
     DurableDataIntent.ReadGuard :=

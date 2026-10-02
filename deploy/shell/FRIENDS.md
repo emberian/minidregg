@@ -144,19 +144,45 @@ ten independent `any [ … ]` clauses is too many cases and says so too. `histor
 take a grant back with `revoke cut notes SAMS-SUBJECT`, then `submit cut`; sam's next read
 is `refused: revoked`.
 
-documents. a doc is a resource whose lines you append and edit together:
+documents. a doc is a resource whose lines you write together; its lines stand in a tree
+(sections hold lines), and `doc show` walks it in order:
 ```
 mini> doc new paper                       # (or `doc new log note`: append-only, edits refused)
 mini> doc append p1 paper 'first paragraph'
 mini> submit p1
-mini> doc show paper                      # numbered lines, who created each
-mini> doc edit p2 paper 1 'first paragraph, better'
-mini> submit p2                           # refused if someone changed line 1 since your `doc show`
+mini> doc insert paper 1 'a title'        # a line placed at line 1; the rest move down
+mini> doc show paper                      # numbered lines, marks, annotations, quotes inline
+mini> doc edit p2 paper 2 'first paragraph, better'
+mini> submit p2                           # refused if someone changed line 2 since your `doc show`
+mini> doc mark paper 1 heading            # bold italic code heading, or `link TARGET`
+mini> doc annotate n1 paper 2 'cite this'  # then `submit n1`; it goes stale if line 2 changes
+mini> doc move paper 3 1                  # line 3 now stands where line 1 stood
 mini> doc link p3 index paper             # a link from index to paper; `doc backlinks paper` finds it
 mini> board new tasks                     # tasks 0 and 1: `board add`, `board take`, `board move … todo doing`
 ```
-share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
-content cell with no fixed size; its lines are ordered by their atom ids.
+**quoting another doc without copying it.** the owner of `notes` publishes a range of its
+lines (`doc range notes 2 3`); you transclude it into your doc: `doc transclude paper notes 2 3`
+(a snapshot, pinned to those lines as they are now) or `… live` (follows later edits; `doc
+follow paper T` re-reads it). your doc holds no bytes of notes: each reader sees the quote
+through their own read of notes, so someone without a grant on notes sees `[transclusion: 2
+atoms of notes, not readable by you]` instead. `doc backlinks notes` lists your quote.
+
+**the past.** `doc history paper` lists every write with its height and who made it;
+`doc show paper --at 77` is the doc as it stood at height 77 (only if your grant covered it
+then: otherwise `refused: no-grant`); `doc diff paper 77 81` names what changed, moves included.
+
+**your own editor.** `doc pull paper` prints the live lines (a quote is one marker line,
+`⟦transclusion T⟧`, which you may keep or delete but not edit). save it to `requests/p.md`, edit,
+then `doc push p4 paper @p.md`: the push becomes the fewest edits, new lines and strikes in
+one proposal. if someone changed a line you edited since your pull, the whole push is
+refused and the refusal names the line: pull again, merge, push again.
+
+**on the web.** `mini web --dir WORKSPACE --listen 127.0.0.1:0` serves your docs as read-only
+pages on your own machine; a page is exactly what `doc show NAME --html` prints, plus the
+links and backlinks. `doc show NAME --raw` prints the bytes of the lines and nothing else.
+
+share a doc the same way as `notes` (delegate, publish, export/import). a reviewer you
+delegate with fields `annotations` can mark and annotate but not edit.
 
 rooms. a room is a resource that other things are born *in*; holding a grant under the
 room reaches the room and everything in it. the five verbs you'll use:
@@ -361,10 +387,11 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. Jobs run Nock programs
-  only, and each check runs the whole program again on the box. Paying is for room weeks;
-  chat rooms are new (`help chat`); docs have no annotations or quotes yet. No uptime promises. IDs are write-once:
-  pick a new one per request. `help guide` prints this guide.
+- Numbered fields and one scalar action per `invoke`; laws may be written in the law
+  grammar or JSON. Jobs run Nock programs, and each check reruns the program.
+  Room weeks, chat and document editing are available; quote ranges name published
+  lines, not spans within a line. IDs are write-once: pick a new one per request.
+  `help guide` prints this guide. No uptime promises.
 
 ## reaching me
 

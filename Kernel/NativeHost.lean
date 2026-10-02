@@ -13,6 +13,7 @@ import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
 import Kernel.FnConsumerProgressHistory
+import Kernel.PreparedInvocationDiagnostics
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -41,17 +42,27 @@ def openExisting (config : Config) : IO (Except String (Opened config)) := do
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
-Returns the number of accepted records audited and the presence index of the
-re-admitted history (`NativeHostReplay.Verified.index_from_replay`: it is the
-stored log's index). -/
-def audit (config : Config) : IO (Except String (Nat × PresenceIndex.Index)) := do
-  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+Returns the number of accepted records audited and the presence and link
+indexes of the re-admitted history (`NativeHostReplay.Verified.index_from_replay`
+and `Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
+private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
+    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
+  match ← AuditTiming.measure timing (fun _ => "load")
+      (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable with
+      match ← NativeHostReplay.verifyLoaded config durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index)
+      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index,
+          verified.opened.durable.links)
+
+/-- Timing is opt-in operator output only; the profile, durable image and
+all receiving judgments are exactly the same arguments as ordinary audit. -/
+def audit (config : Config) :
+    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
+  let timing ← AuditTiming.fromEnvironment
+  try auditWithTiming config timing finally AuditTiming.report timing
 
 /-- Operator read of the whole presence index after an ordinary (checkpoint +
 suffix) open. Local administration only: the operator holds the Store. -/
@@ -60,6 +71,14 @@ def presenceIndex (config : Config) : IO (Except String (Nat × Nat × PresenceI
   | .error detail => return .error detail
   | .ok opened =>
       return .ok (opened.durable.baseHeight, opened.durable.height, opened.durable.index)
+
+/-- Operator read of the whole link index after an ordinary (checkpoint +
+suffix) open. Local administration only: the operator holds the Store. -/
+def linkIndex (config : Config) : IO (Except String (Nat × Nat × LinkIndex.Index)) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      return .ok (opened.durable.baseHeight, opened.durable.height, opened.durable.links)
 
 /-- Explicit local administration, separate from the signed network protocol.
 The exact operator-pinned source genesis must have no accepted transactions. -/
@@ -171,6 +190,20 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
         let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
         pure (.install subject control bytes, [signature])
+    | .installWithRoster subject control bytes rosterBytes => do
+        let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
+        let context : PolicyInstallController.RequestContext :=
+          { federation := config.federation, subject := subject
+            subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch subject
+            height := height
+            policyEpoch := opened.authority.snapshot.authState.policyEpoch declaration.source.policyId
+            policyRevision := opened.authority.snapshot.authState.policyRevision declaration.source.policyId }
+        let prepared ← (PolicyInstallController.prepare profile opened.authority.snapshot context bytes).mapError
+          (fun reason => s!"install preparation: {repr reason}")
+        let request := PolicyInstallController.request profile opened.authority.snapshot context prepared.declaration
+        let marker := (PolicyInstallController.requestDigest profile opened.authority.snapshot context prepared.declaration).value
+        let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
+        pure (.installWithRoster subject control bytes rosterBytes, [signature])
     | .delegate bytes => do
         let packed ← need "noncanonical delegation command" (CapabilityDelegationController.commandCodec.decode bytes)
         let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
@@ -265,10 +298,13 @@ def enrollmentPlan (config : Config) (signedObservationBytes commandBytes : List
   let opened ← IO.ofExcept (← openExisting config)
   enrollmentPlanAuthorizedLoaded config opened signedObservationBytes commandBytes
 
-/-- Assembly transports two detached signatures. Native submission rechecks
-both, the current factory law, exact old state and fresh subject. -/
+/-- Assembly transports the detached signatures: the sponsor's, the new key's
+and, for a record that commits to a next key, that next key's public half and
+its co-signature (both empty otherwise). Native submission rechecks all of
+them, the current factory law, exact old state and fresh subject. -/
 def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
-    (sponsorSignature possessionSignature : List UInt8) : Except String (List UInt8) := do
+    (sponsorSignature possessionSignature nextPublicKey nextSignature : List UInt8) :
+    Except String (List UInt8) := do
   check (decide (sponsorSignature.length = 64)) "sponsor signature must be 64 bytes"
   check (decide (possessionSignature.length = 64)) "possession signature must be 64 bytes"
   let header ← need "noncanonical enrollment sponsor header"
@@ -277,10 +313,19 @@ def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
     (ParticipantKeyEnrollment.commandCodec.decode plan.commandBytes)
   check (decide (plan.possessionHeader = ParticipantKeyEnrollment.possessionFrame
     plan.domain plan.semantics command)) "enrollment possession frame differs"
+  match command.key.nextKeyDigest with
+  | none =>
+      check (decide (nextPublicKey = [] ∧ nextSignature = []))
+        "the record commits to no next key: no next key or co-signature may be presented"
+  | some _ =>
+      check (decide (nextPublicKey.length = 32))
+        "the record commits to a next key: its 32-byte public key is required"
+      check (decide (nextSignature.length = 64))
+        "the record commits to a next key: that key's 64-byte co-signature is required"
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
     ⟨header, sponsorSignature⟩
   pure (ParticipantKeyEnrollment.ingressCodec.encode
-    ⟨plan.commandBytes, envelope, possessionSignature⟩)
+    ⟨plan.commandBytes, envelope, possessionSignature, nextPublicKey, nextSignature⟩)
 
 /-! ## Subject key rotation (pre-rotation)
 
@@ -380,44 +425,131 @@ def observationContext (config : Config) (opened : Opened config) :
     NativeObservationController.Context config.deployment opened.durable :=
   ⟨opened.directory, opened.authority⟩
 
-/-- Only commitments and explicitly public request/key/policy coordinates
-escape this pre-authorization step; the controller derives every header. -/
-def challengeLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    Except Refusal NativeObservationCodec.Challenge := do
-  let some intent := NativeObservationCodec.intentCodec.decode bytes
-    | throw (.of .malformed)
-  (NativeObservationController.challenge (observationContext config opened)
-    config.profile config.federation config.genesisHeight intent).mapError
-      NativeObservationController.preAuthentication
+/-- The answer to an observation request, given the subject's selected key and the native
+verdict on its intent signature. Only an authenticated request reaches the challenge, which
+reads the intent's targets; from there only commitments and explicitly public
+request/key/policy coordinates escape, and a refusal names only a `preAuthentication`
+reason. -/
+def challengeAnswer (config : Config) (opened : Opened config)
+    (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
+    (key : Except Refusal (List UInt8)) (verdict : Except CredentialSignatureIO.Error Bool) :
+    Except Refusal NativeObservationCodec.Challenge :=
+  match NativeObservationController.authenticated key verdict with
+  | .error refusal => .error refusal
+  | .ok () =>
+      (NativeObservationController.challenge (observationContext config opened)
+        config.profile config.federation config.genesisHeight intent intentSignature).mapError
+          NativeObservationController.preAuthentication
 
-/-- A challenge refusal is an unauthenticated answer: it names only a
+/-- Op 4. The request is the intent's bytes and the subject's signature over them. The
+Host decodes the intent, selects the subject's current key, and verifies the signature;
+nothing about the intent's targets is read until that succeeds (FIX-DISCLOSE). -/
+def challengeLoaded (config : Config) (opened : Opened config)
+    (intentBytes intentSignature : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) := do
+  let some intent := NativeObservationCodec.intentCodec.decode intentBytes
+    | return .error (.of .malformed)
+  let key := NativeObservationController.intentKey (observationContext config opened) intent.subject
+  let verdict ← NativeObservationController.intentVerdict config.signature key intent intentSignature
+  return challengeAnswer config opened intent intentSignature key verdict
+
+/-- **One path before authentication.** Op 4 is: decode, select the subject's key, ask the
+native verifier about the intent signature (`intentVerdict`, which is handed the key, the
+intent's bytes and the signature, and nothing of the Store's directory), then answer. -/
+theorem challengeLoaded_authenticates_first (config : Config) (opened : Opened config)
+    (intentBytes intentSignature : List UInt8) :
+    challengeLoaded config opened intentBytes intentSignature =
+      (match NativeObservationCodec.intentCodec.decode intentBytes with
+      | none => pure (.error (.of .malformed))
+      | some intent => do
+          let verdict ← NativeObservationController.intentVerdict config.signature
+            (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+            intent intentSignature
+          pure (challengeAnswer config opened intent intentSignature
+            (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+            verdict)) := by
+  unfold challengeLoaded
+  cases NativeObservationCodec.intentCodec.decode intentBytes <;> rfl
+
+/-- **`unenrolled_response_independent_of_target`.** A request whose intent signature does
+not verify under the subject's current key -- a key that was never enrolled naming an
+enrolled subject, or any wrong key -- gets the same answer whatever its intent names:
+present or absent targets, any capability numbers, any purpose. With
+`challengeLoaded_authenticates_first`, the answer is computed on the one path that reads
+only the subject's key. -/
+theorem unenrolled_response_independent_of_target (config : Config) (opened : Opened config)
+    (left right : NativeObservationCodec.Intent) (leftSignature rightSignature : List UInt8)
+    (subject : left.subject = right.subject)
+    (leftVerdict rightVerdict : Except CredentialSignatureIO.Error Bool)
+    (leftFails : leftVerdict ≠ .ok true) (rightFails : rightVerdict ≠ .ok true) :
+    challengeAnswer config opened left leftSignature
+        (NativeObservationController.intentKey (observationContext config opened) left.subject)
+        leftVerdict =
+      challengeAnswer config opened right rightSignature
+        (NativeObservationController.intentKey (observationContext config opened) right.subject)
+        rightVerdict := by
+  have same : NativeObservationController.authenticated
+        (NativeObservationController.intentKey (observationContext config opened) left.subject)
+        leftVerdict =
+      NativeObservationController.authenticated
+        (NativeObservationController.intentKey (observationContext config opened) right.subject)
+        rightVerdict := by
+    rw [subject]
+    exact NativeObservationController.authenticated_unverified _ _ _ leftFails rightFails
+  unfold challengeAnswer
+  cases refused : NativeObservationController.authenticated
+      (NativeObservationController.intentKey (observationContext config opened) right.subject)
+      rightVerdict with
+  | ok value =>
+      exact absurd refused fun admitted =>
+        rightFails ((NativeObservationController.authenticated_ok_iff _ _).mp admitted).2
+  | error refusal => rw [same, refused]
+
+/-- The accepting pole: an authenticated request reaches the challenge exactly as before. -/
+theorem authenticated_reaches_challenge (config : Config) (opened : Opened config)
+    (intent : NativeObservationCodec.Intent) (intentSignature publicKey : List UInt8) :
+    challengeAnswer config opened intent intentSignature (.ok publicKey) (.ok true) =
+      (NativeObservationController.challenge (observationContext config opened)
+        config.profile config.federation config.genesisHeight intent intentSignature).mapError
+          NativeObservationController.preAuthentication := rfl
+
+/-- An answer's refusal is an unauthenticated one (`unknownKey`, `badSignature`), a
 `preAuthentication` reason, or `malformed` for bytes that do not decode. -/
-theorem challengeLoaded_public (config : Config) (opened : Opened config) (bytes : List UInt8)
-    (refusal : Refusal) (refused : challengeLoaded config opened bytes = .error refusal) :
-    refusal = .of .malformed ∨ ∃ inner, refusal = NativeObservationController.preAuthentication inner := by
-  unfold challengeLoaded at refused
-  cases decoded : NativeObservationCodec.intentCodec.decode bytes with
-  | none =>
-      simp only [decoded] at refused
+theorem challengeAnswer_public (config : Config) (opened : Opened config)
+    (intent : NativeObservationCodec.Intent) (intentSignature : List UInt8)
+    (verdict : Except CredentialSignatureIO.Error Bool) (refusal : Refusal)
+    (refused : challengeAnswer config opened intent intentSignature
+      (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+      verdict = .error refusal) :
+    refusal = .of .unknownKey ∨ refusal = .of .badSignature ∨
+      ∃ inner, refusal = NativeObservationController.preAuthentication inner := by
+  unfold challengeAnswer at refused
+  cases gate : NativeObservationController.authenticated
+      (NativeObservationController.intentKey (observationContext config opened) intent.subject)
+      verdict with
+  | error reason =>
+      rw [gate] at refused
       cases refused
-      exact Or.inl rfl
-  | some intent =>
-      simp only [decoded] at refused
+      rcases NativeObservationController.authenticated_refusal _ _ _ _ gate with known | bad
+      · exact Or.inl known
+      · exact Or.inr (Or.inl bad)
+  | ok value =>
+      rw [gate] at refused
       cases decided : NativeObservationController.challenge (observationContext config opened)
-          config.profile config.federation config.genesisHeight intent with
+          config.profile config.federation config.genesisHeight intent intentSignature with
       | error inner =>
           rw [decided] at refused
           cases refused
-          exact Or.inr ⟨inner, rfl⟩
+          exact Or.inr (Or.inr ⟨inner, rfl⟩)
       | ok value =>
           rw [decided] at refused
           cases refused
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
-def challenge (config : Config) (bytes : List UInt8) :
+def challenge (config : Config) (intentBytes intentSignature : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) := do
   let opened ← IO.ofExcept (← openExisting config)
-  return challengeLoaded config opened bytes
+  challengeLoaded config opened intentBytes intentSignature
 
 /-- The steps a command's run claim names, when they exceed the operator's
 synchronous budget `config.nockFSync`; `none` when the command claims no run or
@@ -502,6 +634,58 @@ def invokeCastAlias (config : Config) (opened : Opened config) : Draft → Optio
       DeclaredResourceController.firstCastAlias prepared tuple
   | _ => none
 
+/-- Op 4's payload: the session's pair framing (a four-byte little-endian length, the
+intent's bytes, then the signature). Anything else is `malformed`. -/
+def challengeRequestParts (payload : List UInt8) : Option (List UInt8 × List UInt8) :=
+  if payload.length < 4 then none
+  else
+    let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
+      65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
+    if width ≤ payload.length - 4 then some ((payload.drop 4).take width, payload.drop (4 + width))
+    else none
+
+/-- Op 4 on an opened image: split the request, then `challengeLoaded`. -/
+def challengeRequestLoaded (config : Config) (opened : Opened config) (payload : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) :=
+  match challengeRequestParts payload with
+  | none => pure (.error (.of .malformed))
+  | some (intentBytes, intentSignature) => challengeLoaded config opened intentBytes intentSignature
+
+/-- Op 4, one-shot. -/
+def challengeRequest (config : Config) (payload : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) := do
+  let opened ← IO.ofExcept (← openExisting config)
+  challengeRequestLoaded config opened payload
+
+/-- The fields the requester's observation grant on `target` names (K-FIELDS): the first
+grant of the signed intent naming that target. A target the intent names no grant for is
+told no field (`some ∅`). -/
+def grantFields (config : Config) (opened : Opened config) (grants : List NativeObservationCodec.GrantRef)
+    (target : Nat) : Option (Finset CellField) :=
+  match grants.find? (fun grant => grant.target == target) with
+  | some grant => ResourceObservationAdmission.readerFields (observationContext config opened)
+      grant.kind grant.capability
+  | none => some ∅
+
+/-- Diagnose one already prepared invocation, with each leg's grant controlling
+which values may be disclosed. Submission still performs its own fresh preparation. -/
+def invokeRefusal (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable
+        (some opened.directory) command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      let legs := DeclaredResourceController.preparePolicyLegs prepared tuple
+      let fieldsOf := fun incidence => match incidence with
+        | some i => grantFields config opened grants command.targets[i].target
+        | none => some ∅
+      (legs.firstRangeRefusal fieldsOf).orElse fun _ =>
+        (legs.firstCastRefusal fieldsOf).orElse fun _ =>
+          legs.firstLawRefusal fieldsOf
+  | _ => none
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -515,19 +699,12 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
   | .ok _ =>
       match signed.challenge.intent.purpose with
       | .prepare draft =>
-          -- Before the referee re-executes anything (`invokeLawLeaf`, `prepareLoaded`).
           if let some steps := draftOverSyncBudget config draft then
             return .error ⟨.operationRejected, overSyncBudgetDetail config steps, none⟩
-          match invokeRangeLeaf config opened draft with
-          | some leaf => return .error (Refusal.lawInputRange leaf)
-          | none =>
-              match invokeCastAlias config opened draft with
-              | some (x, y) => return .error (Refusal.castAlias x y)
-              | none =>
-                  match invokeLawLeaf config opened draft with
-                  | some leaf => return .error (Refusal.lawDenied (some leaf))
-                  | none => return ((prepareLoaded config opened draft).mapError
-                      fun detail => ⟨.operationRejected, detail, none⟩)
+          match invokeRefusal config opened signed.challenge.intent.grants draft with
+          | some refusal => return .error refusal
+          | none => return ((prepareLoaded config opened draft).mapError
+              fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
@@ -624,6 +801,10 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
         ({ capability := some capability, envelope := envelope } : ResourceBirthPolicyController.Concrete.BranchCredential)
       pure (.birth (ResourceBirthPolicyController.Concrete.ingressCodec.encode
         ⟨bytes, ⟨⟨none, factory⟩, ⟨none, authority⟩, allocations, sources⟩⟩))
+  | .installWithRoster subject control bytes rosterBytes =>
+      match envelopes with
+      | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope, some rosterBytes⟩))
+      | _ => .error "install signing slots mismatch"
   | .delegate bytes =>
       match envelopes with
       | [envelope] => pure (.delegate (CapabilityDelegationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))

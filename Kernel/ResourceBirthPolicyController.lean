@@ -13,6 +13,8 @@ import Kernel.ResourceBirthController
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CanonicalRuntimeProfile
 import Compiler.CanonicalAccountView
+import Compiler.PhysicalLawResolution
+import Compiler.WorldKindLawDependencies
 
 namespace Minidregg.Kernel.ResourceBirthPolicyController
 
@@ -39,6 +41,11 @@ inductive Reject where
   | fundingDestination
   | initialPolicy
   | grantTemplate
+  /-- A born grant's authored `notBefore` lies past the admission height. -/
+  | birthFuture
+  /-- The admission height lies past a born grant's authored `notBefore` plus
+  the template's `birthSlack`: the birth waited too long to land. -/
+  | birthStale
   | ambiguousRequests
   | duplicateCell
   | capability
@@ -50,6 +57,10 @@ inductive Reject where
   | signature
   | policyUnavailable
   | policyRejected
+  /-- A born grant's `ancestors` are not the lineage its birth requires: none
+  for a root birth; for a birth under a room, the creator's presented placing
+  capability and that capability's own ancestors (`BornLineage`). -/
+  | roomLineage
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -339,17 +350,29 @@ def ownerVerbs : (kind : ResourceKind) → Finset (Verb kind)
   | .account => {.observeAccount, .transfer, .delegateAccount, .mintAsset, .burnAsset}
   | .program => {.observeProgram, .installProgram, .delegateProgram}
 
+/-- The admission window of one born grant. Its author names `notBefore` (the
+height it authored at); the receiver admits the birth from that height through
+`birthSlack` later heights. Any admission in between (a clock tick, a
+friend's write) does not invalidate the birth. -/
+def BirthWindow (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (height : Height) (grant : AuthorityGrant) : Prop :=
+  grant.capability.head.notBefore ≤ height ∧
+    height ≤ grant.capability.head.notBefore + template.birthSlack
+
+/-- A root grant issued by the factory. Its window is the author's own:
+`notAfter = notBefore + template.lifetime` fixes the lifetime from the authored
+`notBefore`, and the admission height enters only through `BirthWindow`. The
+grant installed is therefore the grant signed, at every admissible height. -/
 def RootGrantShape (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) (height : Height) (grant : AuthorityGrant) : Prop :=
   grant.capability.head.issuer = template.issuer ∧
   grant.capability.head.issuerEpoch = authority.issuerEpoch template.issuer ∧
   grant.capability.head.root = grant.capability.head.id ∧
   grant.capability.head.parent = none ∧
-  grant.capability.head.ancestors = ∅ ∧
   grant.capability.head.channels = ∅ ∧
   grant.capability.ancestry = [] ∧
-  grant.capability.head.notBefore = height ∧
-  grant.capability.head.notAfter = height + template.lifetime ∧
+  BirthWindow template height grant ∧
+  grant.capability.head.notAfter = grant.capability.head.notBefore + template.lifetime ∧
   grant.capability.head.scope.maxCost = template.ownerBudget
 
 def NativeOwnerGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
@@ -373,6 +396,83 @@ def TemplateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
     NativeOwnerGrant grant item ∨ PolicyOwnerGrant grant item) ∧
   descriptor.grants.length = 2 * descriptor.births.length
 
+instance birthWindowDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (height : Height) (grant : AuthorityGrant) :
+    Decidable (BirthWindow template height grant) := by
+  unfold BirthWindow
+  infer_instance
+
+/-! ### A born grant's revocation lineage (PLACE §2.2: a kick takes down the docs)
+
+Authority over a cell born in a room is an attenuation of the creator's room
+grant. The born owner and control grants cannot be `Attenuates`-children of it:
+`Capability` is kind-indexed (the control grant is `.program`, the room grant
+`.object`) and `Attenuates.policyId` keeps the parent's policy while
+`AuthorityGrant.NativeForBirth` gives every newborn its own (`policyId = cell`).
+So they are roots (`parent = none`, `root = id`, `RootGrantShape`) whose
+`ancestors` are the presented room grant's lineage: the placing capability and
+its own ancestors. `Admissible.ancestorNotRevoked` then refuses them, and every
+attenuation or delegation of them (each copies its parent's ancestors), once
+that room grant or anything above it is revoked. A root birth names no placing
+capability and its grants carry no ancestors. -/
+
+/-- The revocation lineage of a stored object capability: its own ancestors,
+read from the authority cell (`none`: no such capability). -/
+def placementLineage {M : CellState.Materializer CredentialAuthorityState.layout Digest}
+    (cell : CredentialAuthorityState.Cell M) (placement : CapabilityId) :
+    Option (Finset CapabilityId) :=
+  (CredentialAuthorityState.readCapability cell .object placement).map (·.head.ancestors)
+
+/-- What a born grant's `ancestors` must be: empty for a root birth; for a
+birth under a room, `insert placement (ancestors of placement)`. `none` when
+the placement is not a stored capability (the room gate refuses that birth). -/
+def bornAncestors (lineage : CapabilityId → Option (Finset CapabilityId))
+    (item : BirthItem Registry) : Option (Finset CapabilityId) :=
+  match item.placement with
+  | none => some ∅
+  | some placement => (lineage placement).map (insert placement)
+
+/-- Every grant born for an item carries exactly that item's `bornAncestors`. -/
+def BornLineage (lineage : CapabilityId → Option (Finset CapabilityId))
+    (descriptor : Descriptor Registry) : Prop :=
+  ∀ item ∈ descriptor.births, ∀ grant ∈ descriptor.grants, grant.ForBirth item →
+    bornAncestors lineage item = some grant.capability.head.ancestors
+
+instance bornLineageDecidable (lineage : CapabilityId → Option (Finset CapabilityId))
+    (descriptor : Descriptor Registry) : Decidable (BornLineage lineage descriptor) := by
+  unfold BornLineage
+  infer_instance
+
+/-- A grant born under a room carries the creator's placing capability among
+its ancestors. -/
+theorem placement_mem_born_ancestors {lineage : CapabilityId → Option (Finset CapabilityId)}
+    {descriptor : Descriptor Registry} (bound : BornLineage lineage descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {placement : CapabilityId} (placed : item.placement = some placement)
+    {grant : AuthorityGrant} (grantMember : grant ∈ descriptor.grants)
+    (forBirth : grant.ForBirth item) :
+    placement ∈ grant.capability.head.ancestors := by
+  have pinned := bound item member grant grantMember forBirth
+  simp only [bornAncestors, placed] at pinned
+  cases found : lineage placement with
+  | none => simp [found] at pinned
+  | some ancestors =>
+      simp only [found, Option.map_some, Option.some.injEq] at pinned
+      rw [← pinned]
+      exact Finset.mem_insert_self placement ancestors
+
+/-- A root birth's grants carry no ancestors. -/
+theorem root_born_ancestors_empty {lineage : CapabilityId → Option (Finset CapabilityId)}
+    {descriptor : Descriptor Registry} (bound : BornLineage lineage descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    (root : item.placement = none)
+    {grant : AuthorityGrant} (grantMember : grant ∈ descriptor.grants)
+    (forBirth : grant.ForBirth item) :
+    grant.capability.head.ancestors = ∅ := by
+  have pinned := bound item member grant grantMember forBirth
+  simp only [bornAncestors, root] at pinned
+  exact (Option.some.inj pinned).symm
+
 instance rootGrantShapeDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) (height : Height) (grant : AuthorityGrant) :
     Decidable (RootGrantShape template authority height grant) := by
@@ -395,10 +495,24 @@ instance templateBoundDecidable (template : CanonicalRuntimeProfile.FactoryTempl
   unfold TemplateBound
   infer_instance
 
+/-- The template check, with the window refusals named before the shape. A
+grant authored past the admission height is `birthFuture`; a birth admitted
+past its slack is `birthStale`; `grantTemplate` is reserved for a descriptor
+whose every window is open and whose shape is wrong. -/
+def checkTemplateAt (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    Except Reject (PLift (TemplateBound template authority height descriptor)) :=
+  if ∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore then
+    .error .birthFuture
+  else if ∃ grant ∈ descriptor.grants,
+      grant.capability.head.notBefore + template.birthSlack < height then
+    .error .birthStale
+  else require (TemplateBound template authority height descriptor) .grantTemplate
+
 def checkTemplate (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) : Except Reject (PLift (TemplateBound profile.template
       (oldAuthority prepared) height descriptor)) :=
-  require (TemplateBound profile.template (oldAuthority prepared) height descriptor) .grantTemplate
+  checkTemplateAt profile.template (oldAuthority prepared) height descriptor
 
 /-- A correct ordinary program-edit grant never includes policy replacement,
 even though both resources use the same numerical target id. -/
@@ -418,6 +532,309 @@ theorem arbitrary_issuer_refused (template : CanonicalRuntimeProfile.FactoryTemp
     ¬TemplateBound template authority height descriptor := by
   intro bound
   exact wrong (template_issuer_exact template authority height descriptor bound grant member)
+
+/-! ## The birth window: the author names it, the receiver admits a bounded lag
+
+The descriptor is authored at a height `H0` and its root grants carry
+`notBefore = H0`, `notAfter = H0 + lifetime`. Any admission between authoring
+and admission (a clock tick, a friend's write) moves the admission height; the
+birth stays admissible while that height is within `birthSlack` of `H0`, and
+the grant installed is the grant the author signed. -/
+
+/-- The shape restated: a root grant admitted at `height` has its window open
+at `height`, and its lifetime runs from the authored `notBefore`. -/
+theorem rootGrantShape_window (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (grant : AuthorityGrant)
+    (shape : RootGrantShape template authority height grant) :
+    grant.capability.head.notBefore ≤ height ∧
+      height ≤ grant.capability.head.notBefore + template.birthSlack ∧
+      grant.capability.head.notAfter = grant.capability.head.notBefore + template.lifetime :=
+  ⟨shape.2.2.2.2.2.2.1.1, shape.2.2.2.2.2.2.1.2, shape.2.2.2.2.2.2.2.1⟩
+
+/-- A named projection keeps callers independent of the grant-shape tuple's
+other fields. -/
+theorem rootGrantShape_birthWindow (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (grant : AuthorityGrant)
+    (shape : RootGrantShape template authority height grant) : BirthWindow template height grant :=
+  ⟨(rootGrantShape_window template authority height grant shape).1,
+    (rootGrantShape_window template authority height grant shape).2.1⟩
+
+/-- The admission height enters a root grant's shape only through its window. -/
+theorem rootGrantShape_height_move (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {height height' : Height} (grant : AuthorityGrant)
+    (shape : RootGrantShape template authority height grant)
+    (window : BirthWindow template height' grant) :
+    RootGrantShape template authority height' grant := by
+  obtain ⟨issuer, epoch, root, parent, channels, ancestry, _, notAfter, budget⟩ := shape
+  exact ⟨issuer, epoch, root, parent, channels, ancestry, window, notAfter, budget⟩
+
+theorem templateBound_height_move (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {height height' : Height} (descriptor : Descriptor Registry)
+    (bound : TemplateBound template authority height descriptor)
+    (windows : ∀ grant ∈ descriptor.grants, BirthWindow template height' grant) :
+    TemplateBound template authority height' descriptor :=
+  ⟨fun grant member => rootGrantShape_height_move template authority grant
+      (bound.1 grant member) (windows grant member),
+    bound.2.1, bound.2.2.1, bound.2.2.2⟩
+
+/-- A grant outside its window refuses the whole template, whatever its shape. -/
+theorem outside_window_not_templateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry)
+    (grant : AuthorityGrant) (member : grant ∈ descriptor.grants)
+    (outside : ¬BirthWindow template height grant) :
+    ¬TemplateBound template authority height descriptor :=
+  fun bound => outside (rootGrantShape_birthWindow template authority height grant (bound.1 grant member))
+
+/-- An honest descriptor authored at `authored`: it satisfies the template at
+its own height, and every grant names that height as its `notBefore`. -/
+def AuthoredAt (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (authored : Height) (descriptor : Descriptor Registry) : Prop :=
+  TemplateBound template authority authored descriptor ∧
+    ∀ grant ∈ descriptor.grants, grant.capability.head.notBefore = authored
+
+theorem checkTemplateAt_of_bound (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry)
+    (bound : TemplateBound template authority height descriptor) :
+    checkTemplateAt template authority height descriptor = .ok ⟨bound⟩ := by
+  have notFuture : ¬∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore := by
+    rintro ⟨grant, member, early⟩
+    exact Nat.not_le.mpr early
+      (rootGrantShape_birthWindow template authority height grant (bound.1 grant member)).1
+  have notStale : ¬∃ grant ∈ descriptor.grants,
+      grant.capability.head.notBefore + template.birthSlack < height := by
+    rintro ⟨grant, member, late⟩
+    exact Nat.not_le.mpr late
+      (rootGrantShape_birthWindow template authority height grant (bound.1 grant member)).2
+  unfold checkTemplateAt
+  rw [if_neg notFuture, if_neg notStale]
+  unfold require
+  rw [dif_pos bound]
+
+/-- The check accepts exactly the template contract. -/
+theorem checkTemplateAt_ok_iff (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    (checkTemplateAt template authority height descriptor).toOption.isSome = true ↔
+      TemplateBound template authority height descriptor := by
+  constructor
+  · intro accepted
+    cases outcome : checkTemplateAt template authority height descriptor with
+    | error reason => simp [outcome, Except.toOption] at accepted
+    | ok result => exact result.down
+  · intro bound
+    rw [checkTemplateAt_of_bound template authority height descriptor bound]
+    rfl
+
+/-- Positive pole: an honest birth authored at `authored` is admitted at every
+height from `authored` through `authored + birthSlack`, and the grants it
+installs keep the window their author named. -/
+theorem birth_admitted_within_slack (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {authored height : Height} (descriptor : Descriptor Registry)
+    (honest : AuthoredAt template authority authored descriptor)
+    (fromAuthored : authored ≤ height) (withinSlack : height ≤ authored + template.birthSlack) :
+    (∃ bound, checkTemplateAt template authority height descriptor = .ok bound) ∧
+      ∀ grant ∈ descriptor.grants, grant.capability.head.notBefore = authored ∧
+        grant.capability.head.notAfter = authored + template.lifetime := by
+  have windows : ∀ grant ∈ descriptor.grants, BirthWindow template height grant := by
+    intro grant member
+    rw [BirthWindow, honest.2 grant member]
+    exact ⟨fromAuthored, withinSlack⟩
+  refine ⟨⟨_, checkTemplateAt_of_bound template authority height descriptor
+    (templateBound_height_move template authority descriptor honest.1 windows)⟩, ?_⟩
+  intro grant member
+  have notAfter := (rootGrantShape_window template authority authored grant
+    (honest.1.1 grant member)).2.2
+  rw [honest.2 grant member] at notAfter
+  exact ⟨honest.2 grant member, notAfter⟩
+
+/-- Negative pole: a birth admitted past a grant's `notBefore + birthSlack` is
+refused `birthStale`, never `grantTemplate`. -/
+theorem birth_refused_beyond_slack (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {height : Height} (descriptor : Descriptor Registry)
+    (notFuture : ∀ grant ∈ descriptor.grants, grant.capability.head.notBefore ≤ height)
+    (stale : ∃ grant ∈ descriptor.grants,
+      grant.capability.head.notBefore + template.birthSlack < height) :
+    checkTemplateAt template authority height descriptor = .error .birthStale := by
+  have early : ¬∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore := by
+    rintro ⟨grant, member, before⟩
+    exact Nat.not_le.mpr before (notFuture grant member)
+  unfold checkTemplateAt
+  rw [if_neg early, if_pos stale]
+
+/-- The honest form: a birth authored at `authored` and admitted after
+`authored + birthSlack` is refused `birthStale`. -/
+theorem authored_birth_refused_beyond_slack (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {authored height : Height} (descriptor : Descriptor Registry)
+    (honest : AuthoredAt template authority authored descriptor)
+    (nonempty : descriptor.grants ≠ []) (late : authored + template.birthSlack < height) :
+    checkTemplateAt template authority height descriptor = .error .birthStale := by
+  refine birth_refused_beyond_slack template authority descriptor ?_ ?_
+  · intro grant member
+    rw [honest.2 grant member]
+    exact Nat.le_of_lt (Nat.lt_of_le_of_lt (Nat.le_add_right _ _) late)
+  · obtain ⟨grant, member⟩ := List.exists_mem_of_ne_nil _ nonempty
+    exact ⟨grant, member, by rw [honest.2 grant member]; exact late⟩
+
+/-- A birth whose grant names a `notBefore` past the admission height is
+refused `birthFuture`. -/
+theorem future_birth_refused (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {height : Height} (descriptor : Descriptor Registry)
+    (future : ∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore) :
+    checkTemplateAt template authority height descriptor = .error .birthFuture := by
+  unfold checkTemplateAt
+  rw [if_pos future]
+
+/-- `grantTemplate` never names a window: when it is the refusal, every grant's
+window is open at the admission height and the shape is what failed. -/
+theorem grantTemplate_only_inside_window (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) {height : Height} (descriptor : Descriptor Registry)
+    (refused : checkTemplateAt template authority height descriptor = .error .grantTemplate) :
+    ∀ grant ∈ descriptor.grants, BirthWindow template height grant := by
+  intro grant member
+  unfold checkTemplateAt at refused
+  by_cases future : ∃ grant ∈ descriptor.grants, height < grant.capability.head.notBefore
+  · rw [if_pos future] at refused
+    cases refused
+  · rw [if_neg future] at refused
+    by_cases stale : ∃ grant ∈ descriptor.grants,
+        grant.capability.head.notBefore + template.birthSlack < height
+    · rw [if_pos stale] at refused
+      cases refused
+    · exact ⟨Nat.not_lt.mp fun early => future ⟨grant, member, early⟩,
+        Nat.not_lt.mp fun late => stale ⟨grant, member, late⟩⟩
+
+/-! ### Both poles on one concrete descriptor
+
+One object birth with its owner and control grants, authored at height 100
+under a template with `birthSlack = 64`. The descriptor is admitted at 101
+(the measured defect: one tick landed between authoring and admission) and at
+164, and refused `birthStale` at 165 and `birthFuture` at 99. -/
+namespace WindowExample
+
+def template : CanonicalRuntimeProfile.FactoryTemplate := ⟨⟨5⟩, 100000, 10000, 64⟩
+
+def authority : AuthState where
+  capabilityRoot := ⟨0⟩
+  revocationRoot := ⟨0⟩
+  policyRoot := ⟨0⟩
+  policyAddress := fun _ _ => ⟨0⟩
+  revoked := ∅
+  issuerEpoch := fun _ => 2
+  policyEpoch := fun _ => 0
+  policyRevision := fun _ => 0
+  subjectKeyEpoch := fun _ => 0
+  parent := Parentage.empty
+
+def target : Nat := 7001
+
+def item : BirthItem Registry where
+  create := ⟨target, CellSlot.root CanonicalCellRegistry.registry .absent,
+    CanonicalCellRegistry.Witness.emptyContent⟩
+  resourceKind := .object
+  owner := ⟨8⟩
+  parent := none
+  placement := none
+
+def ownerCapability (authored : Height) : Capability .object where
+  id := ⟨71⟩
+  root := ⟨71⟩
+  parent := none
+  issuer := ⟨5⟩
+  holder := .subject ⟨8⟩
+  scope := ⟨.under target, ownerVerbs .object, 100000, none, ∅⟩
+  notBefore := authored
+  notAfter := authored + 10000
+  issuerEpoch := 2
+  policyId := ⟨target⟩
+  policyEpoch := 0
+  ancestors := ∅
+  channels := ∅
+
+def controlCapability (authored : Height) : Capability .program where
+  id := ⟨72⟩
+  root := ⟨72⟩
+  parent := none
+  issuer := ⟨5⟩
+  holder := .subject ⟨8⟩
+  scope := ⟨.explicit {⟨target⟩}, {Verb.installPolicy, Verb.revokeCapability}, 100000, none, ∅⟩
+  notBefore := authored
+  notAfter := authored + 10000
+  issuerEpoch := 2
+  policyId := ⟨target⟩
+  policyEpoch := 0
+  ancestors := ∅
+  channels := ∅
+
+def ownerGrant (authored : Height) : AuthorityGrant := ⟨.object, ⟨ownerCapability authored, []⟩⟩
+
+def controlGrant (authored : Height) : AuthorityGrant :=
+  ⟨.program, ⟨controlCapability authored, []⟩⟩
+
+def birthDescriptor (authored : Height) : Descriptor Registry where
+  factory := ⟨10⟩
+  creator := ⟨8⟩
+  transactionId := ⟨0⟩
+  nonce := 0
+  births := [item]
+  auxiliaryCreates := []
+  grants := [ownerGrant authored, controlGrant authored]
+  authorityNullifier := 0
+  funding := []
+  fee := ⟨0, 0, 0, 0⟩
+
+theorem authored : AuthoredAt template authority 100 (birthDescriptor 100) := by
+  refine ⟨by decide, ?_⟩
+  intro grant member
+  simp only [birthDescriptor, List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with rfl | rfl <;> rfl
+
+theorem admitted_one_tick_later :
+    ∃ bound, checkTemplateAt template authority 101 (birthDescriptor 100) = .ok bound :=
+  (birth_admitted_within_slack template authority (birthDescriptor 100) authored
+    (by decide) (by decide)).1
+
+theorem admitted_at_slack_edge :
+    ∃ bound, checkTemplateAt template authority 164 (birthDescriptor 100) = .ok bound :=
+  (birth_admitted_within_slack template authority (birthDescriptor 100) authored
+    (by decide) (by decide)).1
+
+theorem refused_past_slack :
+    checkTemplateAt template authority 165 (birthDescriptor 100) = .error .birthStale :=
+  authored_birth_refused_beyond_slack template authority (birthDescriptor 100) authored
+    (by simp [birthDescriptor]) (by decide)
+
+theorem refused_before_authored :
+    checkTemplateAt template authority 99 (birthDescriptor 100) = .error .birthFuture :=
+  future_birth_refused template authority (birthDescriptor 100)
+    ⟨ownerGrant 100, by simp [birthDescriptor], by decide⟩
+
+end WindowExample
+
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.rootGrantShape_window' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rootGrantShape_window
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.templateBound_height_move' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms templateBound_height_move
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.checkTemplateAt_ok_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkTemplateAt_ok_iff
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.birth_admitted_within_slack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms birth_admitted_within_slack
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.birth_refused_beyond_slack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms birth_refused_beyond_slack
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.authored_birth_refused_beyond_slack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authored_birth_refused_beyond_slack
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.future_birth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms future_birth_refused
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.grantTemplate_only_inside_window' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grantTemplate_only_inside_window
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.WindowExample.authored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WindowExample.authored
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.WindowExample.admitted_one_tick_later' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WindowExample.admitted_one_tick_later
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.WindowExample.admitted_at_slack_edge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WindowExample.admitted_at_slack_edge
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.WindowExample.refused_past_slack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WindowExample.refused_past_slack
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.WindowExample.refused_before_authored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WindowExample.refused_before_authored
 
 /-- Request metadata is entirely source-derived except the receiver's trusted
 height. That height is a service input, not asserted to be a committed clock.
@@ -620,7 +1037,8 @@ def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployme
     (wanted : PackedEffectRequest) (source : Source descriptor)
     (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
-  let header := CanonicalRuntimeProfile.requestSlots wanted.2 ++
+  let header := WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory
+    wanted.2.target.value ++ CanonicalRuntimeProfile.requestSlots wanted.2 ++
     [ ("request/creator", Int.ofNat source.val.creator.value)
 
     , ("birth/count", Int.ofNat source.val.births.length)
@@ -795,6 +1213,7 @@ structure Pending
     (height : Height) : Prop where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   templateBound : TemplateBound profile.template (oldAuthority prepared) height descriptor
+  bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
 
@@ -803,6 +1222,8 @@ def preparePending
     (height : Height) : Except Reject (PLift (Pending prepared height)) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   let templateBound ← checkTemplate prepared height
+  let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
+    descriptor) .roomLineage
   letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
     decidable_of_iff
       (((policyBranches descriptor.createRequests.length descriptor.resourceBatch.operations.length).map
@@ -810,7 +1231,7 @@ def preparePending
       (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
   if cells : Function.Injective (layout prepared).cellId then
     if requests : Function.Injective (branchIdentity prepared height) then
-      .ok ⟨⟨checked.down, templateBound.down, cells, requests⟩⟩
+      .ok ⟨⟨checked.down, templateBound.down, bornLineage.down, cells, requests⟩⟩
     else .error .ambiguousRequests
   else .error .duplicateCell
 
@@ -899,14 +1320,39 @@ theorem Pending.branchStep_prepared_exact
 /-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.Pending.branchStep_prepared_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Pending.branchStep_prepared_exact
 
+/-- Structural selection uses the actual old governing target, including
+factory-authorized allocation and authority branches. -/
+def Pending.branchDependencies
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (_pending : Pending prepared height) (branch : Branch descriptor) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
+    (branchRequest prepared height branch).2.target.value
+
+/-- NativeHostContext/Genesis align the factory policy id with the factory
+resource id. The v6 composed receiver intentionally refuses generic pins that
+select a distinct governing policy; it never substitutes a newborn local law. -/
 def Pending.branchConfig [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (payloadStore prepared)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
-    (pending.branchStep branch)
+    (pending.branchStep branch) (branchRequest prepared height branch).2.target.value
+    (((pending.branchDependencies branch).map (·.additional)).getD [])
+
+/-- Failure to load the old target or any selected current/historical policy
+source refuses the branch. No missing structural root becomes an empty law. -/
+def Pending.branchReadGuards
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
+    Option (List (Nat × Digest)) := do
+  let structural ← pending.branchDependencies branch
+  let law ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics
+    (branchRequest prepared height branch).2.target.value structural.additional
+  some (structural.readGuards ++ law)
 
 /-- All non-policy checks are the same fixed native source checks. Only the
 policy witness adds an exact source-enumerated branch; each branch delegates
@@ -917,8 +1363,8 @@ def Pending.portal [DecidableEq F]
   let base := domainPortal prepared.authority.snapshot
     (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
   { base with
-    PolicyWitness := Branch descriptor × CompiledPolicyWitness F
-    policyAddress := fun witness => witness.2.address
+    PolicyWitness := Branch descriptor × ComposedPolicyAdmission.Witness F
+    policyAddress := fun witness => witness.2.compiled.address
     verifyCommittedPolicy := fun address kind request witness =>
       decide (AuthorizationDeclaration.encodeRequest ⟨kind, request⟩ =
         branchIdentity prepared height witness.1) &&
@@ -946,7 +1392,7 @@ theorem Pending.no_other_branch [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height)
     (branch other : Branch descriptor) (different : branch ≠ other)
-    (address : Digest) (compiled : CompiledPolicyWitness F) :
+    (address : Digest) (compiled : ComposedPolicyAdmission.Witness F) :
     pending.portal.verifyCommittedPolicy address (branchRequest prepared height branch).2
       (other, compiled) = false := by
   apply Bool.eq_false_iff.mpr
@@ -965,8 +1411,8 @@ def Pending.liftEvidence [DecidableEq F]
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence (pending.branchConfig branch).portal
       (oldAuthority prepared) request) : Evidence pending.portal (oldAuthority prepared) request := by
-  unfold Pending.portal Pending.branchConfig CredentialAuthorityPolicyRegistry.config
-    CanonicalPolicyConfig.portal at *
+  unfold Pending.portal Pending.branchConfig PhysicalLawResolution.config
+    ComposedPolicyAdmission.Config.portal at *
   cases evidence with
   | signature witness epoch verified => exact .signature witness epoch verified
   | proof witness verified => exact .proof witness verified
@@ -1024,6 +1470,10 @@ structure BranchAccepted [DecidableEq F]
   its dependent address index later would recompute the entire branch request. -/
   sourceGuard : Nat × Digest
   sourceGuardExact : sourceGuard = source.readGuard
+  lawGuards : List (Nat × Digest)
+  lawGuardsExact : pending.branchReadGuards branch = some lawGuards
+  lawGuardsBound : ∀ guard ∈ lawGuards,
+    guard.2 = durable.snapshot.model.roots ⟨guard.1⟩
   authorization : Authorized pending.portal (oldAuthority prepared)
     (branchRequest prepared height branch).2
   modeBound : branchRequiresCapability branch = true →
@@ -1037,11 +1487,13 @@ def Pending.admitBranch [DecidableEq F]
     Except Reject { accepted : BranchAccepted pending branch // accepted.credential = credential } := do
   let envelopeExact ← require (receipt.envelopeBytes = credential.envelope) .credentialShape
   let wanted := branchRequest prepared height branch
-  let step := pending.branchStep branch
-  let compiler := profile.compilerProfile
-  let config := CredentialAuthorityPolicyRegistry.config compiler prepared.authority.snapshot
-    (payloadStore prepared) (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier) step
+  let config := pending.branchConfig branch
   let old := oldAuthority prepared
+  let guards ← match exact : pending.branchReadGuards branch with
+    | none => .error .policySourceUnavailable
+    | some guards => .ok (⟨guards, exact⟩ : { guards // pending.branchReadGuards branch = some guards })
+  let guardsBound ← require
+    (∀ guard ∈ guards.val, guard.2 = durable.snapshot.model.roots ⟨guard.1⟩) .policySourceUnavailable
   let source ← match CanonicalCellRegistry.loadPolicySource deployment.domain
       prepared.directory.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
     | none => .error .policySourceUnavailable
@@ -1051,11 +1503,9 @@ def Pending.admitBranch [DecidableEq F]
         match credential.capability with
         | none => .error .capability
         | some identifier =>
-            match sourceCapabilityEvidence compiler prepared.authority.snapshot
-                (payloadStore prepared) descriptor.authorityNullifier step
-                wanted.2 identifier receipt with
-            | none => .error .capability
-            | some evidence => .ok evidence
+            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
+            | .error _ => .error .capability
+            | .ok evidence => .ok evidence
     else
         if credential.capability = none then
           if epoch : wanted.2.subjectKeyEpoch = old.subjectKeyEpoch wanted.2.subject then
@@ -1066,11 +1516,11 @@ def Pending.admitBranch [DecidableEq F]
         else .error .credentialShape
   if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
     if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-      match config.registry.resolve wanted.2.policyId wanted.2.policyRevision with
+      match config.resolve? with
       | none => .error .policyUnavailable
-      | some committed =>
-          let witness := canonicalWitness compiler.compiler committed step.oldState step.newState
-          match CanonicalPolicyAdmission.admit config old wanted.2 evidence witness
+      | some law =>
+          let witness := law.witness
+          match ComposedPolicyAdmission.admit config wanted.2 evidence witness
               (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
           | none => .error .policyRejected
           | some admitted =>
@@ -1084,6 +1534,9 @@ def Pending.admitBranch [DecidableEq F]
                     source := source
                     sourceGuard := source.readGuard
                     sourceGuardExact := rfl
+                    lawGuards := guards.val
+                    lawGuardsExact := guards.property
+                    lawGuardsBound := guardsBound.down
                     authorization := authorization
                     modeBound := modeBound }
                 .ok (show { accepted : BranchAccepted pending branch //
@@ -1455,11 +1908,9 @@ theorem AcceptedBirth.actual_posts_exact {height : Height}
 
 def AcceptedBirth.sourceReadGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List (Nat × Digest) :=
-  [(accepted.branches .factory).readGuard, (accepted.branches .authority).readGuard] ++
-  (List.finRange accepted.descriptor.createRequests.length).map
-    (fun index => (accepted.branches (.allocation index)).readGuard) ++
-  (List.finRange accepted.descriptor.resourceBatch.operations.length).map
-    (fun index => (accepted.branches (.source index)).readGuard)
+  (policyBranches accepted.descriptor.createRequests.length
+    accepted.descriptor.resourceBatch.operations.length).flatMap fun branch =>
+      (accepted.branches branch).lawGuards
 
 
 end Concrete

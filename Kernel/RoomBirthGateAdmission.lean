@@ -19,7 +19,7 @@ open Minidregg.Kernel.ResourceBirthController.Concrete
 
 set_option autoImplicit false
 
-variable {F : Type} [Field F]
+variable {F : Type} [Field F] [DecidableEq F]
 
 theorem preparePreAuthority_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}

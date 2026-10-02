@@ -249,8 +249,12 @@ def scalarCommand (command : Command) (d : Declaration) : DeclaredResourceScalar
     d.expectedPreRoot, d.operationNullifier,
     JobMoney.actions command.job d.plan.before d.plan.after⟩
 
-def jobPatch (command : Command) (d : Declaration) : Patch effectLayout :=
-  DeclaredResourceScalar.cellPatch (scalarCommand command d)
+/-- The job leg's patch: the money writes, then the kernel's ratchet of the
+job's blinding at the turn's height (K-HIDE-ROTATE). -/
+def jobPatch (command : Command) (d : Declaration) (pre : Store effectLayout) (height : Nat) :
+    Patch effectLayout :=
+  DeclaredResourceScalar.cellPatch (scalarCommand command d) ++
+    DeclaredEffectCell.blinding.patch pre height
 
 structure Mode {M : Materializer effectLayout Digest} (pre : Materialized M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
@@ -370,9 +374,9 @@ def family (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient :
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun d _ => Mode job d
-  Postcondition := fun d _ post => (jobPatch command d).ResultAt job.logical post
+  Postcondition := fun d _ post => (jobPatch command d job.logical ambient.height).ResultAt job.logical post
   effectDigest := effectDigest snapshot.domain semantics command
-  patch := fun d _ => jobPatch command d
+  patch := fun d _ => jobPatch command d job.logical ambient.height
   nullifier := fun d _ => some d.operationNullifier
   Release := fun _ _ => Unit
   DeclassificationAuthority := fun _ _ => Unit
@@ -487,7 +491,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
           | .error reason => throw (.jobCell reason)
           | .ok _ =>
             match validate DeclaredEffectCell.materializer job job.root
-                (jobPatch command d) with
+                (jobPatch command d job.logical ambient.height) with
             | .rejected _ => throw .validation
             | .accepted validated =>
               let candidate : Candidate (family snapshot job profile.semantics ambient command)
@@ -577,7 +581,8 @@ theorem Prepared.job_before (prepared : Prepared deployment profile ambient dura
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : Store effectLayout) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory (targetOf command) ++
+    CanonicalRuntimeProfile.requestSlots
       (request prepared.authority.snapshot prepared.job profile.semantics ambient command
         prepared.plan) ++
     moneySlots command ++ [("job/money/job", Int.ofNat command.job)] ++
@@ -595,13 +600,58 @@ def sourceStore (prepared : Prepared deployment profile ambient durable command)
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
     prepared.directory.directory⟩
 
+/-- The actual management target supplies current ambient and kind restrictions. -/
+def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory (targetOf command)
+
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    (prepared : Prepared deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) (targetOf command)
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+/-- Money authorization and the changed resource's restrictions are separate
+obligations. A neutral job/purse cannot discard its room or kind exports. -/
+def effectLaw (prepared : Prepared deployment profile ambient durable command) :
+    Option (Minidregg.Pred.Pred × List (Nat × Digest)) := do
+  let structural ← WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.job
+  let loaded ← PhysicalLawResolution.loadTarget prepared.authority.snapshot
+    prepared.directory.directory profile.semantics command.job
+    PhysicalLawResolution.resolutionBudget structural.additional
+  pure (ResolvedLawCompilation.predicate loaded.graph.resolved,
+    loaded.sourceGuards ++ structural.readGuards)
+
+/-- This is the actual object mutation view, not the account transfer header.
+The receiver supplies all selector/header coordinates before payload slots. -/
+def effectProject (prepared : Prepared deployment profile ambient durable command)
+    (logical : Store effectLayout) : Minidregg.Pred.State :=
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.job ++
+    [("request/kind", Int.ofNat (CanonicalRuntimeProfile.requestKindTag .object)),
+     ("request/verb", Int.ofNat (verbTag .mutateObject)),
+     ("request/target", Int.ofNat command.job),
+     ("target/policyId", Int.ofNat command.job),
+     ("request/policyEpoch", Int.ofNat (prepared.authority.snapshot.authState.policyEpoch ⟨command.job⟩)),
+     ("request/policyRevision", Int.ofNat (prepared.authority.snapshot.authState.policyRevision ⟨command.job⟩))] ++
+    (jobState command prepared.clock.clock prepared.job.logical logical).slots ++ (project prepared logical).slots⟩
+
+def effectLawAccepted (prepared : Prepared deployment profile ambient durable command) : Bool :=
+  match effectLaw prepared with
+  | none => false
+  | some (predicate, _) => Minidregg.Pred.eval predicate
+      (effectProject prepared prepared.job.logical)
+      (effectProject prepared prepared.candidate.validated.apply.logical)
+
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics (targetOf command) structural.additional
+  let effect ← effectLaw prepared
+  pure (sources ++ structural.readGuards ++ effect.2)
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
@@ -621,22 +671,18 @@ def authorize [DecidableEq F]
   let wanted := request prepared.authority.snapshot prepared.job profile.semantics ambient
     command prepared.plan
   let config := policyConfig prepared
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.capability receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.capability () receipt () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
+  match ComposedPolicyAdmission.admit config wanted
       evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
@@ -744,7 +790,8 @@ def sourceGuards (prepared : Prepared deployment profile ambient durable command
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++
-    prepared.authority.readGuards.filter fun guard =>
+    (prepared.authority.readGuards ++
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId ∧
         guard.cellId ∉ (sourceGuards prepared).map ReadGuard.cellId
 
@@ -754,7 +801,27 @@ def PhysicalShape (prepared : Prepared deployment profile ambient durable comman
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (∀ write ∈ writes prepared, rootBytes write.canonicalPostBytes = write.exactPost) ∧
     (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (lawReadGuards prepared).isSome = true ∧
+    effectLawAccepted prepared = true
+
+/-- A successful account grant cannot bypass a refusing law on the actual
+job/purse effect. This is a required receiving proposition before intent creation. -/
+theorem effect_refusal_blocks_physical
+    (prepared : Prepared deployment profile ambient durable command)
+    (refused : effectLawAccepted prepared = false) : ¬ PhysicalShape prepared := by
+  intro shape
+  rcases shape with ⟨_, _, _, _, _, _, _, admitted⟩
+  rw [refused] at admitted
+  cases admitted
+
+/-- Missing current/pinned law material is a refusal, not an empty guard set. -/
+theorem unavailable_law_blocks_physical
+    (prepared : Prepared deployment profile ambient durable command)
+    (missing : lawReadGuards prepared = none) : ¬ PhysicalShape prepared := by
+  intro shape
+  rcases shape with ⟨_, _, _, _, _, _, present, _⟩
+  simp [missing] at present
 
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
     Decidable (PhysicalShape prepared) := by

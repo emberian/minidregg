@@ -14,6 +14,11 @@ premises are explicit here. Concrete native field/range selection lives in
 `NativeHostProfile`; this shared profile remains parameterized.
 -/
 import Compiler.CanonicalPolicyAdmission
+import Compiler.NativeProtocolFrames
+import Compiler.ObjectAudienceRoster
+import Compiler.WorldKindDescriptor
+import Compiler.WorldKindCell
+import Kernel.WorldKindInstance
 import Compiler.CanonicalCellRegistry
 import Compiler.CredentialAuthorityDomain
 import Compiler.CredentialAuthorityReplay
@@ -33,72 +38,77 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-/-- First-order factory parameters are part of the one compatible runtime identity. -/
+/-- The admission lag a birth may carry, in heights: the longest honest
+authoring-to-admission gap the deployment tolerates. Every admission advances
+the height (`nativeClockVersion`), so this counts other admissions, not
+seconds: a birth authored at `H0` stays admissible through the next 64
+admissions anyone makes. The deployed clock ticks once a minute and a busy
+room adds a handful more per birth window (10-40 s measured), so 64 is an
+order of magnitude over the honest gap and far under every owner grant
+`lifetime`. -/
+def defaultBirthSlack : Nat := 64
+
+/-- First-order factory parameters are part of the one compatible runtime identity.
+`birthSlack` is how many heights after its authored `notBefore` a birth may
+still be admitted (`ResourceBirthPolicyController.Concrete.BirthWindow`). -/
 structure FactoryTemplate where
   issuer : IssuerId
   ownerBudget : Nat
   lifetime : Nat
+  birthSlack : Nat := defaultBirthSlack
   deriving DecidableEq, Repr
 
-def FactoryTemplate.tuple (template : FactoryTemplate) : Nat × (Nat × Nat) :=
-  (template.issuer.value, template.ownerBudget, template.lifetime)
+def FactoryTemplate.tuple (template : FactoryTemplate) : Nat × (Nat × (Nat × Nat)) :=
+  (template.issuer.value, template.ownerBudget, template.lifetime, template.birthSlack)
 
-def FactoryTemplate.ofTuple (tuple : Nat × (Nat × Nat)) : FactoryTemplate :=
-  ⟨⟨tuple.1⟩, tuple.2.1, tuple.2.2⟩
+def FactoryTemplate.ofTuple (tuple : Nat × (Nat × (Nat × Nat))) : FactoryTemplate :=
+  ⟨⟨tuple.1⟩, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩
 
 @[simp] theorem FactoryTemplate.ofTuple_tuple (template : FactoryTemplate) :
     ofTuple template.tuple = template := by
   cases template with
-  | mk issuer budget lifetime => cases issuer; rfl
+  | mk issuer budget lifetime slack => cases issuer; rfl
 
 def factoryTemplateStream : StreamCodec FactoryTemplate :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
     FactoryTemplate.tuple FactoryTemplate.ofTuple FactoryTemplate.ofTuple_tuple
 
 def FactoryTemplate.encode (template : FactoryTemplate) : List UInt8 :=
   factoryTemplateStream.encode template
 
-/-- Policy replacement checks complete authority privately and projects only
-the selected policy's old/candidate metadata. -/
+/-- Policy replacement keeps current-law composition and its authenticated dependency guards;
+the audience phase change and any roster/catalog preimage are checked against the same image. -/
 def installProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.POLICY-INSTALL.PRESERVE-GRANTS-ADVANCE-REVISION/v2".toUTF8.toList
+  "DREGG.RUNTIME.POLICY-INSTALL.PRESERVE-GRANTS-ADVANCE-REVISION.CURRENT-COMPOSED-LAW-CANDIDATE-GRAPH-AUDIENCE-CATALOG-GUARDS/v3".toUTF8.toList
 
-/-- The same source declaration produces request fields, old/post views and
-effects. Generic scalar views retain complete field identifiers and expose
-before/after/delta plus pair-total deltas only where the actual reads exist.
-Every participant of a joint command is exposed twice, under
-`joint/target/{cell id}/…` and under `joint/index/{i}/…` with `i` its 0-based
-position in the command's target list (`DeclaredResourceController.jointSlots`,
-`joint_index_of_target`); a position the command lacks names no slot.
-The deployment clock's `clock/now`, `clock/day` and `clock/slot`
-(`ClockCell.slots`) come first among the common slots, on old and new alike.
-v7 (the final merge): a stream append projects `request/topic…`,
-`stream/sequence`, `request/to`, `request/ref/…` (K-STREAM) and a checked run
-`run/program/{id}`, `run/steps`, `run/fuel` (K-RAN); v6 named only the clock
-and joint slots, so the label moves with the slots. -/
+/-- One source-owned preparation supplies exact old/final views, clock/run/stream and
+target/index joint slots, semantic world-kind fields and composed-law dependencies.
+Protected objects bind the fresh epoch and complete roster at the same receiving image. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS/v7".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER/v9".toUTF8.toList
 
-/-- Typed content edits are source-derived canonical patches; atom payloads
-and exact old records belong to the command, not a host-side blob table.
-v3 (the final merge): the store cell (no page), atom revisions, annotate and
-quote with their `content/annotations|quotes|writes/…|tombstones` slots
-(K-CONTENT); v2 named the deleted 16-entry page. -/
+/-- Content uses the complete typed document tree, revisioned atoms, ordered marks,
+transclusion read guards, event/history/link indexes and live shared-name uniqueness.
+Committed hiding-key material is excluded from the predicate view. -/
 def contentProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.REVISIONED-ATOMS-ANNOTATE-QUOTE.STORE-CELL/v3".toUTF8.toList
+  "DREGG.RUNTIME.CONTENT.FULL-DOCUMENT-TREE-REVISIONED-ATOMS-MARKS-TRANSCLUSION-HISTORY-LINKS.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS.NO-HIDING-KEY-PROJECTION/v5".toUTF8.toList
 
-/-- Factory, initial policy, authority grants and resource post-state share one tuple. -/
+/-- Factory, initial source, grants and newborn share one prepared tuple. The authored
+height window, inherited lineage, current kind/descriptor/ROM guards and composed
+exports all contribute; a newborn local law is installed without self-gating birth. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND/v2".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS/v4".toUTF8.toList
 
+/-- Delegation checks current composed resource law and exact parent/child authority
+against authenticated dependencies from the same image. -/
 def delegationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY/v2".toUTF8.toList
+  "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY.CURRENT-COMPOSED-LAW-DEPENDENCY-GUARDS/v3".toUTF8.toList
 
-/-- Revocation is its own management verb, checked by the current resource
-law and exact stored control grant against the same complete old authority. -/
+/-- Revocation checks current composed resource law, the exact control grant
+and authenticated dependencies from the same image. -/
 def revocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY/v2".toUTF8.toList
+  "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY.CURRENT-COMPOSED-LAW-DEPENDENCY-GUARDS/v3".toUTF8.toList
 
 /-- K-RENOUNCE: the holder a capability names revokes it, signed by its
 current key; no management grant and no policy participate; the holder gate
@@ -106,16 +116,16 @@ runs after the signature, and only its refusal is disclosed to the signer. -/
 def renounceVersion : List UInt8 :=
   "DREGG.RUNTIME.CAPABILITY-RENOUNCE.HOLDER-SIGNED-NO-POLICY-GATE-AFTER-SIGNATURE/v1".toUTF8.toList
 
-/-- Signed snapshot observation uses the actual resource page and only the
-selected account's sparse balance cut; the deployment clock's `clock/now`,
-`clock/day` and `clock/slot` come first (v4), as on every invocation. Preparation must cover every private
-read with an exact observe-grant footprint from the same loaded image. -/
+/-- Signed queries use committed clock slots, current composed law, semantic world
+fields, exact observe-grant footprints and independently authorized document/index
+views. Protected release binds current epoch and complete roster/catalog guards. -/
 def observationProjectionVersion : List UInt8 :=
-  "observe/v4:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
+  "observe/v6:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content|stream|worldKind|worldInstance;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-content-tree-and-subject-bound-world-kind-slots;document-history-marks-links-query-sum;current-kind-export-descriptor-and-composed-law-guards;sparse-account-cut;same-image-intent-signatures;submit-foreign-view-read-gate;audience-epoch-complete-roster-catalog".toUTF8.toList
 
-/-- Exact request fields and request-bound capability possession are part of this epoch. -/
+/-- Authorization binds exact inner semantic field footprints, current key and
+policy revision, separate grant generation, and current authenticated composed dependencies. -/
 def authorizationVersion : List UInt8 :=
-  "DREGG.RUNTIME.AUTHORIZATION.REVISION-GRANT-GENERATION-DISTINCT-REVOCATION/v3".toUTF8.toList
+  "DREGG.RUNTIME.AUTHORIZATION.REVISION-GRANT-GENERATION-DISTINCT-REVOCATION.EXACT-INNER-SEMANTIC-FIELD-FOOTPRINT.CURRENT-COMPOSED-DEPENDENCIES/v5".toUTF8.toList
 
 /-- Native logical time is derived from the very image admitted and CASed.
 Its genesis offset belongs to the source-owned receiver parameters below. -/
@@ -126,8 +136,24 @@ def nativeClockVersion : List UInt8 :=
 def authorityDomainVersion : List UInt8 :=
   "DREGG.RUNTIME.AUTHORITY-DOMAIN.ONE-CELL.SPENT-NULLIFIER-CLOCK/v1".toUTF8.toList
 
+/-- The actual current codec frames, with explicit component boundaries. This
+replaces the old descriptive host-version label: changing a receiving frame now
+changes the semantics identity through the same definition used by its decoder. -/
 def nativeHostWireVersion : List UInt8 :=
-  "DREGG.NATIVE.HOST.JOINT-TYPED-OPERATIONS-REVOCATION-SIGNED-READS/v3".toUTF8.toList
+  (StreamCodec.list bytesStream).encode
+    [NativeHostCodec.callFrame, NativeHostCodec.draftFrame,
+     NativeHostCodec.signingPlanFrame, NativeHostCodec.outcomeFrame,
+     NativeObservationCodec.intentFrame, NativeObservationCodec.challengeFrame,
+     NativeObservationCodec.signedFrame,
+     Kernel.PolicyInstallReceiver.ingressFrame,
+     Kernel.DeclaredResourceController.commandFrame]
+
+/-- Audience state uses the exact combined v6 source and structural active/frozen
+mode. Enrollment/resume authenticates the complete ordered roster against a
+separate content catalog's live atom zero and exact current root. Fresh receiving
+and policy installation retain their source-owned phase checks. -/
+def audienceProjectionVersion : List UInt8 :=
+  "DREGG.RUNTIME.OBJECT-AUDIENCE/v1:state=object,epoch,parent,transition,audience,devices,history,manifest,mode,authoritySnapshot,deviceSnapshot;mode=active|frozen;complete-ordered-roster=subject,capability,deviceSource,deviceGeneration,keyCommitment;catalog=separate-content-live-atom-zero-exact-entry-bytes-and-root;enroll-resume-current-authority;fresh-current-active-epoch;manifest-and-all-holder-post-binding;program-descriptor-not-world-layout".toUTF8.toList
 
 /-- Reuse the canonical kind encoder; there is no second ordinal table in the views. -/
 def requestKindTag (kind : ResourceKind) : Nat :=
@@ -188,6 +214,14 @@ def sourceComponents : List (List UInt8) :=
    authorityDomainVersion,
    PolicyRecordCodec.wireFrame,
    PolicyRecordCodec.customization,
+   PolicyRecordCodec.semanticLawCustomization,
+   StreamCodec.nat.encode PolicyRecordCodec.semanticLawVersion,
+   Minidregg.Theory.LawComposition.receivingContract,
+   Minidregg.Theory.LawComposition.closureCustomization,
+   Minidregg.Theory.LawComposition.birthProjectionContract,
+   audienceProjectionVersion,
+   ObjectAudienceRoster.digestCustomization,
+   ObjectAudienceRoster.deviceCustomization,
    PolicySourceCell.wireFrame,
    PolicySourceCell.rootCustomization,
    PolicySourceCell.idCustomization,
@@ -217,9 +251,18 @@ def sourceComponents : List (List UInt8) :=
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,
+   StoreCodec.ratchetCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,
    StreamCodec.nat.encode CanonicalResourcePageMaterializer.wireVersion,
+   WorldKindDescriptor.identityCustomization,
+   WorldKindDescriptor.descriptorContract,
+   (StreamCodec.list bytesStream).encode
+     ([WorldKindDescriptor.ScalarCodec.natural, .integer, .bytes].map fun codec =>
+       codec.codecId.toUTF8.toList),
+   Kernel.WorldKindInstance.frame,
+   StoreCodec.frame WorldKindCell.definitionWire,
+   StoreCodec.frame WorldKindCell.instanceWire,
    StoreCodec.frame HyperdocumentCell.contentWire,
    StoreCodec.frame HyperdocumentCell.eventWire,
    ResourceBirthCodec.descriptorFrame,

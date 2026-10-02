@@ -335,7 +335,8 @@ def tuple (prepared : Prepared deployment profile ambient durable command) : Pre
 
 def project (prepared : Prepared deployment profile ambient durable command) (_ : Unit)
     (logical : (incidence : Unit) → Store ((layout prepared).storeLayout incidence)) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.declaration.target.value ++
+    CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0 (PackedCell.bytes Registry prepared.target.before) ++
     ResourceAuthorityProjection.grantSlots "authority/parent" kind command.declaration.parentId (logical ()) ++
@@ -364,9 +365,26 @@ def step (prepared : Prepared deployment profile ambient durable command) : Poli
 def sourceStore (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyRegistry.PayloadStore :=
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain prepared.directory.directory⟩
 
-def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot (sourceStore prepared)
-    (sourceCapabilityPortal prepared.authority.snapshot command.declaration.operationNullifier) (step prepared)
+/-- Management uses the same current structural roots as edits and reads. -/
+def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.declaration.target.value
+
+def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) :
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
+    (sourceCapabilityPortal prepared.authority.snapshot command.declaration.operationNullifier)
+    (step prepared) command.declaration.target.value
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+/-- Missing kind/history dependencies refuse at both semantic and CAS boundaries. -/
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics command.declaration.target.value structural.additional
+  pure (sources ++ structural.readGuards)
 
 def portal [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) : Portal :=
   (policyConfig prepared).portal
@@ -425,16 +443,17 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
   exact do
     let wanted := request prepared.authority.snapshot profile.semantics ambient command
     let config := policyConfig prepared
-    match supplied : sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-        (sourceStore prepared) command.declaration.operationNullifier (step prepared)
-        wanted command.declaration.parentId receipt with
-    | none => .error .capabilityRejected
-    | some evidence =>
-      let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
-      let witness := canonicalWitness profile.compilerProfile.compiler committed (step prepared).oldState (step prepared).newState
-      if inputsInRange profile.compilerProfile.compiler committed.record.predicate witness.oldState witness.newState != true then
+    let _ ← requireSome .policyUnavailable (kindDependencies prepared)
+    match supplied : config.capabilityEvidenceChecked wanted command.declaration.parentId
+        () receipt () (fun _ => ()) with
+    | .error _ => .error .capabilityRejected
+    | .ok evidence =>
+      let law ← requireSome .policyUnavailable config.resolve?
+      let witness := law.witness
+      if inputsInRange profile.compilerProfile.compiler law.predicate
+          (step prepared).oldState (step prepared).newState != true then
         throw .policyInputRange
-      if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      if !decide (castInjOn F (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
         throw .policyCastAlias
       let epochExact : wanted.policyEpoch = prepared.authority.snapshot.authState.policyEpoch wanted.policyId := by
         rw [CredentialAuthorityDomain.Snapshot.authState_policyEpoch]
@@ -442,16 +461,15 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
       let revisionExact : wanted.policyRevision = prepared.authority.snapshot.authState.policyRevision wanted.policyId := by
         rw [CredentialAuthorityDomain.Snapshot.authState_policyRevision]
         rfl
-      match admitted : CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted evidence witness
+      match admitted : ComposedPolicyAdmission.admit config wanted evidence witness
           (.policy wanted.policyId wanted.policyRevision) epochExact revisionExact with
       | none => .error .policyRejected
       | some authorization =>
         .ok ⟨authorization, by
-          have unchanged := CanonicalPolicyAdmission.admit_preserves_evidence config prepared.authority.snapshot.authState
+          have unchanged := ComposedPolicyAdmission.admit_preserves_evidence config
             wanted evidence witness (.policy wanted.policyId wanted.policyRevision) epochExact revisionExact admitted
-          have named := sourceCapabilityOnlyEvidence_names_parent profile.compilerProfile prepared.authority.snapshot
-            (sourceStore prepared) command.declaration.operationNullifier (step prepared)
-            wanted command.declaration.parentId receipt supplied
+          have named := config.capabilityEvidence_names_stored wanted command.declaration.parentId
+            () receipt () (fun _ => ()) supplied
           obtain ⟨parent, parentExact, evidenceExact⟩ := named
           have parentSame : parent = prepared.parent := Option.some.inj (parentExact.symm.trans prepared.descent.parentExact)
           subst parent
@@ -521,26 +539,19 @@ is installed; no caller-selected predicate state appears in either statement. -/
 theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
-    ∃ committed,
-      (policyConfig prepared).registry.resolve command.declaration.child.policyId
-        (prepared.authority.snapshot.authState.policyRevision command.declaration.child.policyId) = some committed ∧
-      Minidregg.Pred.eval committed.record.predicate
-        (project prepared () (fun _ => prepared.authority.snapshot.logical))
-        (project prepared () (fun _ => prepared.authorityPost.logical)) = true := by
-  let authorization : CanonicalAuthorized (policyConfig prepared) prepared.authority.snapshot.authState
-      (request prepared.authority.snapshot profile.semantics ambient command) := by
-    simpa only [portal] using accepted.authorization
-  have verified := authorization.policyVerified
-  change (decide (_ = authorization.policyWitness.address) &&
-    (policyConfig prepared).verifies
-      (request prepared.authority.snapshot profile.semantics ambient command)
-      authorization.policyWitness) = true at verified
-  have sound := canonical_context_verifies_sound (config := policyConfig prepared)
-    (step prepared) rfl (Bool.and_eq_true_iff.mp verified).2
-  obtain ⟨committed, resolved, evaluated⟩ := sound.2.2.2
-  refine ⟨committed, ?_, evaluated⟩
-  rw [CredentialAuthorityDomain.Snapshot.authState_policyRevision]
-  exact resolved
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true := by
+  apply ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request prepared.authority.snapshot profile.semantics ambient command)
+  simpa only [portal] using accepted.authorization
 
 /-- info: 'Minidregg.Kernel.CapabilityDelegationController.project_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms project_noninterference

@@ -53,8 +53,13 @@ mod participant_namespace;
 mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
+mod replan;
 #[cfg(unix)]
 mod proxy;
+#[cfg(unix)]
+mod public_proxy;
+#[cfg(unix)]
+mod operator_drain;
 #[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
@@ -69,6 +74,8 @@ mod selected_publisher;
 mod selected_release;
 #[cfg(unix)]
 mod session_enrollment;
+#[cfg(unix)]
+mod render;
 #[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
@@ -91,9 +98,29 @@ mod transport;
 #[cfg(unix)]
 mod worker;
 #[cfg(unix)]
+mod web;
+#[cfg(unix)]
 mod receipt_continuity;
 #[cfg(unix)]
 mod workspace;
+#[cfg(unix)]
+#[path="protected_object/object_keys.rs"]
+mod object_keys;
+#[cfg(unix)]
+#[path="protected_object/object_keys_hybrid.rs"]
+mod object_keys_hybrid;
+#[cfg(unix)]
+#[path="protected_object/object_messages.rs"]
+mod object_messages;
+#[cfg(unix)]
+#[path="protected_object/object_cli.rs"]
+mod object_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_cli.rs"]
+mod object_epoch_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_packages.rs"]
+mod object_epoch_packages;
 #[cfg(unix)]
 mod well;
 
@@ -143,6 +170,24 @@ pub(crate) fn take_host_decision() -> Option<HostDecision> {
         .take()
 }
 
+/// A refused `doc push`'s diagnosis: which pulled lines changed since the
+/// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
+/// line, above the Host's own decoding of the same refusal.
+static LINE_REFUSAL: Mutex<Option<String>> = Mutex::new(None);
+
+pub(crate) fn note_line_refusal(lines: String) {
+    *LINE_REFUSAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(lines);
+}
+
+pub(crate) fn take_line_refusal() -> Option<String> {
+    LINE_REFUSAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
 /// Exit code for a request the Host refused.
 pub(crate) const EXIT_REFUSED: u8 = 3;
 
@@ -185,11 +230,26 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
     if let Some(explain) = outcome.get("explain").and_then(Value::as_str) {
         return Some(format!("refused: {reason}: {explain}"));
     }
+    let detail = outcome_text(outcome.get("detail"));
+    let hint = refusal_hint(&detail);
     Some(format!(
-        "refused: {reason}: {} (phase {})",
-        outcome_text(outcome.get("detail")),
+        "refused: {reason}: {detail} (phase {}){hint}",
         outcome_text(outcome.get("phase"))
     ))
+}
+
+/// What to do about a refusal whose name alone does not say (AUDIT-ROOMS,
+/// client defect 8). A delegation's `descent` check reads the authority as it
+/// stood when the proposal was authored (its root, the issuer and policy
+/// epochs, a fresh child id, an unspent nullifier); most often the authority
+/// has moved since, and the cure is a new proposal.
+fn refusal_hint(detail: &str) -> &'static str {
+    if detail.contains("CapabilityDelegationController.Reject.descent") {
+        "\n  hint: this delegation was authored against the authority as it stood then; it has moved since \
+         (or the proposal was already used). Propose it again under a new ID and submit that."
+    } else {
+        ""
+    }
 }
 
 /// The line `mini` prints when the Host decided a refusal, from the recorded
@@ -355,20 +415,25 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini [--remote DEST] COMMAND [options]
+  mini [--remote DEST] COMMAND [options] [--replan-max N]
+    --replan-max N: when a tick, certify or another write lands between an observation and
+    its use, the Host answers stale-root; mini observes again up to N times (default 5;
+    MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
   mini key-status --workspace WORKSPACE [--next-public-key NEXT.pub]
   mini join --key KEY
   mini join --remote DEST --key KEY --sponsor-plan PLAN.json --dir JOIN-ROOT
-  mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
+  mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT --verifier LOCAL-HOST
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
   mini key --action export-blinding --secret KEY
   mini verify-view --view VIEW.json
-  mini key --action cell-blinding --secret KEY --cell CELL
-  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content --entry HEX
+  mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
+  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini workspace --action init ... --continuity-ref '{"name":"account","kind":"account","target":"ID","observeCapability":"CAP"}' [--verifier LOCAL-HOST]
+  mini workspace --action onboard --dir WORKSPACE
   mini workspace --action continuity-init --dir WORKSPACE --name REF [--verifier LOCAL-HOST]
   mini workspace --action continuity-verifier --dir WORKSPACE --verifier LOCAL-HOST
   mini workspace --action continuity-check --dir WORKSPACE --attempt RETAINED [--historical true|false]
@@ -389,6 +454,9 @@ usage:
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|rotate|kick|list|open|forget --dir WORKSPACE --name ROOM [op options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
+  mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
+  mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
+  mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
   mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]
   mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIGNATURE.bin
@@ -459,6 +527,9 @@ usage:
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
+  mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
@@ -663,7 +734,7 @@ fn utf8_path(path: &Path) -> Result<&str> {
         .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))
 }
 
-fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -679,7 +750,7 @@ fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
-fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -911,7 +982,15 @@ fn generate_key(
             create_private(next_secret, &next_seed)?;
             next_seed.fill(0);
             create_public(next_public, &next_signing.verifying_key().to_bytes())?;
+            // FIX-IDENTITY: the next key co-signs its succession now, while it is
+            // here; an enrollment that commits to it carries this signature.
+            let cosign_path = key_rotation::conventional_next_cosign(secret);
+            let cosign = key_rotation::cosign(&signing.verifying_key().to_bytes(), &next_signing);
+            create_public(&cosign_path, &cosign)?;
             eprintln!("next key: {} (its public half: {})", next_secret.display(), next_public.display());
+            eprintln!("for your sponsor's `enroll plan NAME KEYFILE NEXT-PUB COSIGN` (public, safe to send):");
+            eprintln!("  next public key: {}", hex(&next_signing.verifying_key().to_bytes()));
+            eprintln!("  co-signature:    {}", hex(&cosign));
             eprintln!("{}", key_rotation::PREROTATION_NOTICE);
             if hosted {
                 eprintln!("{}", key_rotation::HOSTED_PREROTATION_NOTICE);
@@ -994,7 +1073,7 @@ fn socket_process(
         "prepare" if arguments.len() == 3 => (1, read(1)?, Some(arguments[2])),
         "submit" if arguments.len() == 3 => (2, read(1)?, Some(arguments[2])),
         "lookup" if arguments.len() == 3 => (3, read(1)?, Some(arguments[2])),
-        "challenge" if arguments.len() == 3 => (4, read(1)?, Some(arguments[2])),
+        "challenge" if arguments.len() == 4 => (4, pair(read(1)?, read(2)?)?, Some(arguments[3])),
         "query" if arguments.len() == 3 => (5, read(1)?, Some(arguments[2])),
         "author" if arguments.len() == 4 => {
             (7, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
@@ -1511,6 +1590,7 @@ fn authorize_observation(
     directory: &Path,
 ) -> Result<Observed> {
     let intent_bin = directory.join("intent.bin");
+    let intent_signature = directory.join("intent-signature.bin");
     let challenge_bin = directory.join("challenge.bin");
     let challenge_json = directory.join("challenge.json");
     let signatures_json = directory.join("observation-signatures.json");
@@ -1521,10 +1601,15 @@ fn authorize_observation(
     } else {
         author(host, config, intent_kind, intent, &intent_bin)?;
     }
+    // The Host answers an observation only for a request its subject signed: the
+    // signature over the intent's own framed bytes is checked before any target is read.
+    let intent_bytes = fs::read(&intent_bin)
+        .map_err(|error| format!("cannot read {}: {error}", intent_bin.display()))?;
+    write_new(&intent_signature, &signing.sign(&intent_bytes).to_bytes())?;
     host_files(
         host,
         config,
-        &[Path::new("challenge"), &intent_bin, &challenge_bin],
+        &[Path::new("challenge"), &intent_bin, &intent_signature, &challenge_bin],
     )?;
     let presentation = inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
     encode_signatures(
@@ -1548,6 +1633,11 @@ fn authorize_observation(
     Ok(Observed { signed })
 }
 
+/// Observe, prepare, sign, assemble and (unless `prepare_only`) submit one
+/// intent under the exact attempt `directory`. A Host `stale-root` (the state
+/// moved between the challenge and its use) re-plans the SAME intent with a
+/// fresh observation in the same attempt path (`replan`); the superseded plan
+/// is kept under `directory/replanned/`.
 fn submit(
     host: &Path,
     config: &Path,
@@ -1560,6 +1650,25 @@ fn submit(
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
     create_dir(directory)?;
+    replan::replan(
+        "submit",
+        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only),
+        replan::stale_root,
+        |number| replan::retire_attempt(directory, number),
+    )
+}
+
+fn submit_once(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    directory: &Path,
+    prepare_only: bool,
+) -> Result<()> {
+    #[cfg(unix)]
+    let continuity = receipt_continuity::begin_attempt(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -1740,12 +1849,39 @@ pub(crate) fn dry_run(
     }
 }
 
+/// Whether the Host answers its own `stale-root` to the signed observation a
+/// refused birth authoring generation retained: the observation is presented
+/// to `query` once more, its answer kept as `stale-probe.view` or the refusal
+/// recorded. An answered probe means the refusal was not the timer race; a
+/// generation is probed at most once.
+#[cfg(unix)]
+pub(crate) fn observation_stale(host: &Path, config: &Path, generation: &Path) -> bool {
+    let probe = generation.join("stale-probe.view");
+    let signed = generation.join("factory-observation.bin");
+    if probe.exists() || !signed.is_file() {
+        return false;
+    }
+    let earlier = take_host_decision();
+    let answered = host_files(host, config, &[Path::new("query"), &signed, &probe]);
+    let decision = take_host_decision();
+    if answered.is_err() {
+        let _ = fs::write(&probe, format!("{decision:?}\n"));
+    }
+    if let Some(earlier) = earlier {
+        note_host_decision(earlier);
+    }
+    answered.is_err() && replan::is_stale_root(decision.as_ref())
+}
+
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
-        "resource" | "policy" | "capability" | "who" | "since" | "at"
+        "resource" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
     ) {
-        return Err("--view must be resource, policy, capability, who, since, or at".to_owned());
+        return Err(
+            "--view must be resource, policy, capability, who, since, at, backlinks, or links"
+                .to_owned(),
+        );
     }
     match presentation {
         None => Ok(format!("view-{view}")),
@@ -1754,6 +1890,8 @@ fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<Str
     }
 }
 
+/// One signed read. A Host `stale-root` between the challenge and the query
+/// observes again (`replan`); a read commits nothing.
 fn query_retained(
     host: &Path,
     config: &Path,
@@ -1764,6 +1902,23 @@ fn query_retained(
     directory: &Path,
 ) -> Result<Value> {
     create_dir(directory)?;
+    replan::replan(
+        "signed read",
+        || query_once(host, config, intent, intent_kind, key, inspection_kind, directory),
+        replan::stale_root,
+        |number| replan::retire_attempt(directory, number),
+    )
+}
+
+fn query_once(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    inspection_kind: &str,
+    directory: &Path,
+) -> Result<Value> {
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -2621,6 +2776,7 @@ fn continuity(
 }
 
 fn run(mut args: Args) -> Result<()> {
+    replan::configure(args.optional("replan-max"))?;
     let mut socket_argument = args.optional("socket");
     #[cfg(unix)]
     if let Some(destination) = args.optional("remote") {
@@ -2660,6 +2816,8 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
+        #[cfg(unix)]
+        "web" => web::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
@@ -2729,6 +2887,26 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-operator requires --socket")?;
             transport::serve_operator(socket, &host, &config)
+        }
+        #[cfg(unix)]
+        "serve-public-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
+            public_proxy::serve(socket, &upstream, &config)
+        }
+        #[cfg(unix)]
+        "operator-status" | "drain-operator" => {
+            let drain = args.command == OsStr::new("drain-operator");
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let instance = if drain { Some(args.required("instance")?.into_string().map_err(|_| "instance must be UTF-8")?) } else { None };
+            let pid = if drain { args.required("pid")?.to_str().ok_or("pid must be UTF-8")?.parse::<u32>().map_err(|_| "invalid process PID")? } else { 0 };
+            let timeout = if drain { args.required("timeout-seconds")?.to_str().ok_or("timeout must be UTF-8")?.parse::<u64>().map_err(|_| "invalid timeout")? } else { 0 };
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("operator control requires --socket")?;
+            operator_drain::command(socket, &host, &config, instance.as_deref().map(|instance| (instance, pid, timeout)))
         }
         "host-command" => {
             let host = path(args.required("host")?);
@@ -3103,24 +3281,56 @@ fn run(mut args: Args) -> Result<()> {
                     Ok(())
                 }
                 Some("cell-blinding") => {
+                    // With --heights, the cell's CURRENT blinding: the birth blinding
+                    // ratcheted once per write at each height (K-HIDE-ROTATE).
                     let cell = args.required("cell")?;
+                    let storage = args.optional("storage");
+                    let heights = args.optional("heights");
                     args.finish()?;
                     let cell = cell.to_str().ok_or("--cell must be UTF-8")?;
-                    println!("{}", hiding::cell_blinding(&hiding::blinding_key(&seed), cell)?);
+                    let key = hiding::blinding_key(&seed);
+                    match heights {
+                        None => println!("{}", hiding::cell_blinding(&key, cell)?),
+                        Some(heights) => {
+                            let storage = storage.ok_or("--heights needs --storage")?;
+                            let heights = hiding::parse_heights(
+                                heights.to_str().ok_or("--heights must be UTF-8")?,
+                            )?;
+                            println!(
+                                "{}",
+                                hiding::ratcheted_blinding(
+                                    &key,
+                                    storage.to_str().ok_or("--storage must be UTF-8")?,
+                                    cell,
+                                    &heights,
+                                )?
+                            );
+                        }
+                    }
                     Ok(())
                 }
                 Some("derive-salt") => {
                     let cell = args.required("cell")?;
                     let storage = args.required("storage")?;
                     let entry = args.required("entry")?;
+                    let heights = args.optional("heights");
                     args.finish()?;
                     let entry = workspace::private::decode_hex(
                         entry.to_str().ok_or("--entry must be UTF-8 hex")?,
                     )?;
+                    // The heights of the cell's writes since birth, in order: the
+                    // salts are keyed by the ratcheted blinding (K-HIDE-ROTATE).
+                    let heights = match heights {
+                        Some(text) => hiding::parse_heights(
+                            text.to_str().ok_or("--heights must be UTF-8")?,
+                        )?,
+                        None => Vec::new(),
+                    };
                     let salt = hiding::owner_salt(
                         &seed,
                         storage.to_str().ok_or("--storage must be UTF-8")?,
                         cell.to_str().ok_or("--cell must be UTF-8")?,
+                        &heights,
                         &entry,
                     )?;
                     println!("{}", hex(&salt));
@@ -4168,6 +4378,16 @@ mod tests {
             .unwrap();
         assert!(away.exists() && directory.join("a.key.next.pub").exists());
         assert!(!directory.join("a.key.next").exists());
+        // FIX-IDENTITY: the next key co-signed its succession at keygen; the
+        // co-signature verifies for (a.key, its next key) and for no other pair.
+        let daily: [u8; 32] = fs::read(directory.join("a.pub")).unwrap().try_into().unwrap();
+        let next: [u8; 32] = fs::read(directory.join("a.key.next.pub")).unwrap().try_into().unwrap();
+        let cosign: [u8; 64] = fs::read(directory.join("a.key.next.cosign")).unwrap().try_into().unwrap();
+        key_rotation::verify_cosign(&daily, &next, &cosign).unwrap();
+        assert!(key_rotation::verify_cosign(&next, &daily, &cosign).is_err());
+        let mut other = daily;
+        other[0] ^= 1;
+        assert!(key_rotation::verify_cosign(&other, &next, &cosign).is_err());
 
         // --no-prerotation makes no next key at all.
         keygen(&directory.join("p.key"), &directory.join("p.pub"), None, NextKey::Without, false).unwrap();

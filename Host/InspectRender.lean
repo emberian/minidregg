@@ -237,7 +237,26 @@ def fieldValues (bytes : List UInt8) : Option (List (Nat × Int)) := do
         | _ => none
   | _ => some []
 
-private def slotNow (fields : Option (List (Nat × Int))) (slot : Slot) : String :=
+/-- The fields the reader's own capability names (`Scope.fields`, K-FIELDS), from its signed
+capability view: `none` when the view was not supplied or does not decode, `some none` for
+every field, `some (some fs)` for exactly `fs`. -/
+def grantedFields (bytes : Option (List UInt8)) : Option (Option (Finset CellField)) := do
+  let bytes ← bytes
+  let (stored, rest) ← (CredentialAuthorityEntryCodec.storedCapabilityStream .object).decodePrefix bytes
+  if rest.isEmpty then some stored.head.scope.fields else none
+
+/-- A field absent from the reader's narrowed read is absent only when the reader's grant
+names it; otherwise it is outside the grant, and its presence is not the reader's to know
+(FIX-DISCLOSE; the audit found `absent now` printed for a field that exists). -/
+private def absentText (granted : Option (Option (Finset CellField))) (field : Nat) : String :=
+  match granted with
+  | some none => "absent now"
+  | some (some named) =>
+      if CellField.slot field ∈ named then "absent now" else "(not in your read: outside your grant)"
+  | none => "(not in your read: absent, or outside your grant)"
+
+private def slotNow (granted : Option (Option (Finset CellField)))
+    (fields : Option (List (Nat × Int))) (slot : Slot) : String :=
   match slot.splitOn "/" with
   | ["resource", "field", n, view] =>
       if view = "delta" then "(the step's change; no current value)" else
@@ -245,7 +264,7 @@ private def slotNow (fields : Option (List (Nat × Int))) (slot : Slot) : String
       | none, _ => "(not in your read)"
       | some fields, some field => match fields.find? (·.1 = field) with
         | some (_, value) => s!"{value} now" ++ (if view = "before" then " (this is the value a step starts from)" else "")
-        | none => "absent now"
+        | none => absentText granted field
       | some _, none => "(not in your read)"
   | ["request", _] => "(the request's own value)"
   | _ => "(not in your read)"
@@ -260,6 +279,7 @@ def lawView (bytes : List UInt8) : Result Json := do
     | some view => match fieldValues view with
       | some fields => pure (some fields)
       | none => throw "resource: not a resource view"
+  let granted := grantedFields (← optHex "input" json "capability")
   let law := record.predicate
   let clauses := lawClauses law
   let line := "; ".intercalate (clauses.map LawLeaf.renderClause)
@@ -267,14 +287,14 @@ def lawView (bytes : List UInt8) : Result Json := do
   let lines := [s!"law {name}  (policy {record.policyId.value} version {record.version})", s!"  {line}"] ++
     (clauses.zipIdx.map fun (clause, i) => s!"  [{i}] {LawLeaf.renderClause clause}") ++
     (if slots.isEmpty then [] else "  slots:" :: slots.map fun slot =>
-      s!"    {LawLeaf.renderSlot slot} = {slotNow fields slot}")
+      s!"    {LawLeaf.renderSlot slot} = {slotNow granted fields slot}")
   pure <| .mkObj [("type", "law"), ("name", name),
     ("policyId", decimal record.policyId.value), ("version", decimal record.version),
     ("law", line), ("roundTrip", .bool (parseLaw (lawTokens law) == some law)),
     ("clauses", .arr <| clauses.zipIdx.toArray.map fun (clause, i) => .mkObj
       [("index", decimal i), ("text", LawLeaf.renderClause clause)]),
     ("slots", .arr <| slots.toArray.map fun (slot : Slot) => .mkObj
-      [("slot", Json.str slot), ("rendered", LawLeaf.renderSlot slot), ("now", slotNow fields slot)]),
+      [("slot", Json.str slot), ("rendered", LawLeaf.renderSlot slot), ("now", slotNow granted fields slot)]),
     ("text", "\n".intercalate lines)]
 
 /-! ## why -/
@@ -322,6 +342,9 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
   | .refused .undisclosed _ _ none =>
       (["refused: undisclosed — a blind submission names no reason, by design"],
        [("reason", "undisclosed")])
+  | .refused .lawDenied _ _ none =>
+      (["refused: law-denied: the law refused, and the refusal names no clause (the cell has no committed law, or every failing clause reads fields outside your grant)"],
+       [("reason", "law-denied")])
   | .refused reason _ _ none =>
       ([s!"refused: {reason.name}: {reason.describe}"], [("reason", reason.name)])
   | .confirmed _ receipt => ([s!"not refused: confirmed at height {receipt.acceptedCount}"], [("reason", .null)])
@@ -394,6 +417,9 @@ private def draftLines : Draft → List String
             | .scalar actions => actions.map (fun a => "    " ++ actionText a)
             | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
+            | .world actions => [s!"    world instance: {actions.length} guarded field actions"]
+            | .kindDefinition definition =>
+                [s!"    kind {definition.descriptor.kind}: layout revision {definition.descriptor.revision}, {definition.descriptor.fields.length} semantic fields"]
   | .delegate bytes => match CapabilityDelegationController.commandCodec.decode bytes with
     | none => ["  delegate: noncanonical command"]
     | some ⟨kind, command⟩ =>

@@ -50,6 +50,13 @@ def birthStore (object : Nat) (values : DeclaredResourceProjection.Values) : Sto
 def read (object field : Nat) (logical : Store effectLayout) : Option Int :=
   logical (key object field).address
 
+/-- The kernel's blinding ratchet (K-HIDE-ROTATE) writes no field. -/
+@[simp] theorem read_ratchet (object field : Nat) (store pre : Store effectLayout) (height : Nat) :
+    read object field (Minidregg.Theory.Store.Patch.run store
+      (DeclaredEffectCell.blinding.patch pre height)) = read object field store :=
+  StoreCodec.Blinding.run_patch_frame _ _ _ _ _ (by
+    simp [StoreCodec.Blinding.address, DeclaredEffectCell.blinding, key, StateKey.address])
+
 private theorem key_addressKey (object field : Nat) :
     StoreCodec.addressKey DeclaredEffectCell.wire (key object field).address =
       ((0 :: StreamCodec.nat.encode object).map UInt8.toNat) ++

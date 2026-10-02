@@ -19,6 +19,8 @@ import Theory.ResourceBirthAuthority
 import Kernel.CanonicalResourceEffect
 import Kernel.DurableDataIntent
 import Kernel.RoomBirthGate
+import Kernel.BirthExportAdmission
+import Kernel.BirthCandidateAdmission
 
 namespace Minidregg.Kernel.ResourceBirthController
 
@@ -426,12 +428,36 @@ theorem parentGuards_cover (durable : Durable) (descriptor : Descriptor Registry
     ∃ guard ∈ parentGuards durable descriptor, guard.cellId = ⟨row.2⟩ :=
   ⟨_, List.mem_map.mpr ⟨row.2, List.mem_dedup.mpr (List.mem_map.mpr ⟨row, member, rfl⟩), rfl⟩, rfl⟩
 
+/-- Kind-definition bytes are observed once, at the same durable snapshot as
+birth preparation, and remain a physical CAS dependency through commit. -/
+def kindGuards (durable : Durable) (descriptor : Descriptor Registry) : List ReadGuard :=
+  (descriptor.births.filterMap fun item =>
+    CanonicalCellRegistry.instanceKind item.create.cell).map fun kind =>
+      ⟨⟨kind⟩, durable.snapshot.model.roots ⟨kind⟩⟩
+
+theorem kindGuards_exact (durable : Durable) (descriptor : Descriptor Registry)
+    (guard : ReadGuard) (member : guard ∈ kindGuards durable descriptor) :
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  obtain ⟨kind, _, rfl⟩ := List.mem_map.mp member
+  rfl
+
+theorem kindGuards_cover (durable : Durable) (descriptor : Descriptor Registry)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
+    ∃ guard ∈ kindGuards durable descriptor, guard.cellId = ⟨kind⟩ :=
+  ⟨_, List.mem_map.mpr ⟨kind, List.mem_filterMap.mpr ⟨item, member, selected⟩, rfl⟩, rfl⟩
+
 inductive PreparationReject where
   | deployment
   | compilerProfile
   | identity
   | directory
   | parent
+  | kindSource
+  /-- An authenticated inherited export refused the exact initial effect. -/
+  | inheritedLaw
+  /-- Joint staged policy sources have an invalid or unsupported closure. -/
+  | candidateLaw
   | initialPayload
   | initialPolicy
   | nockLibrary
@@ -452,6 +478,18 @@ inductive PreparationReject where
   | room (reason : RoomBirthGate.Refusal)
   deriving DecidableEq, Repr
 
+/-- The same old directory authenticates every world-kind source selected
+by an instance birth, including its exact descriptor and chosen source root. -/
+def KindsPresent (deployment : Deployment) (directory : Directory Nat Registry)
+    (descriptor : Descriptor Registry) : Prop :=
+  ∀ item ∈ descriptor.births,
+    CanonicalCellRegistry.kindBirthValid deployment directory item.create.cell = true
+
+instance kindsPresentDecidable (deployment : Deployment) (directory : Directory Nat Registry)
+    (descriptor : Descriptor Registry) : Decidable (KindsPresent deployment directory descriptor) := by
+  unfold KindsPresent
+  infer_instance
+
 /-- Every component is obtained from this one restored image and the fixed
 production registry. The private constructor prevents a host from supplying
 an arbitrary authority snapshot, Book, allocation result or post-state.
@@ -468,6 +506,7 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   parentsPresent : ParentsPresent deployment directory.directory descriptor
+  kindsPresent : KindsPresent deployment directory.directory descriptor
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
@@ -488,6 +527,10 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   gateHeight : Height
   /-- Every room birth passed the gate (`RoomBirthGate.Admitted`). -/
   rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
+  exports : BirthExportAdmission.Checked profile deployment pins durable directory authority
+    factory.payload.root gateHeight descriptor
+  candidates : BirthCandidateAdmission.Checked profile deployment durable directory authority
+    grants.post grants.initialSources.records
 
 private def requirePreparation (condition : Prop) [Decidable condition]
     (reason : PreparationReject) : Except PreparationReject (PLift condition) :=
@@ -512,6 +555,7 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   parentsPresent : ParentsPresent deployment directory.directory descriptor
+  kindsPresent : KindsPresent deployment directory.directory descriptor
   /-- The evaluators this deployment's operator disabled (`Profile.disabledEvaluators`, the list
   the runtime semantics digest commits and a run resolves against), as the birth checked them. -/
   disabled : List Digest
@@ -527,6 +571,8 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   gateHeight : Height
   rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
+  exports : BirthExportAdmission.Checked profile deployment pins durable directory authority
+    factory.payload.root gateHeight descriptor
 
 /-- The evaluator check, by name: a program record naming an unknown or disabled evaluator
 refuses the birth before any other payload is read (`birthEvaluators`). -/
@@ -537,7 +583,7 @@ def requireEvaluators (disabled : List Digest) (descriptor : Descriptor Registry
   | .error .unknownEvaluator => .error .unknownEvaluator
   | .error .evaluatorDisabled => .error .evaluatorDisabled
 
-def preparePreAuthority (profile : PolicyCompilerProfile F) (disabled : List Digest)
+def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
@@ -546,6 +592,7 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (disabled : List Dig
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
+  let kinds ← requirePreparation (KindsPresent deployment directory.directory descriptor) .kindSource
   let evaluators ← requireEvaluators disabled descriptor
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
@@ -561,9 +608,12 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (disabled : List Dig
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   let rooms ← (RoomBirthGate.check pins directory authority height descriptor).mapError
     PreparationReject.room
+  let exports ← fromOption
+    (BirthExportAdmission.check profile deployment pins durable directory authority
+      factory.payload.root height descriptor) .inheritedLaw
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    parents.down, disabled, evaluators.down, initials.down, policiesBound.down, libraries.down,
-    factory, book, authority, height, rooms.down⟩
+    parents.down, kinds.down, disabled, evaluators.down, initials.down, policiesBound.down, libraries.down,
+    factory, book, authority, height, rooms.down, exports⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
@@ -609,7 +659,7 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
 /-- The actual fail-closed receiving preparation. Even the auxiliary create
 list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
-def prepareBirth (profile : PolicyCompilerProfile F) (disabled : List Digest)
+def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
@@ -621,11 +671,14 @@ def prepareBirth (profile : PolicyCompilerProfile F) (disabled : List Digest)
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
     .auxiliaryCreates
+  let candidates ← fromOption
+    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+      grants.post grants.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre grants.writes
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
-    pre.directory, pre.parentsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
+    pre.directory, pre.parentsPresent, pre.kindsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
-    post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms⟩
+    post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports, candidates⟩
 
 /-- Preparation for the composite route retains a single old-image authority
 post covering initial grants and both replay markers. `operationMarker` here is
@@ -640,8 +693,10 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
     pre.authority descriptor operationMarker
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
   post : PreparedPostAuthority pre authorityCombined.writes
+  candidates : BirthCandidateAdmission.Checked profile deployment durable pre.directory pre.authority
+    authorityCombined.post authorityCombined.initialSources.records
 
-def prepareGrainBirth (profile : PolicyCompilerProfile F) (disabled : List Digest)
+def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
     (operationMarker : Nat) (height : Height) :
@@ -654,8 +709,11 @@ def prepareGrainBirth (profile : PolicyCompilerProfile F) (disabled : List Diges
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates combined.auxiliaryCreates = true)
     .auxiliaryCreates
+  let candidates ← fromOption
+    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+      combined.post combined.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre combined.writes
-  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post⟩
+  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
@@ -670,7 +728,8 @@ def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List ReadGuard :=
-  (prepared.pre.authority.readGuards ++ parentGuards durable descriptor).filter fun guard =>
+  (prepared.pre.authority.readGuards ++ (parentGuards durable descriptor ++
+    (kindGuards durable descriptor ++ (prepared.pre.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 /-- The user draft has no auxiliary creates; only the initial policy sources are
@@ -684,7 +743,7 @@ structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
   prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker
 
-def prepareGrainDraft (profile : PolicyCompilerProfile F) (disabled : List Digest)
+def prepareGrainDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
     (operationMarker : Nat) (height : Height) :
@@ -693,6 +752,11 @@ def prepareGrainDraft (profile : PolicyCompilerProfile F) (disabled : List Diges
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  -- The room gate first: a creator whose placing grant is revoked is refused
+  -- `notRoomMember`, by name, before the grant batch would refuse the born
+  -- grants' revoked ancestors as `authorityBatch`.
+  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
@@ -709,7 +773,8 @@ def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
-  (prepared.authority.readGuards ++ parentGuards durable descriptor).filter fun guard =>
+  (prepared.authority.readGuards ++ (parentGuards durable descriptor ++
+    (kindGuards durable descriptor ++ (prepared.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
@@ -759,13 +824,17 @@ structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deploy
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
   prepared : PreparedBirth profile deployment pins durable descriptor
 
-def prepareDraft (profile : PolicyCompilerProfile F) (disabled : List Digest)
+def prepareDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (draft : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  -- The room gate first (as `prepareGrainDraft`): a revoked placing grant is
+  -- `notRoomMember`, not the grant batch's `authorityBatch`.
+  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
@@ -815,7 +884,59 @@ theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : Factory
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   rcases List.mem_append.mp (List.mem_filter.mp member).1 with authority | room
   · exact prepared.authority.readGuards_exact guard authority
-  · exact parentGuards_exact durable descriptor guard room
+  · rcases List.mem_append.mp room with parent | kind
+    · exact parentGuards_exact durable descriptor guard parent
+    · rcases List.mem_append.mp kind with kind | inherited
+      · exact kindGuards_exact durable descriptor guard kind
+      · rcases List.mem_append.mp inherited with inherited | candidate
+        · exact prepared.exports.guardsExact guard inherited
+        · exact prepared.candidates.guardsExact guard candidate
+
+/-- Every export dependency is guarded at commit or covered by an exact
+old-root write of the same transaction. -/
+theorem PreparedBirth.export_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (guard : ReadGuard) (member : guard ∈ prepared.exports.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ member))),
+        by simpa using written⟩)
+
+theorem PreparedGrainBirth.export_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker)
+    (guard : ReadGuard) (member : guard ∈ prepared.pre.exports.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ member))),
+        by simpa using written⟩)
+
+theorem PreparedBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member))),
+        by simpa using written⟩)
+
+theorem PreparedGrainBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker)
+    (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member))),
+        by simpa using written⟩)
 
 /-- The authority cell's read is covered: it is written under its old root, or
 it remains a read guard. -/
@@ -848,10 +969,31 @@ theorem birth_parent_must_exist {deployment : Deployment} {pins : FactoryPins}
   obtain ⟨guard, guardMember, guardCell⟩ := parentGuards_cover durable descriptor row
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl (guardCell ▸ written)
-  · refine Or.inr ⟨guard, List.mem_filter.mpr ⟨List.mem_append_right _ guardMember,
+  · refine Or.inr ⟨guard, List.mem_filter.mpr ⟨List.mem_append_right _ (List.mem_append_left _ guardMember),
       by simpa using written⟩, guardCell, ?_⟩
     rw [← guardCell]
     exact parentGuards_exact durable descriptor guard guardMember
+
+/-- Every prepared world-instance birth checks its chosen definition against
+actual old source and retains that source as a commit dependency. -/
+theorem birth_kind_source_bound {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
+    CanonicalCellRegistry.kindBirthValid deployment prepared.directory.directory item.create.cell = true ∧
+      (⟨kind⟩ ∈ prepared.writes.map DataWrite.cellId ∨
+        ∃ guard ∈ prepared.readGuards, guard.cellId = ⟨kind⟩ ∧
+          guard.expectedRoot = durable.snapshot.model.roots ⟨kind⟩) := by
+  refine ⟨prepared.kindsPresent item member, ?_⟩
+  obtain ⟨guard, guardMember, guardCell⟩ := kindGuards_cover durable descriptor member selected
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl (guardCell ▸ written)
+  · refine Or.inr ⟨guard, List.mem_filter.mpr
+        ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ guardMember)),
+          by simpa using written⟩, guardCell, ?_⟩
+    rw [← guardCell]
+    exact kindGuards_exact durable descriptor guard guardMember
 
 /-- **`birth_under_room_requires_grant`**, at the one preparation every birth
 route passes: a prepared birth of an item into room `R` names the creator's

@@ -100,7 +100,7 @@ def baseAtomRecord : AtomRecord :=
 def baseRunRecord : RunRecord :=
   ⟨baseIdentifier, [], basePrincipal, baseIdentifier, none⟩
 def baseElementRecord : ElementRecord :=
-  ⟨baseIdentifier, none, .container [], basePrincipal, baseIdentifier, none⟩
+  ⟨baseIdentifier, none, .container [], basePrincipal, baseIdentifier, baseIdentifier, none⟩
 def baseFieldRecord : FieldRecord where
   valueType := .flag
   value := false
@@ -129,7 +129,7 @@ def baseAnnotationRecord : AnnotationRecord :=
 /-- Two visibly distinct mark values, with every non-discriminating field held
 fixed. -/
 def markValue (marked : Bool) : MarkRecord :=
-  ⟨baseIdentifier, baseRange, ⟨if marked then 1 else 0⟩, [],
+  ⟨baseIdentifier, .range baseRange, if marked then .bold else .italic,
     basePrincipal, baseIdentifier, baseDigest, none⟩
 
 theorem markValue_injective : Function.Injective markValue := by

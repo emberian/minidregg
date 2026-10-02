@@ -505,22 +505,21 @@ Each refusing branch names its reason. Absence, a failed native use and every
 holder/scope failure are `noGrant`, and they are decided before any other
 component, so only the capability's own holder can learn that it is revoked,
 outside its window or stale (`RefusalReason.capabilityRefusal`). -/
-private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
-    (profile : PolicyCompilerProfile F)
-    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+def capabilityEvidenceCheckedFor
+    (snapshot : Snapshot) (portal : Portal)
     {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
-    (commitmentWitness : base.CapabilityCommitmentWitness)
-    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
-    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    (commitmentWitness : portal.CapabilityCommitmentWitness)
+    (useWitness : portal.CapabilityUseWitness) (issuerWitness : portal.IssuerWitness)
+    (revocationWitness : RevocationKey → portal.NonRevocationWitness)
+    (membershipWitness : CapabilityId → portal.MembershipWitness) :
     Except RefusalReason
-      { evidence : Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request //
+      { evidence : Evidence portal snapshot.authState request //
         NamesStored snapshot identifier evidence } :=
   match found : readCapability snapshot.cell kind identifier with
   | none => .error .noGrant
   | some stored =>
     let capability := stored.head
     let commitment := storedCapabilityDigest snapshot stored
-    let portal := (config (F := F) profile snapshot store base step).portal
     if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
       match refusal : RefusalReason.capabilityRefusal capability snapshot.authState request with
       | some reason => .error reason
@@ -530,7 +529,7 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
           (RefusalReason.capabilityRefusal_eq_none_iff capability snapshot.authState request).mp refusal
         if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
           if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
-              (.capability kind capability.id) = true then
+              (membershipWitness capability.id) = true then
             if issuer : portal.verifyIssuer capability.issuer capability.issuerEpoch commitment issuerWitness = true then
               if self : portal.verifyNonRevocation snapshot.authState.revocationRoot
                   (.capability capability.id) (revocationWitness (.capability capability.id)) = true then
@@ -541,7 +540,7 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
                       portal.verifyNonRevocation snapshot.authState.revocationRoot (.channel channel)
                         (revocationWitness (.channel channel)) = true then
                     .ok ⟨(.capability capability commitment commitmentWitness
-                      (.capability kind capability.id) issuerWitness
+                      (membershipWitness capability.id) issuerWitness
                       (revocationWitness (.capability capability.id)) useWitness
                       ((AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff
                         capability snapshot.authState request).mp semantic)
@@ -556,6 +555,22 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
           else .error .noGrant
         else .error .noGrant
     else .error .noGrant
+
+/-- Compatibility wrapper: the neutral single-source and composed receiving
+portals share capability lookup, semantic admission and native evidence gates. -/
+private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    Except RefusalReason
+      { evidence : Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request //
+        NamesStored snapshot identifier evidence } :=
+  capabilityEvidenceCheckedFor snapshot (config profile snapshot store base step).portal
+    request identifier commitmentWitness useWitness issuerWitness revocationWitness
+    (fun id => .capability kind id)
 
 /-- The single receiving constructor projects evidence from the checked source
 result. Its erased proof records the exact parent lookup at the construction
@@ -611,7 +626,7 @@ private theorem capabilityEvidenceChecked_absent {F : Type} [Field F] [Decidable
     (absent : readCapability snapshot.cell kind identifier = none) :
     capabilityEvidenceChecked profile snapshot store base step request identifier
       commitmentWitness useWitness issuerWitness revocationWitness = .error .noGrant := by
-  unfold capabilityEvidenceChecked
+  unfold capabilityEvidenceChecked capabilityEvidenceCheckedFor
   split
   · rfl
   · rename_i stored found
@@ -632,7 +647,7 @@ private theorem capabilityEvidenceChecked_semantic {F : Type} [Field F] [Decidab
     (refused : RefusalReason.capabilityRefusal stored.head snapshot.authState request = some reason) :
     capabilityEvidenceChecked profile snapshot store base step request identifier
       commitmentWitness useWitness issuerWitness revocationWitness = .error reason := by
-  unfold capabilityEvidenceChecked
+  unfold capabilityEvidenceChecked capabilityEvidenceCheckedFor
   split
   · rename_i found
     rw [present] at found
@@ -1050,6 +1065,7 @@ theorem policy_verifies (base : Portal) :
     (config := config base) (request := demoRequest)
     (committed := committedPolicy) (oldState := kOld) (newState := kNew)
     (resolved := registry_resolves base)
+    (neutralExact := rfl)
     (policyIdExact := rfl) (versionExact := rfl)
     (domainExact := rfl) (semanticsExact := rfl)
     (recordDigestExact := rfl)

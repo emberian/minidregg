@@ -27,6 +27,7 @@ import Compiler.NativeCoprocess
 import Compiler.DurableLogTags
 import Kernel.PresenceIndex
 import Kernel.TailBound
+import Kernel.LinkIndex
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -619,6 +620,10 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   `admit` per append. It is a function of the log, never stored. -/
   index : PresenceIndex.Index
   indexExact : index = PresenceIndex.ofRecords image.accepted
+  /-- The link index (forward links and backlinks) of the accepted log, cached
+  beside the presence index and advanced the same way (K-DOC-INDEX). -/
+  links : LinkIndex.Index
+  linksExact : links = LinkIndex.ofRecords image.accepted
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -661,7 +666,7 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
         rfl, RootCache.ofEntries (entriesOf image snapshot chain),
         RootsExact.ofEntries (entriesOf image snapshot chain),
-        PresenceIndex.ofRecords image.accepted, rfl⟩
+        PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -734,7 +739,7 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
               DurableLogTags.chainPrefixes_getLast? logStart records,
               RootCache.ofEntries (entriesOf image snapshot headChain),
               RootsExact.ofEntries (entriesOf image snapshot headChain),
-              PresenceIndex.ofRecords image.accepted, rfl⟩
+              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl⟩
       else return .error "checkpoint beyond the log head"
 
 inductive Confirmation where
@@ -791,7 +796,10 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     roots.1, roots.2,
     loaded.index.admit (loaded.image.accepted.length + 1) record,
     by rw [loaded.indexExact]
-       exact (PresenceIndex.ofRecords_snoc loaded.image.accepted record).symm⟩
+       exact (PresenceIndex.ofRecords_snoc loaded.image.accepted record).symm,
+    loaded.links.admit (loaded.image.accepted.length + 1) record,
+    by rw [loaded.linksExact]
+       exact (LinkIndex.ofRecords_snoc loaded.image.accepted record).symm⟩
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
 open of a checkpoint at the head would. The root cache carries over: the
@@ -808,7 +816,7 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
         loaded.chain, loaded.chainExact, loaded.roots,
         ⟨fun k => by rw [same]; exact loaded.rootsExact.agree k, loaded.rootsExact.injective,
           loaded.rootsExact.injectiveSound⟩,
-        loaded.index, loaded.indexExact⟩
+        loaded.index, loaded.indexExact, loaded.links, loaded.linksExact⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -836,6 +844,23 @@ theorem Loaded.index_from_replay {rootBytes : List UInt8 → Digest} (loaded : L
 
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.index_from_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.index_from_replay
+
+/-- **The link index is the replay's link index**: the cached index is the fold
+of the whole log, and equally the fold of the checkpoint's prefix advanced by
+the replayed suffix, which is the shape a resumed open computes. -/
+theorem Loaded.linkIndex_from_replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.links = LinkIndex.ofRecords loaded.image.accepted ∧
+      loaded.links = (LinkIndex.ofRecords (loaded.image.accepted.take loaded.baseHeight)).extend
+        loaded.baseHeight (loaded.image.accepted.drop loaded.baseHeight) := by
+  refine ⟨loaded.linksExact, ?_⟩
+  have prefixLength : (loaded.image.accepted.take loaded.baseHeight).length = loaded.baseHeight := by
+    rw [List.length_take]; exact Nat.min_eq_left loaded.withinLog
+  rw [loaded.linksExact]
+  conv => lhs; rw [← List.take_append_drop loaded.baseHeight loaded.image.accepted]
+  rw [LinkIndex.ofRecords_append, prefixLength]
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.linkIndex_from_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.linkIndex_from_replay
 
 /-! ## A past height (K-HISTORY-READ) -/
 

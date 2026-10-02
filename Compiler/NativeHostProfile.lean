@@ -142,9 +142,11 @@ theorem order_atoms_supported (s a b : Slot) (v c : Int) :
     supported (.scalar orderWidth) (.not (.leSlots b a)) = true := by
   simp [supported, CompilerProfile.scalar]
 
-/-- The canonical verifier at the native field reflects `eval` on `R`: the
-binding facts of `canonical_verifies_iff_eval`, with `rangesExact` and
-`castExact` replaced by "every integer the instance touches is in `R`". -/
+/-- The neutral local-law verifier at the native field reflects `eval` on `R`.
+The explicit neutral premise excludes composed sources, which require their
+authenticated closure receiver. The binding facts of `canonical_verifies_iff_eval`
+remain, with `rangesExact` and `castExact` replaced by "every integer the instance
+touches is in `R`". -/
 theorem native_verifies_iff_eval_on_R
     {config : CanonicalPolicyAdmission.CanonicalPolicyConfig Field} {kind : ResourceKind}
     {request : Request kind} {committed : CanonicalPolicyAdmission.CommittedPolicy}
@@ -152,6 +154,7 @@ theorem native_verifies_iff_eval_on_R
     (compilerExact : config.compilerProfile.compiler = .scalar orderWidth)
     (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
+    (neutralExact : committed.record.neutral = true)
     (policyIdExact : committed.record.policyId = request.policyId)
     (versionExact : committed.record.version = request.policyRevision)
     (domainExact : committed.record.domain = request.domain)
@@ -166,7 +169,7 @@ theorem native_verifies_iff_eval_on_R
         (CanonicalPolicyAdmission.canonicalWitness config.compilerProfile.compiler committed
           oldState newState) = true ↔
       Minidregg.Pred.eval committed.record.predicate oldState newState = true :=
-  CanonicalPolicyAdmission.canonical_verifies_iff_eval resolved policyIdExact versionExact
+  CanonicalPolicyAdmission.canonical_verifies_iff_eval resolved neutralExact policyIdExact versionExact
     domainExact semanticsExact recordDigestExact stepExact profileCompatible
     profileSemanticsExact supportedExact (by rw [compilerExact]; exact inputsInRange_on_R inR)
     (castInjOn_on_R _ inR)
@@ -185,7 +188,7 @@ theorem accepted_integer_inputs_checked
         witness.oldState witness.newState = true ∧
       castInjOn Field (intsOf committed.record.predicate witness.oldState witness.newState) := by
   rcases (CanonicalPolicyAdmission.verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, _, _, _, _, ranges, casts, _⟩
+    ⟨committed, resolved, _, _, _, _, _, _, _, _, _, _, _, ranges, casts, _⟩
   exact ⟨committed, resolved, ranges, casts⟩
 
 #assert_axioms order_agrees_with_eval_on_R

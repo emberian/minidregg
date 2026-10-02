@@ -42,7 +42,8 @@ def intentLoadedAuthorized (config : NativeHost.Config)
       match Json.birthIntentFrom "$" json (fun path source =>
           Json.birthCurrent path source config
             (NativeHost.logicalHeight config opened.durable)
-            opened.authority.snapshot.authState) with
+            opened.authority.snapshot.authState
+            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)) with
       | .error reason => return .error reason
       | .ok intent =>
           if intent.subject != signed.challenge.intent.subject then

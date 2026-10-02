@@ -1,0 +1,18 @@
+{
+  "source": "/Users/ember/workbox/mini-private-objects-20261002/src/native/resource-client/src",
+  "sha256": {
+    "object_keys.rs": "fff07962257bfcca41bdeda65c74204c460330a29510c7cc9cf9a60d445d756f",
+    "object_keys_hybrid.rs": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+    "object_messages.rs": "37ff3b4553795fbc5efc500c11f22b85263cd5b7ff9593e279624c4706dabdb6",
+    "object_cli.rs": "9837f176d056dbc0da2e782c42d5673850c30bd08367db7fddddf77df88120e4",
+    "object_epoch_cli.rs": "7eaab9ab95d6397cf13230ba760c1ebfdc89269ad1f5764227c4ca40c6797040",
+    "roomkey.rs": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703"
+  },
+  "adaptations": [
+    "namespace roomkey -> object_epoch_packages",
+    "legacy private module resolves through workspace",
+    "Store::initialize persists initial encrypted journal before custody metadata",
+    "combined v6 direct JSON authoring preserves all five source fields and refuses incomplete readback",
+    "receive_epoch retains signed-manifest law catchup semantics; full source commitment separately authenticated"
+  ]
+}

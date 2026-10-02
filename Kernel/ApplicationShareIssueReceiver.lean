@@ -44,25 +44,21 @@ def issueNullifier (domain : Digest) (ingress : ApplicationShareIssueSource.Ingr
 def readGuards (accepted : Accepted profile config pins durable height ingress) :
     List ReadGuard :=
   ResourceBirthReceiver.readGuards accepted.birth ++
-    [ApplicationShareIssueDelegation.readGuard accepted.appPrepared]
+    ApplicationShareIssueDelegation.readGuards accepted.appPrepared
 
 theorem readGuards_readonly (accepted : Accepted profile config pins durable height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ accepted.birth.prepared.writes.map DataWrite.cellId := by
   rcases List.mem_append.mp member with birth | app
   · exact ResourceBirthReceiver.readGuards_readonly accepted.birth guard birth
-  · simp only [List.mem_singleton] at app
-    subst guard
-    exact accepted.appReadOnly
+  · exact accepted.appReadOnly guard app
 
 theorem readGuards_exact (accepted : Accepted profile config pins durable height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   rcases List.mem_append.mp member with birth | app
   · exact ResourceBirthReceiver.readGuards_exact accepted.birth guard birth
-  · simp only [List.mem_singleton] at app
-    subst guard
-    exact ApplicationShareIssueDelegation.readGuard_current accepted.appPrepared
+  · exact accepted.appChecked.guardsCurrent guard app
 
 def writes (accepted : Accepted profile config pins durable height ingress) :
     List DataWrite := accepted.atomic.writes

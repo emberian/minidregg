@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
+#[path = "fresh_onboarding.rs"]
+pub(crate) mod fresh;
+
 const DIRECTORY: &str = "receipt-continuity";
 const ALGORITHM: &str = "minidregg-continuity-v1";
 const MAX_JSON: u64 = 1024 * 1024;
@@ -179,8 +182,11 @@ fn create_file(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(fail)
 }
 fn lock(root: &Path) -> Result<File> {
+    lock_named(root, "lock")
+}
+fn lock_named(root: &Path, name: &str) -> Result<File> {
     let _directory = directory(root)?;
-    let path = root.join("lock");
+    let path = root.join(name);
     let file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -226,6 +232,9 @@ fn save_with(
         .open(&temporary)
         .map_err(fail)?;
     let bytes = serde_json::to_vec(value).map_err(fail)?;
+    if bytes.len() as u64 > MAX_JSON {
+        return Err(fail("persisted JSON exceeds custody bound"));
+    }
     file.write_all(&bytes).map_err(fail)?;
     stage(SaveStage::BeforeFileSync)?;
     file.sync_all().map_err(fail)?;
@@ -257,6 +266,9 @@ impl Settings {
                 "enabled or incomplete custody cannot be reset automatically: {e}"
             ))
         })?;
+        Self::parse(&value)
+    }
+    fn parse(value: &Value) -> Result<Self> {
         if text(&value, "type")? != "minidregg-receipt-continuity-custody-v1" {
             return Err(fail("unknown custody version"));
         }
@@ -345,6 +357,7 @@ pub(crate) fn begin(root: &Path, workspace: &Value) -> Result<Option<Ticket>> {
     if workspace.get("receiptContinuity").is_some() && manifest.get("receiptContinuity").is_none() {
         return Err(fail("workspace continuity enablement disappeared"));
     }
+    fresh::guard(root, &manifest)?;
     let enabled = match manifest.get("receiptContinuity") {
         None => false,
         Some(Value::String(value)) if value == ALGORITHM => true,
@@ -497,14 +510,9 @@ impl HostProof<'_> {
         Ok((point, complete))
     }
 }
-impl ProofSource for HostProof<'_> {
-    fn verified_hop(&mut self, from: Option<&Point>, target: &Point) -> Result<(Point, bool)> {
-        let mut query = json!({"identity":self.settings.identity,"from":from.map(Point::json),"target":target.json()});
-        if let Some((chain, siblings)) = from.and_then(|point| point.witness.as_ref()) {
-            query["fromChain"] = json!(chain);
-            query["fromSiblings"] = json!(siblings);
-        }
-        let bytes = serde_json::to_vec(&query).map_err(fail)?;
+impl HostProof<'_> {
+    fn response(&self, query: &Value) -> Result<Vec<u8>> {
+        let bytes = serde_json::to_vec(query).map_err(fail)?;
         let host = workspace::workspace_host(self.workspace)?;
         let config = workspace::member_path(self.workspace, "config")?;
         let socket = SOCKET
@@ -514,7 +522,17 @@ impl ProofSource for HostProof<'_> {
         if frame.first() != Some(&151) || frame.len() as u64 > MAX_JSON {
             return Err(fail("Host refused continuity or exceeded hop bound"));
         }
-        self.verify_response(&query, &frame[1..])
+        Ok(frame[1..].to_vec())
+    }
+}
+impl ProofSource for HostProof<'_> {
+    fn verified_hop(&mut self, from: Option<&Point>, target: &Point) -> Result<(Point, bool)> {
+        let mut query = json!({"identity":self.settings.identity,"from":from.map(Point::json),"target":target.json()});
+        if let Some((chain, siblings)) = from.and_then(|point| point.witness.as_ref()) {
+            query["fromChain"] = json!(chain);
+            query["fromSiblings"] = json!(siblings);
+        }
+        self.verify_response(&query, &self.response(&query)?)
     }
 }
 fn walk(
@@ -725,6 +743,13 @@ pub(crate) fn initialize(
     read: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
     let custody = root.join(DIRECTORY);
+    if workspace.get("freshContinuity").is_some()
+        || fs::symlink_metadata(root.join(fresh::RECORD)).is_ok()
+    {
+        return Err(fail(
+            "fresh enrollment must finish its retained onboarding candidate",
+        ));
+    }
     if workspace.get("receiptContinuity").is_some() || fs::symlink_metadata(&custody).is_ok() {
         return Err(fail("custody already exists, possibly incomplete; restore it instead of trusting a new endpoint"));
     }

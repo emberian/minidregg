@@ -44,15 +44,12 @@ abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 abbrev Registry := CanonicalCellRegistry.registry
 
-/-! ## The next-key digest -/
+/-! ## The next-key digest
 
-def nextKeyDigestTag : List UInt8 := "DREGG.SIGNING-KEY.NEXT/v1".toUTF8.toList
+One definition, `ParticipantKeyEnrollment.nextKeyDigest`: enrollment commits
+to it and checks the next key's possession against it; a rotation opens it. -/
 
-/-- The pre-rotation commitment to a public key: cSHAKE256 under its own tag,
-projected to the authority `Digest`.  The client never computes it; it asks the
-host (`Host.Json` kind `signing-key-next-digest`). -/
-def nextKeyDigest (publicKey : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash nextKeyDigestTag publicKey).digest
+export Minidregg.Kernel.ParticipantKeyEnrollment (nextKeyDigest nextKeyDigestTag)
 
 /-! ## Command, ingress, frames -/
 

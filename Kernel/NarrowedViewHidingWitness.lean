@@ -17,9 +17,11 @@ difference) is decided.
 The fix (`Compiler.StoreHiding`, view v5): the root is over salted per-entry
 leaves keyed by the cell's blinding, and the reader receives opened entries
 with their salts and only the leaves of the rest.  On the same pair, blinded,
-every item the reader can open is byte-identical before and after the write to
-field 4 (`narrowed_view_hides_field_four`), and what still moves is the root and
-field 4's sealed leaf: the metadata channel, stated in the same theorem.
+every entry the reader can open is byte-identical before and after the write to
+field 4 and the kernel's ratchet of the blinding (`narrowed_view_hides_field_four`,
+K-HIDE-ROTATE); the root moves (THAT the cell was written) and every sealed leaf
+moves, field 4's and field 1's and the blinding's alike, so which field was
+written is not visible.
 -/
 import Kernel.ResourceObservationAdmission
 import Compiler.StoreHiding
@@ -126,29 +128,54 @@ def blinding : Int := 271828182845904523536
 def blinded (store : Store effectLayout) : Store effectLayout :=
   store.set StateKey.blinding.address (some blinding)
 
-theorem blinding_not_field_four : DeclaredEffectCell.wire.blinding ≠ some (fieldAt 4) := by
-  decide
+/-- The blinding entry's value bytes: the cell key the salts use. -/
+theorem blinded_key (store : Store effectLayout) :
+    blindingKey DeclaredEffectCell.wire (blinded store) =
+      some (IntStream.intStream.encode blinding) := by
+  rw [DeclaredEffectCell.blinding.blindingKey_eq]
+  simp [blinded, Blinding.address, DeclaredEffectCell.blinding, StateKey.address]
+  rfl
 
-/-- **The fix.**  Under view v5 every item the field-3 reader can open is
-byte-identical before and after the owner's write to field 4; what moves is
-the root (unless cSHAKE256 collides) — the reader learns that something it may
-not read changed, and nothing of what. -/
-theorem narrowed_view_hides_field_four :
-    StoreHiding.opened DeclaredEffectCell.wire (Visible reader .declaredObject)
-        ((blinded before).set (fieldAt 4) (some 21)) =
-      StoreHiding.opened DeclaredEffectCell.wire (Visible reader .declaredObject) (blinded before) ∧
-    (saltedRoot DeclaredEffectCell.wire ((blinded before).set (fieldAt 4) (some 21)) ≠
+/-- The owner's write to field 4 at `height`, with the kernel's ratchet. -/
+def written (height : Nat) : Store effectLayout :=
+  Patch.run ((blinded before).set (fieldAt 4) (some 21))
+    (DeclaredEffectCell.blinding.patch (blinded before) height)
+
+/-- **The fix, under the ratchet.**  On the journey's ledger the field-3 reader's
+opened entries are byte-identical before and after the owner's write to field
+4; the root moves unless cSHAKE256 collides (THAT the cell was written); and no
+sealed leaf of the earlier view survives into the later one except by a KMAC256
+coincidence across the two links or a cSHAKE256 collision — field 4's leaf and
+field 1's move alike, so WHICH field was written is not visible. -/
+theorem narrowed_view_hides_field_four (height : Nat) :
+    StoreHiding.openedEntries DeclaredEffectCell.wire (Visible reader .declaredObject)
+        (written height) =
+      StoreHiding.openedEntries DeclaredEffectCell.wire (Visible reader .declaredObject)
+        (blinded before) ∧
+    (saltedRoot DeclaredEffectCell.wire (written height) ≠
         saltedRoot DeclaredEffectCell.wire (blinded before) ∨
-      RootCollision DeclaredEffectCell.wire ((blinded before).set (fieldAt 4) (some 21))
-        (blinded before) ∨
-      ∃ first ∈ (entries DeclaredEffectCell.wire
-            ((blinded before).set (fieldAt 4) (some 21))).map
-          (opening DeclaredEffectCell.wire ((blinded before).set (fieldAt 4) (some 21))),
+      RootCollision DeclaredEffectCell.wire (written height) (blinded before) ∨
+      ∃ first ∈ (entries DeclaredEffectCell.wire (written height)).map
+          (opening DeclaredEffectCell.wire (written height)),
         ∃ second ∈ (entries DeclaredEffectCell.wire (blinded before)).map
-          (opening DeclaredEffectCell.wire (blinded before)), LeafCollision first second) := by
-  apply StoreHiding.change_detection_only_via_root
+          (opening DeclaredEffectCell.wire (blinded before)), LeafCollision first second) ∧
+    ∀ leaf ∈ StoreHiding.sealedLeaves DeclaredEffectCell.wire (Visible reader .declaredObject)
+        (written height),
+      leaf ∈ StoreHiding.sealedLeaves DeclaredEffectCell.wire (Visible reader .declaredObject)
+          (blinded before) →
+        (∃ entry, salt (some (DeclaredEffectCell.blinding.step height
+            (IntStream.intStream.encode blinding))) entry =
+          salt (some (IntStream.intStream.encode blinding)) entry) ∨
+          ∃ first second, LeafCollision first second := by
+  apply StoreHiding.change_detection_only_via_root DeclaredEffectCell.wire _ DeclaredEffectCell.blinding
+  · intro visible
+    simp [Visible, CanonicalCellRegistry.isBlinding, CanonicalCellRegistry.wire?,
+      Blinding.address, DeclaredEffectCell.blinding, DeclaredEffectCell.wire] at visible
+    exact visible.2 rfl
+  · exact blinded_key before
   · exact fun visible => field_four_not_kept visible.1
-  · exact blinding_not_field_four
+  · show fieldAt 4 ≠ StateKey.blinding.address
+    decide
   · show (blinded before) (fieldAt 4) = some 20
     have different : fieldAt 4 ≠ StateKey.blinding.address := by decide
     simp [blinded, before, Store.set_ne _ _ _ _ different]
@@ -160,5 +187,7 @@ theorem narrowed_view_hides_field_four :
 #guard_msgs (whitespace := lax) in #print axioms narrowed_view_not_independent
 /-- info: 'Minidregg.Kernel.NarrowedViewHidingWitness.narrowed_view_hides_field_four' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms narrowed_view_hides_field_four
+/-- info: 'Minidregg.Kernel.NarrowedViewHidingWitness.blinded_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms blinded_key
 
 end Minidregg.Kernel.NarrowedViewHidingWitness

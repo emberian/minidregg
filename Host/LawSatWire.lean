@@ -132,6 +132,9 @@ def certJson (q : Query) (t : Pred) : SysCert → Json
       ("sources", Json.arr ((sources t (fun s => s.present.contains v || s.absent.contains v)).map
         (sourceJson q)).toArray)]
   | .cycle cs => Json.mkObj [("kind", "cycle"), ("sum", toJson (cs.map Con.k).sum),
+      -- The exact decimal: subject ids exceed 2^63, and a JSON number past i64
+      -- reached the client as 0 ("0 <= 0") (FIX-DISCLOSE).
+      ("sumText", Json.str (toString (cs.map Con.k).sum)),
       ("constraints", Json.arr (cs.map (conJson q t)).toArray)]
 
 def stateJson (s : State) : Json :=

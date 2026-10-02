@@ -230,9 +230,18 @@ def accountPredicate (subject : Nat) : Minidregg.Pred.Pred :=
   .all [.eq "request/subject" (Int.ofNat subject)]
 
 def accountPolicy (deployment : Deployment) (semantics : Digest) (identities : Ids) :
-    PolicyRecord :=
-  ⟨⟨identities.account⟩, 0, deployment.domain, semantics, none,
-    accountPredicate identities.subject⟩
+    PolicyRecord where
+  policyId := ⟨identities.account⟩
+  version := 0
+  domain := deployment.domain
+  semantics := semantics
+  previous := none
+  predicate := accountPredicate identities.subject
+  localSelector := {}
+  parents := []
+  descendants := none
+  audience := none
+  objectDescriptor := none
 
 /-- A root capability exactly as genesis and birth authoring build one: the
 template's issuer, budget and lifetime, the issuer and policy epochs current in
@@ -579,6 +588,8 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     authority.snapshot.authState ambient.height descriptor
+  bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor
   keyFresh : KeyFresh authority.snapshot (enrolKey deployment authority plan)
   observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority plan)
   entriesDistinct : ((authorityEntries descriptor (enrolKey deployment authority plan)
@@ -606,6 +617,8 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
   let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     authority.snapshot.authState ambient.height descriptor) .birthShape
+  let lineage ← require (ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor) .birthShape
   let key ← require (KeyFresh authority.snapshot (enrolKey deployment authority plan)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
     (enrolObserve deployment profile ambient authority plan)) .observeGrantTaken
@@ -623,7 +636,7 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
     let admission ← require ((enrolBatch tariff ambient.tariff.collector plan descriptor).Admission
       (CanonicalResourceKernel.logicalBook book.payload.logical)) .bookAdmission
     pure ⟨descriptor, rfl, grants, (ResourceBirthController.Concrete.sameCreates_iff _ _).mp aux.down,
-      initials.down, template.down, key.down, observe.down,
+      initials.down, template.down, lineage.down, key.down, observe.down,
       distinct.down, validated, allocated,
       CanonicalResourceKernel.AcceptedBatch.ofAdmission admission.down⟩
 
@@ -776,6 +789,12 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
+  dependencies : WorldKindLawDependencies.Dependencies
+  dependenciesExact : WorldKindLawDependencies.loadTarget deployment directory.directory
+    deployment.factoryId = some dependencies
+  lawGuards : List (Nat × Digest)
+  lawGuardsExact : PhysicalLawResolution.readGuards authority.snapshot directory.directory
+    profile.semantics deployment.factoryId dependencies.additional = some lawGuards
 
 /-- The whole preparation, in order: the loaded cells, the two pinned roots,
 the clock, the pure decision (`decideEnrol`, at the birth fee of the key the
@@ -827,8 +846,17 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                     modeEvidence := ⟨rootExact⟩
                     validated := validated
                     postcondition := validated.resultAt }
-                pure ⟨directory, authority, pay, book, factory, tariff, tariffExact, clock,
-                  tipAhead, clockValid, decision, decided, legs, candidate, source⟩
+                match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
+                    directory.directory deployment.factoryId with
+                | none => throw .policyUnavailable
+                | some dependencies =>
+                  match lawGuardsExact : PhysicalLawResolution.readGuards snapshot directory.directory
+                      profile.semantics deployment.factoryId dependencies.additional with
+                  | none => throw .policyUnavailable
+                  | some lawGuards =>
+                    pure ⟨directory, authority, pay, book, factory, tariff, tariffExact, clock,
+                      tipAhead, clockValid, decision, decided, legs, candidate, source,
+                      dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
         else throw .tipBehindClock
     else throw .stalePay
   else throw .staleAuthority
@@ -846,7 +874,8 @@ def Prepared.declaration (prepared : Prepared deployment profile ambient durable
 
 def project (prepared : Prepared deployment profile ambient durable command verified)
     (_logical : PayStore) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory deployment.factoryId ++
+    CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
         command prepared.declaration) ++
     [(NativeHostGenesis.selfEnrolSlot, 1),
@@ -866,14 +895,28 @@ def sourceStore (prepared : Prepared deployment profile ambient durable command 
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
     prepared.directory.directory⟩
 
+/-- The factory is the request's actual target. Preparation retains the exact
+structural dependencies and complete current/pinned law-source read set. -/
 def policyConfig [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command verified) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) deployment.factoryId prepared.dependencies.additional
+
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command verified) :
+    List (Nat × Digest) := prepared.lawGuards ++ prepared.dependencies.readGuards
+
+/-- No absent resolver can be interpreted as an empty dependency list. -/
+theorem Prepared.complete_law_dependencies
+    (prepared : Prepared deployment profile ambient durable command verified) :
+    WorldKindLawDependencies.loadTarget deployment prepared.directory.directory deployment.factoryId =
+      some prepared.dependencies ∧
+    PhysicalLawResolution.readGuards prepared.authority.snapshot prepared.directory.directory
+      profile.semantics deployment.factoryId prepared.dependencies.additional = some prepared.lawGuards :=
+  ⟨prepared.dependenciesExact, prepared.lawGuardsExact⟩
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command verified) :=
@@ -895,21 +938,16 @@ def authorize [DecidableEq F]
     ambient command prepared.declaration
   let config := policyConfig prepared
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.capability receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.capability () receipt () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
+  match ComposedPolicyAdmission.admit config wanted
       evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
@@ -922,6 +960,25 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+
+/-- An accepted observer submission satisfies the resolved current law, including
+inherited/ambient/kind components, on this exact source-prepared effect. -/
+theorem Accepted.composed_law_evaluated [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command verified}
+    {ingress : DecodedIngress} (accepted : Accepted prepared ingress) :
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true := by
+  exact ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics
+      ambient command prepared.declaration) accepted.semantic.authorization
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command verified)
@@ -964,7 +1021,8 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command 
 def readGuards (prepared : Prepared deployment profile ambient durable command verified) :
     List ReadGuard :=
   policyGuard prepared ::
-    prepared.authority.readGuards.filter fun guard =>
+    (prepared.authority.readGuards ++
+      (lawReadGuards prepared).map (fun (cellIdentifier, expectedRoot) => (⟨⟨cellIdentifier⟩, expectedRoot⟩ : ReadGuard))).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command verified) : Prop :=

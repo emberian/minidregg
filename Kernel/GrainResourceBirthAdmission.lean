@@ -4,6 +4,8 @@ bare-birth or marker-only grain acceptance is composed here: every request
 and policy projection is derived from the one composite tuple.
 -/
 import Kernel.GrainResourceBirthTransaction
+import Compiler.PhysicalLawResolution
+import Compiler.WorldKindLawDependencies
 
 namespace Minidregg.Kernel.GrainResourceBirthAdmission
 
@@ -167,7 +169,9 @@ def project {F : Type} [Field F]
       Store.Store ((GrainResourceBirthTransaction.layout birth grain).storeLayout incidence)) :
     Minidregg.Pred.State :=
   let wanted := branchRequest birth grain height branch
-  let common := CanonicalRuntimeProfile.requestSlots wanted.2
+  let common := WorldKindLawDependencies.targetSelectorSlots
+    birth.prepared.pre.directory.directory wanted.2.target.value ++
+    CanonicalRuntimeProfile.requestSlots wanted.2
   match branch with
   | .inl birthBranch =>
       let metadata :=
@@ -191,12 +195,12 @@ def project {F : Type} [Field F]
       let command := source.grainCommand tariff
       let ownSlots := ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
         (command.targets[index].materializer.codec.encode (logical (.inr index))) ++
-        DeclaredResourceController.targetProjection command.targets[index]
+        DeclaredResourceController.targetProjection command.subject command.targets[index]
           (grain.targets index).pre.logical (logical (.inr index))
       let observed := DeclaredResourceController.jointSlots command.targets fun i =>
         ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
           (command.targets[i].materializer.codec.encode (logical (.inr i))) ++
-         DeclaredResourceController.targetProjection command.targets[i]
+         DeclaredResourceController.targetProjection command.subject command.targets[i]
            (grain.targets i).pre.logical (logical (.inr i))
       ⟨common ++ ResourceBirthPolicyController.Concrete.bytesSlots "command/bytes" 0
         (DeclaredResourceController.commandCodec.encode command) ++ ownSlots ++ observed⟩
@@ -235,6 +239,9 @@ structure Pending {F : Type} [Field F]
     birth.prepared.pre.authority.snapshot.authState source.birth
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
     birth.prepared.pre.authority.snapshot.authState ambient.height source.birth
+  bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
+    (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+    source.birth
   requestsDistinct : Function.Injective (branchIdentity birth grain ambient.height)
 
 def preparePending {F : Type} [Field F]
@@ -257,12 +264,15 @@ def preparePending {F : Type} [Field F]
   let checked ← (ResourceBirthPolicyController.check pins
     CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
     source.birth).mapError Reject.metadata
-  let templateBound ← (ResourceBirthPolicyController.require
-    (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
-      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth)
-      .grantTemplate).mapError Reject.metadata
+  let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt profile.template
+      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
+    Reject.metadata
+  let bornLineage ← (ResourceBirthPolicyController.require
+    (ResourceBirthPolicyController.Concrete.BornLineage
+      (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+      source.birth) .roomLineage).mapError Reject.metadata
   if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
-    return ⟨tuple, physical.down, checked.down, templateBound.down, distinct⟩
+    return ⟨tuple, physical.down, checked.down, templateBound.down, bornLineage.down, distinct⟩
   else .error .ambiguousRequests
 
 /-- Changing the primary selector for one policy branch leaves every old cell,
@@ -314,6 +324,21 @@ theorem Pending.branchStep_states {F : Type} [Field F]
       project birth grain ambient.height branch pending.tuple.logicalPost :=
   ⟨rfl, rfl⟩
 
+def Pending.branchDependencies {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (branch : Branch tariff source) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment birth.prepared.pre.directory.directory
+    (branchRequest birth grain ambient.height branch).2.target.value
+
 def Pending.branchConfig {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
@@ -324,13 +349,31 @@ def Pending.branchConfig {F : Type} [Field F] [DecidableEq F]
       birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
       profile.semantics ambient (source.grainCommand tariff)}
     (pending : Pending profile deployment pins durable ambient tariff source birth grain)
-    (branch : Branch tariff source) : CanonicalPolicyAdmission.CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile
-    birth.prepared.pre.authority.snapshot
-    ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain birth.prepared.pre.directory.directory⟩
+    (branch : Branch tariff source) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile birth.prepared.pre.authority.snapshot
+    birth.prepared.pre.directory.directory
     (CredentialAuthorityPolicyRegistry.sourcePortal birth.prepared.pre.authority.snapshot
       (useMarker profile deployment tariff source))
-    (pending.branchStep branch)
+    (pending.branchStep branch) (branchRequest birth grain ambient.height branch).2.target.value
+    (((pending.branchDependencies branch).map WorldKindLawDependencies.Dependencies.additional).getD [])
+
+def Pending.branchLawGuards {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (branch : Branch tariff source) :
+    Option (List (Nat × Digest)) := do
+  let dependencies ← pending.branchDependencies branch
+  let guards ← PhysicalLawResolution.readGuards birth.prepared.pre.authority.snapshot
+    birth.prepared.pre.directory.directory profile.semantics
+    (branchRequest birth grain ambient.height branch).2.target.value dependencies.additional
+  pure (guards ++ dependencies.readGuards).eraseDups
 
 /-- The branch tag must match the *complete* encoded request before its
 compiled witness can be accepted. This includes the composite factory mode,
@@ -350,8 +393,8 @@ def Pending.portal {F : Type} [Field F] [DecidableEq F]
     (CredentialAuthorityPolicyRegistry.sourcePortal birth.prepared.pre.authority.snapshot
       (useMarker profile deployment tariff source))
   { base with
-    PolicyWitness := Branch tariff source × CanonicalPolicyAdmission.CompiledPolicyWitness F
-    policyAddress := fun witness => witness.2.address
+    PolicyWitness := Branch tariff source × ComposedPolicyAdmission.Witness F
+    policyAddress := fun witness => witness.2.compiled.address
     verifyCommittedPolicy := fun address kind request witness =>
       decide (AuthorizationDeclaration.encodeRequest ⟨kind, request⟩ =
         branchIdentity birth grain ambient.height witness.1) &&
@@ -397,8 +440,8 @@ def Pending.liftEvidence {F : Type} [Field F] [DecidableEq F]
     (evidence : Evidence (pending.branchConfig branch).portal
       birth.prepared.pre.authority.snapshot.authState request) :
     Evidence pending.portal birth.prepared.pre.authority.snapshot.authState request := by
-  unfold Pending.portal Pending.branchConfig CredentialAuthorityPolicyRegistry.config
-    CanonicalPolicyAdmission.CanonicalPolicyConfig.portal at *
+  unfold Pending.portal Pending.branchConfig PhysicalLawResolution.config
+    ComposedPolicyAdmission.Config.portal at *
   cases evidence with
   | signature witness epoch verified => exact .signature witness epoch verified
   | proof witness verified => exact .proof witness verified
@@ -467,6 +510,12 @@ structure CheckedBranch {F : Type} [Field F] [DecidableEq F]
     (birth.prepared.pre.authority.snapshot.authState.policyAddress
       (branchRequest birth grain ambient.height branch).2.policyId
       (branchRequest birth grain ambient.height branch).2.policyRevision)
+  dependencies : WorldKindLawDependencies.Dependencies
+  dependenciesExact : pending.branchDependencies branch = some dependencies
+  lawGuards : List (Nat × Digest)
+  lawGuardsExact : pending.branchLawGuards branch = some lawGuards
+  lawGuardsBound : lawGuards.all (fun guard =>
+    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true
   authorization : Authorized pending.portal birth.prepared.pre.authority.snapshot.authState
     (branchRequest birth grain ambient.height branch).2
   modeBound : requiresCapability branch = true →
@@ -496,29 +545,31 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
         (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
       | none => .error .policySourceUnavailable
       | some loaded => .ok loaded
-    let store : CanonicalPolicyRegistry.PayloadStore :=
-      ⟨CanonicalCellRegistry.fetchPolicySource deployment.domain
-        birth.prepared.pre.directory.directory⟩
+    let dependenciesChecked ← match exact : pending.branchDependencies branch with
+      | none => .error .policySourceUnavailable
+      | some dependencies => .ok (show { dependencies // pending.branchDependencies branch = some dependencies }
+          from ⟨dependencies, exact⟩)
+    let guardsChecked ← match exact : pending.branchLawGuards branch with
+      | none => .error .policySourceUnavailable
+      | some guards => .ok (show { guards // pending.branchLawGuards branch = some guards }
+          from ⟨guards, exact⟩)
+    let guardsBound ← (if bound : guardsChecked.val.all (fun guard =>
+        decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true then
+      Except.ok (PLift.up bound) else Except.error .policySourceConflict)
     let evidence : Evidence config.portal old wanted.2 ←
       if requiresCapability branch then
         match credential.capability with
         | none => .error .capability
         | some identifier =>
-            match CredentialAuthorityPolicyRegistry.sourceCapabilityEvidence
-                profile.compilerProfile birth.prepared.pre.authority.snapshot
-                store (useMarker profile deployment tariff source) step
-                wanted.2 identifier receipt with
-            | none => .error .capability
-            | some evidence => .ok evidence
+            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
+            | .error _ => .error .capability
+            | .ok evidence => .ok evidence
       else
         match credential.capability with
         | some identifier =>
-            match CredentialAuthorityPolicyRegistry.sourceCapabilityEvidence
-                profile.compilerProfile birth.prepared.pre.authority.snapshot
-                store (useMarker profile deployment tariff source) step
-                wanted.2 identifier receipt with
-            | none => .error .capability
-            | some evidence => .ok evidence
+            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
+            | .error _ => .error .capability
+            | .ok evidence => .ok evidence
         | none =>
             if epoch : wanted.2.subjectKeyEpoch = old.subjectKeyEpoch wanted.2.subject then
               if verified : config.portal.verifySignature wanted.2 receipt = true then
@@ -527,28 +578,21 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
             else .error (Reject.nativeSignature .sourceBinding)
     if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
       if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-        match config.registry.resolve wanted.2.policyId wanted.2.policyRevision with
+        match config.resolve? with
         | none => .error .policyUnavailable
         | some committed =>
-            let witness := CanonicalPolicyAdmission.canonicalWitness
-              profile.compilerProfile.compiler committed step.oldState step.newState
-            if inputsInRange profile.compilerProfile.compiler
-                committed.record.predicate witness.oldState witness.newState != true then
-              .error .policyInputRange
-            else if !decide (castInjOn F
-                (intsOf committed.record.predicate
-                  witness.oldState witness.newState)) then
-              .error .policyCastAlias
-            else
-              match CanonicalPolicyAdmission.admit config old wanted.2 evidence witness
-                  (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
-              | none => .error .policyRejected
-              | some admitted =>
-                  let authorization := pending.liftAuthorization branch admitted
-                  if modeBound : requiresCapability branch = true →
-                      authorization.evidence.capabilityValue.isSome = true then
-                    .ok ⟨receipt, exactEnvelope, policySource, authorization, modeBound⟩
-                  else .error .capability
+            let witness := committed.witness
+            match ComposedPolicyAdmission.admit config wanted.2 evidence witness
+                (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
+            | none => .error .policyRejected
+            | some admitted =>
+                let authorization := pending.liftAuthorization branch admitted
+                if modeBound : requiresCapability branch = true →
+                    authorization.evidence.capabilityValue.isSome = true then
+                  .ok ⟨receipt, exactEnvelope, policySource,
+                    dependenciesChecked.val, dependenciesChecked.property,
+                    guardsChecked.val, guardsChecked.property, guardsBound.down, authorization, modeBound⟩
+                else .error .capability
       else .error .policyUnavailable
     else .error .policyUnavailable
   else .error .credentialShape
@@ -638,6 +682,10 @@ structure ReadLeg {F : Type} [Field F] [DecidableEq F]
     ((source.grainCommand tariff).targets[index].observeCapability.getD ⟨0⟩)
     (DeclaredResourceController.commandCodec.encode (source.grainCommand tariff))
   checked : ResourceObservationAdmission.Checked selected envelope
+  lawGuards : List (Nat × Digest)
+  lawGuardsExact : ResourceObservationAdmission.lawReadGuards selected = some lawGuards
+  lawGuardsBound : lawGuards.all (fun guard =>
+    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true
 
 def verifyRead {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
@@ -657,7 +705,14 @@ def verifyRead {F : Type} [Field F] [DecidableEq F]
     | .ok ready =>
         match ← ResourceObservationAdmission.check native ready envelope with
         | .error _ => return .error .policyRejected
-        | .ok checked => return .ok ⟨present, ready, checked⟩
+        | .ok checked =>
+            match guardsExact : ResourceObservationAdmission.lawReadGuards ready with
+            | none => return .error .policySourceUnavailable
+            | some guards =>
+                if bound : guards.all (fun guard =>
+                    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true then
+                  return .ok ⟨present, ready, checked, guards, guardsExact, bound⟩
+                else return .error .policySourceConflict
   else return .error .capability
 
 def branches (tariff : Tariff) (source : Source) : List (Branch tariff source) :=
@@ -672,6 +727,27 @@ theorem mem_branches {tariff : Tariff} {source : Source}
       simp [branches, ResourceBirthPolicyController.Concrete.mem_policyBranches birthBranch]
   | inr index => simp [branches]
 
+def policyDependencyPairs {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (signed : SignedShape profile deployment tariff source ingress)
+    (checked : (branch : Branch tariff source) →
+      CheckedBranch pending branch (credentialFor signed branch))
+    (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
+      ReadLeg birth grain index (observationEnvelope signed index)) : List (Nat × Digest) :=
+  (branches tariff source).flatMap (fun branch =>
+      (checked branch).policySource.readGuard :: (checked branch).lawGuards) ++
+    (List.finRange (source.grainCommand tariff).targets.length).flatMap
+      (fun index => (observations index).lawGuards)
+
 def policySourceGuards {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
@@ -685,10 +761,40 @@ def policySourceGuards {F : Type} [Field F] [DecidableEq F]
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
-      CheckedBranch pending branch (credentialFor signed branch)) : List ReadGuard :=
-  (branches tariff source).map fun branch =>
-    ⟨⟨(checked branch).policySource.readGuard.1⟩,
-      (checked branch).policySource.readGuard.2⟩
+      CheckedBranch pending branch (credentialFor signed branch))
+    (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
+      ReadLeg birth grain index (observationEnvelope signed index)) : List ReadGuard :=
+  ((policyDependencyPairs signed checked observations).eraseDups.map fun pair =>
+    (⟨⟨pair.1⟩, pair.2⟩ : ReadGuard)).filter fun guard =>
+    guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId
+
+theorem policyDependency_covered {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (signed : SignedShape profile deployment tariff source ingress)
+    (checked : (branch : Branch tariff source) →
+      CheckedBranch pending branch (credentialFor signed branch))
+    (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
+      ReadLeg birth grain index (observationEnvelope signed index))
+    (pair : Nat × Digest) (member : pair ∈ policyDependencyPairs signed checked observations) :
+    (⟨pair.1⟩ : CellId) ∈ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId ∨
+      (⟨⟨pair.1⟩, pair.2⟩ : ReadGuard) ∈ policySourceGuards signed checked observations := by
+  by_cases written : (⟨pair.1⟩ : CellId) ∈
+      (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId
+  · exact Or.inl written
+  · apply Or.inr
+    apply List.mem_filter.mpr
+    refine ⟨List.mem_map.mpr ⟨pair, ?_, rfl⟩, ?_⟩
+    · simpa using member
+    · simpa using written
 
 def PolicyGuardShape {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
@@ -703,10 +809,12 @@ def PolicyGuardShape {F : Type} [Field F] [DecidableEq F]
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
-      CheckedBranch pending branch (credentialFor signed branch)) : Prop :=
-  (∀ guard ∈ policySourceGuards signed checked,
+      CheckedBranch pending branch (credentialFor signed branch))
+    (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
+      ReadLeg birth grain index (observationEnvelope signed index)) : Prop :=
+  (∀ guard ∈ policySourceGuards signed checked observations,
     guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId) ∧
-  (∀ guard ∈ policySourceGuards signed checked,
+  (∀ guard ∈ policySourceGuards signed checked observations,
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
 instance policyGuardShapeDecidable {F : Type} [Field F] [DecidableEq F]
@@ -722,8 +830,10 @@ instance policyGuardShapeDecidable {F : Type} [Field F] [DecidableEq F]
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
-      CheckedBranch pending branch (credentialFor signed branch)) :
-    Decidable (PolicyGuardShape signed checked) := by
+      CheckedBranch pending branch (credentialFor signed branch))
+    (observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
+      ReadLeg birth grain index (observationEnvelope signed index)) :
+    Decidable (PolicyGuardShape signed checked observations) := by
   unfold PolicyGuardShape
   infer_instance
 
@@ -746,7 +856,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     ReadLeg birth grain index (observationEnvelope signed index)
   checked : (branch : Branch tariff source) →
     CheckedBranch pending branch (credentialFor signed branch)
-  guardShape : PolicyGuardShape signed checked
+  guardShape : PolicyGuardShape signed checked observations
 
 def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
@@ -801,7 +911,7 @@ def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
                                     | .inl (.allocation index) => allocations index
                                     | .inl (.source index) => sources index
                                     | .inr index => targets index
-                                if guards : PolicyGuardShape signed checked then
+                                if guards : PolicyGuardShape signed checked observations then
                                   return .ok ⟨signed, pending, observations, checked, guards⟩
                                 else return .error .policySourceConflict
   else return .error .credentialShape
@@ -946,7 +1056,7 @@ def Accepted.readGuards {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
     List ReadGuard :=
   GrainResourceBirthTransaction.readGuards birth grain ++
-    policySourceGuards accepted.signed accepted.checked
+    policySourceGuards accepted.signed accepted.checked accepted.observations
 
 theorem Accepted.readGuards_readonly {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}

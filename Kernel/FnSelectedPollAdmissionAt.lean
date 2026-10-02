@@ -93,7 +93,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
     DataIntent ResourceBirthCodec.rootBytes :=
   { transactionId := transactionId ingress.spec
     writes := []
-    readGuards := [FnConsumerFrontierGateway.readGuard accepted.gateway.prepared] ++
+    readGuards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
       opened.authority.readGuards
     nullifiers := [frontierNullifier ingress.spec]
     exactCharge := charge ingress

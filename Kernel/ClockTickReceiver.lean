@@ -387,7 +387,8 @@ theorem prepare_behind_refused (prepared : Prepared deployment profile ambient d
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : ClockStore) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory (clockTarget deployment) ++
+    CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient command
         prepared.plan) ++
     ClockCell.slots ((ClockCell.clockOf logical).getD prepared.clock.clock) ++
@@ -403,13 +404,26 @@ def sourceStore (prepared : Prepared deployment profile ambient durable command)
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
     prepared.directory.directory⟩
 
+/-- The actual management target supplies current ambient and kind restrictions. -/
+def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory (clockTarget deployment)
+
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    (prepared : Prepared deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) (clockTarget deployment)
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics (clockTarget deployment) structural.additional
+  pure (sources ++ structural.readGuards)
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
@@ -426,11 +440,9 @@ cell, checked in capability mode against the checked signature. -/
 def capabilityEvidence [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :=
-  sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
-    (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-    (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
-      ambient command prepared.plan) command.capability receipt
+  ((policyConfig prepared).capabilityEvidenceChecked (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
+      ambient command prepared.plan)
+    command.capability () receipt () (fun _ => ())).toOption
 
 def authorize [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
@@ -440,17 +452,16 @@ def authorize [DecidableEq F]
     ambient command prepared.plan
   let config := policyConfig prepared
   let evidence ← requireSome .capabilityRejected (capabilityEvidence prepared receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
+  match ComposedPolicyAdmission.admit config wanted
       evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
@@ -528,14 +539,16 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   policyGuard prepared ::
-    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+    (prepared.authority.readGuards ++
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (lawReadGuards prepared).isSome = true
 
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
     Decidable (PhysicalShape prepared) := by

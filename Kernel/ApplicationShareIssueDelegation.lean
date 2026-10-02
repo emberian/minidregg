@@ -88,11 +88,12 @@ variable {context : Context deployment durable}
 def project (prepared : Prepared context profile federation height spec descriptor)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory spec.ticket.scope.app ++
+    CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec descriptor) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
-    ResourceObservationAdmission.resourceSlots spec.ticket.scope.app
+    ResourceObservationAdmission.resourceSlots prepared.wanted.subject spec.ticket.scope.app
       prepared.observed.before.kind logical⟩
 
 def step (prepared : Prepared context profile federation height spec descriptor) :
@@ -102,12 +103,28 @@ def step (prepared : Prepared context profile federation height spec descriptor)
       prepared.observed.before.kind prepared.observed.before.payload
       prepared.observed.rootExact)
 
+def kindDependencies (_prepared : Prepared context profile federation height spec descriptor) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment context.directory.directory spec.ticket.scope.app
+
 def policyConfig (prepared : Prepared context profile federation height spec descriptor) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile
-    context.authority.snapshot (ResourceObservationAdmission.sourceStore context)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
+    context.directory.directory
     (sourceCapabilityPortal context.authority.snapshot (issueMarker spec descriptor))
-    (step prepared)
+    (step prepared) spec.ticket.scope.app
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+def lawReadGuards (prepared : Prepared context profile federation height spec descriptor) :
+    Option (List DurableDataIntent.ReadGuard) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
+    context.directory.directory profile.semantics spec.ticket.scope.app structural.additional
+  pure ((sources ++ structural.readGuards).map fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))
+
+def readGuards (prepared : Prepared context profile federation height spec descriptor) :
+    List DurableDataIntent.ReadGuard := (lawReadGuards prepared).getD []
+
 
 def portal (prepared : Prepared context profile federation height spec descriptor) : Portal :=
   (policyConfig prepared).portal
@@ -116,15 +133,12 @@ def authorize (prepared : Prepared context profile federation height spec descri
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Option (Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted) := do
   let config := policyConfig prepared
-  let evidence ← sourceCapabilityOnlyEvidence profile.compilerProfile
-    context.authority.snapshot (ResourceObservationAdmission.sourceStore context)
-    (issueMarker spec descriptor) (step prepared) prepared.wanted
-    spec.appDelegateCapability signature
-  let committed ← config.registry.resolve prepared.wanted.policyId prepared.wanted.policyRevision
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  CanonicalPolicyAdmission.admit config context.authority.snapshot.authState prepared.wanted
-    evidence witness (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
+  let _ ← kindDependencies prepared
+  let evidence ← (config.capabilityEvidenceChecked prepared.wanted
+    spec.appDelegateCapability () signature () (fun _ => ())).toOption
+  let law ← config.resolve?
+  ComposedPolicyAdmission.admit config prepared.wanted
+    evidence law.witness (.policy prepared.wanted.policyId prepared.wanted.policyRevision)
     prepared.epochCurrent prepared.revisionCurrent
 
 attribute [irreducible] portal
@@ -136,6 +150,9 @@ structure Checked (prepared : Prepared context profile federation height spec de
   envelopeExact : signature.envelopeBytes = envelope
   authorization : Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted
   authorized : authorize prepared signature = some authorization
+  guardsPresent : (lawReadGuards prepared).isSome = true
+  guardsCurrent : ∀ guard ∈ readGuards prepared,
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height spec descriptor)
@@ -147,7 +164,13 @@ def check (native : CredentialSignatureIO.NativeConfig)
       if exact : signature.envelopeBytes = envelope then
         match authorized : authorize prepared signature with
         | none => return .error refused
-        | some authorization => return .ok ⟨signature, exact, authorization, authorized⟩
+        | some authorization =>
+          if guardsPresent : (lawReadGuards prepared).isSome = true then
+            if guardsCurrent : ∀ guard ∈ readGuards prepared,
+                guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+              return .ok ⟨signature, exact, authorization, authorized, guardsPresent, guardsCurrent⟩
+            else return .error refused
+          else return .error refused
       else return .error refused
 
 def readGuard (prepared : Prepared context profile federation height spec descriptor) :

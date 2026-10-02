@@ -471,14 +471,17 @@ theorem loadDirectoryFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCode
 
 /-- A grant is ready at the loaded cell when it is a fresh root whose own key
 is not yet registered (the birth registers it) and not revoked, and every
-channel it names is already registered and live; each read is a presence-plane
-read of the one cell. -/
+ancestor (a room birth: the creator's room-grant lineage) and channel it names
+is already registered and live; each read is a presence-plane read of the one
+cell. -/
 def GrantReady (snapshot : CredentialAuthorityDomain.Snapshot) (grant : AuthorityGrant) : Prop :=
   grant.capability.ancestry = [] ∧
     CapabilityIdFresh snapshot.cell grant.capability.head.id ∧
     grant.capability.head.parent = none ∧
     grant.capability.head.root = grant.capability.head.id ∧
-    grant.capability.head.ancestors = ∅ ∧
+    (∀ ancestor ∈ grant.capability.head.ancestors,
+      isRegistered snapshot.cell (.capability ancestor) = true ∧
+      isRevoked snapshot.cell (.capability ancestor) = false) ∧
     grant.capability.head.issuerEpoch = issuerEpochAt snapshot.cell grant.capability.head.issuer ∧
     grant.capability.head.policyEpoch = policyEpochAt snapshot.cell grant.capability.head.policyId ∧
     isRegistered snapshot.cell (.capability grant.capability.head.id) = false ∧
@@ -533,13 +536,14 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
         slotFresh := slot
         rootParent := parent
         rootSelf := root
-        rootAncestors := ancestors
+        ancestorsRegistered := fun ancestor member => (ancestors ancestor member).1
         issuerCurrent := issuer
         policyCurrent := policy
         selfUnregistered := unregistered
         channelsRegistered := fun channel channelMember => (channels channel channelMember).1
         selfLive := self
-        channelsLive := fun channel channelMember => (channels channel channelMember).2 }
+        channelsLive := fun channel channelMember => (channels channel channelMember).2
+        ancestorsLive := fun ancestor member => (ancestors ancestor member).2 }
 
 /-- The deployment fixes the authority cell. This prepares the batch before
 factory/policy authorization. New grants are never used to authorize their own

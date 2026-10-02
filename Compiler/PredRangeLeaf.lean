@@ -282,6 +282,24 @@ def Refusal.castAlias (x y : Int) : Refusal :=
     s!"values {x} and {y} have the same image in the native field (outside the band the compiled law decides)",
     none⟩
 
+
+/-- Alias witnesses carry no slot provenance, so a field-restricted grant cannot
+establish that either integer is covered. Only an unnarrowed grant sees the pair. -/
+def Refusal.castAliasFor (fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField))
+    (x y : Int) : Refusal :=
+  match fields with
+  | none => Refusal.castAlias x y
+  | some _ => Refusal.lawDeniedOutsideGrant
+
+/-- A restricted grant receives no alias values or range-specific reason. -/
+theorem castAliasFor_restricted (fields : Finset Minidregg.Theory.TypedAuthorization.CellField)
+    (x y : Int) :
+    Refusal.castAliasFor (some fields) x y = Refusal.lawDeniedOutsideGrant := rfl
+
+/-- An unnarrowed grant retains the exact alias diagnostic. -/
+theorem castAliasFor_none (x y : Int) :
+    Refusal.castAliasFor none x y = Refusal.castAlias x y := rfl
+
 #assert_axioms castAlias_none_iff
 #assert_axioms castAlias_sound
 #assert_axioms rangeLeaf_none_iff

@@ -105,10 +105,26 @@ theorem ownerPortal_use_exact (config : NativeHost.Config)
       have all := of_decide_eq_true use
       exact ⟨all.2.2.2.2, all.2.2.2.1⟩
 
-/-- Construct the existing typed capability evidence from the complete
-recipient authority. `capabilityEvidence` checks the stored parent, full
-lineage, current epochs, every revocation channel and the exact request.
-Only the signature-use witness differs from ordinary DRC admission. -/
+/-- Same receiving snapshot, target and kind roots as ordinary DRC, with
+only the native checked owner packet replacing its signature-use witness. -/
+def policyConfigAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (ingress : FnSelectiveReleaseIngress.Ingress)
+    (prepared : Prepared config opened ingress)
+    (tuple : PreparedTuple (DeclaredResourceController.plan prepared.operation))
+    (incidence : DeclaredResourceController.Incidence
+      (FnSelectiveReleaseIngress.command ingress)) :=
+  PhysicalLawResolution.config config.profile.compilerProfile opened.authority.snapshot
+    opened.directory.directory
+    (ownerPortal config opened ingress.packet
+      (DeclaredResourceController.operationMarker config.deployment.domain
+        config.profile.semantics (FnSelectiveReleaseIngress.command ingress))
+      (tuple.request incidence))
+    (DeclaredResourceController.step prepared.operation tuple incidence)
+    (DeclaredResourceController.incidenceTarget
+      (FnSelectiveReleaseIngress.command ingress) incidence).target
+    ((DeclaredResourceController.kindDependencies prepared.operation incidence).map
+      (·.additional) |>.getD [])
+
 def capabilityAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress)
     (prepared : Prepared config opened ingress)
@@ -116,20 +132,11 @@ def capabilityAt (config : NativeHost.Config) (opened : NativeHost.Opened config
     (incidence : DeclaredResourceController.Incidence
       (FnSelectiveReleaseIngress.command ingress))
     (checked : Checked config opened) :=
-  let request := tuple.request incidence
-  let marker := DeclaredResourceController.operationMarker
-    config.deployment.domain config.profile.semantics
-    (FnSelectiveReleaseIngress.command ingress)
-  CredentialAuthorityPolicyRegistry.capabilityEvidence
-    config.profile.compilerProfile opened.authority.snapshot
-    (DeclaredResourceController.sourceStore config.deployment.domain
-      opened.directory.directory)
-    (ownerPortal config opened ingress.packet marker request)
-    (DeclaredResourceController.step prepared.operation tuple incidence)
-    request.2
+  ((policyConfigAt config opened ingress prepared tuple incidence).capabilityEvidenceChecked
+    (tuple.request incidence).2
     (DeclaredResourceController.incidenceTarget
       (FnSelectiveReleaseIngress.command ingress) incidence).capability
-    () checked () (fun _ => ())
+    () checked () (fun _ => ())).toOption
 
 /-- The same canonical policy compiler used by DRC admits each special
 incidence. This is intentionally an `Option` of the *typed* authorized result,
@@ -142,31 +149,21 @@ def authorizeAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
       (FnSelectiveReleaseIngress.command ingress))
     (checked : Checked config opened) :=
   let request := (tuple.request incidence).2
-  let context := DeclaredResourceController.step prepared.operation tuple incidence
-  let policyConfig := CredentialAuthorityPolicyRegistry.config
-    config.profile.compilerProfile opened.authority.snapshot
-    (DeclaredResourceController.sourceStore config.deployment.domain
-      opened.directory.directory)
-    (ownerPortal config opened ingress.packet
-      (DeclaredResourceController.operationMarker config.deployment.domain
-        config.profile.semantics (FnSelectiveReleaseIngress.command ingress))
-      (tuple.request incidence))
-    context
+  let policyConfig := policyConfigAt config opened ingress prepared tuple incidence
+  (DeclaredResourceController.kindDependencies prepared.operation incidence).bind fun _ =>
   (capabilityAt config opened ingress prepared tuple incidence checked).bind fun evidence =>
-    (policyConfig.registry.resolve request.policyId request.policyRevision).bind fun committed =>
-      let witness := CanonicalPolicyAdmission.canonicalWitness
-        config.profile.compilerProfile.compiler committed
-        context.oldState context.newState
+    policyConfig.resolve?.bind fun law =>
+      let witness := law.witness
       if inputsInRange config.profile.compilerProfile.compiler
-          committed.record.predicate witness.oldState witness.newState then
+          law.predicate witness.compiled.oldState witness.compiled.newState then
         if decide (castInjOn NativeHostProfile.Field
-            (intsOf committed.record.predicate witness.oldState witness.newState)) then
+            (intsOf law.predicate witness.compiled.oldState witness.compiled.newState)) then
           if epoch : request.policyEpoch =
               opened.authority.snapshot.authState.policyEpoch request.policyId then
             if revision : request.policyRevision =
                 opened.authority.snapshot.authState.policyRevision request.policyId then
-              CanonicalPolicyAdmission.admit policyConfig
-                opened.authority.snapshot.authState request evidence witness
+              ComposedPolicyAdmission.admit policyConfig
+                request evidence witness
                 (.policy request.policyId request.policyRevision) epoch revision
             else none
           else none

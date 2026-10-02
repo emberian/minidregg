@@ -285,13 +285,17 @@ theorem keyStanding_subjectKey_frame {M N : Materializer} (pre : Cell M) (post :
 
 /-- Every stored edge retains its explicit origin and its matching static
 relation. The terminal record is a root; historical operation authorization
-is supplied by the accepted state transition, not by the serialized marker. -/
+is supplied by the accepted state transition, not by the serialized marker.
+
+A root's `ancestors` are its revocation dependencies: empty for a grant issued
+under nothing, and the creator's room-grant lineage for a grant born under a
+room (`ResourceBirthPolicyController.Concrete.BornLineage`). They only ever add
+refusals (`Admissible.ancestorNotRevoked`), never authority. -/
 inductive LineageValid {kind : ResourceKind} (parentage : Parentage) :
     StoredCapability kind → Prop
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
-      (rootSelf : cap.root = cap.id)
-      (ancestorsEmpty : cap.ancestors = ∅) :
+      (rootSelf : cap.root = cap.id) :
       LineageValid parentage ⟨cap, []⟩
   | attenuate (child parent : Capability kind)
       (tail : List (ParentLink kind))
@@ -313,7 +317,7 @@ theorem LineageValid.root_admissible_of_strict {kind : ResourceKind}
       root.parent = none ∧ root.root = root.id ∧
       root.Admissible state request := by
   induction valid with
-  | root cap parentNone rootSelf ancestorsEmpty =>
+  | root cap parentNone rootSelf =>
       exact ⟨cap, parentNone, rootSelf, admitted⟩
   | attenuate child parent tail parentValid edge ih =>
       exact ih strict.2 (Capability.strict_attenuation_admits_subset edge admitted)
@@ -326,7 +330,7 @@ theorem LineageValid.root_bounds {kind : ResourceKind}
     ∃ root : Capability kind, root.parent = none ∧ root.root = root.id ∧
       Capability.LineageBounds stored.head root parentage := by
   induction valid with
-  | root cap parentNone rootSelf ancestorsEmpty =>
+  | root cap parentNone rootSelf =>
       exact ⟨cap, parentNone, rootSelf, Capability.LineageBounds.refl cap parentage⟩
   | attenuate child parent tail parentValid edge ih =>
       obtain ⟨root, parentNone, rootSelf, bound⟩ := ih
@@ -340,8 +344,8 @@ theorem LineageValid.nonempty_lineage {kind : ResourceKind}
     (valid : LineageValid parentage stored) :
     Nonempty (stored.head.Lineage parentage) := by
   induction valid with
-  | root cap parentNone rootSelf ancestorsEmpty =>
-      exact ⟨.root cap parentNone rootSelf ancestorsEmpty⟩
+  | root cap parentNone rootSelf =>
+      exact ⟨.root cap parentNone rootSelf⟩
   | attenuate child parent tail parentValid edge ih =>
       obtain ⟨lineage⟩ := ih
       exact ⟨.attenuate child parent lineage edge⟩

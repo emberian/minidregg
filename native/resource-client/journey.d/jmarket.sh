@@ -92,6 +92,22 @@ next_height() {
     | xargs -0 -r jq -r '.acceptedCount // empty' 2>/dev/null | sort -n | tail -1)
   echo $((G + ${n:-0}))
 }
+# timers_in LO HI: how many records the deployment timers (journey.sh JOURNEY_TIMER_COUNTS: the
+# acceptedCount of each timer record, from the Host's own receipt) moved the next request height
+# to a value in (LO, HI]. Unset: no timer runs and every height step below is exact.
+timers_in() {
+  [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ -f "$JOURNEY_TIMER_COUNTS" ] || { echo 0; return; }
+  awk -v lo="$1" -v hi="$2" -v g="$G" '$1 + g > lo && $1 + g <= hi { n++ } END { print n + 0 }' "$JOURNEY_TIMER_COUNTS"
+}
+# exact_or_timers WANT GOT: GOT is WANT, or every height past WANT is a timer record. A timer's
+# record may land before the timer logged it: wait up to 30 s for the log.
+exact_or_timers() {
+  local tries=0
+  while [ "$2" -gt "$1" ] && [ "$(timers_in "$1" "$2")" -lt $(($2 - $1)) ] && [ "$tries" -lt 60 ]; do
+    sleep 0.5; tries=$((tries + 1))
+  done
+  [ "$2" = "$1" ] || { [ "$2" -gt "$1" ] && [ "$(timers_in "$1" "$2")" -ge $(($2 - $1)) ]; }
+}
 TICK=0
 tick_until() { # MARKET HEIGHT: alice appends to `tick` until the next request height is HEIGHT
   local h
@@ -103,7 +119,7 @@ tick_until() { # MARKET HEIGHT: alice appends to `tick` until the next request h
     say alice "doc append t$TICK tick 'tick $TICK'"; [ "$RC" = 0 ] || { record tick alice "doc append" admitted "rc $RC" FAIL "$(first_line)"; finish; }
     say alice "submit t$TICK"; [ "$RC" = 0 ] || { record tick alice "submit t$TICK" admitted "rc $RC" FAIL "$(first_line)"; finish; }
   done
-  [ "$h" = "$2" ] || { record tick alice "bids $1" "height $2" "height $h" FAIL "overshot"; finish; }
+  exact_or_timers "$2" "$h" || { record tick alice "bids $1" "height $2" "height $h" FAIL "overshot"; finish; }
 }
 scan() { # LABEL VALUE...: byte-pattern hits for each value over the Store and operator files
   scan_in "$JOURNEY_WORLD/store:$JOURNEY_WORLD/deployment:$JOURNEY_WORLD/operator.json:$JOURNEY_WORLD/genesis.json" "$@"
@@ -254,7 +270,7 @@ refused sealed bob "submit r0" 'all [ not (slot "request/height" <= '"$((CLOSE -
 # ------------------------------------------------ the close
 tick_until fish "$CLOSE"
 read_height fish
-check close "the next request height is the close" "h=$CLOSE" test "$HEIGHT" = "$CLOSE"
+check close "the next request height is the close (or past it by timer records only)" "h=$CLOSE" exact_or_timers "$CLOSE" "$HEIGHT"
 ok close alice "bid fish 99 1 late"
 refused close alice "submit late" "field 40 before == 0, field 40 == subject"
 
@@ -280,7 +296,7 @@ write_req "$H/bob/requests/again.req.json" fish 18 $((PB0 - 1)) "$PB0"
 ok reveal bob "propose again @again.req.json"
 refused reveal bob "submit again" "field 17 opens (field 18, field 19) with field 20"
 read_height fish
-check reveal "no refused attempt moved the height (4 refusals since bob's reveal)" "h=$H2" test "$HEIGHT" = "$H2"
+check reveal "no refused attempt moved the height (4 refusals since bob's reveal; timer records aside)" "h=$H2" exact_or_timers "$H2" "$HEIGHT"
 ok reveal alice "bids fish"
 cp "$OUT" "$SD/bids-revealed.txt"
 check reveal "alice's read now carries bob's revealed tuples; carol's slot is still sealed" bob-open,carol-sealed \

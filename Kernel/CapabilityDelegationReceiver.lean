@@ -96,7 +96,9 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   resourceGuard prepared :: policyGuard prepared ::
-    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+    (prepared.authority.readGuards ++
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter
+      fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
@@ -104,7 +106,8 @@ def PhysicalShape (prepared : Prepared deployment profile ambient durable comman
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (resourceGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (lawReadGuards prepared).isSome = true
 
 instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
     Decidable (PhysicalShape prepared) := by

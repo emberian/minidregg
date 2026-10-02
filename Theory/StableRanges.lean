@@ -906,16 +906,9 @@ theorem range_realization_unique
 
 /-! ### Stored mark and annotation records -/
 
-/-- Preserve both the mark-kind digest and its canonical payload as the
-semantic mark kind. -/
-structure MarkPayload where
-  kind : TypedAuthorization.Digest
-  payload : List UInt8
-deriving DecidableEq
-
 abbrev DecodedMark :=
   Mark Hyperdocument.RunId Hyperdocument.AtomId Hyperdocument.MarkId
-    Hyperdocument.PrincipalRef MarkPayload Hyperdocument.OperationId
+    Hyperdocument.PrincipalRef Hyperdocument.MarkKind Hyperdocument.OperationId
     TypedAuthorization.Digest
 
 abbrev DecodedAnnotation :=
@@ -935,23 +928,28 @@ def annotationLifecycle (record : Hyperdocument.AnnotationRecord) :
   | none => .active
   | some event => .retracted record.author event
 
-/-- Decode a stored mark directly from its canonical range/death/visibility
+/-- Decode a stored range mark directly from its canonical range/death/visibility
 data.  Empty-anchor ranges remain non-decoded rather than receiving a synthetic
-target. -/
+target.  A mark anchored to an atom or element at a revision is not a range
+overlay: its projection is the kernel's revision check
+(`ContentResource.markFresh`), and it does not decode here. -/
 def decodeMarkRecord?
     (id : Hyperdocument.MarkId)
     (record : Hyperdocument.MarkRecord) : Option DecodedMark :=
-  match decodeRange? record.range with
-  | none => none
-  | some target =>
-      some
-        { id := id
-          author := record.author
-          target := target
-          kind := { kind := record.kind, payload := record.payload }
-          created := record.operation
-          lifecycle := markLifecycle record
-          visibility := .indexed record.visibilityPolicy }
+  match record.anchor with
+  | .atom _ _ | .element _ _ => none
+  | .range range =>
+      match decodeRange? range with
+      | none => none
+      | some target =>
+          some
+            { id := id
+              author := record.author
+              target := target
+              kind := record.kind
+              created := record.operation
+              lifecycle := markLifecycle record
+              visibility := .indexed record.visibilityPolicy }
 
 /-- Decode a stored annotation directly from canonical data.  A document anchor
 becomes a first-class document target, an atom anchor an atom target, and an

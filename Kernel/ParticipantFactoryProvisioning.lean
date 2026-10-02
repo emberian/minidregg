@@ -282,13 +282,14 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     slotFresh := (capabilityIdFreshCheck_iff snapshot.cell command.capability).mp fresh
                     rootParent := rfl
                     rootSelf := rfl
-                    rootAncestors := rfl
+                    ancestorsRegistered := fun _ member => absurd member (Finset.notMem_empty _)
                     issuerCurrent := rfl
                     policyCurrent := rfl
                     selfUnregistered := unregistered
                     channelsRegistered := fun _ member => absurd member (Finset.notMem_empty _)
                     selfLive := live
-                    channelsLive := fun _ member => absurd member (Finset.notMem_empty _) }
+                    channelsLive := fun _ member => absurd member (Finset.notMem_empty _)
+                    ancestorsLive := fun _ member => absurd member (Finset.notMem_empty _) }
                 let candidate : Candidate
                     (family deployment snapshot profile.semantics ambient command)
                     snapshot.cell d () :=
@@ -320,7 +321,8 @@ cell it will govern and the presented control grant. Unrelated authority
 records are not projected. -/
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory deployment.factoryId ++
+    CanonicalRuntimeProfile.requestSlots
       (request deployment profile.template prepared.authority.snapshot profile.semantics
         ambient command) ++
     [("authority/operation/provision-factory-observe", 1)] ++
@@ -337,13 +339,26 @@ def sourceStore (prepared : Prepared deployment profile ambient durable command)
   ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
     prepared.directory.directory⟩
 
+/-- The actual management target supplies current ambient and kind restrictions. -/
+def kindDependencies (prepared : Prepared deployment profile ambient durable command) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory deployment.factoryId
+
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile ambient durable command) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (sourceStore prepared)
+    (prepared : Prepared deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared)
+    (step prepared) deployment.factoryId
+    ((kindDependencies prepared).map (·.additional) |>.getD [])
+
+def lawReadGuards (prepared : Prepared deployment profile ambient durable command) :
+    Option (List (Nat × Digest)) := do
+  let structural ← kindDependencies prepared
+  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics deployment.factoryId structural.additional
+  pure (sources ++ structural.readGuards)
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
@@ -364,22 +379,18 @@ def authorize [DecidableEq F]
   let wanted := request deployment profile.template prepared.authority.snapshot
     profile.semantics ambient command
   let config := policyConfig prepared
+  let _ ← requireSome .policyUnavailable (kindDependencies prepared)
   let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.control receipt)
-  let committed ← requireSome .policyUnavailable
-    (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  if inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      witness.oldState witness.newState != true then
+    (config.capabilityEvidenceChecked wanted command.control () receipt () (fun _ => ())).toOption
+  let law ← requireSome .policyUnavailable config.resolve?
+  let witness := law.witness
+  if inputsInRange profile.compilerProfile.compiler law.predicate
+      (step prepared).oldState (step prepared).newState != true then
     throw .policyInputRange
   if !decide (castInjOn F
-      (intsOf committed.record.predicate witness.oldState witness.newState)) then
+      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
     throw .policyCastAlias
-  match CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted
+  match ComposedPolicyAdmission.admit config wanted
       evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl with
   | none => .error .policyRejected
   | some authorization =>
@@ -462,6 +473,11 @@ theorem Accepted.capability_mode [DecidableEq F]
     (accepted : Accepted prepared ingress) :
     ∃ capability commitment,
       accepted.semantic.authorization.evidence.capabilityValue = some (capability, commitment) :=
-  source_capability_only_mode _ _ _ _ _ accepted.semantic.authorization.evidence
+  by
+    match accepted.semantic.authorization.evidence with
+    | .signature witness _ _ => exact nomatch witness
+    | .proof witness _ => exact nomatch witness
+    | .capability capability commitment _ _ _ _ _ _ _ _ _ _ _ _ _ =>
+        exact ⟨capability, commitment, rfl⟩
 
 end Minidregg.Kernel.ParticipantFactoryProvisioning

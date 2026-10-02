@@ -170,8 +170,25 @@ private def mediaType (source : String) : Result String := do
       pure base.trimAscii.toString
   | _ => throw "ambiguous Content-Type parameters"
 
+/-- A post-finish choice can only repeat the finish marker, not produce more
+output. Only empty content and the assistant role are inert delta fields. -/
+private def checkTerminalEcho (choice : Json) (finishedReason : String) : Result Unit := do
+  let obj ← choice.getObj?.mapError (fun _ => "SSE terminal choice must be an object")
+  let keys := obj.foldl (init := []) (fun names key _ => key :: names)
+  unless keys.all (["index", "finish_reason", "native_finish_reason", "delta"].contains) do
+    throw "SSE terminal choice contains extra output"
+  unless (← stringField choice "finish_reason") = finishedReason do
+    throw "SSE terminal choice finish reason differs"
+  let delta ← (← field choice "delta").getObj?.mapError
+    (fun _ => "SSE terminal choice delta must be an object")
+  let inert := delta.foldl (init := true) fun accepted key value =>
+    accepted && ((key == "content" && value == toJson "") ||
+      (key == "role" && value == toJson "assistant"))
+  unless inert do throw "SSE terminal choice delta is not inert"
+
 /-- Accept a complete stream with exactly one terminal usage event, after a
-finish reason and immediately before [DONE]. No usage is inferred from deltas. -/
+finish reason and immediately before [DONE]. That event may echo the same
+choice's finish reason with an inert delta. No usage is inferred from deltas. -/
 private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage := do
   let normalized := (text.replace "\r\n" "\n").replace "\r" "\n"
   let normalized := if normalized.startsWith (String.ofList [Char.ofNat 65279]) then
@@ -183,14 +200,14 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
   let frames := (segments.take (segments.length - 1)).filter (· != "")
   if frames.isEmpty || frames.length > 4096 then
     throw "SSE frame count outside bound"
-  let mut finished := false
+  let mut finished : Option String := none
   let mut done := false
   let mut usage : Option Usage := none
   let mut completionId : Option String := none
   for frame in frames do
     let some payload ← dataPayload frame | continue
     if payload = "[DONE]" then
-      if done || !finished || usage.isNone then
+      if done || finished.isNone || usage.isNone then
         throw "SSE completion lacks one terminal usage record"
       done := true
     else
@@ -206,25 +223,32 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
       let choices ← (← field event "choices").getArr?.mapError
         (fun _ => "SSE choices must be an array")
       if choices.isEmpty then
-        unless finished do throw "usage precedes finish reason"
+        unless finished.isSome do throw "usage precedes finish reason"
         usage := some (← usageOfJson (← field event "usage"))
       else
-        if finished || choices.size != 1 then
-          throw "SSE choices continue after finish or contain multiple indices"
-        for choice in choices do
-          unless (← field choice "index").getNat?.toOption == some 0 do
-            throw "SSE choice index is not zero"
-          let reason ← field choice "finish_reason"
-          if reason != .null then
-            let name ← reason.getStr?.mapError (fun _ => "finish_reason must be a string")
-            if name.isEmpty then throw "empty finish_reason"
-            finished := true
-          match event.getObjVal? "usage" with
-          | .ok value =>
-              if value != .null then
-                unless finished do throw "usage precedes finish reason"
-                usage := some (← usageOfJson value)
-          | .error _ => pure ()
+        if choices.size != 1 then
+          throw "SSE choices contain multiple indices"
+        let choice := choices[0]!
+        unless (← field choice "index").getNat?.toOption == some 0 do
+          throw "SSE choice index is not zero"
+        match finished with
+        | some reason =>
+            checkTerminalEcho choice reason
+            -- A repeated finish is allowed only on the unique usage event;
+            -- the next data event must be [DONE], as enforced above.
+            usage := some (← usageOfJson (← field event "usage"))
+        | none =>
+            let reason ← field choice "finish_reason"
+            if reason != .null then
+              let name ← reason.getStr?.mapError (fun _ => "finish_reason must be a string")
+              if name.isEmpty then throw "empty finish_reason"
+              finished := some name
+            match event.getObjVal? "usage" with
+            | .ok value =>
+                if value != .null then
+                  unless finished.isSome do throw "usage precedes finish reason"
+                  usage := some (← usageOfJson value)
+            | .error _ => pure ()
   unless done do throw "SSE [DONE] marker absent"
   match usage with
   | some observed => pure observed
