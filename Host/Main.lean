@@ -1456,13 +1456,13 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
   return NativeHost.publicSubmissionOutcome outcome
 
-/-- Receipt recovery re-admits the exact event-22 intent at the verifier's
-original prefix. It never runs a birth, grain settlement or app delegation. -/
+/-- Receipt recovery uses the exact event-22 certificate and original receipt
+retained by the refreshed verifier walk. It performs no new admission. -/
 def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let opened ← sessionOpened config state
-  match ← ApplicationShareIssueGrainLookup.lookupOriginal config opened.durable payload with
+  let session ← sessionWalked config state
+  match ApplicationShareIssueGrainLookup.lookupVerified session.verified payload with
   | .error .malformed =>
       return .refused .malformed "application-grain-share-issue".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
