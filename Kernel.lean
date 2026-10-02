@@ -125,6 +125,6 @@ import Kernel.NockProgramCell.Sample -- NOCK K-NOCK-CELL: sampleOf (targets + AB
 import Kernel.NockEntry -- K-EVAL E2: Nock's entry into the run (N16 subjectFormula, the oracle = the export, decodeWrites, staleField), below Compiler.Evaluator
 import Kernel.Run -- K-RAN made generic (K-EVAL E2): RunClaim, resolve (registry; unknownEvaluator / evaluatorDisabled), checkRun E (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle over E.Spec and at Nock; op 134 dryRun
 import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R
-import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)
+import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 and the blinding ratchet the field-3 reader's opened entries are unchanged by a write to field 4, the root moves, and every sealed leaf moves (narrowed_view_hides_field_four)
 
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge

@@ -406,14 +406,28 @@ theorem step_prepared_exact
   rw [PolicyStepContext.ofPreparedTupleExact_eq]
   rfl
 
-def policyConfig [DecidableEq F]
+/-- Build the policy configuration from the step the caller is already
+examining. A leg must not project and hash its same old/new cells twice merely
+to resolve the committed law. This helper is only fed the current prepared
+step below; no context is retained across requests or accepted from a client. -/
+def policyConfigFromStep [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
+    (context : PolicyStepContext) : CanonicalPolicyConfig F :=
   CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (sourceCapabilityPortal prepared.authority.snapshot
-      (operationMarker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared tuple incidence)
+      (operationMarker prepared.authority.snapshot.domain profile.semantics command)) context
+
+def policyConfig [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
+  policyConfigFromStep prepared (step prepared tuple incidence)
+
+theorem policyConfigFromStep_exact [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    policyConfigFromStep prepared (step prepared tuple incidence) =
+      policyConfig prepared tuple incidence := rfl
 
 def portals [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -442,7 +456,7 @@ def authorizeLeg [DecidableEq F]
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let config := policyConfig prepared tuple incidence
+  let config := policyConfigFromStep prepared context
   let capability := (incidenceTarget command incidence).capability
   let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
@@ -469,7 +483,7 @@ def lawLeaf [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   LawLeaf.of committed.record.predicate witness.oldState witness.newState
@@ -589,7 +603,7 @@ def rangeLeaf [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
@@ -618,7 +632,7 @@ def castAliasLeg [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option (Int × Int) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   castAlias F (intsOf committed.record.predicate witness.oldState witness.newState)
@@ -667,7 +681,7 @@ def lawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset 
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option Refusal := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let committed ← (policyConfigFromStep prepared context).registry.resolve wanted.policyId wanted.policyRevision
   let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
     context.oldState context.newState
   if Minidregg.Pred.eval committed.record.predicate witness.oldState witness.newState then none
@@ -800,11 +814,30 @@ def targetAmount (target : Target) :
     | append _ => exact fun _ _ => 0
     | read => exact fun _ _ => 0
 
-/-- A target's footprint, scanning only the patch's write footprint. -/
+/-- The address the kernel's blinding ratchet writes on every leg of a
+blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
+it (`writableKeyCheck`), no scope names it, and it is left out of the
+footprint. -/
+def targetRatchet (target : Target) : Address target.layout → Bool := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
+    | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
+    | append _ => exact fun _ => false
+    | read => exact fun _ => false
+
+/-- What one write changed, but the ratchet's address. -/
+def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
+  (ResourceObservationAdmission.changed pre post).filter fun address => targetRatchet target address = false
+
+/-- A target's footprint, scanning only the patch's write footprint, without
+the ratchet's address. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   ResourceObservationAdmission.footprintOf
-    (ResourceObservationAdmission.changedWithin (Patch.writeFootprint patch) pre post)
+    (ResourceObservationAdmission.changedWithin
+      ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
     (targetField target) (targetAmount target) pre post
 
 /-- The footprint of one incidence: a target's write, or nothing for the
@@ -817,19 +850,29 @@ def legFootprint (prepared : PreparedInvocation deployment profile ambient durab
       (prepared.targets i).pre.logical (prepared.targets i).post)
   | none => none
 
-/-- **The leg's footprint is exactly what the write changed**: scanning the
-patch's write footprint finds every changed address of the target cell
-(`Patch.run_frame`), so it equals the whole-cell footprint. -/
+/-- **The leg's footprint is exactly what the write changed, but the
+ratchet**: scanning the patch's write footprint finds every changed address of
+the target cell (`Patch.run_frame`), so it equals the whole-cell footprint over
+every address except the blinding the kernel advanced. -/
 theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprint
+    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprintOf
+      (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
       (targetField command.targets[i]) (targetAmount command.targets[i])
       (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  simp only [legFootprint, targetFootprint, ResourceObservationAdmission.footprint]
-  rw [ResourceObservationAdmission.changedWithin_eq_changed]
-  intro address outside
-  rw [← (prepared.targets i).postExact]
-  exact (Patch.run_frame _ _ address outside).symm
+  simp only [legFootprint, targetFootprint, changedEffect]
+  congr 2
+  have whole := ResourceObservationAdmission.changedWithin_eq_changed
+    (candidates := Patch.writeFootprint (targetPatch prepared.authority.snapshot profile.semantics
+      ambient command command.targets[i] (prepared.targets i).pre))
+    (pre := (prepared.targets i).pre.logical) (post := (prepared.targets i).post) (by
+      intro address outside
+      rw [← (prepared.targets i).postExact]
+      exact (Patch.run_frame _ _ address outside).symm)
+  rw [← whole]
+  ext address
+  simp only [ResourceObservationAdmission.changedWithin, Finset.mem_filter]
+  tauto
 
 /-- The authorizing capability's scope against a leg's footprint. Refusals
 name the failed coordinate: a field the scope does not name, or a named field
@@ -907,7 +950,8 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
     {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple (some i) envelope) :
     ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      cap.scope.FieldsCover (ResourceObservationAdmission.footprint
+      cap.scope.FieldsCover (ResourceObservationAdmission.footprintOf
+        (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
         (targetField command.targets[i]) (targetAmount command.targets[i])
         (prepared.targets i).pre.logical (prepared.targets i).post) := by
   have fields := leg.fields

@@ -41,9 +41,16 @@ theorem actions_readJob (store : Store effectLayout) (job subject capability roo
     stateField, callerField, callerAcctField, priceField, escrowField, providerField,
     providerAcctField, bondField]
 
-theorem jobPatch_readJob (command : Command) (d : Declaration) (store : Store effectLayout) :
-    readJob command.job (Patch.run store (jobPatch command d)) = some d.plan.after :=
-  actions_readJob store command.job command.subject.value command.capability.value
+theorem jobPatch_readJob (command : Command) (d : Declaration) (store pre : Store effectLayout)
+    (height : Nat) :
+    readJob command.job (Patch.run store (jobPatch command d pre height)) = some d.plan.after := by
+  rw [jobPatch, Patch.run_append]
+  have ratchet : ∀ s : Store effectLayout, readJob command.job
+      (Patch.run s (Minidregg.Compiler.DeclaredEffectCell.blinding.patch pre height)) = readJob command.job s := by
+    intro s
+    simp only [readJob, readField, DeclaredFields.read_ratchet]
+  rw [ratchet]
+  exact actions_readJob store command.job command.subject.value command.capability.value
     d.expectedPreRoot.value d.operationNullifier d.plan.before d.plan.after
 
 variable {F : Type} [Field F] {deployment : Deployment}
@@ -55,7 +62,7 @@ theorem Prepared.job_after (prepared : Prepared deployment profile ambient durab
     readJob command.job prepared.jobPost.logical = some prepared.plan.after :=
   jobPatch_readJob command
     (declaration prepared.authority.snapshot.domain profile.semantics command prepared.job.root
-      prepared.plan) prepared.job.logical
+      prepared.plan) prepared.job.logical prepared.job.logical ambient.height
 
 /-- With `PayLedger.job_turn_balance`: the job the receiver commits holds the
 loaded job's credit plus the deposit, minus the payouts and the retired share. -/

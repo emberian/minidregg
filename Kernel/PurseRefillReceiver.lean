@@ -199,8 +199,12 @@ def scalarCommand (command : Command) (d : Declaration) : DeclaredResourceScalar
     d.expectedPreRoot, d.operationNullifier,
     AgentGrain.actions command.task d.plan.before d.plan.after⟩
 
-def pursePatch (command : Command) (d : Declaration) : Patch effectLayout :=
-  DeclaredResourceScalar.cellPatch (scalarCommand command d)
+/-- The purse leg's patch: the refill writes, then the kernel's ratchet of the
+purse's blinding at the turn's height (K-HIDE-ROTATE). -/
+def pursePatch (command : Command) (d : Declaration) (pre : Store effectLayout) (height : Nat) :
+    Patch effectLayout :=
+  DeclaredResourceScalar.cellPatch (scalarCommand command d) ++
+    DeclaredEffectCell.blinding.patch pre height
 
 structure Mode {M : Materializer effectLayout Digest} (pre : Materialized M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
@@ -255,9 +259,9 @@ def family (snapshot : Snapshot) (purse : PurseCell) (semantics : Digest) (ambie
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun d _ => Mode purse d
-  Postcondition := fun d _ post => (pursePatch command d).ResultAt purse.logical post
+  Postcondition := fun d _ post => (pursePatch command d purse.logical ambient.height).ResultAt purse.logical post
   effectDigest := effectDigest snapshot.domain semantics command
-  patch := fun d _ => pursePatch command d
+  patch := fun d _ => pursePatch command d purse.logical ambient.height
   nullifier := fun d _ => some d.operationNullifier
   Release := fun _ _ => Unit
   DeclassificationAuthority := fun _ _ => Unit
@@ -365,7 +369,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
           | .error reason => throw (.purseCell reason)
           | .ok _ =>
             match validate DeclaredEffectCell.materializer purse purse.root
-                (pursePatch command d) with
+                (pursePatch command d purse.logical ambient.height) with
             | .rejected _ => throw .validation
             | .accepted validated =>
               let candidate : Candidate (family snapshot purse profile.semantics ambient command)

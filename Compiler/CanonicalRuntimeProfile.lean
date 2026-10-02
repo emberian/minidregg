@@ -233,6 +233,7 @@ def sourceComponents : List (List UInt8) :=
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,
+   StoreCodec.ratchetCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,
    StreamCodec.nat.encode CanonicalResourcePageMaterializer.wireVersion,
