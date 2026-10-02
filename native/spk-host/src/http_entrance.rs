@@ -7,13 +7,14 @@
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const MAX_HEAD: usize = 64 * 1024;
@@ -74,6 +75,7 @@ impl Method {
 
 #[derive(Debug)]
 pub(crate) struct ReceivedRequest {
+    response_stream: Option<UnixStream>,
     pub method: Method,
     #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
     pub path_and_query: String,
@@ -536,6 +538,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     }
     Ok((
         ReceivedRequest {
+            response_stream: None,
             method,
             path_and_query: target[1..].to_owned(),
             ordinary_headers,
@@ -690,6 +693,135 @@ impl CustodianPolicy {
     }
 }
 
+const MAX_PENDING_REQUESTS: usize = 16;
+const MAX_PENDING_PER_SUBJECT: usize = 2;
+const QUEUE_DEADLINE: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+struct Admission {
+    total: usize,
+    subjects: HashMap<String, usize>,
+}
+struct AdmissionGuard {
+    admission: Arc<Mutex<Admission>>,
+    subject: String,
+}
+impl AdmissionGuard {
+    fn reserve(admission: &Arc<Mutex<Admission>>, subject: &str) -> io::Result<Option<Self>> {
+        let mut state = admission
+            .lock()
+            .map_err(|_| refuse("admission lock poisoned"))?;
+        if state.total >= MAX_PENDING_REQUESTS
+            || state.subjects.get(subject).copied().unwrap_or(0) >= MAX_PENDING_PER_SUBJECT
+        {
+            return Ok(None);
+        }
+        state.total += 1;
+        *state.subjects.entry(subject.into()).or_default() += 1;
+        Ok(Some(Self {
+            admission: admission.clone(),
+            subject: subject.into(),
+        }))
+    }
+}
+impl Drop for AdmissionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.admission.lock() {
+            state.total -= 1;
+            if let Some(count) = state.subjects.get_mut(&self.subject) {
+                *count -= 1;
+                if *count == 0 {
+                    state.subjects.remove(&self.subject);
+                }
+            }
+        }
+    }
+}
+struct ParsedRequest {
+    index: usize,
+    request: ReceivedRequest,
+    kind: EntranceKind,
+    policy: CustodianPolicy,
+    stream: UnixStream,
+    queued_at: Instant,
+    _guard: AdmissionGuard,
+}
+fn fair_pending_index(
+    pending: &VecDeque<ParsedRequest>,
+    served: &HashMap<String, u64>,
+) -> Option<usize> {
+    pending
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, request)| {
+            served
+                .get(&request.policy.fixed_subject)
+                .copied()
+                .unwrap_or(0)
+        })
+        .map(|(index, _)| index)
+}
+pub(crate) fn admission_response(method: Method, status: &str) -> Vec<u8> {
+    let body = format!(
+        "{{\"protocol\":\"mini-spk-admission-v1\",\"status\":\"{status}\",\"retry\":\"{}\"}}\n",
+        if status == "busy" {
+            "new-request"
+        } else {
+            "exact-recovery-only"
+        }
+    );
+    let mut bytes = format!("HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+    if method != Method::Head {
+        bytes.extend_from_slice(body.as_bytes());
+    }
+    bytes
+}
+fn write_response_bounded(stream: &UnixStream, mut bytes: &[u8]) -> io::Result<()> {
+    let deadline = Instant::now() + DEADLINE;
+    while !bytes.is_empty() {
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "HTTP response deadline"))?;
+        let mut poll = [libc::pollfd {
+            fd: stream.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        }];
+        if !poll_entrances(&mut poll, left.as_millis().min(i32::MAX as u128) as i32)? {
+            continue;
+        }
+        let sent = unsafe {
+            libc::send(
+                stream.as_raw_fd(),
+                bytes.as_ptr().cast(),
+                bytes.len(),
+                libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+            )
+        };
+        if sent > 0 {
+            bytes = &bytes[sent as usize..];
+        } else {
+            let error = io::Error::last_os_error();
+            if !matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+            ) {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+fn dispatch_error_response(method: Method, error: &io::Error) -> Vec<u8> {
+    if error.kind() == io::ErrorKind::WouldBlock {
+        admission_response(method, "busy")
+    } else if error.kind() == io::ErrorKind::Interrupted {
+        admission_response(method, "uncertain")
+    } else {
+        unavailable_response(method)
+    }
+}
+
 /// A same-UID, owner-private Unix entrance. No TCP listener or Mini signer is
 /// created here. Under the owner lock, an owned socket is removed only when
 /// connect reports ConnectionRefused and its device/inode are unchanged.
@@ -717,10 +849,19 @@ impl PrivateHttpEntrance {
         if entrances.is_empty() || auxiliary_fds.len() > 10 {
             return Err(refuse("resident entrance count refused"));
         }
+        // Only unadmitted requests live in this queue. A restart may drop them;
+        // no operation ID, Store record or physical effect has been allocated.
+        let admission = Arc::new(Mutex::new(Admission::default()));
+        let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
+        let mut pending: VecDeque<ParsedRequest> = VecDeque::new();
+        let mut served: HashMap<String, u64> = HashMap::new();
+        let mut clock = 0_u64;
+        let mut next_route = 0_usize;
         loop {
             if entrances.len() > crate::resident_route_control::MAX_ROUTES {
                 return Err(refuse("resident route limit reached"));
             }
+            pending.extend(receiver.try_iter());
             let prior_count = entrances.len();
             let mut polls: Vec<libc::pollfd> = entrances
                 .iter()
@@ -740,9 +881,20 @@ impl PrivateHttpEntrance {
                     revents: 0,
                 });
             }
-            if !poll_entrances(&mut polls, -1)? {
-                continue;
-            }
+            // Readers notify through the bounded channel. Poll at a short bound
+            // while they exist, and block normally when the app is idle.
+            let active = admission
+                .lock()
+                .map_err(|_| refuse("admission lock poisoned"))?
+                .total;
+            let timeout = if !pending.is_empty() {
+                0
+            } else if active > 0 {
+                20
+            } else {
+                -1
+            };
+            let _ = poll_entrances(&mut polls, timeout)?;
             for (index, auxiliary) in polls.iter().skip(prior_count).enumerate() {
                 if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     return Err(refuse("resident auxiliary poll error"));
@@ -751,7 +903,11 @@ impl PrivateHttpEntrance {
                     let _ = dispatch(Err(index), &mut entrances)?;
                 }
             }
-            for (index, poll) in polls.iter().take(prior_count).enumerate() {
+            // Rotate listener acceptance, then select queued work by principal's
+            // last service turn. Multiple routes do not buy a principal priority.
+            for offset in 0..prior_count {
+                let index = (next_route + offset) % prior_count;
+                let poll = &polls[index];
                 if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     return Err(refuse("resident entrance poll error"));
                 }
@@ -759,20 +915,82 @@ impl PrivateHttpEntrance {
                     continue;
                 }
                 let entrance = &entrances[index];
-                let (stream, _) = entrance.listener.accept()?;
-                let policy = entrance.policy.clone();
-                let directory = entrance.socket.parent().map(Path::to_path_buf);
-                if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
-                    let _ = handle_stream_with(
-                        stream,
-                        &policy,
-                        directory.as_deref(),
-                        &mut |request, kind, policy| {
-                            dispatch(Ok((index, request, kind, policy)), &mut entrances)?
-                                .ok_or_else(|| refuse("resident HTTP response absent"))
-                        },
-                    );
+                let (mut stream, _) = entrance.listener.accept()?;
+                if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) {
+                    continue;
                 }
+                let policy = entrance.policy.clone();
+                let mut guard = match AdmissionGuard::reserve(&admission, &policy.fixed_subject)? {
+                    Some(guard) => Some(guard),
+                    None => {
+                        let _ = stream.write_all(&admission_response(Method::Get, "busy"));
+                        continue;
+                    }
+                };
+                let directory = entrance.socket.parent().map(Path::to_path_buf);
+                let sender = sender.clone();
+                std::thread::Builder::new()
+                    .name("mini-spk-http-reader".into())
+                    .spawn(move || {
+                        // Parsing/bootstrap never calls Mini. A held or malformed
+                        // reader occupies its own bounded slot, not the dispatch loop.
+                        let _ = handle_stream_with(
+                            stream,
+                            &policy,
+                            directory.as_deref(),
+                            &mut |request, kind, policy| {
+                                let response_stream = request
+                                    .response_stream
+                                    .as_ref()
+                                    .ok_or_else(|| refuse("queued response stream absent"))?
+                                    .try_clone()?;
+                                let queued = ParsedRequest {
+                                    index,
+                                    request,
+                                    kind,
+                                    policy: policy.clone(),
+                                    stream: response_stream,
+                                    queued_at: Instant::now(),
+                                    _guard: guard
+                                        .take()
+                                        .ok_or_else(|| refuse("reader queued twice"))?,
+                                };
+                                sender
+                                    .send(queued)
+                                    .map_err(|_| refuse("resident dispatch loop ended"))?;
+                                // Ownership of the response passed to the dispatch loop.
+                                Ok(Vec::new())
+                            },
+                        );
+                    })?;
+            }
+            next_route = (next_route + 1) % entrances.len();
+            pending.extend(receiver.try_iter());
+            if let Some(index) = fair_pending_index(&pending, &served) {
+                let queued = pending.remove(index).expect("selected pending request");
+                let method = queued.request.method;
+                let response = if queued.queued_at.elapsed() >= QUEUE_DEADLINE {
+                    admission_response(method, "busy")
+                } else {
+                    clock = clock
+                        .checked_add(1)
+                        .ok_or_else(|| refuse("admission turn overflow"))?;
+                    served.insert(queued.policy.fixed_subject.clone(), clock);
+                    dispatch(
+                        Ok((queued.index, queued.request, queued.kind, &queued.policy)),
+                        &mut entrances,
+                    )
+                    .and_then(|reply| reply.ok_or_else(|| refuse("resident HTTP response absent")))
+                    .unwrap_or_else(|error| dispatch_error_response(method, &error))
+                };
+                let stream = queued.stream;
+                let guard = queued._guard;
+                std::thread::Builder::new()
+                    .name("mini-spk-http-response".into())
+                    .spawn(move || {
+                        let _ = write_response_bounded(&stream, &response);
+                        drop(guard);
+                    })?;
             }
         }
     }
@@ -884,7 +1102,7 @@ fn poll_entrances(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<boo
     Ok(ready > 0)
 }
 
-fn peer_uid(stream: &UnixStream) -> Option<u32> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let mut credential = unsafe { std::mem::zeroed::<libc::ucred>() };
     let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     if unsafe {
@@ -1053,18 +1271,21 @@ fn handle_stream_with(
         };
     }
     let kind = policy.authenticate(&mut request)?;
+    request.response_stream = Some(stream.try_clone()?);
     let method = request.method;
     if request.websocket.is_some() {
         // The fd3 worker owns this duplicate once the open is admitted; on a
         // refusal or failure the response below goes out on the original.
         request.upgrade_stream = Some(stream.try_clone()?);
     }
+    // Typed pre-admission busy and retained uncertainty remain distinguishable.
+    // Other failures use the ordinary unavailable response.
     // The client sees one uniform 503; the operator's journal gets the
     // reason (an admitted request that failed in delivery, an fd3 refusal,
     // an unrepresentable app response), or a survey cannot say what broke.
     let response = dispatch(request, kind, policy).unwrap_or_else(|error| {
         eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
-        unavailable_response(method)
+        dispatch_error_response(method, &error)
     });
     stream.write_all(&response)
 }
@@ -1076,6 +1297,112 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     include!("http_entrance_gitweb_probe.rs");
+
+    #[test]
+    fn admission_bounds_principals_and_apps_independently() {
+        let state = Arc::new(Mutex::new(Admission::default()));
+        let mut held = Vec::new();
+        for principal in 0..8 {
+            for _ in 0..2 {
+                held.push(
+                    AdmissionGuard::reserve(&state, &principal.to_string())
+                        .unwrap()
+                        .unwrap(),
+                );
+            }
+            assert!(AdmissionGuard::reserve(&state, &principal.to_string())
+                .unwrap()
+                .is_none());
+        }
+        assert!(AdmissionGuard::reserve(&state, "new").unwrap().is_none());
+        let other = Arc::new(Mutex::new(Admission::default()));
+        assert!(AdmissionGuard::reserve(&other, "new").unwrap().is_some());
+        drop(held);
+        assert!(AdmissionGuard::reserve(&state, "new").unwrap().is_some());
+        assert!(String::from_utf8(admission_response(Method::Get, "busy"))
+            .unwrap()
+            .contains("new-request"));
+        assert!(
+            String::from_utf8(admission_response(Method::Get, "uncertain"))
+                .unwrap()
+                .contains("exact-recovery-only")
+        );
+    }
+    #[test]
+    fn principal_turns_are_fair_across_multiple_routes() {
+        let state = Arc::new(Mutex::new(Admission::default()));
+        let make = |principal: &str| {
+            let (stream, _) = UnixStream::pair().unwrap();
+            let mut policy = policy();
+            policy.fixed_subject = principal.into();
+            ParsedRequest {
+                index: 0,
+                request: parsed("GET / HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").unwrap(),
+                kind: EntranceKind::Browser,
+                policy,
+                stream,
+                queued_at: Instant::now(),
+                _guard: AdmissionGuard::reserve(&state, principal).unwrap().unwrap(),
+            }
+        };
+        let pending = VecDeque::from([make("a"), make("a"), make("b"), make("c")]);
+        let mut served = HashMap::from([("a".into(), 4), ("b".into(), 2), ("c".into(), 3)]);
+        assert_eq!(fair_pending_index(&pending, &served), Some(2));
+        served.insert("b".into(), 5);
+        assert_eq!(fair_pending_index(&pending, &served), Some(3));
+    }
+    #[test]
+    fn held_reader_does_not_block_another_members_dispatch() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("fair-reader-{}-{nonce}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let make = |name: &str, subject: &str| {
+            let directory = root.join(name);
+            fs::create_dir(&directory).unwrap();
+            let socket = directory.join("http.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let metadata = fs::symlink_metadata(&socket).unwrap();
+            let mut policy = policy();
+            policy.fixed_subject = subject.into();
+            PrivateHttpEntrance {
+                listener,
+                socket,
+                socket_dev: metadata.dev(),
+                socket_ino: metadata.ino(),
+                _lock: File::create(directory.join(".lock")).unwrap(),
+                policy,
+            }
+        };
+        let a = make("a", "80008");
+        let b = make("b", "90009");
+        let a_path = a.socket.clone();
+        let b_path = b.socket.clone();
+        let (mut control, mut stop) = UnixStream::pair().unwrap();
+        let (seen, events) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let fds = [control.as_raw_fd()];
+            assert!(PrivateHttpEntrance::serve_dynamic_with_aux(vec![a,b],&fds,|event,_|match event {
+                Ok((index,_,_,_))=>{seen.send(index).unwrap();Ok(Some(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nb".to_vec()))},
+                Err(_)=>{let mut byte=[0];control.read_exact(&mut byte)?;Err(refuse("fixture complete"))},
+            }).is_err());
+        });
+        let mut slow = UnixStream::connect(a_path).unwrap();
+        slow.write_all(b"G").unwrap();
+        let mut fast = UnixStream::connect(b_path).unwrap();
+        fast.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        fast.write_all(b"GET / HTTP/1.1\r\nHost: friend.example.test\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n").unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(1)).unwrap(), 1);
+        let mut response = String::new();
+        fast.read_to_string(&mut response).unwrap();
+        assert!(response.ends_with('b'));
+        drop(slow);
+        stop.write_all(&[1]).unwrap();
+        worker.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn two_private_poll_channels_report_only_the_ready_participant() {

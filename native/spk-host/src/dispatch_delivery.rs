@@ -87,6 +87,21 @@ impl ResidentHuman<'_> {
             .read()?
             .ok_or_else(|| invalid("app journal absent"))?
             .verify_running_instance()?;
+        // A retained native submission or physical attempt cannot be replaced
+        // with a new request. Report exact-recovery-only before authoring another
+        // ingress, so all members see the fence without creating extra evidence.
+        for name in ["native-dispatch-active.json", "dispatch-active.json"] {
+            match std::fs::symlink_metadata(attempt_parent.join(name)) {
+                Ok(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "SPK dispatch uncertain; exact recovery required",
+                    ))
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
         // A WebSocket open takes its place in the grain's class cap before
         // any Mini write: the open past the cap is refused by name and
         // leaves no dispatch record.
@@ -133,6 +148,16 @@ impl ResidentHuman<'_> {
                 &self.custody.ticket_resource,
                 self.route_binding,
             );
+        })
+        .map_err(|error| {
+            if attempt_parent.join("native-dispatch-active.json").exists() {
+                io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "SPK native outcome uncertain; exact recovery required",
+                )
+            } else {
+                error
+            }
         })?;
         let m = &committed.matched;
         let current_binding = ContinuityBinding {
@@ -247,7 +272,7 @@ impl ResidentHuman<'_> {
                     }
                     Err(error) => {
                         let _ = recorded.finish(self.journal, false);
-                        Err(error)
+                        Err(io::Error::new(io::ErrorKind::Interrupted, error))
                     }
                 };
             }
@@ -282,7 +307,7 @@ impl ResidentHuman<'_> {
             }
             Err(error) => {
                 let _ = recorded.finish(self.journal, false);
-                Err(error)
+                Err(io::Error::new(io::ErrorKind::Interrupted, error))
             }
         }
     }

@@ -86,14 +86,14 @@ def grant(target, cap, kind="object"):
     return {"kind": kind, "target": str(target), "capability": str(cap)}
 
 
-def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-broker.sock"):
+def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-broker.sock", result_path=None, init_path=None):
     """Consume the retained native/profile result, without deriving Store identity."""
-    result_path = root / "evidence/profile-result.json"
+    result_path = result_path or root / "evidence/profile-result.json"
     result = load(result_path)
     require(result.get("protocol") == "mini-spk-grain-profile-result-v1", "unknown profile result protocol")
     state = absolute(result["stateRoot"])
     profile_path = absolute(result["profilePath"])
-    init_path = root / "evidence/init-store.json"
+    init_path = init_path or root / "evidence/init-store.json"
     require(state.is_relative_to(grains) and state != grains and state.resolve() == state,
             "native profile state is outside the pinned grains root or noncanonical")
     require(profile_path == state / "grain-host.json" and profile_path.resolve() == profile_path,
@@ -141,19 +141,39 @@ class Fixture:
         protected_parent(self.root)
         for source, expected in load(self.root / "source-inputs.json").items():
             require(sha(source) == expected, "fixture adapter source changed after preparation")
-        self.wr = self.root / "store/base/workroom"
-        self.config = self.wr / "deployment/pinned-config.json"
-        self.psock = self.root / "sock/participant/host.sock"
-        self.osock = self.root / "sock/operator/host.sock"
+        attached = self.f.get("attachment", {})
+        self.wr = absolute(attached["workspace"]) if attached else self.root / "store/base/workroom"
+        self.config = absolute(attached["miniConfig"]) if attached else self.wr / "deployment/pinned-config.json"
+        self.psock = absolute(attached["publicSocket"]) if attached else self.root / "sock/participant/host.sock"
+        self.osock = absolute(attached["privateSocket"]) if attached else self.root / "sock/operator/host.sock"
+        if attached:
+            require(sha(self.config) == attached["miniConfigSha256"], "attached Mini config changed")
+        self.owner = self.f.get("authority", {}).get("owner", "8")
+        self.authority = self.f.get("authority", {
+            "owner":"8", "ownerAccountCapability":"42", "factory":{"target":"10","capability":"55"},
+            "tool":{"task":"7902","capability":"81","observeCapability":"81"},
+            "parent":{"task":"7901","capability":"73","observeCapability":"73"},
+            "template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
+            "tariff":{"base":"2","perBirth":"1"}})
+        self.creator = self.authority.get("creator", self.owner)
+        self.tool, self.parent = self.authority["tool"], self.authority["parent"]
+        self.accountcap = self.authority.get("creatorAccountCapability", self.authority.get("ownerAccountCapability"))
+        self.genesis = absolute(attached["genesis"]) if attached else self.wr / "genesis.json"
+        self.keys = self.f.get("keys", {subject:{"keyId":keyid,"keyEpoch":"2",
+            "seedPath":str(self.wr/name),"publicKeyPath":str((self.wr/name).with_suffix(".pub"))}
+            for subject,keyid,name in [("7","7007","controller.key"),("8","8008","tool.key"),("9","9009","member.key")]})
         self.m = self.f["artifacts"]
         for a in self.m.values():
             require(sha(a["path"]) == a["sha256"], "candidate artifact changed")
-        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket","/run/mini-spk-broker.sock"))
+        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket","/run/mini-spk-broker.sock"),
+            absolute(attached["profileResult"]) if attached else None,
+            absolute(attached["initStoreResult"]) if attached else None)
         require(str(self.state) == self.f["state"] and str(self.profile) == self.f["profilePath"],
                 "fixture state differs from retained native profile result")
         self.app = self.f["app"]
-        self.appcap = "3101"
-        self.pkgcap = "3103"
+        self.appcap = self.f.get("application", {}).get("appOwnerCapability", "3101")
+        self.pkgcap = self.f.get("application", {}).get("packageOwnerCapability", "3103")
+        self.package_manifest = self.f.get("application", {}).get("packageManifest", str(int(self.app)+1))
         self.pkg = self.state / f"apps/{self.app}/install/launch-descriptor/package-v1"
         self.opdir = self.root / "hooks" / (str(time.time_ns()) + "-" + secrets.token_hex(4))
         self.opdir.mkdir(mode=0o700)
@@ -181,7 +201,7 @@ class Fixture:
                          "--config", self.config, "--socket", self.osock if operator else self.psock], okay)
 
     def key(self, subject):
-        return self.wr / {"7": "controller.key", "8": "tool.key", "9": "member.key"}[str(subject)]
+        return absolute(self.keys[str(subject)]["seedPath"])
 
     def query(self, subject, target, cap, view="resource", kind="object", denied=False):
         name = self.fresh("query")
@@ -211,68 +231,74 @@ class Fixture:
                 f"write not confirmed: {target}")
         return target
 
+    def task_grants(self):
+        return [grant(t["task"],cap) for t in [self.tool,self.parent]
+                for cap in dict.fromkeys([t["capability"],t["observeCapability"]])]
+
     def reserve(self, amount):
-        q = self.query(8, 7902, 81)
+        q = self.query(self.creator, self.tool["task"], self.tool["observeCapability"])
         n = self.n()
         grain = {k: q["view"]["cell"]["grain"][k] for k in ["generation", "status", "remaining", "reserved"]}
-        return self.submit({"grain": {"task": "7902", "subject": "8", "capability": "81",
-            "observeCapability": "81", "schemaVersion": "1", "expectedTargetRoot": q["view"]["cell"]["root"],
+        return self.submit({"grain": {"task": self.tool["task"], "subject": self.creator, "capability": self.tool["capability"],
+            "observeCapability": self.tool["observeCapability"], "schemaVersion": "1", "expectedTargetRoot": q["view"]["cell"]["root"],
             "context": {"operationId": n, "payload": "stream continuity fixture"}, "before": grain,
             "operation": {"type": "reserve", "amount": str(amount)}, "publications": []},
-            "grants": [grant(7902, 81)], "intentNonce": n}, 8, "grain-intent")
+            "grants": [grant(self.tool["task"],cap) for cap in dict.fromkeys([self.tool["capability"],self.tool["observeCapability"]])], "intentNonce": n}, self.creator, "grain-intent")
 
     def birth_session(self, d):
-        self.reserve(5)
-        tool, parent = self.query(8, 7902, 81), self.query(8, 7901, 73)
+        self.reserve(int(self.authority["tariff"]["base"])+2*int(self.authority["tariff"]["perBirth"]))
+        tool, parent = self.query(self.creator, self.tool["task"], self.tool["observeCapability"]), self.query(self.creator, self.parent["task"], self.parent["observeCapability"])
         n = self.n()
-        spec = {"genesis": load(self.wr / "genesis.json"),
-                "template": {"issuer": "5", "ownerBudget": "100000", "lifetime": "10000"},
-                "creator": "8", "nonce": n, "sourceCapabilities": ["42"], "funding": [], "feePayer": "8",
-                "session": {"app": self.app, "session": d["session"], "descriptor": str(int(d["session"]) + 1),
+        spec = {"genesis": load(self.genesis),
+                "template": self.authority["template"],
+                "creator": self.creator, "nonce": n, "sourceCapabilities": [self.accountcap], "funding": [], "feePayer": self.creator,
+                "session": {"app": self.app, "session": d["session"], "descriptor": d.get("descriptor",str(int(d["session"])+1)),
                   "participant": d["subject"], "kind": "web", "sessionOwnerCapability": d["cap"],
-                  "sessionControlCapability": str(int(d["cap"]) + 1),
-                  "descriptorOwnerCapability": str(int(d["cap"]) + 2),
-                  "descriptorControlCapability": str(int(d["cap"]) + 3)}}
-        def witness(q, target, cap):
-            return {"task": target, "capability": cap, "observeCapability": cap,
+                  "sessionControlCapability": d.get("sessionControlCapability",str(int(d["cap"])+1)),
+                  "descriptorOwnerCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)),
+                  "descriptorControlCapability": d.get("descriptorControlCapability",str(int(d["cap"])+3))}}
+        def witness(q, t):
+            return {"task": t["task"], "capability": t["capability"], "observeCapability": t["observeCapability"],
                     "targetRoot": q["view"]["cell"]["root"],
                     "before": {k: q["view"]["cell"]["grain"][k] for k in ["generation", "status", "remaining", "reserved"]}}
         source = self.fresh("session-source.json")
-        save(source, {"subject": "8", "nonce": n, "grants": [grant(10,55), grant(8,42,"account"), grant(7902,81), grant(7901,73)],
-            "applicationSessionGrainBirth": {"tariff": {"base": "2", "perBirth": "1"}, "applicationSessionBirth": spec,
-                 "tool": witness(tool,"7902","81"), "parent": witness(parent,"7901","73")}})
+        save(source, {"subject": self.creator, "nonce": n, "grants": [grant(self.authority["factory"]["target"],self.authority["factory"]["capability"]), grant(self.creator,self.accountcap,"account"), *self.task_grants()],
+            "applicationSessionGrainBirth": {"tariff": self.authority["tariff"], "applicationSessionBirth": spec,
+                 "tool": witness(tool,self.tool), "parent": witness(parent,self.parent)}})
         author = self.fresh("session-author")
         self.mini("current-session-intent", "--source", source, "--dir", author)
         attempt = self.fresh("session-birth")
-        self.mini("submit", "--intent", author / "intent.bin", "--intent-kind", "binary", "--key", self.key(8), "--dir", attempt)
+        self.mini("submit", "--intent", author / "intent.bin", "--intent-kind", "binary", "--key", self.key(self.creator), "--dir", attempt)
         o = load(attempt / "outcome.json")
         require(o.get("type") == "confirmed" and o.get("confirmation") == "installed", "session birth not confirmed")
         d.update(sessionSource=str(author / "source.json"), sessionReceipt=str(attempt / "outcome.json"))
 
     def delegate(self, target, parent, child, holder):
-        c = self.query(8, target, parent, "capability")
+        c = self.query(self.owner, target, parent, "capability")
         head = self.fresh("cap-head.json")
         self.run([self.m["host"]["path"], self.config, "inspect", "view-object-capability", c["dir"] / "view.bin", head])
         p = load(head)["head"]
-        q = self.query(8, target, parent)
+        q = self.query(self.owner, target, parent)
         new = copy.deepcopy(p)
         new.update(id=str(child), parent=p["id"], holder={"type": "subject", "subject": str(holder)},
                    targets=[str(target)], verbs=["observe"], ancestors=sorted(set(p["ancestors"] + [p["id"]])))
-        return self.submit({"subject": "8", "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
+        return self.submit({"subject": self.owner, "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
             "type": "delegate-source", "command": {"kind": "object", "domain": q["challenge"]["domain"],
-                "semantics": q["challenge"]["semantics"], "subject": "8", "nonce": self.n(),
+                "semantics": q["challenge"]["semantics"], "subject": self.owner, "nonce": self.n(),
                 "expectedTargetRoot": q["view"]["cell"]["root"], "parentId": p["id"], "target": str(target),
                 "expectedPreRoot": q["challenge"]["authorityRoot"], "child": new}}},
-                "grants": [grant(target,parent)]}, 8)
+                "grants": [grant(target,parent)]}, self.owner)
 
     def approve(self, plan, header, base, out):
         signers = []
         for slot in load(plan)["slots"]:
-            subject = {"7007": "7", "8008": "8", "9009": "9"}[slot["signing"]["keyId"]]
+            subject = next((subject for subject,key in self.keys.items()
+                if key["keyId"] == slot["signing"]["keyId"] and key["keyEpoch"] == slot["signing"]["keyEpoch"]), None)
+            require(subject is not None, "source requested an unavailable signer")
             key = self.key(subject)
             signers.append({"role": slot["role"], "index": slot["index"],
                 "keyId": slot["signing"]["keyId"], "keyEpoch": slot["signing"]["keyEpoch"],
-                "publicKey": key.with_suffix(".pub").read_bytes().hex(),
+                "publicKey": absolute(self.keys[str(subject)]["publicKeyPath"]).read_bytes().hex(),
                 "headerSha256": hashlib.sha256(bytes.fromhex(slot[header])).hexdigest(), "keyPath": str(key)})
         save(out, dict(base, signers=signers))
 
@@ -280,7 +306,7 @@ class Fixture:
         schema = load(self.pkg / "schema-inspection.json")
         descriptor = load(self.pkg / "descriptor-inspection.json")
         interface = next(i for i in descriptor["interfaces"] if i["kind"] == "web")
-        q = self.query(8, self.app, self.appcap)
+        q = self.query(self.owner, self.app, self.appcap)
         launch = load(self.state / f"apps/{self.app}/install/launch-descriptor/launch-inspection.json")
         self.reserve(3)
         ceiling = {"basis": {"type": "allAccess"}, "added": [], "removed": [],
@@ -289,15 +315,14 @@ class Fixture:
                     "packageVersion": entries(q["view"])["2"], "packageRoot": launch["root"],
                     "interfaceId": interface["id"], "interfaceVersion": interface["version"],
                     "interfaceRoot": interface["root"], "schemaRoot": schema["root"], "schemaVersion": schema["version"]},
-                "participant": {"session": d["session"], "descriptorResource": str(int(d["session"]) + 1),
+                "participant": {"session": d["session"], "descriptorResource": d.get("descriptor",str(int(d["session"])+1)),
                     "kind": "web", "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
                     "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n()},
-                "issuer": "8", "appDelegateCapability": self.appcap,
+                "issuer": self.owner, "appDelegateCapability": self.appcap,
                 "ticketOwnerCapability": d["ticketOwner"], "ticketControlCapability": d["ticketControl"]}
-        req = {"spec": spec, "payer": "8", "funding": [], "sourceCapabilities": ["42"],
-               "tool": {"task": "7902", "capability": "81", "observeCapability": "81"},
-               "parent": {"task": "7901", "capability": "73", "observeCapability": "73"}}
+        req = {"spec": spec, "payer": self.creator, "funding": [], "sourceCapabilities": [self.accountcap],
+               "tool": self.tool, "parent": self.parent}
         request, preview, approval, issue = (self.fresh(x) for x in ["ticket-request.json","ticket-preview","ticket-approval.json","ticket-issue"])
         save(request, req)
         self.mini("grain-share-issue-plan", "--request", request, "--dir", preview, operator=True)
@@ -318,10 +343,10 @@ class Fixture:
         schema = load(self.pkg / "schema-inspection.json")
         count = int(load(Path(d["issue"]) / "receipt-anchor.json")["receipt"]["acceptedCount"])
         request, attempt, approval = (self.fresh(x) for x in ["enrollment-request.json","enrollment","enrollment-approval.json"])
-        save(request, {"issueIndex": str(count - 1), "ticketResource": d["ticket"], "packageManifest": str(int(self.app)+1),
+        save(request, {"issueIndex": str(count - 1), "ticketResource": d["ticket"], "packageManifest": self.package_manifest,
             "role": {"basis": {"type": "allAccess"}, "added": [], "removed": [], "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]},
-            "descriptorCapability": str(int(d["cap"])+2), "sessionObserveCapability": d["cap"],
-            "descriptorObserveCapability": str(int(d["cap"])+2), "manifestObserveCapability": d["pkgObserve"], "nonce": self.n()})
+            "descriptorCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)), "sessionObserveCapability": d["cap"],
+            "descriptorObserveCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)), "manifestObserveCapability": d["pkgObserve"], "nonce": self.n()})
         self.run([self.m["mini"]["path"], "session-enrollment-plan", "--host", self.m["host"]["path"], "--config", self.config,
                   "--operator-socket", self.osock, "--request", request, "--dir", attempt])
         self.approve(attempt / "plan-inspected.json", "headerHex", {
@@ -339,8 +364,8 @@ class Fixture:
             "displayName": "Continuity delegate " + d["subject"], "preferredHandle": name,
             "sessionSource": d["sessionSource"], "sessionReceipt": d["sessionReceipt"], "ticketIssue": d["issue"],
             "manifestObserveCapability": d["pkgObserve"],
-            "participantKey": {"keyId": {"7":"7007","9":"9009"}[d["subject"]], "keyEpoch": "2",
-                "publicKeyHex": key.with_suffix(".pub").read_bytes().hex(), "seedPath": str(key)}})
+            "participantKey": {"keyId": self.keys[d["subject"]]["keyId"], "keyEpoch": self.keys[d["subject"]]["keyEpoch"],
+                "publicKeyHex": absolute(self.keys[d["subject"]]["publicKeyPath"]).read_bytes().hex(), "seedPath": str(key)}})
         self.run([self.m["spkHost"]["path"], "grain", "route", self.profile, self.app, request])
         route = self.state / f"apps/{self.app}/routes/{name}"
         d["endpoint"] = {"token": str(route/"browser.token"), "unix_socket": str(route/"http.sock"), "host": d.get("expectedHost","grain.test")}
@@ -381,7 +406,7 @@ class Fixture:
         os.replace(temp, self.path)
 
     def snapshot(self):
-        app = self.query(8, self.app, self.appcap)
+        app = self.query(self.owner, self.app, self.appcap)
         generation = entries(app["view"])["0"]
         require(entries(app["view"])["1"] == "4", "snapshot requires source serving phase 4")
         require(generation == self.f["generation"], "application generation changed unexpectedly")
@@ -397,7 +422,7 @@ class Fixture:
             active = (session["0"] == self.app and session["1"] == generation and
                       session["3"] == "1" and not d.get("revoked",False))
             delegates[label] = {"subject": d["subject"], "session": d["session"], "active": active}
-        payer = self.query(8,8,42,kind="account")
+        payer = self.query(self.creator,self.creator,self.accountcap,kind="account")
         observations.append(payer)
         tip = payer["challenge"]
         require(all(q["challenge"]["height"] == tip["height"] and q["challenge"]["worldRoot"] == tip["worldRoot"] for q in observations),
@@ -415,7 +440,7 @@ class Fixture:
             "billingEvidence":"No source-exported billing event counter. Source-verified Store height must remain unchanged during renewal; payer balance is recorded independently.",
             "storeHeight":int(tip["height"]), "delegates":delegates,
             "evidence":[str(q["dir"] / "challenge.json") for q in observations],
-            "payerBalances":{"8:0":str(balance)}, "worldRoot":tip["worldRoot"],
+            "payerBalances":{self.creator+":0":str(balance)}, "worldRoot":tip["worldRoot"],
             "provenance":{"storeHeight":"source-verified signed current queries at one unchanged tip",
                 "dispatchCount":"resident committed-permit inspection journal; NOT a source history event count",
                 "billing":"no fabricated event counter: unchanged authenticated Store height excludes new billing writes",
@@ -434,12 +459,12 @@ class Fixture:
         d = self.f["delegates"]["a"]
         if action == "revokeA":
             require(not d.get("revoked",False), "A already revoked; refusing duplicate mutation")
-            q = self.query(8,d["ticket"],d["ticketOwner"])
-            artifact = self.submit({"subject":"8","nonce":self.n(),"purpose":{"type":"prepare","draft":{
-                "type":"revoke-source","command":{"kind":"object","subject":"8","nonce":self.n(),"target":d["ticket"],
+            q = self.query(self.owner,d["ticket"],d["ticketOwner"])
+            artifact = self.submit({"subject":self.owner,"nonce":self.n(),"purpose":{"type":"prepare","draft":{
+                "type":"revoke-source","command":{"kind":"object","subject":self.owner,"nonce":self.n(),"target":d["ticket"],
                   "victimKind":"object","capability":d["ticketObserve"],"controlCapability":d["ticketControl"],
                   "expectedTargetRoot":q["view"]["cell"]["root"],"expectedAuthorityRoot":q["challenge"]["authorityRoot"]}}},
-                "grants":[grant(d["ticket"],d["ticketOwner"])]},8)
+                "grants":[grant(d["ticket"],d["ticketOwner"])]},self.owner)
             self.query(d["subject"],d["ticket"],d["ticketObserve"],denied=True)
             b = self.f["delegates"]["b"]
             self.query(b["subject"],b["ticket"],b["ticketObserve"])
@@ -470,7 +495,7 @@ class Fixture:
             rc,out,err = self.run([self.m["spkHost"]["path"],"grain","status",self.profile,self.app])
             status = load(out)
             require(not any(r["state"] == "running" for r in status["runs"]), "STOP still reports running generation")
-            q = self.query(8,self.app,self.appcap)
+            q = self.query(self.owner,self.app,self.appcap)
             require(entries(q["view"])["1"] == "2", "STOP did not reach source stopped phase 2")
             receipt = self.state / f"apps/{self.app}/g{self.f['generation']}/stop-completion"
             for _ in range(8):

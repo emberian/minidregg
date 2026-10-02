@@ -52,6 +52,9 @@ class AdapterTests(unittest.TestCase):
         self.x.state = self.x.root/"state"
         self.x.app = "4601"
         self.x.appcap = "3101"
+        self.x.owner = "8"
+        self.x.creator = "8"
+        self.x.accountcap = "42"
         self.x.nonce = 100
         self.x.f = {"app":"4601","generation":"4","delegates":{
             "a":{"subject":"7","session":"4610","cap":"3211","ticket":"4620","ticketOwner":"3232","ticketControl":"3233","ticketObserve":"3234"},
@@ -65,7 +68,7 @@ class AdapterTests(unittest.TestCase):
         result = self.x.action("revokeA")
         intent, signer = self.x.submit.call_args.args
         c = intent["purpose"]["draft"]["command"]
-        self.assertEqual(signer,8)
+        self.assertEqual(signer,"8")
         self.assertEqual((c["subject"],c["target"],c["capability"],c["controlCapability"]),
                          ("8","4620","3234","3233"))
         self.assertEqual(self.x.query.call_args_list[1].kwargs,{"denied":True})
