@@ -110,7 +110,7 @@ def progressCommand (domain semantics : Digest) (report : Report) :
     progressNonce domain semantics report.evidence,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩], none⟩
+        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none, none, none⟩], none⟩
 
 /-- Exactly the prior operation helper's byte-array command comparison.
     It avoids recursive equality on a potentially large signed command. -/
@@ -159,7 +159,7 @@ theorem progressCommand_exact_action (domain semantics : Digest) (report : Repor
     (progressCommand domain semantics report).targets =
       [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
         .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-          (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩] := rfl
+          (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none, none, none⟩] := rfl
 
 /-- Historical recovery derives gateway identity from the signed original
 call, never a current mutable atom or an unauthenticated caller claim. The
