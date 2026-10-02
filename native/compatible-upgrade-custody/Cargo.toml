@@ -1,0 +1,12 @@
+[package]
+name = "minidregg-compatible-upgrade-custody"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+libc = "=0.2.177"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
+sha2 = "=0.10.9"
