@@ -23,8 +23,8 @@ def planLoaded (config : Config) (opened : Opened config) (request : PlanRequest
   if current.publicKey != request.currentPublicKey then throw "presented key is not current"
   let command : SubjectKeyCommitmentAdoption.Command :=
     ⟨request.subject, request.nonce, current, request.nextPublicKey⟩
-  let _ ← (SubjectKeyCommitmentAdoption.prepare config.deployment config.profile.semantics opened.durable command)
-    .mapError (fun reason => s!"adoption preparation: {repr reason}")
+  let _ ← (SubjectKeyCommitmentAdoption.prepare config.deployment config.profile.semantics opened.durable command).mapError
+    (fun reason => s!"adoption preparation: {repr reason}")
   return ⟨config.deployment.domain, config.profile.semantics,
     SubjectKeyCommitmentAdoption.commandCodec.encode command,
     SubjectKeyCommitmentAdoption.authorizationFrame config.deployment.domain config.profile.semantics command,
@@ -40,7 +40,7 @@ def assemble (plan : SubjectKeyCommitmentAdoption.SigningPlan) (currentSignature
     throw "adoption signing frames differ from complete command"
   return SubjectKeyCommitmentAdoption.ingressCodec.encode ⟨plan.commandBytes, currentSignature, nextSignature⟩
 
-private def refused (reason : NativeHostCodec.RefusalReason) (detail : String) : NativeHostCodec.Outcome :=
+private def refused (reason : Minidregg.Compiler.RefusalReason) (detail : String) : NativeHostCodec.Outcome :=
   .refused reason "adopt-next-key".toUTF8.toList detail.toUTF8.toList
 
 def lookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : NativeHostCodec.Outcome :=
