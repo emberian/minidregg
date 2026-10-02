@@ -335,7 +335,8 @@ def tuple (prepared : Prepared deployment profile ambient durable command) : Pre
 
 def project (prepared : Prepared deployment profile ambient durable command) (_ : Unit)
     (logical : (incidence : Unit) → Store ((layout prepared).storeLayout incidence)) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.declaration.target.value ++
+    CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0 (PackedCell.bytes Registry prepared.target.before) ++
     ResourceAuthorityProjection.grantSlots "authority/parent" kind command.declaration.parentId (logical ()) ++

@@ -262,7 +262,8 @@ def Prepared.authorityPost (prepared : Prepared deployment profile ambient durab
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.target.value ++
+    CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
     [("authority/operation/revoke", 1)] ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0 (PackedCell.bytes Registry prepared.target.before) ++

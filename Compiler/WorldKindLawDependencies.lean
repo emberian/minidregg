@@ -16,6 +16,16 @@ set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 
+/-- Source-owned selector coordinates for an existing target. Admission must
+also require `loadTarget` success; absence never authorizes an empty projection.
+These slots precede extensible payload projections so they cannot be shadowed. -/
+def targetSelectorSlots (directory : Directory Nat Registry) (target : Nat) :
+    List (String × Int) :=
+  match directory.slots target with
+  | .present cell => [("target/storageKind", Int.ofNat cell.kind.tag.toNat),
+      ("world/request/birth", 0)]
+  | .absent => []
+
 structure Dependencies where
   additional : List PolicyRef
   readGuards : List (Nat × Digest)
