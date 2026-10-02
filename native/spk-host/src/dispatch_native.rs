@@ -78,6 +78,118 @@ pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Establish transport before sending any operation bytes. Linux AF_UNIX can
+/// block indefinitely on a full listener backlog even with later IO timeouts.
+/// EAGAIN is not an in-progress connection: polling that socket reports HUP
+/// immediately, so retry it with bounded local backoff instead of busy polling.
+fn connect_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStream> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    let timeout = || io::Error::new(io::ErrorKind::TimedOut, "Mini operator connect deadline");
+    let bytes = path.as_os_str().as_bytes();
+    // Zero initializes the unused sun_path tail and supplies its NUL terminator.
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
+        return Err(invalid("Mini operator socket path refused"));
+    }
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
+        *dst = *src as libc::c_char;
+    }
+    let length =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    if Instant::now() >= deadline {
+        return Err(timeout());
+    }
+    let raw = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // Owned immediately so every failure closes this attempt's fd.
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(timeout());
+        }
+        let result = unsafe {
+            libc::connect(
+                fd.as_raw_fd(),
+                &address as *const _ as *const libc::sockaddr,
+                length,
+            )
+        };
+        if result == 0 {
+            break;
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EISCONN) => break,
+            Some(libc::EINTR) => continue,
+            Some(libc::EAGAIN) => {
+                std::thread::sleep(left.min(Duration::from_millis(10)));
+            }
+            Some(libc::EINPROGRESS) | Some(libc::EALREADY) => {
+                let mut pollfd = libc::pollfd {
+                    fd: fd.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                loop {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(timeout());
+                    }
+                    let ms = left.as_millis().saturating_add(1).min(i32::MAX as u128) as i32;
+                    let result = unsafe { libc::poll(&mut pollfd, 1, ms) };
+                    if result < 0 {
+                        let error = io::Error::last_os_error();
+                        if error.kind() == io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                    if result == 0 {
+                        continue;
+                    }
+                    let mut socket_error: libc::c_int = 0;
+                    let mut length = std::mem::size_of_val(&socket_error) as libc::socklen_t;
+                    if unsafe {
+                        libc::getsockopt(
+                            fd.as_raw_fd(),
+                            libc::SOL_SOCKET,
+                            libc::SO_ERROR,
+                            &mut socket_error as *mut _ as *mut libc::c_void,
+                            &mut length,
+                        )
+                    } < 0
+                    {
+                        return Err(io::Error::last_os_error());
+                    }
+                    if socket_error != 0 {
+                        return Err(io::Error::from_raw_os_error(socket_error));
+                    }
+                    break;
+                }
+                break;
+            }
+            _ => return Err(error),
+        }
+    }
+    if Instant::now() >= deadline {
+        return Err(timeout());
+    }
+    let stream = UnixStream::from(fd);
+    stream.set_nonblocking(false)?;
+    Ok(stream)
+}
+
 fn read_exact_deadline(
     stream: &mut UnixStream,
     bytes: &mut [u8],
@@ -107,12 +219,34 @@ fn read_exact_deadline(
 
 /// The socket belongs to the separately started operator broker, never a
 /// tenant frontend. Version 2 pins the exact Host ELF and full config bytes.
+#[derive(Clone)]
 pub(crate) struct PrivateOperator {
     pub host: PathBuf,
     pub config: PathBuf,
     pub socket: PathBuf,
     pub host_sha256: String,
     pub config_sha256: String,
+}
+
+/// Opaque bytes returned by our pinned private op152 invocation and source
+/// inspector. Public only for the package's standalone fd3 smoke binary;
+/// callers cannot construct this from HTTP or an arbitrary JSON document.
+pub struct PrivateContinuityReply {
+    payload: Vec<u8>,
+    inspection: Vec<u8>,
+    challenge: Vec<u8>,
+}
+
+impl PrivateContinuityReply {
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+    pub fn inspection(&self) -> &[u8] {
+        &self.inspection
+    }
+    pub fn challenge(&self) -> &[u8] {
+        &self.challenge
+    }
 }
 
 impl PrivateOperator {
@@ -164,11 +298,29 @@ impl PrivateOperator {
         input: &Path,
         output: &Path,
     ) -> io::Result<Vec<u8>> {
+        self.tool_until(
+            command,
+            kind,
+            input,
+            output,
+            Instant::now() + RESPONSE_DEADLINE,
+        )
+    }
+
+    pub(crate) fn tool_until(
+        &self,
+        command: &str,
+        kind: &str,
+        input: &Path,
+        output: &Path,
+        deadline: Instant,
+    ) -> io::Result<Vec<u8>> {
         let _ = self.check_pin()?;
         let cap = match command {
             "author" => MAX_AUTHOR_JSON,
             "inspect" => (HOST_MAX_FRAME - 1) as u64,
             "signatures" => 1024 * 1024,
+            "profile" => 1024,
             _ => return Err(invalid("Mini Host helper command unavailable")),
         };
         private_dir(
@@ -188,16 +340,46 @@ impl PrivateOperator {
         }
         let mut process = Command::new(&self.host);
         process.arg(&self.config).arg(command);
-        if !kind.is_empty() {
-            process.arg(kind);
+        if command == "profile" {
+            let output_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(output)?;
+            process.stdout(Stdio::from(output_file));
+        } else {
+            if !kind.is_empty() {
+                process.arg(kind);
+            }
+            process.arg(input).arg(output).stdout(Stdio::null());
         }
-        let status = process
-            .arg(input)
-            .arg(output)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
+        process.stdin(Stdio::null()).stderr(Stdio::null());
+        if Instant::now() >= deadline {
+            return Err(invalid("Mini helper deadline"));
+        }
+        let mut child = process.spawn()?;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(error);
+                }
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Mini helper deadline",
+                ));
+            }
+            // Bounded local child wait, never a Mini authority poll.
+            std::thread::sleep(Duration::from_millis(10));
+        };
         if !status.success() {
             return Err(invalid("pinned Mini Host helper refused"));
         }
@@ -212,7 +394,19 @@ impl PrivateOperator {
     }
 
     pub(crate) fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
+        self.invoke_until(operation, payload, Instant::now() + RESPONSE_DEADLINE)
+    }
+
+    pub(crate) fn invoke_until(
+        &self,
+        operation: u8,
+        payload: &[u8],
+        deadline: Instant,
+    ) -> io::Result<Vec<u8>> {
         let config = self.check_pin()?;
+        if Instant::now() >= deadline {
+            return Err(invalid("Mini operator deadline"));
+        }
         if payload.is_empty() || payload.len() >= HOST_MAX_FRAME {
             return Err(invalid("Mini operator request size refused"));
         }
@@ -232,8 +426,8 @@ impl PrivateOperator {
         envelope.extend_from_slice(&sha);
         envelope.push(operation);
         envelope.extend_from_slice(payload);
-        let mut stream = UnixStream::connect(&self.socket)?;
-        let write_deadline = Instant::now() + Duration::from_secs(10);
+        let mut stream = connect_deadline(&self.socket, deadline)?;
+        let write_deadline = deadline.min(Instant::now() + Duration::from_secs(10));
         let mut framed = Vec::with_capacity(envelope.len() + 4);
         framed.extend_from_slice(&(envelope.len() as u32).to_le_bytes());
         framed.extend_from_slice(&envelope);
@@ -257,7 +451,6 @@ impl PrivateOperator {
             sent += count;
         }
         stream.flush()?;
-        let deadline = Instant::now() + RESPONSE_DEADLINE;
         let mut prefix = [0u8; 4];
         read_exact_deadline(&mut stream, &mut prefix, deadline)?;
         let length = u32::from_le_bytes(prefix) as usize;
@@ -271,6 +464,177 @@ impl PrivateOperator {
             return Err(invalid("Mini operator reply opcode mismatch"));
         }
         Ok(reply)
+    }
+}
+
+/// Every directory is freshly created under the resident's private journal.
+/// Renewal artifacts have no ledger effect and are removed after inspection;
+/// active storage is bounded by one attempt per open stream.
+struct ContinuityAttemptDir(PathBuf);
+impl ContinuityAttemptDir {
+    fn create(parent: &Path) -> io::Result<Self> {
+        private_dir(parent)?;
+        let mut nonce = [0u8; 32];
+        File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        let path = parent.join(format!("continuity-{}", hex(&nonce)));
+        DirBuilder::new().mode(0o700).create(&path)?;
+        Ok(Self(path))
+    }
+}
+impl Drop for ContinuityAttemptDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+impl PrivateOperator {
+    /// Pinned executable metadata, not a current-authority grant.
+    pub(crate) fn continuity_namespace(&self, parent: &Path) -> io::Result<(String, String)> {
+        let attempt = ContinuityAttemptDir::create(parent)?;
+        let input = write_new(&attempt.0, "request.json", b"{}")?;
+        let bytes = self.tool("profile", "", &input, &attempt.0.join("profile.json"))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let field = |name| {
+            value
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("pinned source namespace missing"))
+        };
+        Ok((field("domain")?, field("semantics")?))
+    }
+
+    /// Only this function constructs the opaque transport-provenance wrapper.
+    /// It never calls op34, writes an active-dispatch marker, or reaches app fd3.
+    pub(crate) fn probe_continuity(
+        &self,
+        custody: &FixedAuthoring,
+        challenge: &crate::web_socket::RenewalChallenge,
+        parent: &Path,
+    ) -> io::Result<PrivateContinuityReply> {
+        challenge.check()?;
+        let deadline = challenge.response_deadline();
+        let attempt = ContinuityAttemptDir::create(parent)?;
+        let b = challenge.binding();
+        let tip = challenge.minimum_tip();
+        let value = json!({"domain":b.domain,"semantics":b.semantics,
+            "app":b.app,"appGeneration":b.app_generation,"session":b.session,
+            "sessionGeneration":b.session_generation,"subject":b.subject,
+            "ticketResource":b.ticket_resource,"sessionFingerprintHex":hex(&b.session_fingerprint),
+            "streamNonceHex":challenge.stream_nonce_hex(),"attemptNonceHex":challenge.attempt_nonce_hex(),
+            "minimumHeight":tip.height,"minimumWorldRoot":tip.world_root});
+        let input = write_new(&attempt.0, "challenge.json", &serde_json::to_vec(&value)?)?;
+        let challenge_bytes = self.tool_until(
+            "author",
+            "application-stream-continuity-challenge",
+            &input,
+            &attempt.0.join("challenge.bin"),
+            deadline,
+        )?;
+        let path = format!("?{}", hex(&challenge_bytes));
+        let headers = vec![(
+            "sec-websocket-protocol".to_owned(),
+            "dregg.authority.continuity.v1".to_owned(),
+        )];
+        let http = HttpProjection {
+            method: "WEBSOCKET",
+            path_and_query: &path,
+            ordered_headers: &headers,
+            body: &[],
+            route: crate::dispatch_inspection::Route::Browser,
+        };
+        let ingress = author_signed_ingress(
+            self,
+            custody,
+            &http,
+            "0",
+            &attempt.0.join("signed"),
+            deadline,
+        )?;
+        challenge.check()?;
+        let request = json!({"challengeHex":hex(&challenge_bytes),"ingressHex":hex(&ingress)});
+        let request_json = write_new(
+            &attempt.0,
+            "continuity.json",
+            &serde_json::to_vec(&request)?,
+        )?;
+        let request_bytes = self.tool_until(
+            "author",
+            "application-stream-continuity-request",
+            &request_json,
+            &attempt.0.join("continuity.bin"),
+            deadline,
+        )?;
+        let response = self.invoke_until(152, &request_bytes, deadline)?;
+        let payload = response
+            .get(5..)
+            .ok_or_else(|| invalid("short continuity reply"))?;
+        if response.get(4) != Some(&152)
+            || !payload.starts_with(b"DREGG/APPLICATION/STREAM-CONTINUITY-ATTESTATION/v1")
+        {
+            return Err(invalid("Mini refused current stream continuity"));
+        }
+        let response_path = write_new(&attempt.0, "attestation.bin", payload)?;
+        let inspection = self.tool_until(
+            "inspect",
+            "application-stream-continuity-attestation",
+            &response_path,
+            &attempt.0.join("inspection.json"),
+            deadline,
+        )?;
+        challenge.check()?;
+        Ok(PrivateContinuityReply {
+            payload: payload.to_vec(),
+            inspection,
+            challenge: challenge_bytes,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ContinuityCustody {
+    pub operator: PrivateOperator,
+    pub custody: FixedAuthoring,
+    pub attempt_parent: PathBuf,
+}
+
+/// At most one native probe is outstanding per live stream. Timers run on
+/// the existing fd3 LocalSet; bounded blocking helper IO runs off that thread.
+pub(crate) async fn renew_stream(
+    lease: crate::web_socket::StreamLease,
+    custody: ContinuityCustody,
+) {
+    loop {
+        let delay = match lease.renewal_delay() {
+            Ok(delay) => delay,
+            Err(_) => return,
+        };
+        tokio::select! {
+            biased;
+            _ = lease.ended() => return,
+            _ = tokio::time::sleep(delay) => {},
+        }
+        let challenge = match lease.begin_renewal() {
+            Ok(c) => c,
+            Err(_) => {
+                lease.revoke();
+                return;
+            }
+        };
+        let custody = custody.clone();
+        let result = tokio::select! {
+            biased;
+            _ = lease.ended() => return,
+            result = tokio::task::spawn_blocking(move || {
+                let reply = custody.operator.probe_continuity(&custody.custody, &challenge, &custody.attempt_parent)?;
+                crate::stream_continuity::verify_reply(challenge, &reply)
+            }) => result.map_err(io::Error::other).and_then(|result| result),
+        };
+        if result.and_then(|grant| lease.renew(grant)).is_err() {
+            lease.revoke();
+            eprintln!("spk-host: stream continuity refused or unavailable; lease ended");
+            return;
+        }
     }
 }
 
@@ -350,6 +714,70 @@ impl CommittedDispatch {
 /// fsynced before op34; once present, this function refuses to run again for
 /// the same attempt even if the Host response was lost. Historical op35 may
 /// inform an audit, but it can never mint a fresh physical delivery permit.
+fn author_signed_ingress(
+    operator: &PrivateOperator,
+    custody: &FixedAuthoring,
+    http: &HttpProjection<'_>,
+    operation_id: &str,
+    attempt_dir: &Path,
+    deadline: Instant,
+) -> io::Result<Vec<u8>> {
+    let parent = attempt_dir
+        .parent()
+        .ok_or_else(|| invalid("attempt parent missing"))?;
+    private_dir(parent)?;
+    DirBuilder::new().mode(0o700).create(attempt_dir)?;
+    let request = custody.request_json(operation_id, http)?;
+    let request_json = write_new(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
+    let request_bin = attempt_dir.join("request.bin");
+    let request_bytes = operator.tool_until(
+        "author",
+        "application-dispatch-request",
+        &request_json,
+        &request_bin,
+        deadline,
+    )?;
+    let plan_reply = operator.invoke_until(36, &request_bytes, deadline)?;
+    if plan_reply[4] != 36 {
+        return Err(invalid("Mini dispatch authoring refused"));
+    }
+    let plan_bytes = &plan_reply[5..];
+    let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
+    let plan_json_path = attempt_dir.join("plan.json");
+    let plan_json = operator.tool_until(
+        "inspect",
+        "application-dispatch-plan",
+        &plan_bin,
+        &plan_json_path,
+        deadline,
+    )?;
+    let signatures = custody.sign_plan(plan_bytes, &plan_json, &request_bytes, &request)?;
+    let signatures_json = write_new(
+        attempt_dir,
+        "signatures.json",
+        &serde_json::to_vec(&signatures)?,
+    )?;
+    let signatures_bin_path = attempt_dir.join("signatures.bin");
+    let signatures_bin = operator.tool_until(
+        "signatures",
+        "",
+        &signatures_json,
+        &signatures_bin_path,
+        deadline,
+    )?;
+    let mut pair = Vec::with_capacity(4 + plan_bytes.len() + signatures_bin.len());
+    pair.extend_from_slice(&(plan_bytes.len() as u32).to_le_bytes());
+    pair.extend_from_slice(plan_bytes);
+    pair.extend_from_slice(&signatures_bin);
+    let ingress_reply = operator.invoke_until(37, &pair, deadline)?;
+    if ingress_reply[4] != 37 {
+        return Err(invalid("Mini dispatch assembly refused"));
+    }
+    let ingress = &ingress_reply[5..];
+    write_new(attempt_dir, "ingress.bin", ingress)?;
+    Ok(ingress.to_vec())
+}
+
 pub(crate) fn author_and_submit(
     operator: &PrivateOperator,
     custody: &FixedAuthoring,
@@ -360,50 +788,16 @@ pub(crate) fn author_and_submit(
     let parent = attempt_dir
         .parent()
         .ok_or_else(|| invalid("attempt parent missing"))?;
-    private_dir(parent)?;
-    DirBuilder::new().mode(0o700).create(attempt_dir)?;
-    let request = custody.request_json(operation_id, http)?;
-    let request_json = write_new(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
-    let request_bin = attempt_dir.join("request.bin");
-    let request_bytes = operator.tool(
-        "author",
-        "application-dispatch-request",
-        &request_json,
-        &request_bin,
-    )?;
-    let plan_reply = operator.invoke(36, &request_bytes)?;
-    if plan_reply[4] != 36 {
-        return Err(invalid("Mini dispatch authoring refused"));
-    }
-    let plan_bytes = &plan_reply[5..];
-    let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
-    let plan_json_path = attempt_dir.join("plan.json");
-    let plan_json = operator.tool(
-        "inspect",
-        "application-dispatch-plan",
-        &plan_bin,
-        &plan_json_path,
-    )?;
-    let signatures = custody.sign_plan(plan_bytes, &plan_json, &request_bytes, &request)?;
-    let signatures_json = write_new(
+    let ingress = author_signed_ingress(
+        operator,
+        custody,
+        http,
+        operation_id,
         attempt_dir,
-        "signatures.json",
-        &serde_json::to_vec(&signatures)?,
+        Instant::now() + RESPONSE_DEADLINE,
     )?;
-    let signatures_bin_path = attempt_dir.join("signatures.bin");
-    let signatures_bin = operator.tool("signatures", "", &signatures_json, &signatures_bin_path)?;
-    let mut pair = Vec::with_capacity(4 + plan_bytes.len() + signatures_bin.len());
-    pair.extend_from_slice(&(plan_bytes.len() as u32).to_le_bytes());
-    pair.extend_from_slice(plan_bytes);
-    pair.extend_from_slice(&signatures_bin);
-    let ingress_reply = operator.invoke(37, &pair)?;
-    if ingress_reply[4] != 37 {
-        return Err(invalid("Mini dispatch assembly refused"));
-    }
-    let ingress = &ingress_reply[5..];
-    write_new(attempt_dir, "ingress.bin", ingress)?;
     let marker = json!({"protocol":"mini-spk-dispatch-submit-requested-v1",
-        "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(ingress))});
+        "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(&ingress))});
     write_new(
         attempt_dir,
         "submit-requested.json",
@@ -422,7 +816,7 @@ pub(crate) fn author_and_submit(
     active_file.write_all(&active_bytes)?;
     active_file.sync_all()?;
     File::open(parent)?.sync_all()?;
-    let reply = operator.invoke(34, ingress)?;
+    let reply = operator.invoke(34, &ingress)?;
     write_new(attempt_dir, "op34-frame.bin", &reply)?;
     let payload = match parse_op34_response(&reply)? {
         Op34Reply::CommittedBytes(payload) => payload.to_vec(),
@@ -461,6 +855,35 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn full_unix_backlog_obeys_connect_deadline_and_recovers() {
+        use std::os::fd::AsRawFd;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("mini-spk-connect-{}-{nonce}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let path = root.join("socket");
+        let listener = UnixListener::bind(&path).unwrap();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
+        let first = connect_deadline(&path, Instant::now() + Duration::from_secs(1)).unwrap();
+        let second = connect_deadline(&path, Instant::now() + Duration::from_secs(1)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            connect_deadline(&path, started + Duration::from_millis(40))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+        let (accepted, _) = listener.accept().unwrap();
+        let recovered = connect_deadline(&path, Instant::now() + Duration::from_secs(1)).unwrap();
+        drop((accepted, first, second, recovered, listener));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn private_v2_operator_frame_pins_host_config_and_socket() {

@@ -5,6 +5,7 @@ post-image bytes. Historical receipt recovery, generic DRC event 3, a
 concurrent suffix, and an uncertain CAS response are not delivery permits.
 -/
 import Kernel.ApplicationDispatchProjection
+import Kernel.ApplicationStreamContinuity
 
 namespace Minidregg.Kernel.ApplicationDispatchReceiver
 
@@ -113,6 +114,8 @@ def receiveVerified (config : Config) {target : Durable}
     (bytes : List UInt8) : IO (Result config) := do
   let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
     | return .rejected "noncanonical special dispatch ingress"
+  if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
+    return .rejected "stream continuity probes are read-only and cannot open an app stream"
   if ingress.dispatch.dispatch.session.origin != .human then
     return .rejected "v1 committed dispatch permit requires human-origin session"
   let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
@@ -138,5 +141,20 @@ def receiveVerified (config : Config) {target : Durable}
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
+
+/-- Even fully signed authority material for a continuity probe cannot be
+submitted to the app-open receiver. Refusal occurs before admission/CAS. -/
+theorem continuity_probe_never_submits (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (challenge : ApplicationStreamContinuity.Challenge)
+    (probe : ingress.dispatch.dispatch.request =
+      ApplicationStreamContinuity.probeRequest challenge) :
+    receiveVerified config old (ApplicationDispatchAdmissionIngress.codec.encode ingress) =
+      pure (.rejected "stream continuity probes are read-only and cannot open an app stream") := by
+  simp [receiveVerified, ApplicationDispatchAdmissionIngress.codec.decode_encode,
+    probe, ApplicationStreamContinuity.probe_reserved]
+
+#assert_axioms continuity_probe_never_submits
 
 end Minidregg.Kernel.ApplicationDispatchReceiver

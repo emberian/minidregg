@@ -92,6 +92,7 @@ import Kernel.ApplicationLifecycleCompletionV2Receiver
 import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
+import Host.ApplicationStreamContinuityInspection
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -619,6 +620,8 @@ def loadSettings (path : System.FilePath) : IO Settings := do
 native view bytes. Query authority remains with the signed native read. -/
 def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :=
   if kind == "fn-inbox-resource" then FnInboxView.render bytes
+  else if kind == "application-stream-continuity-attestation" then
+    ApplicationStreamContinuityInspection.inspect bytes
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
@@ -1810,6 +1813,26 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
+/-- Op152 is a read-only continuity challenge. It retains the same verified
+session and emits no event or paid dispatch. A fresh physical-tip callback is
+mandatory even when no history extension was needed at session refresh. -/
+def dispatchStreamContinuitySession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionWalked config state
+  match ← ApplicationStreamContinuity.receiveVerified config session.verified payload with
+  | .ok attestation =>
+      match ← attestation.withFreshTip (fun bytes => writeSessionFrame output 152 bytes) with
+      | .ok _ => pure ()
+      | .error detail =>
+          writeSessionFrame output 152 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .error _ =>
+      writeSessionFrame output 152 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused .operationRejected "stream-continuity".toUTF8.toList
+            "current continuation refused".toUTF8.toList)
+
 /-- Op46 hands out the distinct paid agent permit only from an exact event21
 CAS/readback and a final point-in-time physical tip check. Historical op47 is
 receipt-only; neither result is a lease across an external fd3 delivery. -/
@@ -1957,7 +1980,9 @@ partial def serveSession (config : NativeHost.Config)
   let (operation, payload) ← match frame.toList with
     | [] => throw (IO.userError "empty native host frame")
     | operation :: payload => pure (operation, payload)
-  if operation == 34 then
+  if operation == 152 then
+    dispatchStreamContinuitySession config state payload output
+  else if operation == 34 then
     dispatchApplicationSubmitSession config state payload output
   else if operation == 46 then
     dispatchAgentSubmitSession config state payload output
@@ -4887,7 +4912,9 @@ def run (arguments : List String) : IO UInt32 := do
             (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
       | "author", [kind, input, output] =>
-          let source ← if kind == "application-dispatch-request" ||
+          let source ← if kind == "application-stream-continuity-request" ||
+              kind == "application-stream-continuity-challenge" ||
+              kind == "application-dispatch-request" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
@@ -4901,11 +4928,17 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-lifetime-reserve-request" ||
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
-          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source (some config))
+          let bytes ← IO.ofExcept (
+            if kind == "application-stream-continuity-challenge" then
+              ApplicationStreamContinuityInspection.authorChallenge config source
+            else if kind == "application-stream-continuity-request" then
+              ApplicationStreamContinuityInspection.authorRequest source
+            else Minidregg.Host.Json.author kind source (some config))
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
-          let bytes ← if kind == "fn-inbox-resource" ||
+          let bytes ← if kind == "application-stream-continuity-attestation" ||
+              kind == "fn-inbox-resource" ||
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
@@ -4942,7 +4975,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
-          if kind == "application-dispatch-committed" ||
+          if kind == "application-stream-continuity-attestation" ||
+              kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
               kind == "fn-consumer-namespace-plan" ||

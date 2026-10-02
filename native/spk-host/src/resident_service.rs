@@ -1331,6 +1331,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
     let ws_open = crate::web_socket::OpenSockets::default();
+    let continuity_namespace = operator.continuity_namespace(&config.journal_dir)?;
     PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
         if let Ok((index, request, kind, policy)) = event {
             let entry = &config.entrances[index];
@@ -1344,6 +1345,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 sockets: &ws_open,
                 limits: ws_limits,
                 stream_lease_lifetime: Duration::from_secs(config.ws_authority_lease_seconds),
+                continuity_namespace: &continuity_namespace,
             };
             return deliver_request(
                 &mut human,

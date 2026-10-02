@@ -4,7 +4,9 @@ A Mini-admitted WebSocket open no longer permits an indefinitely live stream.
 The resident gives it a physical authority lease, default **60 seconds**. The
 clock starts immediately before `author_and_submit`, not after Mini returns,
 not at HTTP 101, and not on the first frame. Admission latency consumes the
-lease. An expired late result cannot reach `openWebSocket` or emit a 101;
+lease. Only a fresh source-checked continuity response may extend it; frame
+traffic never does. See `STREAM-CONTINUITY.md` for the receiving protocol.
+An expired late result cannot reach `openWebSocket` or emit a 101;
 expiry while app setup or handshake output is pending cancels that wait.
 
 The operator can set a positive `wsAuthorityLeaseSeconds` in the private
@@ -21,7 +23,7 @@ operating choice, not the desired permanent editing experience.
 
 - Every fresh open still passes current Mini admission. Frame traffic and
   lease expiry write no Mini records, create no additional billing events,
-  and cannot renew the lease.
+  and cannot renew the lease. Separate checked continuity is read-only.
 - A later successfully admitted request whose session projection changes
   invalidates existing streams for the same app, process generation, session,
   subject and session kind. Projection equality uses the existing checked
@@ -32,13 +34,16 @@ operating choice, not the desired permanent editing experience.
   authority is treated conservatively in the same way. Another subject's
   streams are not cancelled. This is a local notification, not a global Store
   subscription; a revocation performed elsewhere may produce no notification.
-- Without a notification, the fixed deadline still ends the stream. If an
-  authority change occurs after this stream's admission began, the remaining
-  stale-access window is at most the configured lifetime. New opens after
-  revocation must fail Mini's independent current-authority check.
+- Without a notification, the last checked lease deadline still bounds access.
+  Each successful renewal anchors its replacement deadline before its source
+  check starts; the old deadline applies until that reply is received. An
+  authority change therefore leaves at most the configured lifetime of stale
+  access. A subsequent renewal must pass current authority again. New opens
+  after revocation must pass Mini's independent current-authority check.
 - Both pumps check validity immediately before handing a new byte chunk to
   the app or client. A biased watch/timer branch also cancels blocked I/O at
-  expiry or invalidation. There is no polling and no per-frame Mini call.
+  expiry or invalidation. The pumps are watch/timer driven; only the separate
+  bounded renewal schedule calls Mini, never individual frames.
   As with all process timers, actual close notification can be delayed by
   scheduling or suspension; resumed pumps check the monotonic deadline before
   another handoff. Bytes already handed to Cap'n Proto or the OS can finish
@@ -71,25 +76,10 @@ existing old-kernel TLS fixture was left running unchanged for browser use.
 
 ## Continuous authorization renewal
 
-Periodic forced reconnect is an intermediate fail-closed contract. Mature
-editing needs a source-owned, read-only continuity receiver rather than a new
-paid dispatch every minute or an unsigned planning response used as authority.
-The source seam is `ApplicationDispatchAdmission.checkCurrent`: its private
-`CheckedCurrent` already requires the signed invocation, current app/manifest/
-enrollment/ticket observations, permissions and issuer lineage.
-`NativeHostReplay.admitDispatchVerified` adds selected share-issue provenance
-from the verified chronological prefix. The existing receiver then performs
-`DurableReceiverIO.receiveLoadedDetailed` and returns a CAS-backed permit;
-that mutating half must not be reused silently as free renewal.
-
-A dedicated continuity receiver should validate freshly signed, domain-separated
-continuity intent against the warm verified image, check the physical Store tip
-before handoff, and return a bounded attestation tied to the resident's fresh
-stream nonce, app/generation/session/subject, ticket/enrollment and projection
-fingerprint. Its request must start the renewed local deadline, so stale replies
-cannot extend access. Replayed replies or permission changes must never renew
-an old app-side capability; renewal failure closes the stream. It must preserve
-the distinction between checked observation, session workflow and billable app
-dispatch, with no app RPC effect and no fake dispatch history. Tip freshness
-remains point-in-time; bounded expiry is still needed if later invalidation is
-missed. That receiver/API and its source proofs are not implemented here.
+The fixed-only lease was the first enforcement step. Source-owned read-only
+renewal is now implemented in `ApplicationStreamContinuity` and the physical
+resident, preserving the same fail-closed fallback. It uses fresh signed
+current admission and verified share history; unsigned op36 planning remains
+insufficient. `STREAM-CONTINUITY.md` records the protocol, lifecycle, proof
+boundary and remaining common-candidate qualification. Lease/frame tests alone
+do not establish successful real-Mini renewal or editing capacity.

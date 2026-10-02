@@ -2,21 +2,23 @@
 //! admitted Mini dispatch, the open (method `WEBSOCKET`, a streamed dispatch);
 //! its frames are opaque bytes inside that admitted session, like a streamed
 //! body, and a close writes nothing to Mini. The stream is physically limited
-//! by an admission-anchored authority lease; it never renews itself. Frames are
+//! by an admission-anchored authority lease; only checked private continuity can renew it. Frames are
 //! unmetered by design,
 //! so the grain's size class bounds them physically: at most `ws_max_open`
 //! sockets per generation (`wsConcurrencyCap`, refused before any Mini write)
 //! and `ws_bytes_per_minute` per socket (`wsByteCap`, the socket is cut).
 
 use crate::broker::SizeClass;
+use crate::stream_continuity::{ContinuityBinding, ContinuityTip, VerifiedContinuity};
 use base64::Engine as _;
 use minidregg_spk_rpc::{send_to_app, WebSocketSession};
 use sha1::{Digest, Sha1};
 use std::cell::RefCell;
 use std::io;
+use std::io::Read as _;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -27,14 +29,107 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) const DEFAULT_LEASE_SECONDS: u64 = 60;
 
 struct LeaseState {
+    lifetime: Duration,
+    stream_nonce: [u8; 32],
+    state: Mutex<LeaseCurrent>,
+    changed: tokio::sync::watch::Sender<u64>,
+}
+
+struct LeaseCurrent {
     deadline: Instant,
-    revoked: tokio::sync::watch::Sender<bool>,
+    ended: bool,
+    attempt: u64,
+    pending: Option<[u8; 32]>,
+    continuity: Option<(ContinuityBinding, ContinuityTip)>,
 }
 
 #[derive(Clone)]
 pub(crate) struct StreamLease(Arc<LeaseState>);
-
 pub(crate) struct WeakStreamLease(Weak<LeaseState>);
+
+/// Single-use local challenge. Its deadline is anchored before any authoring,
+/// and the old lease remains binding while the private probe is in flight.
+pub(crate) struct RenewalChallenge {
+    lease: Arc<LeaseState>,
+    attempt: u64,
+    nonce: [u8; 32],
+    deadline: Instant,
+    binding: ContinuityBinding,
+    tip: ContinuityTip,
+}
+
+impl RenewalChallenge {
+    pub(crate) fn binding(&self) -> &ContinuityBinding {
+        &self.binding
+    }
+    pub(crate) fn minimum_tip(&self) -> &ContinuityTip {
+        &self.tip
+    }
+    pub(crate) fn stream_nonce_hex(&self) -> String {
+        nonce_hex(&self.lease.stream_nonce)
+    }
+    pub(crate) fn attempt_nonce_hex(&self) -> String {
+        nonce_hex(&self.nonce)
+    }
+    /// The original live deadline continues to bound the entire probe. A
+    /// revoked/expired challenge gives blocking IO no remaining time.
+    pub(crate) fn response_deadline(&self) -> Instant {
+        let mut current = self
+            .lease
+            .state
+            .lock()
+            .expect("stream lease mutex poisoned");
+        if check_current(&mut current).is_err() {
+            return Instant::now();
+        }
+        current.deadline.min(self.deadline)
+    }
+    pub(crate) fn check(&self) -> io::Result<()> {
+        let mut current = self
+            .lease
+            .state
+            .lock()
+            .expect("stream lease mutex poisoned");
+        check_current(&mut current)?;
+        if current.attempt != self.attempt
+            || current.pending != Some(self.nonce)
+            || Instant::now() >= self.deadline
+        {
+            return Err(lease_ended());
+        }
+        Ok(())
+    }
+}
+
+fn nonce_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            write!(s, "{b:02x}").expect("String write");
+            s
+        })
+}
+
+fn fresh_nonce() -> io::Result<[u8; 32]> {
+    let mut nonce = [0; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    Ok(nonce)
+}
+
+fn lease_ended() -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, "wsAuthorityLeaseEnded")
+}
+
+fn check_current(current: &mut LeaseCurrent) -> io::Result<()> {
+    if current.ended || Instant::now() >= current.deadline {
+        current.ended = true;
+        current.pending = None;
+        Err(lease_ended())
+    } else {
+        Ok(())
+    }
+}
 
 impl WeakStreamLease {
     pub(crate) fn upgrade(&self) -> Option<StreamLease> {
@@ -49,8 +144,16 @@ impl StreamLease {
             .filter(|_| !lifetime.is_zero())
             .ok_or_else(|| refuse("WebSocket lease lifetime must be positive and representable"))?;
         Ok(Self(Arc::new(LeaseState {
-            deadline,
-            revoked: tokio::sync::watch::channel(false).0,
+            lifetime,
+            stream_nonce: fresh_nonce()?,
+            state: Mutex::new(LeaseCurrent {
+                deadline,
+                ended: false,
+                attempt: 0,
+                pending: None,
+                continuity: None,
+            }),
+            changed: tokio::sync::watch::channel(0).0,
         })))
     }
 
@@ -59,30 +162,121 @@ impl StreamLease {
     }
 
     pub(crate) fn revoke(&self) {
-        self.0.revoked.send_replace(true);
+        let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+        current.ended = true;
+        current.pending = None;
+        self.0
+            .changed
+            .send_modify(|version| *version = version.wrapping_add(1));
     }
 
     pub(crate) fn check(&self) -> io::Result<()> {
-        if *self.0.revoked.borrow() || Instant::now() >= self.0.deadline {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "wsAuthorityLeaseEnded",
-            ))
-        } else {
-            Ok(())
+        check_current(&mut self.0.state.lock().expect("stream lease mutex poisoned"))
+    }
+
+    /// Attach only the committed open's source identity, never caller input.
+    /// A lease cannot change its identity or be rebound following revocation.
+    pub(crate) fn bind_continuity(
+        &self,
+        binding: ContinuityBinding,
+        tip: ContinuityTip,
+    ) -> io::Result<()> {
+        binding.validate()?;
+        tip.validate()?;
+        let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+        check_current(&mut current)?;
+        if current.continuity.is_some() {
+            return Err(refuse("stream continuity already bound"));
         }
+        current.continuity = Some((binding, tip));
+        Ok(())
+    }
+
+    /// Renew halfway through the current interval. Admission and prior probe
+    /// latency consume this interval; already inside the window means now.
+    pub(crate) fn renewal_delay(&self) -> io::Result<Duration> {
+        let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+        check_current(&mut current)?;
+        Ok(current
+            .deadline
+            .checked_sub(self.0.lifetime / 2)
+            .unwrap_or_else(Instant::now)
+            .saturating_duration_since(Instant::now()))
+    }
+
+    pub(crate) fn begin_renewal(&self) -> io::Result<RenewalChallenge> {
+        // Capture before nonce generation, locking, and all private Mini work.
+        let deadline = Instant::now()
+            .checked_add(self.0.lifetime)
+            .ok_or_else(lease_ended)?;
+        let nonce = fresh_nonce()?;
+        let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+        check_current(&mut current)?;
+        let (binding, tip) = current
+            .continuity
+            .clone()
+            .ok_or_else(|| refuse("stream continuity unbound"))?;
+        let attempt = current.attempt.checked_add(1).ok_or_else(lease_ended)?;
+        current.attempt = attempt;
+        current.pending = Some(nonce);
+        Ok(RenewalChallenge {
+            lease: Arc::clone(&self.0),
+            attempt,
+            nonce,
+            deadline,
+            binding,
+            tip,
+        })
+    }
+
+    /// No raw bytes or caller claims can extend a deadline. The only input is
+    /// a single-use result checked against a private source inspection.
+    pub(crate) fn renew(&self, grant: VerifiedContinuity) -> io::Result<()> {
+        let (challenge, tip) = grant.into_parts();
+        if !Arc::ptr_eq(&self.0, &challenge.lease) {
+            return Err(lease_ended());
+        }
+        let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+        check_current(&mut current)?;
+        if current.attempt != challenge.attempt
+            || current.pending != Some(challenge.nonce)
+            || Instant::now() >= challenge.deadline
+            || challenge.deadline <= current.deadline
+        {
+            return Err(lease_ended());
+        }
+        let (binding, old_tip) = current.continuity.as_ref().ok_or_else(lease_ended)?;
+        if binding != &challenge.binding {
+            return Err(lease_ended());
+        }
+        tip.follows(old_tip)?;
+        current.deadline = challenge.deadline;
+        current.pending = None;
+        current.continuity = Some((challenge.binding, tip));
+        self.0
+            .changed
+            .send_modify(|version| *version = version.wrapping_add(1));
+        Ok(())
     }
 
     pub(crate) async fn ended(&self) {
-        let mut revoked = self.0.revoked.subscribe();
-        tokio::select! {
-            biased;
-            _ = async {
-                while !*revoked.borrow_and_update() {
-                    if revoked.changed().await.is_err() { break; }
+        let mut changed = self.0.changed.subscribe();
+        loop {
+            // Mark before reading state so a concurrent extension cannot be
+            // swallowed between the state snapshot and changed().
+            changed.borrow_and_update();
+            let deadline = {
+                let mut current = self.0.state.lock().expect("stream lease mutex poisoned");
+                if check_current(&mut current).is_err() {
+                    return;
                 }
-            } => {},
-            _ = tokio::time::sleep_until(self.0.deadline.into()) => {},
+                current.deadline
+            };
+            tokio::select! {
+                biased;
+                _ = changed.changed() => {},
+                _ = tokio::time::sleep_until(deadline.into()) => {},
+            }
         }
     }
 }
@@ -174,7 +368,10 @@ pub(crate) fn switching_protocols(accept: &str, chosen: &[String]) -> Vec<u8> {
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n"
     );
     if !chosen.is_empty() {
-        head.push_str(&format!("Sec-WebSocket-Protocol: {}\r\n", chosen.join(", ")));
+        head.push_str(&format!(
+            "Sec-WebSocket-Protocol: {}\r\n",
+            chosen.join(", ")
+        ));
     }
     head.push_str("\r\n");
     head.into_bytes()
@@ -220,12 +417,10 @@ impl OpenSockets {
             if current >= limits.max_open {
                 return Err("wsConcurrencyCap");
             }
-            match self.0.compare_exchange(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match self
+                .0
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => return Ok(Slot(Arc::clone(&self.0))),
                 Err(actual) => current = actual,
             }
@@ -269,7 +464,10 @@ impl ByteBudget {
         let elapsed = now.saturating_duration_since(self.last).as_nanos();
         self.last = now;
         let full = self.per_minute * NANOS_PER_MINUTE;
-        self.scaled = full.min(self.scaled.saturating_add(elapsed.saturating_mul(self.per_minute)));
+        self.scaled = full.min(
+            self.scaled
+                .saturating_add(elapsed.saturating_mul(self.per_minute)),
+        );
         let wanted = (bytes as u128) * NANOS_PER_MINUTE;
         if wanted > self.scaled {
             return false;
@@ -287,6 +485,15 @@ enum End {
     Failed(String),
 }
 
+/// Closing the physical stream also stops its continuity worker, even when
+/// that worker currently owns another strong lease reference.
+struct CloseLeaseOnDrop(StreamLease);
+impl Drop for CloseLeaseOnDrop {
+    fn drop(&mut self) {
+        self.0.revoke();
+    }
+}
+
 /// Carry opaque bytes both ways until either side ends or the socket passes
 /// its byte cap or authority lease. Each new byte chunk checks the lease before
 /// forwarding; expiry also cancels stalled reads/writes. Bytes already handed
@@ -301,6 +508,7 @@ pub(crate) async fn pump(
     lease: StreamLease,
 ) {
     let _slot = slot;
+    let _close_lease = CloseLeaseOnDrop(lease.clone());
     let WebSocketSession {
         to_app,
         mut from_app,
@@ -338,7 +546,9 @@ pub(crate) async fn pump(
                 if !budget.borrow_mut().take(count, Instant::now()) {
                     return End::Cut;
                 }
-                if lease.check().is_err() { return End::Authority; }
+                if lease.check().is_err() {
+                    return End::Authority;
+                }
                 carried.borrow_mut().0 += count as u64;
                 if let Err(error) = send_to_app(&to_app, &buffer[..count]).await {
                     return End::Failed(format!("app sendBytes: {error}"));
@@ -355,7 +565,9 @@ pub(crate) async fn pump(
                 if !budget.borrow_mut().take(bytes.len(), Instant::now()) {
                     return End::Cut;
                 }
-                if lease.check().is_err() { return End::Authority; }
+                if lease.check().is_err() {
+                    return End::Authority;
+                }
                 carried.borrow_mut().1 += bytes.len() as u64;
                 if let Err(error) = writer.write_all(&bytes).await {
                     return End::Failed(format!("client write: {error}"));
@@ -394,6 +606,204 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn renewable(lifetime: Duration) -> StreamLease {
+        let lease = StreamLease::begin(lifetime).unwrap();
+        lease
+            .bind_continuity(
+                crate::stream_continuity::ContinuityBinding {
+                    domain: "1".into(),
+                    semantics: "2".into(),
+                    app: "91".into(),
+                    app_generation: "2".into(),
+                    session: "6208".into(),
+                    session_generation: "1".into(),
+                    subject: "8".into(),
+                    ticket_resource: "6000".into(),
+                    session_fingerprint: [0; 32],
+                },
+                crate::stream_continuity::ContinuityTip {
+                    height: "10".into(),
+                    chain: None,
+                    world_root: "42".into(),
+                },
+            )
+            .unwrap();
+        lease
+    }
+
+    #[test]
+    fn renewal_never_resurrects_and_pending_probe_does_not_delay_expiry() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let l = renewable(Duration::from_millis(40));
+            let challenge = l.begin_renewal().unwrap();
+            let tip = challenge.minimum_tip().clone();
+            let grant = VerifiedContinuity::fixture(challenge, tip);
+            tokio::time::timeout(Duration::from_millis(200), l.ended())
+                .await
+                .unwrap();
+            assert!(l.renew(grant).is_err());
+            assert!(l.begin_renewal().is_err());
+            assert!(l.check().is_err());
+        });
+    }
+
+    #[test]
+    fn renewal_schedule_and_io_remain_inside_old_deadline() {
+        let lease = renewable(Duration::from_secs(2));
+        let delay = lease.renewal_delay().unwrap();
+        assert!(delay > Duration::from_millis(500) && delay <= Duration::from_secs(1));
+        let challenge = lease.begin_renewal().unwrap();
+        assert_eq!(
+            challenge.response_deadline(),
+            lease.0.state.lock().unwrap().deadline
+        );
+        lease.0.state.lock().unwrap().deadline = Instant::now() + Duration::from_millis(10);
+        assert_eq!(lease.renewal_delay().unwrap(), Duration::ZERO);
+        lease.revoke();
+        assert!(challenge.response_deadline() <= Instant::now());
+        assert!(lease.renewal_delay().is_err());
+    }
+
+    #[test]
+    fn renewal_reply_uses_request_start_and_superseded_grant_is_single_use() {
+        let lease = renewable(Duration::from_secs(5));
+        let first = lease.begin_renewal().unwrap();
+        let tip = first.minimum_tip().clone();
+        let first = VerifiedContinuity::fixture(first, tip);
+        let second = lease.begin_renewal().unwrap();
+        let expected = second.deadline;
+        let tip = second.minimum_tip().clone();
+        let second = VerifiedContinuity::fixture(second, tip);
+        assert!(lease.renew(first).is_err());
+        std::thread::sleep(Duration::from_millis(10));
+        lease.renew(second).unwrap();
+        let state = lease.0.state.lock().unwrap();
+        assert_eq!(state.deadline, expected);
+        assert!(state.pending.is_none());
+    }
+
+    struct RecordingStream(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    impl minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::Server
+        for RecordingStream
+    {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            params: minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            self.0
+                .send(params.get()?.get_message()?.to_vec())
+                .map_err(|_| capnp::Error::failed("closed".into()))
+        }
+    }
+
+    #[test]
+    fn pump_closure_ends_continuity_even_with_worker_reference() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let lease = renewable(Duration::from_secs(60));
+            let (client, host) = std::os::unix::net::UnixStream::pair().unwrap();
+            let (tx, _reads) = tokio::sync::mpsc::unbounded_channel();
+            let (_writes, rx) = tokio::sync::mpsc::channel(16);
+            let session = WebSocketSession {
+                protocols: vec![],
+                to_app: capnp_rpc::new_client(RecordingStream(tx)),
+                from_app: rx,
+            };
+            let sockets = OpenSockets::default();
+            let limits = Limits {
+                class: "S",
+                max_open: 2,
+                bytes_per_minute: 1_000_000,
+            };
+            drop(client);
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                pump(
+                    host,
+                    session,
+                    limits,
+                    sockets.reserve(&limits).unwrap(),
+                    "close-test".into(),
+                    lease.clone(),
+                ),
+            )
+            .await
+            .unwrap();
+            assert!(lease.check().is_err());
+            assert!(lease.begin_renewal().is_err());
+            assert_eq!(sockets.open(), 0);
+        });
+    }
+
+    #[test]
+    fn live_pump_survives_initial_deadline_then_revocation_cuts_both_directions() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let lease = renewable(Duration::from_secs(1));
+            let (client, host) = std::os::unix::net::UnixStream::pair().unwrap();
+            client.set_nonblocking(true).unwrap();
+            let mut client = tokio::net::UnixStream::from_std(client).unwrap();
+            let (tx, mut reads) = tokio::sync::mpsc::unbounded_channel();
+            let (writes, rx) = tokio::sync::mpsc::channel(16);
+            let session = WebSocketSession {
+                protocols: vec![],
+                to_app: capnp_rpc::new_client(RecordingStream(tx)),
+                from_app: rx,
+            };
+            let sockets = OpenSockets::default();
+            let limits = Limits {
+                class: "S",
+                max_open: 2,
+                bytes_per_minute: 1_000_000,
+            };
+            let task = tokio::task::spawn_local(pump(
+                host,
+                session,
+                limits,
+                sockets.reserve(&limits).unwrap(),
+                "renewal-test".into(),
+                lease.clone(),
+            ));
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                let challenge = lease.begin_renewal().unwrap();
+                let tip = challenge.minimum_tip().clone();
+                lease
+                    .renew(VerifiedContinuity::fixture(challenge, tip))
+                    .unwrap();
+                client.write_all(b"in").await.unwrap();
+                assert_eq!(reads.recv().await.unwrap(), b"in");
+                writes.send(b"out".to_vec()).await.unwrap();
+                let mut out = [0; 3];
+                client.read_exact(&mut out).await.unwrap();
+                assert_eq!(&out, b"out");
+            }
+            assert!(lease.check().is_ok()); // 1200ms > the initial 1000ms deadline.
+            client.write_all(b"forbidden").await.unwrap();
+            writes.send(b"forbidden".to_vec()).await.unwrap();
+            lease.revoke();
+            tokio::time::timeout(Duration::from_millis(100), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(reads.recv().await.is_none());
+            assert!(writes.send(b"later".to_vec()).await.is_err());
+            assert_eq!(sockets.open(), 0);
+            let mut out = [0; 32];
+            assert!(!matches!(client.read(&mut out).await,Ok(n) if n > 0));
+        });
+    }
+
     #[test]
     fn rfc6455_sample_key_accepts() {
         // RFC 6455 §1.3's worked example.
@@ -415,13 +825,18 @@ mod tests {
         assert!(client_handshake(None, "websocket", key, Some("13")).is_err());
         assert!(client_handshake(Some("upgrade"), "websocket", key, Some("8")).is_err());
         assert!(client_handshake(Some("upgrade"), "websocket", None, Some("13")).is_err());
-        assert!(client_handshake(Some("upgrade"), "websocket", Some("c2hvcnQ="), Some("13")).is_err());
+        assert!(
+            client_handshake(Some("upgrade"), "websocket", Some("c2hvcnQ="), Some("13")).is_err()
+        );
     }
 
     #[test]
     fn subprotocols_are_tokens_in_order() {
         assert_eq!(protocols(None).unwrap(), Vec::<String>::new());
-        assert_eq!(protocols(Some("chat, superchat")).unwrap(), ["chat", "superchat"]);
+        assert_eq!(
+            protocols(Some("chat, superchat")).unwrap(),
+            ["chat", "superchat"]
+        );
         assert!(protocols(Some("chat, ")).is_err());
         assert!(protocols(Some("a b")).is_err());
     }
@@ -433,9 +848,11 @@ mod tests {
             head,
             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: abc=\r\n\r\n"
         );
-        assert!(String::from_utf8(switching_protocols("abc=", &["chat".into()]))
-            .unwrap()
-            .contains("\r\nSec-WebSocket-Protocol: chat\r\n"));
+        assert!(
+            String::from_utf8(switching_protocols("abc=", &["chat".into()]))
+                .unwrap()
+                .contains("\r\nSec-WebSocket-Protocol: chat\r\n")
+        );
         assert!(String::from_utf8(cap_refusal("wsConcurrencyCap"))
             .unwrap()
             .starts_with("HTTP/1.1 429 Too Many Requests\r\n"));

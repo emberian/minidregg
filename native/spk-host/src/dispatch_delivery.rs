@@ -5,15 +5,16 @@
 
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::HttpProjection;
-use crate::dispatch_native::{author_and_submit, PrivateOperator};
+use crate::dispatch_native::{author_and_submit, renew_stream, ContinuityCustody, PrivateOperator};
 use crate::dispatch_web_input::{physical_open_input, physical_web_input};
 use crate::hostd::Journal;
 use crate::http_entrance::{CustodianPolicy, EntranceKind};
 use crate::http_response;
 use crate::rpc_adapter::RpcDriver;
+use crate::stream_continuity::{ContinuityBinding, ContinuityTip};
 use crate::web_socket::{cap_refusal, Limits, OpenSockets, StreamLease};
-use std::os::unix::net::UnixStream;
 use std::io;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
@@ -39,11 +40,15 @@ pub(crate) struct ResidentHuman<'a> {
     pub sockets: &'a OpenSockets,
     pub limits: Limits,
     pub stream_lease_lifetime: Duration,
+    pub continuity_namespace: &'a (String, String),
 }
 
 enum Physical {
     Exchange(crate::dispatch_web_input::PhysicalWebInput),
-    Open(crate::dispatch_web_input::PhysicalOpenInput, crate::web_socket::Slot),
+    Open(
+        crate::dispatch_web_input::PhysicalOpenInput,
+        crate::web_socket::Slot,
+    ),
 }
 
 /// A WebSocket open the entrance validated: the client's stream (handed to
@@ -102,18 +107,47 @@ impl ResidentHuman<'_> {
         let operation_id = self.journal.allocate_dispatch_operation()?;
         let attempt_dir = attempt_parent.join(format!("dispatch-op-{operation_id}"));
         // Anchor BEFORE native authoring/admission; late success never renews it.
-        let lease = upgrade.as_ref().map(|_| StreamLease::begin(self.stream_lease_lifetime)).transpose()?;
+        let lease = upgrade
+            .as_ref()
+            .map(|_| StreamLease::begin(self.stream_lease_lifetime))
+            .transpose()?;
         let committed = author_and_submit(
             self.operator,
             self.custody,
             http,
             &operation_id,
             &attempt_dir,
-        ).inspect_err(|_| {
+        )
+        .inspect_err(|_| {
             // A failed current-authority check (including unavailable authority)
             // ends streams for this exact pinned custody, never another principal.
-            self.rpc.invalidate_custody(&self.custody.app, &self.custody.subject, &self.custody.session);
+            self.rpc.invalidate_custody(
+                &self.custody.app,
+                &self.custody.subject,
+                &self.custody.session,
+            );
         })?;
+        let continuity = lease.as_ref().map(|_| {
+            let m = &committed.matched;
+            (
+                ContinuityBinding {
+                    domain: self.continuity_namespace.0.clone(),
+                    semantics: self.continuity_namespace.1.clone(),
+                    app: m.app.to_string(),
+                    app_generation: m.app_generation.to_string(),
+                    session: m.session_resource.clone(),
+                    session_generation: m.session_generation.clone(),
+                    subject: m.subject.clone(),
+                    ticket_resource: self.custody.ticket_resource.clone(),
+                    session_fingerprint: m.session_fingerprint,
+                },
+                ContinuityTip {
+                    height: m.accepted_count.clone(),
+                    chain: None,
+                    world_root: m.after_world_root.clone(),
+                },
+            )
+        });
         let base_path = format!("https://{}", policy.expected_host);
         // Projected before the durable DeliveryRequested, exactly as a GET.
         let physical = match (&upgrade, slot) {
@@ -154,17 +188,34 @@ impl ResidentHuman<'_> {
                 // the client stream. The record finishes delivered once the
                 // app accepted the open; frames and the close never return
                 // here and write nothing to Mini.
-                let opened = self.rpc.open_web_socket(
-                    physical.binding,
-                    physical.open,
-                    upgrade.client,
-                    upgrade.accept,
-                    self.limits,
-                    slot,
-                    lease.ok_or_else(|| invalid("WebSocket lease absent"))?,
-                    format!("op {operation_id}"),
-                    APP_CALL_TIME,
-                );
+                // Lease setup failure after admission must finish this exact
+                // journal record, not leave the generation's active marker.
+                let opened = (|| {
+                    let lease = lease.ok_or_else(|| invalid("WebSocket lease absent"))?;
+                    let (binding, tip) =
+                        continuity.ok_or_else(|| invalid("continuity binding absent"))?;
+                    lease.bind_continuity(binding, tip)?;
+                    let renewal = Box::pin(renew_stream(
+                        lease.clone(),
+                        ContinuityCustody {
+                            operator: self.operator.clone(),
+                            custody: self.custody.clone(),
+                            attempt_parent: attempt_parent.to_path_buf(),
+                        },
+                    ));
+                    self.rpc.open_web_socket(
+                        physical.binding,
+                        physical.open,
+                        upgrade.client,
+                        upgrade.accept,
+                        self.limits,
+                        slot,
+                        lease,
+                        renewal,
+                        format!("op {operation_id}"),
+                        APP_CALL_TIME,
+                    )
+                })();
                 return match opened {
                     Ok(()) => {
                         recorded.finish(self.journal, true)?;
@@ -178,7 +229,9 @@ impl ResidentHuman<'_> {
             }
             _ => {
                 let _ = recorded.finish(self.journal, false);
-                return Err(invalid("dispatch projection differs from the entrance request"));
+                return Err(invalid(
+                    "dispatch projection differs from the entrance request",
+                ));
             }
         };
         let head = http.method == "HEAD";

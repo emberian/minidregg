@@ -6,6 +6,10 @@ mod rpc_adapter;
 #[path = "../web_socket.rs"]
 #[allow(dead_code)]
 mod web_socket;
+#[path = "../stream_continuity.rs"]
+#[allow(dead_code)]
+mod stream_continuity;
+use minidregg_spk_host::dispatch_native;
 
 use minidregg_spk_host::broker;
 use minidregg_spk_host::hostd;

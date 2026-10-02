@@ -42,7 +42,7 @@ mod dispatch_delivery;
 #[cfg(target_os = "linux")]
 mod dispatch_inspection;
 #[cfg(target_os = "linux")]
-mod dispatch_native;
+pub mod dispatch_native;
 #[cfg(target_os = "linux")]
 mod dispatch_web_input;
 #[cfg(target_os = "linux")]
@@ -107,3 +107,5 @@ mod spawn_gate;
 mod volume_custody;
 #[cfg(target_os = "linux")]
 mod web_socket;
+#[cfg(target_os = "linux")]
+mod stream_continuity;

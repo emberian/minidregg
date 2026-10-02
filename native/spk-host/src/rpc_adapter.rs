@@ -15,6 +15,8 @@ use minidregg_spk_rpc::{
 use tokio::io::AsyncWriteExt;
 use std::collections::HashMap;
 use std::io;
+use std::future::Future;
+use std::pin::Pin;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as sync_mpsc;
@@ -262,6 +264,10 @@ async fn write_upgrade(
     }
 }
 
+/// Starts only after an admitted app open and successful 101. Transport code
+/// need not know operator credentials or native continuity wire formats.
+pub(crate) type StreamRenewal = Pin<Box<dyn Future<Output = ()> + Send>>;
+
 enum Command {
     View {
         deadline: Instant,
@@ -286,6 +292,7 @@ enum Command {
         limits: Limits,
         slot: Slot,
         lease: StreamLease,
+        renewal: StreamRenewal,
         label: String,
         deadline: Instant,
         reply: sync_mpsc::SyncSender<io::Result<()>>,
@@ -558,6 +565,7 @@ impl RpcDriver {
                                 limits,
                                 slot,
                                 lease,
+                                renewal,
                                 label,
                                 deadline,
                                 reply,
@@ -600,6 +608,7 @@ impl RpcDriver {
                                         tokio::task::spawn_local(pump(
                                             client, opened, limits, slot, label, lease,
                                         ));
+                                        tokio::task::spawn_local(renewal);
                                         let _ = reply.send(Ok(()));
                                     }
                                     Err(error) => {
@@ -879,6 +888,7 @@ impl RpcDriver {
         limits: Limits,
         slot: Slot,
         lease: StreamLease,
+        renewal: StreamRenewal,
         label: String,
         timeout: Duration,
     ) -> io::Result<()> {
@@ -898,6 +908,7 @@ impl RpcDriver {
                 limits,
                 slot,
                 lease,
+                renewal,
                 label,
                 deadline,
                 reply: reply_tx,
