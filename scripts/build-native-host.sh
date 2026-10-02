@@ -1169,9 +1169,9 @@ if [[ -n "$incremental_baseline_root" ]]; then
     "$validated_sources" "$validated_additional_changes" "$validated_insertions" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
 fi
 
+compiled_sources=0
 if [[ "$build_umbrella" == 0 ]]; then
   index=0
-  compiled_sources=0
   incremental_started=0
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
@@ -1337,6 +1337,8 @@ EOF
       "$wrapper_log" >&2
     exit 70
   fi
+  # Lake may reuse the entire warm closure; count actual source invocations.
+  compiled_sources=$(awk -F '\t' '$1 == "START" && $4 ~ /\.lean( |$)/ { n++ } END { print n+0 }' "$wrapper_log")
   printf 'max_concurrent_real_lean=1\nwrapper_invocations=%s\n' \
     "$(grep -c '^START' "$wrapper_log")" > "$output_dir/lake-wrapper-summary.txt"
 fi
