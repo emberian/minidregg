@@ -52,6 +52,7 @@ pub(crate) struct Verb {
 }
 
 pub(crate) const VERBS: &[Verb] = &[
+    Verb { name: "app", usage: "app delegate-lifecycle prepare ID NAME --package PKG --snapshot SNAP --manager SUBJECT | app delegate-lifecycle prepare|submit|recover|status ID", operation: "member-signed lifecycle management delegation with retained exact recovery" },
     Verb { name: "home", usage: "home [REF] [--json]", operation: "mini member --dir WORKSPACE [--name REF]: your resources and exact recovery actions; REF checks current Mini authority" },
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
@@ -86,7 +87,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Verb { name: "doc", usage: "doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR] | doc hit NAME DOCUMENT ATOM REVISION | doc device | doc share ID NAME SUBJECT @DEVICE @INVITATION | doc accept NAME CATALOG @INVITATION | doc revoke ID NAME SUBJECT | doc membership-recover ID NAME [@INVITATION] | doc protect NAME | doc protect-current NAME | doc protect-recover NAME | doc epoch-export NAME @FILE | doc epoch-import NAME CATALOG @FILE | doc new NAME [draft|note|index|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
+    Verb { name: "doc", usage: "doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT | doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR] | doc hit NAME DOCUMENT ATOM REVISION | doc device | doc share ID NAME SUBJECT @DEVICE @INVITATION | doc accept NAME CATALOG @INVITATION | doc revoke ID NAME SUBJECT | doc membership-recover ID NAME [@INVITATION] | doc protect NAME | doc protect-current NAME | doc protect-recover NAME | doc epoch-export NAME @FILE | doc epoch-import NAME CATALOG @FILE | doc new NAME [draft|note|index|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
     Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate)" },
     Verb { name: "room", usage: "room index ID ROOM INDEX-DOC | room bind ID ROOM NAME TARGET | room rename ID ROOM NAME NEW-NAME | room unbind ID ROOM NAME | room resolve ROOM/NAME | room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room seal ID NAME --freeze-roster | room rotate ID NAME | room register ID NAME | room rewrap ID NAME SUBJECT | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | room-kick: one revoke per standing grant SUBJECT holds under NAME (the Host's signed who view: the invite, a concierge's window, any other), proposed; `submit ID` submits them all (private: room-key --op kick = every revoke + rotate + rewrap, submitted) | propose (action install-policy, `sealed`): sealing a room freezes its membership forever (no invite, no kick, while members keep the cells under it), so it needs --freeze-roster | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
@@ -113,14 +114,17 @@ pub(crate) fn command_catalog() -> impl Iterator<Item = &'static Verb> {
 
 /// Subcommands spelled by the command's actual usage, without another table.
 fn subcommands(verb: &str) -> Vec<String> {
+    subcommands_after(verb,&format!("{verb} "))
+}
+
+fn subcommands_after(verb: &str, prefix: &str) -> Vec<String> {
     let mut names = std::collections::BTreeSet::new();
     if let Some(command) = command_catalog().find(|v| v.name == verb) {
-        for alternative in command.usage.split('|') {
-            let mut words = alternative.split_whitespace();
-            if words.next() == Some(verb) {
-                if let Some(word) = words.next() {
-                    if word.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
-                        names.insert(word.to_owned());
+        for alternative in command.usage.split(prefix).skip(1) {
+            if let Some(word) = alternative.split_whitespace().next() {
+                for literal in word.split('|') {
+                    if !literal.is_empty() && literal.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+                        names.insert(literal.to_owned());
                     }
                 }
             }
@@ -1155,6 +1159,30 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         writes: vec![],
     };
     Ok(match verb.as_str() {
+        "app" => {
+            if !w.get(1).is_some_and(|v|v=="delegate-lifecycle") {return Err(u.to_owned());}
+                if !matches!(w.len(),4|11) || !matches!(w[2].as_str(),"prepare"|"submit"|"recover"|"status") {return Err(u.to_owned());}
+                crate::workspace::validate_name(&w[3])?;
+                let mut flags=vec![flag("dir",ws()),flag("action","app-lifecycle"),flag("request-id",&w[3]),flag("op",&w[2])];
+                if w.len()==11 {
+                    if w[2]!="prepare" {return Err(u.to_owned());}
+                    ref_name(&w[4],"app reference")?;
+                    let mut options=std::collections::BTreeMap::new();
+                    for option in w[5..].chunks_exact(2) {
+                        if !matches!(option[0].as_str(),"--package"|"--snapshot"|"--manager")
+                            || options.insert(option[0].as_str(),option[1].as_str()).is_some() {
+                            return Err(u.to_owned());
+                        }
+                    }
+                    if options.len()!=3 {return Err(u.to_owned());}
+                    ref_name(options["--package"],"package reference")?;
+                    ref_name(options["--snapshot"],"snapshot reference")?;
+                    crate::workspace::decimal(options["--manager"],"manager subject")?;
+                    flags.extend([flag("name",&w[4]),flag("package-name",options["--package"]),
+                        flag("snapshot-name",options["--snapshot"]),flag("manager",options["--manager"])]);
+                }
+                client("workspace",flags)
+        }
         "home" => {
             let mut args = w[1..].to_vec();
             let json_output = args.last().is_some_and(|s| s == "--json");
@@ -2831,7 +2859,9 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
         (_, 0) => command_catalog().map(|v| v.name.to_owned()).collect(),
-        ("room" | "key" | "chat", 1) => subcommands(verb),
+        ("room" | "key" | "chat" | "app", 1) => subcommands(verb),
+        ("app", 2) if w[1] == "delegate-lifecycle" => subcommands_after("app","app delegate-lifecycle "),
+        ("app", 4) if w[1] == "delegate-lifecycle" && w[2] == "prepare" => refs(),
         ("ask" | "dismiss" | "summon", 1) => refs(),
         ("home" | "read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
@@ -2848,13 +2878,9 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
         ("revoke" | "renounce", 2) => refs(),
-        ("doc", 1) => ["app-export", "search", "hit", "device", "share", "accept", "revoke", "membership-recover", "protect", "protect-current", "protect-recover", "epoch-export", "epoch-import", "new", "show", "outline", "history", "diff", "pull", "push", "append", "edit", "insert", "move",
-            "remove", "mark", "unmark", "annotate", "link", "links", "backlinks", "range", "transclude",
-            "transclusions", "follow", "quote"]
-            .map(String::from)
-            .to_vec(),
+        ("doc", 1) => subcommands("doc"),
         ("room", 2) if !matches!(w[1].as_str(), "new" | "welcome" | "template" | "invite" | "kick" | "seal" | "rotate" | "register" | "rewrap" | "leave" | "index" | "bind" | "rename" | "unbind") => refs(),
-        ("doc", 2) if w[1]=="app-export" => ["capture","publish","status","recover","rebase"].map(String::from).to_vec(),
+        ("doc", 2) if w[1]=="app-export" => subcommands_after("doc","doc app-export "),
         ("doc", 2) if !matches!(w[1].as_str(), "new" | "append" | "edit" | "annotate" | "link" | "push") => refs(),
         ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "annotate" | "link" | "push" | "transclude") => refs(),
         ("doc", 4) if w[1] == "link" => refs(),
@@ -4105,12 +4131,34 @@ mod tests {
     }
 
     #[test]
+    fn app_lifecycle_uses_owner_workspace_custody_and_rejects_seed_options() {
+        let s=session();
+        let p=client(plan(&s,"app delegate-lifecycle prepare manager-delegation sheet --package package --snapshot snapshot --manager 8").unwrap());
+        assert_eq!(p.0,"workspace");
+        assert!(p.1.contains(&("action".into(),"app-lifecycle".into())));
+        assert!(p.1.contains(&("request-id".into(),"manager-delegation".into())));
+        assert!(p.1.contains(&("package-name".into(),"package".into())));
+        let recovered=client(plan(&s,"app delegate-lifecycle recover manager-delegation").unwrap());
+        assert!(recovered.1.contains(&("op".into(),"recover".into())));
+        assert!(!recovered.1.iter().any(|(name,_)|name=="manager" || name=="name"));
+        assert!(plan(&s,"app delegate-lifecycle prepare manager-delegation sheet --package package --snapshot snapshot --seed owner.key").is_err());
+        assert!(plan(&s,"app delegate-lifecycle prepare ../foreign sheet --package package --snapshot snapshot --manager 8").is_err());
+    }
+
+    #[test]
     fn module_subcommands_are_derived_from_their_actual_usage() {
         let s = session();
         assert!(complete(&s, "key p").contains(&"providers".to_owned()));
         assert!(complete(&s, "key c").contains(&"choose".to_owned()));
         assert!(complete(&s, "room st").contains(&"status".to_owned()));
         assert!(complete(&s, "chat e").contains(&"enter".to_owned()));
+        assert!(help_text(Some("doc")).contains("doc app-export"));
+        assert!(complete(&s, "doc app-").contains(&"app-export".to_owned()));
+        assert!(complete(&s, "doc app-export re").contains(&"recover".to_owned()));
+        assert!(complete(&s, "doc q").is_empty());
+        assert!(plan(&s,"doc quote paper notes 1 2").is_err());
+        assert!(complete(&s, "app de").contains(&"delegate-lifecycle".to_owned()));
+        assert!(complete(&s, "app delegate-lifecycle re").contains(&"recover".to_owned()));
     }
 
     #[test]

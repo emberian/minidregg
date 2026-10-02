@@ -66,3 +66,28 @@ unsuitable for readiness reads. Generic native dry-run 130 does not include the
 complete application ticket/lifetime admission, so the next app selector requires
 a dedicated read-only projection of current native dispatch admission. No browser
 URL or reconnect capability is invented by this workspace view.
+
+## Member lifecycle delegation shell successor
+
+The shell routes lifecycle delegation to the separate owner workspace module:
+
+```
+app delegate-lifecycle prepare ID APP --package PKG --snapshot SNAP --manager SUBJECT
+app delegate-lifecycle submit ID
+app delegate-lifecycle prepare ID
+app delegate-lifecycle status ID
+app delegate-lifecycle recover ID
+```
+
+The first preparation retains the app, package and snapshot reference names and
+manager declaration under ID. Later commands use that same retained declaration;
+source-current grants and the member's current signing key remain authoritative.
+Preparation advances one incomplete phase, submission uses its exact retained
+phase, and recovery only looks up that operation. No seed-file argument or new
+request identity is accepted for recovery. The owner module installs the three
+source-authored laws and three child delegations, preserves the owner's admin and
+revocation rights, and emits the manager selector after all phases are confirmed.
+
+This shell checkpoint must be composed with SPK's `workspace::app_lifecycle`
+consumer and the typed source policy author before claiming the journey works.
+The catalog and nested completion derive their operation words from this grammar.
