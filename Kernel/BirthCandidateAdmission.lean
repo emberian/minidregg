@@ -12,6 +12,7 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 
 set_option autoImplicit false
 
@@ -85,6 +86,7 @@ theorem existingAddress_retained (records : List PolicyRecord) (addresses : List
     (address : Digest) (member : address ∈ addresses)
     (unstaged : address ∉ records.map policyRecordDigest) :
     address ∈ existingAddresses records addresses := by
-  simp [existingAddresses, member, unstaged]
+  simp only [existingAddresses, List.mem_filter]
+  exact ⟨member, by simpa using unstaged⟩
 
 end Minidregg.Kernel.BirthCandidateAdmission

@@ -40,11 +40,17 @@ refused() {
     printf '%s\tnative-refusal\t%s\tFAIL\n' "$step" "$RC" >>"$ROWS"; cat "$ERR" >&2; return 1
   fi
   printf '%s\tnative-refusal\t%s\tPASS\n' "$step" "$RC" >>"$ROWS"
+  WORDS=$D/log/$N.words
+  cat "$ERR" >"$WORDS"
+  while read -r hex; do
+    printf '%s' "$hex" | xxd -r -p | tr -c '[:print:]' ' ' >>"$WORDS"
+  done < <(grep -oE 'encoded( refusal)?: [0-9a-f]+' "$ERR" | awk '{print $NF}' || true)
 }
 turn() { local step=$1 id=$2 line=$3; ok "$step-prepare" alice "$line"; ok "$step-submit" alice "submit $id"; }
 # Component selectors use source physical tags and ordinary request verbs.
 printf '%s\n' '{"selector":{"physicalKinds":["1"],"verbs":["2"]},"parents":[],"predicate":{"type":"any","predicates":[]}}' >"$D/alice/requests/block-write.json"
 printf '%s\n' '{"selector":{"physicalKinds":["1"],"verbs":["1"]},"parents":[],"predicate":{"type":"any","predicates":[]}}' >"$D/alice/requests/block-read.json"
+printf '%s\n' '{"selector":{"physicalKinds":["1"],"verbs":["3","5"]},"parents":[],"predicate":{"type":"any","predicates":[]}}' >"$D/alice/requests/block-management.json"
 SECRET=987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789987654321123456789
 jq -n --arg secret "$SECRET" '{selector:{physicalKinds:["1"],verbs:["1"]},parents:[],predicate:{type:"le",slot:"clock/now",value:$secret}}' >"$D/alice/requests/hidden-range.json"
 
@@ -93,13 +99,28 @@ refused cycle-install alice 'submit jli-cycle'
 turn remove-export jli-clear 'law export jli-clear jli-room none'
 turn write-restored jli-after "doc append jli-after jli-room/notes 'after removing export'"
 
+# A neutral child cannot escape its room export through authority management.
+turn block-management jli-mgmt 'law export jli-mgmt jli-room @block-management.json'
+ok management-before alice 'law export show jli-room/notes'
+jq '.judgedAt|{authorityRoot,worldRoot,height}' "$OUT" >"$D/management-before.json"
+ok delegate-denied-prepare alice "delegate jli-delegate-denied jli-room/notes $NEWCOMER_SUBJECT observe 50000"
+refused inherited-delegate alice 'submit jli-delegate-denied'
+ok revoke-denied-prepare alice "revoke jli-revoke-denied jli-room/notes $NEWCOMER_SUBJECT"
+refused inherited-revoke alice 'submit jli-revoke-denied'
+ok management-after alice 'law export show jli-room/notes'
+jq '.judgedAt|{authorityRoot,worldRoot,height}' "$OUT" >"$D/management-after.json"
+check no-management-record cmp -s "$D/management-before.json" "$D/management-after.json"
+ok denied-revoke-retains-reader dan 'doc show jli-note'
+turn management-clear jli-mgmt-clear 'law export jli-mgmt-clear jli-room none'
+
 turn block-read jli-read-block 'law export jli-read-block jli-room @block-read.json'
 refused inherited-signed-read dan 'doc show jli-note'
 # Public refusal must not identify a parent's source or a clause origin.
-check hidden-parent-name bash -c '! grep -q "jli-room\|policy-origin\|descendants" "$1"' _ "$ERR"
+check hidden-parent-name bash -c '! grep -q "jli-room\|policy-origin\|descendants" "$1"' _ "$WORDS"
+check hidden-parent-id bash -c '! grep -q "$1" "$2"' _ "$POLICY" "$WORDS"
 turn hidden-range jli-range 'law export jli-range jli-room @hidden-range.json'
 refused inherited-range-read dan 'doc show jli-note'
-check hidden-range-value bash -c '! grep -q "$1" "$2"' _ "$SECRET" "$ERR"
+check hidden-range-value bash -c '! grep -q "$1" "$2"' _ "$SECRET" "$WORDS"
 turn read-restored jli-read-clear 'law export jli-read-clear jli-room none'
 ok restored-signed-read dan 'doc show jli-note'
 check restored-content grep -q 'after removing export' "$OUT"
