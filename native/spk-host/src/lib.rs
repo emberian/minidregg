@@ -54,6 +54,8 @@ pub mod http_entrance;
 #[cfg(target_os = "linux")]
 mod http_response;
 #[cfg(target_os = "linux")]
+mod export_receipt;
+#[cfg(target_os = "linux")]
 pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod launch_descriptor_native;

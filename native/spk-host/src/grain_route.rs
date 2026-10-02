@@ -115,6 +115,9 @@ struct RouteRequest {
     /// the legacy owner entrance selector. Native admission checks authority.
     #[serde(default)]
     manifest_observe_capability: Option<String>,
+    /// Opt in only a source-derived API session to bounded export custody.
+    #[serde(default)]
+    export_capture: bool,
     participant_key: ParticipantKey,
 }
 
@@ -252,6 +255,11 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     private_dir(&app_dir)?;
     let placement = crate::grain::load_placement(&app_dir.join("placement.json"))?;
     let derived = derive(app, &placement.selector, &request)?;
+    if request.export_capture && derived.kind != "api" {
+        return Err(invalid(
+            "export capture requires a source-derived api session",
+        ));
+    }
     let installed = crate::materialize::verify_installed_spk(
         &PathBuf::from(format!(
             "/var/lib/minidregg/spk/packages/sha256-{}",
@@ -286,15 +294,26 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
         if staging.exists() {
             fs::remove_dir_all(&staging)?;
         }
-        crate::http_entrance::initialize_custodian(
-            &staging,
-            &request.expected_host,
-            app,
-            &derived.subject,
-            &derived.session,
-            &derived.ticket,
-            &derived.kind,
-        )?;
+        if request.export_capture {
+            crate::http_entrance::initialize_connector_custodian(
+                &staging,
+                &request.expected_host,
+                app,
+                &derived.subject,
+                &derived.session,
+                &derived.ticket,
+            )?;
+        } else {
+            crate::http_entrance::initialize_custodian(
+                &staging,
+                &request.expected_host,
+                app,
+                &derived.subject,
+                &derived.session,
+                &derived.ticket,
+                &derived.kind,
+            )?;
+        }
         let custody = custody_json(
             app,
             &placement.selector,
@@ -324,6 +343,8 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     }
     let custody = read_json(&directory.join("dispatch-custody.json"))?;
     check_retained_custody(&custody, &derived, &request.name)?;
+    let policy = crate::http_entrance::CustodianPolicy::load(&directory)?;
+    check_retained_policy(&policy, app, &derived, &request)?;
     Ok(json!({
         "protocol":"mini-spk-grain-route-v1",
         "app":app,
@@ -339,6 +360,29 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
         "tokenFile":directory.join(if derived.kind == "api" { "api.token" } else { "bootstrap.token" }),
         "signedApiPath":bridge.api_path,
     }))
+}
+
+fn check_retained_policy(
+    policy: &crate::http_entrance::CustodianPolicy,
+    app: &str,
+    derived: &Derived,
+    request: &RouteRequest,
+) -> io::Result<()> {
+    let api = policy.fixed_session_kind == crate::http_entrance::EntranceKind::Api;
+    if policy.expected_host != request.expected_host
+        || policy.fixed_app != app
+        || policy.fixed_subject != derived.subject
+        || policy.fixed_session != derived.session
+        || policy.fixed_ticket != derived.ticket
+        || api != (derived.kind == "api")
+        || policy.export_capture != request.export_capture
+        || (policy.export_capture && !api)
+    {
+        return Err(invalid(
+            "retained route custody differs from requested authority or export opt-in",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -425,6 +469,7 @@ mod tests {
             session_receipt,
             ticket_issue: e.0.clone(),
             manifest_observe_capability: manifest.map(str::to_owned),
+            export_capture: false,
             participant_key: ParticipantKey {
                 key_id: format!("{subject}00{subject}"),
                 key_epoch: "2".into(),
@@ -434,6 +479,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn retained_capture_route_cannot_switch_authority_or_opt_in() {
+        let e = Evidence::new();
+        let mut req = request(&e, "91", None);
+        let mut d = derive("4601", &selector(), &req).unwrap();
+        let mut p = crate::http_entrance::CustodianPolicy {
+            expected_host: req.expected_host.clone(),
+            fixed_app: "4601".into(),
+            fixed_subject: d.subject.clone(),
+            fixed_session: d.session.clone(),
+            fixed_ticket: d.ticket.clone(),
+            fixed_session_kind: crate::http_entrance::EntranceKind::Browser,
+            export_capture: false,
+            browser_token_sha256: [0; 32],
+            bootstrap_token_sha256: [0; 32],
+            api_token_sha256: [0; 32],
+        };
+        check_retained_policy(&p, "4601", &d, &req).unwrap();
+        req.export_capture = true;
+        assert!(check_retained_policy(&p, "4601", &d, &req).is_err());
+        p.export_capture = true;
+        assert!(check_retained_policy(&p, "4601", &d, &req).is_err());
+        p.fixed_session_kind = crate::http_entrance::EntranceKind::Api;
+        d.kind = "api".into();
+        check_retained_policy(&p, "4601", &d, &req).unwrap();
+        p.fixed_subject = "92".into();
+        assert!(check_retained_policy(&p, "4601", &d, &req).is_err());
+    }
     #[test]
     fn delegate_manifest_selector_reaches_dispatch_custody() {
         for (subject, cap) in [("7", "3231"), ("9", "3241")] {

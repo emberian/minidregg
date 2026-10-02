@@ -69,6 +69,7 @@ impl ResidentHuman<'_> {
         attempt_parent: &Path,
         upgrade: Option<UpgradeRequest>,
     ) -> io::Result<Vec<u8>> {
+        let export_capture = crate::export_receipt::requested(policy, http)?;
         let kind = match http.route {
             crate::dispatch_inspection::Route::Browser => EntranceKind::Browser,
             crate::dispatch_inspection::Route::Api { .. } => EntranceKind::Api,
@@ -299,7 +300,11 @@ impl ResidentHuman<'_> {
         )?;
         let origin = format!("https://{}", policy.expected_host);
         let serialized = response
-            .and_then(|reply| http_response::serialize_for_origin(&reply, head, Some(&origin)));
+            .and_then(|reply| http_response::serialize_for_origin(&reply, head, Some(&origin)))
+            .and_then(|bytes| match &export_capture {
+                Some(capture) => crate::export_receipt::prepare(bytes, capture, self.custody, &recorded.identity, http),
+                None => Ok(bytes),
+            });
         match serialized {
             Ok(bytes) => {
                 recorded.finish(self.journal, true)?;

@@ -112,6 +112,7 @@ pub(crate) struct CustodianPolicy {
     pub fixed_session: String,
     /// Bound to the Mini session, never inferred from the bearer or cookie.
     pub fixed_session_kind: EntranceKind,
+    pub export_capture: bool,
     #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
@@ -128,6 +129,8 @@ struct PolicyFile {
     fixed_subject: String,
     fixed_session: String,
     fixed_session_kind: String,
+    #[serde(default)]
+    export_capture: bool,
     fixed_ticket: String,
     browser_token_sha256: String,
     bootstrap_token_sha256: String,
@@ -239,6 +242,7 @@ impl CustodianPolicy {
             || !canonical_nat(&parsed.fixed_session)
             || !canonical_nat(&parsed.fixed_ticket)
             || !matches!(parsed.fixed_session_kind.as_str(), "web" | "api")
+            || (parsed.export_capture && parsed.fixed_session_kind != "api")
         {
             return Err(refuse("custodian origin or fixed Mini coordinate refused"));
         }
@@ -253,6 +257,7 @@ impl CustodianPolicy {
                 EntranceKind::Api
             },
             fixed_ticket: parsed.fixed_ticket,
+            export_capture: parsed.export_capture,
             browser_token_sha256: hex_digest(&parsed.browser_token_sha256)?,
             bootstrap_token_sha256: hex_digest(&parsed.bootstrap_token_sha256)?,
             api_token_sha256: hex_digest(&parsed.api_token_sha256)?,
@@ -293,6 +298,27 @@ pub fn initialize_custodian(
     ticket: &str,
     session_kind: &str,
 ) -> io::Result<()> {
+    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, (session_kind, false))
+}
+
+/// An explicitly enabled, fixed-participant API route for document exports.
+pub fn initialize_connector_custodian(
+    directory: &Path, expected_host: &str, app: &str, subject: &str,
+    session: &str, ticket: &str,
+) -> io::Result<()> {
+    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, ("api", true))
+}
+
+fn initialize_custodian_policy(
+    directory: &Path,
+    expected_host: &str,
+    app: &str,
+    subject: &str,
+    session: &str,
+    ticket: &str,
+    session_policy: (&str, bool),
+) -> io::Result<()> {
+    let (session_kind, export_capture) = session_policy;
     if !valid_expected_host(expected_host)
         || !matches!(session_kind, "web" | "api")
         || ![app, subject, session, ticket]
@@ -318,6 +344,7 @@ pub fn initialize_custodian(
         fixed_subject: subject.into(),
         fixed_session: session.into(),
         fixed_session_kind: session_kind.into(),
+        export_capture,
         fixed_ticket: ticket.into(),
         browser_token_sha256: digest(&browser),
         bootstrap_token_sha256: digest(&bootstrap),
@@ -489,7 +516,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             name if name.starts_with("x-sandstorm-") => {
                 return Err(refuse("caller-supplied Sandstorm header"));
             }
-            name if allowed_ordinary_header(name) => {
+            name if allowed_ordinary_header(name) || name == "x-mini-export-capture" => {
                 ordinary_headers.push((name.to_owned(), value))
             }
             _ => {} // Browser/proxy metadata is never forwarded to Mini or the app.
@@ -1604,6 +1631,7 @@ mod tests {
             fixed_subject: "8".into(),
             fixed_session: "6208".into(),
             fixed_session_kind: EntranceKind::Browser,
+            export_capture: false,
             fixed_ticket: "6408".into(),
             browser_token_sha256: hash("browser-token-abcdefghijklmnopqrstuvwxyz"),
             bootstrap_token_sha256: hash("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),

@@ -3,6 +3,8 @@
 //! the signed observation, current Plan, and Lean admission in `main`.
 
 pub(crate) mod web_author;
+#[path = "app_document.rs"]
+pub(crate) mod app_document;
 
 use crate::current_birth;
 use crate::receipt_continuity::{self, Mode as ContinuityMode};
@@ -5482,6 +5484,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         load(&root)?
     };
     match action.as_str() {
+        "app-document" => app_document::run(&root, &workspace, args),
         "onboard" => {
             args.finish()?;
             print_json(&complete_fresh_onboarding(&root)?)
