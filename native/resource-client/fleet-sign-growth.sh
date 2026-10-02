@@ -12,6 +12,11 @@
 # attempt's submit marker to the Host's answer frame), the one-minute box load
 # when the turn ended, and the Store's bytes on disk.
 #
+# AUDIT_LEVELS (default none): at each of these levels, while the Host is
+# stopped for the reopen, a cold `mini audit` (the genesis re-admission of every
+# record) runs first and is timed into audit.tsv (AUDIT_TIMEOUT seconds, default
+# 3600; rc 124 is a timeout), with the box load when it started.
+#
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
 umask 077
@@ -58,6 +63,8 @@ B=$(jq -er .cell "$OUT/join-bravo.json")
 T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
 printf 'n\tverb\tseconds\treplans\tchain_index\tsubmit_s\tload1\tstore_bytes\n' >"$T"
 printf 'level\tchain_index\tserve_ready_s\tfirst_receipt_s\tstore_bytes\n' >"$R"
+A="$OUT/audit.tsv"
+printf 'level\tchain_index\trc\taudit_s\tload1\n' >"$A"
 n=1
 while [ "$n" -le "$TURNS" ]; do
   f="$OUT/turns/$n.json"
@@ -80,6 +87,17 @@ while [ "$n" -le "$TURNS" ]; do
     if [ "$n" -eq "$level" ]; then
       TX=$(jq -er .turn_hash "$f")
       stop_server
+      for audit in ${AUDIT_LEVELS:-}; do
+        if [ "$audit" -eq "$level" ]; then
+          load=$(cut -d' ' -f1 /proc/loadavg)
+          t0=$(now)
+          rc=0
+          timeout "${AUDIT_TIMEOUT:-3600}" "$MINI" audit --host "$HOST" --config "$CONFIG" \
+            >"$OUT/audit-$level.out" 2>"$OUT/audit-$level.err" || rc=$?
+          printf '%s\t%s\t%s\t%s\t%s\n' "$level" "$(jq -r .chain_index "$f")" "$rc" \
+            "$(elapsed "$t0" "$(now)")" "$load" >>"$A"
+        fi
+      done
       t0=$(now)
       serve "$FIX/public/serve-$level.log"
       t1=$(now)
