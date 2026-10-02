@@ -13,6 +13,15 @@ const MAX_NAT: &str =
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Nat(String);
 impl Nat {
+    /// Operator configs may encode a natural as a JSON number; source replies
+    /// use decimal strings. Both retain the exact 256-bit integer representation.
+    pub(crate) fn from_json(value: &Value) -> Result<Self> {
+        match value {
+            Value::String(text) => Self::parse(text),
+            Value::Number(number) => Self::parse(&number.to_string()),
+            _ => Err("paid natural requires a decimal string or exact JSON number".into()),
+        }
+    }
     pub(crate) fn parse(text: &str) -> Result<Self> {
         if text.is_empty()
             || !text.bytes().all(|b| b.is_ascii_digit())

@@ -145,17 +145,7 @@ fn pinned_config(common: &Common) -> Result<Value> {
     serde_json::from_slice(&common.config_bytes).map_err(|e| format!("pinned config JSON: {e}"))
 }
 fn config_nat(config: &Value, name: &str) -> Result<String> {
-    let text = config[name]
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| config[name].to_string());
-    same(
-        !text.is_empty()
-            && text.bytes().all(|b| b.is_ascii_digit())
-            && (text == "0" || !text.starts_with('0')),
-        "pinned config requires canonical natural domain/expectedSeed",
-    )?;
-    Ok(text)
+    pay_status::Nat::from_json(&config[name]).map(|n| n.as_str().to_owned())
 }
 fn check_pins(common: &Common) -> Result<()> {
     same(

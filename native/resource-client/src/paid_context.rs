@@ -100,22 +100,9 @@ fn hash(bytes: &[u8]) -> String {
     hex(&sha2::Sha256::digest(bytes))
 }
 fn natural(value: &Value, name: &str) -> Result<String> {
-    let text = match value.get(name) {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Number(n)) => n
-            .as_u64()
-            .ok_or("paid snapshot integer is not exact")?
-            .to_string(),
-        _ => return Err(format!("paid snapshot lacks {name}")),
-    };
-    if text.is_empty()
-        || text.len() > 78
-        || !text.bytes().all(|b| b.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
-    {
-        return Err(format!("paid snapshot {name} is not canonical decimal"));
-    }
-    Ok(text)
+    crate::pay_status::Nat::from_json(value.get(name).ok_or_else(|| format!("paid snapshot lacks {name}"))?)
+        .map(|n| n.as_str().to_owned())
+        .map_err(|_| format!("paid snapshot {name} is not canonical decimal below 2^256"))
 }
 fn bootstrap(value: Option<&str>, selected: &Option<String>) -> Result<Option<String>> {
     if let (Some(old), Some(new)) = (value, selected.as_deref()) {
@@ -571,6 +558,17 @@ pub(crate) fn retained_lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn config_natural_preserves_exact_numeric_source_seed() {
+        let seed = "88189377857592770933314839959077069940205126760513677220874099214343167465763";
+        let value: Value = serde_json::from_str(&format!("{{\"expectedSeed\":{seed}}}")).unwrap();
+        assert_eq!(natural(&value, "expectedSeed").unwrap(), seed);
+        assert_eq!(natural(&json!({"expectedSeed":seed}), "expectedSeed").unwrap(), seed);
+        for invalid in ["1.0", "1e2", "-1", "115792089237316195423570985008687907853269984665640564039457584007913129639936"] {
+            let value: Value = serde_json::from_str(&format!("{{\"expectedSeed\":{invalid}}}")).unwrap();
+            assert!(natural(&value, "expectedSeed").is_err());
+        }
+    }
     struct Fixture {
         root: PathBuf,
         options: Options,
