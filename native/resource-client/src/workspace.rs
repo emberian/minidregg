@@ -133,8 +133,8 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
 
 /// A reference name: one segment (`lab`) or a path of segments under a room
 /// (`lab/index`), each segment a `validate_name` word, at most 128 bytes in
-/// all. The name is the friend's own local handle; nothing on the wire carries
-/// it, and the Host never sees it.
+/// all. A single segment is a private handle; a path resolves through the
+/// room index before an authenticated-absence fallback to a private hint.
 pub(crate) fn validate_ref_name(value: &str) -> Result<()> {
     if value.is_empty() || value.len() > 128 || value.split('/').any(|segment| validate_name(segment).is_err()) {
         return Err("a reference name is 1..128 bytes of segments separated by '/', each 1..64 ASCII letters, digits or hyphens".into());
@@ -618,8 +618,16 @@ pub(crate) fn complete_fresh_onboarding(root: &Path) -> Result<Value> {
         Ok(signed_view_unchecked(root, &workspace, reference, "resource")?.1)
     })
 }
+#[path = "shared_names.rs"]
+pub(crate) mod shared_names;
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
+    if !name.contains('/') { return local_reference(root, name); }
+    shared_names::resolve(root, &load(root)?, name)
+}
+
+/// Private address-book lookup only; never an authenticated shared discovery.
+pub(crate) fn local_reference(root: &Path, name: &str) -> Result<Value> {
     validate_ref_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{}.json", ref_file(name))))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -922,6 +930,7 @@ pub(crate) fn read(
             .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
     }
     let mut answered = answered?;
+    if let Some(at) = &judged { shared_names::check_opened(&reference, at)?; }
     if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
         object.insert("judgedAt".to_owned(), judged);
     }
@@ -937,7 +946,7 @@ fn cell_label(root: &Path, cell: &str) -> String {
         .filter_map(|entry| {
             let file = entry.file_name().to_string_lossy().into_owned();
             let stem = ref_name_of_file(file.strip_suffix(".json")?);
-            let value = reference(root, &stem).ok()?;
+            let value = local_reference(root, &stem).ok()?;
             (value.get("target").and_then(Value::as_str) == Some(cell)).then_some(stem)
         })
         .collect();
@@ -1050,6 +1059,7 @@ fn signed_view_unchecked(
         &attempt,
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    shared_names::check_opened(reference, &challenge)?;
     Ok((result, challenge, attempt.join("signed-observation.bin")))
 }
 
@@ -1176,7 +1186,7 @@ fn reference_for_target(root: &Path, target: &str) -> Result<Option<Value>> {
         .collect();
     names.sort();
     for name in names {
-        if let Ok(value) = reference(root, &name) {
+        if let Ok(value) = local_reference(root, &name) {
             if member(&value, "target")? == target {
                 return Ok(Some(value));
             }
@@ -1880,7 +1890,7 @@ fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
     stems.sort();
     let mut names = std::collections::BTreeMap::new();
     for stem in stems {
-        if let Ok(value) = reference(root, &stem) {
+        if let Ok(value) = local_reference(root, &stem) {
             if let Some(target) = value["target"].as_str() {
                 names.entry(target.to_owned()).or_insert(stem);
             }
@@ -4560,7 +4570,7 @@ pub(crate) fn names_for_target(root: &Path, document: &str) -> Vec<String> {
             let file = entry.file_name().to_string_lossy().into_owned();
             if let Some(stem) = file.strip_suffix(".json") {
                 let name = ref_name_of_file(stem);
-                if let Ok(value) = reference(root, &name) {
+                if let Ok(value) = local_reference(root, &name) {
                     if value.get("target").and_then(Value::as_str) == Some(document) { names.push(name); }
                 }
             }
@@ -5353,6 +5363,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             print_json(&receipt_continuity::check_retained(&root, &workspace, &attempt, historical)?)
         }
+        "shared-name" => {
+            let op = os_string(args.required("op")?, "name operation")?;
+            let room = os_string(args.required("room")?, "room")?;
+            let name = args.optional("name").map(|v| os_string(v,"name")).transpose()?;
+            let to = args.optional("to").map(|v| os_string(v,"target")).transpose()?;
+            let id = args.optional("id").map(|v| os_string(v,"operation ID")).transpose()?;
+            args.finish()?;
+            shared_names::command(&root,&workspace,&op,&room,name.as_deref(),to.as_deref(),id.as_deref())
+        }
+        "index-law" => { args.finish()?; print_json(&shared_names::index_law()) }
         "import" => {
             if let Some(from) = args.optional("from-ref") {
                 let name = os_string(args.required("name")?, "reference name")?;
