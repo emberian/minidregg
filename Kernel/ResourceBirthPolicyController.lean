@@ -13,6 +13,8 @@ import Kernel.ResourceBirthController
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CanonicalRuntimeProfile
 import Compiler.CanonicalAccountView
+import Compiler.PhysicalLawResolution
+import Compiler.WorldKindLawDependencies
 
 namespace Minidregg.Kernel.ResourceBirthPolicyController
 
@@ -1021,7 +1023,8 @@ def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployme
     (wanted : PackedEffectRequest) (source : Source descriptor)
     (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
-  let header := CanonicalRuntimeProfile.requestSlots wanted.2 ++
+  let header := WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory
+    wanted.2.target.value ++ CanonicalRuntimeProfile.requestSlots wanted.2 ++
     [ ("request/creator", Int.ofNat source.val.creator.value)
 
     , ("birth/count", Int.ofNat source.val.births.length)
@@ -1303,14 +1306,39 @@ theorem Pending.branchStep_prepared_exact
 /-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.Pending.branchStep_prepared_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Pending.branchStep_prepared_exact
 
+/-- Structural selection uses the actual old governing target, including
+factory-authorized allocation and authority branches. -/
+def Pending.branchDependencies
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (_pending : Pending prepared height) (branch : Branch descriptor) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
+    (branchRequest prepared height branch).2.target.value
+
+/-- NativeHostContext/Genesis align the factory policy id with the factory
+resource id. The v6 composed receiver intentionally refuses generic pins that
+select a distinct governing policy; it never substitutes a newborn local law. -/
 def Pending.branchConfig [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
-    (payloadStore prepared)
+    ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+    prepared.directory.directory
     (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
-    (pending.branchStep branch)
+    (pending.branchStep branch) (branchRequest prepared height branch).2.target.value
+    ((pending.branchDependencies branch).map (·.additional)).getD []
+
+/-- Failure to load the old target or any selected current/historical policy
+source refuses the branch. No missing structural root becomes an empty law. -/
+def Pending.branchReadGuards
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
+    Option (List (Nat × Digest)) := do
+  let structural ← pending.branchDependencies branch
+  let law ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+    prepared.directory.directory profile.semantics
+    (branchRequest prepared height branch).2.target.value structural.additional
+  some (structural.readGuards ++ law)
 
 /-- All non-policy checks are the same fixed native source checks. Only the
 policy witness adds an exact source-enumerated branch; each branch delegates
@@ -1321,8 +1349,8 @@ def Pending.portal [DecidableEq F]
   let base := domainPortal prepared.authority.snapshot
     (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier)
   { base with
-    PolicyWitness := Branch descriptor × CompiledPolicyWitness F
-    policyAddress := fun witness => witness.2.address
+    PolicyWitness := Branch descriptor × ComposedPolicyAdmission.Witness F
+    policyAddress := fun witness => witness.2.compiled.address
     verifyCommittedPolicy := fun address kind request witness =>
       decide (AuthorizationDeclaration.encodeRequest ⟨kind, request⟩ =
         branchIdentity prepared height witness.1) &&
@@ -1350,7 +1378,7 @@ theorem Pending.no_other_branch [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height)
     (branch other : Branch descriptor) (different : branch ≠ other)
-    (address : Digest) (compiled : CompiledPolicyWitness F) :
+    (address : Digest) (compiled : ComposedPolicyAdmission.Witness F) :
     pending.portal.verifyCommittedPolicy address (branchRequest prepared height branch).2
       (other, compiled) = false := by
   apply Bool.eq_false_iff.mpr
@@ -1369,8 +1397,8 @@ def Pending.liftEvidence [DecidableEq F]
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence (pending.branchConfig branch).portal
       (oldAuthority prepared) request) : Evidence pending.portal (oldAuthority prepared) request := by
-  unfold Pending.portal Pending.branchConfig CredentialAuthorityPolicyRegistry.config
-    CanonicalPolicyConfig.portal at *
+  unfold Pending.portal Pending.branchConfig PhysicalLawResolution.config
+    ComposedPolicyAdmission.Config.portal at *
   cases evidence with
   | signature witness epoch verified => exact .signature witness epoch verified
   | proof witness verified => exact .proof witness verified
@@ -1428,6 +1456,10 @@ structure BranchAccepted [DecidableEq F]
   its dependent address index later would recompute the entire branch request. -/
   sourceGuard : Nat × Digest
   sourceGuardExact : sourceGuard = source.readGuard
+  lawGuards : List (Nat × Digest)
+  lawGuardsExact : pending.branchReadGuards branch = some lawGuards
+  lawGuardsBound : ∀ guard ∈ lawGuards,
+    guard.2 = durable.snapshot.model.roots ⟨guard.1⟩
   authorization : Authorized pending.portal (oldAuthority prepared)
     (branchRequest prepared height branch).2
   modeBound : branchRequiresCapability branch = true →
@@ -1441,11 +1473,13 @@ def Pending.admitBranch [DecidableEq F]
     Except Reject { accepted : BranchAccepted pending branch // accepted.credential = credential } := do
   let envelopeExact ← require (receipt.envelopeBytes = credential.envelope) .credentialShape
   let wanted := branchRequest prepared height branch
-  let step := pending.branchStep branch
-  let compiler := profile.compilerProfile
-  let config := CredentialAuthorityPolicyRegistry.config compiler prepared.authority.snapshot
-    (payloadStore prepared) (sourcePortal prepared.authority.snapshot descriptor.authorityNullifier) step
+  let config := pending.branchConfig branch
   let old := oldAuthority prepared
+  let guards ← match exact : pending.branchReadGuards branch with
+    | none => .error .policySourceUnavailable
+    | some guards => .ok (⟨guards, exact⟩ : { guards // pending.branchReadGuards branch = some guards })
+  let guardsBound ← require
+    (∀ guard ∈ guards.val, guard.2 = durable.snapshot.model.roots ⟨guard.1⟩) .policySourceUnavailable
   let source ← match CanonicalCellRegistry.loadPolicySource deployment.domain
       prepared.directory.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
     | none => .error .policySourceUnavailable
@@ -1455,11 +1489,9 @@ def Pending.admitBranch [DecidableEq F]
         match credential.capability with
         | none => .error .capability
         | some identifier =>
-            match sourceCapabilityEvidence compiler prepared.authority.snapshot
-                (payloadStore prepared) descriptor.authorityNullifier step
-                wanted.2 identifier receipt with
-            | none => .error .capability
-            | some evidence => .ok evidence
+            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
+            | .error _ => .error .capability
+            | .ok evidence => .ok evidence
     else
         if credential.capability = none then
           if epoch : wanted.2.subjectKeyEpoch = old.subjectKeyEpoch wanted.2.subject then
@@ -1470,11 +1502,11 @@ def Pending.admitBranch [DecidableEq F]
         else .error .credentialShape
   if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
     if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-      match config.registry.resolve wanted.2.policyId wanted.2.policyRevision with
+      match config.resolve? with
       | none => .error .policyUnavailable
-      | some committed =>
-          let witness := canonicalWitness compiler.compiler committed step.oldState step.newState
-          match CanonicalPolicyAdmission.admit config old wanted.2 evidence witness
+      | some law =>
+          let witness := law.witness
+          match ComposedPolicyAdmission.admit config wanted.2 evidence witness
               (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
           | none => .error .policyRejected
           | some admitted =>
@@ -1488,6 +1520,9 @@ def Pending.admitBranch [DecidableEq F]
                     source := source
                     sourceGuard := source.readGuard
                     sourceGuardExact := rfl
+                    lawGuards := guards.val
+                    lawGuardsExact := guards.property
+                    lawGuardsBound := guardsBound.down
                     authorization := authorization
                     modeBound := modeBound }
                 .ok (show { accepted : BranchAccepted pending branch //
@@ -1859,11 +1894,9 @@ theorem AcceptedBirth.actual_posts_exact {height : Height}
 
 def AcceptedBirth.sourceReadGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List (Nat × Digest) :=
-  [(accepted.branches .factory).readGuard, (accepted.branches .authority).readGuard] ++
-  (List.finRange accepted.descriptor.createRequests.length).map
-    (fun index => (accepted.branches (.allocation index)).readGuard) ++
-  (List.finRange accepted.descriptor.resourceBatch.operations.length).map
-    (fun index => (accepted.branches (.source index)).readGuard)
+  (policyBranches accepted.descriptor.createRequests.length
+    accepted.descriptor.resourceBatch.operations.length).flatMap fun branch =>
+      (accepted.branches branch).lawGuards
 
 
 end Concrete

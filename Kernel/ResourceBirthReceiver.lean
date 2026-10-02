@@ -180,16 +180,8 @@ theorem sourceReadGuards_exact {height : Height}
     at member
   obtain ⟨pair, inPairs, rfl⟩ := List.mem_map.mp member
   unfold ResourceBirthPolicyController.Concrete.AcceptedBirth.sourceReadGuards at inPairs
-  rcases List.mem_append.mp inPairs with first | sources
-  · rcases List.mem_append.mp first with native | allocations
-    · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
-      rcases native with rfl | rfl
-      · exact branch_read_exact accepted .factory
-      · exact branch_read_exact accepted .authority
-    · obtain ⟨index, _, rfl⟩ := List.mem_map.mp allocations
-      exact branch_read_exact accepted (.allocation index)
-  · obtain ⟨index, _, rfl⟩ := List.mem_map.mp sources
-    exact branch_read_exact accepted (.source index)
+  obtain ⟨branch, _, inBranch⟩ := List.mem_flatMap.mp inPairs
+  exact (accepted.branches branch).lawGuardsBound pair inBranch
 
 theorem readGuards_exact {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
