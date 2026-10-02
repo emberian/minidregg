@@ -100,7 +100,7 @@ NIL = jam_atom(0)
 STATE, EVENT, COUNT = 2, 3, 4
 open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')
 kernel = open(JAM, "rb").read()
-ABI = {"version": "2", "arm": "23", "fuel": FUEL, "sample": [], "libraries": [],
+ABI = {"evaluator": "nock", "version": "5", "context": "live", "arm": "23", "fuel": FUEL, "sample": [], "libraries": [],
        "outputs": [{"key": "count", "target": "0", "field": str(COUNT), "type": "nat"}],
        "door": {"peek": "22", "state": str(STATE), "event": str(EVENT)}}
 
@@ -154,7 +154,7 @@ def read_fields(tag):
     return vals, r.stdout
 
 r = mini("--action", "create", "--dir", WS, "--name", "ctr", "--storage", "declared",
-    "--predicate", path("permit-all.json"))
+    "--predicate", path("permit-all.json"), "--fields", "%d-%d" % (STATE, COUNT))
 CTR = json.load(open(os.path.join(WS, "refs", "ctr.json")))["target"] if r.returncode == 0 else None
 LAW = {"type": "any", "predicates": [
     {"type": "not", "predicate": {"type": "eq", "slot": "request/verb", "value": "2"}},

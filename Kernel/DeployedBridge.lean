@@ -102,6 +102,7 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .stream => StreamCell.wire
   | .nockProgram => nockProgramWire
   | .clock => Kernel.ClockCell.wire
+  | .system => Kernel.SystemCell.wire
 
 /-! ## The cell decoder -/
 

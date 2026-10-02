@@ -2,13 +2,15 @@
 # Kernel.ClockTickReceiver — an authorised observer advances the one clock
 
 A tick asserts a new clock value `{now, slot}`.  It is admitted exactly when:
-* the sponsor presents the deployment's factory control capability (verb
-  `installPolicy`), admitted in capability mode under the factory's current law
-  with the operation slot `authority/operation/clock-tick` — the same authority
-  shape as key enrollment and PAY's book receiver, so the factory law decides
-  WHICH observers may tick (the operator's wall-clock ticker, PAY's chain
-  observer);
-* the command pins the current factory, authority and clock roots;
+* the sponsor presents a `C_tick`: a capability on the clock cell itself
+  carrying the verb `tickClock`, admitted in capability mode under the clock
+  cell's current law.  Genesis issues `C_tick` only to the configured clock
+  tickers (`NativeHostGenesis.tickCapability`, `clock_subject_confined`) and the
+  clock law admits exactly their `tickClock` (`clockPredicate_eval`): the
+  operator's wall-clock ticker is the dedicated clock subject, and a chain
+  observer is another ticker.  The factory controller holds no such capability
+  (`tick_requires_clock_capability`);
+* the command pins the current authority and clock roots;
 * the tick `advances` the loaded clock: `now` strictly increases and `slot`
   does not decrease (`clock_monotone`; a tick behind or at the current time is
   refused, `tick_behind_refused`);
@@ -61,7 +63,7 @@ structure Plan where
 def Plan.patch (plan : Plan) : Patch ClockCell.layout := tickPatch plan.current plan.next
 
 inductive Reject where
-  | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
+  | malformedIngress | directoryUnavailable | authorityUnavailable
   | clockUnavailable | staleAuthority | staleClock | clockNotAdvancing
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
@@ -112,9 +114,9 @@ theorem tick_installs (store : ClockStore) (plan : Plan) :
 
 structure Command where
   sponsor : SubjectId
-  control : CapabilityId
+  /-- The sponsor's `C_tick` on the clock cell. -/
+  capability : CapabilityId
   nonce : Nat
-  expectedFactoryRoot : Digest
   expectedAuthorityRoot : Digest
   expectedClockRoot : Digest
   now : Nat
@@ -130,12 +132,11 @@ def commandStream : StreamCodec Command :=
         (StreamCodec.product StreamCodec.nat
           (StreamCodec.product digestStream
             (StreamCodec.product digestStream
-              (StreamCodec.product digestStream
-                (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
-    (fun c => (c.sponsor, c.control, c.nonce, c.expectedFactoryRoot, c.expectedAuthorityRoot,
+              (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
+    (fun c => (c.sponsor, c.capability, c.nonce, c.expectedAuthorityRoot,
       c.expectedClockRoot, c.now, c.slot))
-    (fun (sponsor, control, nonce, factoryRoot, authorityRoot, clockRoot, now, slot) =>
-      ⟨sponsor, control, nonce, factoryRoot, authorityRoot, clockRoot, now, slot⟩)
+    (fun (sponsor, capability, nonce, authorityRoot, clockRoot, now, slot) =>
+      ⟨sponsor, capability, nonce, authorityRoot, clockRoot, now, slot⟩)
     (by intro c; cases c; rfl)
 
 def framedRaw {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
@@ -157,7 +158,10 @@ theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A
     (framed frame stream).encode value = bytes :=
   ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
 
-def commandFrame : List UInt8 := "DREGG/CLOCK/TICK/v1".toUTF8.toList
+/-- v2: the command names the sponsor's `C_tick` on the clock cell and pins
+no factory root (v1 named the factory control capability and the factory
+root).  A v1 command refuses to decode. -/
+def commandFrame : List UInt8 := "DREGG/CLOCK/TICK/v2".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -248,6 +252,10 @@ structure Ambient where
   federation : FederationId
   height : Height
 
+/-- The clock cell is the tick's resource and policy: `C_tick` names it, and
+its law (installed at genesis, `NativeHostGenesis.clockPredicate`) decides. -/
+def clockTarget (deployment : Deployment) : Nat := ClockCell.physicalId deployment.domain
+
 def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command) : RequestContext where
   authority :=
@@ -257,13 +265,13 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       federation := ambient.federation
       subject := command.sponsor
       subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.sponsor
-      target := ⟨deployment.factoryId⟩
-      verb := .installPolicy
+      target := ⟨clockTarget deployment⟩
+      verb := .tickClock
       nonce := marker snapshot.domain semantics command
       height := ambient.height
-      policyId := ⟨deployment.factoryId⟩
-      policyEpoch := snapshot.authState.policyEpoch ⟨deployment.factoryId⟩
-      policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
+      policyId := ⟨clockTarget deployment⟩
+      policyEpoch := snapshot.authState.policyEpoch ⟨clockTarget deployment⟩
+      policyRevision := snapshot.authState.policyRevision ⟨clockTarget deployment⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
     (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.ARGS/v1".toUTF8.toList
@@ -309,25 +317,20 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   private mk ::
   directory : LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
-  factory : ResourceTargetAdmission.Observed deployment directory.directory .object
-    deployment.factoryId command.expectedFactoryRoot
   clock : ClockCellDomain.Loaded deployment durable.snapshot
   plan : Plan
   decided : decideTick clock.clock command.tick = .ok plan
   candidate : Candidate (family deployment authority.snapshot clock.cell profile.semantics ambient command)
     clock.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
-    (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
-      (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
+    (authority.snapshot.authState.policyAddress ⟨clockTarget deployment⟩
+      (authority.snapshot.authState.policyRevision ⟨clockTarget deployment⟩))
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
   let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-  let factory ← requireSome .factoryUnavailable
-    (ResourceTargetAdmission.observe deployment directory.directory .object
-      deployment.factoryId command.expectedFactoryRoot)
   let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
@@ -342,15 +345,15 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
           | .accepted validated =>
               let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                 snapshot.domain directory.directory
-                (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
-                  (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
+                (snapshot.authState.policyAddress ⟨clockTarget deployment⟩
+                  (snapshot.authState.policyRevision ⟨clockTarget deployment⟩)))
               let candidate : Candidate (family deployment snapshot clock.cell profile.semantics ambient command)
                   clock.cell d () :=
                 { preStateBound := rfl
                   modeEvidence := ⟨rootExact⟩
                   validated := validated
                   postcondition := validated.resultAt }
-              pure ⟨directory, authority, factory, clock, plan, decided, candidate, source⟩
+              pure ⟨directory, authority, clock, plan, decided, candidate, source⟩
         else throw .replayedMarker
     else throw .staleClock
   else throw .staleAuthority
@@ -387,12 +390,9 @@ def project (prepared : Prepared deployment profile ambient durable command)
   ⟨CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient command
         prepared.plan) ++
-    [("authority/operation/clock-tick", 1)] ++
     ClockCell.slots ((ClockCell.clockOf logical).getD prepared.clock.clock) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
-    DeclaredResourceController.bytesSlots "resource/bytes" 0
-      (PackedCell.bytes Registry prepared.factory.before) ++
-    ResourceAuthorityProjection.grantSlots "authority/control" .program command.control
+    ResourceAuthorityProjection.grantSlots "authority/tick" .program command.capability
       prepared.authority.snapshot.logical⟩
 
 def step (prepared : Prepared deployment profile ambient durable command) : PolicyStepContext :=
@@ -421,8 +421,8 @@ abbrev Prepared.SemanticAccepted [DecidableEq F]
     prepared.clock.cell
     (declaration prepared.authority.snapshot.domain profile.semantics command prepared.plan) ()
 
-/-- The capability evidence a tick needs: the sponsor's control capability on
-the factory, checked in capability mode against the checked signature. -/
+/-- The capability evidence a tick needs: the sponsor's `C_tick` on the clock
+cell, checked in capability mode against the checked signature. -/
 def capabilityEvidence [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :=
@@ -430,7 +430,7 @@ def capabilityEvidence [DecidableEq F]
     (sourceStore prepared)
     (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
     (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
-      ambient command prepared.plan) command.control receipt
+      ambient command prepared.plan) command.capability receipt
 
 def authorize [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
@@ -457,7 +457,7 @@ def authorize [DecidableEq F]
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
 /-- **`tick_requires_capability`** (refuting pole).  A sponsor whose signed
-request carries no admissible control capability on the factory is refused,
+request carries no admissible `C_tick` on the clock cell is refused,
 whatever clock it asserts. -/
 theorem tick_requires_capability [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
@@ -523,22 +523,17 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
   [prepared.clock.write prepared.clockPost]
 
-def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
-  ⟨⟨deployment.factoryId⟩,
-    rootBytes (LifecycleImage.bytes Registry (.live prepared.factory.before))⟩
-
 def policyGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  resourceGuard prepared :: policyGuard prepared ::
+  policyGuard prepared ::
     prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (resourceGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
@@ -557,11 +552,9 @@ theorem writes_roots_bound (prepared : Prepared deployment profile ambient durab
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
-  rcases List.mem_cons.mp member with rfl | rest
+  rcases List.mem_cons.mp member with rfl | authority
   · exact shape.2.2.2.1
-  · rcases List.mem_cons.mp rest with rfl | authority
-    · exact shape.2.2.2.2.1
-    · simpa using (List.mem_filter.mp authority).2
+  · simpa using (List.mem_filter.mp authority).2
 
 structure AcceptedTick [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -684,15 +677,15 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 
 def viewStream : StreamCodec ClockCellDomain.View :=
   StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product digestStream clockStream)))
-    (fun view => (view.clockRoot, view.authorityRoot, view.factoryRoot, view.clock))
-    (fun (clockRoot, authorityRoot, factoryRoot, clock) =>
-      ⟨clockRoot, authorityRoot, factoryRoot, clock⟩)
+    (StreamCodec.product digestStream (StreamCodec.product digestStream clockStream))
+    (fun view => (view.clockRoot, view.authorityRoot, view.clock))
+    (fun (clockRoot, authorityRoot, clock) => ⟨clockRoot, authorityRoot, clock⟩)
     (by intro view; cases view; rfl)
 
+/-- v2: the clock and the two roots a tick pins (v1 also named the factory
+root, which a tick no longer reads). -/
 def viewCodec : LawfulCodec ClockCellDomain.View :=
-  framed "DREGG/CLOCK/VIEW/v1".toUTF8.toList viewStream
+  framed "DREGG/CLOCK/VIEW/v2".toUTF8.toList viewStream
 
 /-- info: 'Minidregg.Kernel.ClockTickReceiver.clock_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms clock_monotone

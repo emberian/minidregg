@@ -39,12 +39,21 @@ signature verifier executable. Configuration is loaded once per process;
 operations cannot replace it. Native binaries, their byte transport, SQLite,
 and the operating system remain trusted external execution dependencies.
 
-The concrete profile is `Compiler.NativeHostProfile`: BabyBear with scalar
-order difference width 29, and the proved `NoWrap` interval. The shared compiler
-still checks every actual input range and full-view cast injectivity. Large
-integers are never truncated or rescaled. This native checked execution profile
-does not claim a deployed succinct STARK proof. Source-bound limbs and carries
-remain necessary to support wider arithmetic in this compiler dialect.
+The concrete profile is `Compiler.NativeHostProfile`: the prime field
+`ZMod (2^127 - 1)` (`Compiler.Mersenne127`, primality by Lucas–Lehmer in the
+kernel) with scalar order difference width 125, and the proved `NoWrap`
+interval. Admission evaluates the compiled law natively, so no proving field
+constrains the choice. On the stated range `R = [-2^123, 2^123)` (every signed
+and unsigned 64-bit value) the compiled verdict equals `Pred.eval` with no
+premise left over (`order_agrees_with_eval_on_R`,
+`native_verifies_iff_eval_on_R`). The shared compiler still checks every actual
+input range and full-view cast injectivity; a law whose order clause compares
+two values more than `2^125` apart is refused as `law-input-range`, naming the
+clause and both values (`Compiler.PredRangeLeaf`), on reads and on prepared
+writes. Large integers are never truncated or rescaled. This native checked
+execution profile does not claim a deployed succinct STARK proof. The profile
+was BabyBear with width 29 until 2026-10-01, which refused every law comparing
+the wall clock with a small field.
 
 The profile's receiver parameters commit the actual deployment, federation,
 tariff, and genesis clock offset. The genesis commitment is separate, avoiding

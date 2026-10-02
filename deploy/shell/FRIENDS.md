@@ -138,6 +138,39 @@ is written, no attempt is used up, and `history` doesn't change. a verb you hold
 for isn't listed. a revoked grant lists nothing. a locked resource answers
 `law-denied: sealed` for every verb.
 
+**post a job, run a job.** a job is a Nock program, an input and a price, posted in a
+room. you put the price in escrow; a friend in the room takes it by putting up a bond at
+least that big, runs the program on their own node and posts the answer. anyone in the
+room can check it: the kernel runs the program itself on the job's input and compares,
+digit for digit. a right answer pays the provider price + bond; a wrong one (or none by the
+deadline) gives you your escrow back plus half their bond, and the other half is burned.
+```
+mini> job post lab 9721…4782 --input 6 --price 1000 --deadline 600 --account purse --name j1
+mini> jobs lab                            # what's posted in lab, and where each one is
+(sam) mini> job claim 1681…7359 --room lab --bond 1000 --account purse --name j1
+(sam) mini> job answer j1                 # sam's node runs it and posts the output
+mini> job check j1                        # the kernel re-runs it: upheld, or slashed
+mini> job settle j1                       # the money moves; settling again shows the same receipt
+```
+`job show j1` prints every field by name. the price and bond live in the Book under the
+job's own id until the job settles; nobody, you included, can move them by writing the job.
+sealed markets. you sell SUPPLY units to sealed bids; nobody, me included, can read a bid before
+the close, because the Store holds only a commitment to it:
+```
+mini> market open fish 120 140 8          # bids sealed until height 119, reveals 120..139, settle from 140
+mini> delegate g1 fish SAMS-SUBJECT observe,mutate 50000     # then submit/publish/export as for notes
+sam>  bid fish 30 5                        # commits to (price 30, qty 5); the opening stays in sam's workspace
+sam>  submit bid-fish
+mini> bids fish                            # sam's slot shows `sealed sealed` until sam reveals
+sam>  reveal fish r1                       # from height 120: writes the opening; the law checks it
+sam>  submit r1                            # a wrong price or a reveal before 120 is `refused: law-denied: …`
+mini> market settle fish                   # from height 140: fills by price, then by who bid first
+mini> submit settle-fish
+mini> law show fish                        # the market's law, in the one-line grammar
+```
+a bid you never reveal fills nothing. there is no deposit yet, so not revealing costs nothing:
+markets here are for friends, not for strangers who might bid and walk away.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -164,8 +197,8 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. no rooms, chat or paying
-  yet; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
+- numbered fields, one scalar action per `invoke`, laws as JSON. jobs run Nock programs
+  only, and each check runs the whole program again on the box; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
   pick a new one per request. `help guide` prints this guide.
 
 ## reaching me

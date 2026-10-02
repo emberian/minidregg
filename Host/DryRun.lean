@@ -45,6 +45,7 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   key := t.key
   checkpointEvery := t.checkpointEvery
   logStart := t.logStart
+  systemCell := t.systemCell
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/
@@ -150,14 +151,37 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
   split <;> first | rfl | (rename_i h; exact absurd h (refused _))
 
+/-- The dry transport names the Store's system cell, so the tail law
+(`Loaded.judge`, C14) judges a dry run exactly as it judges the submission. -/
+@[simp] theorem dryTransport_judge (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
+    {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
+    (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
+    loaded.judge (dryTransport t reached) intent = loaded.judge t intent := rfl
+
+/-- **At the Store writer, the dry run agrees with submission on a tail-bound
+refusal.** Where the durable admission accepts but the tail law refuses, neither
+path reaches the transport's writers, and both answer the same refusal. -/
+theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool)
+    (rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest)
+    (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes)
+    (ready) (admitted : prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
+      loaded.withinLog loaded.resumed intent = .inl ready)
+    (reason) (bounded : loaded.judge t intent = .error reason) :
+    DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
+      DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
+  unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
+  simp only [admitted, dryTransport_judge, bounded]
+
 /-- **At the Store writer, admission is exactly reaching the writer.** Where the
-durable admission accepts, the real path appends; the dry run instead marks
-`reached` (after the same MAC-key read) and reports contention. -/
+durable admission accepts and the tail law admits, the real path appends; the
+dry run instead marks `reached` (after the same MAC-key read) and reports
+contention. -/
 theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
     (reached : IO.Ref Bool) (rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest)
     (loaded : DurableReceiverIO.Loaded rootBytes) (intent : DurableDataIntent.DataIntent rootBytes)
     (ready) (admitted : prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
-      loaded.withinLog loaded.resumed intent = .inl ready) :
+      loaded.withinLog loaded.resumed intent = .inl ready)
+    (judged : loaded.judge t intent = .ok ()) :
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       (do
         let .ok _ ← t.key
@@ -165,10 +189,12 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
         reached.set true
         return (false, .ordinary .contention)) := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
-  simp only [admitted, dryTransport_key, dryTransport_append]
+  simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_append]
   rfl
 
 #assert_axioms dryTransport_writers_irrelevant
+#assert_axioms dryTransport_judge
+#assert_axioms dryReceive_tail_refusal_agrees
 #assert_axioms dryRun_commits_nothing
 #assert_axioms submit_storage_irrelevant
 #assert_axioms submit_is_via_store_transport

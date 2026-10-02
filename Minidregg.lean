@@ -40,3 +40,4 @@ import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.Job  -- COMPUTE C1: the job lifecycle as one Pred law (deploy/shell/templates/job/law.job); both poles per edge, no_double_settle, bond_slashed_iff_mismatch, settle_requires_match_or_timeout, caller_cannot_forge_truth
+import Kernel.SealedMarket  -- SEALED-MARKET: the sealed-bid market law (the template is its rendering) and its guarantees

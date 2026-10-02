@@ -254,6 +254,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 "account",
                 None,
                 None,
+                // An account holds no object field: its balances are the Book's.
+                None,
             )
         }
         "mint" | "burn" => command(&root, args, &action),

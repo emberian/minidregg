@@ -37,7 +37,10 @@ import Kernel.PayCell
 import Compiler.StreamCell
 import Kernel.DomainEpochLaw
 import Compiler.NockProgramCodec
+import Compiler.Evaluator
 import Kernel.ClockCell
+import Kernel.FieldClosure
+import Kernel.SystemCell
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -75,14 +78,19 @@ inductive Kind where
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
   last observed chain slot, advanced only by `ClockTickReceiver`. -/
   | clock
+  /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
+  and the tail bound `L`, written only by a certify record. -/
+  | system
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock,
+    .system]
 
-/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14 are deployment pins. The final table across
-lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock.  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15 are deployment pins. The final table across
+lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock, 15 system (C14's genesis cell; its
+lane called it 13, which is the Nock program cell's).  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -98,6 +106,7 @@ def Kind.tag : Kind → UInt8
   | .stream => 12
   | .nockProgram => NockProgramCodec.registryTag
   | .clock => 14
+  | .system => 15
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -112,6 +121,7 @@ def kindAtTag : UInt8 → Option Kind
   | 12 => some .stream
   | 13 => some .nockProgram
   | 14 => some .clock
+  | 15 => some .system
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -124,20 +134,23 @@ theorem retired_catalogue_tag : kindAtTag 7 = none := rfl
 /-- Store-cell wire versions.  Content, event and authority moved from page
 frames to `StoreCodec` frames; authority v6 tags every capability scope's
 target set (explicit or `under` a room); the Book's balance codec became the zigzag
-integer codec; the declared roles moved in S2c. -/
+integer codec; the declared roles moved in S2c, and to v4 when the declared-effect key codec
+`state-key/tagged-v3` carried both the blinding (tag 3, K-NARROW-HIDE) and a cell's declaration
+(tags 4/5, K-FIELD-CLOSURE); the compute braid's v3 had the declaration alone at tags 3/4. -/
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
   | .authority => ⟨⟨91003⟩, 7⟩
-  | .declaredObject => ⟨⟨91004⟩, 2⟩
+  | .declaredObject => ⟨⟨91004⟩, 4⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
-  | .accountMetadata => ⟨⟨91007⟩, 2⟩
-  | .declaredProgram => ⟨⟨91008⟩, 2⟩
+  | .accountMetadata => ⟨⟨91007⟩, 4⟩
+  | .declaredProgram => ⟨⟨91008⟩, 4⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 3⟩
   | .stream => ⟨⟨91012⟩, 2⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
+  | .system => ⟨⟨91014⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -158,6 +171,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .stream => StreamCell.layout
   | .nockProgram => NockProgramCodec.layout
   | .clock => Kernel.ClockCell.layout
+  | .system => Kernel.SystemCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -172,6 +186,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .stream => StreamCell.materializer
   | .nockProgram => NockProgramCodec.materializer
   | .clock => Kernel.ClockCell.materializer
+  | .system => Kernel.SystemCell.materializer
 
 /-- The store wire of every kind whose materializer is the generic
 `StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
@@ -185,6 +200,7 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .pay => some Kernel.PayCell.wire
   | .stream => some StreamCell.wire
   | .clock => some Kernel.ClockCell.wire
+  | .system => some Kernel.SystemCell.wire
   | .resourceBook | .policySource | .nockProgram => none
 
 /-- A kind with a store wire is materialized by it, so its cell root is that
@@ -296,6 +312,11 @@ def KeyAllowed (kind : ResourceKind) (cellId : Nat) : StateKey → Prop
   | .programCode program => kind = .program ∧ program.value = cellId
   | .accountBalance _ _ => False
   | .blinding => True
+  -- A cell's declaration (K-FIELD-CLOSURE) is its own: it names this cell.
+  | .fieldDeclared object _ =>
+      (kind = .object ∨ kind = .account) ∧ object.value = cellId
+  | .fieldsOpen object =>
+      (kind = .object ∨ kind = .account) ∧ object.value = cellId
 
 instance keyAllowedDecidable (kind : ResourceKind) (cellId : Nat) (key : StateKey) :
     Decidable (KeyAllowed kind cellId key) := by
@@ -305,11 +326,22 @@ theorem accountBalance_never_allowed (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     ¬KeyAllowed kind cellId (.accountBalance account asset) := fun impossible => impossible
 
-/-- The declared-cell law: every present field is a key this role allows at
-this cell.  There is no capacity, no shard number and no in-cell domain tag:
-the cell's domain is the directory that holds it. -/
-def DeclaredCellLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
+/-- The key law: every present key is a key this role allows at this cell.
+There is no capacity, no shard number and no in-cell domain tag: the cell's
+domain is the directory that holds it. -/
+def KeyLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
   ∀ address ∈ store.support, KeyAllowed kind cellId address.2
+
+instance keyLawDecidable (kind : ResourceKind) (cellId : Nat)
+    (store : Store effectLayout) : Decidable (KeyLaw kind cellId store) := by
+  unfold KeyLaw
+  infer_instance
+
+/-- The declared-cell law: the key law, and the cell holds only the fields it
+declares (K-FIELD-CLOSURE, `FieldClosure.Closed`).  A cell that declares
+nothing holds no object field; an open cell declares `fieldsOpen`. -/
+def DeclaredCellLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
+  KeyLaw kind cellId store ∧ Kernel.FieldClosure.Closed cellId store
 
 instance declaredCellLawDecidable (kind : ResourceKind) (cellId : Nat)
     (store : Store effectLayout) : Decidable (DeclaredCellLaw kind cellId store) := by
@@ -321,7 +353,21 @@ theorem DeclaredCellLaw.no_balance (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     store (StateKey.accountBalance account asset).address = none := by
   by_contra present
-  exact law _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
+  exact law.1 _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
+
+/-- **`declared_fields_admit_as_before`.** For a write from a lawful cell that
+leaves its declaration unchanged and changes only declared fields
+(`FieldClosure.check` names nothing), the cell law decides exactly what the key
+law decided before K-FIELD-CLOSURE: nothing inside the declaration got stricter
+or looser. -/
+theorem declared_fields_admit_as_before {kind : ResourceKind} {cellId : Nat}
+    {pre post : Store effectLayout} (preLaw : DeclaredCellLaw kind cellId pre)
+    (sameDeclaration : ∀ n, Kernel.FieldClosure.declaredIn cellId post n =
+      Kernel.FieldClosure.declaredIn cellId pre n)
+    (inside : Kernel.FieldClosure.check cellId pre post = none) :
+    DeclaredCellLaw kind cellId post ↔ KeyLaw kind cellId post :=
+  ⟨And.left, fun keys =>
+    ⟨keys, Kernel.FieldClosure.closed_preserved preLaw.2 sameDeclaration inside⟩⟩
 
 def PresentLaw {α : Type} (law : α → Prop) : Option α → Prop
   | none => False
@@ -428,11 +474,12 @@ theorem empty_event_history_lawful (deployment : Deployment) :
     EventHistoryLaw deployment 0 := by
   constructor <;> intro address member <;> simp at member
 
-/-- Semantic identity of the source-owned loaded/final law.  v9 (BRAID-PROOF): `final`'s v7,
-CH-EPOCH's stream law (CH-CLIENT's v8) and K-NARROW-HIDE's store encoding v2 / blinded cells meet
-here; every earlier label names a different law set, so a Store under any of them refuses. -/
+/-- Semantic identity of the source-owned loaded/final law.  v11 (INTEGRATOR-3): the proof braid's
+v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid's v10
+(K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
+of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v9".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v11".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -455,6 +502,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
       Kernel.ClockCell.Law state
+  | .system, state => cellId = Kernel.SystemCell.physicalId deployment.domain ∧
+      Kernel.SystemCell.Law state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -509,8 +558,9 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   -- Empty but for the owner-derived blinding (K-NARROW-HIDE).
   | .content, state => ∀ address ∈ state.support, address = ⟨.blinding, ()⟩
   | .stream, state => state.support = ∅
-  | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
-  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
+  | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
+  | .system, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by
@@ -944,12 +994,13 @@ theorem birth_missing_library_refused (domain : Digest) (directory : Directory N
   rw [List.all_eq_false]
   exact ⟨item, member, by simp [holds, missing]⟩
 
-/-- A friend may birth exactly an admissible program at its content address. -/
+/-- A friend may birth exactly an admissible program at its content address: one naming a
+compiled-in evaluator, admitted by that evaluator (`Evaluator.RecordAdmissible`). -/
 theorem program_user_initial_iff (deployment : Deployment) (cellId : Nat)
     (program : NockProgramCodec.Program) :
     UserInitial deployment cellId (programCell program) ↔
       deployment.Valid ∧ cellId = programCellId deployment.domain program ∧
-        NockProgramCodec.Admissible program := by
+        Evaluator.RecordAdmissible program := by
   simp [UserInitial, CellLaw, LogicalLaw, UserShape, programCell, PresentLaw,
     NockProgramCodec.CellValid, programCellId, and_assoc]
 
@@ -958,9 +1009,22 @@ theorem nonCanonical_birth_refused (deployment : Deployment) (cellId : Nat)
     (bad : Noun.canonical program.jam = false) :
     ¬ UserInitial deployment cellId (programCell program) := by
   rw [program_user_initial_iff]
-  rintro ⟨_, _, admitted, _⟩
-  rw [bad] at admitted
-  cases admitted
+  rintro ⟨_, _, admitted⟩
+  unfold Evaluator.RecordAdmissible Evaluator.admitRecord at admitted
+  cases hr : Evaluator.resolve [] program.evaluator with
+  | error e => rw [hr] at admitted; cases e <;> simp [Except.toBool] at admitted
+  | ok E =>
+    obtain rfl := Evaluator.resolve_nock hr
+    have refused : ∃ r, Evaluator.nock.admit program = .error r := by
+      cases hcue : Noun.cue program.jam with
+      | none => exact ⟨_, Machine.admit_noCue (M := Evaluator.nock.toMachine) hcue⟩
+      | some n =>
+        exact ⟨_, Machine.admit_nonCanonical (M := Evaluator.nock.toMachine)
+          (show (Noun.cue program.jam).isSome = true by rw [hcue]; rfl) bad⟩
+    obtain ⟨r, hr'⟩ := refused
+    rw [hr] at admitted
+    simp only [hr'] at admitted
+    simp [Except.toBool] at admitted
 
 theorem wrong_address_birth_refused (deployment : Deployment) (cellId : Nat)
     (program : NockProgramCodec.Program)
@@ -977,6 +1041,97 @@ theorem program_occupied_refused (domain : Digest) (directory : Directory Nat re
       .error .duplicateCreate := by
   simp [CellRegistry.create, occupied]
 
+/-! ## A birth names an evaluator this deployment runs (E3)
+
+`Evaluator.RecordAdmissible` (the cell law) already refuses a record naming an id no
+compiled-in evaluator has; the birth path checks it first, by name, and also refuses an
+evaluator the operator disabled — a deployment parameter (`Profile.disabledEvaluators`,
+committed in the runtime semantics digest), the same list a run resolves against. -/
+
+/-- The evaluator ids of the program records a descriptor births. -/
+def birthProgramEvaluators (descriptor : ResourceBirth.Descriptor registry) : List Digest :=
+  descriptor.births.filterMap fun item => (cellProgram item.create.cell).map (·.evaluator)
+
+/-- Each id resolves (`Evaluator.resolve`), in order; the first that does not names the
+refusal. (`Except.bind`, not a `match`: a proof never has to compare two matchers over
+`resolve`, whose whnf would compute the registry's cSHAKE ids.) -/
+def resolveAll (disabled : List Digest) : List Digest → Except Evaluator.Unresolved Unit
+  | [] => .ok ()
+  | id :: rest => (Evaluator.resolve disabled id).bind fun _ => resolveAll disabled rest
+
+theorem resolveAll_cons (disabled : List Digest) (id : Digest) (rest : List Digest) :
+    resolveAll disabled (id :: rest) =
+      (Evaluator.resolve disabled id).bind fun _ => resolveAll disabled rest := rfl
+
+/-- **`birthEvaluators`**: every program record a birth carries names an evaluator this
+deployment runs (compiled in, not disabled) — or the birth is refused by name. The run's
+resolution (`Evaluator.resolve`), at birth. -/
+def birthEvaluators (disabled : List Digest) (descriptor : ResourceBirth.Descriptor registry) :
+    Except Evaluator.Unresolved Unit :=
+  resolveAll disabled (birthProgramEvaluators descriptor)
+
+theorem resolveAll_ok_iff (disabled : List Digest) : ∀ (ids : List Digest),
+    resolveAll disabled ids = .ok () ↔ ∀ id ∈ ids, ∃ E, Evaluator.resolve disabled id = .ok E
+  | [] => ⟨fun _ _ m => absurd m List.not_mem_nil, fun _ => rfl⟩
+  | id :: rest => by
+    rw [resolveAll_cons]
+    cases h : Evaluator.resolve disabled id with
+    | error e =>
+      constructor
+      · intro bad; cases bad
+      · intro all
+        obtain ⟨E, hE⟩ := all id (List.mem_cons_self ..)
+        rw [h] at hE; cases hE
+    | ok E =>
+      show resolveAll disabled rest = .ok () ↔ _
+      rw [resolveAll_ok_iff disabled rest]
+      constructor
+      · intro hr x hx
+        rcases List.mem_cons.mp hx with rfl | hx
+        · exact ⟨E, h⟩
+        · exact hr x hx
+      · intro all x hx
+        exact all x (List.mem_cons_of_mem _ hx)
+
+/-- **`birthEvaluators_ok_iff`** (both poles): a birth passes exactly when each program it
+carries names an evaluator that resolves. -/
+theorem birthEvaluators_ok_iff (disabled : List Digest) (descriptor : ResourceBirth.Descriptor registry) :
+    birthEvaluators disabled descriptor = .ok () ↔
+      ∀ id ∈ birthProgramEvaluators descriptor, ∃ E, Evaluator.resolve disabled id = .ok E :=
+  resolveAll_ok_iff disabled _
+
+theorem birthEvaluators_single {disabled : List Digest} {descriptor : ResourceBirth.Descriptor registry}
+    {id : Digest} (single : birthProgramEvaluators descriptor = [id]) :
+    birthEvaluators disabled descriptor = (Evaluator.resolve disabled id).map fun _ => () := by
+  unfold birthEvaluators
+  rw [single, resolveAll_cons]
+  cases Evaluator.resolve disabled id <;> rfl
+
+/-- **`birth_unknownEvaluator_refused`** (E3): a birth whose program record names an id no
+compiled-in evaluator has is refused `unknownEvaluator` — at birth, not at its first run. -/
+theorem birth_unknownEvaluator_refused {disabled : List Digest}
+    {descriptor : ResourceBirth.Descriptor registry} {id : Digest}
+    (single : birthProgramEvaluators descriptor = [id])
+    (absent : ∀ E ∈ Evaluator.registry, E.id ≠ id) :
+    birthEvaluators disabled descriptor = .error .unknownEvaluator := by
+  rw [birthEvaluators_single single, Evaluator.resolve_unknown absent]; rfl
+
+/-- **`birth_evaluatorDisabled_refused`** (E3): in a deployment whose operator disabled Nock,
+the birth of a Nock program is refused `evaluatorDisabled`. -/
+theorem birth_evaluatorDisabled_refused {disabled : List Digest}
+    {descriptor : ResourceBirth.Descriptor registry}
+    (single : birthProgramEvaluators descriptor = [Evaluator.nock.id])
+    (off : Evaluator.nock.id ∈ disabled) :
+    birthEvaluators disabled descriptor = .error .evaluatorDisabled := by
+  rw [birthEvaluators_single single, Evaluator.pole_evaluatorDisabled disabled off]; rfl
+
+/-- The admitting pole: where Nock is enabled, a Nock program's birth passes this check. -/
+theorem birth_nock_admitted {disabled : List Digest} {descriptor : ResourceBirth.Descriptor registry}
+    (single : birthProgramEvaluators descriptor = [Evaluator.nock.id])
+    (enabled : Evaluator.nock.id ∉ disabled) :
+    birthEvaluators disabled descriptor = .ok () := by
+  rw [birthEvaluators_single single, Evaluator.pole_nock_resolves disabled enabled]; rfl
+
 theorem nock_program_final_state_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (program : before.kind = .nockProgram)
     (valid : FinalPostLaw deployment cellId before after) : before = after := by
@@ -990,10 +1145,21 @@ namespace Witness
 
 def deployment : Deployment := ⟨⟨42⟩, 1, 2, 3⟩
 
-/-- Account metadata with one field of its own identity. -/
+/-- Account metadata with one field of its own identity, which it declares. -/
 def payload : Materialized DeclaredEffectCell.materializer :=
   materialize DeclaredEffectCell.materializer
+    (Kernel.FieldClosure.declare 10 (.closed [1])
+      (StoreCodec.fromEntries [⟨(StateKey.objectField ⟨10⟩ ⟨1⟩).address, (17 : Int)⟩]))
+
+/-- The same cell without its declaration holds an undeclared field: refused. -/
+def undeclaredPayload : Materialized DeclaredEffectCell.materializer :=
+  materialize DeclaredEffectCell.materializer
     (StoreCodec.fromEntries [⟨(StateKey.objectField ⟨10⟩ ⟨1⟩).address, (17 : Int)⟩])
+
+/-- **A cell holding a field it does not declare is not lawful** (K-FIELD-CLOSURE): a
+birth or a post holding it is refused by every receiver's cell law. -/
+theorem undeclared_account_refused :
+    ¬ UserInitial deployment 10 ⟨.accountMetadata, undeclaredPayload⟩ := by decide
 
 def account : PackedCell registry := ⟨.accountMetadata, payload⟩
 
@@ -1026,6 +1192,10 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.decoded_cell_canonical
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.undeclared_account_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.undeclared_account_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.declared_fields_admit_as_before' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.declared_fields_admit_as_before
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.foreign_domain_event_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1050,3 +1220,11 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.program_occupied_refused
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birthEvaluators_ok_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birthEvaluators_ok_iff
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_unknownEvaluator_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_unknownEvaluator_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_evaluatorDisabled_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_evaluatorDisabled_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_nock_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_nock_admitted

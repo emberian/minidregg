@@ -39,6 +39,7 @@ import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Compiler.PayEnrolSignatureIO
+import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -300,8 +301,10 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
   | "hashEq" =>
-      let obj ← exactObject path ["type", "value", "blinder", "commit"] json
-      pure (.hashEq (← string (path ++ ".value") (← field path "value" obj))
+      let obj ← exactObject path ["type", "values", "blinder", "commit"] json
+      let values ← list (path ++ ".values") string (← field path "values" obj)
+      if values.isEmpty then failAt (path ++ ".values") "a hashEq opens at least one value slot"
+      pure (.hashEq values
         (← string (path ++ ".blinder") (← field path "blinder" obj))
         (← string (path ++ ".commit") (← field path "commit" obj)))
   | "ran" =>
@@ -333,8 +336,9 @@ private partial def predicateJson : Pred → Lean.Json
       ("right", .str right), ("offset", signedDecimal offset)]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
-  | .hashEq value blinder commit => .mkObj [("type", "hashEq"), ("value", .str value),
-      ("blinder", .str blinder), ("commit", .str commit)]
+  | .hashEq values blinder commit => .mkObj [("type", "hashEq"),
+      ("values", .arr (values.toArray.map .str)), ("blinder", .str blinder),
+      ("commit", .str commit)]
   | .ran program => .mkObj [("type", "ran"), ("program", .str (toString program))]
   | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]
   | .allL children => .mkObj [("type", "all"),
@@ -387,6 +391,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .program, "installPolicy" => pure .installPolicy
   | .program, "revokeCapability" => pure .revokeCapability
   | .program, "observePayment" => pure .observePayment
+  | .program, "tickClock" => pure .tickClock
   | _, _ => failAt path "verb is not defined for this resource kind"
 
 private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) :
@@ -743,7 +748,7 @@ private def commandTarget (path : String) (json : Lean.Json) :
     payload := ← targetPayload (path ++ ".payload") (← field path "payload" obj) }
 
 /-- `DREGG/NOCK/RUN/v1` as JSON: decimal program id and steps, hex jams. -/
-def runClaim (path : String) (json : Lean.Json) : Result Kernel.NockRun.RunClaim := do
+def runClaim (path : String) (json : Lean.Json) : Result Kernel.Run.RunClaim := do
   let obj ← exactObject path ["programId", "sample", "output", "steps"] json
   pure ⟨⟨← nat (path ++ ".programId") (← field path "programId" obj)⟩,
     ← decodeHex (path ++ ".sample") (← field path "sample" obj),
@@ -896,12 +901,18 @@ private def charge (path : String) (json : Lean.Json) : Result ResourceCost.Char
     | .proofWork => 4 | .storageBytes => 5 | .networkBytes => 6 | .sideEffectCount => 7
     | .feeDebit => 8 | .leaseByteBlocks => 9)]?).getD 0
 
+/-- A clock ticker: its enrolled subject and the identifier of its `C_tick`. -/
+private def clockTicker (path : String) (json : Lean.Json) : Result NativeHostGenesis.ClockTicker := do
+  let obj ← exactObject path ["subject", "capability"] json
+  pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
+    ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩⟩
+
 private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesis.Config := do
   let names := ["domain", "factoryId", "resourceBookId", "authorityCellId", "federation",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -917,6 +928,9 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
           (← field observerPath "enrolCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
     else pure none
+  let tailBound ← nat (path ++ ".tailBound") (← field path "tailBound" obj)
+  unless 0 < tailBound do
+    throw s!"{path}.tailBound must be positive: with L = 0 no record but a certify is ever admitted"
   pure {
     deployment := ⟨⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ← nat (path ++ ".factoryId") (← field path "factoryId" obj),
@@ -939,7 +953,9 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
       ⟨← nat (path ++ ".factoryControllerCapability")
       (← field path "factoryControllerCapability" obj)⟩⟩
     meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
-    payObserver := payObserver }
+    payObserver := payObserver
+    clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
+    tailBound := tailBound }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -1435,18 +1451,22 @@ private def birthParts (path : String)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
   let roomField := if (raw.get? "room").isSome then ["room"] else []
   let blindingField := if (raw.get? "blinding").isSome then ["blinding"] else []
+  -- K-FIELD-CLOSURE: a declared resource names the fields it may hold, or
+  -- `"open"`; absent, it declares none and holds none.
+  let fieldsField := if storage = "declared" ∧ (raw.get? "fields").isSome then ["fields"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
         (if worker.isSome then grainWorkerFields raw else [])
     else if storage = "nock" then
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
-    else if storage = "job" then
-      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "caller",
-        "callerAcct", "price"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
-      roomField ++ blindingField) json
+      roomField ++ blindingField ++ fieldsField) json
+  let declaration : Minidregg.Kernel.FieldClosure.FieldSet ← match obj.get? "fields" with
+    | none => pure (.closed [])
+    | some (.str "open") => pure .open
+    | some value => .closed <$> list (path ++ ".fields") nat value
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
@@ -1464,7 +1484,7 @@ private def birthParts (path : String)
       let bytes ← decodeHex (path ++ ".program") (← field path "program" obj)
       match NockProgramCodec.programCodec.decode bytes with
       | some program => pure (some program)
-      | none => failAt (path ++ ".program") "noncanonical DREGG/NOCK/PROGRAM/v1 bytes"
+      | none => failAt (path ++ ".program") "noncanonical DREGG/PROGRAM/v1 bytes"
     else pure none
   let target ← match program with
     | some program => pure (CanonicalCellRegistry.programCellId source.deployment.domain program)
@@ -1479,7 +1499,6 @@ private def birthParts (path : String)
       pure <| match schedule with
         | some routes => ProviderRoute.policy routes (grainPolicy owner.value worker)
         | none => grainPolicy owner.value worker
-    else if storage = "job" then pure JobMoney.standInLaw
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -1489,18 +1508,12 @@ private def birthParts (path : String)
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
       pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
-    else if storage = "job" then
-      let caller ← nat (path ++ ".caller") (← field path "caller" obj)
-      let callerAcct ← nat (path ++ ".callerAcct") (← field path "callerAcct" obj)
-      let price ← nat (path ++ ".price") (← field path "price" obj)
-      pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
-        (JobMoney.initialStore target caller callerAcct price)⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
         (if schedule.isSome then ProviderRoute.initialStore target budget
          else AgentGrain.initialStore target budget)⟩
-    else pure (NativeHostGenesis.declaredCell source target (kind = .account))
+    else pure (NativeHostGenesis.declaredCell source target (kind = .account) declaration)
   let blinding ← match obj.get? "blinding" with
     | none => pure none
     | some value => some <$> nat (path ++ ".blinding") value
@@ -2421,16 +2434,34 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
-/-- A clock tick: the observer asserts `now` (unix seconds) and `slot`,
-pinning the current factory, authority and clock roots (from the clock view). -/
-private def clockTick (json : Lean.Json) : Result (List UInt8) := do
+/-- A certify: the certifier names the current head and its chain value,
+pinning the current factory, authority and system roots (all from the
+certify view). -/
+private def certify (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["sponsor", "control", "nonce", "expectedFactoryRoot",
-    "expectedAuthorityRoot", "expectedClockRoot", "now", "slot"] json
-  let command : ClockTickReceiver.Command :=
+    "expectedAuthorityRoot", "expectedSystemRoot", "height", "digest"] json
+  let command : CertifyReceiver.Command :=
     { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
       control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
       nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
       expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot" (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot :=
+        ⟨← nat "$.expectedAuthorityRoot" (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedSystemRoot := ⟨← nat "$.expectedSystemRoot" (← field "$" "expectedSystemRoot" obj)⟩
+      height := ← nat "$.height" (← field "$" "height" obj)
+      digest := ⟨← nat "$.digest" (← field "$" "digest" obj)⟩ }
+  return CertifyReceiver.commandCodec.encode command
+
+/-- A clock tick: a ticker asserts `now` (unix seconds) and `slot` under its
+`C_tick` (`capability`), pinning the current authority and clock roots (from
+the clock view). -/
+private def clockTick (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "capability", "nonce",
+    "expectedAuthorityRoot", "expectedClockRoot", "now", "slot"] json
+  let command : ClockTickReceiver.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
       expectedAuthorityRoot :=
         ⟨← nat "$.expectedAuthorityRoot" (← field "$" "expectedAuthorityRoot" obj)⟩
       expectedClockRoot := ⟨← nat "$.expectedClockRoot" (← field "$" "expectedClockRoot" obj)⟩
@@ -2618,11 +2649,12 @@ private def payRefill (json : Lean.Json) : Result (List UInt8) := do
 /-- A job-money command (lane C3): `action` 1 fund · 2 claim · 3 settle.
 The bytes claim nothing: the receiver decides every amount a settle pays. -/
 private def jobMoney (json : Lean.Json) : Result (List UInt8) := do
-  let obj ← exactObject "$" ["subject", "capability", "job", "action", "account", "amount",
-    "nonce", "expectedAuthorityRoot"] json
+  let obj ← exactObject "$" ["subject", "capability", "jobCapability", "job", "action",
+    "account", "amount", "nonce", "expectedAuthorityRoot"] json
   let command : JobMoneyReceiver.Command :=
     { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
       capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      jobCapability := ⟨← nat "$.jobCapability" (← field "$" "jobCapability" obj)⟩
       job := ← nat "$.job" (← field "$" "job" obj)
       action := ← nat "$.action" (← field "$" "action" obj)
       account := ← nat "$.account" (← field "$" "account" obj)
@@ -2747,6 +2779,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-enrol" => payEnrolCommand json
   | "pay-refill" => payRefill json
   | "job-money" => jobMoney json
+  | "certify" => certify json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -3011,9 +3044,10 @@ private def payRefillCommandJson (command : PurseRefillReceiver.Command) : Lean.
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
 
 private def jobMoneyCommandJson (command : JobMoneyReceiver.Command) : Lean.Json := .mkObj
-  [("type", "job-money-v1"),
+  [("type", "job-money-v2"),
    ("canonical", hexJson (JobMoneyReceiver.commandCodec.encode command)),
    ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("jobCapability", decimal command.jobCapability.value),
    ("job", decimal command.job), ("action", decimal command.action),
    ("account", decimal command.account), ("amount", decimal command.amount),
    ("nonce", decimal command.nonce),
@@ -3601,6 +3635,9 @@ private def challengeJson (value : Challenge) : Lean.Json := .mkObj
    ("semantics", decimal value.semantics.value), ("federation", decimal value.federation.value),
    ("worldRoot", decimal value.worldRoot.value),
    ("authorityRoot", decimal value.authorityRoot.value), ("height", decimal value.height),
+   ("clock", .mkObj [("now", decimal value.clockNow),
+     ("day", decimal (value.clockNow / Kernel.ClockCell.secondsPerDay)),
+     ("slot", decimal value.clockSlot)]),
    ("headers", .arr <| value.headers.toArray.map hexJson),
    ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
 
@@ -3623,11 +3660,14 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
+  | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
+      ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
+      ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
   | .refused reason phase detail none => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail)]
   | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail), ("leaf", lawLeafJson leaf),
-      ("explain", .str leaf.render)]
+      ("explain", .str (leaf.explain reason))]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
   | .uncertain detail => .mkObj [("type", "uncertain"), ("detail", hexJson detail)]
@@ -3641,13 +3681,33 @@ private def stateKeyJson : Minidregg.Theory.EffectDeclaration.StateKey → Lean.
   | .programCode resource => .mkObj [("type", "program"),
       ("resource", decimal resource.value)]
   | .blinding => .mkObj [("type", "blinding")]
+  -- The declaration renders without a `field` member: a reader selecting a
+  -- field's value by `key.field` never matches a declaration entry.
+  | .fieldDeclared object field => .mkObj [("type", "declared"),
+      ("resource", decimal object.value), ("declares", decimal field.value)]
+  | .fieldsOpen object => .mkObj [("type", "open"), ("resource", decimal object.value)]
 
+private def isDeclarationKey : Minidregg.Theory.EffectDeclaration.StateKey → Bool
+  | .fieldDeclared _ _ | .fieldsOpen _ => true
+  | _ => false
+
+/-- A declared cell's view: `entries` are the values it holds; its declaration
+(K-FIELD-CLOSURE) is the separate `declaration` member, `"open"` or the declared
+field numbers, so a reader iterating values never meets the cell's shape. -/
 private def declaredCellJson (root : Digest)
     (store : Store.Store EffectDeclaration.effectLayout) : Lean.Json :=
-  let entries := StoreCodec.entries DeclaredEffectCell.wire store
+  let all := StoreCodec.entries DeclaredEffectCell.wire store
+  let entries := all.filter fun entry => !isDeclarationKey entry.1.2
+  let isOpen := all.any fun entry => match entry.1.2 with
+    | .fieldsOpen _ => true
+    | _ => false
+  let declared := all.filterMap fun entry => match entry.1.2 with
+    | .fieldDeclared _ field => some (decimal field.value)
+    | _ => none
   let base := [("root", decimal root.value),
     ("entries", .arr <| entries.toArray.map fun entry => .mkObj
-      [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))])]
+      [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))]),
+    ("declaration", if isOpen then "open" else .arr declared.toArray)]
   let grain := entries.findSome? fun entry => match entry.1.2 with
     | .objectField task field => if field.value = 0 then some task.value else none
     | _ => none
@@ -4058,12 +4118,39 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       applicationSpkPackageIdentityJson descriptor
   | "application-spk-launch-descriptor" =>
       ApplicationSpkLaunchDescriptorAuthoring.inspect bytes
+  | "certify" => do
+      let c ← decoded "certify" CertifyReceiver.commandCodec bytes
+      pure <| .mkObj
+        [("type", "certify-v1"), ("sponsor", decimal c.sponsor.value),
+         ("control", decimal c.control.value), ("nonce", decimal c.nonce),
+         ("expectedFactoryRoot", decimal c.expectedFactoryRoot.value),
+         ("expectedAuthorityRoot", decimal c.expectedAuthorityRoot.value),
+         ("expectedSystemRoot", decimal c.expectedSystemRoot.value),
+         ("height", decimal c.height), ("digest", decimal c.digest.value)]
+  | "certify-plan" => do
+      let plan ← decoded "certify-plan" CertifyReceiver.signingPlanCodec bytes
+      pure <| .mkObj
+        [("type", "certify-plan-v1"), ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("header", signedHeaderJson plan.header)]
+  | "certify-view" => do
+      let view ← decoded "certify-view" CertifyReceiver.viewCodec bytes
+      pure <| .mkObj
+        [("type", "certify-view-v1"), ("systemRoot", decimal view.systemRoot.value),
+         ("authorityRoot", decimal view.authorityRoot.value),
+         ("factoryRoot", decimal view.factoryRoot.value),
+         ("certifiedHeight", decimal view.system.certifiedHeight),
+         ("certifiedDigest", decimal view.system.certifiedDigest.value),
+         ("tailBound", decimal view.system.tailBound),
+         ("head", decimal view.head), ("chain", decimal view.chain.value),
+         ("tail", decimal (view.head - view.system.certifiedHeight)),
+         ("remaining", decimal (view.system.certifiedHeight + view.system.tailBound - view.head))]
   | "clock-tick" => do
       let c ← decoded "clock-tick" ClockTickReceiver.commandCodec bytes
       pure <| .mkObj
-        [("type", "clock-tick-v1"), ("sponsor", decimal c.sponsor.value),
-         ("control", decimal c.control.value), ("nonce", decimal c.nonce),
-         ("expectedFactoryRoot", decimal c.expectedFactoryRoot.value),
+        [("type", "clock-tick-v2"), ("sponsor", decimal c.sponsor.value),
+         ("capability", decimal c.capability.value), ("nonce", decimal c.nonce),
          ("expectedAuthorityRoot", decimal c.expectedAuthorityRoot.value),
          ("expectedClockRoot", decimal c.expectedClockRoot.value),
          ("now", decimal c.now), ("slot", decimal c.slot)]
@@ -4077,9 +4164,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "clock-view" => do
       let view ← decoded "clock-view" ClockTickReceiver.viewCodec bytes
       pure <| .mkObj
-        [("type", "clock-view-v1"), ("clockRoot", decimal view.clockRoot.value),
+        [("type", "clock-view-v2"), ("clockRoot", decimal view.clockRoot.value),
          ("authorityRoot", decimal view.authorityRoot.value),
-         ("factoryRoot", decimal view.factoryRoot.value),
          ("now", decimal view.clock.now),
          ("day", decimal (view.clock.now / Kernel.ClockCell.secondsPerDay)),
          ("slot", decimal view.clock.slot)]
@@ -4263,7 +4349,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("address", decimal (PolicyRecordCodec.digest value).value),
         ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
         ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
-        ("predicate", predicateJson value.predicate)]
+        ("predicate", predicateJson value.predicate),
+        ("text", .str (LawLeaf.renderClause value.predicate))]
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
       pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen) =>
@@ -4341,8 +4428,9 @@ def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := d
 /-! ## Nock program cells (host ops 117–119)
 
 Op 117 takes the minimal jam bytes and this ABI JSON and answers what a birth
-of that program would meet, with the canonical `DREGG/NOCK/PROGRAM/v1` bytes the
-birth's `"program"` field carries. Op 118 shows a stored program by id. Op 119
+of that program would meet, with the canonical `DREGG/PROGRAM/v1` bytes the
+birth's `"program"` field carries. The ABI JSON is Nock's: its `"arm"` becomes the
+record's params (`Kernel.NockEntry.encodeParams`), not an ABI field. Op 118 shows a stored program by id. Op 119
 builds the kernel's sample jam for a stored program. -/
 
 private def nockSlotType (path : String) (json : Lean.Json) :
@@ -4350,19 +4438,24 @@ private def nockSlotType (path : String) (json : Lean.Json) :
   match ← string path json with
   | "nat" => pure .nat
   | "int" => pure .int
-  | _ => failAt path "expected nat or int"
+  | "noun" => pure .noun
+  | _ => failAt path "expected nat, int or noun"
 
 private def nockSlotTypeName : NockProgramCodec.SlotType → String
   | .nat => "nat"
   | .int => "int"
+  | .noun => "noun"
 
 private def nockSampleSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.SampleSlot := do
-  let obj ← exactObject path ["target", "slot", "key", "type"] json
+  let hasMax := ((← object path json).get? "max").isSome
+  let obj ← exactObject path
+    (["target", "slot", "key", "type"] ++ if hasMax then ["max"] else []) json
+  let max ← if hasMax then some <$> nat (path ++ ".max") (← field path "max" obj) else pure none
   pure ⟨← nat (path ++ ".target") (← field path "target" obj),
     ← string (path ++ ".slot") (← field path "slot" obj),
     ← string (path ++ ".key") (← field path "key" obj),
-    ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
+    ← nockSlotType (path ++ ".type") (← field path "type" obj), max⟩
 
 private def nockOutputSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.OutputSlot := do
@@ -4372,6 +4465,18 @@ private def nockOutputSlot (path : String) (json : Lean.Json) :
     ← nat (path ++ ".field") (← field path "field" obj),
     ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
 
+/-- `"live"` or `"pinned"` (ABI v3, K-RUN-PIN). Required: a v3 ABI says which. -/
+private def nockContext (path : String) (json : Lean.Json) :
+    Result NockProgramCodec.ContextMode := do
+  match ← string path json with
+  | "live" => pure .live
+  | "pinned" => pure .pinned
+  | _ => failAt path "expected live or pinned"
+
+private def nockContextName : NockProgramCodec.ContextMode → String
+  | .live => "live"
+  | .pinned => "pinned"
+
 /-- `{"peek", "state", "event"}`: a NockApp kernel door's peek axis and the
 object fields of target 0 holding its state jam atom and event number. -/
 private def nockDoor (path : String) (json : Lean.Json) : Result NockProgramCodec.Door := do
@@ -4380,17 +4485,19 @@ private def nockDoor (path : String) (json : Lean.Json) : Result NockProgramCode
     ← nat (path ++ ".state") (← field path "state" obj),
     ← nat (path ++ ".event") (← field path "event" obj)⟩
 
-def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := do
+def nockAbi (path : String) (json : Lean.Json) (extra : List String := []) :
+    Result NockProgramCodec.Abi := do
   let isDoor := ((← object path json).get? "door").isSome
   let obj ← exactObject path
-    (["version", "arm", "sample", "outputs", "libraries", "fuel"] ++ if isDoor then ["door"] else [])
+    (["version", "sample", "outputs", "libraries", "fuel", "context"] ++ extra ++
+      if isDoor then ["door"] else [])
     json
   let door ← if isDoor then some <$> nockDoor (path ++ ".door") (← field path "door" obj)
     else pure none
   pure {
     door := door
+    context := ← nockContext (path ++ ".context") (← field path "context" obj)
     version := ← nat (path ++ ".version") (← field path "version" obj)
-    arm := ← nat (path ++ ".arm") (← field path "arm" obj)
     sample := ← list (path ++ ".sample") nockSampleSlot (← field path "sample" obj)
     outputs := ← list (path ++ ".outputs") nockOutputSlot (← field path "outputs" obj)
     libraries := ← list (path ++ ".libraries") (fun p j => Digest.mk <$> nat p j)
@@ -4398,22 +4505,54 @@ def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := 
     fuel := ← nat (path ++ ".fuel") (← field path "fuel" obj) }
 
 def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
-  Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
-    ("sample", .arr (abi.sample.map fun slot => .mkObj [("target", toString slot.target),
-      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)]).toArray),
+  Lean.Json.mkObj [("version", toString abi.version),
+    ("sample", .arr (abi.sample.map fun slot => .mkObj (([("target", toString slot.target),
+      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] :
+        List (String × Lean.Json)) ++
+        match slot.max with
+        | some m => [("max", Lean.Json.str (toString m))]
+        | none => [])).toArray),
     ("outputs", .arr (abi.outputs.map fun slot => .mkObj [("key", slot.key),
       ("target", toString slot.target), ("field", toString slot.field),
       ("type", nockSlotTypeName slot.type)]).toArray),
     ("libraries", .arr (abi.libraries.map fun d => Lean.Json.str (toString d.value)).toArray),
-    ("fuel", toString abi.fuel)] |>.mergeObj (match abi.door with
+    ("fuel", toString abi.fuel), ("context", nockContextName abi.context)] |>.mergeObj (match abi.door with
       | none => Lean.Json.mkObj []
       | some d => Lean.Json.mkObj [("door", Lean.Json.mkObj [("peek", toString d.peek),
           ("state", toString d.state), ("event", toString d.event)])])
 
-/-- Op 117 request: the jam bytes and the ABI source. -/
+/-- The evaluator a record names: a compiled-in one by its registry name (`"nock"`; a name
+the registry lacks is refused here), or any `{"name", "semantics"}`, whose id is derived
+exactly as a registry entry's would be (`Evaluator.idOf`). The record carries the id, never
+the name. A record naming an id the registry lacks is the KERNEL's to refuse, by name:
+`unknownEvaluator`, at the check (op 131), at birth and at run (E3). -/
+def evaluatorNamed (path : String) (json : Lean.Json) : Result Digest := do
+  match json with
+  | .str name =>
+    match Evaluator.registry.find? (fun E => E.name == name) with
+    | some E => pure E.id
+    | none => failAt path s!"no compiled-in evaluator named {name}"
+  | _ =>
+    let obj ← exactObject path ["name", "semantics"] json
+    pure (Evaluator.idOf (← string (path ++ ".name") (← field path "name" obj))
+      (← string (path ++ ".semantics") (← field path "semantics" obj)))
+
+/-- Op 131 request: the code bytes and the ABI source, which also names the
+record's evaluator (`"evaluator": "nock"`) and Nock's arm (`"arm"`, the record's params). -/
 def nockProgramOf (jam : List UInt8) (abiSource : String) : Result NockProgramCodec.Program := do
   let json ← parse abiSource
-  pure ⟨jam, ← nockAbi "abi" json⟩
+  let obj ← object "abi" json
+  let evaluator ← evaluatorNamed "abi.evaluator" (← field "abi" "evaluator" obj)
+  let arm ← nat "abi.arm" (← field "abi" "arm" obj)
+  pure ⟨evaluator, jam, ← nockAbi "abi" json ["evaluator", "arm"],
+    Kernel.NockEntry.encodeParams ⟨arm⟩⟩
+
+/-- The record's params, shown: their bytes, and Nock's arm when they are Nock's. -/
+private def paramsJson (params : List UInt8) : List (String × Lean.Json) :=
+  [("params", hexJson params),
+   ("arm", match Kernel.NockEntry.decodeParams params with
+     | some p => Lean.Json.str (toString p.arm)
+     | none => Lean.Json.null)]
 
 /-- The verdict, and the canonical record bytes in every case: a refused record
 is still the exact bytes a birth would carry, so the kernel's own refusal of it
@@ -4422,25 +4561,27 @@ def nockCheckJson (submitted : NockProgramCodec.Program) :
     Kernel.NockProgramCell.CheckVerdict → Lean.Json
   | .malformed => .mkObj [("type", "nock-check"), ("verdict", "malformed")]
   | .refused reason => .mkObj [("type", "nock-check"), ("verdict", "refused"),
-      ("reason", reason.name),
+      ("reason", reason.name), ("evaluator", toString submitted.evaluator.value),
       ("program", hexJson (NockProgramCodec.programCodec.encode submitted))]
-  | .admissible program pid code cellId present => .mkObj [("type", "nock-check"),
+  | .admissible program pid code cellId present => Lean.Json.mkObj [("type", "nock-check"),
       ("verdict", "admissible"), ("programId", toString pid.value),
+      ("evaluator", toString program.evaluator.value),
       ("codeDigest", toString code.value), ("cellId", toString cellId),
       ("present", Lean.Json.bool present), ("jamBytes", toString program.jam.length),
-      ("program", hexJson (NockProgramCodec.programCodec.encode program))]
+      ("program", hexJson (NockProgramCodec.programCodec.encode program))] |>.mergeObj
+      (Lean.Json.mkObj (paramsJson program.params))
 
 /-- Op 118: a stored program, or its absence. -/
 def nockShowJson (domain : Digest) (id : Digest) :
     Option NockProgramCodec.Program → Lean.Json
   | none => .mkObj [("type", "nock-program"), ("programId", toString id.value),
       ("present", Lean.Json.bool false)]
-  | some program => .mkObj [("type", "nock-program"), ("programId", toString id.value),
-      ("present", Lean.Json.bool true),
+  | some program => Lean.Json.mkObj [("type", "nock-program"), ("programId", toString id.value),
+      ("present", Lean.Json.bool true), ("evaluator", toString program.evaluator.value),
       ("cellId", toString (CanonicalCellRegistry.programCellId domain program)),
       ("codeDigest", toString (NockProgramCodec.codeDigest program.jam).value),
       ("jamBytes", toString program.jam.length), ("abi", nockAbiJson program.abi),
-      ("jam", hexJson program.jam)]
+      ("jam", hexJson program.jam)] |>.mergeObj (Lean.Json.mkObj (paramsJson program.params))
 
 /-- Op 119 request: `{"programId", "context": {height, caller, room}, "targets",
 "values": [[index, slot, value], …]}`. -/
@@ -4480,14 +4621,14 @@ def nockRunRequest (source : String) :
     ← list "run.targets" nat (← field "run" "targets" obj),
     ← list "run.values" value (← field "run" "values" obj))
 
-private def fieldWritesJson (writes : List Kernel.NockRun.FieldWrite) : Lean.Json :=
+private def fieldWritesJson (writes : List Theory.Eval.FieldWrite) : Lean.Json :=
   .arr (writes.map fun w => Lean.Json.arr #[toString w.target, toString w.field,
     toString w.value]).toArray
 
 /-- Op 120 reply: the kernel's sample, the oracle's verdict and Lean steps at the
 ABI fuel, the product and its decoded writes; `claim` is what a runner signs. -/
 def nockRunJson (programId : Digest) (height : Nat) :
-    Kernel.NockRun.DryRun → Lean.Json
+    Kernel.Run.DryRun → Lean.Json
   | .missingProgram => .mkObj [("type", "nock-run"), ("verdict", "refused"),
       ("reason", "programUnknown")]
   | .ambiguousValues => .mkObj [("type", "nock-run"), ("verdict", "refused"),
@@ -4498,8 +4639,7 @@ def nockRunJson (programId : Digest) (height : Nat) :
       let base : List (String × Lean.Json) := [("type", "nock-run"), ("height", toString height),
         ("sample", hexJson sample)]
       match result with
-      | .ok out steps =>
-        let output := Noun.jam out
+      | .ok output steps =>
         .mkObj (base ++ ([("verdict", "ok"), ("steps", toString steps), ("output", hexJson output),
           ("writes", match writes with | some ws => fieldWritesJson ws | none => Lean.Json.null),
           ("claim", .mkObj [("programId", toString programId.value), ("sample", hexJson sample),
@@ -4524,13 +4664,13 @@ private def nounHex (path : String) (json : Lean.Json) : Result Noun := do
   | none => failAt path "not a jam"
 
 private def doorView (path : String) (obj : Std.TreeMap.Raw String Lean.Json compare) :
-    Result Kernel.NockDoor.View := do
+    Result Kernel.Door.View := do
   pure ⟨← optional (path ++ ".state") nat (← field path "state" obj),
     ← nat (path ++ ".event") (← field path "event" obj)⟩
 
 /-- Op 121: `{"programId", "state", "event", "wire": <jam hex>, "cause": <jam hex>}`. -/
 def nockDoorPokeRequest (source : String) :
-    Result (Digest × Kernel.NockDoor.View × Noun × Noun) := do
+    Result (Digest × Kernel.Door.View × Noun × Noun) := do
   let json ← parse source
   let obj ← exactObject "poke" ["programId", "state", "event", "wire", "cause"] json
   pure (Digest.mk (← nat "poke.programId" (← field "poke" "programId" obj)), ← doorView "poke" obj,
@@ -4538,7 +4678,7 @@ def nockDoorPokeRequest (source : String) :
 
 /-- Op 122: `{"programId", "state", "event", "path": <jam hex>}`; op 123 without `path`. -/
 def nockDoorReadRequest (source : String) (withPath : Bool) :
-    Result (Digest × Kernel.NockDoor.View × Noun) := do
+    Result (Digest × Kernel.Door.View × Noun) := do
   let json ← parse source
   let obj ← exactObject "door" (["programId", "state", "event"] ++ if withPath then ["path"] else [])
     json
@@ -4553,7 +4693,7 @@ private def peekAtom : Noun → Option Nat
   | _ => none
 
 private def ranJson (type : String) (extra : Noun → Nat → List (String × Lean.Json)) :
-    Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json
+    Except Kernel.Run.Refusal (Theory.Eval.Ran Noun) → Lean.Json
   | .error reason => .mkObj [("type", type), ("verdict", "refused"), ("reason", reason.name)]
   | .ok (.crash k) => .mkObj [("type", type), ("verdict", "crash"), ("steps", toString k)]
   | .ok (.exhausted k) => .mkObj [("type", type), ("verdict", "exhausted"), ("steps", toString k)]
@@ -4561,15 +4701,15 @@ private def ranJson (type : String) (extra : Noun → Nat → List (String × Le
       List (String × Lean.Json)) ++ extra out k)
 
 /-- Op 122 reply: the peek arm's answer (a `(unit (unit *))` jam). -/
-def nockDoorPeekJson : Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json :=
+def nockDoorPeekJson : Except Kernel.Run.Refusal (Theory.Eval.Ran Noun) → Lean.Json :=
   ranJson "nock-door-peek" fun out _ =>
     [("answer", hexJson (Noun.jam out)),
      ("value", match peekAtom out with | some x => Lean.Json.str (toString x) | none => Lean.Json.null)]
 
 /-- Op 123 reply: the instance's state now (stored, or the booted trap's). -/
-def nockDoorStateJson : Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json :=
+def nockDoorStateJson : Except Kernel.Run.Refusal (Theory.Eval.Ran Noun) → Lean.Json :=
   ranJson "nock-door-state" fun out _ =>
-    [("state", hexJson (Noun.jam out)), ("stateAtom", toString (Kernel.NockDoor.jamAtom out)),
+    [("state", hexJson (Noun.jam out)), ("stateAtom", toString (Kernel.NockProgramCell.jamAtom out)),
      ("value", match out with | .atom x => Lean.Json.str (toString x) | _ => Lean.Json.null)]
 
 /-- Op 121 reply: what a runner claims for one poke. `claim` appears when the
@@ -4593,7 +4733,7 @@ def nockDoorPokeJson (programId : Digest) : Kernel.NockDoor.DryPoke → Lean.Jso
       | some (effects, state, writes) =>
         let output := Noun.jam (.cell effects state)
         .mkObj (ran ++ ([("output", hexJson output), ("stateJam", hexJson (Noun.jam state)),
-          ("stateOut", toString (Kernel.NockDoor.jamAtom state)),
+          ("stateOut", toString (Kernel.NockProgramCell.jamAtom state)),
           ("value", match state with | .atom x => Lean.Json.str (toString x) | _ => Lean.Json.null),
           ("writes", match writes with | .ok ws => fieldWritesJson ws | .error _ => Lean.Json.null),
           ("writesRefusal", match writes with | .ok _ => Lean.Json.null | .error r => Lean.Json.str r.name),
@@ -4603,6 +4743,10 @@ def nockDoorPokeJson (programId : Digest) : Kernel.NockDoor.DryPoke → Lean.Jso
 def nockSampleJson : Kernel.NockProgramCell.SampleVerdict → Lean.Json
   | .missingProgram => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
       ("reason", "missingProgram")]
+  | .unresolved reason => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
+      ("reason", match reason with
+        | .unknownEvaluator => "unknownEvaluator"
+        | .evaluatorDisabled => "evaluatorDisabled")]
   | .ambiguousValues => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
       ("reason", "ambiguousValues")]
   | .refused => .mkObj [("type", "nock-sample"), ("verdict", "refused"),

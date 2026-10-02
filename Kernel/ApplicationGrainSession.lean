@@ -87,7 +87,7 @@ def State.store (s : State) (session : Nat) : Store effectLayout :=
   DeclaredFields.store session s.coordinates
 
 def initialStore (session app : Nat) (kind : Kind) : Store effectLayout :=
-  (⟨app, 0, 0, .inactive, kind⟩ : State).store session
+  DeclaredFields.birthStore session (⟨app, 0, 0, .inactive, kind⟩ : State).coordinates
 
 def readState (session : Nat) (store : Store effectLayout) : Option State := do
   let read := fun n => DeclaredFields.read session n store

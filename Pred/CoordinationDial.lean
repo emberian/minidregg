@@ -218,7 +218,7 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
   | .hashEq v b c, _, old, old', s, s', h => by
       have hg : ∀ k, s.get k = s'.get k := fun k => ofRead_injective (congrFun h k)
       show hashEqHolds _ s v b c = hashEqHolds _ s' v b c
-      simp only [hashEqHolds, hashEqOpening, hg]
+      simp only [hashEqHolds, hashEqOpening, hg, State.getAll_congr hg]
   | .not q, hp, old, old', _, _, h => by
       rw [eval_not, eval_not,
         eval_congr_toFun q (by simpa [NewOnly] using hp) (old := old) (old' := old') h]

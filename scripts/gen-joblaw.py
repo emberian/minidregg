@@ -9,8 +9,9 @@ usage (from the repository root):
 
 Source: deploy/shell/templates/job/law.job (the grammar; clause numbers in its `-- N` comments),
 rendered by deploy/shell/templates/mud/render.py to law.job.json (an `all` of clauses 0..N).
-A value placeholder `{X}` becomes `p.X`; a slot that is a placeholder (`slot {RAN_SLOT}`) becomes
-`p.RAN_SLOT`; negative literals are parenthesised; nothing is re-sorted, dropped or simplified.
+A value placeholder `{X}` becomes `p.X` (`{PROGRAM}`, a Nat, becomes `(p.PROGRAM : Int)` in a value
+position and `.ran p.PROGRAM` in K-RAN's atom); negative literals are parenthesised; nothing is
+re-sorted, dropped or simplified.
 law.job.shell is the same law in the shell's one-line grammar (native/resource-client/src/shell/law.rs),
 each clause spelled exactly as the Host renders a refused clause (Compiler/RefusalReason.lean
 `renderClause`), one clause per line; law.rs's `job_law_grammar_is_the_template_json` parses it back
@@ -22,18 +23,19 @@ T = "deploy/shell/templates/job"
 F = "Kernel/Job.lean"
 PH = re.compile(r"\{([A-Z_0-9]+)\}")
 
+NAT_PARAMS = {"PROGRAM"}
+
 def val(v):
     v = str(v)
     m = PH.fullmatch(v)
     if m:
+        if m.group(1) in NAT_PARAMS:
+            return f"(p.{m.group(1)} : Int)"
         return "p." + m.group(1)
     n = int(v)
     return f"({n})" if n < 0 else str(n)
 
 def slot(s):
-    m = PH.fullmatch(s)
-    if m:
-        return "p." + m.group(1)
     if PH.search(s):
         sys.exit(f"gen-joblaw: a placeholder inside a slot name is not embedded: {s!r}")
     return '"' + s + '"'
@@ -55,6 +57,9 @@ def render(n, ind):
         return f".{t} {slot(n['left'])} {slot(n['right'])}"
     if t == "leSlotsOff":
         return f".leSlotsOff {slot(n['left'])} {slot(n['right'])} {val(n['offset'])}"
+    if t == "ran":
+        m = PH.fullmatch(str(n["program"]))
+        return f".ran p.{m.group(1)}" if m else f".ran {int(n['program'])}"
     sys.exit(f"gen-joblaw: no Lean rendering for atom type {t!r}")
 
 VERBS = {1: "read", 2: "write", 3: "delegate", 4: "install", 5: "revoke"}
@@ -96,6 +101,8 @@ def shell(n):
         return f"{sh_slot(n['left'])} <= {sh_slot(n['right'])}"
     if t == "leSlotsOff":
         return f"{sh_slot(n['left'])} <= {sh_slot(n['right'])} + {n['offset']}"
+    if t == "ran":
+        return f"ran {n['program']}"
     sys.exit(f"gen-joblaw: no shell rendering for atom type {t!r}")
 
 def shell_law(law):

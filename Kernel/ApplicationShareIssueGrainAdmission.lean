@@ -93,7 +93,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     let specialPins := sourceReady.effectivePins pins
     let .ok tariff := config.grainBirthTariffValue | return .error refused
     let .ok birth := GrainResourceBirthController.prepareSourceBirth
-        profile.compilerProfile config.deployment specialPins durable profile.semantics
+        profile.compilerProfile profile.disabledEvaluators config.deployment specialPins durable profile.semantics
         tariff decoded.source | return .error refused
     if sourceDescriptorBytes :
         CanonicalCellRegistry.sourceEncoding.codec.encode decoded.source.birth =

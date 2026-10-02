@@ -9,6 +9,7 @@
 #   * `leSlotsOff A B k`                      -> {"type":"leSlotsOff","left","right","offset"}
 #                                               NOT LANDED: K-PRED-OFFSET; the JSON key names are ASSUMED
 #   * `witnessed ID`                          -> {"type":"witnessed","identifier":ID}
+#   * `ran PROGRAM`                           -> {"type":"ran","program":PROGRAM}   (K-RAN, policy tag 14)
 #   * slot operands: `subject` `verb` `cost` (request/*), `clock now|day` (K-CLOCK, NOT LANDED),
 #     `field NAME [VIEW]`, `joint I KIND NAME [VIEW]` -> joint/index/I/resource/field/N/VIEW
 #     (K-JOINT-INDEX, NOT LANDED; I is the command's 0-based target index, as List.finRange at
@@ -93,6 +94,7 @@ class P:
         if w == 'not':
             s.eat(); s.eat('('); p = s.pred(); s.eat(')'); return {"type":"not","predicate":p}
         if w == 'witnessed': s.eat(); return {"type":"witnessed","identifier":s.eat()}
+        if w == 'ran': s.eat(); return {"type":"ran","program":s.val()}
         if w in ('eqSlots', 'leSlots'):
             s.eat(); a, _ = s.slot(); b, _ = s.slot()
             return {"type":w,"left":a,"right":b}

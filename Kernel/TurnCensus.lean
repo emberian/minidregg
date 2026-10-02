@@ -1,10 +1,10 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 37 constructors of
+SURPASS §2(b), lane T1.  The Host admits through the 38 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
-the BRAID-PROOF merge).  `Compiler.TurnCensusCoverage` fails the build when
+the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge).  `Compiler.TurnCensusCoverage` fails the build when
 `Ctor` and `NativeAdmission` disagree on their constructor names.  T0's census
 (`planning/surpass/t0-receiver-census.md`) lists, per constructor, the cells it
 reads and writes, its nullifiers, its charge and its clock pin.  This module
@@ -42,7 +42,7 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 37 shapes is accepted, and each
+* `every_admission_is_turn`: every one of the 38 shapes is accepted, and each
   of the seven ROM-birth receivers (the six above and `payEnrol`, whose enrol
   branch births the new account's law source) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
@@ -85,6 +85,8 @@ inductive Kind
   | pay
   /-- A policy-source cell: ROM, born with its record (T3b). -/
   | source
+  /-- The system cell (C14): the certified height a certify advances. -/
+  | system
   deriving DecidableEq, Repr
 
 /-- Every census cell has a RAM row namespace, an append-only log and a ROM
@@ -155,19 +157,20 @@ def cWell : CellId := 9
 def cContent : CellId := 10
 def cRoom : CellId := 11
 def cPay : CellId := 12
+def cSystem : CellId := 13
 
 def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  (((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
+  ((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
     (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
     cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
     (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
     (some (cellOf .lifecycle [(0, 0)]))).update cGate (some (cellOf .gateway [(0, 1)]))).update
     cClock (some (cellOf .clock [(0, 1000)]))).update cWell (some (cellOf .well [(0, 50)]))).update
     cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
-    cPay (some (cellOf .pay [(0, 1)]))
+    cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))
 
 /-- The meter every lane starts with. -/
 def budget : Nat := 10000
@@ -211,7 +214,7 @@ inductive Ctor
   | applicationLifecycleClaim | applicationLifecycleBeginV2 | applicationLifecycleClaimV2
   | applicationLifecycleCompletion | applicationLifecycleBeginV3 | applicationLifecycleClaimV3
   | applicationLifecycleCompletionV2 | fnConsumerNamespace | fnSelectedPoll | fnEmptyPollV2
-  | payObservation | payEnrol | payRefill | jobMoney
+  | payObservation | payEnrol | payRefill | jobMoney | certify
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -223,11 +226,12 @@ def Ctor.all : List Ctor :=
     .applicationLifecycleBegin, .applicationLifecycleClaim, .applicationLifecycleBeginV2,
     .applicationLifecycleClaimV2, .applicationLifecycleCompletion, .applicationLifecycleBeginV3,
     .applicationLifecycleClaimV3, .applicationLifecycleCompletionV2, .fnConsumerNamespace,
-    .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney]
+    .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
+    .certify]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 37 := rfl
+theorem Ctor.all_length : Ctor.all.length = 38 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -314,6 +318,9 @@ def Ctor.turn : Ctor → CTurn
   -- transfer into the job's held account, registered fresh
   | .jobMoney => mk [] [payGuard, leg cRes .resource [wr 0 10 11], leg cBook .book [wr 0 100 90, al 4 10]]
       [141]
+  -- certify (C14): the certifier's capability guard and the system cell's
+  -- certified height advanced at its signed pre-value; one nullifier
+  | .certify => mk [] [capGuard, leg cSystem .system [wr 0 0 64]] [142]
 
 /-- Each constructor's negation: the case its receiver must refuse. -/
 def Ctor.negation : Ctor → CTurn
@@ -376,6 +383,8 @@ def Ctor.negation : Ctor → CTurn
   -- the tariff changed under the plan (the pay cell's read guard)
   | .jobMoney => mk [] [leg cPay .pay [rd 0 (some 2)], leg cRes .resource [wr 0 10 11],
       leg cBook .book [wr 0 100 90, al 4 10]] [141]
+  -- a certify signed against a stale certified height (`certify_not_advancing_refused`)
+  | .certify => mk [] [capGuard, leg cSystem .system [wr 0 1 64]] [142]
 
 /-- The reason each negation is refused with. -/
 def Ctor.refusal : Ctor → Reject
@@ -416,6 +425,7 @@ def Ctor.refusal : Ctor → Reject
   | .payEnrol => .guardFailed cClock 0
   | .payRefill => .guardFailed cRes 0
   | .jobMoney => .guardFailed cPay 0
+  | .certify => .guardFailed cSystem 0
 
 /-! ## The poles -/
 
@@ -512,7 +522,7 @@ theorem every_admission_is_turn_all :
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 37 admission shapes is
+/-- **`every_admission_is_turn`.**  Each of the 38 admission shapes is
 accepted by the one transition, and each receiver that creates a ROM
 policy-source cell does so by a create carrying its image. -/
 theorem every_admission_is_turn (c : Ctor) :

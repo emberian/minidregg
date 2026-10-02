@@ -319,6 +319,31 @@ instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) 
   unfold PhysicalPostLaw
   split <;> infer_instance
 
+/-- **K-FIELD-CLOSURE at every receiver.** A live declared object cell that a
+receiver's `PhysicalPostLaw` admits holds only the fields it declares.  Every
+receiver that writes cells checks `PhysicalPostLaw` on each write, births
+included, so none can leave an undeclared field on a declared cell; with the
+declaration fixed by every admitted action (`FieldClosure.admitted_preserves_declared`)
+none can widen it either. -/
+theorem PhysicalPostLaw.declared_closed {deployment : Deployment} {write : DataWrite}
+    (law : PhysicalPostLaw deployment write) {payload : Compiler.DeclaredEffectCell.Cell}
+    (live : (LifecycleImage.codec Registry).decode write.canonicalPostBytes =
+      some (.live ⟨.declaredObject, payload⟩)) :
+    FieldClosure.Closed write.cellId.value payload.logical := by
+  unfold PhysicalPostLaw at law
+  rw [live] at law
+  exact law.2.2
+
+/-- The same for an account's metadata cell. -/
+theorem PhysicalPostLaw.account_closed {deployment : Deployment} {write : DataWrite}
+    (law : PhysicalPostLaw deployment write) {payload : Compiler.DeclaredEffectCell.Cell}
+    (live : (LifecycleImage.codec Registry).decode write.canonicalPostBytes =
+      some (.live ⟨.accountMetadata, payload⟩)) :
+    FieldClosure.Closed write.cellId.value payload.logical := by
+  unfold PhysicalPostLaw at law
+  rw [live] at law
+  exact law.2.2
+
 def PinsBound (deployment : Deployment) (pins : FactoryPins) : Prop :=
   pins.factory.value = deployment.factoryId ∧ pins.domain = deployment.domain
 
@@ -409,6 +434,10 @@ inductive PreparationReject where
   | initialPayload
   | initialPolicy
   | nockLibrary
+  /-- A program record names an evaluator id no compiled-in entry has (E3). -/
+  | unknownEvaluator
+  /-- A program record names an evaluator this deployment's operator disabled (E3). -/
+  | evaluatorDisabled
   | factory
   | resourceBook
   | authorityDomain
@@ -476,6 +505,11 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   parentsPresent : ParentsPresent deployment directory.directory descriptor
+  /-- The evaluators this deployment's operator disabled (`Profile.disabledEvaluators`, the list
+  the runtime semantics digest commits and a run resolves against), as the birth checked them. -/
+  disabled : List Digest
+  /-- Every program record born here names an evaluator this deployment runs (E3). -/
+  evaluators : CanonicalCellRegistry.birthEvaluators disabled descriptor = .ok ()
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
   /-- Every Nock program born here names only program cells already present. -/
@@ -485,7 +519,17 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
 
-def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deployment)
+/-- The evaluator check, by name: a program record naming an unknown or disabled evaluator
+refuses the birth before any other payload is read (`birthEvaluators`). -/
+def requireEvaluators (disabled : List Digest) (descriptor : Descriptor Registry) :
+    Except PreparationReject (PLift (CanonicalCellRegistry.birthEvaluators disabled descriptor = .ok ())) :=
+  match CanonicalCellRegistry.birthEvaluators disabled descriptor with
+  | .ok () => .ok ⟨rfl⟩
+  | .error .unknownEvaluator => .error .unknownEvaluator
+  | .error .evaluatorDisabled => .error .evaluatorDisabled
+
+def preparePreAuthority (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) :
     Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
@@ -493,6 +537,7 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
+  let evaluators ← requireEvaluators disabled descriptor
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
   let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
@@ -506,7 +551,8 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    parents.down, initials.down, policiesBound.down, libraries.down, factory, book, authority⟩
+    parents.down, disabled, evaluators.down, initials.down, policiesBound.down, libraries.down,
+    factory, book, authority⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
@@ -552,10 +598,11 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
 /-- The actual fail-closed receiving preparation. Even the auxiliary create
 list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
-def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
+def prepareBirth (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (descriptor : Descriptor Registry) :
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
-  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
       pre.authority descriptor)
@@ -583,12 +630,13 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
   post : PreparedPostAuthority pre authorityCombined.writes
 
-def prepareGrainBirth (profile : PolicyCompilerProfile F) (deployment : Deployment)
+def prepareGrainBirth (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
     (operationMarker : Nat) :
     Except PreparationReject
       (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
-  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment pre.authority
       descriptor operationMarker) .authorityBatch
@@ -625,7 +673,8 @@ structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
   prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker
 
-def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployment)
+def prepareGrainDraft (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
     (operationMarker : Nat) :
     Except PreparationReject
@@ -637,7 +686,7 @@ def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployme
     (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
-  let prepared ← prepareGrainBirth profile deployment pins durable descriptor operationMarker
+  let prepared ← prepareGrainBirth profile disabled deployment pins durable descriptor operationMarker
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
@@ -699,7 +748,8 @@ structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deploy
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
   prepared : PreparedBirth profile deployment pins durable descriptor
 
-def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
+def prepareDraft (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (draft : Descriptor Registry) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
@@ -709,7 +759,7 @@ def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
-  let prepared ← prepareBirth profile deployment pins durable descriptor
+  let prepared ← prepareBirth profile disabled deployment pins durable descriptor
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
@@ -962,4 +1012,8 @@ end Concrete
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.no_prepared_of_absent_parent
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.declared_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.declared_closed
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed
 end Minidregg.Kernel.ResourceBirthController

@@ -23,6 +23,7 @@ import Compiler.CredentialAuthorityCell
 import Compiler.HyperdocumentCell
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
+import Compiler.Evaluator
 
 namespace Minidregg.Compiler.CanonicalRuntimeProfile
 
@@ -100,10 +101,11 @@ def revocationProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY/v2".toUTF8.toList
 
 /-- Signed snapshot observation uses the actual resource page and only the
-selected account's sparse balance cut. Preparation must cover every private
+selected account's sparse balance cut; the deployment clock's `clock/now`,
+`clock/day` and `clock/slot` come first (v4), as on every invocation. Preparation must cover every private
 read with an exact observe-grant footprint from the same loaded image. -/
 def observationProjectionVersion : List UInt8 :=
-  "observe/v3:exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
+  "observe/v4:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
 
 /-- Exact request fields and request-bound capability possession are part of this epoch. -/
 def authorizationVersion : List UInt8 :=
@@ -196,11 +198,16 @@ def sourceComponents : List (List UInt8) :=
    (StreamCodec.list StreamCodec.nat).encode
      [NockProgramCodec.registryTag.toNat, NockProgramCodec.schemaId,
       NockProgramCodec.wireVersion, NockProgramCodec.abiVersion],
+   Evaluator.idCustomization,
+   (StreamCodec.list bytesStream).encode Evaluator.registryManifest,
    StoreCodec.frame DeclaredEffectCell.wire,
    StoreCodec.frame Kernel.PayCell.wire,
    Kernel.PayCell.idCustomization,
    StoreCodec.frame Kernel.ClockCell.wire,
    Kernel.ClockCell.idCustomization,
+   StoreCodec.frame Kernel.SystemCell.wire,
+   Kernel.SystemCell.idCustomization,
+   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v1".toUTF8.toList,
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,
@@ -237,7 +244,8 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.delegateProgram),
        CredentialAuthorityEntryCodec.verbTag (.installPolicy),
        CredentialAuthorityEntryCodec.verbTag (.revokeCapability),
-       CredentialAuthorityEntryCodec.verbTag (.observePayment)]]]
+       CredentialAuthorityEntryCodec.verbTag (.observePayment),
+       CredentialAuthorityEntryCodec.verbTag (.tickClock)]]]
 
 def runtimeStream : StreamCodec (List (List UInt8) × FactoryTemplate) :=
   StreamCodec.product (StreamCodec.list bytesStream) factoryTemplateStream
@@ -260,9 +268,15 @@ theorem encode_injective : Function.Injective encode := by
   rw [leftDecoded, rightDecoded] at decoded
   exact (Prod.mk.inj (Option.some.inj decoded)).2
 
-def receiverSemantics (template : FactoryTemplate) (parameters : List UInt8 := []) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE.RUNTIME.SEMANTICS/v2".toUTF8.toList
-    ((StreamCodec.product bytesStream bytesStream).encode (encode template, parameters))).digest
+/-- The runtime semantics: the template (its source components include the compiled-in
+evaluator registry), the deployment parameters, and the evaluators the operator disabled
+(K-EVAL: what a run may execute on is part of what admission means, so two nodes that
+disagree on it disagree on the semantics digest, never silently on a verdict). -/
+def receiverSemantics (template : FactoryTemplate) (parameters : List UInt8 := [])
+    (disabled : List Digest := []) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE.RUNTIME.SEMANTICS/v3".toUTF8.toList
+    ((StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.list digestStream))).encode
+      (encode template, parameters, disabled))).digest
 
 /-- Native runtime profiles always enable scalar order with its actual arithmetic
 premises. The common compiler bundle is derived below, so a template/profile
@@ -276,17 +290,23 @@ structure Profile (F : Type) [Field F] where
   orderNoWrap : PredOrder.NoWrap F orderWidth
   /-- Source-owned deployment parameters, never selected by an operation. -/
   receiverParameters : List UInt8 := []
+  /-- Compiled-in evaluators (`Evaluator.registry`) this deployment's operator disabled,
+  by id: a run on one refuses `evaluatorDisabled` (`Kernel.Run.resolve`). Committed in
+  `semantics`. -/
+  disabledEvaluators : List Digest := []
 
 def Profile.source {F : Type} [Field F] (template : FactoryTemplate)
     (fieldIdentity : Digest) (characteristic : Nat)
     (characteristicCorrect : CharP F characteristic) (orderWidth : Nat)
-    (orderNoWrap : PredOrder.NoWrap F orderWidth) (receiverParameters : List UInt8 := []) : Profile F :=
+    (orderNoWrap : PredOrder.NoWrap F orderWidth) (receiverParameters : List UInt8 := [])
+    (disabledEvaluators : List Digest := []) : Profile F :=
   ⟨template, fieldIdentity, characteristic, characteristicCorrect, orderWidth, orderNoWrap,
-    receiverParameters⟩
+    receiverParameters, disabledEvaluators⟩
 
 def Profile.compilerProfile {F : Type} [Field F] (profile : Profile F) :
     PolicyCompilerProfile F :=
-  .source (receiverSemantics profile.template profile.receiverParameters) profile.fieldIdentity
+  .source (receiverSemantics profile.template profile.receiverParameters profile.disabledEvaluators)
+    profile.fieldIdentity
     profile.characteristic profile.characteristicCorrect
     (.scalar profile.orderWidth) profile.orderNoWrap
 
@@ -295,7 +315,8 @@ def Profile.semantics {F : Type} [Field F] (profile : Profile F) : Digest :=
 
 theorem Profile.receiverSemantics_exact {F : Type} [Field F] (profile : Profile F) :
     profile.compilerProfile.descriptor?.map (·.receiverSemantics) =
-      some (receiverSemantics profile.template profile.receiverParameters) := rfl
+      some (receiverSemantics profile.template profile.receiverParameters
+        profile.disabledEvaluators) := rfl
 
 theorem Profile.order_enabled {F : Type} [Field F] (profile : Profile F) :
     profile.compilerProfile.compiler = .scalar profile.orderWidth := rfl

@@ -381,9 +381,9 @@
           "right": "resource/field/0/before"
         },
         {
-          "type": "eqSlots",
-          "left": "resource/field/8/after",
-          "right": "resource/field/5/after"
+          "type": "eq",
+          "slot": "resource/field/8/after",
+          "value": "0"
         }
       ]
     },
@@ -404,9 +404,24 @@
           "right": "resource/field/0/before"
         },
         {
-          "type": "eq",
-          "slot": "resource/field/11/after",
-          "value": "0"
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/11/after",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/9/after",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/10/after",
+              "value": "0"
+            }
+          ]
         }
       ]
     },
@@ -494,6 +509,31 @@
           "type": "eq",
           "slot": "resource/field/8/delta",
           "value": "0"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/0/before",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/0/after",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/8/before",
+              "value": "0"
+            },
+            {
+              "type": "eqSlots",
+              "left": "resource/field/8/after",
+              "right": "resource/field/5/after"
+            }
+          ]
         },
         {
           "type": "all",
@@ -588,30 +628,17 @@
           }
         },
         {
+          "type": "not",
+          "predicate": {
+            "type": "eqSlots",
+            "left": "resource/field/0/before",
+            "right": "resource/field/0/before"
+          }
+        },
+        {
           "type": "eq",
           "slot": "resource/field/9/delta",
           "value": "0"
-        },
-        {
-          "type": "all",
-          "predicates": [
-            {
-              "type": "not",
-              "predicate": {
-                "type": "eqSlots",
-                "left": "resource/field/9/before",
-                "right": "resource/field/9/before"
-              }
-            },
-            {
-              "type": "not",
-              "predicate": {
-                "type": "eqSlots",
-                "left": "resource/field/9/after",
-                "right": "resource/field/9/after"
-              }
-            }
-          ]
         },
         {
           "type": "all",
@@ -642,30 +669,17 @@
           }
         },
         {
+          "type": "not",
+          "predicate": {
+            "type": "eqSlots",
+            "left": "resource/field/0/before",
+            "right": "resource/field/0/before"
+          }
+        },
+        {
           "type": "eq",
           "slot": "resource/field/10/delta",
           "value": "0"
-        },
-        {
-          "type": "all",
-          "predicates": [
-            {
-              "type": "not",
-              "predicate": {
-                "type": "eqSlots",
-                "left": "resource/field/10/before",
-                "right": "resource/field/10/before"
-              }
-            },
-            {
-              "type": "not",
-              "predicate": {
-                "type": "eqSlots",
-                "left": "resource/field/10/after",
-                "right": "resource/field/10/after"
-              }
-            }
-          ]
         },
         {
           "type": "all",
@@ -905,9 +919,8 @@
           }
         },
         {
-          "type": "eq",
-          "slot": "{RAN_SLOT}",
-          "value": "1"
+          "type": "ran",
+          "program": "{PROGRAM}"
         }
       ]
     },
@@ -1793,6 +1806,87 @@
           "type": "eq",
           "slot": "resource/field/11/after",
           "value": "0"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eqSlots",
+            "left": "resource/field/0/before",
+            "right": "resource/field/0/before"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/8/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/11/delta",
+              "value": "0"
+            },
+            {
+              "type": "not",
+              "predicate": {
+                "type": "all",
+                "predicates": [
+                  {
+                    "type": "eq",
+                    "slot": "resource/field/0/before",
+                    "value": "0"
+                  },
+                  {
+                    "type": "eq",
+                    "slot": "resource/field/0/after",
+                    "value": "1"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "not",
+              "predicate": {
+                "type": "all",
+                "predicates": [
+                  {
+                    "type": "memberOf",
+                    "slot": "resource/field/0/before",
+                    "values": [
+                      "3",
+                      "4",
+                      "5"
+                    ]
+                  },
+                  {
+                    "type": "eq",
+                    "slot": "resource/field/0/after",
+                    "value": "6"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "eq",
+          "slot": "authority/operation/job-money",
+          "value": "1"
         }
       ]
     }

@@ -18,6 +18,7 @@
 #          <= 5 s and cold reopen <= 60 s at 1000 (list item 1)
 #   K4     one resource holds 32 fields and reads them back (list item 2)
 #   KC     K-CLOCK: journey.d/jclock.sh (ticks move the one clock; a law reads clock/now)
+#   KT     C14 TAIL-BOUND: journey.d/jtail.sh (a fresh L=8 Store: writes past certified+L refused; certify resumes)
 #   JJ     K-JOINT-INDEX: journey.d/jjoint.sh (a law reads a participant by position)
 #   KCH    CH-EPOCH: journey.d/jchan-epoch.sh (a channel domain's epoch records under ChannelLaw)
 #   KCHR   CH-RELAY-1: journey.d/jchan-relay.sh (`mini relay` ticking in real time; records appended per epoch)
@@ -30,7 +31,11 @@
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
 #   J13    P-LAW: a law refusal names its clause (journey.d/j13.sh -> law-leaf-journey.sh, its own Store)
-#   JJOB1  COMPUTE C1: the job law on fresh cells; every lifecycle edge admitted and refused by clause (journey.d/jjob1.sh)
+#   JJOB1  COMPUTE C1: the job law on fresh cells; every lifecycle edge admitted and refused by clause (journey.d/jjob1.sh; own Store)
+#   JJOB   COMPUTE floor: post / claim / answer / check (the ran truth turn) / settle between two friends (journey.d/jjob.sh; own Store)
+#   JJOBM  COMPUTE C3: a job's money as conservation-checked Book turns (journey.d/jjob-money.sh; own Store)
+#   KCL    K-FIELD-CLOSURE: a declared cell holds only the fields it declares (journey.d/jclosure.sh)
+#   JMKT   SEALED-MARKET: a sealed-bid market through mini shell (journey.d/jmarket.sh)
 #   J12A   P-AFFORDANCES: `can NAME`, each held verb dry-run (journey.d/j12a.sh -> affordances-journey.sh, its own Store)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
@@ -45,7 +50,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jchan-epoch jchan-relay jchan-client jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve jjob1 jjob-money): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket jtail jchan-epoch jchan-relay jchan-client jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -69,7 +74,8 @@
 # tree is not supplied: a manifest key, or NOCK_TEMPLATES/NOCK_RUN for JN2/JN3,
 # NOCK_DOOR_JAM/NOCK_DOOR_FUEL for JN5). None of them is PASS; only FAIL says
 # something ran and was wrong. scripts/local-gates.sh gate 5 reads them apart.
-# Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
+# Tunables: JOURNEY_TIMER_COUNTS (the timers' accepted counts, see accept());
+# JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
 # JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
@@ -153,7 +159,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C KHQ KW JN2 JN3 JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOBM J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT KW JN2 JN3 JN3P JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -182,10 +188,11 @@ TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[KH]="a narrowed read verifies against a salted root: covered entries open, the rest are sealed leaves"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
-TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
+TITLE[JMKT]="the sealed market: bids commit, reveals open, the runner settles on revealed bids"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
+TITLE[JN3P]="a pinned program: one run claim admitted at two heights (own Store)"
 TITLE[JN5]="a NockApp kernel door refereed by re-execution (own Store)"
 TITLE[JPAY3]="observed payments become Book credit; the observer advances the deployment clock (own Store)"
 TITLE[JPAYE1]="the pay watcher enrollment index on fixtures"
@@ -211,12 +218,16 @@ TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
-TITLE[JJOB1]="C1 JOB-LAW: every job edge admitted and refused by clause"
+TITLE[JJOB1]="C1 JOB-LAW: every job edge admitted and refused by clause (own Store)"
+TITLE[JJOB]="the job floor: a Nock job posted, run, checked by re-execution, settled (own Store)"
+TITLE[JJOBM]="a job's money: escrow, bond, payout and slash as Book turns (own Store)"
+TITLE[KCL]="K-FIELD-CLOSURE: an undeclared field is refused by name; an open cell admits it"
 TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
+TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -257,12 +268,25 @@ decode() {
 installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
 replayed() { jq -e '.type == "confirmed" and .confirmation == "replayed"' "$1" >/dev/null 2>&1; }
 count_of() { jq -r '.acceptedCount' "$1"; }
-# Accept a new record: installed and exactly one past the previous count.
+# Accept a new record: installed and exactly one past the previous count, plus the
+# records the deployment's timers (clock tick, certify) were accepted at in between.
+# JOURNEY_TIMER_COUNTS names the file the timers append each accepted count to (one per
+# line); unset means no timer runs and the count must be exactly LAST + 1. Every record
+# between is accounted for either way: a stranger's record still fails the step.
+timer_between() {  # timer_between LOW HIGH -> how many timer records have LOW < count < HIGH
+  [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ -f "$JOURNEY_TIMER_COUNTS" ] || { echo 0; return; }
+  awk -v lo="$1" -v hi="$2" '$1 > lo && $1 < hi { n++ } END { print n + 0 }' "$JOURNEY_TIMER_COUNTS"
+}
 accept() {
-  local f=$1 c
+  local f=$1 c k=0 tries=0
   installed "$f" || return 1
   c=$(count_of "$f")
-  [ "$c" = $((LAST_COUNT + 1)) ] || { DETAIL="acceptedCount $c, expected $((LAST_COUNT + 1)) in $f"; return 1; }
+  k=$(timer_between "$LAST_COUNT" "$c")
+  # A timer's record can land before the timer has logged it: wait up to 30 s for the log.
+  while [ -n "${JOURNEY_TIMER_COUNTS:-}" ] && [ "$c" != $((LAST_COUNT + 1 + k)) ] && [ "$tries" -lt 60 ]; do
+    sleep 0.5; tries=$((tries + 1)); k=$(timer_between "$LAST_COUNT" "$c")
+  done
+  [ "$c" = $((LAST_COUNT + 1 + k)) ] || { DETAIL="acceptedCount $c, expected $((LAST_COUNT + 1 + k)) ($k timer records between) in $f"; return 1; }
   LAST_COUNT=$c
 }
 field_value() { jq -r --arg f "$2" '[.cell.entries[]? | select(.key.field == $f) | .value][0] // "absent"' "$1"; }
@@ -304,10 +328,32 @@ frontier() {
 }
 
 # run_step ID DEP... : a step whose dependency did not pass is FAIL (blocked).
+# The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
+# the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
+# the journey's Store (L = 256) never reaches its tail bound between certifies.
+# Every certify, and every skip, is logged to $S/certify.log; a confirmed
+# certify advances LAST_COUNT (the exact-count bookkeeping of the steps).
+journey_certify() {
+  [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ] && [ -f "$W/genesis.json" ] || return 0
+  local out=$S/certify-before-$1.json
+  printf '== before %s: ' "$1" >>"$S/certify.log"
+  "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
+    --control "$(jq -r .factoryControllerCapability "$W/genesis.json")" \
+    --min-tail "${JOURNEY_CERTIFY_MIN_TAIL:-64}" >"$out" 2>>"$S/certify.log" \
+    || echo "certify failed (rc $?)" >>"$S/certify.log"
+  cat "$out" >>"$S/certify.log" 2>/dev/null
+  # A confirmed certify is a record the operator added: the steps' exact
+  # acceptedCount bookkeeping (LAST_COUNT) moves past it.
+  if jq -e '.type == "confirmed"' "$out" >/dev/null 2>&1; then
+    LAST_COUNT=$(jq -r .acceptedCount "$out")
+  fi
+}
+
 run_step() {
   local id=$1; shift
   local dep t0 t1 rc
   case " ${STEPS[*]} " in *" $id "*) ;; *) return 0;; esac
+  journey_certify "$id"
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
   # JOURNEY_ONLY="ID ..." runs only those steps; the rest are SKIPPED (never
@@ -433,7 +479,8 @@ craft() {  # craft SOURCE_INTENT SUBJECT [AUTHORITY_ROOT] > out
 
 step_J0() {
   ARTIFACT=$W/handoff.json
-  call bootstrap sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" "$SOCKET" \
+  call bootstrap env NEWPARTICIPANT_CLOCK_OBSERVER=31 \
+    sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" "$SOCKET" \
     || fail "bootstrap exit $(cat "$SD/bootstrap.rc"): $(tail -1 "$SD/bootstrap.err")" || return
   jq -e '.type == "minidregg-newparticipant-fixture-v1"' "$W/handoff.json" >/dev/null \
     || fail "no handoff.json" || return
@@ -465,8 +512,9 @@ step_J1() {
 
 step_J2() {
   ARTIFACT=$SPONSOR_WS/attempts/create-shared/outcome.json
+  # K-FIELD-CLOSURE: shared holds field 2 (J4, J7, J8), 3 (J5's refused write) and 101 (G).
   call create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name shared --storage declared \
-    --predicate "$REQ/permit-all.json" || fail "create refused: $(tail -1 "$SD/create.err")" || return
+    --predicate "$REQ/permit-all.json" --fields 2,3,101 || fail "create refused: $(tail -1 "$SD/create.err")" || return
   accept "$ARTIFACT" || fail "create not installed: $DETAIL" || return
   jq -e '.controlCapability != null and .observeCapability != null' "$SPONSOR_WS/refs/shared.json" >/dev/null \
     || fail "sponsor holds no control/observe capability for shared" || return
@@ -755,8 +803,9 @@ step_J8() {
 step_K4() {
   local A=$SPONSOR_WS/attempts/create-wide f i got=0 id
   ARTIFACT=$SD/fields.tsv; : >"$ARTIFACT"
+  # A resource has as many fields as it declares: wide declares the 32 it creates.
   call create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name wide --storage declared \
-    --predicate "$REQ/permit-all.json" || fail "create wide refused: $(tail -1 "$SD/create.err")" || return
+    --predicate "$REQ/permit-all.json" --fields 201-232 || fail "create wide refused: $(tail -1 "$SD/create.err")" || return
   accept "$A/outcome.json" || fail "wide not installed: $DETAIL" || return
   for i in $(seq 1 32); do
     f=$((200 + i)); id=wide-$f
@@ -768,7 +817,7 @@ step_K4() {
       printf '%s\t%s\trefused\n' "$i" "$f" >>"$ARTIFACT"
       local why; why=$(decode "s$f" | grep -o 'RejectReason\.[a-zA-Z]*' | tail -1)
       ARTIFACT=$SD/s$f.err
-      fail "field $i of 32 refused by the Host (${why:-$(tail -1 "$SD/s$f.err" | cut -c1-160)}); the resource holds $((i)) entries incl. field 1"; return
+      fail "field $i of 32 refused by the Host (${why:-$(tail -1 "$SD/s$f.err" | cut -c1-160)}); the resource holds $((i - 1)) fields"; return
     fi
     accept "$SPONSOR_WS/attempts/$id/outcome.json" || fail "field $i not installed: $DETAIL" || return
     printf '%s\t%s\tinstalled\n' "$i" "$f" >>"$ARTIFACT"
@@ -818,7 +867,8 @@ hook() {
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
-step_KC() { hook jclock "the one clock ticks forward only, under a capability, and a law over clock/now admits after the tick and refuses before (MUD item 3, K-CLOCK)"; }
+step_KT() { hook jtail "a fresh Store with L=8 admits writes up to certified+L, refuses the next naming tail-bound, resumes after the operator certifies, holds the bound across a restart, and audits clean (C14)"; }
+step_KC() { hook jclock "the one clock ticks forward only, under the clock subject's C_tick (the sponsor's is refused), a law over clock/now admits after the tick and refuses before on writes and signed reads, and 200 ephemeral ticks leave no attempt behind (MUD item 3, K-CLOCK; CLOCK-SUBJECT)"; }
 step_J12X() { hook j12x "each malformed request (number for a decimal string, missing/extra field, negative index, NaN, truncated, non-UTF-8, 100k nesting, 10 MB, bad frames) is refused by name by the same Host process, which answers on; a Host killed by PID is restarted under the same socket (lane host-malformed)"; }
 step_JSERVE() { hook jserve "under each attack (3 bytes then silence; a long Host request; 50 silent connections; the J-PAY-6 route-mismatch intent through op 7) the newcomer signed read is answered (< 2 s where the Host is free), every refusal is named, the same Host answers on, and the malformed table still holds (lane serve-robust)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
@@ -836,10 +886,11 @@ step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last vis
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves only the root and one leaf, restart and audit replay (lane k-narrow-hide)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
-step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
+step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) tuples through mini shell; nothing sealed is on the Store or in a signed read before the close, a public price is; the right opening installs, a wrong, partial, replayed or repeated opening and every out-of-phase write are refused by name; the runner settles on revealed bids only (lane sealed-market; supersedes KHQ)" shell; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
+step_JN3P() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3p "J-NOCK-3P: a pinned program (ABI v4) is admitted at two heights with one claim, refused sampleStale naming the field once a read field moves; a noun output round-trips (lane c2-run-pin; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN5() { needs_env NOCK_DOOR_JAM NOCK_DOOR_FUEL || return; hook jnock5 "J-NOCK-5: the hoonc counter kernel is born as a door, pokes are refereed by re-execution, a stale state and a non-write effect refused (lane n11; needs NOCK_DOOR_JAM, NOCK_DOOR_FUEL)"; }
 step_JPAY3() { hook jpay3 "J-PAY-3: observed payments credit exactly, a heartbeat advances the clock cell slot, a tip behind the clock and the named refusals, the audit identity (lane p3-pay)"; }
 step_JPAYE1() { hook jpay-e1 "J-PAY-E1: the watcher enrollment-index vectors (lane p1b-enroll)"; }
@@ -852,7 +903,10 @@ step_JSYNC() { hook jsync "nockFSync (default 1,000,000): a 1,000,000-step run a
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
-step_JJOB1() { hook jjob1 "the job law (COMPUTE §2.3, deploy/shell/templates/job) installs on fresh cells; every edge is admitted with the right subject and time and refused with the wrong one, each refusal naming its clause (lane C1 JOB-LAW; the run slot is a hand-set stand-in on this tree, no K-RAN)"; }
+step_JJOB1() { hook jjob1 "the job law (COMPUTE §2.3, deploy/shell/templates/job) installs on fresh cells; every edge is admitted with the right subject and time and refused with the wrong one, each refusal naming its clause; the truth carries a real run claim and the money edges are the job-money receiver's (needs JOB_PROGRAMS)"; }
+step_JJOB() { hook jjob "J-JOB: one friend posts a Nock job in a room, another friend runs it, the kernel adjudicates by re-execution; a wrong answer or a stall costs the bond (needs JOB_PROGRAMS, NOCK_RUN)"; }
+step_JJOBM() { hook jjob-money "J-JOB-MONEY: fund, claim and settle as conservation-checked Book turns; refusals named by the operator explanation"; }
+step_KCL() { hook jclosure "a write creating a field its cell did not declare is refused by name (undeclaredField N) before the law runs, on a sealed board, a plain cell and a cell that declared nothing; an open cell admits it (lane K-FIELD-CLOSURE)"; }
 step_J12A() { hook j12a "affordances-journey.sh: can NAME lists the verbs my grants cover, each prepared and dry-run (Host op 130) with the clause on a law refusal; root, height and audit unchanged around every can (lane p-affordances, J12A)" shell; }
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
@@ -875,6 +929,7 @@ run_step J7 J4
 run_step J8 J7
 run_step K4 J2
 run_step KC J2
+run_step KT J0
 run_step JJ J2
 run_step K10 J5
 run_step K11 J5
@@ -885,10 +940,11 @@ run_step KIX K10
 run_step KF J5
 run_step KH J5
 run_step K12C J5
-run_step KHQ J4
+run_step JMKT J4
 run_step KW J5
 run_step JN2 J0
 run_step JN3 J0
+run_step JN3P J0
 run_step JN5 J0
 run_step JSYNC J0
 run_step M3 J0
@@ -901,8 +957,10 @@ run_step BD J2
 run_step J12 J0
 run_step J12C J0
 run_step J13 J0
-run_step JJOB1 J4
+run_step JJOB1 J0
+run_step JJOB J0
 run_step JJOBM J0
+run_step KCL J1
 run_step J12A J0
 run_step JPAY1 J0
 run_step JPAY2 J0

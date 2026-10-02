@@ -66,8 +66,13 @@ init() {
   "$MINI" keygen --secret "$state/keys/sponsor.key" --public "$state/keys/sponsor.pub" \
     >"$state/keys/sponsor.pub.hex"
   sponsor_public=$(od -An -tx1 -v "$state/keys/sponsor.pub" | tr -d ' \n')
+  # The clock subject's key (its workspace: `mini clock --action init`, e.g. the
+  # deploy's /var/lib/mini/clock); the sponsor holds no tick authority.
+  "$MINI" keygen --secret "$state/keys/clock.key" --public "$state/keys/clock.pub" \
+    >"$state/keys/clock.pub.hex"
+  clock_public=$(od -An -tx1 -v "$state/keys/clock.pub" | tr -d ' \n')
 
-  sh "$GENESIS" "$p" "$sponsor_public" "$HOST" "$STORE" "$VERIFIER" "$state" \
+  sh "$GENESIS" "$p" "$sponsor_public" "$clock_public" "$HOST" "$STORE" "$VERIFIER" "$state" \
     || candidate_die "genesis template refused (see above)"
 
   "$MINI" bootstrap --host "$HOST" --config "$state/operator.json" \

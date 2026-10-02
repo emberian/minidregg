@@ -103,6 +103,11 @@ inductive Verb : ResourceKind → Type
   observer can credit observed transfers and advance the chain clock, nothing
   else. -/
   | observePayment : Verb .program
+  /-- Advancing the deployment's one clock cell (`Kernel.ClockTickReceiver`).
+  Genesis issues it only as a clock ticker's `C_tick`, on the clock cell
+  alone; no management verb reaches that cell and `C_tick` reaches nothing
+  else. -/
+  | tickClock : Verb .program
   deriving DecidableEq, Repr
 
 /-- The granted verbs that cover a requested verb: the verb itself, and for an

@@ -408,11 +408,11 @@ theorem headerAt_exact (context : Context deployment durable)
       header context profile federation genesisHeight intent grant := by
   rfl
 
-/-- The success payload contains no field values, balances or policy source.
-The selected public KeyRecord is reversibly encoded in the existing registry
-binding in each header; this binding is not claimed to hide enrollment data. -/
-def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except Refusal Challenge := do
+/-- The challenge at a given clock: the one the read's law is judged at is the
+loaded snapshot's (`challenge`). -/
+def challengeAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
+    (clock : ClockCell.Clock) : Except Refusal Challenge := do
   let worldRoot := durable.worldRoot
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
@@ -420,7 +420,16 @@ def challenge (context : Context deployment durable) (profile : CanonicalRuntime
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
     worldRoot, context.authority.snapshot.cell.root,
-    genesisHeight + durable.image.accepted.length, headers⟩
+    genesisHeight + durable.image.accepted.length, clock.now, clock.slot, headers⟩
+
+/-- The success payload contains no field values, balances or policy source.
+The selected public KeyRecord is reversibly encoded in the existing registry
+binding in each header; this binding is not claimed to hide enrollment data.
+The clock it names is public (the clock view publishes it). -/
+def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except Refusal Challenge := do
+  let clock ← need .operationRejected (ClockCellDomain.load deployment durable.snapshot)
+  challengeAt context profile federation genesisHeight intent clock.clock
 
 def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
@@ -1007,13 +1016,14 @@ theorem accepted_footprint_exact
 
 /-- **Challenge binding (DATAMODEL §3.4).**  A challenge carries the world root
 and the height of the one loaded image it was computed from. -/
-theorem challenge_bound {context : Context deployment durable}
+theorem challengeAt_bound {context : Context deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
-    {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
-    (h : challenge context profile federation genesisHeight intent = .ok issued) :
+    {genesisHeight : Nat} {intent : Intent} {clock : ClockCell.Clock} {issued : Challenge}
+    (h : challengeAt context profile federation genesisHeight intent clock = .ok issued) :
     issued.worldRoot = durable.worldRoot ∧
-      issued.height = genesisHeight + NativeHostCodec.height durable.image := by
-  unfold challenge at h
+      issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
+      issued.clockNow = clock.now ∧ issued.clockSlot = clock.slot := by
+  unfold challengeAt at h
   simp only [bind, Except.bind, pure, Except.pure] at h
   split at h
   · exact absurd h (by simp)
@@ -1021,7 +1031,53 @@ theorem challenge_bound {context : Context deployment durable}
     · exact absurd h (by simp)
     · simp only [Except.ok.injEq] at h
       subst h
-      exact ⟨rfl, rfl⟩
+      exact ⟨rfl, rfl, rfl, rfl⟩
+
+/-- The clock a successful challenge names is the loaded snapshot's clock cell. -/
+theorem challenge_names_clock {context : Context deployment durable}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
+    {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
+    (h : challenge context profile federation genesisHeight intent = .ok issued) :
+    ∃ clock, ClockCellDomain.load deployment durable.snapshot = some clock ∧
+      issued.worldRoot = durable.worldRoot ∧
+      issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
+      issued.clockNow = clock.clock.now ∧ issued.clockSlot = clock.clock.slot := by
+  unfold challenge at h
+  cases loaded : ClockCellDomain.load deployment durable.snapshot with
+  | none => simp [need, loaded, bind, Except.bind] at h
+  | some clock =>
+    simp only [need, loaded, bind, Except.bind] at h
+    exact ⟨clock, rfl, challengeAt_bound h⟩
+
+theorem challenge_bound {context : Context deployment durable}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
+    {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
+    (h : challenge context profile federation genesisHeight intent = .ok issued) :
+    issued.worldRoot = durable.worldRoot ∧
+      issued.height = genesisHeight + NativeHostCodec.height durable.image := by
+  obtain ⟨_, _, world, height, _⟩ := challenge_names_clock h
+  exact ⟨world, height⟩
+
+/-- **`read_judged_at_named_clock`**: every grant of an authorized read was
+judged by its law at exactly the clock its challenge names (the clock cell of
+the snapshot at the challenge's world root and height).  With
+`ResourceObservationAdmission.read_law_sees_clock`, the answer names the
+`clock/now` and `clock/slot` the law saw. -/
+theorem read_judged_at_named_clock {context : Context deployment durable}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
+    {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    (index : Fin intent.grants.length) :
+    (accepted.grants index).preparation.clock.clock.now = accepted.suppliedChallenge.clockNow ∧
+      (accepted.grants index).preparation.clock.clock.slot = accepted.suppliedChallenge.clockSlot := by
+  obtain ⟨clock, loaded, _, _, now, slot⟩ := challenge_names_clock accepted.challengeExact
+  have same : (accepted.grants index).preparation.clock = clock :=
+    Option.some.inj ((accepted.grants index).preparation.clockLoaded.symm.trans loaded)
+  rw [same, now, slot]
+  exact ⟨rfl, rfl⟩
+
+#assert_axioms challenge_names_clock
+#assert_axioms read_judged_at_named_clock
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.challenge_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound

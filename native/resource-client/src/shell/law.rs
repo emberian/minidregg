@@ -7,10 +7,14 @@
 //! clause := 'sealed' | 'open'                 any [] | all []
 //!         | ('any' | 'all') '[' [clause (',' clause)*] ']'
 //!         | 'not' '(' clause ')'
+//!         | 'ran' N                           ran: the command's run claim for program N re-executed
 //!         | field ('monotone' | 'writeOnce')
 //!         | slot ('==' value | '<=' value | 'in' '{' value (',' value)* '}')
 //!         | slot '==' slot                    eqSlots: both present and equal
 //!         | slot '<=' slot ['+' integer]      leSlots / leSlotsOff: new[a] <= new[b] (+ k)
+//!         | slot 'opens' '(' slot (',' slot)* ')' 'with' slot
+//!                                             hashEq: the first slot holds the cSHAKE256
+//!                                             commitment to the tuple, under the blinder slot
 //! field  := 'field' N                         resource/field/N/after
 //! slot   := field ['before' | 'after' | 'delta']
 //!         | 'pair' A ',' B 'delta'            resource/pair/A/B/delta
@@ -26,16 +30,29 @@
 //! and new views of `before` and `delta` coincide and the atom could never
 //! refuse. The Host renders a refused clause in this same grammar.
 //!
+//! `ran N` (K-RAN, policy tag 14) holds when the controller projects
+//! `run/program/N`: the command carried a run claim for program N that the
+//! kernel re-executed, and the command's writes are the program's product.
+//! The Host renders it `ran N`.
+//!
+//! There is no `witnessed` clause: Mini admits by re-execution, and with no
+//! proof system in admission (decision 10-01) the `witnessed` atom compiles to
+//! false, so a law that named it would refuse every write. The grammar refuses
+//! the word instead of offering a clause that can never hold.
+//!
 //! The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are spelled the way
 //! the Host renders them (`Compiler/RefusalReason.lean` `renderClause`):
 //! `field 7 before <= slot "clock/now"`, `field 14 <= slot "clock/now" + -1`.
 //! A slot-pair atom is false when either slot is absent, so `field 15 == field 15`
 //! is "field 15 is present" (the job law, `deploy/shell/templates/job/law.job.shell`).
 //!
-//! There is no `witnessed` clause: Mini admits by re-execution, and with no
-//! proof system in admission (decision 10-01) the `witnessed` atom compiles to
-//! false, so a law that named it would refuse every write. The grammar refuses
-//! the word instead of offering a clause that can never hold.
+//! `field 17 opens (field 18, field 19) with field 20` is commit–reveal of a tuple
+//! (`Pred.hashEq`, `Pred/HashEq.lean`): field 17 must hold
+//! `cSHAKE256("DREGG.PRED.HASHEQ/v2"; cell ‖ n ‖ names ‖ values ‖ blinder)` of the
+//! new values of fields 18 and 19 under the blinder in field 20. Every field of the
+//! tuple is opened at once; a reveal missing one is refused. It is spelled the way
+//! the Host renders it in a refusal, and `law show` prints an installed law back in
+//! this grammar from the Host's own rendering.
 
 use serde_json::{json, Value};
 
@@ -44,7 +61,9 @@ const VERBS: [(&str, i64); 5] = [("read", 1), ("write", 2), ("delegate", 3), ("i
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     Word(String),
-    Int(i64),
+    /// A canonical signed decimal of any width (`-0` and leading zeros refused): the
+    /// Host's `int` reader takes any width, and subjects and commitments exceed `i64`.
+    Int(String),
     Str(String),
     Punct(&'static str),
 }
@@ -101,8 +120,11 @@ fn tokens(text: &str) -> Result<Vec<Tok>, String> {
                 i += 1;
             }
             let digits: String = chars[start..i].iter().collect();
-            let value = digits.parse::<i64>().map_err(|_| format!("`{digits}` is not an integer"))?;
-            out.push(Tok::Int(value));
+            let magnitude = digits.strip_prefix('-').unwrap_or(&digits);
+            if magnitude.is_empty() || (magnitude.len() > 1 && magnitude.starts_with('0')) || digits == "-0" {
+                return Err(format!("`{digits}` is not a canonical integer"));
+            }
+            out.push(Tok::Int(digits));
             continue;
         }
         if c.is_ascii_alphabetic() {
@@ -156,9 +178,9 @@ impl Parser {
             Err(format!("expected `{p}`, found {}", show(self.peek())))
         }
     }
-    fn nat(&mut self, what: &str) -> Result<i64, String> {
+    fn nat(&mut self, what: &str) -> Result<String, String> {
         match self.next() {
-            Some(Tok::Int(n)) if n >= 0 => Ok(n),
+            Some(Tok::Int(n)) if !n.starts_with('-') => Ok(n),
             other => Err(format!("expected {what} (a number), found {}", show(other.as_ref()))),
         }
     }
@@ -217,6 +239,11 @@ impl Parser {
                 self.expect(")")?;
                 Ok(json!({"type":"not","predicate":inner}))
             }
+            "ran" => {
+                self.at += 1;
+                let program = self.nat("a program id")?;
+                Ok(json!({"type":"ran","program":program}))
+            }
             "witnessed" => Err(
                 "witnessed is not a law clause: Mini admits by re-execution and has no proof system, so the clause could never hold"
                     .into(),
@@ -272,7 +299,7 @@ impl Parser {
 
     fn value(&mut self, slot: &str) -> Result<String, String> {
         match self.next() {
-            Some(Tok::Int(n)) => Ok(n.to_string()),
+            Some(Tok::Int(n)) => Ok(n),
             Some(Tok::Word(w)) if slot == "request/verb" => VERBS
                 .iter()
                 .find(|(name, _)| *name == w)
@@ -282,14 +309,50 @@ impl Parser {
         }
     }
 
+    /// `C opens (V1, …, Vn) with B`, after the commit slot `C` and the word `opens`.
+    fn opens(&mut self, commit: String) -> Result<Value, String> {
+        if !self.is("(") {
+            return Err(format!(
+                "`opens` takes the opened slots in parentheses, `opens (field 3, field 4) with field 5`; found {}",
+                show(self.peek())
+            ));
+        }
+        self.at += 1;
+        if self.is(")") {
+            return Err("`opens ()` opens nothing: name at least one slot".into());
+        }
+        let mut values = vec![self.slot()?.0];
+        while self.is(",") {
+            self.at += 1;
+            values.push(self.slot()?.0);
+        }
+        self.expect(")")?;
+        if !self.is_word("with") {
+            return Err(format!("after the opened slots expected `with` and the blinder slot, found {}", show(self.peek())));
+        }
+        self.at += 1;
+        let blinder = self.slot()?.0;
+        let mut named = values.clone();
+        named.push(blinder.clone());
+        named.push(commit.clone());
+        let mut sorted = named.clone();
+        sorted.sort();
+        sorted.dedup();
+        if sorted.len() != named.len() {
+            return Err("`opens` names one slot twice: the commit, the blinder and each opened slot must differ".into());
+        }
+        Ok(json!({"type":"hashEq","values":values,"blinder":blinder,"commit":commit}))
+    }
+
     fn atom(&mut self) -> Result<Value, String> {
         let (slot, after) = self.slot()?;
         let op = match self.next() {
+            Some(Tok::Word(w)) if w == "opens" => return self.opens(slot),
             Some(Tok::Word(w)) if w == "monotone" || w == "writeOnce" || w == "in" => w,
             Some(Tok::Punct(p)) if p == "==" || p == "<=" => p.to_string(),
             other => {
                 return Err(format!(
-                    "after a slot expected ==, <=, in, monotone or writeOnce, found {}",
+                    "after a slot expected ==, <=, in, monotone, writeOnce or opens, found {}",
                     show(other.as_ref())
                 ))
             }
@@ -313,7 +376,7 @@ impl Parser {
                 }
                 self.at += 1;
                 match self.next() {
-                    Some(Tok::Int(k)) => Ok(json!({"type":"leSlotsOff","left":slot,"right":right,"offset":k.to_string()})),
+                    Some(Tok::Int(k)) => Ok(json!({"type":"leSlotsOff","left":slot,"right":right,"offset":k})),
                     other => Err(format!("after `+` expected an integer offset, found {}", show(other.as_ref()))),
                 }
             }
@@ -380,6 +443,12 @@ mod tests {
             json!({"type":"le","slot":"resource/pair/2/3/delta","value":"0"})
         );
         assert_eq!(parse("subject == 7").unwrap(), eq("request/subject", "7"));
+        // subjects and commitments are wider than i64
+        assert_eq!(parse("subject == 18424463879702066335").unwrap(), eq("request/subject", "18424463879702066335"));
+        assert_eq!(
+            parse("field 2 == 115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap(),
+            eq(f, "115792089237316195423570985008687907853269984665640564039457584007913129639935")
+        );
         assert_eq!(parse("cost <= 1000").unwrap(), json!({"type":"le","slot":"request/cost","value":"1000"}));
         assert_eq!(parse(r#"slot "account/balance/3" <= 9"#).unwrap(), json!({"type":"le","slot":"account/balance/3","value":"9"}));
         assert!(parse(r#"witnessed "vk-1""#).unwrap_err().contains("no proof system"));
@@ -425,6 +494,9 @@ mod tests {
         assert!(parse("field 2 == 1 field 3 == 1").unwrap_err().contains("expected `;`"));
         assert!(parse("owner == 3").unwrap_err().contains("unknown word"));
         assert!(parse("subject == {GM}").is_err());
+        assert!(parse("field 2 == 007").unwrap_err().contains("canonical"));
+        assert!(parse("field 2 == -0").unwrap_err().contains("canonical"));
+        assert!(parse("field -2 == 1").unwrap_err().contains("field number"));
     }
 
     /// The Host renders a refused clause in this grammar
@@ -484,6 +556,55 @@ mod tests {
         assert!(parse("field 14 == field 2 + 1").unwrap_err().contains("expected `;`"));
     }
 
+    /// `ran N` is K-RAN's atom at any program id width (a programId is a 256-bit
+    /// digest value), and a field value is not an `i64` either.
+    #[test]
+    fn ran_and_wide_values() {
+        let id = "93720198387429108465912876439187263948172639481726394817263948172639481726394";
+        assert_eq!(parse(&format!("ran {id}")).unwrap(), json!({"type":"ran","program":id}));
+        assert_eq!(
+            parse(&format!("field 1 == {id}")).unwrap(),
+            json!({"type":"eq","slot":"resource/field/1/after","value":id})
+        );
+        assert!(parse("ran -3").unwrap_err().contains("a program id"));
+    }
+
+    /// Commit–reveal of a tuple: the Host's rendering of `Pred.hashEq`
+    /// (`Compiler/RefusalReason.lean` `renderClause`) parses to its JSON.
+    #[test]
+    fn opens_is_the_tuple_hash_atom() {
+        let f = |n: u32| format!("resource/field/{n}/after");
+        assert_eq!(
+            parse("field 17 opens (field 18, field 19) with field 20").unwrap(),
+            json!({"type":"hashEq","values":[f(18),f(19)],"blinder":f(20),"commit":f(17)})
+        );
+        assert_eq!(
+            parse("field 2 opens (field 3) with field 4").unwrap(),
+            json!({"type":"hashEq","values":[f(3)],"blinder":f(4),"commit":f(2)})
+        );
+        assert_eq!(
+            parse(r#"slot "x/commit" opens (slot "x/a", field 5, slot "x/b") with slot "x/r""#).unwrap(),
+            json!({"type":"hashEq","values":["x/a",f(5),"x/b"],"blinder":"x/r","commit":"x/commit"})
+        );
+        assert_eq!(
+            parse("any [ field 17 delta == 0, all [ verb == write, field 17 opens (field 18, field 19) with field 20 ] ]").unwrap(),
+            any(vec![
+                eq("resource/field/17/delta", "0"),
+                all(vec![
+                    eq("request/verb", "2"),
+                    json!({"type":"hashEq","values":[f(18),f(19)],"blinder":f(20),"commit":f(17)}),
+                ]),
+            ])
+        );
+        assert!(parse("field 17 opens field 18 with field 20").unwrap_err().contains("parentheses"));
+        assert!(parse("field 17 opens () with field 20").unwrap_err().contains("opens nothing"));
+        assert!(parse("field 17 opens (field 18, field 19) field 20").unwrap_err().contains("`with`"));
+        assert!(parse("field 17 opens (field 18) with").unwrap_err().contains("expected a clause"));
+        assert!(parse("field 17 opens (field 18, field 18) with field 20").unwrap_err().contains("twice"));
+        assert!(parse("field 17 opens (field 18) with field 17").unwrap_err().contains("twice"));
+        assert!(parse("field 17 opens (field 18) with field 20 + 1").unwrap_err().contains("expected `;`"));
+    }
+
     /// The job law (COMPUTE §2.3, `Kernel/Job.lean`): the shell grammar text
     /// `law.job.shell` (the Host's rendering of every clause, written by
     /// `scripts/gen-joblaw.py`) parses to exactly `law.job.json`, both with the
@@ -496,7 +617,6 @@ mod tests {
                 .replace("{PROGRAM}", "42")
                 .replace("{NEG_WINDOW}", "-600")
                 .replace("{WINDOW}", "600")
-                .replace("{RAN_SLOT}", "run/program/42")
         };
         let file = std::fs::read_to_string(format!("{dir}law.job.shell")).expect("law.job.shell");
         let text = bind(file.lines().filter(|l| !l.starts_with("--")).collect::<Vec<_>>().join("\n"));
@@ -504,7 +624,7 @@ mod tests {
             serde_json::from_str(&bind(std::fs::read_to_string(format!("{dir}law.job.json")).expect("law.job.json")))
                 .expect("law.job.json parses");
         let parsed = parse(&text).expect("the job law parses");
-        assert_eq!(parsed["predicates"].as_array().map(Vec::len), Some(44));
+        assert_eq!(parsed["predicates"].as_array().map(Vec::len), Some(45));
         assert_eq!(parsed, json);
     }
 

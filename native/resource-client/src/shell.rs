@@ -33,7 +33,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-mod law;
+pub(crate) mod law;
 
 pub(crate) const EXIT_OK: i32 = 0;
 pub(crate) const EXIT_CLIENT: i32 = 1;
@@ -60,11 +60,15 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "can", usage: "can [REF] [--all]", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
-    Verb { name: "create", usage: "create NAME STORAGE PREDICATE-JSON|@FILE", operation: "mini workspace --action create" },
+    Verb { name: "create", usage: "create NAME STORAGE PREDICATE-JSON|@FILE [FIELDS|open]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold)" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
-    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE", operation: "mini workspace --action propose (action install-policy)" },
+    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE | law show REF", operation: "mini workspace --action propose (action install-policy) | law-show --name REF (the installed law as the Host renders it)" },
+    Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
+    Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
+    Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
+    Verb { name: "bids", usage: "bids MARKET", operation: "mini workspace --action market-bids: a signed read, sealed bids shown as commitments" },
     Verb { name: "submit", usage: "submit ID", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID" },
     Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
@@ -72,6 +76,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
+    Verb { name: "job", usage: "job post ROOM PROGRAM --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME] | job claim JOB --room ROOM --bond B --account REF [--name NAME] | job answer NAME [OUTPUT] | job check NAME | job settle NAME | job show NAME | job fund NAME --account REF | job truth NAME", operation: "mini job --action post|claim|answer|check|settle|show|fund|truth --dir WS (the job law, the job-money ops 160-163, the kernel's ran truth turn)" },
+    Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
     Verb { name: "channel", usage: "channel say ROOM @NAME TEXT... | channel tail ROOM | channel status ROOM", operation: "mini channel say|tail|status ROOM [@NAME TEXT] --home HOME/channels (the member loop, `mini channel join`, is its own long-running process)" },
@@ -110,12 +116,11 @@ fn document_law(template: &str) -> Option<Value> {
 }
 
 /// The board law (PLACE §2.2): task `n` has its state in field `2n+2`
-/// (0 todo, 1 doing, 2 done) and its owner in field `2n+3`. Field 1 is not a
-/// task's: every declared object is born holding field 1 = 0
-/// (`NativeHostGenesis.declaredCell`). A state never goes backwards (a present
-/// delta is never negative; a field created in this turn has no delta) and an
-/// owner, once taken, is never replaced. A declared page holds four entries
-/// today, so only task 0 fits; the law also names task 1 for when it does.
+/// (0 todo, 1 doing, 2 done) and its owner in field `2n+3`. A state never
+/// goes backwards (a present delta is never negative; a field created in this
+/// turn has no delta) and an owner, once taken, is never replaced. The law
+/// names tasks 0 and 1, and `board new` declares exactly their fields (2-5,
+/// K-FIELD-CLOSURE), so the Host refuses any other field by name.
 fn board_law() -> Value {
     let mut clauses = vec![json!({"type":"eq","slot":"request/verb","value":"2"})];
     for task in 0..2u32 {
@@ -599,6 +604,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                             flag("name", w[2].clone()),
                             flag("storage", "declared"),
                             flag("predicate", path.clone()),
+                            // The board law governs tasks 0 and 1: fields 2-5, no other.
+                            flag("fields", "2-5"),
                         ],
                         writes: vec![request_file(path, &board_law())],
                     }
@@ -651,6 +658,41 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::Exit
         }
         "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
+        "job" => {
+            let Some(action) = w.get(1) else {
+                return Err(u.to_owned());
+            };
+            let positional: &[&str] = match action.as_str() {
+                "post" => &["room", "program"],
+                "claim" => &["job"],
+                "answer" => &["name", "output"],
+                "fund" | "truth" | "check" | "settle" | "show" => &["name"],
+                _ => return Err(u.to_owned()),
+            };
+            let mut flags = vec![flag("action", action.clone()), flag("dir", ws())];
+            let mut rest = w[2..].iter();
+            let mut taken = 0;
+            while let Some(word) = rest.next() {
+                if let Some(name) = word.strip_prefix("--") {
+                    if !matches!(name, "input" | "price" | "deadline" | "account" | "window" | "name" | "room" | "bond") {
+                        return Err(u.to_owned());
+                    }
+                    let value = rest.next().ok_or_else(|| u.to_owned())?;
+                    flags.push(flag(name, value.clone()));
+                } else if taken < positional.len() {
+                    flags.push(flag(positional[taken], word.clone()));
+                    taken += 1;
+                } else {
+                    return Err(u.to_owned());
+                }
+            }
+            client("job", flags)
+        }
+        "jobs" => {
+            arity(&w, 1, 1, u)?;
+            workspace_name(&w[1], "room name")?;
+            client("job", vec![flag("action", "list"), flag("dir", ws()), flag("room", w[1].clone())])
+        }
         "history" => {
             arity(&w, 0, 1, u)?;
             match w.get(1).map(String::as_str) {
@@ -891,21 +933,24 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "create" => {
-            arity(&w, 3, 3, u)?;
+            arity(&w, 3, 4, u)?;
             workspace_name(&w[1], "resource name")?;
             let predicate = json_argument(session, &w[3], "predicate")?;
             let path = session.home.join("requests").join(format!("create-{}.json", w[1]));
-            Plan::Client {
-                command: "workspace".into(),
-                flags: vec![
-                    flag("action", "create"),
-                    flag("dir", ws()),
-                    flag("name", w[1].clone()),
-                    flag("storage", w[2].clone()),
-                    flag("predicate", path.clone()),
-                ],
-                writes: vec![request_file(path, &predicate)],
+            let mut flags = vec![
+                flag("action", "create"),
+                flag("dir", ws()),
+                flag("name", w[1].clone()),
+                flag("storage", w[2].clone()),
+                flag("predicate", path.clone()),
+            ];
+            // `create NAME declared LAW FIELDS`: the fields the cell may hold
+            // (`0-3,7` or `open`); without it a declared cell holds none.
+            if let Some(fields) = w.get(4) {
+                crate::workspace::parse_fields(fields)?;
+                flags.push(flag("fields", fields.clone()));
             }
+            Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(path, &predicate)] }
         }
         "propose" => {
             arity(&w, 2, 2, u)?;
@@ -941,6 +986,76 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":w[2],"recipient":w[3],"verbs":verbs,"maxCost":w[5]});
             proposal(session, &w[1], &request)
+        }
+        "law" if w.len() == 3 && w[1] == "show" => {
+            workspace_name(&w[2], "reference name")?;
+            client("workspace", vec![flag("action", "law-show"), flag("dir", ws()), flag("name", w[2].clone())])
+        }
+        "market" => match w.get(1).map(String::as_str) {
+            Some("open") => {
+                arity(&w, 5, 5, u)?;
+                workspace_name(&w[2], "market name")?;
+                decimal(&w[3], "CLOSE")?;
+                decimal(&w[4], "REVEAL-END")?;
+                decimal(&w[5], "SUPPLY")?;
+                client(
+                    "workspace",
+                    vec![
+                        flag("action", "market-open"),
+                        flag("dir", ws()),
+                        flag("name", w[2].clone()),
+                        flag("close", w[3].clone()),
+                        flag("reveal-end", w[4].clone()),
+                        flag("supply", w[5].clone()),
+                    ],
+                )
+            }
+            Some("settle") => {
+                arity(&w, 2, 3, u)?;
+                workspace_name(&w[2], "market name")?;
+                let id = w.get(3).cloned().unwrap_or_else(|| format!("settle-{}", w[2]));
+                workspace_name(&id, "proposal ID")?;
+                client(
+                    "workspace",
+                    vec![flag("action", "market-settle"), flag("dir", ws()), flag("name", w[2].clone()), flag("proposal-id", id)],
+                )
+            }
+            _ => return Err(u.to_owned()),
+        },
+        "bid" => {
+            arity(&w, 3, 4, u)?;
+            workspace_name(&w[1], "market name")?;
+            let id = w.get(4).cloned().unwrap_or_else(|| format!("bid-{}", w[1]));
+            workspace_name(&id, "proposal ID")?;
+            for (word, label) in [(&w[2], "PRICE"), (&w[3], "QTY")] {
+                decimal(word, label)?;
+            }
+            client(
+                "workspace",
+                vec![
+                    flag("action", "market-bid"),
+                    flag("dir", ws()),
+                    flag("name", w[1].clone()),
+                    flag("price", w[2].clone()),
+                    flag("qty", w[3].clone()),
+                    flag("proposal-id", id),
+                ],
+            )
+        }
+        "reveal" => {
+            arity(&w, 1, 2, u)?;
+            workspace_name(&w[1], "market name")?;
+            let id = w.get(2).cloned().unwrap_or_else(|| format!("reveal-{}", w[1]));
+            workspace_name(&id, "proposal ID")?;
+            client(
+                "workspace",
+                vec![flag("action", "market-reveal"), flag("dir", ws()), flag("name", w[1].clone()), flag("proposal-id", id)],
+            )
+        }
+        "bids" => {
+            arity(&w, 1, 1, u)?;
+            workspace_name(&w[1], "market name")?;
+            client("workspace", vec![flag("action", "market-bids"), flag("dir", ws()), flag("name", w[1].clone())])
         }
         "law" => {
             if w.len() < 4 {
@@ -1466,6 +1581,8 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("enroll", 1) => ["plan", "offer", "seal", "submit", "lookup", "welcome"].map(String::from).to_vec(),
         ("enroll", 2) if w[1] != "plan" => enrolled(),
         ("enroll", 3) if w[1] == "plan" => keys(),
+        ("law", 1) => vec!["show".into()],
+        ("law", 2) if w[1] == "show" => refs(),
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
         ("revoke", 2) => refs(),
@@ -1483,6 +1600,9 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
             all
         }
         ("delegate", 4) => vec!["observe".into(), "observe,mutate".into()],
+        ("bid" | "reveal" | "bids", 1) => refs(),
+        ("market", 1) => ["open", "settle"].map(String::from).to_vec(),
+        ("market", 2) if w[1] == "settle" => refs(),
         _ => vec![],
     };
     candidates.into_iter().filter(|c| c.starts_with(&partial)).collect()
@@ -1747,6 +1867,48 @@ mod tests {
         }
     }
 
+    /// SEALED-MARKET: each market verb is one client-contract operation; the
+    /// commitment, the opening and the allocation are the client's, not the
+    /// shell's.
+    #[test]
+    fn market_verbs_are_one_client_operation_each() {
+        let s = session();
+        let ws = |items: &[(&str, &str)]| ("workspace".to_string(), pairs(items), vec![]);
+        assert_eq!(
+            client(plan(&s, "market open fish 30 40 8").unwrap()),
+            ws(&[("action", "market-open"), ("dir", "/w"), ("name", "fish"), ("close", "30"),
+                ("reveal-end", "40"), ("supply", "8")])
+        );
+        assert_eq!(
+            client(plan(&s, "bid fish 30 5").unwrap()),
+            ws(&[("action", "market-bid"), ("dir", "/w"), ("name", "fish"), ("price", "30"), ("qty", "5"),
+                ("proposal-id", "bid-fish")])
+        );
+        assert_eq!(client(plan(&s, "bid fish 30 5 again").unwrap()).1[5], ("proposal-id".into(), "again".into()));
+        assert_eq!(
+            client(plan(&s, "reveal fish").unwrap()),
+            ws(&[("action", "market-reveal"), ("dir", "/w"), ("name", "fish"), ("proposal-id", "reveal-fish")])
+        );
+        assert_eq!(
+            client(plan(&s, "bids fish").unwrap()),
+            ws(&[("action", "market-bids"), ("dir", "/w"), ("name", "fish")])
+        );
+        assert_eq!(
+            client(plan(&s, "market settle fish").unwrap()),
+            ws(&[("action", "market-settle"), ("dir", "/w"), ("name", "fish"), ("proposal-id", "settle-fish")])
+        );
+        assert_eq!(
+            client(plan(&s, "law show fish").unwrap()),
+            ws(&[("action", "law-show"), ("dir", "/w"), ("name", "fish")])
+        );
+        for line in ["bid fish -3 5", "bid fish 3", "bid ../x 3 5", "market open fish 30 40", "market close fish",
+            "market", "reveal", "bids fish more", "market open fish x 40 8"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
+        // `law ID REF TEXT` is still a proposal: a law named show is three words or more.
+        assert!(matches!(plan(&s, "law show fish open").unwrap(), Plan::Client { .. }));
+    }
+
     #[test]
     fn words_split_quote_and_keep_json_whole() {
         assert_eq!(words("  read   shared ").unwrap(), ["read", "shared"]);
@@ -1766,6 +1928,29 @@ mod tests {
     #[test]
     fn each_verb_is_exactly_one_client_operation() {
         let s = session();
+        assert_eq!(
+            client(plan(&s, "job post lab 42 --input 6 --price 1000 --deadline 600 --account purse").unwrap()),
+            (
+                "job".into(),
+                pairs(&[
+                    ("action", "post"),
+                    ("dir", "/w"),
+                    ("room", "lab"),
+                    ("program", "42"),
+                    ("input", "6"),
+                    ("price", "1000"),
+                    ("deadline", "600"),
+                    ("account", "purse"),
+                ]),
+                vec![]
+            )
+        );
+        assert_eq!(
+            client(plan(&s, "job answer j1 9").unwrap()).1,
+            pairs(&[("action", "answer"), ("dir", "/w"), ("name", "j1"), ("output", "9")])
+        );
+        assert_eq!(client(plan(&s, "jobs lab").unwrap()).1, pairs(&[("action", "list"), ("dir", "/w"), ("room", "lab")]));
+        assert!(plan(&s, "job post lab 42 --sneaky 1").is_err());
         assert_eq!(
             client(plan(&s, "submit first-action").unwrap()),
             (
@@ -2070,7 +2255,13 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke"]);
+        assert_eq!(complete(&s, "bid "), ["factory", "shared"]);
+        assert_eq!(complete(&s, "bids s"), ["shared"]);
+        assert_eq!(complete(&s, "market s"), ["settle"]);
+        assert_eq!(complete(&s, "market settle f"), ["factory"]);
+        assert_eq!(complete(&s, "law s"), ["show"]);
+        assert_eq!(complete(&s, "law show sh"), ["shared"]);
         assert_eq!(complete(&s, "doc show "), ["factory", "shared"]);
         assert_eq!(complete(&s, "doc link x shared f"), ["factory"]);
         assert_eq!(complete(&s, "board m"), ["move"]);

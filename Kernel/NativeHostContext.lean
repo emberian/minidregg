@@ -61,6 +61,9 @@ structure Config where
   policy, not runtime semantics: it is not in `runtimeParameters`, and a
   history admitted under a larger budget replays unchanged. -/
   nockFSync : Nat := defaultNockFSync
+  /-- Compiled-in evaluators this operator disabled (K-EVAL); committed in the profile's
+  semantics, so every node of a deployment must agree. -/
+  disabledEvaluators : List Digest := []
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -106,7 +109,7 @@ theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
            config.tariff.asset] := by simp [Config.runtimeParameters]
 
 def Config.profile (config : Config) :=
-  NativeHostProfile.profile config.template config.runtimeParameters
+  NativeHostProfile.profile config.template config.runtimeParameters config.disabledEvaluators
 
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
@@ -124,9 +127,17 @@ slot are this one chain. -/
 def Config.logStart (config : Config) (seed : DurableReceiver.Seed) : Digest :=
   NativeHostCodec.logRoot0 config.deployment.domain config.profile.semantics seed
 
-/-- The Store transport for this deployment. -/
+/-- The deployment's system cell (`Kernel.SystemCell.physicalId`). -/
+def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.CellId :=
+  ⟨Minidregg.Kernel.SystemCell.physicalId config.deployment.domain⟩
+
+/-- The Store transport for this deployment: every new commit is judged by the
+tail law over this deployment's system cell. -/
 def Config.transport (config : Config) : DurableReceiverIO.Transport :=
-  config.storage.transport config.logStart
+  config.storage.transport config.logStart config.systemCell
+
+theorem Config.transport_systemCell (config : Config) :
+    config.transport.systemCell = some config.systemCell := rfl
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

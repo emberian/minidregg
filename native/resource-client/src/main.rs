@@ -35,6 +35,9 @@ mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
 #[cfg(unix)]
+mod market;
+mod checkpoint;
+#[cfg(unix)]
 mod clock;
 mod participant_enrollment;
 mod pay_refill;
@@ -68,6 +71,8 @@ mod share_issue;
 mod share_issue_receipt;
 #[cfg(unix)]
 mod keys;
+#[cfg(unix)]
+mod job;
 #[cfg(unix)]
 mod shell;
 #[cfg(unix)]
@@ -354,6 +359,10 @@ usage:
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
+  mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
+  mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
+  mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
+  mini job --action list --dir WORKSPACE --room REF
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
@@ -2517,6 +2526,9 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
+        "checkpoint" => checkpoint::run(args),
+        #[cfg(unix)]
+        "job" => job::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
         // mini key carries two verb families: the credential store (keys.rs) and the

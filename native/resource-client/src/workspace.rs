@@ -5,7 +5,8 @@
 use crate::current_birth;
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, path, query, query_retained, retry, submit, Args, Result, SOCKET,
+    absolute, author, hex, path, print_json, query_retained, retry, submit, Args, Result,
+    SOCKET,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -14,6 +15,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
@@ -530,12 +532,47 @@ fn list(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Ephemeral reads keep only one line per read in this rotating journal
+/// (`unix-time  height  read  outcome  clock-now  reference`).
+const READ_JOURNAL: &str = "read-journal.tsv";
+const READ_JOURNAL_LIMIT: u64 = 1 << 20;
+
+fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str) -> Result<()> {
+    let path = root.join(READ_JOURNAL);
+    if fs::metadata(&path).map(|meta| meta.len() >= READ_JOURNAL_LIMIT).unwrap_or(false) {
+        fs::rename(&path, root.join(format!("{READ_JOURNAL}.1")))
+            .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
+    }
+    let unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "wall clock is before the unix epoch")?
+        .as_secs();
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
+    file.write_all(format!("{unix}\t{height}\tread\t{outcome}\t{now}\t{name}\n").as_bytes())
+        .map_err(|error| format!("cannot append {}: {error}", path.display()))
+}
+
+/// The coordinates a read was judged at, from its retained challenge: the world root,
+/// the height, and the deployment clock the resource's law saw
+/// (`NativeObservationController.read_judged_at_named_clock`).
+fn judged_at(attempt: &Path) -> Result<Value> {
+    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    Ok(json!({"worldRoot": challenge.get("worldRoot"), "height": challenge.get("height"),
+        "clock": challenge.get("clock")}))
+}
+
 fn read(
     root: &Path,
     workspace: &Value,
     resource_name: &str,
     view: &str,
     window: Option<(&str, &str)>,
+    ephemeral: bool,
 ) -> Result<()> {
     let reference = reference(root, resource_name)?;
     let (attempt, nonce) = new_attempt(root)?;
@@ -555,8 +592,10 @@ fn read(
     bytes.push(b'\n');
     let source = root.join("sources").join(format!("q-{nonce}.json"));
     private_file(&source, &bytes)?;
-    eprintln!("workspace read attempt: {}", attempt.display());
-    query(
+    if !ephemeral {
+        eprintln!("workspace read attempt: {}", attempt.display());
+    }
+    let answered = query_retained(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         &source,
@@ -564,7 +603,39 @@ fn read(
         &member_path(workspace, "key")?,
         &format!("view-{view}"),
         &attempt,
-    )
+    );
+    let judged = judged_at(&attempt).ok();
+    if ephemeral {
+        // A read commits nothing: once its answer (or refusal) is in hand the attempt
+        // and its intent source are not needed for any retry. One journal line stays.
+        let at = |name: &str| -> String {
+            judged
+                .as_ref()
+                .and_then(|value| value.get(name))
+                .and_then(Value::as_str)
+                .unwrap_or("-")
+                .to_string()
+        };
+        let now = judged
+            .as_ref()
+            .and_then(|value| value.pointer("/clock/now"))
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string();
+        let outcome = if answered.is_ok() { "answered" } else { "refused" };
+        read_journal(root, &at("height"), outcome, &now, resource_name)?;
+        if attempt.exists() {
+            fs::remove_dir_all(&attempt)
+                .map_err(|error| format!("cannot remove {}: {error}", attempt.display()))?;
+        }
+        fs::remove_file(&source)
+            .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
+    }
+    let mut answered = answered?;
+    if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
+        object.insert("judgedAt".to_owned(), judged);
+    }
+    print_json(&answered)
 }
 
 pub(crate) fn signed_view(
@@ -840,7 +911,7 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
-fn propose(
+pub(crate) fn propose(
     root: &Path,
     workspace: &Value,
     request_path: &Path,
@@ -1288,7 +1359,7 @@ fn propose_summary(
     Ok(summary)
 }
 
-fn submit_intent(
+pub(crate) fn submit_intent(
     root: &Path,
     workspace: &Value,
     source: &Path,
@@ -1560,10 +1631,39 @@ struct BirthShape<'a> {
     /// `--in ROOM`: the workspace reference name of the room the resource is
     /// born in (its parent cell); `None` births at the root.
     room: Option<&'a str>,
-    /// `storage: "nock"`: the program's canonical DREGG/NOCK/PROGRAM bytes (hex)
+    /// `storage: "nock"`: the program's canonical DREGG/PROGRAM/v1 record bytes (hex)
     /// from the Host's own nock-check verdict and, when admissible, its cell id.
     /// A program is born at its content address, so no target is reserved.
     program: Option<(String, Option<String>)>,
+    /// `storage: "declared"`: the fields the cell may ever hold (K-FIELD-CLOSURE),
+    /// `["0","1",…]` or `"open"`. `None` declares none: the cell can hold no field.
+    fields: Option<Value>,
+}
+
+/// `--fields`: `open`, or a comma list of field numbers and inclusive ranges
+/// (`0-15,20`). The Host refuses a write to any field a cell did not declare.
+pub(crate) fn parse_fields(text: &str) -> Result<Value> {
+    if text == "open" {
+        return Ok(json!("open"));
+    }
+    let mut fields: Vec<u64> = Vec::new();
+    for part in text.split(',') {
+        let (low, high) = match part.split_once('-') {
+            Some((low, high)) => (low, high),
+            None => (part, part),
+        };
+        let low: u64 = low.parse().map_err(|_| format!("--fields: bad field number {part:?}"))?;
+        let high: u64 = high.parse().map_err(|_| format!("--fields: bad field number {part:?}"))?;
+        if high < low || high - low > 4096 {
+            return Err(format!("--fields: bad range {part:?}").into());
+        }
+        for field in low..=high {
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
+        }
+    }
+    Ok(Value::Array(fields.into_iter().map(|f| json!(f.to_string())).collect()))
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
@@ -1690,6 +1790,9 @@ fn birth(
     if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
         return Err("supported resource storage is content, declared, stream or nock".into());
     }
+    if shape.fields.is_some() && shape.storage != "declared" {
+        return Err("--fields is only for declared storage".into());
+    }
     decimal(shape.owner, "birth owner")?;
     // An account (a realm well, or a holder's purse) is declared storage only.
     if !matches!((shape.kind, shape.storage), ("object", _) | ("account", "declared")) {
@@ -1721,6 +1824,9 @@ fn birth(
     }
     if let Some((hex, _)) = &program {
         requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
+    }
+    if let Some(fields) = &shape.fields {
+        requested_core["fields"] = fields.clone();
     }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -1832,6 +1938,10 @@ fn birth(
             &crate::hiding::blinding_key(&seed),
             target
         )?);
+    }
+    // K-FIELD-CLOSURE: a declared cell names the fields it may hold.
+    if let Some(fields) = &shape.fields {
+        resource["fields"] = fields.clone();
     }
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
@@ -1977,10 +2087,12 @@ pub(crate) fn create(
     kind: &str,
     owner: Option<&str>,
     program_path: Option<&Path>,
+    fields: Option<&str>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
+    let fields = fields.map(parse_fields).transpose()?;
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
-    // canonical DREGG/NOCK/PROGRAM/v1 bytes and, when admissible, its cell id.
+    // canonical DREGG/PROGRAM/v1 record bytes and, when admissible, its cell id.
     let program = match program_path {
         Some(path) => {
             let verdict = bounded_json_limit(path, MAX_PROGRAM_SOURCE)?;
@@ -2013,6 +2125,7 @@ pub(crate) fn create(
             funding: None,
             room,
             program: program.clone(),
+            fields,
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
@@ -2043,6 +2156,7 @@ pub(crate) fn create_funded_account(
             funding: Some(amount),
             room: None,
             program: None,
+            fields: None,
         },
     )?;
     let resource = &source["birth"]["resources"][0];
@@ -2146,6 +2260,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
             funding: Some(request.funding),
             room: None,
             program: None,
+            fields: None,
         },
     )?;
     let account = &source["birth"]["resources"][0];
@@ -2722,6 +2837,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .optional("private")
                 .map(|value| os_string(value, "private room"))
                 .transpose()?;
+            let ephemeral = match args.optional("ephemeral").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--ephemeral must be true or false".into()),
+            };
             args.finish()?;
             if let Some(room) = room {
                 if action == "describe" {
@@ -2739,6 +2860,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     "resource"
                 },
                 None,
+                ephemeral,
             )
         }
         "tail" => {
@@ -2746,7 +2868,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let start = os_string(args.required("from")?, "tail start")?;
             let count = os_string(args.required("count")?, "tail count")?;
             args.finish()?;
-            read(&root, &workspace, &name, "tail", Some((&start, &count)))
+            read(&root, &workspace, &name, "tail", Some((&start, &count)), false)
         }
         "submit" => {
             let source = path(args.required("intent")?);
@@ -2812,6 +2934,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "resource owner")?),
                 None => None,
             };
+            let fields = match args.optional("fields") {
+                Some(value) => Some(os_string(value, "declared fields")?),
+                None => None,
+            };
             args.finish()?;
             create(
                 &root,
@@ -2823,6 +2949,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &kind,
                 owner.as_deref(),
                 program.as_deref(),
+                fields.as_deref(),
             )
         }
         "provision" => {
@@ -2871,8 +2998,51 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             doc_backlinks(&root, &workspace, &name)
         }
+        "law-show" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            crate::market::law_show(&root, &workspace, &name)
+        }
+        "market-open" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let close = os_string(args.required("close")?, "close height")?;
+            let reveal_end = os_string(args.required("reveal-end")?, "reveal end height")?;
+            let supply = os_string(args.required("supply")?, "supply")?;
+            let deposit = args
+                .optional("deposit")
+                .map(|value| os_string(value, "deposit"))
+                .transpose()?
+                .unwrap_or_else(|| "0".into());
+            args.finish()?;
+            crate::market::open(&root, &workspace, &name, &close, &reveal_end, &supply, &deposit)
+        }
+        "market-bid" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let price = os_string(args.required("price")?, "price")?;
+            let qty = os_string(args.required("qty")?, "quantity")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            validate_name(&id)?;
+            crate::market::bid(&root, &workspace, &name, &price, &qty, &id)
+        }
+        "market-reveal" | "market-settle" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            validate_name(&id)?;
+            if action == "market-reveal" {
+                crate::market::reveal(&root, &workspace, &name, &id)
+            } else {
+                crate::market::settle(&root, &workspace, &name, &id)
+            }
+        }
+        "market-bids" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            args.finish()?;
+            crate::market::show(&root, &workspace, &name)
+        }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show or doc-backlinks".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-backlinks, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }
@@ -3108,6 +3278,16 @@ mod tests {
         .unwrap();
         assert_eq!(again, base.join("g0002"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn declared_fields_parse_lists_ranges_and_open() {
+        assert_eq!(parse_fields("open").unwrap(), json!("open"));
+        assert_eq!(parse_fields("2,3").unwrap(), json!(["2", "3"]));
+        assert_eq!(parse_fields("0-3,2,7").unwrap(), json!(["0", "1", "2", "3", "7"]));
+        assert!(parse_fields("").is_err());
+        assert!(parse_fields("3-1").is_err());
+        assert!(parse_fields("a").is_err());
     }
 
     #[test]

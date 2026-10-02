@@ -30,7 +30,12 @@ open Minidregg.Theory.Store
 
 /-! ## §1. Typed state keys, effects, and exact deltas -/
 
-/-- Every mutable coordinate is kind-correct by construction. -/
+/-- Every mutable coordinate is kind-correct by construction.
+
+`fieldDeclared` and `fieldsOpen` are a declared cell's **declaration**
+(K-FIELD-CLOSURE, `Kernel.FieldClosure`): the fields the cell may hold,
+written at birth.  No action writes them (`DeclaredActionLowering.writableKeyCheck`),
+so a cell's declaration is fixed for its life. -/
 inductive StateKey where
   | objectField (object : ResourceId .object) (field : Digest)
   | accountBalance (account : ResourceId .account) (resource : Digest)
@@ -39,6 +44,10 @@ inductive StateKey where
   entry's salt under the store root.  Set at birth by the owner's client; no
   action writes it (`writableKeyCheck` refuses it) and no reader receives it. -/
   | blinding
+  /-- The cell declares that it may hold object field `field`. -/
+  | fieldDeclared (object : ResourceId .object) (field : Digest)
+  /-- The cell declares that it may hold any object field: an open kind. -/
+  | fieldsOpen (object : ResourceId .object)
   deriving DecidableEq, Repr
 
 /-- The declared-effect layout: one RAM namespace whose keys are the typed

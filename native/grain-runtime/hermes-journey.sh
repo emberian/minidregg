@@ -153,7 +153,7 @@ mark "friend enrolled through mini enroll: subject $FRIEND"
 # --- Sponsor creates the shared resource and delegates to Hermes -------------
 printf '%s\n' '{"type":"all","predicates":[]}' >"$RUN/all-true.json"
 "$MINI" workspace --action create --dir "$ROOT/sponsor" --name shared --storage declared \
-  --predicate "$RUN/all-true.json" >"$EV/sponsor-create.stdout" 2>"$EV/sponsor-create.stderr"
+  --predicate "$RUN/all-true.json" --fields 2 >"$EV/sponsor-create.stdout" 2>"$EV/sponsor-create.stderr"
 jq -n '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"shared",
   recipient:"9",verbs:["observe","mutate","delegate"],maxCost:"50000"}' >"$RUN/grant-hermes.json"
 "$MINI" workspace --action propose --dir "$ROOT/sponsor" --request "$RUN/grant-hermes.json" \

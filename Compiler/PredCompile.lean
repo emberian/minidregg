@@ -17,7 +17,7 @@ under negation and disjunction:
   explicit scalar width. Missing operands force false and impose no unused range.
 * `witnessed`: the first-party false indicator; negation composes faithfully.
 * `ran program`: exactly the `eq (ranSlot program) 1` gadget. Re-execution is a
-  controller fact (`Kernel.NockRun`); the circuit reads the slot the controller
+  controller fact (`Kernel.Run`); the circuit reads the slot the controller
   projects after the check, it does not re-run Nock.
 * `not`/`all`/`any`: the same indicator algebra and child-prefix renaming.
 
@@ -132,12 +132,12 @@ inductive Wire where
   /-- Presence wire: `1` if the slot is present on the chosen side, else `0`. -/
   | pres (isNew : Bool) (s : Slot)
   /-- `hashEq` digest wire: `Int.cast` of the cSHAKE256 digest of the new side's opening of
-  `(value, blinder, commit)` (`0` if it has none). Like `val`, it is computed by the verifier from
+  `(values, blinder, commit)` (`0` if it has none). Like `val`, it is computed by the verifier from
   the pinned step and is never prover-supplied: the hash runs in the kernel's assignment, and the
   system compares it with the commit wire. -/
-  | digest (value blinder commit : Slot)
+  | digest (values : List Slot) (blinder commit : Slot)
   /-- `hashEq` opening wire: `1` if the new side has an admissible opening, else `0`. -/
-  | opened (value blinder commit : Slot)
+  | opened (values : List Slot) (blinder commit : Slot)
   /-- Auxiliary (prover-supplied) wire at an AST path. -/
   | aux  (path : List ℕ) (k : ℕ)
 deriving DecidableEq, Repr
@@ -153,14 +153,14 @@ def presOf (st : State) (s : Slot) : F :=
   cond (st.get s).isSome 1 0
 
 /-- The digest reading of a `hashEq` opening on a state (`0` if there is none). -/
-def digestOf (st : State) (v b c : Slot) : F :=
+def digestOf (st : State) (v : List Slot) (b c : Slot) : F :=
   match Minidregg.Pred.hashEqOpening st v b c with
   | some o =>
       ((Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o : Int) : F)
   | none => 0
 
 /-- The opening reading: `1` if the state has an admissible `hashEq` opening, else `0`. -/
-def openedOf (st : State) (v b c : Slot) : F :=
+def openedOf (st : State) (v : List Slot) (b c : Slot) : F :=
   cond (Minidregg.Pred.hashEqOpening st v b c).isSome 1 0
 
 /-- **The step assignment**: input wires pinned by the (old, new) step, aux wires supplied
@@ -464,11 +464,11 @@ def eqSlotsD (a b : Slot) : Term (AirSig F Wire) :=
   simp only [woD2, eval_add', eval_mul', eval_vr, eval_cst, stepAsg, cond_true, cond_false]
   ring
 
-/-- `hashEq` difference: `digest(new; value, blinder, commit) − val(new, commit)`. -/
-def hashD (v b c : Slot) : Term (AirSig F Wire) :=
+/-- `hashEq` difference: `digest(new; values, blinder, commit) − val(new, commit)`. -/
+def hashD (v : List Slot) (b c : Slot) : Term (AirSig F Wire) :=
   add' (vr (.digest v b c)) (mul' (cst (-1)) (vr (.val true c)))
 
-@[simp] theorem eval_hashD (old new : State) (A : List ℕ → ℕ → F) (v b c : Slot) :
+@[simp] theorem eval_hashD (old new : State) (A : List ℕ → ℕ → F) (v : List Slot) (b c : Slot) :
     eval (stepAsg old new A) (hashD v b c) = digestOf new v b c - valOf new c := by
   simp only [hashD, eval_add', eval_mul', eval_vr, eval_cst, stepAsg, cond_true]
   ring
@@ -1718,7 +1718,7 @@ example : ∃ A : List ℕ → ℕ → ZMod 7,
 
 /-! ## §16. `hashEq` — the hash runs in the step assignment, the system compares
 
-`hashEq value blinder commit` lowers to one `isZero` over `digest − val(new, commit)`, gated by
+`hashEq values blinder commit` lowers to one `isZero` over `digest − val(new, commit)`, gated by
 the `opened` and commit-presence wires. `digest`/`opened` are input wires the verifier computes
 from the pinned new state (the kernel's executable cSHAKE256), exactly as it computes `val`/`pres`;
 a prover supplies only the two is-zero aux wires. No hash is arithmetized: a Poseidon2 or Keccak
@@ -1735,7 +1735,8 @@ variable [DecidableEq F]
 aux assignment iff the new state has an admissible opening and the commit slot holds its
 cSHAKE256 digest. -/
 theorem lower_hashEq_correct (profile : CompilerProfile) (hprofile : profile.Admissible F)
-    {v b c : Slot} {old new : State} (hinj : castInjOn F (intsOf (.hashEq v b c) old new)) :
+    {v : List Slot} {b c : Slot} {old new : State}
+    (hinj : castInjOn F (intsOf (.hashEq v b c) old new)) :
     (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c)))
       ↔ ∃ o, Minidregg.Pred.hashEqOpening new v b c = some o ∧
           new.get c = some (Minidregg.Pred.HashEqDigest.digestWith
@@ -1747,7 +1748,8 @@ theorem lower_hashEq_correct (profile : CompilerProfile) (hprofile : profile.Adm
 whose commit slot holds the digest of opening `o` is compiled-accepted, its own opening is `o`
 or there is a collision. -/
 theorem lower_hashEq_binds (profile : CompilerProfile) (hprofile : profile.Admissible F)
-    {v b c : Slot} {old new : State} (hinj : castInjOn F (intsOf (.hashEq v b c) old new))
+    {v : List Slot} {b c : Slot} {old new : State}
+    (hinj : castInjOn F (intsOf (.hashEq v b c) old new))
     {o : Minidregg.Pred.HashEqDigest.Opening} (hadm : o.Admissible)
     (hcommit : new.get c = some (Minidregg.Pred.HashEqDigest.digestWith
       Minidregg.Pred.HashEqDigest.deployed o))

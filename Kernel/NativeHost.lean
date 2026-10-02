@@ -77,16 +77,32 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
 private def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
   .refused reason phase.toUTF8.toList detail.toUTF8.toList
 
+/-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
+with the head, the certified height and `L`): it is a fact about the public
+chain head, not about the request.  Every other durable reason is the
+receiver's `operationRejected`. -/
+def durableRefusal : DurableDataIntent.RejectReason → Outcome
+  | .tailBound head certified bound =>
+      refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}"
+  | reason => refused .operationRejected "durable" s!"{repr reason}"
+
+/-- The tail bound's refusal names `tailBound` and the three heights. -/
+theorem durableRefusal_tailBound (head certified bound : Nat) :
+    durableRefusal (.tailBound head certified bound) =
+      refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}" := rfl
+
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
   | .admission reason => s!"admission: {repr reason}"
+  | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
 
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
   | .admission _ => .operationRejected
+  | .durable (.tailBound ..) => .tailBound
   | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)
@@ -108,7 +124,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           let descriptor ← need "noncanonical birth draft"
             (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
           let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-            config.deployment opened.pins opened.durable descriptor).mapError
+            profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor).mapError
               (fun reason => s!"birth preparation: {repr reason}")
           check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
             "birth source capability count mismatch"
@@ -364,12 +380,12 @@ def overSyncBudget (config : Config) (command : DeclaredResourceController.Comma
   | none => none
 
 theorem overSyncBudget_admits (config : Config) (command : DeclaredResourceController.Command)
-    (claim : NockRun.RunClaim) (run : command.run = some claim)
+    (claim : Run.RunClaim) (run : command.run = some claim)
     (within : claim.steps ≤ config.nockFSync) : overSyncBudget config command = none := by
   simp [overSyncBudget, run, Nat.not_lt.mpr within]
 
 theorem overSyncBudget_refuses (config : Config) (command : DeclaredResourceController.Command)
-    (claim : NockRun.RunClaim) (run : command.run = some claim)
+    (claim : Run.RunClaim) (run : command.run = some claim)
     (exceeds : config.nockFSync < claim.steps) : overSyncBudget config command = some claim.steps := by
   simp [overSyncBudget, run, exceeds]
 
@@ -413,6 +429,31 @@ def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option 
       DeclaredResourceController.firstLawLeaf prepared tuple
   | _ => none
 
+/-- The out-of-range order clause of a target's committed law that an invocation
+draft would hit, on the same projected step and resolved law that
+`DeclaredResourceController.authorizeLeg` range-checks at submission
+(`DeclaredResourceController.rangeLeaf_none_iff_inputsInRange`). -/
+def invokeRangeLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstRangeLeaf prepared tuple
+  | _ => none
+
+/-- Two integers of an invocation draft's step with one field image, on the same
+step and resolved law `DeclaredResourceController.authorizeLeg` cast-checks
+(`DeclaredResourceController.castAliasLeg_none_iff_castInjOn`). -/
+def invokeCastAlias (config : Config) (opened : Opened config) : Draft → Option (Int × Int)
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstCastAlias prepared tuple
+  | _ => none
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -429,10 +470,16 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
           -- Before the referee re-executes anything (`invokeLawLeaf`, `prepareLoaded`).
           if let some steps := draftOverSyncBudget config draft then
             return .error ⟨.operationRejected, overSyncBudgetDetail config steps, none⟩
-          match invokeLawLeaf config opened draft with
-          | some leaf => return .error (Refusal.lawDenied (some leaf))
-          | none => return ((prepareLoaded config opened draft).mapError
-              fun detail => ⟨.operationRejected, detail, none⟩)
+          match invokeRangeLeaf config opened draft with
+          | some leaf => return .error (Refusal.lawInputRange leaf)
+          | none =>
+              match invokeCastAlias config opened draft with
+              | some (x, y) => return .error (Refusal.castAlias x y)
+              | none =>
+                  match invokeLawLeaf config opened draft with
+                  | some leaf => return .error (Refusal.lawDenied (some leaf))
+                  | none => return ((prepareLoaded config opened draft).mapError
+                      fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
@@ -619,7 +666,7 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "enroll-key" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -657,7 +704,7 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -748,7 +795,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
   | .rejected (.signature (.envelope .staleAuthority)) => return .contention
   | .rejected reason => return refused .operationRejected "fleet-turn" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -921,7 +968,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
     | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-book" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-    | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+    | .durableRejected reason => return durableRefusal reason
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -931,7 +978,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
     | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-assign" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-    | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+    | .durableRejected reason => return durableRefusal reason
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1061,9 +1108,9 @@ def wellLedger (config : Config) : IO (Except String WellLedger) := do
 /-! ## The clock (K-CLOCK): session operations 126-129
 
 126 = tick signing plan, 127 = detached assembly, 128 = submit, 129 = public
-clock view.  The command is authored by `author clock-tick`; the signer is any
-subject the factory law admits in capability mode for
-`authority/operation/clock-tick`. -/
+clock view.  The command is authored by `author clock-tick`; the signer is a
+genesis clock ticker presenting its `C_tick` on the clock cell, under the
+clock cell's law (`NativeHostGenesis.clock_subject_confined`). -/
 
 def clockPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String ClockTickReceiver.SigningPlan := do
@@ -1093,18 +1140,15 @@ def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List U
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- The public view of the clock: its value and the three roots a tick pins. -/
+/-- The public view of the clock: its value and the two roots a tick pins. -/
 def clockViewLoaded (config : Config) (opened : Opened config) : Except String ClockCellDomain.View := do
   let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
-  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
-    | .present before => pure before.payload.root
-    | .absent => .error "factory unavailable"
-  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
+  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, clock.clock⟩
 
 /-- Session operation 112 (PAY P3b): the public enrollment view — the hour of
 the deployment clock and every self-enrolled Mini key with its subject, ssh
@@ -1405,6 +1449,23 @@ def payJob (config : Config) (job : Nat) : IO (Except String PayJob) := do
   | .error detail => return .error detail
   | .ok opened => return payJobLoaded config opened job
 
+/-- The operator's local explanation of one job-money command (not a socket
+operation: a public submission stays blind, MR's rule). It runs the receiver's
+own preparation (`JobMoneyReceiver.prepare`: the money decision, the claimer's
+membership, the pinned job law at the clock) on the Store as it is now, and
+names the refusal it reaches. It signs nothing and commits nothing. -/
+def jobMoneyExplain (config : Config) (commandBytes : List UInt8) : IO (Except String String) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      match JobMoneyReceiver.commandCodec.decode commandBytes with
+      | none => return .error "noncanonical job money command"
+      | some command =>
+          match JobMoneyReceiver.prepare config.deployment config.profile
+              ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command with
+          | .ok _ => return .ok "prepared: the receiver would admit this command up to its signature"
+          | .error reason => return .ok s!"refused {(repr reason).pretty}"
+
 /-- The operator's local read of one AgentGrain purse (not a socket
 operation): its root and its four coordinates. -/
 structure PayPurse where
@@ -1427,6 +1488,59 @@ def payPurse (config : Config) (task : Nat) : IO (Except String PayPurse) := do
   | .error detail => return .error detail
   | .ok opened => return payPurseLoaded config opened task
 
+/-! ## Certify (the checkpoint path)
+
+170 = certify signing plan, 171 = detached assembly, 172 = submit, 173 = public
+system view.  The command is authored by `author certify` from the view's head
+and chain; the signer is any subject the factory law admits in capability mode
+for `authority/operation/certify` (today the operator's ticker). -/
+
+def certifyPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String CertifyReceiver.SigningPlan := do
+  let height := logicalHeight config opened.durable
+  let some command := CertifyReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical certify command"
+  let header ← CertifyReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, height⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def certifyAssemble (plan : CertifyReceiver.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "certify signature must be 64 bytes"
+  let header ← need "noncanonical certify header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  if (CertifyReceiver.commandCodec.decode plan.commandBytes).isSome then
+    pure (CertifyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  else .error "noncanonical certify plan command"
+
+def certifySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  let ambient := logicalHeight config opened.durable
+  match ← CertifyReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "certify" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- The public view of the system cell: its value, the roots a certify pins,
+and the head a certify would name now with that head's chain value.  The head
+and its chain are public (every receipt carries a height and a root). -/
+def certifyViewLoaded (config : Config) (opened : Opened config) :
+    Except String SystemCellDomain.View := do
+  let system ← need "system cell unavailable"
+    (SystemCellDomain.load config.deployment opened.durable.snapshot)
+  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
+    | .present before => pure before.payload.root
+    | .absent => .error "factory unavailable"
+  pure ⟨system.cell.root, opened.authority.snapshot.cell.root, factoryRoot, system.system,
+    opened.durable.height, opened.durable.chain⟩
+
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
 op 130) passes a writer that never appends, so both run this one program. -/
@@ -1441,7 +1555,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "revoke" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1451,7 +1565,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1480,7 +1594,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
           transport opened.durable config.federation height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1511,12 +1625,11 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
                   confirm kind
                     (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
                     (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
-              | .rejected reason =>
-                  return refused .operationRejected "durable" (match reason with
-                    | .durable .insufficientBudget =>
-                        meterShortfallDetail (opened.durable.snapshot.model.available .proofWork)
-                          ((command.run.map fun claim => claim.steps).getD 0)
-                    | other => s!"{repr other}")
+              | .rejected (.durable .insufficientBudget) =>
+                  return refused .operationRejected "durable"
+                    (meterShortfallDetail (opened.durable.snapshot.model.available .proofWork)
+                      ((command.run.map fun claim => claim.steps).getD 0))
+              | .rejected reason => return durableRefusal reason
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1546,6 +1659,7 @@ theorem signedRefusal_carries_reason (phase : String) (refusal : Refusal) :
 remain possible). Its preflight/native/semantic refusal therefore exposes no
 state-dependent reason. This is output non-disclosure, not a timing theorem. -/
 def publicSubmissionOutcome : Outcome → Outcome
+  | .refused .tailBound phase detail leaf => .refused .tailBound phase detail leaf
   | .refused .. => refused .undisclosed "admission" "request refused"
   | result => result
 
@@ -1560,9 +1674,10 @@ and whatever reason it named, so a submitter without read authority learns
 nothing from it. Its twin for the signed observation channel is
 `signedRefusal_carries_reason`. -/
 theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UInt8)
-    (leaf : Option LawLeaf) :
+    (leaf : Option LawLeaf) (notTail : reason ≠ .tailBound) :
     publicSubmissionOutcome (.refused reason phase detail leaf) =
-      refused .undisclosed "admission" "request refused" := rfl
+      refused .undisclosed "admission" "request refused" := by
+  cases reason <;> first | rfl | exact absurd rfl notTail
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with

@@ -109,7 +109,11 @@ import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusa
 import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)
 import Kernel.DomainEpochLaw  -- the kernel side of the epoch record: ChannelLaw, admitAppend, ChannelStoreLaw (split from DomainEpoch, CH-CLIENT-1)
 import Kernel.DomainEpochAudit  -- the axiom pins of DomainEpoch, DomainEpochLaw, DomainEpochExport (runtime closure has no Mathlib, CH-CLIENT-1)
-import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots), sampleOf_injective/_deterministic; reads for ops 131-133
+import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: the program cell's reads for ops 131-133
+import Kernel.Door -- K-EVAL E4: the door referee on any evaluator (EvalDoor: boot+poke / peek / load, the state codec); door_poke_sound / door_state_stale_refused / door_other_state_stale / door_poke_deterministic generic
 import Kernel.NockDoor -- NOCK N11: a NockApp kernel door (poke 23 / peek 22, state at axis 6) refereed by re-execution; door_poke_sound / door_state_stale_refused / door_effects_are_writes / door_peek_pure / door_load_deterministic; ops 135-137
-import Kernel.NockRun -- NOCK K-RAN: RunClaim, checkRun (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle; op 134 dryRun
+import Kernel.NockProgramCell.Sample -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots, context live|pinned, declared max), sampleOf_injective/_deterministic, declared_shape_sound
+import Kernel.NockEntry -- K-EVAL E2: Nock's entry into the run (N16 subjectFormula, the oracle = the export, decodeWrites, staleField), below Compiler.Evaluator
+import Kernel.Run -- K-RAN made generic (K-EVAL E2): RunClaim, resolve (registry; unknownEvaluator / evaluatorDisabled), checkRun E (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle over E.Spec and at Nock; op 134 dryRun
+import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R
 import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)

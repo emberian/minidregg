@@ -49,17 +49,19 @@ behind a signed account observation, 102=exact receipt by transaction id,
 112=public enrollment view (`DREGG/PAY/ENROLMENT-VIEW/v3`, with the journal),
 113=purse refill signing plan, 114=refill detached assembly,
 115=refill submit, 116=refill receipt-only lookup,
-160=job money (fund/claim/settle) signing plan, 161=job money detached assembly,
-162=job money submit, 163=job money receipt-only lookup,
 117=self-enrollment signing plan, 118=self-enrollment detached assembly,
 119=self-enrollment submit, 120=self-enrollment receipt-only lookup.
 123=realm well signing plan, 124=realm well detached assembly,
 125=realm well submit (non-confirmed outcomes reply 255),
 126=clock tick signing plan, 127=clock tick detached assembly,
 128=clock tick submit, 129=public clock view.
+160=job money (fund/claim/settle) signing plan, 161=job money detached assembly,
+162=job money submit (blind, as 115), 163=job money receipt-only lookup.
+170=certify signing plan, 171=certify detached assembly, 172=certify submit,
+173=public system view (certified head, tail bound, current head and chain).
 
 131=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
-canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
+canonical DREGG/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
 132=Nock program show (decimal programId) -> JSON, 133=Nock sample (JSON request)
 -> JSON with the kernel's canonical sample jam, 134=Nock run dry run (JSON
 {programId, caller, room, targets, values}) -> JSON with the kernel's sample at
@@ -541,11 +543,32 @@ structure Settings where
   /-- The operator's synchronous run budget in Lean steps (default
   `NativeHost.defaultNockFSync`, C17's measured 1,000,000). -/
   nockFSync : Option Nat := none
+  /-- Compiled-in evaluators (by registry name, e.g. `"nock"`) this operator disabled;
+  committed in the runtime semantics, so `expectedSemantics` must be computed with the same
+  list. A name the registry lacks refuses the config (`loadSettings`). -/
+  disabledEvaluators : Option (List String) := none
   deriving FromJson, ToJson
+
+/-- The disabled evaluators' registry ids, by name. `loadSettings` refuses a name the registry
+lacks (`Settings.checkDisabledEvaluators`), so the fallback below — an id derived from the
+name, which no compiled-in entry has, so it disables nothing — is never reached by a loaded
+config; it is deterministic, never an empty list standing in for a refusal. -/
+def Settings.disabledEvaluatorIds (settings : Settings) :
+    List Minidregg.Theory.TypedAuthorization.Digest :=
+  (settings.disabledEvaluators.getD []).map fun name =>
+    match Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name) with
+    | some E => E.id
+    | none => Minidregg.Compiler.Evaluator.idOf name ""
+
+def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit :=
+  (settings.disabledEvaluators.getD []).forM fun name =>
+    if (Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name)).isSome then .ok ()
+    else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
 def Settings.config (settings : Settings) : NativeHost.Config where
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
+  disabledEvaluators := settings.disabledEvaluatorIds
   template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
   tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
     settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
@@ -648,6 +671,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   discard <| IO.ofExcept settings.providerServicePins
   discard <| IO.ofExcept settings.continuityIds
   discard <| IO.ofExcept settings.lifetimeDispatchPins
+  IO.ofExcept settings.checkDisabledEvaluators
   if let some tariff := settings.grainBirthTariff then
     unless 0 < tariff.base do
       throw (IO.userError "grainBirthTariff.base must be positive")
@@ -733,7 +757,7 @@ def profileDescription (config : NativeHost.Config)
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),
      ("authorityCellId", n config.deployment.authorityCellId),
-     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("fieldModulus", n NativeHostProfile.characteristic),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("genesisHeight", n config.genesisHeight),
      ("template", Lean.Json.mkObj [("issuer", n config.template.issuer.value),
@@ -769,7 +793,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
      ("payCell", n (Kernel.PayCell.physicalId config.deployment.domain)),
-     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("fieldModulus", n NativeHostProfile.characteristic),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson
@@ -4948,7 +4972,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
-"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|well-ledger LEDGER.json|pay-ledger LEDGER.json|pay-purse TASK PURSE.json|pay-enrol-probe INPUT.json OUTPUT.json|pay-enrol-ids MINI-KEY-HEX OUTPUT.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json|pay-job JOB JOB.json"
+"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|well-ledger LEDGER.json|pay-ledger LEDGER.json|pay-purse TASK PURSE.json|pay-job JOB JOB.json|job-money-explain COMMAND.bin|pay-enrol-probe INPUT.json OUTPUT.json|pay-enrol-ids MINI-KEY-HEX OUTPUT.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -5474,6 +5498,29 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payRefillLookupLoaded pinnedConfig opened payload
                             return ((116 : UInt8), outcomeCodec.encode outcome)
+                        | 170 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.certifyPlanLoaded pinnedConfig opened payload)
+                            let bytes := CertifyReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify plan exceeds host frame bound")
+                            return ((170 : UInt8), bytes)
+                        | 171 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := CertifyReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical certify plan")
+                            let ingress ← IO.ofExcept (NativeHost.certifyAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify ingress exceeds host frame bound")
+                            return ((171 : UInt8), ingress)
+                        | 172 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig opened payload
+                            return ((172 : UInt8), outcomeCodec.encode outcome)
+                        | 173 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
+                            return ((173 : UInt8), CertifyReceiver.viewCodec.encode view)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
@@ -5536,6 +5583,7 @@ def run (arguments : List String) : IO UInt32 := do
                               (Minidregg.Host.Json.nockProgramOf jam abiSource)
                             let directory ← nockDirectory pinnedConfig state
                             let verdict := Minidregg.Kernel.NockProgramCell.checkProgram
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory program
                             return ((131 : UInt8),
                               (Minidregg.Host.Json.nockCheckJson program verdict).compress.toUTF8.toList)
@@ -5557,6 +5605,7 @@ def run (arguments : List String) : IO UInt32 := do
                               (Minidregg.Host.Json.nockSampleRequest source)
                             let directory ← nockDirectory pinnedConfig state
                             let verdict := Minidregg.Kernel.NockProgramCell.sampleFor
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId ctx targets values
                             return ((133 : UInt8),
                               (Minidregg.Host.Json.nockSampleJson verdict).compress.toUTF8.toList)
@@ -5569,7 +5618,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
                             let directory := opened.directory.directory
-                            let verdict := Minidregg.Kernel.NockRun.dryRun
+                            let verdict := Minidregg.Kernel.Run.dryRun
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId
                               ⟨height, caller, room⟩ targets values
                             return ((134 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
@@ -5583,9 +5633,16 @@ def run (arguments : List String) : IO UInt32 := do
                             let verdict := match CanonicalCellRegistry.loadProgram
                                 pinnedConfig.deployment.domain directory programId with
                               | none => .refused .programUnknown
-                              | some program => match program.abi.door with
-                                | none => .refused .notDoor
-                                | some door => Minidregg.Kernel.NockDoor.dryPoke program door view wire cause
+                              | some program =>
+                                -- The dry run renders Nock nouns: Nock's door only.
+                                match Minidregg.Kernel.Run.resolve pinnedConfig.disabledEvaluators
+                                    program.evaluator with
+                                | .error reason => .refused reason
+                                | .ok E =>
+                                  if E.id ≠ Minidregg.Compiler.Evaluator.nock.id then .refused .doorUnsupported
+                                  else match program.abi.door with
+                                  | none => .refused .notDoor
+                                  | some door => Minidregg.Kernel.NockDoor.dryPoke program door view wire cause
                             return ((135 : UInt8), (Minidregg.Host.Json.nockDoorPokeJson programId
                               verdict).compress.toUTF8.toList)
                         | 136 | 137 =>
@@ -5595,16 +5652,23 @@ def run (arguments : List String) : IO UInt32 := do
                             let (programId, view, path) ← IO.ofExcept
                               (Minidregg.Host.Json.nockDoorReadRequest source isPeek)
                             let directory ← nockDirectory pinnedConfig state
-                            let verdict : Except Minidregg.Kernel.NockRun.Refusal
-                                Minidregg.Kernel.NockRun.Ran :=
+                            let verdict : Except Minidregg.Kernel.Run.Refusal
+                                (Minidregg.Theory.Eval.Ran Minidregg.Theory.Noun) :=
                               match CanonicalCellRegistry.loadProgram
                                   pinnedConfig.deployment.domain directory programId with
                               | none => .error .programUnknown
-                              | some program => match program.abi.door with
-                                | none => .error .notDoor
-                                | some door =>
-                                  if isPeek then Minidregg.Kernel.NockDoor.peek program door view path
-                                  else Minidregg.Kernel.NockDoor.stateNow program view
+                              | some program =>
+                                -- The replies render Nock nouns: Nock's door only.
+                                match Minidregg.Kernel.Run.resolve pinnedConfig.disabledEvaluators
+                                    program.evaluator with
+                                | .error reason => .error reason
+                                | .ok E =>
+                                  if E.id ≠ Minidregg.Compiler.Evaluator.nock.id then .error .doorUnsupported
+                                  else match program.abi.door with
+                                  | none => .error .notDoor
+                                  | some door =>
+                                    if isPeek then Minidregg.Kernel.NockDoor.peek program door view path
+                                    else Minidregg.Kernel.NockDoor.stateNow program view
                             return (operation, (if isPeek then Minidregg.Host.Json.nockDoorPeekJson verdict
                               else Minidregg.Host.Json.nockDoorStateJson verdict).compress.toUTF8.toList)
                         | 91 =>
@@ -6034,6 +6098,12 @@ def run (arguments : List String) : IO UInt32 := do
           let some job := job.toNat? | throw (IO.userError "pay-job: JOB must be a natural")
           let view ← IO.ofExcept (← NativeHost.payJob config job)
           writeJson output (Minidregg.Host.Json.payJobJson view)
+          pure 0
+      | "job-money-explain", [command] =>
+          -- The operator's local reading of a job-money command: the receiver's own
+          -- preparation on the Store as it is, its refusal named (public submissions stay blind).
+          let bytes ← IO.FS.readBinFile command
+          IO.println (← IO.ofExcept (← NativeHost.jobMoneyExplain config bytes.toList))
           pure 0
       | "pay-purse", [task, output] =>
           let some task := task.toNat? | throw (IO.userError "pay-purse: TASK must be a natural")

@@ -1,0 +1,44 @@
+-- market/sealed: one sealed-bid market (SEALED-MARKET; PRIVACY §3.4, MUD §2.7/§2.8).
+-- Written by scripts/SealedMarketTemplate.lean: the Host's rendering of Kernel/SealedMarket.lean `law`.
+-- Placeholders: {FOUNDER} the founder's subject; {CLOSE} the first reveal height, {LAST_SEALED} = CLOSE-1;
+-- {REVEAL_END} the first settlement height, {LAST_REVEAL} = REVEAL_END-1; {SUPPLY} the units sold.
+-- Fields in fields.json. A bid commits (price, qty) in its slot: commit = cSHAKE256("DREGG.PRED.HASHEQ/v2";
+-- cell ‖ 2 ‖ names of price, qty, blinder, commit ‖ price ‖ qty ‖ blinder), Pred/HashEqDigest.lean.
+-- 0 management: anyone holding a grant reads and writes (the clauses below judge every write); the founder delegates; nobody installs or revokes, so the law and the bidders' grants stand.
+any [ verb == read, verb == write, all [ verb == delegate, subject == {FOUNDER} ] ];
+-- 1 setup, once, by the founder: the parameters and every bid slot empty; then the parameters are frozen.
+any [ not (verb == write), all [ not (field 2 before == field 2 before), subject == {FOUNDER}, field 1 == 0, field 2 == {CLOSE}, field 3 == {REVEAL_END}, field 4 == {SUPPLY}, field 5 == 0, field 16 == 0, field 17 == 0, field 18 == 0, field 19 == 0, field 20 == 0, field 21 == 0, field 24 == 0, field 25 == 0, field 26 == 0, field 27 == 0, field 28 == 0, field 29 == 0, field 32 == 0, field 33 == 0, field 34 == 0, field 35 == 0, field 36 == 0, field 37 == 0, field 40 == 0, field 41 == 0, field 42 == 0, field 43 == 0, field 44 == 0, field 45 == 0 ], all [ field 2 before == field 2 before, field 2 delta == 0, field 3 delta == 0, field 4 delta == 0 ] ];
+-- 2 settlement, once, by the founder, after the last reveal height: settled 0 -> 1 and the clearing price.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 1 delta == 0, field 5 delta == 0 ], all [ subject == {FOUNDER}, not (slot "request/height" <= {LAST_REVEAL}), field 1 before == 0, field 1 == 1 ] ];
+-- 3 slot 0 (who 16, commit 17, price 18, qty 19, blinder 20, filled 21): a bid takes an empty slot with the bidder and a nonzero commitment, only while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 16 delta == 0, field 17 delta == 0 ], all [ slot "request/height" <= {LAST_SEALED}, field 16 before == 0, field 16 == subject, field 17 before == 0, not (field 17 == 0) ] ];
+-- 4 slot 0: the opened fields move only in the reveal window; nothing is in the clear while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 18 delta == 0, field 19 delta == 0, field 20 delta == 0 ], all [ not (slot "request/height" <= {LAST_SEALED}), slot "request/height" <= {LAST_REVEAL} ] ];
+-- 5 slot 0: a reveal opens the commitment, the whole tuple at once, under its blinder.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 18 delta == 0, field 19 delta == 0, field 20 delta == 0 ], field 17 opens (field 18, field 19) with field 20 ];
+-- 6 slot 0: the fill moves only in the settling write, and never past the revealed quantity.
+any [ not (verb == write), not (field 2 before == field 2 before), field 21 delta == 0, all [ field 1 before == 0, field 1 == 1, not (field 21 <= -1), field 21 <= field 19 ] ];
+-- 7 slot 1 (who 24, commit 25, price 26, qty 27, blinder 28, filled 29): a bid takes an empty slot with the bidder and a nonzero commitment, only while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 24 delta == 0, field 25 delta == 0 ], all [ slot "request/height" <= {LAST_SEALED}, field 24 before == 0, field 24 == subject, field 25 before == 0, not (field 25 == 0) ] ];
+-- 8 slot 1: the opened fields move only in the reveal window; nothing is in the clear while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 26 delta == 0, field 27 delta == 0, field 28 delta == 0 ], all [ not (slot "request/height" <= {LAST_SEALED}), slot "request/height" <= {LAST_REVEAL} ] ];
+-- 9 slot 1: a reveal opens the commitment, the whole tuple at once, under its blinder.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 26 delta == 0, field 27 delta == 0, field 28 delta == 0 ], field 25 opens (field 26, field 27) with field 28 ];
+-- 10 slot 1: the fill moves only in the settling write, and never past the revealed quantity.
+any [ not (verb == write), not (field 2 before == field 2 before), field 29 delta == 0, all [ field 1 before == 0, field 1 == 1, not (field 29 <= -1), field 29 <= field 27 ] ];
+-- 11 slot 2 (who 32, commit 33, price 34, qty 35, blinder 36, filled 37): a bid takes an empty slot with the bidder and a nonzero commitment, only while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 32 delta == 0, field 33 delta == 0 ], all [ slot "request/height" <= {LAST_SEALED}, field 32 before == 0, field 32 == subject, field 33 before == 0, not (field 33 == 0) ] ];
+-- 12 slot 2: the opened fields move only in the reveal window; nothing is in the clear while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 34 delta == 0, field 35 delta == 0, field 36 delta == 0 ], all [ not (slot "request/height" <= {LAST_SEALED}), slot "request/height" <= {LAST_REVEAL} ] ];
+-- 13 slot 2: a reveal opens the commitment, the whole tuple at once, under its blinder.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 34 delta == 0, field 35 delta == 0, field 36 delta == 0 ], field 33 opens (field 34, field 35) with field 36 ];
+-- 14 slot 2: the fill moves only in the settling write, and never past the revealed quantity.
+any [ not (verb == write), not (field 2 before == field 2 before), field 37 delta == 0, all [ field 1 before == 0, field 1 == 1, not (field 37 <= -1), field 37 <= field 35 ] ];
+-- 15 slot 3 (who 40, commit 41, price 42, qty 43, blinder 44, filled 45): a bid takes an empty slot with the bidder and a nonzero commitment, only while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 40 delta == 0, field 41 delta == 0 ], all [ slot "request/height" <= {LAST_SEALED}, field 40 before == 0, field 40 == subject, field 41 before == 0, not (field 41 == 0) ] ];
+-- 16 slot 3: the opened fields move only in the reveal window; nothing is in the clear while sealed.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 42 delta == 0, field 43 delta == 0, field 44 delta == 0 ], all [ not (slot "request/height" <= {LAST_SEALED}), slot "request/height" <= {LAST_REVEAL} ] ];
+-- 17 slot 3: a reveal opens the commitment, the whole tuple at once, under its blinder.
+any [ not (verb == write), not (field 2 before == field 2 before), all [ field 42 delta == 0, field 43 delta == 0, field 44 delta == 0 ], field 41 opens (field 42, field 43) with field 44 ];
+-- 18 slot 3: the fill moves only in the settling write, and never past the revealed quantity.
+any [ not (verb == write), not (field 2 before == field 2 before), field 45 delta == 0, all [ field 1 before == 0, field 1 == 1, not (field 45 <= -1), field 45 <= field 43 ] ];

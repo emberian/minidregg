@@ -123,7 +123,8 @@ cat >"$EVIDENCE/genesis.json" <<EOF
     "factoryObserveCapabilityId":"55","initialBalance":"200",
     "accountPredicate":{"type":"all","predicates":[]}}
  ],
- "factoryControllerSubject":"7","factoryControllerCapability":"53",
+ "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
+ "tailBound":"256",
  "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
    "memoryTouches":"10000000","witnessBytes":"10000000",
    "proofWork":"10000000","storageBytes":"10000000",
@@ -144,7 +145,7 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
    "creator":"7","nonce":"22000",
    "resources":[{"kind":"object","storage":"declared","target":"600",
      "owner":"7","ownerCapability":"61","controlCapability":"62",
-     "predicate":{"type":"all","predicates":[]}}],
+     "predicate":{"type":"all","predicates":[]},"fields":["0","2"]}],
    "sourceCapabilities":["41"],"funding":[],"feePayer":"7"},
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}

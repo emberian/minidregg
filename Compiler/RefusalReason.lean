@@ -64,12 +64,20 @@ inductive RefusalReason where
   | staleGrant
   /-- The resource's current committed law denies this operation. -/
   | lawDenied
+  /-- An order clause of the law compares two values further apart than the
+  native order comparison decides (`NativeHostProfile.orderWidth`); the clause
+  and its two values are named. Fail-closed: no verdict is guessed. -/
+  | lawInputRange
   /-- Authorized, but the operation's controller or receiver refused it. -/
   | operationRejected
   /-- A different transaction already holds this transaction identity. -/
   | conflict
   /-- A blind submission was refused; by design no state-dependent reason is disclosed. -/
   | undisclosed
+  /-- The node is more than its tail bound past its last certified head
+  (`Kernel.TailBound`).  A fact about the public chain head, so it is named
+  even on a blind submission (MR's rule): it says nothing about the request. -/
+  | tailBound
   deriving DecidableEq, Repr, Inhabited
 
 namespace RefusalReason
@@ -85,9 +93,11 @@ def name : RefusalReason → String
   | .outsideValidity => "outside-validity"
   | .staleGrant => "stale-grant"
   | .lawDenied => "law-denied"
+  | .lawInputRange => "law-input-range"
   | .operationRejected => "operation-rejected"
   | .conflict => "conflict"
   | .undisclosed => "undisclosed"
+  | .tailBound => "tail-bound"
 
 /-- Fixed friend-facing text. It depends on the reason only. -/
 def describe : RefusalReason → String
@@ -100,13 +110,16 @@ def describe : RefusalReason → String
   | .outsideValidity => "the request is outside the grant's validity window"
   | .staleGrant => "the grant's issuer or policy epoch is no longer current"
   | .lawDenied => "the resource's current law denies this operation"
+  | .lawInputRange => "a law clause compares two values outside the native order range"
   | .operationRejected => "the operation was refused by its controller"
   | .conflict => "transaction identity conflict"
   | .undisclosed => "request refused; a blind submission discloses no reason"
+  | .tailBound => "the node is past its tail bound; no write is admitted until the next checkpoint"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
-    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed]
+    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed,
+    .lawInputRange, .tailBound]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -131,6 +144,8 @@ def stream : StreamCodec RefusalReason where
     | .operationRejected => [9]
     | .conflict => [10]
     | .undisclosed => [11]
+    | .lawInputRange => [12]
+    | .tailBound => [13]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -144,11 +159,13 @@ def stream : StreamCodec RefusalReason where
     | 9 :: suffix => some (.operationRejected, suffix)
     | 10 :: suffix => some (.conflict, suffix)
     | 11 :: suffix => some (.undisclosed, suffix)
+    | 12 :: suffix => some (.lawInputRange, suffix)
+    | 13 :: suffix => some (.tailBound, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (12 :: suffix) = none := rfl
+    stream.decodePrefix (14 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the
@@ -475,7 +492,8 @@ def renderClause : Pred → String
   | .eqSlots a b => s!"{renderSlot a} == {renderSlot b}"
   | .leSlots a b => s!"{renderSlot a} <= {renderSlot b}"
   | .leSlotsOff a b k => s!"{renderSlot a} <= {renderSlot b} + {k}"
-  | .hashEq v b c => s!"hash({renderSlot v}, {renderSlot b}) == {renderSlot c}"
+  | .hashEq vs b c =>
+      s!"{renderSlot c} opens ({", ".intercalate (vs.map renderSlot)}) with {renderSlot b}"
   | .ran program => s!"ran {program}"
   | .not q => s!"not ({renderClause q})"
   | .allL .nil => "open"
@@ -503,6 +521,17 @@ def render (leaf : LawLeaf) : String :=
         if (slotOf clause).isSome then s!" (value {shown leaf.after})" else ""
     | _ => ""
   renderClause clause ++ values
+
+/-- An out-of-range order clause: where it sits in the law (`clause` is the index of
+the law's top-level clause, `atom` the rest of the path), the atom as written, and the
+two integers it compares (`before` holds the left operand, `after` the right one, with
+`leSlotsOff`'s offset added). -/
+def renderRange (leaf : LawLeaf) : String :=
+  let place := match leaf.path with
+    | [] => "the law"
+    | [k] => s!"clause {k}"
+    | k :: atom => s!"clause {k} atom {atom}"
+  s!"{place}: {renderClause leaf.clause} (left {shown leaf.before}, right {shown leaf.after})"
 
 /-! ### Wire form
 
@@ -587,8 +616,17 @@ def Refusal.of (reason : RefusalReason) : Refusal := ⟨reason, reason.describe,
 def Refusal.lawDenied (leaf : Option LawLeaf) : Refusal :=
   ⟨.lawDenied, RefusalReason.lawDenied.describe, leaf⟩
 
+/-- An out-of-range order clause, named with its two values. -/
+def Refusal.lawInputRange (leaf : LawLeaf) : Refusal :=
+  ⟨.lawInputRange, RefusalReason.lawInputRange.describe, some leaf⟩
+
+/-- The text a refusal's leaf is explained by: the out-of-range rendering for
+`lawInputRange`, the failing-clause rendering otherwise. -/
+def LawLeaf.explain (reason : RefusalReason) (leaf : LawLeaf) : String :=
+  if reason = .lawInputRange then leaf.renderRange else leaf.render
+
 instance : ToString Refusal := ⟨fun refusal => match refusal.leaf with
-  | some leaf => s!"refused: {refusal.reason.name}: {leaf.render}"
+  | some leaf => s!"refused: {refusal.reason.name}: {leaf.explain refusal.reason}"
   | none => s!"refused: {refusal.reason.name}: {refusal.detail}"⟩
 
 end Minidregg.Compiler

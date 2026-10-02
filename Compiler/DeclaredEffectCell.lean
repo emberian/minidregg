@@ -15,8 +15,10 @@ frame `LOOM/EFFECT/PAGE ++ [1, 4, 16]`.  That page, its shard, its capacity
 byte, its `overflow`/`unsupportedAddress` reject reasons and its 2⁴-way case
 proofs are deleted.  A resource now has as many fields as it declares
 (`resource_fields_roundtrip`, instantiated at 32), and a `create` at any fresh
-field is accepted (`create_fresh_field_accepted`, instantiated at the journey's
-field 103).
+field is accepted by the action semantics (`create_fresh_field_accepted`,
+instantiated at the journey's field 103).  Whether the kernel admits it is the
+cell's declaration's to say (K-FIELD-CLOSURE, `Kernel.FieldClosure`): a cell
+holds only the fields it declared at birth, unless it declared itself open.
 
 **What refuses to load.**  Every page-era cell began with the page frame's
 `'L'` (76); the store frame begins with `'D'` (68).  `retired_page_frame_refused`
@@ -54,6 +56,10 @@ def stateKeyStream : StreamCodec StateKey where
     | .programCode program =>
         2 :: StreamCodec.nat.encode program.value
     | .blinding => [3]
+    | .fieldDeclared object field =>
+        4 :: StreamCodec.nat.encode object.value ++ digestStream.encode field
+    | .fieldsOpen object =>
+        5 :: StreamCodec.nat.encode object.value
   decodePrefix
     | 0 :: bytes => do
         let (object, afterObject) <- StreamCodec.nat.decodePrefix bytes
@@ -67,6 +73,13 @@ def stateKeyStream : StreamCodec StateKey where
         let (program, suffix) <- StreamCodec.nat.decodePrefix bytes
         some (.programCode ⟨program⟩, suffix)
     | 3 :: suffix => some (.blinding, suffix)
+    | 4 :: bytes => do
+        let (object, afterObject) <- StreamCodec.nat.decodePrefix bytes
+        let (field, suffix) <- digestStream.decodePrefix afterObject
+        some (.fieldDeclared ⟨object⟩ field, suffix)
+    | 5 :: bytes => do
+        let (object, suffix) <- StreamCodec.nat.decodePrefix bytes
+        some (.fieldsOpen ⟨object⟩, suffix)
     | _ => none
   decodePrefix_encode := by
     intro key suffix
@@ -80,8 +93,17 @@ def stateKeyStream : StreamCodec StateKey where
     | programCode program =>
         simp [StreamCodec.nat.decodePrefix_encode]
     | blinding => rfl
+    | fieldDeclared object field =>
+        simp [List.append_assoc, StreamCodec.nat.decodePrefix_encode,
+          digestStream.decodePrefix_encode]
+    | fieldsOpen object =>
+        simp [StreamCodec.nat.decodePrefix_encode]
 
-def stateKeyCodecId : String := "state-key/tagged-v2"
+/-- v3 (INTEGRATOR-3): tag 3 is the blinding (K-NARROW-HIDE, the proof braid's v2), tags 4 and 5
+a cell's declaration (K-FIELD-CLOSURE, the compute braid's v2 at tags 3 and 4). Both v2s and v1
+lay out a different digest, so every earlier declared cell is refused
+(`StoreCodec.decode_other_layout`), never reinterpreted. -/
+def stateKeyCodecId : String := "state-key/tagged-v3"
 
 /-- The effect layout on the wire.  Its single namespace contributes no bytes;
 keys are typed state keys and values are zigzag integers. -/

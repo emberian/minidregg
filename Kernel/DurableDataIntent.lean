@@ -302,6 +302,15 @@ inductive RejectReason
   /-- A claim-only event needs a nonempty, exact-current read guard; source
   admission separately proves the authority meaning of its selected guard. -/
   | unguardedEventOnly
+  /-- The deployment's system cell is absent or undecodable: the tail law
+  cannot be judged, so nothing is admitted (`Kernel.TailBound.gate`). -/
+  | systemUnavailable
+  /-- A write to the system cell that is not exactly the certification of the
+  current head (`Kernel.TailBound.certified_written_only_by_checkpoint`). -/
+  | systemWriteRefused
+  /-- **`tailBound`**: a record at height `head` is more than `bound` heights
+  past the last certified head `certified` (`Kernel.TailBound.tail_bounded`). -/
+  | tailBound (head certified bound : Nat)
   deriving DecidableEq, Repr
 
 namespace DataIntent
