@@ -111,15 +111,20 @@ start() {
   if pid=$(server_pid); then candidate_die "already serving as pid $pid"; fi
   TMPDIR=$STATE/tmp
   export TMPDIR
+  # Only this launch can establish readiness; old log entries are not evidence.
+  log_start=1
+  if [ -f "$STATE/logs/serve.log" ]; then
+    log_start=$(( $(wc -c <"$STATE/logs/serve.log") + 1 ))
+  fi
   nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >>"$STATE/logs/serve.log" 2>&1 </dev/null &
   pid=$!
   printf '%s\n' "$pid" >"$STATE/public/server.pid"
   waited=0
-  until [ -S "$SOCKET" ] && grep -q "mini: serving $SOCKET with host process" "$STATE/logs/serve.log"; do
+  until [ -S "$SOCKET" ] && tail -c +"$log_start" "$STATE/logs/serve.log" | grep -Eq "^mini: host process [0-9]+$"; do
     kill -0 "$pid" 2>/dev/null || { tail -20 "$STATE/logs/serve.log" >&2; candidate_die "mini serve exited"; }
     waited=$((waited + 1))
-    [ "$waited" -lt 1200 ] || candidate_die "socket did not appear within 120 s"
+    [ "$waited" -lt 1200 ] || candidate_die "socket and Host launch were not ready within 120 s"
     sleep 0.1
   done
   printf 'serving %s pid %s\n' "$SOCKET" "$pid"
