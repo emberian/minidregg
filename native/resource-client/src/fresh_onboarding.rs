@@ -419,6 +419,7 @@ else: sys.exit(2)
                     operation: None,
                     control: None,
                     provenance: None,
+                    room: None,
                 },
             )
             .unwrap();
