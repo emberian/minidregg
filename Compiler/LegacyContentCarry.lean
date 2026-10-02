@@ -432,7 +432,8 @@ private def migrate (height : Nat) (old : LegacyStore) (raw : List UInt8) : Exce
     | _ => pure ()
   for (identifier, record) in originalAtoms do
     -- Retained atom records themselves are never rewritten or renumbered.
-    if current ⟨.atoms, identifier⟩ != some record then throw "legacy content atom changed"
+    let retained : Option AtomRecord := current ⟨.atoms, identifier⟩
+    if retained != some record then throw "legacy content atom changed"
   let documentIds := (originalDocuments.map Prod.fst ++
     originalAtoms.map (fun entry => entry.2.document) ++
     originalElements.map (fun entry => entry.2.document)).eraseDups
