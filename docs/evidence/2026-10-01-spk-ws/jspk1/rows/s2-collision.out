@@ -1,0 +1,4 @@
+spk-host: grain refused: mini-spk-broker refused: unit mini-spk-a6101-g2.service belongs to store 59a2fd5a4c3859fb; Mini's resident unit name carries no Store identity (K-SPK)
+/var/lib/minidregg/grains/spk-ws-root/vars/59a2fd5a4c3859fb-6101
+/var/lib/minidregg/grains/spk-ws-root/vars/bf684cdcc84cdea6-6101
+app 6101 in two Stores: distinct volumes 59a2fd5a4c3859fb-6101 and bf684cdcc84cdea6-6101; Store 2's START refused (unit name pinned by Mini without a Store id)

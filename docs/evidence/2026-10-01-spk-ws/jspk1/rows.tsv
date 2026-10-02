@@ -1,0 +1,44 @@
+identity	PASS	0s	operator mini-spk-robust is not root; broker socket root-owned 0660
+refusals	PASS	0s	5/5 out-of-protocol requests refused with a reason
+s1-store	PASS	113s	profile                      exit=0 .479860778s
+s1-birth-a	PASS	22s	birth-a                      exit=0 22.174248359s
+s1-install-a	PASS	207s	install-a                    exit=0 206.397611721s
+s1-share-a	PASS	143s	share-a                      exit=0 142.926607218s
+s1-start-a	PASS	231s	start-a                      exit=0 231.912408867s
+s1-floor-a	PASS	1s	floor-held app-processes=3 unit=mini-spk-a6101-g2.service
+s1-limits-a	PASS	0s	class S limits hold on mini-spk-ws-grains-s59a2fd5a4c3859fba6101.slice (MemoryMax=536870912 CPUWeight=50 TasksMax=256 IOWeight=50)
+s1-enroll-a	PASS	32s	enroll-a                     exit=0 31.866949072s
+s1-get-a	PASS	25s	get-a                        exit=0 24.855280218s
+s1-post-a	PASS	25s	post-a                       exit=0 24.973285866s
+s1-kill-a	PASS	1375s	generation 2 killed -> supervisor STOP + continue -> generation 4 active 1375.065071490s after SIGKILL (supervisor activation .039072119s)
+s1-floor-a2	PASS	1s	floor-held app-processes=3 unit=mini-spk-a6101-g4.service
+s1-enroll-a2	PASS	57s	enroll-a2                    exit=0 57.160356843s
+s1-poll-a2	PASS	29s	poll returned "published by a before STOP" through 1 line(s)
+s1-backup	PASS	5s	backup of the RUNNING grain 59a2fd5a4c3859fb-6101: frozen copy, e2fsck clean, /var listed without mounting
+s1-stop-a	PASS	2298s	stop-a                       exit=0 2298.747828746s
+s1-export-a	PASS	3s	export of 6101 bound to STOP receipt def21a67f3491168762ac9f66e0b64123760b838b4d76c1e92a1a17be4d2bc9b, signed by f70315c2f5ef3c89c411666fe3378a0d6319756c36ceba63ca727975120af300
+s1-start-a3	PASS	843s	start-a3                     exit=0 843.217153480s
+s2-store	PASS	103s	profile                      exit=0 .643239628s
+s2-birth-a	PASS	21s	birth-a                      exit=0 21.629389444s
+s2-install-a	PASS	228s	imported /var re-owned to this grain's app UID 970
+s2-share-a	PASS	158s	share-a                      exit=0 157.585938735s
+s2-collision	PASS	0s	app 6101 in two Stores: distinct volumes 59a2fd5a4c3859fb-6101 and bf684cdcc84cdea6-6101; Store 2's START refused (unit name pinned by Mini without a Store id)
+s2-birth-d	PASS	24s	birth-d                      exit=0 23.607918727s
+s2-tamper-d	PASS	1s	one flipped byte refused before any Mini or broker effect (no placement for 6401)
+s2-install-d	PASS	298s	imported /var re-owned to this grain's app UID 971
+s3-store	PASS	115s	profile                      exit=0 .681882322s
+s3-birth-e	PASS	24s	birth-e                      exit=0 24.146966110s
+s3-install-e	PASS	317s	imported /var re-owned to this grain's app UID 972
+s3-share-e	PASS	170s	share-e                      exit=0 169.795166578s
+s3-start-e	PASS	222s	start-e                      exit=0 221.856178036s
+s3-floor-e	PASS	0s	floor-held app-processes=3 unit=mini-spk-a6601-g2.service
+s3-enroll-e	PASS	30s	enroll-e                     exit=0 30.030470197s
+s3-poll-e	PASS	16s	poll returned "published by a before STOP" through 1 line(s)
+s3-birth-b	PASS	26s	birth-b                      exit=0 25.485137298s
+s3-install-b	PASS	349s	install-b                    exit=0 349.000917501s
+s3-share-b	PASS	613s	share-b                      exit=0 613.146208408s
+s3-start-b	PASS	727s	start-b                      exit=0 726.804140734s
+s3-limits-b	PASS	0s	class M limits hold on mini-spk-ws-grains-sdaeee12574c8707fa6201.slice (MemoryMax=1073741824 CPUWeight=100 TasksMax=512 IOWeight=100)
+s3-enroll-b	PASS	62s	enroll-b                     exit=0 61.537178192s
+s3-get-b	PASS	27s	get-b                        exit=0 27.308759932s
+side-by-side	PASS	1s	three grains of two Stores active at once under three distinct units
