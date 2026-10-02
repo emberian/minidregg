@@ -1520,7 +1520,7 @@ def Pending.admitBranch [DecidableEq F]
       | none => .error .policyUnavailable
       | some law =>
           let witness := law.witness
-          match ComposedPolicyAdmission.admit config wanted.2 evidence witness
+          match law.admit wanted.2 evidence witness
               (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
           | none => .error .policyRejected
           | some admitted =>

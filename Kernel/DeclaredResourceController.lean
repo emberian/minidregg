@@ -546,7 +546,7 @@ def authorizeLeg [DecidableEq F]
     throw .policyInputRange
   if !decide (castInjOn F (intsOf law.predicate context.oldState context.newState)) then
     throw .policyCastAlias
-  requireSome .policyRejected (ComposedPolicyAdmission.admit config wanted evidence witness
+  requireSome .policyRejected (law.admit wanted evidence witness
     (.policy wanted.policyId wanted.policyRevision)
     (source_request_epoch_current prepared tuple incidence)
     (source_request_revision_current prepared tuple incidence))

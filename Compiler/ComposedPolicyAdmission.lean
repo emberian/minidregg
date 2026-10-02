@@ -155,6 +155,29 @@ def Config.resolve? {F : Type} [Field F] [DecidableEq F] (config : Config F) :
       | .error _ => none
       | .ok graph => some ⟨head, headExact, graph, exact⟩
 
+/-- Reuse a resolution from this exact configuration. The supplied witness is
+still checked in full; a retained graph is not itself authorization. -/
+def PreparedLaw.verifies {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (witness : Witness F) : Bool :=
+  decide (request.target.value = config.target) &&
+  decide (request.policyId = law.head.committed.record.policyId) &&
+  decide (request.policyRevision = law.head.committed.record.version) &&
+  decide (request.domain = config.snapshot.domain) &&
+  decide (request.semantics = config.profile.semantics) &&
+  (PolicyStepBinding.canonical config.step).matches request
+    witness.compiled.oldState witness.compiled.newState &&
+  config.profile.compatible (.canonical config.step) &&
+  ResolvedLawCompilation.checks config.profile law.graph.resolved
+    law.head.committed.address (closureDigest law.graph.resolved) witness
+
+/-- Exact Boolean equality, including every rejecting branch and arbitrary
+supplied witnesses; no assumption about a successful policy evaluation. -/
+theorem PreparedLaw.verifies_eq {F : Type} [Field F] [DecidableEq F] {config : Config F}
+    (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (witness : Witness F) : law.verifies request witness = config.verifies request witness := by
+  simp only [Config.verifies, law.headExact, law.graphExact, PreparedLaw.verifies]
+
 def PreparedLaw.predicate {F : Type} [Field F] [DecidableEq F] {config : Config F}
     (law : PreparedLaw config) : Pred := ResolvedLawCompilation.predicate law.graph.resolved
 
@@ -230,21 +253,21 @@ def Config.witness? {F : Type} [Field F] [DecidableEq F]
     head.committed.address config.step.oldState config.step.newState,
     closureDigest graph.resolved⟩
 
-/-- The ordinary TypedAuthorization gate, now using the composed source portal.
-Evidence, generation, revision, root membership and effective law all remain
-mandatory; no policy-only result is presented as authorization. -/
-def admit {F : Type} [Field F] [DecidableEq F]
+/-- One admission gate for ordinary and already-resolved policy checks. The
+check remains lazy until address and membership pass, preserving refusal order. -/
+private def admitWithCheck {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)
     (evidence : Evidence config.portal config.snapshot.authState request)
     (witness : Witness F) (membership : config.portal.MembershipWitness)
     (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
-    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId)
+    (check : Unit → Bool) (checkExact : check () = config.verifies request witness) :
     Option (Authorized config.portal config.snapshot.authState request) :=
   if addressExact : witness.compiled.address =
       config.snapshot.authState.policyAddress request.policyId request.policyRevision then
     if membershipAccepted : config.portal.verifyMembership config.snapshot.authState.policyRoot
         (config.snapshot.authState.policyAddress request.policyId request.policyRevision) membership = true then
-      if accepted : config.verifies request witness = true then
+      if accepted : check () = true then
         some
           { evidence := evidence
             policyWitness := witness
@@ -253,10 +276,47 @@ def admit {F : Type} [Field F] [DecidableEq F]
             policyRevisionExact := revisionExact
             policyAddressExact := addressExact
             policyMembershipVerified := membershipAccepted
-            policyVerified := by simp [Config.portal, addressExact, accepted] }
+            policyVerified := by
+              have verified := checkExact.symm.trans accepted
+              simp [Config.portal, addressExact, verified] }
       else none
     else none
   else none
+
+/-- Ordinary callers perform the complete source resolution as before. -/
+def admit {F : Type} [Field F] [DecidableEq F]
+    (config : Config F) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (witness : Witness F) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    Option (Authorized config.portal config.snapshot.authState request) :=
+  admitWithCheck config request evidence witness membership epochExact revisionExact
+    (fun _ => config.verifies request witness) rfl
+
+/-- Reuse only the head/graph whose exact source equations this value retains.
+All other authorization checks run through the same ordinary gate. -/
+def PreparedLaw.admit {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (witness : Witness F) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    Option (Authorized config.portal config.snapshot.authState request) :=
+  admitWithCheck config request evidence witness membership epochExact revisionExact
+    (fun _ => law.verifies request witness) (law.verifies_eq request witness)
+
+/-- The complete authorization result, including refusals and retained
+witness/evidence values, is identical to ordinary source resolution. -/
+theorem PreparedLaw.admit_eq {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (witness : Witness F) (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    law.admit request evidence witness membership epochExact revisionExact =
+      admit config request evidence witness membership epochExact revisionExact := by
+  simp only [PreparedLaw.admit, admit, PreparedLaw.verifies_eq]
 
 theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
     (config : Config F) {kind : ResourceKind} (request : Request kind)
@@ -267,7 +327,7 @@ theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
     {authorized : Authorized config.portal config.snapshot.authState request}
     (accepted : admit config request evidence witness membership epochExact revisionExact = some authorized) :
     authorized.evidence = evidence := by
-  unfold admit at accepted
+  unfold admit admitWithCheck at accepted
   split at accepted
   · split at accepted
     · split at accepted
