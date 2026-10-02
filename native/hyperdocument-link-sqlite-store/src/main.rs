@@ -25,7 +25,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store serve"
+        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store serve"
     );
     std::process::exit(2)
 }
@@ -35,6 +35,9 @@ fn crash_phase(name: &str) -> Option<(PublishPhase, i32)> {
         "after-begin" => Some((PublishPhase::Begun, 86)),
         "after-insert" => Some((PublishPhase::Inserted, 87)),
         "after-commit" => Some((PublishPhase::Committed, 88)),
+        "after-anchor-prepare" => Some((PublishPhase::AnchorPrepared, 90)),
+        "after-anchor-rename" => Some((PublishPhase::AnchorRenamed, 91)),
+        "after-anchor" => Some((PublishPhase::Anchored, 89)),
         _ => None,
     }
 }
@@ -48,22 +51,35 @@ fn parse_height(value: &std::ffi::OsStr) -> Result<u64, StoreError> {
 }
 
 fn run() -> Result<(), StoreError> {
-    let arguments: Vec<_> = env::args_os().skip(1).collect();
+    let mut arguments: Vec<_> = env::args_os().skip(1).collect();
+    let identity = if arguments
+        .first()
+        .is_some_and(|arg| arg == "--anchor-identity")
+    {
+        if arguments.len() < 3 {
+            usage();
+        }
+        let identity = arguments[1].clone().into_encoded_bytes();
+        arguments.drain(..2);
+        identity
+    } else {
+        Vec::new()
+    };
     let Some(command) = arguments.first().and_then(|value| value.to_str()) else {
         usage()
     };
     match (command, &arguments[1..]) {
         ("read", [root]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             io::stdout().write_all(&store.read()?)?;
         }
         ("read-to", [root, output]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let bytes = store.read()?;
             fs::write(output, bytes)?;
         }
         ("cas", [root, expected, input]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let expected = if expected == "-" {
                 None
             } else {
@@ -78,7 +94,7 @@ fn run() -> Result<(), StoreError> {
             let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
                 usage()
             };
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let expected = if expected == "-" {
                 None
             } else {
@@ -93,14 +109,14 @@ fn run() -> Result<(), StoreError> {
                 })?;
         }
         ("publish", [root, input]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             println!("{:?}", store.publish(&read_input(Path::new(input))?)?);
         }
         ("publish-crash", [root, input, phase]) => {
             let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
                 usage()
             };
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let bytes = read_input(Path::new(input))?;
             let _ = store.publish_with_hook(&bytes, |observed| {
                 if observed == target {
@@ -111,7 +127,7 @@ fn run() -> Result<(), StoreError> {
             })?;
         }
         ("publish-hold", [root, input, ready, release]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let bytes = read_input(Path::new(input))?;
             let ready = Path::new(ready);
             let release = Path::new(release);
@@ -128,8 +144,13 @@ fn run() -> Result<(), StoreError> {
                 })?
             );
         }
+        ("durable-anchor-enroll", [root]) => {
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            store.durable_anchor_enroll()?;
+            println!("Enrolled");
+        }
         ("durable-init", [root, seed]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             println!("{:?}", store.durable_init(&read_input(Path::new(seed))?)?);
         }
         ("durable-read", [root, from, with_base, output]) => {
@@ -139,12 +160,15 @@ fn run() -> Result<(), StoreError> {
                 Some("1") => true,
                 _ => usage(),
             };
-            let store = SqliteLinkStore::open(root)?;
-            fs::write(output, encode_durable_read(&store.durable_read(from, with_base)?))?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            fs::write(
+                output,
+                encode_durable_read(&store.durable_read(from, with_base)?),
+            )?;
         }
         ("durable-append", [root, height, record, tag]) => {
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             println!(
                 "{:?}",
                 store.durable_append(
@@ -159,7 +183,7 @@ fn run() -> Result<(), StoreError> {
                 usage()
             };
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let record = read_input(Path::new(record))?;
             let tag = read_input(Path::new(tag))?;
             let _ = store.durable_append_with_hook(height, &record, &tag, |observed| {
@@ -170,11 +194,11 @@ fn run() -> Result<(), StoreError> {
         }
         ("durable-checkpoint", [root, height, input]) => {
             let height = parse_height(height)?;
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             store.durable_checkpoint(height, &read_input(Path::new(input))?)?;
         }
         ("database-path", [root]) => {
-            let store = SqliteLinkStore::open(root)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             println!("{}", store.database_path().display());
         }
         _ => usage(),

@@ -195,6 +195,34 @@ def projectWithCommon (prepared : PreparedInvocation deployment profile ambient 
   ⟨common ++ participantSlots prepared logical localIndex ++
     jointSlots command.targets (participantSlots prepared logical)⟩
 
+/-- Materialize each finite participant projection once for this logical state,
+then reuse it for the local and both joint names. This array exists only while
+constructing one policy state; it contains no authority decision or durable cache. -/
+def projectWithCommonShared (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    Minidregg.Pred.State :=
+  let localIndex := primary.getD (firstIndex prepared)
+  let projected := Array.ofFn (participantSlots prepared logical)
+  let slots := fun i : TargetIndex command => projected[i.val]'(by
+    simpa only [projected, Array.size_ofFn] using i.isLt)
+  ⟨common ++ slots localIndex ++ jointSlots command.targets slots⟩
+
+theorem projectWithCommonShared_exact
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    projectWithCommonShared prepared primary common logical =
+      projectWithCommon prepared primary common logical := by
+  simp only [projectWithCommonShared, projectWithCommon, Array.getElem_ofFn]
+
+@[csimp] theorem projectWithCommon_eq_shared :
+    @projectWithCommon = @projectWithCommonShared := by
+  funext F field deployment profile ambient durable command prepared primary common logical
+  exact (projectWithCommonShared_exact prepared primary common logical).symm
+
+#assert_axioms projectWithCommonShared_exact
+
 def project (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
@@ -537,6 +565,7 @@ theorem lawLeaf_none_iff_verifies [DecidableEq F]
   have verdict := law.verifies_iff_eval (tuple.request incidence).2 bound supportedExact rangesExact casts
   refine Iff.trans ?_ verdict.symm
   unfold lawLeaf
+  simp only [policyConfigFromStep_exact]
   simp only [resolved, Option.bind_eq_bind, Option.bind_some]
   exact LawLeaf.of_none_iff _ _ _
 

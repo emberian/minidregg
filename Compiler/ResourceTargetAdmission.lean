@@ -27,7 +27,7 @@ resource so that its control grants (`NativeHostGenesis.payControlCapability`)
 can be exercised by the ordinary delegation and revocation receivers; its
 contents are written only by the pay receivers. -/
 def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
-  | .content | .declaredObject | .stream => some .object
+  | .content | .declaredObject | .stream | .worldKind | .worldInstance => some .object
   | .accountMetadata => some .account
   | .declaredProgram | .pay => some .program
   -- A Nock program cell is read through ops 131-133 (public), not observed.

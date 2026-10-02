@@ -1903,18 +1903,15 @@ fn room_ls(session: &Session, room: &Room, since: u64, import: bool, as_json: bo
         let stream_of = roster.members.iter().find(|(_, s)| s == cell).map(|(subject, _)| subject.clone());
         if names.is_empty() && import && *cell != room_cell {
             let name = format!("{}-cell-{cell}", room.name);
-            client(
-                "workspace",
-                &[
-                    ("action", os("import")),
-                    ("dir", os(root)),
-                    ("name", os(&name)),
-                    ("kind", os("object")),
-                    ("target", os(cell)),
-                    ("observe-capability", os(&capability)),
-                    ("operation-capability", os(&capability)),
-                ],
-            )?;
+            // The signed since result already proves this child's room lineage
+            // under our grant. Retain its sealing hint in the first reference write.
+            let sealed = grant.get("private").is_some_and(Value::is_object)
+                .then_some((room.grant.as_str(), room_cell.as_str()));
+            crate::workspace::import_with_private_context(root, crate::workspace::ImportInput {
+                name: &name, kind: "object", target: cell,
+                observe: &capability, operation: Some(&capability), control: None,
+                provenance: None, room: None,
+            }, sealed).map_err(error)?;
             names.push(name);
         }
         rows.push(json!({"cell":cell,"names":names,"room":*cell == room_cell,"stream":stream_of.is_some(),

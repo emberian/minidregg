@@ -3,6 +3,7 @@
 //! the signed observation, current Plan, and Lean admission in `main`.
 
 use crate::current_birth;
+use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
     absolute, author, hex, inspect, path, print_json, query_retained, retry, submit, Args,
@@ -31,6 +32,10 @@ pub(crate) mod private;
 /// rotation on a kick, the cache sync, sealing stream entries.
 #[path = "roomkey.rs"]
 pub(crate) mod roomkey;
+#[path = "content_privacy.rs"]
+pub(crate) mod content_privacy;
+#[path = "protected_document.rs"]
+pub(crate) mod protected_document;
 
 /// `can [NAME] [--all]` (P-AFFORDANCES): the verbs my grants cover, each
 /// prepared and dry-run against the current state, never submitted.
@@ -410,6 +415,22 @@ pub(crate) fn init(
     birth_context: Option<&Path>,
     namespace_root: Option<&Path>,
 ) -> Result<()> {
+    init_impl(root, host, config, identity, birth_context, namespace_root, None)
+}
+
+/// Fresh product onboarding only: the directory must not already exist.
+pub(crate) fn init_fresh(
+    root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
+    birth_context: Option<&Path>, namespace_root: Option<&Path>,
+    first_ref: &Value, verifier: Option<&Path>,
+) -> Result<()> {
+    init_impl(root, host, config, identity, birth_context, namespace_root, Some((first_ref, verifier)))
+}
+fn init_impl(
+    root: &Path, host: Option<&Path>, config: &Path, identity: InitIdentity<'_>,
+    birth_context: Option<&Path>, namespace_root: Option<&Path>,
+    fresh: Option<(&Value, Option<&Path>)>,
+) -> Result<()> {
     let InitIdentity {
         key,
         subject,
@@ -564,11 +585,22 @@ pub(crate) fn init(
     if let Some(sha) = host_sha {
         value["hostSha256"] = json!(sha);
     }
+    if let Some((first_ref, verifier)) = fresh {
+        receipt_continuity::fresh::prepare(&root, &mut value, first_ref, verifier)?;
+    }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(&root.join("workspace.json"), &bytes)?;
     println!("{}", root.display());
     Ok(())
+}
+
+/// Completes or resumes only a pin created by `init_fresh`; never upgrades legacy.
+pub(crate) fn complete_fresh_onboarding(root: &Path) -> Result<Value> {
+    let workspace = load(root)?;
+    receipt_continuity::fresh::complete(root, &workspace, |reference| {
+        Ok(signed_view_unchecked(root, &workspace, reference, "resource")?.1)
+    })
 }
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
@@ -611,6 +643,15 @@ pub(crate) struct ImportInput<'a> {
 }
 
 pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
+    import_with_private_context(root, input, None)
+}
+
+// Write a newly imported reference once, including its verified sealing
+// context. Never leave a temporarily public reference if a second write fails.
+pub(crate) fn import_with_private_context(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &str)>) -> Result<()> {
+    import_complete(root, input, sealed, None)
+}
+fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &str)>, room_private: Option<&Value>) -> Result<()> {
     let ImportInput {
         name: name_value,
         kind,
@@ -641,6 +682,11 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
     if let Some(room) = room {
         value["room"] = json!(room);
     }
+    if let Some((room, id)) = sealed {
+        value["sealedIn"] = json!(room);
+        value["sealedRoom"] = json!(id);
+    }
+    if let Some(private) = room_private { value["private"] = private.clone(); }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(
@@ -669,7 +715,20 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
     for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         field_decimal(member(receipt, field)?, field)?;
     }
-    import(
+    // A sender's room ID is only a routing hint. Prove membership under the
+    // recipient's own room grant before retaining a local sealing context.
+    let sealed_room = match value.get("sealedRoom") {
+        None => None,
+        Some(id) => {
+            let id = id.as_str().ok_or("sealedRoom must be a decimal string")?;
+            let room = private_room_name(root, id)?;
+            let room_ref = reference(root, &room)?;
+            let (since, _) = doc_query(root, workspace, &room_ref, "since", Some("0"), "view-since")?;
+            require_room_member(&since, member(&value, "target")?)?;
+            Some((room, id.to_owned()))
+        }
+    };
+    import_complete(
         root,
         ImportInput {
             name,
@@ -681,13 +740,42 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
             provenance: Some(source),
             room: (value.get("room") == Some(&json!(true))).then_some("member"),
         },
-    )?;
-    if let Some(private) = value.get("private") {
-        let mut imported = reference(root, name)?;
-        imported["private"] = private.clone();
-        roomkey::rewrite_reference(root, name, &imported)?;
+        sealed_room.as_ref().map(|(room, id)| (room.as_str(), id.as_str())),
+        value.get("private"),
+    )
+}
+
+/// `since` filters each named cell by both room ancestry and the caller's
+/// grant (NativeObservationController.sees). Call only on a signed result.
+fn require_room_member(since: &Value, target: &str) -> Result<()> {
+    decimal(target, "private document target")?;
+    if since.get("entries").and_then(Value::as_array).is_some_and(|rows|
+        rows.iter().any(|row| row.get("cells").and_then(Value::as_array)
+            .is_some_and(|cells| cells.iter().any(|cell| cell.as_str() == Some(target))))) {
+        Ok(())
+    } else {
+        Err("signed room history does not establish this document's membership".into())
     }
-    Ok(())
+}
+
+/// Resolve a stable room ID to a recipient-local private room, never to a
+/// sender's petname. A room grant remains subject to live Host authorization.
+fn private_room_name(root: &Path, target: &str) -> Result<String> {
+    decimal(target, "private room target")?;
+    let mut names = Vec::new();
+    for file in fs::read_dir(root.join("refs")).map_err(|e| e.to_string())? {
+        let file = file.map_err(|e| e.to_string())?;
+        if file.path().extension().is_none_or(|ext| ext != "json") { continue; }
+        let Ok(value) = bounded_json(&file.path()) else { continue };
+        if value.get("target").and_then(Value::as_str) == Some(target)
+            && value.get("kind").and_then(Value::as_str) == Some("object")
+            && value.get("private").is_some_and(Value::is_object) {
+            names.push(member(&value, "name")?.to_owned());
+        }
+    }
+    names.sort();
+    names.into_iter().next().ok_or_else(||
+        "import the private room invitation before importing its document".into())
 }
 
 fn list(root: &Path) -> Result<()> {
@@ -755,6 +843,7 @@ pub(crate) fn read(
     window: Option<(&str, &str)>,
     ephemeral: bool,
 ) -> Result<()> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
     let reference = reference(root, resource_name)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
@@ -786,6 +875,10 @@ pub(crate) fn read(
         &attempt,
     );
     let judged = judged_at(&attempt).ok();
+    if answered.is_ok() {
+        let challenge = bounded_json(&attempt.join("challenge.json"))?;
+        receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+    }
     if ephemeral {
         // A read commits nothing: once its answer (or refusal) is in hand the attempt
         // and its intent source are not needed for any retry. One journal line stays.
@@ -902,6 +995,19 @@ pub(crate) fn signed_view(
     reference: &Value,
     view: &str,
 ) -> Result<(Value, Value, PathBuf)> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
+    let (result, challenge, signed) = signed_view_unchecked(root, workspace, reference, view)?;
+    receipt_continuity::finish(root, workspace, ticket, &challenge, ContinuityMode::Ordinary)?;
+    Ok((result, challenge, signed))
+}
+
+// Only explicit legacy init or durably pinned fresh onboarding may establish first trust.
+fn signed_view_unchecked(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    view: &str,
+) -> Result<(Value, Value, PathBuf)> {
     let (attempt, nonce) = new_attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
@@ -942,6 +1048,7 @@ fn doc_query(
     height: Option<&str>,
     inspection: &str,
 ) -> Result<(Value, PathBuf)> {
+    let ticket = receipt_continuity::begin(root, workspace)?;
     let (attempt, nonce) = new_attempt(root)?;
     let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
         "target":member(reference,"target")?,"view":view});
@@ -967,6 +1074,9 @@ fn doc_query(
         inspection,
         &attempt,
     )?;
+    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    let mode = if view == "at" { ContinuityMode::Historical } else { ContinuityMode::Ordinary };
+    receipt_continuity::finish(root, workspace, ticket, &challenge, mode)?;
     Ok((value, attempt))
 }
 
@@ -1189,6 +1299,28 @@ pub(crate) struct DocumentRead {
     pub sources: std::collections::BTreeMap<String, std::collections::BTreeMap<String, usize>>,
 }
 
+/// Open a separate presentation copy. The signed raw view remains unchanged
+/// and is the only source of mutation guards.
+pub(crate) fn opened_entries(root: &Path, workspace: &Value, reference: &Value, view: &Value) -> Result<Vec<Value>> {
+    if view.is_null() { return Ok(Vec::new()); }
+    let mut display = view.clone();
+    if entries(view)?.iter().any(|entry| protected_document::is_kind(&entry["kind"])) {
+        display["cell"]["entries"] = json!(protected_document::opened_entries(root, reference, view)?);
+    }
+    let has_private = entries(view)?.iter().any(|entry| entry["type"] == "atom"
+        && entry["kind"] == json!({"type":"inlineObject","schema":private::schema_decimal()}));
+    if has_private {
+        match sealing_room(None, root, reference)? {
+            Some(room) => {
+                let (room_id, keys) = roomkey::reader_keys(root, workspace, &room)?;
+                private::open_view(&mut display, &room_id, member(reference,"target")?, keys.as_ref());
+            }
+            None => { private::open_view(&mut display, "", member(reference,"target")?, None); }
+        }
+    }
+    Ok(entries(&display)?.clone())
+}
+
 pub(crate) fn rendered_document(
     root: &Path,
     workspace: &Value,
@@ -1346,12 +1478,13 @@ pub(crate) fn rendered_document(
         shown.push(item);
     }
     current["transclusions"] = Value::Array(resolved);
+    let display_entries = opened_entries(root, workspace, &host_ref, &host_view)?;
     Ok(DocumentRead {
         host: member(&host_ref, "target")?.to_owned(),
         view: host_view,
         attempt: host_attempt,
         document: current,
-        entries: host_entries,
+        entries: display_entries,
         shown,
         sources: source_lines,
     })
@@ -1790,7 +1923,7 @@ fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>, format
         // What `doc edit` and `doc push` name a line against: this read, in the
         // kernel's order.
         let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
-        retain_seen(root, name, &read.view, &read.document, &challenge)?;
+        retain_seen_value(root, name, &seen_read_value(name, &read, &challenge))?;
     }
     let mut out = std::io::stdout().lock();
     let bytes = match format {
@@ -2078,49 +2211,15 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
 /// Check content actions against the Host's content grammar. Every action the
 /// grammar has may be proposed directly (the Host checks an edit's `before` and
 /// an annotation's `revision` against the stored atom). A payload `sealed`
-/// under `--private` may only create: an edit, link, annotation or quote would
-/// carry its bytes in plaintext into a sealed room.
+/// under `--private` passes one strict action classifier before payload sealing.
+/// Structural edits carry no body bytes; edits retain ciphertext stale guards.
 fn content_actions(actions: &Value, sealed: bool) -> Result<Value> {
-    let actions = actions
-        .as_array()
-        .ok_or("content actions must be an array")?;
-    if actions.is_empty() || actions.len() > 64 {
-        return Err("content proposal requires 1..64 actions".into());
-    }
-    for action in actions {
-        let obj = action
-            .as_object()
-            .ok_or("content action must be an object")?;
-        let (tag, fields): (&str, &[&str]) = match member(action, "type")? {
-            "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
-            "createDocument" => ("createDocument", &["type", "rootElement", "schema"]),
-            "createContainer" => ("createContainer", &["type", "element"]),
-            "editElement" => ("editElement", &["type", "element", "revision", "op"]),
-            "createRun" => ("createRun", &["type", "run", "atoms"]),
-            "editAtom" => (
-                "editAtom",
-                &["type", "atom", "before", "kind", "payload", "tombstone"],
-            ),
-            // A link; an annotation is a link in the `annotations` field (K-FIELDS).
-            "link" => ("link", &["type", "link", "source", "target", "relation"]),
-            "annotate" => (
-                "annotate",
-                &["type", "annotation", "atom", "revision", "body"],
-            ),
-            "transclude" => ("transclude", &["type", "transclusion", "link", "request"]),
-            "unlink" => ("unlink", &["type", "link"]),
-            "mark" => ("mark", &["type", "mark", "target", "revision", "kind"]),
-            "unmark" => ("unmark", &["type", "mark"]),
-            _ => return Err("unknown workspace content action".into()),
-        };
-        if sealed && !matches!(tag, "createAtom" | "createDocument" | "createRun") {
-            return Err(format!("--private seals creation actions only; {tag} would carry plaintext"));
-        }
-        if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
-            return Err(format!("{tag} has unexpected fields"));
-        }
-    }
-    Ok(json!({"type":"content","actions":actions}))
+    crate::workspace::content_privacy::actions(actions, sealed)
+}
+
+fn legacy_private_content(lowered: Value, room: &str, target: &str, key: &private::RoomKey) -> Result<Value> {
+    protected_document::reject_fresh_legacy(&lowered["actions"])?;
+    private::seal_content(lowered, room, target, key)
 }
 
 fn unhex(text: &str) -> Result<Vec<u8>> {
@@ -2185,6 +2284,39 @@ fn stream_append(payload: &Value) -> Result<Value> {
         "payload":to_hex(&text),"to":to,"ref":reference}))
 }
 
+/// Private intent follows the document reference. Browser and shell writers
+/// cannot silently drop sealing by omitting an optional command-line flag.
+fn sealing_room(explicit: Option<&str>, root: &Path, reference: &Value) -> Result<Option<String>> {
+    let mut rooms = std::collections::BTreeSet::new();
+    if let Some(room) = reference.get("sealedIn").and_then(Value::as_str) { rooms.insert(room.to_owned()); }
+    // Sealing follows the cell, not one petname. Importing a second reference
+    // cannot make the same sealed content become a public mutation target.
+    if let Ok(refs) = fs::read_dir(root.join("refs")) {
+        for file in refs.flatten() {
+            if file.path().extension().is_none_or(|ext| ext != "json") { continue; }
+            if let Ok(other) = bounded_json(&file.path()) {
+                if other.get("target") == reference.get("target") && other.get("kind") == reference.get("kind") {
+                    if let Some(room) = other.get("sealedIn").and_then(Value::as_str) { rooms.insert(room.to_owned()); }
+                }
+            }
+        }
+    }
+    if let Some(id) = reference.get("sealedRoom") {
+        rooms.insert(private_room_name(root, id.as_str().ok_or("sealedRoom must be a decimal string")?)?);
+    }
+    if let Some(room) = explicit { rooms.insert(room.to_owned()); }
+    // Room aliases are equivalent only when they resolve to the same cell.
+    let mut identity = None;
+    for room in &rooms {
+        let id = member(&self::reference(root, room)?, "target")?.to_owned();
+        if identity.as_ref().is_some_and(|other| other != &id) {
+            return Err("conflicting private rooms for the same document reference".into());
+        }
+        identity = Some(id);
+    }
+    Ok(rooms.into_iter().next())
+}
+
 fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str) -> Result<()> {
     let (room_id, keys) = roomkey::reader_keys(root, workspace, room)?;
     let reference = reference(root, resource_name)?;
@@ -2228,16 +2360,11 @@ pub(crate) fn sealed_room(root: &Path, reference: &Value) -> Option<String> {
     })
 }
 
-/// The private room a target is sealed under: the proposal's `--private ROOM`,
-/// or the room its cell was born in (`sealed_room`).
-fn sealing_room(explicit: Option<&str>, root: &Path, reference: &Value) -> Option<String> {
-    explicit.map(str::to_owned).or_else(|| sealed_room(root, reference))
-}
-
 /// Whether a signed view holds a private-cell envelope (`DREGG/PRIVATE-CELL`
 /// atoms of the private schema).
 fn holds_sealed(view: &Value, target: &str) -> bool {
     private::open_view(&mut view.clone(), "", target, None) > 0
+        || view["cell"]["entries"].as_array().is_some_and(|rows| rows.iter().any(|row| protected_document::is_kind(&row["kind"])))
 }
 
 /// The client's own observations of one plan named different world or
@@ -2350,6 +2477,7 @@ fn propose_summary_once(
             }
             let mut target_rows = Vec::new();
             let mut grants = Vec::new();
+            let command_nonce = random_nonce()?;
             let mut image = None::<String>;
             let mut seen = std::collections::BTreeSet::new();
             for entry in selected {
@@ -2364,14 +2492,16 @@ fn propose_summary_once(
                     return Err("duplicate named target".into());
                 }
                 let reference = reference(root, local_name)?;
-                let (view, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
+                let protected = reference.get("protectedDocument").is_some();
+                let (view, challenge, signed) = signed_view(root, workspace, &reference, "resource")?;
+                let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
                         return Err(OBSERVATIONS_MOVED.into());
                     }
                 }
-                image = Some(current_image);
+                image = Some(current_image.clone());
                 let target = member(&reference, "target")?;
                 let kind = member(&reference, "kind")?;
                 let root_value = view
@@ -2385,11 +2515,11 @@ fn propose_summary_once(
                     .as_object()
                     .ok_or("target payload must be an object")?;
                 let read_only = payload.get("type").and_then(Value::as_str) == Some("read");
-                let sealing = match sealing_room(private_room_name, root, &reference) {
+                let sealing = match if protected || read_only { None } else { sealing_room(private_room_name, root, &reference)? } {
                     // A cell that already holds sealed lines is a private room's,
                     // whatever this reference is called: refuse to write plaintext
                     // into it when the room is not known here.
-                    None if !read_only && holds_sealed(&view, target) => {
+                    None if !protected && !read_only && holds_sealed(&view, target) => {
                         return Err(format!(
                             "{local_name} holds sealed lines (a private room's cell) and this workspace does not know \
                              its room: name it with --private ROOM, or read and write it through the reference it was born under"
@@ -2447,7 +2577,7 @@ fn propose_summary_once(
                     match (member(payload, "type")?, &sealing) {
                         ("scalar", None) => scalar_actions(&payload["actions"], target)?,
                         ("content", None) => content_actions(&payload["actions"], false)?,
-                        ("content", Some((room, key))) => private::seal_content(
+                        ("content", Some((room, key))) => legacy_private_content(
                             content_actions(&payload["actions"], true)?,
                             room,
                             target,
@@ -2458,24 +2588,19 @@ fn propose_summary_once(
                                 &payload["actions"])?,
                             false,
                         )?,
-                        // A doc in a private room: an append is sealed; an edit or
-                        // a link would carry plaintext and refuses.
-                        ("document", Some((room, key))) => private::seal_content(
-                            content_actions(
-                                &document_actions(root, workspace, local_name, &view, fresh,
-                                    &payload["actions"])?,
-                                true,
-                            )?,
-                            room,
-                            target,
-                            key,
-                        )?,
+                        ("document", Some((room, key))) => legacy_private_content(
+                            content_actions(&document_actions(root, workspace, local_name, &view,
+                                fresh, &payload["actions"])?, true)?, room, target, key)?,
                         ("scalar", Some(_)) => {
                             return Err("--private seals content and stream payloads only".into())
                         }
                         _ => return Err("unsupported workspace payload type".into()),
                     }
                 };
+                let lowered = if let Some(audience) = &audience {
+                    if lowered["type"] != "content" { return Err("protected document accepts content actions only".into()); }
+                    protected_document::seal(root,workspace,audience,lowered,&command_nonce)?
+                } else { lowered };
                 // A read target's authorization leg is checked under the observe
                 // verb, so it carries the observe capability.
                 let capability = if read_only {
@@ -2491,13 +2616,15 @@ fn propose_summary_once(
                     Some("content") | Some("read") => CONTENT_COMMAND_VERSION,
                     _ => SCALAR_COMMAND_VERSION,
                 };
-                target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
+                let mut target_row = json!({"kind":kind,"target":target,"capability":capability,
                     "observeCapability":observe,"schemaVersion":schema_version,
-                    "expectedTargetRoot":root_value,"payload":lowered}));
+                    "expectedTargetRoot":root_value,"payload":lowered});
+                if let Some(audience) = &audience { audience.bind_target(&mut target_row,&current_image)?; }
+                target_rows.push(target_row);
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
             let mut command = json!({"subject":member(workspace,"subject")?,
-                "nonce":random_nonce()?,"targets":target_rows});
+                "nonce":command_nonce,"targets":target_rows});
             if let Some(claim) = run {
                 command["run"] = claim;
             }
@@ -2734,6 +2861,10 @@ fn propose_summary_once(
             delegation = Some(json!({"recipient":recipient,"kind":kind,"target":target,
                 "childCapability":child_id,"reservation":reservation.request_digest,
                 "domain":member(&policy,"domain")?,"name":member(&request,"name")?}));
+            if let Some(room) = sealing_room(None, root, &reference)? {
+                let id = member(&self::reference(root, &room)?, "target")?.to_owned();
+                delegation.as_mut().unwrap()["sealedRoom"] = json!(id);
+            }
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"delegate-source",
                     "command":{"kind":kind,"domain":member(&policy,"domain")?,
@@ -3056,6 +3187,7 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
 }
 
 pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+    let continuity = receipt_continuity::begin_attempt(attempt)?;
     let mut names = Vec::new();
     for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -3074,6 +3206,7 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
                 Some("installed" | "replayed")
             )
         {
+            receipt_continuity::finish_attempt(continuity, &value, true)?;
             return Ok(Some(value));
         }
     }
@@ -3138,6 +3271,10 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
                 value["private"] = private.clone();
             }
         }
+    }
+    if let Some(room) = delegation.get("sealedRoom") {
+        decimal(room.as_str().ok_or("sealedRoom must be a decimal string")?, "private room target")?;
+        value["sealedRoom"] = room.clone();
     }
     let path = proposal_dir.join("recipient-reference.json");
     if path.exists() {
@@ -4134,8 +4271,8 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
 // reads the Host's JSON, and it lowers line-level document actions into the
 // Host's own content grammar (`Kernel/ContentResource.lean` `Action`).
 //
-// Lines are the page's atom entries in page order (insertion order; the page
-// has 16 entries). `doc show` retains the signed view it rendered under
+// Lines follow the kernel's element-tree order. `doc show` retains the signed
+// ciphertext view and its separate opened presentation under
 // `seen/NAME.json`; an edit carries the line exactly as that read saw it, so an
 // edit of a line someone else changed since is refused by the Host (`staleAtom`)
 // rather than silently overwritten.
@@ -4234,8 +4371,13 @@ fn seen_path(root: &Path, name: &str) -> Result<PathBuf> {
     Ok(root.join("seen").join(format!("{}.json", ref_file(name))))
 }
 
-/// Replace the retained "as I last read it" view of one document.
+/// Test fixture wrapper for a raw-only retained view.
+#[cfg(test)]
 fn retain_seen(root: &Path, name: &str, view: &Value, document: &Value, challenge: &Value) -> Result<()> {
+    retain_seen_value(root, name, &seen_value(name, view, document, challenge))
+}
+
+fn retain_seen_value(root: &Path, name: &str, value: &Value) -> Result<()> {
     let dir = root.join("seen");
     if !dir.exists() {
         make_private_dir(&dir)?;
@@ -4243,10 +4385,9 @@ fn retain_seen(root: &Path, name: &str, view: &Value, document: &Value, challeng
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
     let staged = dir.join(format!(".{}.{}", ref_file(name), random_nonce()?));
-    let value = seen_value(name, view, document, challenge);
     private_file(
         &staged,
-        &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
+        &serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
     )?;
     fs::rename(&staged, &path).map_err(|error| format!("cannot retain {}: {error}", path.display()))
 }
@@ -4444,6 +4585,14 @@ fn seen_value(name: &str, view: &Value, document: &Value, challenge: &Value) -> 
         "view":view,"document":document})
 }
 
+/// Local edit-session snapshot: ciphertext guards and opened diff text live
+/// in distinct fields. Only raw atom records are ever sent back to the Host.
+fn seen_read_value(name: &str, read: &DocumentRead, challenge: &Value) -> Value {
+    let mut seen = seen_value(name, &read.view, &read.document, challenge);
+    seen["openedEntries"] = json!(read.entries);
+    seen
+}
+
 /// A retained read holds the whole page and its view-document: it grows with the
 /// document (a hundred-line document's is past 256 KiB), so it has its own bound.
 const MAX_SEEN: u64 = 16 * 1024 * 1024;
@@ -4465,7 +4614,9 @@ fn read_seen(root: &Path, name: &str, why: &str) -> Result<Value> {
 fn seen_for(root: &Path, workspace: &Value, name: &str, view: &Value, fresh: bool, why: &str) -> Result<Value> {
     if fresh {
         let document = host_document(root, workspace, &reference(root, name)?)?;
-        Ok(seen_value(name, view, &document, &Value::Null))
+        let mut seen = seen_value(name, view, &document, &Value::Null);
+        seen["openedEntries"] = json!(opened_entries(root, workspace, &reference(root, name)?, view)?);
+        Ok(seen)
     } else {
         read_seen(root, name, why)
     }
@@ -4493,10 +4644,15 @@ fn pulled_lines(seen: &Value) -> Result<Vec<PulledLine<'_>>> {
                     .iter()
                     .find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(id))
                     .ok_or_else(|| format!("line {line} names atom {id}, which the page you read does not hold"))?;
-                if atom.get("kind") != Some(&json!({"type":"text"})) {
-                    return Err(format!("line {line} is not a text atom; a file cannot carry it"));
-                }
-                let bytes = crate::decode_hex(member(atom, "payload")?)?;
+                let opened = seen.get("openedEntries").and_then(Value::as_array)
+                    .and_then(|all| all.iter().find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(id)))
+                    .unwrap_or(atom);
+                let bytes = match private::opened_text(opened)? {
+                    Some(bytes) => bytes,
+                    None if atom.get("kind") == Some(&json!({"type":"text"})) =>
+                        crate::decode_hex(member(atom, "payload")?)?,
+                    None => return Err(format!("line {line} is not a text atom; a file cannot carry it")),
+                };
                 if bytes.contains(&b'\n') {
                     return Err(format!("line {line} holds a newline; a file cannot carry it as one line"));
                 }
@@ -4541,8 +4697,9 @@ fn doc_read(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
     let read = rendered_document(root, workspace, name, None, None)?;
     content_page(&read.view, name)?;
     let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
-    retain_seen(root, name, &read.view, &read.document, &challenge)?;
-    Ok(seen_value(name, &read.view, &read.document, &challenge))
+    let seen = seen_read_value(name, &read, &challenge);
+    retain_seen_value(root, name, &seen)?;
+    Ok(seen)
 }
 
 fn doc_pull(root: &Path, workspace: &Value, name: &str) -> Result<()> {
@@ -4787,6 +4944,7 @@ fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &
     };
     let was_entries = page_entries(content_page(&seen["view"], name)?)?.clone();
     let now_entries = page_entries(content_page(&view, name)?)?.clone();
+    let displayed = opened_entries(root, workspace, &reference, &view)?;
     let mut changed = Vec::new();
     for (line, id) in &plan.pinned {
         let was = atom_of(&was_entries, id).ok_or("a pinned line is missing from the seen record")?;
@@ -4795,7 +4953,12 @@ fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &
             Some(atom) if atom_record(&atom)? == atom_record(&was)? => continue,
             Some(atom) if atom.get("tombstonedAt").is_some_and(|value| !value.is_null()) => "was struck".to_owned(),
             Some(atom) => {
-                let bytes = crate::decode_hex(atom["payload"].as_str().unwrap_or("")).unwrap_or_default();
+                let opened = atom_of(&displayed, id).unwrap_or_else(|| atom.clone());
+                let bytes = match private::opened_text(&opened) {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) => crate::decode_hex(atom["payload"].as_str().unwrap_or("")).unwrap_or_default(),
+                    Err(_) => { changed.push(format!("line {line} changed (private text unavailable)")); continue; }
+                };
                 let mut text = String::from_utf8_lossy(&bytes).into_owned();
                 if text.chars().count() > 60 {
                     text = text.chars().take(57).collect::<String>() + "...";
@@ -5108,24 +5271,55 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         let namespace = args.optional("namespace-root").map(path);
         let next_public = args.optional("next-pub").map(path);
         let without_prerotation = args.optional("no-prerotation").is_some();
+        let first_ref = args.optional("continuity-ref").map(|value| {
+            serde_json::from_str::<Value>(&os_string(value, "continuity reference")?)
+                .map_err(|error| error.to_string())
+        }).transpose()?;
+        let verifier = args.optional("verifier").map(path);
+        if verifier.is_some() && first_ref.is_none() {
+            return Err("init --verifier requires --continuity-ref".into());
+        }
         args.finish()?;
-        return init(
-            &root,
-            host.as_deref(),
-            &config,
-            InitIdentity {
-                key: key.as_deref(),
-                subject: subject.as_deref(),
-                enrollment: enrollment.as_deref(),
-                next_public: next_public.as_deref(),
-                without_prerotation,
-            },
-            context.as_deref(),
-            namespace.as_deref(),
-        );
+        let identity = InitIdentity { key: key.as_deref(), subject: subject.as_deref(), enrollment: enrollment.as_deref(), next_public: next_public.as_deref(), without_prerotation };
+        return match first_ref.as_ref() {
+            Some(reference) => init_fresh(&root, host.as_deref(), &config, identity,
+                context.as_deref(), namespace.as_deref(), reference, verifier.as_deref()),
+            None => init(&root, host.as_deref(), &config, identity,
+                context.as_deref(), namespace.as_deref()),
+        };
     }
     let workspace = load(&root)?;
     match action.as_str() {
+        "onboard" => {
+            args.finish()?;
+            print_json(&complete_fresh_onboarding(&root)?)
+        }
+        "continuity-init" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let verifier = args.optional("verifier").map(path);
+            args.finish()?;
+            let reference = reference(&root, &name)?;
+            let result = receipt_continuity::initialize(&root, &workspace, verifier.as_deref(), || {
+                Ok(signed_view_unchecked(&root, &workspace, &reference, "resource")?.1)
+            })?;
+            print_json(&result)
+        }
+        "continuity-verifier" => {
+            let verifier = path(args.required("verifier")?);
+            args.finish()?;
+            print_json(&receipt_continuity::replace_verifier(&root, &workspace, &verifier)?)
+        }
+        "continuity-check" => {
+            let attempt = path(args.required("attempt")?);
+            let historical = match args.optional("historical").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--historical must be true or false".into()),
+            };
+            args.finish()?;
+            print_json(&receipt_continuity::check_retained(&root, &workspace, &attempt, historical)?)
+        }
         "import" => {
             if let Some(from) = args.optional("from-ref") {
                 let name = os_string(args.required("name")?, "reference name")?;
@@ -5677,6 +5871,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
         }
+        "doc-device" => {
+            args.finish()?;
+            println!("{}", serde_json::to_string_pretty(&protected_document::device(&root)?).map_err(|e|e.to_string())?);
+            Ok(())
+        }
+        "doc-epoch-export" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let output = path(args.required("output")?);
+            args.finish()?;
+            protected_document::export_epoch(&root, &workspace, &name, &output)
+        }
+        "doc-epoch-import" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let catalog = os_string(args.required("catalog")?, "device catalog reference")?;
+            let input = path(args.required("bundle")?);
+            args.finish()?;
+            protected_document::import_epoch(&root, &workspace, &name, &catalog, &input)
+        }
+        "doc-protect-recover" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            args.finish()?;
+            protected_document::recover(&root, &workspace, &name)
+        }
+        "doc-protect" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            args.finish()?;
+            protected_document::protect_empty(&root, &workspace, &name)
+        }
         "doc-new" => {
             let name = os_string(args.required("name")?, "document name")?;
             let predicate = path(args.required("predicate")?);
@@ -5748,7 +5970,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             crate::market::show(&root, &workspace, &name)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
+            "workspace action must be init, onboard, continuity-init, continuity-verifier, continuity-check, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull, doc-push, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }
@@ -5873,6 +6095,86 @@ mod tests {
             .iter()
             .map(|a| (a["type"].as_str().unwrap().to_owned(), a.get("tombstone") == Some(&json!(true))))
             .collect()
+    }
+
+    #[test]
+    fn private_document_alias_cannot_drop_or_change_its_room() {
+        let root = std::env::temp_dir().join(format!("mini-private-alias-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap(); make_private_dir(&root.join("refs")).unwrap();
+        let hint = |name: &str, target: &str| json!({"type":"minidregg-participant-reference-v1",
+            "name":name,"kind":"object","target":target,"observeCapability":"1"});
+        for (name,target) in [("lab","71"),("alias-lab","71"),("other","99")] {
+            private_file(&root.join("refs").join(format!("{name}.json")), &serde_json::to_vec(&hint(name,target)).unwrap()).unwrap();
+        }
+        let mut marked = hint("original", "72"); marked["sealedIn"] = json!("lab");
+        private_file(&root.join("refs/original.json"), &serde_json::to_vec(&marked).unwrap()).unwrap();
+        let alias = hint("second-name", "72");
+        assert_eq!(sealing_room(None, &root, &alias).unwrap(), Some("lab".to_owned()));
+        assert!(sealing_room(Some("alias-lab"), &root, &alias).unwrap().is_some());
+        assert!(sealing_room(Some("other"), &root, &alias).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn private_import_context_requires_recipient_room_and_signed_membership() {
+        let root = std::env::temp_dir().join(format!("mini-private-import-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap(); make_private_dir(&root.join("refs")).unwrap();
+        let public = json!({"name":"wrong","kind":"object","target":"71"});
+        private_file(&root.join("refs/wrong.json"), &serde_json::to_vec(&public).unwrap()).unwrap();
+        assert!(private_room_name(&root, "71").is_err());
+        let own_room = json!({"name":"my-local-room","kind":"object","target":"71","private":{"protocol":"room-key"}});
+        private_file(&root.join("refs/my-local-room.json"), &serde_json::to_vec(&own_room).unwrap()).unwrap();
+        assert_eq!(private_room_name(&root, "71").unwrap(), "my-local-room");
+        assert!(private_room_name(&root, "99").is_err());
+        import_with_private_context(&root, ImportInput {name:"paper", kind:"object", target:"72",
+            observe:"63", operation:Some("63"), control:None, provenance:None, room:None},
+            Some(("my-local-room", "71"))).unwrap();
+        let paper = reference(&root, "paper").unwrap();
+        assert_eq!(paper["sealedIn"], "my-local-room");
+        assert_eq!(paper["sealedRoom"], "71");
+        assert!(require_room_member(&json!({"entries":[{"cells":["72","73"]}]}), "72").is_ok());
+        assert!(require_room_member(&json!({"entries":[{"cells":["99"]}]}), "72").is_err());
+        assert!(require_room_member(&json!({"entries":null}), "72").is_err());
+        assert!(require_room_member(&json!({"entries":[{"cells":["72"]}]}), "072").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn doc_push_private_diff_uses_opened_text_but_preserves_ciphertext_guard() {
+        let key = private::RoomKey::generate(0).unwrap();
+        let sealed = private::seal_content(json!({"type":"content","actions":[
+            {"type":"createAtom","atom":"10","kind":{"type":"text"},"payload":hex(b"private old")}
+        ]}), "71", "72", &key).unwrap();
+        let mut seen = seen_doc(&[("10", "private old", false)], &[], false);
+        seen["view"]["cell"]["entries"][0]["kind"] = sealed["actions"][0]["kind"].clone();
+        seen["view"]["cell"]["entries"][0]["payload"] = sealed["actions"][0]["payload"].clone();
+        seen["document"]["order"][0]["payload"] = sealed["actions"][0]["payload"].clone();
+        assert!(pull_text(&seen).is_err());
+        let mut display = seen["view"].clone();
+        let mut keys = private::Keyring::default(); keys.insert("71", &key);
+        private::open_view(&mut display, "71", "72", Some(&keys));
+        seen["openedEntries"] = display["cell"]["entries"].clone();
+        assert_eq!(pull_text(&seen).unwrap(), b"private old\n");
+        let names = std::collections::BTreeMap::new();
+        let sources = std::collections::BTreeMap::new();
+        let render = |entries: &[Value]| crate::render::render(&crate::render::View {
+            document: &seen["document"], entries, names: &names, sources: &sources, me: "7"
+        }).unwrap();
+        assert_eq!(render(seen["openedEntries"].as_array().unwrap()).raw(), b"private old\n");
+        let locked = render(seen["view"]["cell"]["entries"].as_array().unwrap()).text();
+        assert!(locked.contains("private: locked"));
+        assert!(!locked.contains("private old"));
+        let plan = push_actions(&seen, b"private new\n").unwrap();
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(plan.actions[0]["before"], atom_record(&seen["view"]["cell"]["entries"][0]).unwrap());
+        assert_eq!(plan.actions[0]["payload"], hex(b"private new"));
+        assert_eq!(plan.actions[0]["before"]["payload"], sealed["actions"][0]["payload"]);
+        let new = private::seal_content(json!({"type":"content","actions":plan.actions}), "71", "72", &key).unwrap();
+        assert_eq!(new["actions"][0]["before"]["revision"], "56");
+        assert_ne!(new["actions"][0]["payload"], plan.actions[0]["payload"]);
+        let inserted = push_actions(&seen, b"first\nprivate old\n").unwrap();
+        assert!(inserted.actions.iter().any(|a| a["type"] == "editElement"));
+        assert!(private::seal_content(json!({"type":"content","actions":inserted.actions}), "71", "72", &key).is_ok());
     }
 
     #[test]
@@ -6024,11 +6326,13 @@ mod tests {
     }
 
     #[test]
-    fn sealed_content_only_creates() {
+    fn sealed_content_validates_shape_then_seals_at_one_boundary() {
         let edit = json!([{"type":"editAtom","atom":"1","before":{},"kind":{"type":"text"},
             "payload":"61","tombstone":false}]);
         assert!(content_actions(&edit, false).is_ok());
-        assert!(content_actions(&edit, true).is_err());
+        let validated = content_actions(&edit, true).unwrap();
+        let key = private::RoomKey::generate(0).unwrap();
+        assert!(private::seal_content(validated, "71", "72", &key).is_err());
         assert!(content_actions(&json!([{"type":"createAtom","atom":"1","kind":{"type":"text"},
             "payload":"61"}]), true).is_ok());
         assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), false).is_err());

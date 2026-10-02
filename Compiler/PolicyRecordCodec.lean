@@ -654,15 +654,17 @@ theorem semanticLawBytes_composition_bound {left right : PolicyRecord}
     left.descendants = right.descendants := by
   have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
   refine ⟨?_, ?_, ?_⟩
-  · exact congrArg PolicyRecord.localSelector records
-  · exact congrArg PolicyRecord.parents records
-  · exact congrArg PolicyRecord.descendants records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.localSelector records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.parents records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.descendants records
 
 theorem semanticLawBytes_executable_bound {left right : PolicyRecord}
     (same : semanticLawBytes left = semanticLawBytes right) :
     left.predicate = right.predicate ∧ left.objectDescriptor = right.objectDescriptor := by
   have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
-  exact ⟨congrArg PolicyRecord.predicate records, congrArg PolicyRecord.objectDescriptor records⟩
+  constructor
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.predicate records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.objectDescriptor records
 
 theorem semanticLawBytes_identity_bound {left right : PolicyRecord}
     (same : semanticLawBytes left = semanticLawBytes right) :
@@ -670,9 +672,12 @@ theorem semanticLawBytes_identity_bound {left right : PolicyRecord}
     left.domain = right.domain ∧ left.semantics = right.semantics ∧
     left.previous = right.previous := by
   have records : semanticLawRecord left = semanticLawRecord right := encode_injective same
-  exact ⟨congrArg PolicyRecord.policyId records, congrArg PolicyRecord.version records,
-    congrArg PolicyRecord.domain records, congrArg PolicyRecord.semantics records,
-    congrArg PolicyRecord.previous records⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.policyId records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.version records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.domain records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.semantics records
+  · simpa [semanticLawRecord] using congrArg PolicyRecord.previous records
 
 theorem audience_bound_by_encoding {left right : PolicyRecord}
     (same : encode left = encode right) : left.audience = right.audience :=
@@ -812,8 +817,8 @@ def neutralLift (record : Record) (targetSemantics : Digest)
 
 theorem neutralLift_local_eval (record : Record) (targetSemantics : Digest)
     (targetPrevious : Option Digest) (old new : State) :
-    eval (neutralLift record targetSemantics targetPrevious).localComponent.guarded old new =
-      eval record.predicate old new :=
+    Minidregg.Pred.eval (neutralLift record targetSemantics targetPrevious).localComponent.guarded old new =
+      Minidregg.Pred.eval record.predicate old new :=
   Minidregg.Theory.LawComposition.neutral_component_eval record.predicate old new
 
 theorem refused_by_active_decoder (record : Record) :

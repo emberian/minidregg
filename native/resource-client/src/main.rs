@@ -96,7 +96,27 @@ mod worker;
 #[cfg(unix)]
 mod web;
 #[cfg(unix)]
+mod receipt_continuity;
+#[cfg(unix)]
 mod workspace;
+#[cfg(unix)]
+#[path="protected_object/object_keys.rs"]
+mod object_keys;
+#[cfg(unix)]
+#[path="protected_object/object_keys_hybrid.rs"]
+mod object_keys_hybrid;
+#[cfg(unix)]
+#[path="protected_object/object_messages.rs"]
+mod object_messages;
+#[cfg(unix)]
+#[path="protected_object/object_cli.rs"]
+mod object_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_cli.rs"]
+mod object_epoch_cli;
+#[cfg(unix)]
+#[path="protected_object/object_epoch_packages.rs"]
+mod object_epoch_packages;
 #[cfg(unix)]
 mod well;
 
@@ -408,6 +428,11 @@ usage:
   mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
   mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini workspace --action init ... --continuity-ref '{"name":"account","kind":"account","target":"ID","observeCapability":"CAP"}' [--verifier LOCAL-HOST]
+  mini workspace --action onboard --dir WORKSPACE
+  mini workspace --action continuity-init --dir WORKSPACE --name REF [--verifier LOCAL-HOST]
+  mini workspace --action continuity-verifier --dir WORKSPACE --verifier LOCAL-HOST
+  mini workspace --action continuity-check --dir WORKSPACE --attempt RETAINED [--historical true|false]
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
@@ -1633,6 +1658,8 @@ fn submit_once(
     directory: &Path,
     prepare_only: bool,
 ) -> Result<()> {
+    #[cfg(unix)]
+    let continuity = receipt_continuity::begin_attempt(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -1693,6 +1720,8 @@ fn submit_once(
         &outcome_bin,
         &outcome_json,
     )?;
+    #[cfg(unix)]
+    receipt_continuity::finish_attempt(continuity, &outcome, false)?;
     print_confirmed_outcome(&outcome)
 }
 
@@ -2020,6 +2049,8 @@ fn retry_with_upgrade(
             let _ = SOCKET.set(socket);
         }
     }
+    #[cfg(unix)]
+    let continuity = receipt_continuity::begin_attempt(directory)?;
     let (outcome_bin, outcome_json) = next_retry(directory)?;
     #[cfg(unix)]
     let host = if let Some(upgrade) = upgrade {
@@ -2076,6 +2107,8 @@ fn retry_with_upgrade(
     let host = &original_host;
     host_files(host, &config, &[Path::new(mode), &call, &outcome_bin])?;
     let outcome = inspect(host, &config, "outcome", &outcome_bin, &outcome_json)?;
+    #[cfg(unix)]
+    receipt_continuity::finish_attempt(continuity, &outcome, true)?;
     print_confirmed_outcome(&outcome)
 }
 

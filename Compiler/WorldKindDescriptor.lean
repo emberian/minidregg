@@ -132,8 +132,15 @@ theorem definition_roundtrip (descriptor : Descriptor) (valid : descriptor.Valid
     decodeDefinition (descriptorCodec.encode descriptor) = some ⟨descriptor, valid⟩ := by
   simp [decodeDefinition, descriptor_roundtrip, valid]
 
+/-- Exported source identities are part of the runtime profile as well as
+instance decoding; changing field meaning or codec changes the layout hash. -/
+def identityCustomization : List UInt8 := "DREGG.WORLD.KIND.LAYOUT/v1".toUTF8.toList
+
+def descriptorContract : List UInt8 :=
+  "world-kind-descriptor/v1:kind,revision,ordered-fields(id,name,meaning,codec,discipline);unique-id-and-name;nonempty-name-and-meaning;key=nat;nat=0,int=1,bytes=2;rom=0,ram=1,append=2".toUTF8.toList
+
 def Descriptor.identity (descriptor : Descriptor) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.WORLD.KIND.LAYOUT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash identityCustomization
     (descriptorCodec.encode descriptor)).digest
 
 /-- One namespace per named field; a scalar uses key zero, a map uses arbitrary
@@ -188,10 +195,11 @@ def descriptorFields (descriptor : Descriptor) : Finset CellField :=
   (descriptor.fields.map fun field => CellField.slot field.id).toFinset
 
 /-- Freeze all-fields authority to this descriptor's actual semantic inventory
-when constructing an instance grant or preparing a carry. This uses the existing
+when deliberately constructing a bound grant or preparing a carry. This uses the existing
 capability Scope, not an alternative authorization model. Explicit old fields
 are intersected with the inventory; budgets, verbs, targets and delta bounds stay
-unchanged. Native grant construction must call this before claiming the rule. -/
+unchanged. Ordinary initial grants are not implicitly changed by this helper;
+carry must call it before claiming preservation of old all-fields authority. -/
 def bindScope (descriptor : Descriptor) (scope : Minidregg.Theory.TypedAuthorization.Scope .object) :
     Minidregg.Theory.TypedAuthorization.Scope .object :=
   { scope with fields := some (match scope.fields with
