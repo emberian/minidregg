@@ -188,6 +188,12 @@ class DeployedRoleBinding(unittest.TestCase):
             declare()
             with patch.object(joined,'protected_binding',return_value=path):
                 self.assertEqual(joined.deployed_roles(spec,manifest,Path(config))['host'],Path(other_host))
+                Path(authorized).write_text('restrict,pty,command="'+command+'" ssh-ed25519 BBBB comment ssh-ed25519 AAAA\n')
+                binding['deployment']['memberCommands'][0]['authorizedKeys']=pinned(authorized);declare()
+                with self.assertRaisesRegex(ValueError,'no unique forced command'):
+                    joined.deployed_roles(spec,manifest,Path(config))
+                Path(authorized).write_text('restrict,pty,command="'+command+'" ssh-ed25519 AAAA\n')
+                binding['deployment']['memberCommands'][0]['authorizedKeys']=pinned(authorized);declare()
                 old=file('old-mini','different native image')
                 binding['deployment']['cli']=pinned(old);declare()
                 with self.assertRaisesRegex(ValueError,'actual CLI differs'):

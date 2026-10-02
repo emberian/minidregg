@@ -166,8 +166,9 @@ def deployed_roles(spec, manifest, config_path):
         require(absolute(row['publicKey']['path']) == absolute(member['ssh']['identityFile'] + '.pub'),
                 'SSH identity does not match actual member command')
         lines = absolute(binding['authorizedKeys']).read_text().splitlines()
-        matches = [line for line in lines if line.split()[-2:] == public_key
-                   or (' '.join(public_key) + ' ') in line]
+        # Options contain a quoted command with spaces; comments never identify
+        # the key whose forced command sshd will execute.
+        matches = [line for line in lines if shlex.split(line)[1:3] == public_key]
         require(len(matches) == 1, 'member SSH key has no unique forced command')
         forced = re.search(r'command="([^"\n]+)"', matches[0])
         require(forced is not None and matches[0].startswith('restrict,pty,command='),
