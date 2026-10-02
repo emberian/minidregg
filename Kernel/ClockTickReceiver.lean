@@ -441,8 +441,8 @@ def capabilityEvidence [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :=
   ((policyConfig prepared).capabilityEvidenceChecked (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
-      ambient command prepared.plan) command.capability receipt
-    command.control () receipt () (fun _ => ())).toOption
+      ambient command prepared.plan)
+    command.capability () receipt () (fun _ => ())).toOption
 
 def authorize [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
@@ -540,7 +540,7 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   policyGuard prepared ::
     (prepared.authority.readGuards ++
-      ((lawReadGuards prepared).getD []).map (fun (id, root) => ⟨⟨id⟩, root⟩)).filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+      ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => ⟨⟨cellIdValue⟩, root⟩)).filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧

@@ -473,6 +473,11 @@ theorem Accepted.capability_mode [DecidableEq F]
     (accepted : Accepted prepared ingress) :
     ∃ capability commitment,
       accepted.semantic.authorization.evidence.capabilityValue = some (capability, commitment) :=
-  source_capability_only_mode _ _ _ _ _ accepted.semantic.authorization.evidence
+  by
+    match accepted.semantic.authorization.evidence with
+    | .signature witness _ _ => exact nomatch witness
+    | .proof witness _ => exact nomatch witness
+    | .capability capability commitment _ _ _ _ _ _ _ _ _ _ _ _ _ =>
+        exact ⟨capability, commitment, rfl⟩
 
 end Minidregg.Kernel.ParticipantFactoryProvisioning
