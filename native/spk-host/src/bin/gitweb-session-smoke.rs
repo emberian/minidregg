@@ -118,6 +118,7 @@ fn binding(kind: SessionKind, bits: [bool; 2], fingerprint: u8) -> SessionBindin
         session_resource,
         subject,
         projection_fingerprint: [fingerprint; 32],
+        ticket_resource: None,
         kind,
         params: params(identity, bits),
     }

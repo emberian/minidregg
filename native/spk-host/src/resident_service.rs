@@ -36,6 +36,7 @@ use crate::lifecycle_v3_report_native::{
 use crate::materialize::verify_installed_spk;
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
+use crate::resident_route_control::{self, RouteControl, RouteRegistrationReply};
 use crate::sandbox::{open_protected_directory, SandboxSpec};
 use crate::volume_custody::{read_attested_volume, VolumeSite};
 use minidregg_spk_rpc::decode_bridge_config;
@@ -49,6 +50,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MAX_CONFIG: u64 = 16 * 1024;
+// Retained routes must remain loadable after the live registry grows. Keep
+// individual custody bounds small while bounding the whole resident config.
+const MAX_RESIDENT_CONFIG: u64 = MAX_CONFIG * (resident_route_control::MAX_ROUTES as u64 + 1);
 const MAX_LIFECYCLE: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -135,7 +139,9 @@ impl PreparedAgent {
     }
 }
 
-fn default_stream_lease_seconds() -> u64 { crate::web_socket::DEFAULT_LEASE_SECONDS }
+fn default_stream_lease_seconds() -> u64 {
+    crate::web_socket::DEFAULT_LEASE_SECONDS
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -495,8 +501,7 @@ fn load_retained_start(
         || receipt.get("eventId").and_then(Value::as_str) != Some(saved_claim.event_id.as_str())
         || receipt.get("acceptedCount").and_then(Value::as_str)
             != Some(saved_claim.accepted_count.as_str())
-        || receipt.get("worldRoot").and_then(Value::as_str)
-            != Some(saved_claim.world_root.as_str())
+        || receipt.get("worldRoot").and_then(Value::as_str) != Some(saved_claim.world_root.as_str())
     {
         return Err(invalid("retained START source inspection differs"));
     }
@@ -723,7 +728,7 @@ fn reconcile_prior_start(
 
 impl ResidentConfig {
     fn load(path: &Path) -> io::Result<Self> {
-        let bytes = private_file(path, MAX_CONFIG)?;
+        let bytes = private_file(path, MAX_RESIDENT_CONFIG)?;
         let config: Self = serde_json::from_slice(&bytes)?;
         if config.protocol != "mini-spk-resident-start-v3"
             || path.parent() != Some(config.journal_dir.as_path())
@@ -750,11 +755,14 @@ impl ResidentConfig {
             || config.app_uid == 0
             || config.app_gid == 0
             || config.entrances.is_empty()
-            || config.entrances.len() > 8
+            || config.entrances.len() > resident_route_control::MAX_ROUTES
             || config.agents.len() > 8
             || config.persistent_var_max_bytes == 0
             || crate::broker::class(&config.size_class).is_err()
-            || crate::web_socket::StreamLease::begin(Duration::from_secs(config.ws_authority_lease_seconds)).is_err()
+            || crate::web_socket::StreamLease::begin(Duration::from_secs(
+                config.ws_authority_lease_seconds,
+            ))
+            .is_err()
             || !config
                 .completion_semantics
                 .bytes()
@@ -882,10 +890,42 @@ impl ResidentBound {
     }
 }
 
+/// A retained directory is a transport route, not a unique Mini selector.
+/// Regrant can retain the same origin/session/ticket in a new directory. On
+/// START each route still obtains current Mini admission for every request.
+fn load_fixed_entrances(
+    entries: &[FixedEntranceConfig],
+    app_uid: u32,
+) -> io::Result<(Vec<FixedAuthoring>, Vec<CustodianPolicy>)> {
+    let mut custodies = Vec::with_capacity(entries.len());
+    let mut policies = Vec::with_capacity(entries.len());
+    for entry in entries {
+        open_protected_directory(&entry.directory, app_uid, false)?;
+        let custody: FixedAuthoring =
+            serde_json::from_slice(&private_file(&entry.dispatch_custody, MAX_CONFIG)?)?;
+        custody.validate()?;
+        let policy = CustodianPolicy::load(&entry.directory)?;
+        if policy.fixed_app != custody.app
+            || policy.fixed_subject != custody.subject
+            || policy.fixed_session != custody.session
+            || policy.fixed_ticket != custody.ticket_resource
+            || !matches!(
+                (policy.fixed_session_kind, custody.session_kind.as_str()),
+                (EntranceKind::Browser, "web") | (EntranceKind::Api, "api")
+            )
+        {
+            return Err(invalid("HTTP transport differs from fixed Mini custody"));
+        }
+        policies.push(policy);
+        custodies.push(custody);
+    }
+    Ok((custodies, policies))
+}
+
 pub fn run(config_path: &Path) -> io::Result<()> {
     let bound = ResidentBound::from_unit_environment()?;
     crate::setid_bound::install(bound.app_uid, bound.app_gid)?;
-    let config = ResidentConfig::load(config_path)?;
+    let mut config = ResidentConfig::load(config_path)?;
     if config.app_uid != bound.app_uid
         || config.app_gid != bound.app_gid
         || config.grains_root != bound.grains_root
@@ -962,34 +1002,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     signers.validate(&operator, config.app_uid)?;
     // Read every separately fixed transport/custody pair before consuming the
     // one-shot claim. No HTTP socket is bound until START completion.
-    let mut custodies = Vec::with_capacity(config.entrances.len());
-    let mut policies = Vec::with_capacity(config.entrances.len());
-    for entry in &config.entrances {
-        open_protected_directory(&entry.directory, config.app_uid, false)?;
-        let custody: FixedAuthoring =
-            serde_json::from_slice(&private_file(&entry.dispatch_custody, MAX_CONFIG)?)?;
-        custody.validate()?;
-        let policy = CustodianPolicy::load(&entry.directory)?;
-        if policy.fixed_app != custody.app
-            || policy.fixed_subject != custody.subject
-            || policy.fixed_session != custody.session
-            || policy.fixed_ticket != custody.ticket_resource
-            || !matches!(
-                (policy.fixed_session_kind, custody.session_kind.as_str()),
-                (EntranceKind::Browser, "web") | (EntranceKind::Api, "api")
-            )
-            || policies.iter().any(|prior: &CustodianPolicy| {
-                prior.expected_host == policy.expected_host
-                    || (prior.fixed_app == policy.fixed_app
-                        && prior.fixed_session == policy.fixed_session
-                        && prior.fixed_ticket == policy.fixed_ticket)
-            })
-        {
-            return Err(invalid("HTTP transport differs from fixed Mini custody"));
-        }
-        policies.push(policy);
-        custodies.push(custody);
-    }
+    let mut route_bindings = vec![None; config.entrances.len()];
+    let (mut custodies, policies) = load_fixed_entrances(&config.entrances, config.app_uid)?;
     let mut agent_preflights = Vec::with_capacity(config.agents.len());
     for agent in &config.agents {
         open_protected_directory(
@@ -1313,26 +1327,28 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // the unit fails, and its OnFailure supervisor STOPs this generation and
     // continues a new one. A generation is never relaunched in place.
     let app_exit = {
-        let fd = unsafe {
-            libc::syscall(libc::SYS_pidfd_open, resident.child_pid() as libc::pid_t, 0)
-        };
+        let fd =
+            unsafe { libc::syscall(libc::SYS_pidfd_open, resident.child_pid() as libc::pid_t, 0) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
         unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd as libc::c_int) }
     };
+    let mut route_control = RouteControl::bind(&config.journal_dir)?;
     let mut agent_fds: Vec<_> = agent_routes
         .iter()
         .map(|(listener, _, _)| listener.as_raw_fd())
         .collect();
     let app_exit_index = agent_fds.len();
     agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&app_exit));
+    let route_control_index = agent_fds.len();
+    agent_fds.push(route_control.as_raw_fd());
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
     let ws_open = crate::web_socket::OpenSockets::default();
     let continuity_namespace = operator.continuity_namespace(&config.journal_dir)?;
-    PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
+    PrivateHttpEntrance::serve_dynamic_with_aux(entrances, &agent_fds, |event, entrances| {
         if let Ok((index, request, kind, policy)) = event {
             let entry = &config.entrances[index];
             let mut human = ResidentHuman {
@@ -1346,6 +1362,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 limits: ws_limits,
                 stream_lease_lifetime: Duration::from_secs(config.ws_authority_lease_seconds),
                 continuity_namespace: &continuity_namespace,
+                route_binding: route_bindings[index].as_ref(),
             };
             return deliver_request(
                 &mut human,
@@ -1363,6 +1380,86 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         };
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
+        }
+        if index == route_control_index {
+            route_control.poll_once(|request| {
+                if entrances.len() >= resident_route_control::MAX_ROUTES {
+                    return Err(invalid("resident route limit reached"));
+                }
+                let (custody, policy) = resident_route_control::prepare(
+                    request,
+                    &claim.physical_begin.app.to_string(),
+                    &claim.physical_begin.generation.to_string(),
+                )?;
+                if policy.fixed_session_kind == EntranceKind::Api && api_path.is_none() {
+                    return Err(invalid("signed package has no configured API interface"));
+                }
+                open_protected_directory(&request.directory, config.app_uid, false)?;
+                if entrances
+                    .iter()
+                    .any(|prior| prior.occupies_directory(&request.directory))
+                    || agent_routes.iter().any(|(_, prior, _)| {
+                        let (session, ticket, _, _) = prior.coordinates();
+                        session == custody.session || ticket == custody.ticket_resource
+                    })
+                {
+                    return Err(invalid("resident route custody or directory duplicated"));
+                }
+                let admitted = operator.admit_resident_route(
+                    &custody,
+                    &request.expected_app_generation,
+                    &request.expected_session_generation,
+                    &request.registration_nonce_hex,
+                    &config.journal_dir,
+                )?;
+                let binding = admitted.binding();
+                if route_bindings
+                    .iter()
+                    .flatten()
+                    .any(|prior| prior == binding)
+                {
+                    return Err(invalid("resident route source binding duplicated"));
+                }
+                if binding.app != custody.app
+                    || binding.app_generation != request.expected_app_generation
+                    || binding.session != custody.session
+                    || binding.session_generation != request.expected_session_generation
+                    || binding.subject != custody.subject
+                    || binding.ticket_resource != custody.ticket_resource
+                    || admitted.registration_nonce_hex() != request.registration_nonce_hex
+                    || admitted.session_kind() != custody.session_kind
+                {
+                    return Err(invalid("source route admission differs from fixed custody"));
+                }
+                let entrance = PrivateHttpEntrance::bind_fixed(&request.directory, policy)?;
+                let reply = RouteRegistrationReply {
+                    protocol: "mini-spk-route-register-v1".into(),
+                    registration_nonce_hex: request.registration_nonce_hex.clone(),
+                    route_index: entrances.len(),
+                    app: binding.app.clone(),
+                    app_generation: binding.app_generation.clone(),
+                    session: binding.session.clone(),
+                    session_generation: binding.session_generation.clone(),
+                    subject: binding.subject.clone(),
+                    ticket_resource: binding.ticket_resource.clone(),
+                    session_fingerprint_hex: hex_bytes(&binding.session_fingerprint),
+                    admitted_height: admitted.tip().height.clone(),
+                    admitted_world_root: admitted.tip().world_root.clone(),
+                };
+                // All fallible work precedes these append-only mutations. Existing
+                // custody and lease objects are never replaced or renewed here.
+                config.entrances.push(FixedEntranceConfig {
+                    directory: request.directory.clone(),
+                    dispatch_custody: request.dispatch_custody.clone(),
+                    display_name: request.display_name.clone(),
+                    preferred_handle: request.preferred_handle.clone(),
+                });
+                custodies.push(custody);
+                route_bindings.push(Some(binding.clone()));
+                entrances.push(entrance);
+                Ok(reply)
+            })?;
+            return Ok(None);
         }
         let (listener, prepared, agent) = agent_routes
             .get_mut(index)
@@ -1551,8 +1648,7 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn resident_config_refuses_two_agent_sockets_under_one_acl_parent() {
+    fn resident_config_fixture() -> (PathBuf, PathBuf, Value) {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1622,6 +1718,12 @@ mod tests {
         config["startAction"] = json!({"kind":"create","index":0});
         config["volumeResource"] = json!(8401);
         config["expectedVolumeId"] = json!("9".repeat(64));
+        (journal, path, config)
+    }
+
+    #[test]
+    fn resident_config_refuses_two_agent_sockets_under_one_acl_parent() {
+        let (journal, path, mut config) = resident_config_fixture();
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -1631,11 +1733,21 @@ mod tests {
         file.write_all(&serde_json::to_vec(&config).unwrap())
             .unwrap();
         file.sync_all().unwrap();
-        assert_eq!(ResidentConfig::load(&path).unwrap().ws_authority_lease_seconds, 60);
+        assert_eq!(
+            ResidentConfig::load(&path)
+                .unwrap()
+                .ws_authority_lease_seconds,
+            60
+        );
         let mut lease_config = config.clone();
         lease_config["wsAuthorityLeaseSeconds"] = json!(300);
         fs::write(&path, serde_json::to_vec(&lease_config).unwrap()).unwrap();
-        assert_eq!(ResidentConfig::load(&path).unwrap().ws_authority_lease_seconds, 300);
+        assert_eq!(
+            ResidentConfig::load(&path)
+                .unwrap()
+                .ws_authority_lease_seconds,
+            300
+        );
         lease_config["wsAuthorityLeaseSeconds"] = json!(0);
         fs::write(&path, serde_json::to_vec(&lease_config).unwrap()).unwrap();
         assert!(ResidentConfig::load(&path).is_err());
@@ -1665,6 +1777,101 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
         assert!(ResidentConfig::load(&path).is_err());
         fs::remove_dir_all(&journal).unwrap();
+    }
+
+    #[test]
+    fn restart_config_accepts_live_route_limit_and_refuses_one_more() {
+        let (journal, path, mut config) = resident_config_fixture();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(&serde_json::to_vec(&config).unwrap())
+            .unwrap();
+        drop(file);
+        for count in [
+            9,
+            resident_route_control::MAX_ROUTES,
+            resident_route_control::MAX_ROUTES + 1,
+        ] {
+            config["entrances"] = Value::Array((0..count).map(|index| json!({
+                "directory": format!("/run/mini-spk/retained-route-{index}"),
+                "dispatchCustody": format!("/run/mini-spk/retained-route-{index}/dispatch.json"),
+                "displayName": "Member".repeat(32), "preferredHandle": format!("member-{index}"),
+            })).collect());
+            let bytes = serde_json::to_vec(&config).unwrap();
+            if count == resident_route_control::MAX_ROUTES {
+                assert!(bytes.len() as u64 > MAX_CONFIG);
+            }
+            fs::write(&path, bytes).unwrap();
+            if count <= resident_route_control::MAX_ROUTES {
+                assert_eq!(ResidentConfig::load(&path).unwrap().entrances.len(), count);
+            } else {
+                assert!(ResidentConfig::load(&path).is_err());
+            }
+        }
+        fs::remove_dir_all(&journal).unwrap();
+    }
+
+    #[test]
+    fn restart_retains_distinct_routes_with_same_origin_session_and_ticket() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap())
+            .join(format!("restart-routes-{}-{unique}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let mut custody = json!({
+            "protocol":"mini-spk-human-dispatch-custody-v1","app":"17","subject":"8","session":"27","sessionKind":"web",
+            "issueIndex":"1","ticketResource":"37","packageManifest":"40","snapshotManifest":"41","sessionObserveCapability":"42",
+            "manifestObserveCapability":"43","enrollmentObserveCapability":"44","signers":[{"role":"0","index":"0","keyId":"9","keyEpoch":"0","publicKeyHex":"00".repeat(32),"seedPath":root.join("seed")}]
+        });
+        let entries: Vec<_> = ["old-epoch", "new-epoch"]
+            .into_iter()
+            .map(|name| {
+                let directory = root.join(name);
+                crate::http_entrance::initialize_custodian(
+                    &directory,
+                    "app.example.test",
+                    "17",
+                    "8",
+                    "27",
+                    "37",
+                    "web",
+                )
+                .unwrap();
+                let dispatch_custody = write_new(
+                    &directory,
+                    "dispatch.json",
+                    &serde_json::to_vec(&custody).unwrap(),
+                )
+                .unwrap();
+                FixedEntranceConfig {
+                    directory,
+                    dispatch_custody,
+                    display_name: name.into(),
+                    preferred_handle: name.into(),
+                }
+            })
+            .collect();
+        let app_uid = unsafe { libc::geteuid() }.wrapping_add(1000);
+        let (custodies, policies) = load_fixed_entrances(&entries, app_uid).unwrap();
+        assert_eq!(custodies.len(), 2);
+        assert_eq!(policies[0].expected_host, policies[1].expected_host);
+        assert_eq!(custodies[0].session, custodies[1].session);
+        assert_eq!(custodies[0].ticket_resource, custodies[1].ticket_resource);
+        // Allowing duplicate selectors does not relax each route identity check.
+        custody["subject"] = json!("9");
+        fs::write(
+            &entries[1].dispatch_custody,
+            serde_json::to_vec(&custody).unwrap(),
+        )
+        .unwrap();
+        assert!(load_fixed_entrances(&entries, app_uid).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

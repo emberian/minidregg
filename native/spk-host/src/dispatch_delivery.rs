@@ -41,6 +41,9 @@ pub(crate) struct ResidentHuman<'a> {
     pub limits: Limits,
     pub stream_lease_lifetime: Duration,
     pub continuity_namespace: &'a (String, String),
+    /// Hot enrollment fixes the exact source identity for this transport route.
+    /// Initial START routes retain their historical per-request admission path.
+    pub route_binding: Option<&'a ContinuityBinding>,
 }
 
 enum Physical {
@@ -125,22 +128,26 @@ impl ResidentHuman<'_> {
                 &self.custody.app,
                 &self.custody.subject,
                 &self.custody.session,
+                &self.custody.ticket_resource,
+                self.route_binding,
             );
         })?;
+        let m = &committed.matched;
+        let current_binding = ContinuityBinding {
+            domain: self.continuity_namespace.0.clone(),
+            semantics: self.continuity_namespace.1.clone(),
+            app: m.app.to_string(),
+            app_generation: m.app_generation.to_string(),
+            session: m.session_resource.clone(),
+            session_generation: m.session_generation.clone(),
+            subject: m.subject.clone(),
+            ticket_resource: self.custody.ticket_resource.clone(),
+            session_fingerprint: m.session_fingerprint,
+        };
+        let route_matches = route_binding_matches(self.route_binding, &current_binding);
         let continuity = lease.as_ref().map(|_| {
-            let m = &committed.matched;
             (
-                ContinuityBinding {
-                    domain: self.continuity_namespace.0.clone(),
-                    semantics: self.continuity_namespace.1.clone(),
-                    app: m.app.to_string(),
-                    app_generation: m.app_generation.to_string(),
-                    session: m.session_resource.clone(),
-                    session_generation: m.session_generation.clone(),
-                    subject: m.subject.clone(),
-                    ticket_resource: self.custody.ticket_resource.clone(),
-                    session_fingerprint: m.session_fingerprint,
-                },
+                current_binding,
                 ContinuityTip {
                     height: m.accepted_count.clone(),
                     chain: None,
@@ -150,7 +157,7 @@ impl ResidentHuman<'_> {
         });
         let base_path = format!("https://{}", policy.expected_host);
         // Projected before the durable DeliveryRequested, exactly as a GET.
-        let physical = match (&upgrade, slot) {
+        let mut physical = match (&upgrade, slot) {
             (None, _) => Physical::Exchange(physical_web_input(
                 &committed.matched,
                 http,
@@ -170,7 +177,22 @@ impl ResidentHuman<'_> {
             ),
             (Some(_), None) => return Err(invalid("WebSocket slot absent")),
         };
+        match &mut physical {
+            Physical::Exchange(input) => {
+                input.binding.ticket_resource = Some(self.custody.ticket_resource.clone())
+            }
+            Physical::Open(input, _) => {
+                input.binding.ticket_resource = Some(self.custody.ticket_resource.clone())
+            }
+        }
         let recorded = committed.record_delivery_requested(self.journal)?;
+        if !route_matches {
+            // Mini committed a valid current dispatch, but this immutable route
+            // belongs to a different enrollment. Refuse fd3 delivery and retire
+            // the exact marker so unrelated participants keep making progress.
+            let _ = recorded.finish(self.journal, false);
+            return Err(invalid("dispatch differs from immutable route admission"));
+        }
         if self
             .journal
             .read()?
@@ -254,5 +276,52 @@ impl ResidentHuman<'_> {
                 Err(error)
             }
         }
+    }
+}
+
+fn route_binding_matches(
+    expected: Option<&ContinuityBinding>,
+    current: &ContinuityBinding,
+) -> bool {
+    expected.is_none_or(|expected| expected == current)
+}
+
+#[cfg(test)]
+mod route_binding_tests {
+    use super::*;
+    fn binding() -> ContinuityBinding {
+        ContinuityBinding {
+            domain: "1".into(),
+            semantics: "2".into(),
+            app: "17".into(),
+            app_generation: "4".into(),
+            session: "27".into(),
+            session_generation: "2".into(),
+            subject: "8".into(),
+            ticket_resource: "37".into(),
+            session_fingerprint: [3; 32],
+        }
+    }
+    #[test]
+    fn hot_route_never_inherits_regrant_or_changed_fingerprint() {
+        let expected = binding();
+        assert!(route_binding_matches(Some(&expected), &expected));
+        let mut regrant = expected.clone();
+        regrant.session_generation = "3".into();
+        assert!(!route_binding_matches(Some(&expected), &regrant));
+        regrant = expected.clone();
+        regrant.session_fingerprint[0] ^= 1;
+        assert!(!route_binding_matches(Some(&expected), &regrant));
+        regrant = expected.clone();
+        regrant.ticket_resource = "38".into();
+        assert!(!route_binding_matches(Some(&expected), &regrant));
+        regrant = expected.clone();
+        regrant.app_generation = "5".into();
+        assert!(!route_binding_matches(Some(&expected), &regrant));
+        let mut unrelated = expected.clone();
+        unrelated.session = "28".into();
+        unrelated.subject = "9".into();
+        assert!(route_binding_matches(Some(&unrelated), &unrelated));
+        assert!(route_binding_matches(None, &regrant));
     }
 }

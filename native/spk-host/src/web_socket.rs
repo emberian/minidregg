@@ -174,6 +174,16 @@ impl StreamLease {
         check_current(&mut self.0.state.lock().expect("stream lease mutex poisoned"))
     }
 
+    pub(crate) fn bound_to(&self, expected: &ContinuityBinding) -> bool {
+        self.0
+            .state
+            .lock()
+            .expect("stream lease mutex poisoned")
+            .continuity
+            .as_ref()
+            .is_some_and(|(binding, _)| binding == expected)
+    }
+
     /// Attach only the committed open's source identity, never caller input.
     /// A lease cannot change its identity or be rebound following revocation.
     pub(crate) fn bind_continuity(

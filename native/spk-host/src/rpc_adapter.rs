@@ -6,22 +6,22 @@
 #![allow(dead_code)] // Staged until Mini exposes a checked current-session projection.
 
 use crate::hostd::DispatchIdentity;
-use minidregg_spk_rpc::web_session_capnp;
 use crate::web_socket::{pump, switching_protocols, Limits, Slot, StreamLease, WeakStreamLease};
+use minidregg_spk_rpc::web_session_capnp;
 use minidregg_spk_rpc::{
-    dispatch_web, open_web_socket, SessionParameters, SupervisorConnection, ViewInfo,
-    WebRequest, WebResponse, WebSocketOpen,
+    dispatch_web, open_web_socket, SessionParameters, SupervisorConnection, ViewInfo, WebRequest,
+    WebResponse, WebSocketOpen,
 };
-use tokio::io::AsyncWriteExt;
 use std::collections::HashMap;
-use std::io;
 use std::future::Future;
-use std::pin::Pin;
+use std::io;
 use std::os::unix::net::UnixStream;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as sync_mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
@@ -70,6 +70,8 @@ pub(crate) struct SessionBinding {
     pub session_resource: u64,
     pub subject: u64,
     pub projection_fingerprint: [u8; 32],
+    /// Human grant identity supplied by fixed custody after source projection.
+    pub ticket_resource: Option<String>,
     pub kind: SessionKind,
     pub params: SessionParameters,
 }
@@ -107,6 +109,7 @@ impl StreamLeases {
                 return false;
             };
             if prior.key() == binding.key()
+                && prior.ticket_resource == binding.ticket_resource
                 && !same_projection(&prior.projection_fingerprint, &prior.params, binding)
             {
                 lease.revoke();
@@ -120,7 +123,14 @@ impl StreamLeases {
         self.0.push((binding.clone(), lease.downgrade()));
     }
 
-    fn invalidate(&mut self, app: &str, subject: &str, session: &str) {
+    fn invalidate(
+        &mut self,
+        app: &str,
+        subject: &str,
+        session: &str,
+        ticket: &str,
+        exact: Option<&crate::stream_continuity::ContinuityBinding>,
+    ) {
         self.0.retain(|(binding, weak)| {
             let Some(lease) = weak.upgrade() else {
                 return false;
@@ -128,6 +138,8 @@ impl StreamLeases {
             if binding.app.to_string() == app
                 && binding.subject.to_string() == subject
                 && binding.session_resource.to_string() == session
+                && binding.ticket_resource.as_deref() == Some(ticket)
+                && exact.is_none_or(|exact| lease.bound_to(exact))
             {
                 lease.revoke();
             }
@@ -191,9 +203,9 @@ async fn session_for(
     {
         sessions.remove(&key);
     }
-    *use_clock = use_clock.checked_add(1).ok_or_else(|| {
-        invalid("SPK session use counter exhausted")
-    })?;
+    *use_clock = use_clock
+        .checked_add(1)
+        .ok_or_else(|| invalid("SPK session use counter exhausted"))?;
     let session = if let Some(cached) = sessions.get_mut(&key) {
         cached.last_use = *use_clock;
         cached.client.clone()
@@ -219,12 +231,8 @@ async fn session_for(
             })?.map_err(io::Error::other),
         }?;
         if sessions.len() >= MAX_CACHED_SESSIONS {
-            let old = oldest_by_use(
-                sessions
-                    .iter()
-                    .map(|(key, cached)| (*key, cached.last_use)),
-            )
-            .ok_or_else(|| invalid("SPK session cache drift"))?;
+            let old = oldest_by_use(sessions.iter().map(|(key, cached)| (*key, cached.last_use)))
+                .ok_or_else(|| invalid("SPK session cache drift"))?;
             sessions.remove(&old);
         }
         sessions.insert(
@@ -236,10 +244,9 @@ async fn session_for(
                 last_use: *use_clock,
             },
         );
-        *sessions_created =
-            sessions_created.checked_add(1).ok_or_else(|| {
-                invalid("SPK session creation counter exhausted")
-            })?;
+        *sessions_created = sessions_created
+            .checked_add(1)
+            .ok_or_else(|| invalid("SPK session creation counter exhausted"))?;
         client
     };
     Ok(session)
@@ -428,8 +435,15 @@ pub(crate) struct RpcDriver {
 impl RpcDriver {
     /// Failed current-authority admission invalidates only this fixed custody.
     /// Synchronous signaling reaches pumps even while the worker awaits fd3.
-    pub(crate) fn invalidate_custody(&mut self, app: &str, subject: &str, session: &str) {
-        self.leases.invalidate(app, subject, session);
+    pub(crate) fn invalidate_custody(
+        &mut self,
+        app: &str,
+        subject: &str,
+        session: &str,
+        ticket: &str,
+        exact: Option<&crate::stream_continuity::ContinuityBinding>,
+    ) {
+        self.leases.invalidate(app, subject, session, ticket, exact);
     }
 
     pub(crate) fn prepare_cancellable(
@@ -993,6 +1007,7 @@ mod tests {
             session_resource: 6208,
             subject: 8,
             projection_fingerprint: [7; 32],
+            ticket_resource: Some("6408".into()),
             kind: SessionKind::Web,
             params: SessionParameters {
                 identity_id: [8; 32],
@@ -1080,7 +1095,7 @@ mod tests {
             // Queue fresh traffic, then notify before either pump can forward it.
             client_a.write_all(b"A after").await.unwrap();
             writes_a.send(b"secret after".to_vec()).await.unwrap();
-            leases.invalidate("91", "8", "6208");
+            leases.invalidate("91", "8", "6208", "6408", None);
             tokio::time::timeout(Duration::from_millis(500), task_a)
                 .await
                 .unwrap()
@@ -1133,6 +1148,77 @@ mod tests {
         let fresh = StreamLease::begin(Duration::from_secs(60)).unwrap();
         leases.register(&a, &fresh);
         assert!(fresh.check().is_ok());
+    }
+
+    #[test]
+    fn revoked_old_ticket_cannot_cancel_regranted_same_session() {
+        let mut leases = StreamLeases::default();
+        let old = binding();
+        let fresh = SessionBinding {
+            ticket_resource: Some("6508".into()),
+            projection_fingerprint: [42; 32],
+            ..old.clone()
+        };
+        let old_lease = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let fresh_lease = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&old, &old_lease);
+        leases.invalidate("91", "8", "6208", "6408", None);
+        assert!(old_lease.check().is_err());
+        leases.register(&fresh, &fresh_lease);
+        // A failed old route request and even a valid old projection cannot
+        // attenuate another grant's streams on the same principal/session.
+        leases.invalidate("91", "8", "6208", "6408", None);
+        leases.observe(&old);
+        assert!(fresh_lease.check().is_ok());
+        assert!(old_lease.check().is_err());
+        leases.invalidate("91", "8", "6208", "6508", None);
+        assert!(fresh_lease.check().is_err());
+    }
+
+    #[test]
+    fn revoked_hot_epoch_cannot_cancel_new_epoch_on_same_ticket() {
+        use crate::stream_continuity::{ContinuityBinding, ContinuityTip};
+        let old = binding();
+        let prior = ContinuityBinding {
+            domain: "1".into(),
+            semantics: "2".into(),
+            app: old.app.to_string(),
+            app_generation: old.process_generation.to_string(),
+            session: old.session_resource.to_string(),
+            session_generation: "1".into(),
+            subject: old.subject.to_string(),
+            ticket_resource: "6408".into(),
+            session_fingerprint: old.projection_fingerprint,
+        };
+        let next = ContinuityBinding {
+            session_generation: "2".into(),
+            session_fingerprint: [42; 32],
+            ..prior.clone()
+        };
+        let next_session = SessionBinding {
+            projection_fingerprint: next.session_fingerprint,
+            ..old.clone()
+        };
+        let lease_old = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let lease_next = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let tip = ContinuityTip {
+            height: "12".into(),
+            chain: Some("13".into()),
+            world_root: "14".into(),
+        };
+        lease_old
+            .bind_continuity(prior.clone(), tip.clone())
+            .unwrap();
+        lease_next.bind_continuity(next.clone(), tip).unwrap();
+        let mut leases = StreamLeases::default();
+        leases.register(&old, &lease_old);
+        leases.register(&next_session, &lease_next);
+        assert!(lease_old.check().is_err());
+        leases.invalidate("91", "8", "6208", "6408", Some(&prior));
+        assert!(lease_next.check().is_ok());
+        assert!(lease_old.check().is_err());
+        leases.invalidate("91", "8", "6208", "6408", Some(&next));
+        assert!(lease_next.check().is_err());
     }
 
     #[test]
@@ -1407,7 +1493,9 @@ mod tests {
         let (supervisor, _app) = UnixStream::pair().unwrap();
         let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
         let (sender, receiver) = sync_mpsc::sync_channel::<io::Result<()>>(1);
-        sender.send(Err(io::Error::other("app declined the upgrade"))).unwrap();
+        sender
+            .send(Err(io::Error::other("app declined the upgrade")))
+            .unwrap();
         assert!(driver
             .receive_released(receiver, Instant::now() + Duration::from_secs(1))
             .is_err());

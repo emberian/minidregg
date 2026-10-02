@@ -324,6 +324,7 @@ fn project(
                 .parse()
                 .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
             projection_fingerprint: matched.session_fingerprint,
+            ticket_resource: None,
             kind,
             params: SessionParameters {
                 identity_id: matched.principal,
