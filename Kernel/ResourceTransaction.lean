@@ -2,6 +2,7 @@
 operations share one command, exact old directory and authority snapshot, one
 nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
+import Compiler.NativeProtocolFrames
 import Kernel.DeclaredResourceScalar
 import Kernel.WorldKindProjection
 import Compiler.ObjectAudienceRoster
@@ -178,10 +179,6 @@ def commandStream : StreamCodec Command :=
     (fun command => (command.subject, command.nonce, command.targets, command.run))
     (fun (subject, nonce, targets, run) => ⟨subject, nonce, targets, run⟩)
     (by intro command; cases command; rfl)
-
-/-- Version 8 unifies observe-only reads, world-kind mutations and typed
-audience epoch/roster bindings. Both prior v7 shapes refuse. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [8]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -775,7 +772,6 @@ def openingsCheck (command : Command)
         | _ => true
     | _ => true
 
-
 def incidences (command : Command) : List (Incidence command) :=
   (List.finRange command.targets.length).map some ++ [none]
 
@@ -1039,7 +1035,6 @@ theorem PreparedInvocation.authorityPost_logical {F : Type} [Field F] {deploymen
   simp only [PreparedInvocation.authorityPost, ValidatedPatch.apply_logical, authorityReadPatch,
     Patch.run_nil]
   rfl
-
 
 /-! ## The run check is what prepared -/
 

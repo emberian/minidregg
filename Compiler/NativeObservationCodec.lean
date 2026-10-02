@@ -4,6 +4,7 @@ only explicitly public commitments, clock/key/policy coordinates (inside the
 actual canonical signing headers), and the client's own intent. Protected
 payloads are released only by the source-owned observation controller.
 -/
+import Compiler.NativeProtocolFrames
 import Compiler.NativeHostCodec
 
 namespace Minidregg.Compiler.NativeObservationCodec
@@ -151,9 +152,6 @@ def intentStream : StreamCodec Intent :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro intent; cases intent; rfl)
 
-/-- v7 retains the full docuverse query sum and signs roster-bound install drafts. -/
-def intentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v7".toUTF8.toList
-
 /-- final's intent frame before the union (who/since/at + tail). -/
 def retiredIntentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v4".toUTF8.toList
 
@@ -177,10 +175,6 @@ def challengeStream : StreamCodec Challenge :=
       ⟨intent, domain, semantics, federation, worldRoot, authorityRoot, height, clockNow, clockSlot, headers, intentSignature⟩)
     (by intro value; cases value; rfl)
 
-/-- The union of document views, committed clock fields, and the early intent
-signature. v10 adds the roster-bound draft encoding without changing tuple order. -/
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v10".toUTF8.toList
-
 def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6".toUTF8.toList
 
 def retiredDocuverseChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v7".toUTF8.toList
@@ -191,8 +185,6 @@ def signedStream : StreamCodec Signed :=
   StreamCodec.xmap (StreamCodec.product challengeStream (StreamCodec.list bytesStream))
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
-
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v10".toUTF8.toList
 
 def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6".toUTF8.toList
 
@@ -282,7 +274,6 @@ theorem v4_intent_refused (payload : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms v6_challenge_refused
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v6_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v6_signed_refused
-
 
 /-- A v7 challenge (the docuverse line's frame) refuses to decode. -/
 theorem v7_challenge_refused (payload : List UInt8) :

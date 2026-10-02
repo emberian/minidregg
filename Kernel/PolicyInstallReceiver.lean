@@ -16,6 +16,7 @@ generation. Every later use checks the newly selected source. The current source
 still governs its own replacement, so a deliberately restrictive new law may
 refuse future installations even though the control grant remains current.
 -/
+import Compiler.NativeProtocolFrames
 import Kernel.ObjectAudienceInstall
 import Kernel.PolicyInstallController
 import Kernel.ResourceBirthController
@@ -38,7 +39,6 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableCommitProtocol
 
 set_option autoImplicit false
-
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
@@ -65,8 +65,6 @@ def ingressStream : StreamCodec Ingress :=
       ingress.declarationBytes, ingress.envelopeBytes, ingress.rosterBytes))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
     (by intro ingress; cases ingress; rfl)
-
-def ingressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [2]
 
 def ingressRawCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress

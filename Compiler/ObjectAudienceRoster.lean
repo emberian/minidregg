@@ -43,10 +43,13 @@ def codec : LawfulCodec Roster where
   encode := encode
   decode := decode
   decode_encode := decode_encode
+/-- Exported domains are shared with the canonical runtime identity. -/
+def digestCustomization : List UInt8 := "LOOM.OBJECT.AUDIENCE.ROSTER/v1".toUTF8.toList
+def deviceCustomization : List UInt8 := "LOOM.OBJECT.AUDIENCE.DEVICES/v1".toUTF8.toList
 def digest (r : Roster) : Digest :=
-  (Sp800185Cshake256.hash "LOOM.OBJECT.AUDIENCE.ROSTER/v1".toUTF8.toList (encode r)).digest
+  (Sp800185Cshake256.hash digestCustomization (encode r)).digest
 def deviceDigest (r : Roster) : Digest :=
-  (Sp800185Cshake256.hash "LOOM.OBJECT.AUDIENCE.DEVICES/v1".toUTF8.toList
+  (Sp800185Cshake256.hash deviceCustomization
     ((StreamCodec.list entryStream).encode r.entries)).digest
 /-- Exact package-list equality prevents omitting an offline retained holder.
 Enrollment must authenticate these bytes and the device sources separately. -/

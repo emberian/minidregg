@@ -4,6 +4,7 @@ controller bytes, not a second executor or an authority assertion. Each
 operation's existing strict receiving codec still decodes its inner payload.
 No raw DataIntent, supplied height, profile, or post-state is a call variant.
 -/
+import Compiler.NativeProtocolFrames
 import Compiler.NativeHostProfile
 import Kernel.DeclaredResourceController
 import Kernel.PolicyInstallReceiver
@@ -184,9 +185,6 @@ def callStream : StreamCodec SignedCall :=
         (StreamCodec.sum bytesStream bytesStream)))))
     SignedCall.toWire SignedCall.ofWire (by intro value; cases value <;> rfl)
 
-/-- Version 4 (K-RENOUNCE): the call gains `renounce`; a v3 call refuses. -/
-def callFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNED-CALL/v4".toUTF8.toList
-
 def callCodec : LawfulCodec SignedCall :=
   framed callFrame callStream
 
@@ -245,9 +243,6 @@ def draftStream : StreamCodec Draft :=
   StreamCodec.xmap (StreamCodec.sum ordinaryDraftStream rosterInstallStream)
     Draft.toWire Draft.ofWire (by intro value; cases value <;> rfl)
 
-/-- Version 5 binds the complete roster witness into the authoring intent. -/
-def draftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v5".toUTF8.toList
-
 def draftCodec : LawfulCodec Draft := framed draftFrame draftStream
 
 /-- `role,index` is an ordered incidence label, not a user-selected authority.
@@ -281,9 +276,6 @@ def signingPlanStream : StreamCodec SigningPlan :=
       value.finalizedDraft, value.slots))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
       wire.2.2.2.2.1, wire.2.2.2.2.2⟩) (by intro value; cases value; rfl)
-
-/-- Version 6 carries the roster-bound finalized draft. -/
-def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6".toUTF8.toList
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
   framed signingPlanFrame signingPlanStream
@@ -361,12 +353,6 @@ def outcomeStream : StreamCodec Outcome :=
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
-/-- Version 4: receipts bind `(worldRoot, height)` (not the whole-image
-boundary); a refusal carries its closed `RefusalReason` and, for a law
-refusal, the failing clause (`LawLeaf`). Version-1, version-2 and version-3
-outcomes refuse; none is reinterpreted. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
-
 def outcomeCodec : LawfulCodec Outcome :=
   framed outcomeFrame outcomeStream
 
@@ -415,7 +401,6 @@ theorem v4_signingPlan_refused (payload : List UInt8) :
       (retiredSigningPlanFrame ++ payload) = none := by
     simp [framedRaw, lengthExact, different]
   simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
-
 
 def retiredDraftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v3".toUTF8.toList
 def retiredCallFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNED-CALL/v3".toUTF8.toList
