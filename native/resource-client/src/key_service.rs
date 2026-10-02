@@ -59,6 +59,8 @@ fn connect(socket: &Path, end: Instant) -> Result<std::os::unix::net::UnixStream
         return Err("native credential authority socket refused".into());
     }
     address.sun_family = libc::AF_UNIX as _;
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
+    { address.sun_len = std::mem::size_of_val(&address) as _; }
     for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
         *dst = *src as _;
     }
@@ -69,7 +71,7 @@ fn connect(socket: &Path, end: Instant) -> Result<std::os::unix::net::UnixStream
         let fd = unsafe {
             libc::socket(
                 libc::AF_UNIX,
-                libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                libc::SOCK_STREAM,
                 0,
             )
         };
@@ -77,6 +79,10 @@ fn connect(socket: &Path, end: Instant) -> Result<std::os::unix::net::UnixStream
             return Err("native credential authority unavailable".into());
         }
         let stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err("native credential authority unavailable".into());
+        }
+        stream.set_nonblocking(true).map_err(|_| "native credential authority unavailable")?;
         let rc = unsafe {
             libc::connect(
                 fd,
