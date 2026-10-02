@@ -3,6 +3,7 @@
 # updated 2026-10-01: first pin (lane GATES, 2026-10-01, at a2ac159b + SheetLaw/ItemLaw moved to Assurance)  [counts: Minidregg 0 1, Theory 46 83, Kernel 220 273, Pred 4 8, Effects 0 3, Compiler 70 148, Selvage 12 151, Assurance 0 126, Host 44 53, AxiomCensus 0 1]
 # updated 2026-10-01: BRAID-HOST: the final pay/C3 receivers (PayEnrol*, PayObservation*, PurseRefill*, JobMoney*), hermes-tariff ProviderRoute, host-malformed Host.RequestRefusal, p-affordances Host.DryRun, hot-path Compiler.NativeCoprocess enter; UMBRELLA-SPLIT dropped no Host module (0 left)  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 72 150, Selvage 12 151, Assurance 0 126, Host 46 55, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-01: BRAID-HOST: host-keccak brings the fast cSHAKE (Compiler.Sp800185Cshake256Fast, Compiler.Sp800185Cshake256Spec under the Core umbrella) and Compiler.NatDigits255Fast into the Host  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 75 153, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
+# updated 2026-10-01: INTEGRATOR-2 merges 2-3: braid-proof brings k-narrow-hide (Compiler.StoreHiding, Theory.StoreNormalize) and ch-client (Kernel.DomainEpoch, Kernel.DomainEpochLaw, Theory.Channel, Theory.Channel.Cell/Lease/Trace) into the Host; durable-tags brings Compiler.DurableLogTags  [counts: Minidregg 0 1, Theory 51 90, Kernel 233 302, Pred 4 8, Effects 0 3, Compiler 77 155, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -31,6 +32,7 @@ Compiler.CredentialSigningKeyCodec
 Compiler.DeclaredEffectArtifact
 Compiler.DeclaredEffectCell
 Compiler.DurableCheckpointCodec
+Compiler.DurableLogTags
 Compiler.DurableReceiverCodec
 Compiler.DurableReceiverIO
 Compiler.Emit
@@ -72,6 +74,7 @@ Compiler.Sp800185Cshake256Fast
 Compiler.Sp800185Cshake256Spec
 Compiler.Sp800185Kmac256
 Compiler.StoreCodec
+Compiler.StoreHiding
 Compiler.StreamCell
 Compiler.Tower256ConcreteBackend
 Compiler.Tower256CshakeMerkleController
@@ -251,6 +254,8 @@ Kernel.DeclaredFields
 Kernel.DeclaredResourceController
 Kernel.DeclaredResourceProjection
 Kernel.DeclaredResourceScalar
+Kernel.DomainEpoch
+Kernel.DomainEpochLaw
 Kernel.DurableCheckpoint
 Kernel.DurableCommitProtocol
 Kernel.DurableDataIntent
@@ -387,6 +392,10 @@ Theory.CanonicalTransition
 Theory.CausalVersionDag
 Theory.CellSlot
 Theory.CellState
+Theory.Channel
+Theory.Channel.Cell
+Theory.Channel.Lease
+Theory.Channel.Trace
 Theory.CredentialAuthorityEffects
 Theory.CredentialAuthorityFamily
 Theory.CredentialAuthorityState
@@ -416,4 +425,5 @@ Theory.ResourceCost
 Theory.RoomAuthorization
 Theory.StableRanges
 Theory.Store
+Theory.StoreNormalize
 Theory.TypedAuthorization

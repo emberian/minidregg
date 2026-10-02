@@ -48,7 +48,8 @@ that the receipt signatures do not already carry.
   2. Recompute the log root over every record.
   3. Open the checkpoint: its key id, recomputed world root, MAC, and log-root
      value at its height must all check.
-  4. Verify the head entry's tag.
+  4. Verify every entry's tag against the chain at its height
+     (`Compiler.DurableLogTags.verifyTags`); the first wrong one refuses by height.
   5. Materialize the checkpoint and replay only the records after it through
      the shared executor.
 
@@ -78,7 +79,8 @@ that the receipt signatures do not already carry.
 | checkpoint world root does not recompute | `checkpoint refused: rootMismatch` |
 | checkpoint MAC wrong | `checkpoint refused: badMac` |
 | checkpoint log-root value differs from the recomputed log root | `checkpoint does not match the log chain` |
-| head entry's tag wrong (an entry written without the key) | `durable log head tag refused` |
+| the stored entry count differs from the head | `durable log head does not match its entries` |
+| any entry's tag wrong (an entry written or altered without the key) | `durable log entry tag refused at height H` |
 | a record after the checkpoint no longer replays | `durable log suffix does not replay through the canonical executor` |
 | log not rooted at this deployment's genesis log root | `log chain not rooted at this deployment's genesis` |
 | a live session sees the log shrink | `durable log shrank beneath the session` (session poisoned) |
