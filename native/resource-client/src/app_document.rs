@@ -474,7 +474,14 @@ fn occupied_capture(
     Ok(None)
 }
 
+fn publishable_id(id: &str) -> Result<()> {
+    validate_name(&format!("app-{id}"))
+        .map_err(|_| "connector identity must contain 1..60 ASCII letters, digits or hyphens".to_owned())
+}
+
 pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str) -> Result<Value> {
+    validate_name(id)?;
+    publishable_id(id)?;
     validate(binding, workspace)?;
     let dir = operation(root, id)?;
     let _key = store_key(root)?;
@@ -671,6 +678,8 @@ pub(crate) fn recover_exact(root: &Path, workspace: &Value, id: &str) -> Result<
 /// app bytes/receipt; only the destination editing base is refreshed. Each
 /// refused operation claims one successor before constructing it.
 pub(crate) fn rebase(root: &Path, workspace: &Value, id: &str, next: &str) -> Result<Value> {
+    validate_name(next)?;
+    publishable_id(next)?;
     if id == next {
         return Err("rebase requires a fresh connector identity".into());
     }
@@ -776,6 +785,18 @@ mod tests {
             hex(&serde_json::to_vec(r).unwrap())
         )
         .into_bytes()
+    }
+    #[test]
+    fn unpublishable_id_refuses_before_export_custody() {
+        let root = std::env::temp_dir().join(format!("app-doc-long-id-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        let error = capture(&root, &json!({"subject":"8"}), &binding(), &"a".repeat(61)).unwrap_err();
+        assert!(error.contains("1..60"));
+        assert!(!root.join("app-documents").exists());
+        let error = rebase(&root, &json!({"subject":"8"}), "old", &"a".repeat(61)).unwrap_err();
+        assert!(error.contains("1..60"));
+        assert!(!root.join("app-documents").exists());
+        std::fs::remove_dir(&root).unwrap();
     }
     #[test]
     fn occupied_rebase_successor_prevents_any_new_physical_capture() {
