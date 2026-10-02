@@ -2362,8 +2362,8 @@ private def walk (config : Config) (opened : Opened config)
       | .ok derived =>
         let compared ← AuditTiming.value timing (fun _ => "record-compare")
           (fun _ => recordMatches record derived.intent)
-        if matches : compared.val = true then
-          have matched : recordMatches record derived.intent = true := compared.property.symm.trans matches
+        if comparisonMatched : compared.val = true then
+          have matched : recordMatches record derived.intent = true := compared.property.symm.trans comparisonMatched
           let advancedValue ← AuditTiming.value timing (fun _ => "advance")
             (fun _ => advance opened derived)
           match advancedResult : advancedValue.val with
