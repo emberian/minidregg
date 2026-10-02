@@ -24,6 +24,7 @@ import Compiler.Tower256ConcreteBackend
 import Compiler.Sp800185Cshake256
 import Theory.PolicyInstall
 import Theory.LawComposition
+import Theory.ObjectAudience
 import Theory.TypedAuthorization
 import Kernel.MultiCellHyperedge
 
@@ -49,6 +50,10 @@ structure PolicyRecord where
   localSelector : Minidregg.Theory.LawComposition.Selector := {}
   parents : List Minidregg.Theory.LawComposition.PolicyRef := []
   descendants : Option Minidregg.Theory.LawComposition.Component := none
+  /-- Current protected-object epoch; receiving paths authenticate it separately. -/
+  audience : Option Minidregg.Theory.ObjectAudience.State := none
+  /-- Protected-object program descriptor, not a world-kind layout digest. -/
+  objectDescriptor : Option Digest := none
   deriving DecidableEq, Repr
 
 def PolicyRecord.localComponent (record : PolicyRecord) :
@@ -262,13 +267,14 @@ structure CompilerSemanticDescriptor where
   orderWidth : Option Nat
   deriving DecidableEq, Repr
 
-/-- Version 5 adds explicit law components and authenticated closure admission.
+/-- Version 6 binds combined composition and protected-object audience source.
+Version 5 added explicit law components and authenticated closure admission.
 Version 4 lowers the tuple `hashEq` (tag 16, SEALED-MARKET: one commitment opens a
 list of value slots; the digest and opening wires carry the list). Version 3 lowered
 `ran` (tag 14, K-RAN) and the single-value `hashEq` (tag 15, K-HASHEQ, retired); version 2
 lowered the slot-to-slot atoms `eqSlots`/`leSlots`/`leSlotsOff`. Descriptors at an earlier
 version do not verify. -/
-def compilerSemanticVersion : Nat := 5
+def compilerSemanticVersion : Nat := 6
 
 open Minidregg.Compiler.Tower256ConcreteBackend in
 def compilerDescriptorStream :
