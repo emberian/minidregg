@@ -3781,8 +3781,16 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
     retry(&candidate, "lookup", false)
 }
 
-pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
-    let continuity = receipt_continuity::begin_attempt(attempt)?;
+/// Pure classification of the member's retained exact-call history. A known
+/// confirmation wins; otherwise only the newest explicit refusal is terminal.
+/// Reading this status does not advance receipt-continuity custody.
+pub(crate) enum AttemptOutcome {
+    Confirmed(Value),
+    Refused,
+    Pending,
+}
+
+pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome> {
     let mut names = Vec::new();
     for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -3793,19 +3801,27 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
         }
     }
     names.sort();
+    let mut newest_refused = None;
     for name in names.iter().rev() {
         let value = bounded_json(&attempt.join(name))?;
+        newest_refused.get_or_insert(value.get("type").and_then(Value::as_str) == Some("refused"));
         if value.get("type").and_then(Value::as_str) == Some("confirmed")
-            && matches!(
-                value.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-        {
-            receipt_continuity::finish_attempt(continuity, &value, true)?;
-            return Ok(Some(value));
+            && matches!(value.get("confirmation").and_then(Value::as_str), Some("installed" | "replayed")) {
+            return Ok(AttemptOutcome::Confirmed(value));
         }
     }
-    Ok(None)
+    Ok(if newest_refused == Some(true) {AttemptOutcome::Refused} else {AttemptOutcome::Pending})
+}
+
+pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+    let continuity = receipt_continuity::begin_attempt(attempt)?;
+    match retained_attempt_outcome(attempt)? {
+        AttemptOutcome::Confirmed(value) => {
+            receipt_continuity::finish_attempt(continuity, &value, true)?;
+            Ok(Some(value))
+        }
+        AttemptOutcome::Refused | AttemptOutcome::Pending => Ok(None),
+    }
 }
 
 pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
@@ -4038,21 +4054,7 @@ fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
     if accepted_outcome(attempt)?.is_some() {
         return Ok(false);
     }
-    let mut names = Vec::new();
-    for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let file = entry.file_name();
-        let Some(file) = file.to_str() else { continue };
-        if file == "outcome.json" || (file.starts_with("retry-") && file.ends_with(".json")) {
-            names.push(file.to_owned());
-        }
-    }
-    names.sort();
-    let Some(newest) = names.last() else {
-        return Ok(false);
-    };
-    let value = bounded_json(&attempt.join(newest))?;
-    Ok(value.get("type").and_then(Value::as_str) == Some("refused"))
+    Ok(matches!(retained_attempt_outcome(attempt)?, AttemptOutcome::Refused))
 }
 
 /// Release a definitely unadmitted birth attempt so the same name can be

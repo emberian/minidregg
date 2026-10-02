@@ -96,27 +96,8 @@ fn pending_attempts(root: &Path) -> Result<Vec<Value>> {
         if workspace::validate_name(&name).is_err() || !regular(&entry.path().join("call.bin")) {
             continue;
         }
-        let mut terminal = false;
-        for outcome in std::fs::read_dir(entry.path()).map_err(|e| e.to_string())? {
-            let outcome = outcome.map_err(|e| e.to_string())?;
-            let filename = outcome.file_name();
-            let Some(filename) = filename.to_str() else {
-                continue;
-            };
-            if filename != "outcome.json"
-                && !(filename.starts_with("retry-") && filename.ends_with(".json"))
-            {
-                continue;
-            }
-            if let Ok(value) = workspace::bounded_json(&outcome.path()) {
-                terminal |= value["type"] == "refused"
-                    || (value["type"] == "confirmed"
-                        && matches!(
-                            value["confirmation"].as_str(),
-                            Some("installed" | "replayed")
-                        ));
-            }
-        }
+        let terminal = matches!(workspace::retained_attempt_outcome(&entry.path()),
+            Ok(workspace::AttemptOutcome::Confirmed(_) | workspace::AttemptOutcome::Refused));
         if !terminal {
             pending.push(json!({"attempt":name,"status":"needs-exact-lookup",
             "origin":"member-retained-call","currentness":"retained-evidence",
@@ -222,10 +203,19 @@ fn object_value(field: &Value, value: &Value) -> String {
 fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
     let pin = workspace::load(root)?;
     let config = workspace::bounded_json(&workspace::member_path(&pin, "config")?)?;
+    projection_with(root,&pin,&config,selected,
+        |name|workspace::reference(root,name),
+        |reference|workspace::signed_view(root,&pin,reference,"resource").map(|(view,challenge,_)|(view,challenge)))
+}
+
+fn projection_with(root: &Path, pin: &Value, config: &Value, selected: Option<&str>,
+    mut resolve: impl FnMut(&str)->Result<Value>,
+    mut read: impl FnMut(&Value)->Result<(Value,Value)>) -> Result<Value> {
     let mut resources = vec![];
     let mut unavailable = vec![];
-    if let Some(name) = selected {
-        resources.push(Resource::from_reference(&workspace::reference(root, name)?)?.json());
+    let selected_reference = selected.map(&mut resolve).transpose()?;
+    if let Some(reference) = &selected_reference {
+        resources.push(Resource::from_reference(reference)?.json());
     } else {
         for entry in std::fs::read_dir(root.join("refs")).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -251,9 +241,8 @@ fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
             {"label":"credits","command":"pay status"},
             {"label":"incoming references","command":"inbox"},
             {"label":"recent work","command":"history"}]});
-    if let Some(name) = selected {
-        let reference = workspace::reference(root, name)?;
-        let (view, challenge, _) = workspace::signed_view(root, &pin, &reference, "resource")?;
+    if let (Some(name), Some(reference)) = (selected, selected_reference.as_ref()) {
+        let (view, challenge) = read(reference)?;
         value["currentness"] = json!("source-checked");
         value["observation"] = json!({"origin":"native-signed-resource","currentness":"at-observed-head",
             "domain":challenge["domain"],"semantics":challenge["semantics"],
@@ -500,6 +489,33 @@ mod tests {
         assert!(!serde_json::to_string(&rows).unwrap().contains("retry"));
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn selected_alias_is_resolved_once_for_label_and_observation() {
+        let root=fixture();
+        let mut calls=0;
+        let value=projection_with(&root,&json!({"subject":"8"}),&json!({"domain":"8501","expectedSeed":"1"}),Some("alias"),
+            |_| {calls+=1;Ok(json!({"name":"alias","kind":"object","target":if calls==1 {"7"} else {"9"}}))},
+            |reference| {assert_eq!(reference["target"],"7");Ok((json!({"cell":{"root":"2"},"balances":[]}),
+                json!({"domain":"8501","semantics":"3","height":"4","worldRoot":"5","clock":"6"}))) }).unwrap();
+        assert_eq!(calls,1);
+        assert_eq!(value["resources"][0]["target"],value["observation"]["target"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn newer_uncertainty_keeps_recovery_after_an_old_refusal() {
+        let root = fixture();
+        attempt(&root,"a-old-refusal",Some(json!({"type":"refused"})));
+        std::fs::write(root.join("attempts/a-old-refusal/retry-001.json"),br#"{"type":"uncertain"}"#).unwrap();
+        attempt(&root,"a-confirmed",Some(json!({"type":"confirmed","confirmation":"installed"})));
+        std::fs::write(root.join("attempts/a-confirmed/retry-001.json"),br#"{"type":"unavailable"}"#).unwrap();
+        let rows=pending_attempts(&root).unwrap();
+        assert_eq!(rows.len(),1);
+        assert_eq!(rows[0]["attempt"],"a-old-refusal");
+        assert_eq!(rows[0]["actions"][0]["command"],"lookup a-old-refusal");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn foreign_symlink_attempt_and_fake_outcome_do_not_hide_uncertainty() {
         let root = fixture();
