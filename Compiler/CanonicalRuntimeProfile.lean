@@ -98,7 +98,7 @@ def contentProjectionVersion : List UInt8 :=
 height window, inherited lineage, current kind/descriptor/ROM guards and composed
 exports all contribute; a newborn local law is installed without self-gating birth. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS/v4".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS.EXPLICIT-PLACEMENT-OR-UNRESTRICTED-MUTATION/v5".toUTF8.toList
 
 /-- Delegation checks current composed resource law and exact parent/child authority
 against authenticated dependencies from the same image. -/
