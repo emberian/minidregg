@@ -1,5 +1,6 @@
 //! Durable receipt continuity custody. Lean owns every proof decision; this module
 //! only bounds transport, serializes completions, and durably remembers verified points.
+pub(crate) mod carry;
 use crate::{workspace, Result, SOCKET};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
@@ -381,6 +382,16 @@ pub(crate) fn begin(root: &Path, workspace: &Value) -> Result<Option<Ticket>> {
         Ok(_) => (),
     }
     let _lock = lock(&root)?;
+    carry::recover_locked(workspace_root)?;
+    manifest = read_json(&workspace_root.join("workspace.json"))?;
+    if manifest["config"] != workspace["config"]
+        || manifest["host"] != workspace["host"]
+        || manifest["hostSha256"] != workspace["hostSha256"]
+    {
+        return Err(fail(
+            "workspace migrated; reload its configuration before requesting",
+        ));
+    }
     let settings = Settings::load(&root)?;
     settings.check(&workspace::member_path(workspace, "config")?)?;
     let baseline = anchor(&root, &settings)?;
@@ -607,6 +618,13 @@ pub(crate) fn finish(
     mode: Mode,
 ) -> Result<Value> {
     finish_resolved(root, workspace, ticket, mode, |source| {
+        if mode == Mode::Historical {
+            if let Some(point) =
+                carry::historical_challenge(root, workspace, source.settings, challenge)?
+            {
+                return Ok(point);
+            }
+        }
         source.challenge_point(challenge)
     })
 }
@@ -631,6 +649,7 @@ fn finish_resolved(
     };
     let custody = root.join(DIRECTORY);
     let _lock = lock(&custody)?;
+    carry::recover_locked(root)?;
     let current_settings = Settings::load(&custody)?;
     if current_settings.json() != ticket.settings.json() {
         return Err(fail("custody changed during read"));
@@ -638,6 +657,9 @@ fn finish_resolved(
     current_settings.check(&workspace::member_path(workspace, "config")?)?;
     let mut source = HostProof::new(root, workspace, &ticket.settings)?;
     let target = resolve(&source)?;
+    if carry::finish_historical_locked(root, workspace, &current_settings, &target, mode)? {
+        return Ok(target.json());
+    }
     finish_locked(&custody, &ticket, &target, mode, &mut source)?;
     Ok(target.json())
 }
@@ -798,6 +820,12 @@ pub(crate) fn initialize(
 pub(crate) fn replace_verifier(root: &Path, workspace: &Value, verifier: &Path) -> Result<Value> {
     let custody = root.join(DIRECTORY);
     let _lock = lock(&custody)?;
+    carry::recover_locked(root)?;
+    if read_json(&root.join("workspace.json"))? != *workspace {
+        return Err(fail(
+            "workspace migrated; reload before upgrading its verifier",
+        ));
+    }
     let old = Settings::load(&custody)?;
     let retained = anchor(&custody, &old)?;
     let verifier = crate::absolute(verifier)?;

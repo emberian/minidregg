@@ -452,6 +452,8 @@ usage:
   mini workspace --action onboard --dir WORKSPACE
   mini workspace --action continuity-init --dir WORKSPACE --name REF [--verifier LOCAL-HOST]
   mini workspace --action continuity-verifier --dir WORKSPACE --verifier LOCAL-HOST
+  mini workspace --action continuity-carry-authority --dir WORKSPACE --operator-key HEX64
+  mini workspace --action continuity-carry --dir WORKSPACE --edge MANIFEST --source-capsule PATH --new-config CONFIG --new-verifier HOST
   mini workspace --action continuity-check --dir WORKSPACE --attempt RETAINED [--historical true|false]
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
