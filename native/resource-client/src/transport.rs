@@ -217,13 +217,25 @@ fn provider_continuity_request(payload: &[u8]) -> bool {
     let receipt_pair = |bytes: &[u8]| exact_pair(bytes).is_some_and(|(call, outcome)| {
         !call.is_empty() && call.len() < HOST_MAX_FRAME && !outcome.is_empty() && outcome.len() <= 1024
     });
-    if let Some(body) = payload.strip_prefix(crate::provider_continuity::V2) {
+    let v2_body = |body: &[u8]| {
         let Some(prefix) = body.get(..4) else { return false; };
         let length = u32::from_le_bytes(prefix.try_into().expect("four-byte prefix")) as usize;
         let Some(end) = length.checked_add(4).filter(|end| *end <= body.len()) else { return false; };
         let reserve = &body[4..end];
         let fence = &body[end..];
         receipt_pair(reserve) && (fence.is_empty() || receipt_pair(fence))
+    };
+    if let Some(body) = payload.strip_prefix(crate::provider_continuity::V2) {
+        v2_body(body)
+    } else if let Some(body) = payload.strip_prefix(crate::provider_continuity::V3) {
+        exact_pair(body).is_some_and(|(receipts, point)| {
+            v2_body(receipts) && exact_pair(point).is_some_and(|(count, root)| {
+                let natural = |digits: &[u8]| !digits.is_empty() && digits.len() <= 80
+                    && digits.iter().all(u8::is_ascii_digit)
+                    && (digits.len() == 1 || digits[0] != b'0');
+                natural(count) && count != b"0" && natural(root)
+            })
+        })
     } else {
         receipt_pair(payload)
     }
@@ -2226,6 +2238,15 @@ done"#;
             let payload = crate::provider_continuity::request_payload(b"reserve-call", b"reserve-outcome", fence, v2).unwrap();
             let frame = [vec![17], payload.clone()].concat();
             assert!(allowed_operation(&frame, false));
+            if v2 {
+                let previous = serde_json::json!({"checkedAcceptedCount":"7","checkedWorldRoot":"42"});
+                let resolved = crate::provider_continuity::resolution_payload(&payload, &previous).unwrap();
+                assert!(allowed_operation(&[vec![17], resolved.clone()].concat(), false));
+                assert!(!allowed_operation(&[vec![17], resolved[..resolved.len()-1].to_vec()].concat(), false));
+                let mut trailing = resolved;
+                trailing.push(0);
+                assert!(!allowed_operation(&[vec![17], trailing].concat(), false));
+            }
             // Removing the final fence/outcome or truncating the v2 envelope
             // cannot become a generic allowed operation.
             assert!(!allowed_operation(&frame[..5], false));
