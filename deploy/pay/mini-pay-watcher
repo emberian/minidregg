@@ -6,16 +6,24 @@
 #                               the observer workspace's receipts directory;
 #   2. `pay-watcher`            finalized transfers at the endpoints' common tip, written to
 #                               STATE/tick/{observations,events}.json;
-#   3. archive events.json      appended to STATE/journal/YYYY-MM-DD.jsonl, one line per event,
-#                               because the watcher overwrites it every tick and a
-#                               below-journal-floor payment appears in it exactly once
-#                               (the sub-floor term of PAY §11.2's audit sum lives only here);
+#   3. retain pending.json      fsynced BEFORE cursor advance, containing observations,
+#                               events and cursor states. A restarted tick reuses it.
+#                               Below-floor audit events cannot fall through a crash gap;
 #   4. `mini pay observe`       ONE report for every record read at this tip, through the
 #                               observer's workspace; a decided transfer gets a receipt
 #                               (WS/pay/receipts/SIGNATURE.ADDRESS -> the attempt), which is
 #                               what step 2 reads next tick.
+#   5. self-enrollment          a record at the tariff's enrollment index (PAY §11) is never in
+#                               a report: `observe` submits it ALONE through ops 117-120 on the
+#                               Host's operator socket under the observer's C_enrol, and the
+#                               kernel decides enrol | renew | journal. One decision spends one
+#                               tip, so while `observe` prints `enrol-pending`, steps 1-4 run
+#                               again (a fresh finalized tip), at most PAY_ENROL_ROUNDS times.
 #
-# There is no other state: kill it anywhere and the next tick converges (an uncertain submit
+#   6. acknowledge             archive the complete tick as STATE/tick/ticks/ID.json after
+#                               observe settles (0/3). Existing daily journals stay historical.
+#
+# Kill it anywhere and the next tick converges (an uncertain submit
 # is settled by exact lookup before anything new is sent; a spent nullifier is "already
 # credited", never a second credit).
 #
@@ -28,9 +36,14 @@
 #   PAY_RPC_FIXTURES         instead of live endpoints: fixture endpoint directories (rehearsal)
 #   PAY_MIN_ENDPOINTS        optional; the watcher's default is 2
 #   PAY_ENROL_INDEX PAY_JOURNAL_FLOOR   optional, together: the enrollment row (PAY §11)
+#   PAY_ENROL_CAPABILITY PAY_OPERATOR_SOCKET   optional, together: the observer's genesis
+#                            `payObserver.enrolCapability` (C_enrol) and the operator socket of
+#                            the same Host (`mini serve --operator-socket`); without them an
+#                            enrollment-index record is left undecided (`enrol-unconfigured`)
+#   PAY_ENROL_ROUNDS         extra watcher+observe rounds per tick while enrollments wait (default 8)
 #   MINI PAY_WATCHER         binaries (default /opt/mini/bin/{mini,pay-watcher})
 #
-# Exit: the watcher's 2 (nothing written) stops the tick before anything is submitted;
+# Exit: the watcher's 2 stops before observation; any pending recovery record stays retained;
 # otherwise `mini pay observe`'s status: 0 settled or waiting, 3 a record was quarantined or
 # the Host refused, 4 undecided (the next tick looks it up).
 set -eu
@@ -42,36 +55,70 @@ PAY_STATE=${PAY_STATE:-/var/lib/mini/pay}
 : "${PAY_OBSERVER_WS:?PAY_OBSERVER_WS is required}"
 : "${PAY_OBSERVER_CAPABILITY:?PAY_OBSERVER_CAPABILITY is required}"
 command -v jq >/dev/null 2>&1 || { echo 'mini-pay-watcher: jq is required' >&2; exit 2; }
+command -v flock >/dev/null 2>&1 || { echo 'mini-pay-watcher: flock is required' >&2; exit 2; }
 
 TICK=$PAY_STATE/tick
-mkdir -p "$TICK" "$PAY_STATE/journal"
-rm -f "$TICK/observations.json" "$TICK/events.json"
-
-set -- --dir "$PAY_OBSERVER_WS" --out "$PAY_STATE/watcher.json"
-[ -n "${PAY_MIN_ENDPOINTS:-}" ] && set -- "$@" --min-endpoints "$PAY_MIN_ENDPOINTS"
-if [ -n "${PAY_ENROL_INDEX:-}" ] || [ -n "${PAY_JOURNAL_FLOOR:-}" ]; then
-  set -- "$@" --enrol-index "${PAY_ENROL_INDEX:?}" --journal-floor "${PAY_JOURNAL_FLOOR:?}"
+mkdir -p "$TICK"
+exec 9>"$PAY_STATE/.service.lock"
+flock -n 9 || { echo 'mini-pay-watcher: another tick is active' >&2; exit 2; }
+if [ -n "${PAY_ENROL_CAPABILITY:-}" ] || [ -n "${PAY_OPERATOR_SOCKET:-}" ]; then
+  : "${PAY_ENROL_CAPABILITY:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"
+  : "${PAY_OPERATOR_SOCKET:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"
 fi
-"$MINI" pay watch-config "$@" >/dev/null
+rounds=${PAY_ENROL_ROUNDS:-8}
+case $rounds in ''|*[!0-9]*) echo 'mini-pay-watcher: PAY_ENROL_ROUNDS must be an integer' >&2; exit 2;; esac
 
-set -- --config "$PAY_STATE/watcher.json" --out "$TICK" --spool "$TICK"
-if [ -n "${PAY_RPC_FIXTURES:-}" ]; then
-  unset PAY_RPC_ENDPOINTS
-  for fixture in $PAY_RPC_FIXTURES; do set -- "$@" --rpc-fixture "$fixture"; done
-fi
-watched=0
-"$PAY_WATCHER" "$@" >"$TICK/watcher.stdout" 2>"$TICK/watcher.stderr" || watched=$?
-case $watched in
-  0|3) ;;
-  *) echo "mini-pay-watcher: pay-watcher exited $watched; nothing submitted: $(tail -1 "$TICK/watcher.stderr")" >&2
-     exit "$watched" ;;
-esac
+round() {
+  set -- --dir "$PAY_OBSERVER_WS" --out "$PAY_STATE/watcher.json"
+  [ -n "${PAY_MIN_ENDPOINTS:-}" ] && set -- "$@" --min-endpoints "$PAY_MIN_ENDPOINTS"
+  if [ -n "${PAY_ENROL_INDEX:-}" ] || [ -n "${PAY_JOURNAL_FLOOR:-}" ]; then
+    set -- "$@" --enrol-index "${PAY_ENROL_INDEX:?}" --journal-floor "${PAY_JOURNAL_FLOOR:?}"
+  fi
+  "$MINI" pay watch-config "$@" >/dev/null || return $?
 
-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-jq -c --arg at "$at" --argjson tip "$(jq -c .tip "$TICK/observations.json")" \
-  '.[] | {at: $at, tip: $tip} + .' "$TICK/events.json" \
-  >>"$PAY_STATE/journal/$(date -u +%Y-%m-%d).jsonl"
+  set -- --config "$PAY_STATE/watcher.json" --out "$TICK" --spool "$TICK" --durable-ticks
+  if [ -n "${PAY_RPC_FIXTURES:-}" ]; then
+    unset PAY_RPC_ENDPOINTS
+    for fixture in $PAY_RPC_FIXTURES; do set -- "$@" --rpc-fixture "$fixture"; done
+  fi
+  watched=0
+  "$PAY_WATCHER" "$@" >"$TICK/watcher.stdout" 2>"$TICK/watcher.stderr" || watched=$?
+  case $watched in
+    0|3) ;;
+    *) echo "mini-pay-watcher: pay-watcher exited $watched; nothing submitted: $(tail -1 "$TICK/watcher.stderr")" >&2
+       return "$watched" ;;
+  esac
 
-echo "watcher: $(cat "$TICK/watcher.stdout") exit=$watched"
-exec "$MINI" pay observe --dir "$PAY_OBSERVER_WS" --capability "$PAY_OBSERVER_CAPABILITY" \
-  --from "$TICK/observations.json"
+  # The complete audit event set is already durable in pending.json before the
+  # cursor advances. Archive exactly that immutable bundle after the observer
+  # settles; no append-then-marker window can duplicate or lose a journal row.
+  tick_id=$(jq -er '.id' "$TICK/pending.json") || return $?
+  echo "watcher: $(cat "$TICK/watcher.stdout") exit=$watched tick=$tick_id"
+  set -- --dir "$PAY_OBSERVER_WS" --capability "$PAY_OBSERVER_CAPABILITY" --from "$TICK/observations.json"
+  if [ -n "${PAY_ENROL_CAPABILITY:-}" ]; then
+    set -- "$@" --enrol-capability "$PAY_ENROL_CAPABILITY" --operator-socket "$PAY_OPERATOR_SOCKET"
+  fi
+  observed=0
+  "$MINI" pay observe "$@" >"$TICK/observe.stdout" || observed=$?
+  cat "$TICK/observe.stdout"
+  case $observed in
+    0|3)
+      "$PAY_WATCHER" --config "$PAY_STATE/watcher.json" --out "$TICK" --ack-tick "$tick_id" || return $?
+      ;;
+    *) echo "mini-pay-watcher: observer exited $observed; tick $tick_id remains pending" >&2 ;;
+  esac
+  return "$observed"
+}
+
+tip_slot() { jq -r '.tip.slot' "$TICK/observations.json" 2>/dev/null || echo none; }
+status=0
+round || status=$?
+last=$(tip_slot)
+while [ "$status" -eq 0 ] && [ "$rounds" -gt 0 ] && grep -q '^enrol-pending' "$TICK/observe.stdout" 2>/dev/null; do
+  rounds=$((rounds - 1))
+  round || status=$?
+  now=$(tip_slot)
+  [ "$now" != "$last" ] || break
+  last=$now
+done
+exit "$status"

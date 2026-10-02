@@ -14,11 +14,11 @@
 //! Client side, a socket address `ssh:DEST` (`mini --remote DEST ...`) makes
 //! every request that would have gone to a unix socket go to one `ssh -T DEST`
 //! session per process instead. `MINI_SSH` names another ssh program, as
-//! `GIT_SSH` does; ports and identities belong in the ssh config.
+//! `GIT_SSH` does; ports belong in ssh config; --ssh-identity pins a workspace credential.
 use crate::transport;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 
@@ -72,6 +72,7 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
 
 struct Session {
     destination: String,
+    identity: Option<PathBuf>,
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
@@ -96,8 +97,11 @@ fn ssh_program() -> OsString {
 fn open(destination: &str) -> Result<Session, String> {
     transport::remote_destination(destination)?;
     let program = ssh_program();
-    let mut child = Command::new(&program)
-        .args(["-T", "-o", "BatchMode=yes", "--", destination])
+    let mut command = Command::new(&program);
+    command.args(["-T", "-o", "BatchMode=yes"]);
+    let identity = crate::ssh_identity().map(Path::to_path_buf);
+    if let Some(identity) = &identity { command.arg("-i").arg(identity).args(["-o", "IdentitiesOnly=yes"]); }
+    let mut child = command.args(["--", destination])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -108,6 +112,7 @@ fn open(destination: &str) -> Result<Session, String> {
     transport::set_nonblocking(&stdin).map_err(|error| format!("cannot bound ssh input: {error}"))?;
     Ok(Session {
         destination: destination.to_owned(),
+        identity,
         child,
         stdin,
         stdout,
@@ -122,7 +127,7 @@ pub(crate) fn exchange(destination: &str, frame: &[u8]) -> Result<Vec<u8>, Strin
     let mut sessions = SESSIONS
         .lock()
         .map_err(|_| "remote session table poisoned")?;
-    let index = match sessions.iter().position(|s| s.destination == destination) {
+    let index = match sessions.iter().position(|s| s.destination == destination && s.identity.as_deref() == crate::ssh_identity()) {
         Some(index) => index,
         None => {
             sessions.push(open(destination)?);

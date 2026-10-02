@@ -9,6 +9,8 @@
 //! | 107 | the public pay view (roots, tariff, nextFree, book) |
 //! | 129 | the public clock view (the deployment clock: now, slot) |
 //! | 108 / 109 / 110 / 111 | observation plan, assembly, submit, receipt-only lookup |
+//! | 112 | the public enrollment view (entries, journal) |
+//! | 117 / 118 / 119 / 120 | the observer's self-enrollment of ONE enrollment-index record: plan, assembly, submit, receipt-only lookup (operator socket only) |
 //!
 //! Mini owns every codec: the client authors and inspects through the Host (`author`/`inspect`,
 //! ops 7/8) and signs the plan header the Host prints. It decides nothing about a payment; it
@@ -22,6 +24,11 @@
 //! - `pay/receipts/SIGNATURE.ADDRESS`: a symlink to the attempt that decided that transfer.
 //!   This is the directory the watcher reads as its receipts (`pay-watcher` `load_receipts`);
 //! - `pay/quarantine/SIGNATURE.ADDRESS.json`: a record the kernel refused on its own merits.
+//!
+//! Records at the tariff's enrollment index (PAY §11) never go into a report: the observation
+//! receiver refuses them (`enrolIndexNeedsReceiver`). Each one is submitted ALONE through ops
+//! 117-120 under the observer's `C_enrol`, and the kernel's `decideEnrol` decides enrol, renew or
+//! journal. The client carries bytes and reads the answer; it decides nothing about the payment.
 
 use super::*;
 use crate::workspace;
@@ -39,23 +46,31 @@ const OBSERVE_OPS: Ops = Ops {
     submit: 110,
     lookup: 111,
 };
+const ENROL_OPS: Ops = Ops {
+    plan: 117,
+    assemble: 118,
+    submit: 119,
+    lookup: 120,
+};
 const VIEW_OP: u8 = 107;
 /// The public clock view (K-CLOCK): the deployment clock's `{now, slot}`.
 const CLOCK_VIEW_OP: u8 = 129;
+const ENROLMENT_VIEW_OP: u8 = 112;
 
 /// The durable preflight's refusal of a spent nullifier, exactly as the Host renders it
 /// (phase `durable`). On a report whose tip is newer than the clock it can only be an
 /// observation's nullifier (see `observe`), which means the transfer was already credited.
 const ALREADY_CONSUMED: &str = "Minidregg.Kernel.DurableDataIntent.RejectReason.durable \
     (Minidregg.Kernel.DurableCommitProtocol.RejectReason.alreadyConsumed)";
-const REJECT_PREFIXES: [&str; 3] = [
+const REJECT_PREFIXES: [&str; 4] = [
     "Minidregg.Kernel.PayObservation.Reject.",
     "Minidregg.Kernel.PayAssignmentReceiver.Reject.",
     "Minidregg.Kernel.PayBookReceiver.Reject.",
+    "Minidregg.Kernel.PayEnrolReceiver.Reject.",
 ];
 /// Refusals decided by one observation on its own (`PayObservation.decideObservation`, and the
 /// Book admission of its credit). A report carrying such a record is refused whole.
-const PER_OBSERVATION: [&str; 10] = [
+const PER_OBSERVATION: [&str; 11] = [
     "malformedObservation",
     "wrongMint",
     "wrongTokenProgram",
@@ -66,6 +81,7 @@ const PER_OBSERVATION: [&str; 10] = [
     "zeroAmount",
     "observationAfterTip",
     "bookAdmission",
+    "enrolIndexNeedsReceiver",
 ];
 
 #[derive(Clone, Copy)]
@@ -85,6 +101,9 @@ struct Session {
     socket: PathBuf,
     key: PathBuf,
     subject: String,
+    /// The owner-private operator socket of the same Host (`mini serve --operator-socket`):
+    /// the only route to ops 117-120.
+    operator_socket: Option<PathBuf>,
 }
 
 impl Session {
@@ -100,6 +119,7 @@ impl Session {
             config: workspace::member_path(&workspace, "config")?,
             key: workspace::member_path(&workspace, "key")?,
             subject: workspace::member(&workspace, "subject")?.to_owned(),
+            operator_socket: None,
             socket,
             workspace,
             root,
@@ -130,13 +150,14 @@ impl Session {
     }
 
     fn call(&self, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
-        session_invoke(
-            &self.host,
-            &self.socket,
-            &self.config,
-            operation,
-            payload,
-        )
+        let socket = if (ENROL_OPS.plan..=ENROL_OPS.lookup).contains(&operation) {
+            self.operator_socket
+                .as_ref()
+                .ok_or("ops 117-120 need --operator-socket (they are not on the public socket)")?
+        } else {
+            &self.socket
+        };
+        session_invoke(&self.host, socket, &self.config, operation, payload)
     }
 
     fn new_attempt(&self, stem: &str) -> Result<PathBuf> {
@@ -286,7 +307,24 @@ fn refusal_reason(phase: &str, detail: &str) -> Option<String> {
             .take_while(|c| c.is_ascii_alphanumeric())
             .collect();
         let tail = &rest[name.len()..];
-        (!name.is_empty() && (tail.is_empty() || tail.starts_with(' '))).then_some(name)
+        if name.is_empty() || !(tail.is_empty() || tail.starts_with(' ')) {
+            return None;
+        }
+        // The self-enrollment receiver wraps the decision's and the verifier's own reasons:
+        // `decision (Minidregg.Kernel.PayEnrolDecision.Reject.belowJournalFloor)` reads
+        // `decision:belowJournalFloor`.
+        if *prefix == "Minidregg.Kernel.PayEnrolReceiver.Reject."
+            && matches!(name.as_str(), "decision" | "verifier")
+        {
+            let inner = tail.trim_start().strip_prefix('(')?;
+            let path: String = inner
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '.')
+                .collect();
+            let leaf = path.rsplit('.').next().filter(|leaf| !leaf.is_empty())?;
+            return Some(format!("{name}:{leaf}"));
+        }
+        Some(name)
     })
 }
 
@@ -893,6 +931,13 @@ struct Tally {
     already: usize,
     quarantined: usize,
     waiting: Option<String>,
+    /// Self-enrollment submissions and the kernel's decisions (PAY §11).
+    enrol_submissions: usize,
+    enrolled: usize,
+    renewed: usize,
+    journalled: usize,
+    /// Enrollment-index records still undecided when this run stopped (the tip was spent).
+    enrol_pending: usize,
 }
 
 struct Tip {
@@ -1015,6 +1060,7 @@ fn credited(session: &Session, attempt: &Path, records: &[Record], tally: &mut T
 /// accepted it, and its records are simply observed again. A confirmed report whose receipts
 /// were not all written (a crash between the outcome and the links) is completed here too.
 fn resolve_pending(session: &Session, tally: &mut Tally) -> Result<()> {
+    resolve_pending_enrolments(session, tally)?;
     for attempt in pay_attempts(session, "report")? {
         match decision(&attempt).as_deref() {
             Some("credited") => {
@@ -1184,7 +1230,13 @@ fn stop(attempt: &Path, result: &Answer) -> Result<Step> {
 
 /// The watcher's submit path: every record read at one tip goes into ONE report (the tick
 /// nullifier spends the tip slot, so an accepted report is the only one at that tip).
-fn observe(session: &Session, capability: &str, file: &Value, hold: bool) -> Result<()> {
+fn observe(
+    session: &Session,
+    capability: &str,
+    enrol_capability: Option<&str>,
+    file: &Value,
+    hold: bool,
+) -> Result<()> {
     let mut tally = Tally::default();
     resolve_pending(session, &mut tally)?;
     let tip = tip_of(file)?;
@@ -1209,13 +1261,346 @@ fn observe(session: &Session, capability: &str, file: &Value, hold: bool) -> Res
         }
         records.push(record);
     }
+    // Route by the tariff's enrollment index: those records go to the self-enrollment
+    // receiver one at a time; the observation receiver would refuse a report carrying one.
+    let enrol_index = if records.is_empty() {
+        None
+    } else {
+        enrol_index_of(&scratch_view(session)?)?
+    };
+    let (enrol, records): (Vec<Record>, Vec<Record>) = records
+        .into_iter()
+        .partition(|record| Some(record.index) == enrol_index);
     if hold {
         let (attempt, _) = build_report(session, capability, &tip, &records)?;
         println!("held\t{}\t{} record(s)", attempt.display(), records.len());
         return Ok(());
     }
-    let step = observe_records(session, capability, &tip, records, &mut tally, None)?;
+    // Ordinary records first, exactly as before. With none and an enrollment record waiting,
+    // the enrollment is this tip's submission (it advances the clock as a heartbeat would).
+    let step = if records.is_empty() && !enrol.is_empty() {
+        Step::Again
+    } else {
+        observe_records(session, capability, &tip, records, &mut tally, None)?
+    };
+    let step = match (step, enrol.is_empty()) {
+        (step, true) => step,
+        (Step::Again, false) => match enrol_capability {
+            Some(enrol_capability) => {
+                enrol_records(session, enrol_capability, &tip, &enrol, &mut tally)?
+            }
+            None => {
+                for record in &enrol {
+                    println!(
+                        "enrol-unconfigured\t{}\t{}\tneeds --enrol-capability and --operator-socket",
+                        record.index,
+                        record.short()
+                    );
+                }
+                tally.enrol_pending = enrol.len();
+                tally.waiting = Some("enrolUnconfigured".into());
+                set_exit(3);
+                Step::Stop
+            }
+        },
+        (step, false) => {
+            // The tip is spent (or this tick stopped): every enrollment record waits for the
+            // next tip. The tick script asks the watcher again while this line appears.
+            tally.enrol_pending = enrol.len();
+            step
+        }
+    };
+    if tally.enrol_pending > 0 {
+        println!("enrol-pending\t{}\tnext tip", tally.enrol_pending);
+    }
     summary(&tip, &tally, step);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- self-enrollment (PAY §11)
+
+/// The tariff's enrollment index, from the public pay view; `None` = self-enrollment off.
+fn enrol_index_of(view: &Value) -> Result<Option<u128>> {
+    let Some(tariff) = view.get("tariff").filter(|tariff| !tariff.is_null()) else {
+        return Ok(None);
+    };
+    match tariff.get("enrolIndex") {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => number(tariff, "enrolIndex").map(Some),
+    }
+}
+
+/// Read the public enrollment view (op 112) into `directory/STEM.{bin,json}`.
+fn read_enrolment_view(session: &Session, directory: &Path, stem: &str) -> Result<Value> {
+    let frame = session.call(ENROLMENT_VIEW_OP, &[])?;
+    let body = frame_body(&frame, ENROLMENT_VIEW_OP)?;
+    let bin = directory.join(format!("{stem}.bin"));
+    create_private(&bin, body)?;
+    session.inspect("pay-enrolment-view", &bin, &directory.join(format!("{stem}.json")))
+}
+
+/// The Mini key a record's memo names, as the Host's own codec reads it; `None` when the
+/// record carries no memo or the memo does not parse (the kernel journals those).
+fn memo_key(session: &Session, record: &Record, directory: &Path) -> Result<Option<String>> {
+    let Some(memo) = record.value.get("memo").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let bin = directory.join("memo.bin");
+    if !bin.exists() {
+        create_private(&bin, &decode_hex(memo)?)?;
+    }
+    let parsed = session.inspect("pay-enrol-memo", &bin, &directory.join("memo.json"))?;
+    Ok(if parsed.get("accepted").and_then(Value::as_bool) == Some(true) {
+        Some(text(&parsed, "miniKey")?)
+    } else {
+        None
+    })
+}
+
+/// What the kernel decided for a CONFIRMED self-enrollment, read back from the enrollment
+/// view the Host serves: a journal row named by the transfer, or the memo key's entry (new
+/// = enrolled, present before = renewed). The client does not re-derive the decision.
+fn enrol_decided(
+    session: &Session,
+    attempt: &Path,
+    record: &Record,
+    result: &Answer,
+    tally: &mut Tally,
+) -> Result<()> {
+    let after = read_enrolment_view(session, attempt, "enrolment-after")?;
+    let before = workspace::bounded_json(&attempt.join("enrolment-before.json"))?;
+    let journal = after
+        .get("journal")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter().find(|row| {
+                row.get("signature").and_then(Value::as_str) == Some(record.signature.as_str())
+                    && row.get("address").and_then(Value::as_str) == Some(record.address.as_str())
+            })
+        });
+    let entry_of = |view: &Value, key: &str| -> Option<Value> {
+        view.get("entries")?
+            .as_array()?
+            .iter()
+            .find(|entry| entry.get("miniKey").and_then(Value::as_str) == Some(key))
+            .cloned()
+    };
+    let (decision, detail) = match journal {
+        Some(row) => (
+            "journalled",
+            json!({"reason": row.get("reason"), "amount": row.get("amount")}),
+        ),
+        None => {
+            let key = memo_key(session, record, attempt)?
+                .ok_or("a confirmed self-enrollment with no journal row names no Mini key")?;
+            let entry = entry_of(&after, &key)
+                .ok_or("a confirmed self-enrollment is in neither the journal nor the entries")?;
+            let decision = if entry_of(&before, &key).is_some() {
+                "renewed"
+            } else {
+                "enrolled"
+            };
+            (
+                decision,
+                json!({"miniKey": key, "subject": entry.get("subject"), "lease": entry.get("lease"),
+                    "index": entry.get("index")}),
+            )
+        }
+    };
+    retain_json(
+        &attempt.join("enrol.json"),
+        &json!({"type":"minidregg-pay-enrol-decision-v1","decision":decision,"detail":detail}),
+    )?;
+    decide(attempt, decision, result)?;
+    receipt(session, record, attempt)?;
+    match decision {
+        "journalled" => tally.journalled += 1,
+        "renewed" => tally.renewed += 1,
+        _ => tally.enrolled += 1,
+    }
+    let shown = match decision {
+        "journalled" => detail
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_owned(),
+        _ => format!(
+            "subject {} expiresAt {}",
+            detail.get("subject").and_then(Value::as_str).unwrap_or("?"),
+            detail
+                .get("lease")
+                .and_then(|lease| lease.get("expiresAt"))
+                .map(Value::to_string)
+                .unwrap_or_else(|| "none".into())
+        ),
+    };
+    println!(
+        "{decision}\t{}\t{}\t{shown}\t{}",
+        record.index,
+        record.short(),
+        attempt.display()
+    );
+    Ok(())
+}
+
+/// Refusals of the self-enrollment receiver that one record caused and that consumed nothing:
+/// the record is quarantined (no receipt: it is read again next tick) and the next record is
+/// tried at the same tip.
+fn enrol_record_refusal(reason: &str) -> bool {
+    reason.starts_with("decision:")
+        || matches!(
+            reason,
+            "keyTaken"
+                | "observeGrantTaken"
+                | "allocation"
+                | "bookAdmission"
+                | "birthShape"
+                | "grantBatch"
+                | "authorityEntries"
+                | "renewalRecord"
+        )
+}
+
+/// Submit the enrollment-index records ONE per submission (ops 117-120, operator socket) at
+/// `tip`. The first confirmed decision spends the tip; the rest wait for the next one.
+fn enrol_records(
+    session: &Session,
+    capability: &str,
+    tip: &Tip,
+    records: &[Record],
+    tally: &mut Tally,
+) -> Result<Step> {
+    for (position, record) in records.iter().enumerate() {
+        let mut stale = false;
+        loop {
+            let attempt = session.new_attempt(&format!("enrol-{}", tip.slot))?;
+            let view = read_view(session, &attempt)?;
+            read_enrolment_view(session, &attempt, "enrolment-before")?;
+            retain_json(
+                &attempt.join("records.json"),
+                &json!({"tip":tip.value,"observations":[record.value]}),
+            )?;
+            let command = json!({"observer":session.subject,"capability":capability,
+                "nonce":workspace::random_nonce()?,
+                "expectedAuthorityRoot":text(&view, "authorityRoot")?,
+                "expectedPayRoot":text(&view, "payRoot")?,
+                "tip":tip.value,"observation":record.kernel()});
+            prepare(session, &attempt, "pay-enrol", &command, ENROL_OPS)?;
+            tally.enrol_submissions += 1;
+            let result = submit_once(session, &attempt, ENROL_OPS)?;
+            match (&result, result.reason()) {
+                (Answer::Confirmed(_), _) => {
+                    enrol_decided(session, &attempt, record, &result, tally)?;
+                    tally.enrol_pending = records.len() - position - 1;
+                    return Ok(Step::Done);
+                }
+                // At a tip equal to the clock the spent nullifier may be the tick's.
+                (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+                    decide(&attempt, "waiting", &result)?;
+                    waiting(tally, "tipReported", tip, &view);
+                    tally.enrol_pending = records.len() - position;
+                    return Ok(Step::Stop);
+                }
+                // A newer tip's tick is unspent, so the spent nullifier is this transfer's:
+                // the kernel decided it before (enrolled, renewed or journalled).
+                (_, Some("alreadyConsumed")) => {
+                    decide(&attempt, "alreadyDecided", &result)?;
+                    receipt(session, record, &attempt)?;
+                    println!(
+                        "already-decided\t{}\t{}\tkernel\t{}",
+                        record.index,
+                        record.short(),
+                        attempt.display()
+                    );
+                    tally.already += 1;
+                }
+                (_, Some("stalePay" | "staleAuthority")) if !stale => {
+                    decide(&attempt, "retried", &result)?;
+                    stale = true;
+                    continue;
+                }
+                (_, Some("tipBehindClock")) => {
+                    decide(&attempt, "waiting", &result)?;
+                    waiting(tally, "tipBehindClock", tip, &view);
+                    tally.enrol_pending = records.len() - position;
+                    return Ok(Step::Stop);
+                }
+                // The native verifier failed: nothing was decided or consumed; retry next tick.
+                (_, Some(reason)) if reason.starts_with("verifier:") => {
+                    decide(&attempt, "waiting", &result)?;
+                    waiting(tally, "verifierUnavailable", tip, &view);
+                    tally.enrol_pending = records.len() - position;
+                    set_exit(4);
+                    return Ok(Step::Stop);
+                }
+                (_, Some(reason)) if enrol_record_refusal(reason) => {
+                    decide(&attempt, "quarantined", &result)?;
+                    quarantine(session, record, &attempt, reason)?;
+                    println!(
+                        "quarantined\t{}\t{}\t{reason}\t{}",
+                        record.index,
+                        record.short(),
+                        attempt.display()
+                    );
+                    tally.quarantined += 1;
+                    set_exit(3);
+                }
+                _ => {
+                    tally.enrol_pending = records.len() - position;
+                    return stop(&attempt, &result);
+                }
+            }
+            break;
+        }
+    }
+    Ok(Step::Again)
+}
+
+/// Settle every self-enrollment whose submit answer was lost (op 120), and re-derive the
+/// receipts of every decided one.
+fn resolve_pending_enrolments(session: &Session, tally: &mut Tally) -> Result<()> {
+    for attempt in pay_attempts(session, "enrol")? {
+        match decision(&attempt).as_deref() {
+            Some("enrolled" | "renewed" | "journalled" | "alreadyDecided") => {
+                for record in retained_records(&attempt)? {
+                    receipt(session, &record, &attempt)?;
+                }
+                continue;
+            }
+            Some(_) => continue,
+            None => {}
+        }
+        if !attempt.join("submit-marker.json").exists() {
+            continue;
+        }
+        if session.operator_socket.is_none() {
+            println!(
+                "undecided\t{}\tself-enrollment lookup needs --operator-socket",
+                attempt.display()
+            );
+            set_exit(4);
+            continue;
+        }
+        let records = retained_records(&attempt)?;
+        let record = records
+            .first()
+            .ok_or("a self-enrollment attempt retains no record")?;
+        let result = lookup(session, &attempt, ENROL_OPS)?;
+        match &result {
+            Answer::Confirmed(_) => {
+                println!("resolved\t{}\tconfirmed by lookup", attempt.display());
+                enrol_decided(session, &attempt, record, &result, tally)?;
+            }
+            Answer::Undecided(detail) if detail.starts_with("absent") => {
+                decide(&attempt, "absent", &result)?;
+                println!("resolved\t{}\tabsent: observed again", attempt.display());
+            }
+            _ => {
+                println!("undecided\t{}\t{}", attempt.display(), result.render());
+                set_exit(4);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1248,8 +1633,22 @@ fn resume(session: &Session, capability: &str, attempt: &Path) -> Result<()> {
 }
 
 fn summary(tip: &Tip, tally: &Tally, step: Step) {
+    // The self-enrollment counts appear only when this run touched the enrollment index, so
+    // a tick without one reads exactly as before.
+    let enrol = if tally.enrol_submissions + tally.enrol_pending > 0 {
+        format!(
+            " enrol-submissions {} enrolled {} renewed {} journalled {} enrol-pending {}",
+            tally.enrol_submissions,
+            tally.enrolled,
+            tally.renewed,
+            tally.journalled,
+            tally.enrol_pending
+        )
+    } else {
+        String::new()
+    };
     println!(
-        "pay observe: tip {} reports {} credited {} already-credited {} quarantined {}{}",
+        "pay observe: tip {} reports {} credited {} already-credited {} quarantined {}{enrol}{}",
         tip.slot,
         tally.reports,
         tally.credited,
@@ -1375,6 +1774,38 @@ fn audit(session: &Session, offline: bool) -> Result<()> {
             println!(
                 "report\t{}\t{count} transfer(s)\t+{credit}\t{}",
                 attempt.display(),
+                if replayed { "journaled" } else { "FINDING: not journaled" }
+            );
+        }
+    }
+    // Self-enrollments: an enrolment or a renewal mints `creditFor amount` into the
+    // enrollment float exactly as a credited report does; a journal row mints nothing. Each
+    // decided submission must replay through op 120 (operator socket).
+    for attempt in pay_attempts(session, "enrol")? {
+        let decided = decision(&attempt);
+        let minted = matches!(decided.as_deref(), Some("enrolled" | "renewed"));
+        if !minted && decided.as_deref() != Some("journalled") {
+            continue;
+        }
+        let (credit, over, count) = if minted {
+            report_credit(&attempt)?
+        } else {
+            (0, 0, 1)
+        };
+        credited += credit;
+        residual += over;
+        transfers += count;
+        if !offline {
+            let result = lookup(session, &attempt, ENROL_OPS)?;
+            let replayed = matches!(&result, Answer::Confirmed(value)
+                if value.get("confirmation").and_then(Value::as_str) == Some("replayed"));
+            if !replayed {
+                findings += 1;
+            }
+            println!(
+                "enrol\t{}\t{}\t+{credit}\t{}",
+                attempt.display(),
+                decided.as_deref().unwrap_or("?"),
                 if replayed { "journaled" } else { "FINDING: not journaled" }
             );
         }
@@ -1508,6 +1939,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return crate::pay_refill::run(args);
     }
     let root = path(args.required("dir")?);
+    // The owner-private operator socket of the same Host: the observer's only route to the
+    // self-enrollment ops 117-120 (`mini serve --operator-socket`).
+    let operator_socket = args
+        .optional("operator-socket")
+        .map(|socket| absolute(&path(socket)))
+        .transpose()?;
+    let open = |root: &Path| -> Result<Session> {
+        let mut session = Session::open(root)?;
+        session.operator_socket = operator_socket.clone();
+        Ok(session)
+    };
     let account = args
         .optional("account")
         .map(|value| value.into_string().map_err(|_| "--account must be UTF-8"))
@@ -1547,16 +1989,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "observe" => {
             let capability = capability(&mut args)?;
+            let enrol_capability = args
+                .optional("enrol-capability")
+                .map(|value| {
+                    let value = value
+                        .into_string()
+                        .map_err(|_| "--enrol-capability must be UTF-8")?;
+                    number(&json!({ "v": value }), "v")
+                        .map_err(|_| "--enrol-capability must be a decimal")?;
+                    Ok::<_, String>(value)
+                })
+                .transpose()?;
+            if enrol_capability.is_some() != operator_socket.is_some() {
+                return Err("--enrol-capability and --operator-socket go together".into());
+            }
             let resume_attempt = args.optional("resume").map(path);
             let from = args.optional("from");
             let hold = args.optional("hold").is_some_and(|value| value == "true");
             args.finish()?;
-            let session = Session::open(&root)?;
+            let session = open(&root)?;
             match (resume_attempt, from) {
                 (Some(attempt), None) if !hold => resume(&session, &capability, &attempt),
-                (None, Some(from)) => {
-                    observe(&session, &capability, &read_observations(&from)?, hold)
-                }
+                (None, Some(from)) => observe(
+                    &session,
+                    &capability,
+                    enrol_capability.as_deref(),
+                    &read_observations(&from)?,
+                    hold,
+                ),
                 _ => Err("pay observe takes --from FILE|- [--hold true], or --resume ATTEMPT".into()),
             }
         }
@@ -1567,12 +2027,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let file = json!({"tip":{"slot":slot as u64,"blockTime":block_time as u64},
                 "observations":[]});
-            observe(&Session::open(&root)?, &capability, &file, false)
+            observe(&open(&root)?, &capability, None, &file, false)
         }
         "audit" => {
             let offline = args.optional("offline").is_some_and(|value| value == "true");
             args.finish()?;
-            audit(&Session::open(&root)?, offline)
+            audit(&open(&root)?, offline)
         }
         other => Err(format!(
             "unknown pay action {other}: address|status|book|watch-config|observe|heartbeat|audit|refill"
@@ -1624,6 +2084,47 @@ mod tests {
             refusal_reason("x", "Minidregg.Kernel.PayObservation.Reject.stalePay.extra"),
             None
         );
+    }
+
+    #[test]
+    fn self_enrollment_refusals_name_the_decision_and_the_verifier() {
+        // As J-PAY-E3's Host rendered them (phase pay-enrol).
+        assert_eq!(
+            refusal_reason(
+                "pay-enrol",
+                "Minidregg.Kernel.PayEnrolReceiver.Reject.decision \
+                 (Minidregg.Kernel.PayEnrolDecision.Reject.belowJournalFloor)"
+            ),
+            Some("decision:belowJournalFloor".into())
+        );
+        assert_eq!(
+            refusal_reason(
+                "pay-enrol",
+                "Minidregg.Kernel.PayEnrolReceiver.Reject.verifier\n  \
+                 (Minidregg.Compiler.CredentialSignatureIO.Error.processFailed 70 \"verifier offline\")"
+            ),
+            Some("verifier:processFailed".into())
+        );
+        assert_eq!(
+            refusal_reason("pay-enrol", "Minidregg.Kernel.PayEnrolReceiver.Reject.stalePay"),
+            Some("stalePay".into())
+        );
+        // A bare `decision` with no inner constructor is not a reason the client acts on.
+        assert_eq!(
+            refusal_reason("pay-enrol", "Minidregg.Kernel.PayEnrolReceiver.Reject.decision"),
+            None
+        );
+        assert!(enrol_record_refusal("decision:selfEnrolOff"));
+        assert!(!enrol_record_refusal("policyRejected"));
+        assert!(!enrol_record_refusal("verifier:processFailed"));
+    }
+
+    #[test]
+    fn the_enrollment_index_comes_from_the_tariff_or_is_off() {
+        assert_eq!(enrol_index_of(&json!({"tariff": null})).unwrap(), None);
+        assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": null}})).unwrap(), None);
+        assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": "0"}})).unwrap(), Some(0));
+        assert!(enrol_index_of(&json!({"tariff": {"enrolIndex": "01"}})).is_err());
     }
 
     #[test]

@@ -197,12 +197,19 @@ fn continuity_request(payload: &[u8]) -> bool {
         && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object())
 }
 
-fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
+pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
-        // Source-owned enrollment/renewal quote. Host/Json validates the fields;
+        // Source-owned enrollment quote and exact paid claim status/quote. Host validates fields;
         // ingress only bounds the JSON object before any backend exchange.
-        [121, payload @ ..] => !payload.is_empty() && payload.len() <= 4096
+        [121 | 181 | 182, payload @ ..] => !payload.is_empty() && payload.len() <= 4096
             && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| value.is_object()),
+        // Closed public claim prepare, detached assembly, submit and exact
+        // lookup. Canonical command/ingress admission remains source-owned.
+        [183, command @ ..] => !command.is_empty() && command.len() <= 2048,
+        [184, pair @ ..] if pair.len() <= 4096 => exact_pair(pair).is_some_and(
+            |(plan, signature)| !plan.is_empty() && plan.len() <= 3072 && signature.len() == 64,
+        ),
+        [185 | 186, ingress @ ..] => !ingress.is_empty() && ingress.len() <= 4096,
         [151, payload @ ..] => continuity_request(payload),
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
@@ -414,6 +421,11 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [93, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [94 | 95, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // Sponsor-custodied self-enrollment: plan, detached signature,
+        // submit and exact lookup. Public callers cannot enter these routes.
+        [117 | 119 | 120, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [118, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
         [126 | 128, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
@@ -769,6 +781,171 @@ pub fn invoke_pinned(
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
     invoke_inner(socket, config, Some(&expected), operation, payload)
+}
+
+/// Public read workflows use one absolute deadline across connect, write and read.
+/// Unlike ordinary invocation, this deliberately supports only a local Unix socket.
+pub(crate) fn invoke_pinned_deadline(
+    socket: &Path,
+    config: &Path,
+    expected_host_sha256: &str,
+    operation: u8,
+    payload: &[u8],
+    deadline: Instant,
+) -> Result<Vec<u8>, String> {
+    let expected = parse_host_sha256(expected_host_sha256)?;
+    let Endpoint::Unix(socket) = endpoint(socket)? else {
+        return Err("deadline invocation requires a local Unix socket".to_owned());
+    };
+    let config = read_config(config)?;
+    if payload.len() >= HOST_MAX_FRAME {
+        return Err("host request exceeds frame bound before transmission".to_owned());
+    }
+    let mut frame = Vec::with_capacity(config.len() + payload.len() + 38);
+    frame.push(2);
+    frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&config);
+    frame.extend_from_slice(&expected);
+    frame.push(operation);
+    frame.extend_from_slice(payload);
+    let mut stream = connect_unix_deadline(socket, deadline)
+        .map_err(|e| format!("cannot connect within deadline: {e}"))?;
+    write_frame(
+        &mut DeadlinePipeWrite {
+            writer: &mut stream,
+            deadline,
+        },
+        &frame,
+    )
+    .map_err(|e| format!("uncertain host request write: {e}"))?;
+    let reply = read_frame(&mut DeadlinePipe {
+        reader: &mut stream,
+        deadline,
+    })
+    .map_err(|e| format!("uncertain host response read: {e}"))?
+    .ok_or_else(|| "uncertain host response: connection closed".to_owned())?;
+    if reply.len() > HOST_MAX_FRAME || reply.is_empty() {
+        return Err("uncertain host response exceeds host frame bound".to_owned());
+    }
+    if reply[0] == 254 {
+        return Err(format!(
+            "socket rejected request: {}",
+            String::from_utf8_lossy(&reply[1..])
+        ));
+    }
+    if reply[0] != operation && reply[0] != 255 {
+        return Err(format!(
+            "uncertain host response: unexpected operation {}",
+            reply[0]
+        ));
+    }
+    Ok(reply)
+}
+
+fn connect_unix_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStream> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let name = path.as_os_str().as_bytes();
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if name.is_empty() || name.contains(&0) || name.len() >= address.sun_path.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Unix socket path",
+        ));
+    }
+    address.sun_family = libc::AF_UNIX as _;
+    for (to, from) in address.sun_path.iter_mut().zip(name) {
+        *to = *from as _;
+    }
+    let length =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + name.len() + 1) as libc::socklen_t;
+    #[cfg(target_os = "macos")]
+    {
+        address.sun_len = length as u8;
+    }
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let stream = unsafe { UnixStream::from_raw_fd(fd) };
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    stream.set_nonblocking(true)?;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Unix connect deadline",
+            ));
+        }
+        if unsafe { libc::connect(fd, &address as *const _ as *const libc::sockaddr, length) } == 0
+        {
+            return Ok(stream);
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINTR) => continue,
+            // AF_UNIX queue saturation does not establish a pending connection.
+            // POLLOUT on that socket can spin, so retry with a bounded short pause.
+            Some(code) if code == libc::EAGAIN || code == libc::EWOULDBLOCK => {
+                std::thread::sleep(remaining.min(Duration::from_millis(2)));
+                continue;
+            }
+            Some(libc::EINPROGRESS) | Some(libc::EALREADY) => {}
+            _ => return Err(error),
+        }
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Unix connect deadline",
+                ));
+            }
+            let mut pollfd = libc::pollfd {
+                fd,
+                events: libc::POLLOUT,
+                revents: 0,
+            };
+            let result = unsafe {
+                libc::poll(
+                    &mut pollfd,
+                    1,
+                    remaining.as_millis().min(i32::MAX as u128).max(1) as i32,
+                )
+            };
+            if result == 0 {
+                continue;
+            }
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            let mut status: libc::c_int = 0;
+            let mut size = std::mem::size_of_val(&status) as libc::socklen_t;
+            if unsafe {
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_ERROR,
+                    &mut status as *mut _ as *mut libc::c_void,
+                    &mut size,
+                )
+            } < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            if status != 0 {
+                return Err(io::Error::from_raw_os_error(status));
+            }
+            return Ok(stream);
+        }
+    }
 }
 
 fn invoke_inner(
@@ -2300,5 +2477,347 @@ done"#;
             assert!(!allowed_operator_operation(&[operation, 1]));
         }
     }
+    #[test]
+    fn paid_claim_public_routes_enforce_payload_boundaries() {
+        for operation in [181u8, 182] {
+            for enabled in [false, true] {
+                for payload in [b"{}".as_slice(), b" { \"owner\": \"01\" } "] {
+                    assert!(allowed_operation(&[&[operation], payload].concat(), enabled));
+                }
+                for payload in [
+                    b"".as_slice(), b" ", b"{", b"[]", b"null", b"1", b"\"x\"",
+                    b"{}{}", b"{} trailing", &[0xff],
+                ] {
+                    assert!(!allowed_operation(&[&[operation], payload].concat(), enabled));
+                }
+                let mut largest = vec![b' '; 4094];
+                largest.extend_from_slice(b"{}");
+                assert!(allowed_operation(&[&[operation], largest.as_slice()].concat(), enabled));
+                largest.push(b' ');
+                assert!(!allowed_operation(&[&[operation], largest.as_slice()].concat(), enabled));
+            }
+        }
+        for (operation, limit) in [(183u8, 2048), (185, 4096), (186, 4096)] {
+            assert!(!allowed_operation(&[operation], false));
+            for length in [1, limit] {
+                let request = [&[operation], vec![7; length].as_slice()].concat();
+                assert!(allowed_operation(&request, false));
+            }
+            assert!(!allowed_operation(
+                &[&[operation], vec![7; limit + 1].as_slice()].concat(), false,
+            ));
+        }
+        // Neighboring unreserved numbers are not introduced as aliases.
+        assert!(!allowed_operation(&[187, b'{', b'}'], false));
+        assert!(!allowed_operation(&[188, 1], false));
+    }
 
+    fn claim_assembly(plan_length: usize, signature_length: usize) -> Vec<u8> {
+        let mut request = vec![184];
+        request.extend_from_slice(&(plan_length as u32).to_le_bytes());
+        request.extend(vec![b'P'; plan_length]);
+        request.extend(vec![7; signature_length]);
+        request
+    }
+
+    #[test]
+    fn paid_claim_assembly_requires_exact_bounded_pair() {
+        for plan_length in [1, 3072] {
+            let request = claim_assembly(plan_length, 64);
+            assert!(allowed_operation(&request, false));
+            for signature_length in [0, 1, 63, 65, 128] {
+                assert!(!allowed_operation(
+                    &claim_assembly(plan_length, signature_length), false,
+                ));
+            }
+        }
+        for plan_length in [0, 3073, 4096] {
+            assert!(!allowed_operation(&claim_assembly(plan_length, 64), false));
+        }
+        for request in [
+            vec![184], vec![184, 1], vec![184, 1, 0, 0],
+            vec![184, 255, 255, 255, 255, 1],
+            vec![184, 1, 0, 0, 0],
+        ] {
+            assert!(!allowed_operation(&request, false));
+        }
+        let mut truncated = claim_assembly(1, 64);
+        truncated[1..5].copy_from_slice(&2u32.to_le_bytes());
+        assert!(!allowed_operation(&truncated, false));
+        let mut trailing = claim_assembly(1, 64);
+        trailing.push(0);
+        assert!(!allowed_operation(&trailing, false));
+    }
+
+    #[test]
+    fn paid_claim_public_envelope_keeps_config_and_catalog_gates() {
+        let config = b"public-config";
+        for request in [
+            vec![181, b'{', b'}'], vec![182, b'{', b'}'], vec![183, 1],
+            claim_assembly(1, 64), vec![185, 1], vec![186, 1],
+        ] {
+            let mut envelope = vec![1];
+            envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
+            envelope.extend_from_slice(config);
+            envelope.extend_from_slice(&request);
+            assert!(public_envelope(&envelope, config, false).is_ok());
+            assert!(public_envelope(&envelope, b"other-config", false).is_err());
+        }
+    }
+
+    #[test]
+    fn self_enrollment_quartet_is_operator_only_and_shape_bounded() {
+        for operation in [117u8, 119, 120] {
+            assert!(!allowed_operation(&[operation, 1], false));
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+        }
+        let mut pair = vec![118u8, 1, 0, 0, 0, b'P'];
+        pair.extend([7u8; 64]);
+        assert!(!allowed_operation(&pair, false));
+        assert!(allowed_operator_operation(&pair));
+        pair.pop();
+        assert!(!allowed_operator_operation(&pair));
+        assert!(!allowed_operator_operation(&[118, 0, 0, 0, 0]));
+        let oversized = [vec![119u8], vec![1; HOST_MAX_FRAME]].concat();
+        assert!(!allowed_operator_operation(&oversized));
+    }
+
+
+    /// Common topology: a filtered public relay and private custodians converge
+    /// on one private Host endpoint. Public routes must therefore be admitted by
+    /// the private listener's union gate, while the relay still refuses 117-120.
+    #[test]
+    fn paid_public_relay_and_observer_share_current_private_host_gate() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-paid-private-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap().as_nanos()));
+        fs::create_dir(&directory).unwrap();
+        let socket = directory.join("private.sock");
+        let config = directory.join("config.json");
+        fs::write(&config, b"config").unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let script = r#"count=0
+while n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \n'); [ -n "$n" ]; do
+  op=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')
+  [ "$n" -gt 1 ] && dd bs=1 count=$((n - 1)) of=/dev/null 2>/dev/null
+  [ "$op" = 9 ] && exit 3
+  count=$((count + 1))
+  printf '\002\000\000\000'
+  printf "\\$(printf %03o "$op")\\$(printf %03o "$count")"
+done"#;
+        let service = thread::spawn(move || {
+            let mut starts = 0;
+            let mut start = || {
+                starts += 1;
+                if starts > 1 { return Err("fixture completed".to_owned()); }
+                HostProcess::start(Command::new("/bin/sh").arg("-c").arg(script), "fake")
+            };
+            // This is the current connection/queue gate used by
+            // supervise_operator, without starting a real drain/admin service.
+            supervise(&listener, true, b"config", &[0;32], false, &mut start)
+        });
+        let envelope = |request: &[u8]| {
+            let mut bytes = vec![1,6,0,0,0];
+            bytes.extend_from_slice(b"config");
+            bytes.extend_from_slice(request);
+            bytes
+        };
+        let mut count = 0u8;
+        for request in [
+            vec![121,b'{',b'}'],vec![181,b'{',b'}'],vec![182,b'{',b'}'],
+            vec![183,1],claim_assembly(1,64),vec![185,1],vec![186,1],
+        ] {
+            public_envelope(&envelope(&request), b"config", false).unwrap();
+            assert!(invoke(&socket,&config,request[0],&[]).unwrap_err()
+                .contains("operation unavailable"));
+            count += 1;
+            assert_eq!(invoke(&socket,&config,request[0],&request[1..]).unwrap(),
+                vec![request[0],count]);
+        }
+        let mut seal = claim_assembly(1,64);
+        seal[0] = 118;
+        for request in [vec![117,1],seal,vec![119,1],vec![120,1]] {
+            assert!(public_envelope(&envelope(&request),b"config",false).is_err());
+            count += 1;
+            assert_eq!(invoke(&socket,&config,request[0],&request[1..]).unwrap(),
+                vec![request[0],count]);
+        }
+        // A catalog route must not acquire permission merely by reaching the
+        // union gate of the private Host.
+        assert!(invoke(&socket,&config,16,b"catalog").unwrap_err()
+            .contains("operation unavailable"));
+        assert!(invoke(&socket,&config,187,b"unknown").unwrap_err()
+            .contains("operation unavailable"));
+        count += 1;
+        assert_eq!(invoke(&socket,&config,185,b"ingress").unwrap(),vec![185,count]);
+        assert!(invoke(&socket,&config,9,&[]).unwrap_err().contains("uncertain"));
+        assert_eq!(service.join().unwrap().unwrap_err(),"fixture completed");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+}
+
+#[cfg(test)]
+mod bootstrap_deadline_tests {
+    use super::*;
+    struct Scratch(std::path::PathBuf);
+    impl Scratch {
+        fn new() -> Self {
+            let path = std::path::PathBuf::from(format!(
+                "/tmp/mdld-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("config"), b"public-config").unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn quote_gate_only_accepts_bounded_json_objects() {
+        assert!(allowed_operation(
+            &[vec![121], b"{}".to_vec()].concat(),
+            false
+        ));
+        for bytes in [b"".as_slice(), b"{", b"[]", b"null"] {
+            assert!(!allowed_operation(
+                &[vec![121], bytes.to_vec()].concat(),
+                false
+            ));
+        }
+        let mut largest = vec![121, b'{', b'"', b'x', b'"', b':', b'"'];
+        largest.extend(vec![b'a'; 4088]);
+        largest.extend_from_slice(b"\"}");
+        assert_eq!(largest.len(), 4097);
+        assert!(allowed_operation(&largest, false));
+        largest.insert(8, b'a');
+        assert!(!allowed_operation(&largest, false));
+        for op in 117..=120 {
+            assert!(!allowed_operation(&[op, b'{', b'}'], false));
+        }
+    }
+    #[test]
+    fn deadline_exchange_keeps_v2_identity_and_operation_pin() {
+        let scratch = Scratch::new();
+        let socket = scratch.0.join("socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            for reply_op in [121, 112] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let frame = read_frame(&mut stream).unwrap().unwrap();
+                assert_eq!(
+                    request_from_envelope(&frame, b"public-config", &[0x11; 32]).unwrap(),
+                    b"y{}"
+                );
+                write_frame(&mut stream, &[reply_op, b'{', b'}']).unwrap();
+            }
+        });
+        assert_eq!(
+            invoke_pinned_deadline(
+                &socket,
+                &scratch.0.join("config"),
+                &"11".repeat(32),
+                121,
+                b"{}",
+                Instant::now() + Duration::from_secs(2)
+            )
+            .unwrap(),
+            b"y{}"
+        );
+        assert!(invoke_pinned_deadline(
+            &socket,
+            &scratch.0.join("config"),
+            &"11".repeat(32),
+            121,
+            b"{}",
+            Instant::now() + Duration::from_secs(2)
+        )
+        .unwrap_err()
+        .contains("unexpected operation"));
+        server.join().unwrap();
+    }
+    #[test]
+    fn stalled_response_obeys_absolute_deadline() {
+        let scratch = Scratch::new();
+        let socket = scratch.0.join("socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_frame(&mut stream).unwrap().unwrap();
+            std::thread::sleep(Duration::from_millis(350));
+        });
+        let start = Instant::now();
+        assert!(invoke_pinned_deadline(
+            &socket,
+            &scratch.0.join("config"),
+            &"11".repeat(32),
+            121,
+            b"{}",
+            start + Duration::from_millis(60)
+        )
+        .unwrap_err()
+        .contains("deadline"));
+        assert!(start.elapsed() < Duration::from_millis(250));
+        server.join().unwrap();
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn saturated_unix_accept_backlog_cannot_escape_connect_deadline() {
+        let scratch = Scratch::new();
+        let socket = scratch.0.join("socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let _queued = UnixStream::connect(&socket).unwrap();
+        let start = Instant::now();
+        let error = invoke_pinned_deadline(
+            &socket,
+            &scratch.0.join("config"),
+            &"11".repeat(32),
+            121,
+            b"{}",
+            start + Duration::from_millis(60),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("connect") && error.contains("deadline"),
+            "{error}"
+        );
+        assert!(start.elapsed() < Duration::from_millis(250));
+    }
+    #[test]
+    fn stalled_request_write_obeys_absolute_deadline() {
+        let scratch = Scratch::new();
+        let socket = scratch.0.join("socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_millis(350));
+        });
+        let start = Instant::now();
+        let error = invoke_pinned_deadline(
+            &socket,
+            &scratch.0.join("config"),
+            &"11".repeat(32),
+            121,
+            &vec![b'x'; HOST_MAX_FRAME - 1],
+            start + Duration::from_millis(60),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("write") && error.contains("deadline"),
+            "{error}"
+        );
+        assert!(start.elapsed() < Duration::from_millis(250));
+        server.join().unwrap();
+    }
 }

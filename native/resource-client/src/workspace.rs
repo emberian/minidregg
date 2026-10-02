@@ -330,6 +330,9 @@ pub(crate) fn load(root: &Path) -> Result<Value> {
     decimal(member(&value, "subject")?, "workspace subject")?;
     let _ = member_path(&value, "config")?;
     let _ = member_path(&value, "key")?;
+    if let Some(identity) = value.get("sshIdentity").and_then(Value::as_str) {
+        crate::pin_ssh_identity(Path::new(identity))?;
+    }
     if workspace_host(&value)?.as_os_str().is_empty() {
         crate::pin_remote_host(member(&value, "hostSha256")?)?;
     }
@@ -594,6 +597,7 @@ fn init_impl(
     };
     let mut value = json!({"type":"minidregg-participant-workspace-v1", "host":host,
         "config":config,"key":key,"subject":subject,"socket":socket,
+        "sshIdentity":crate::ssh_identity(),
         "birthContext":retained_context,"namespaceRoot":namespace,
         "enrollment":retained_enrollment});
     match &commitment {

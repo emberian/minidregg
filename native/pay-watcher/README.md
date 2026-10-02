@@ -62,3 +62,53 @@ Three cases follow from the memo fields:
 `python3 fixtures/generate.py` rewrites every vector byte-identically. The hooks are `journey.d/jpay1.sh` (J-PAY-1, the
 ordinary vectors) and `journey.d/jpay-e1.sh` (J-PAY-E1, the `enrol-*` vectors). Each hook runs the binary on a private
 copy of each vector, because the binary writes its cursor beside the config.
+
+## Durable service ticks
+
+The deployed wrapper uses `--durable-ticks`. Before it advances any enrollment
+cursor, the watcher fsyncs `OUT/pending.json`, containing the complete observations,
+audit events, previous/next cursor and observer/asset identity. Directory entries
+are synced as well as file contents. A restart republishes that exact pending
+report without RPC access. A cursor outside its recorded before/after states or a
+changed observer/asset is refused; recovery never rolls a newer cursor backwards.
+
+After `mini pay observe` settles, the wrapper calls:
+
+```
+pay-watcher --config FILE --out DIR --ack-tick 00000000000000000001
+```
+
+This atomically moves the pending bundle to `OUT/ticks/ID.json` and syncs both
+directories. A repeated acknowledgement of the same archived ID is harmless;
+an acknowledgement naming another pending tick is refused. Each bundle keeps the
+original events once. Existing daily journal files remain historical; new audit
+consumers read archived bundles plus the pending bundle. Nothing deletes them.
+The service holds a lock through scan, observation and acknowledgement. The
+binary separately locks the durable spool while publishing or acknowledging.
+
+An uncertain observer result keeps the pending tick. Recovery still uses the
+resource client's exact retained call; this spool does not replace kernel
+nullifiers or decide credits. `--durable-ticks` without acknowledgement intentionally
+keeps returning the same report. Ordinary fixture/CLI mode remains available
+without this flag. Errors can leave a durable pending record; exit 2 means no
+new report should be submitted, not that the output directory is empty.
+
+The source wrapper is `deploy/pay/mini-pay-watcher`; dregg-infra's installed copy
+shares its body, with only an installation header. DEPLOY-4 validation added:
+
+- `cargo test --test durable_tick`: three process-level restart snapshots,
+  including failure after pending creation, lost output views after cursor advance,
+  offline recovery, repeated acknowledgement and changed-cursor/observer refusal.
+- Existing `units` and `vectors`: 43 passing decoder/Token-2022/memo/cursor cases.
+- dregg-infra `journey/jpay-tick-recovery.sh`: actual SIGKILL of its own fixture
+  wrapper after the observer fixture records an effect; restart offline, preserve
+  both below-floor audit entries, replay the identical report, and archive once.
+  Its idempotent observer is a fixture, not proof of the kernel credit receiver;
+  the composed receiver/enrollment obligation remains J-PAY-E4.
+
+Read-only mainnet orientation, 2026-10-02: the public Solana mainnet RPC
+`getAccountInfo` at finalized slot **452520553** returned the known mint
+`XkeTXo1125vz5H9svJpGiw4JvLbN8VmMu9cmMvspump` as initialized `Dregg` / `DREGG`,
+**6 decimals**, owned by `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`
+(`spl-token-2022`). This is a single-endpoint public read, not a watched payment,
+recipient choice, or mainnet paid-entry qualification. No transaction was sent.

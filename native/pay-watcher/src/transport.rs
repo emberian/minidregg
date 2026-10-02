@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::decode::MAX_SUPPORTED_TRANSACTION_VERSION;
 use crate::model::{Reason, Refusal};
 
 pub trait Transport {
@@ -128,9 +129,10 @@ pub fn fixture_key(method: &str, params: &Value) -> Result<String, String> {
             let o = opts(1)?;
             finalized(o)?;
             if o.get("encoding").and_then(Value::as_str) != Some("jsonParsed")
-                || o.get("maxSupportedTransactionVersion").and_then(Value::as_u64) != Some(0)
+                || o.get("maxSupportedTransactionVersion").and_then(Value::as_u64)
+                    != Some(MAX_SUPPORTED_TRANSACTION_VERSION)
             {
-                return Err("getTransaction not jsonParsed with maxSupportedTransactionVersion 0".into());
+                return Err("getTransaction not jsonParsed with maxSupportedTransactionVersion 1".into());
             }
             Ok(format!("getTransaction/{sig}.json"))
         }
@@ -239,19 +241,38 @@ impl CurlTransport {
     }
 
     fn post(&self, body: &[u8]) -> Result<Vec<u8>, Refusal> {
+        self.request("POST", Some(body))
+    }
+
+    /// Bounded public HTTP used by payment observation and cold-entry metadata,
+    /// quote and status. Callers choose a fixed GET/POST route, never a shell command.
+    pub fn request(&self, method: &str, body: Option<&[u8]>) -> Result<Vec<u8>, Refusal> {
+        self.request_typed(method, body, false)
+    }
+
+    /// Closed canonical paid-claim payloads use binary HTTP, with the same
+    /// endpoint validation, private spool, TLS policy and resource bounds.
+    pub fn post_binary(&self, body: &[u8]) -> Result<Vec<u8>, Refusal> {
+        self.request_typed("POST", Some(body), true)
+    }
+
+    fn request_typed(&self, method: &str, body: Option<&[u8]>, binary: bool) -> Result<Vec<u8>, Refusal> {
+        if !matches!((method, body), ("GET", None) | ("POST", Some(_))) {
+            return Err(Refusal::new(Reason::Transport, "only GET without body or POST with body is supported"));
+        }
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         let prefix = format!("pay-rpc-{}-{}-{n:08}", std::process::id(), self.label);
         let request = self.spool.join(format!("{prefix}.request"));
         let response = self.spool.join(format!("{prefix}.response"));
-        let result = self.post_spooled(body, &request, &response);
+        let result = self.request_spooled(method, body, binary, &request, &response);
         let _ = fs::remove_file(&request);
         let _ = fs::remove_file(&response);
         result
     }
 
-    fn post_spooled(&self, body: &[u8], request: &Path, response: &Path) -> Result<Vec<u8>, Refusal> {
+    fn request_spooled(&self, method: &str, body: Option<&[u8]>, binary: bool, request: &Path, response: &Path) -> Result<Vec<u8>, Refusal> {
         let t = |detail: String| Refusal::new(Reason::Transport, format!("{}: {detail}", self.label));
-        write_private(request, body).map_err(t)?;
+        write_private(request, body.unwrap_or(&[])).map_err(t)?;
         create_private(response).map_err(t)?;
         let protocol = if self.url.starts_with("https://") {
             "=https"
@@ -263,21 +284,22 @@ impl CurlTransport {
             .env_clear()
             .current_dir(&self.spool)
             .arg("--disable")
-            .args(["--silent", "--fail", "--http1.1", "--request", "POST"])
+            .args(["--silent", "--fail", "--http1.1", "--request", method])
             .args(["--proto", protocol, "--noproxy", "*", "--proxy", ""])
             .args(["--max-redirs", "0", "--connect-timeout", "10"])
             .args(["--max-time", &self.timeout.as_secs().max(1).to_string()])
             .args(["--max-filesize", &self.max_response.to_string()])
-            .args(["--header", "Content-Type: application/json"])
+            .args(["--header", if binary {"Content-Type: application/octet-stream"} else {"Content-Type: application/json"}])
             .args(["--header", "Accept-Encoding: identity"])
-            .arg("--data-binary")
-            .arg(format!("@{}", request.display()))
             .arg("--output")
             .arg(response)
             .args(["--config", "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        if body.is_some() {
+            command.arg("--data-binary").arg(format!("@{}", request.display()));
+        }
         // Kernel backstop: the response file cannot grow past the bound even if the peer
         // omits Content-Length.
         let file_limit = self.max_response as libc::rlim_t;

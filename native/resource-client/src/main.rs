@@ -81,6 +81,18 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod join_solana;
+#[cfg(unix)]
+mod join_solana_v2;
+#[cfg(unix)]
+mod pay_memo_v2;
+#[cfg(unix)]
+mod pay_claim;
+#[cfg(unix)]
+mod paid_context;
+#[cfg(unix)]
+mod enrollment_bootstrap;
+#[cfg(unix)]
 mod chat;
 #[cfg(unix)]
 mod hermes;
@@ -88,6 +100,7 @@ mod hermes;
 mod credit;
 #[cfg(unix)]
 mod story;
+#[cfg(unix)]
 mod keys;
 #[cfg(unix)]
 mod job;
@@ -125,6 +138,7 @@ mod object_epoch_packages;
 mod well;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
@@ -440,14 +454,23 @@ usage:
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
-  mini pay observe --dir OBSERVER-WORKSPACE --capability CAP (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
+  mini pay observe --dir OBSERVER-WORKSPACE --capability CAP [--enrol-capability C_ENROL --operator-socket OPERATOR-SOCKET] (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
   mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
   mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
   mini job --action list --dir WORKSPACE --room REF
-  mini pay audit --dir OBSERVER-WORKSPACE [--offline true]
+  mini pay audit --dir OBSERVER-WORKSPACE [--offline true] [--operator-socket OPERATOR-SOCKET]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
+  mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
+  mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX]
+  mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
+  mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
+  mini enrollment-bootstrap --host HOST --config PUBLIC-CONFIG --socket PUBLIC-SOCKET --listen 127.0.0.1:8794 --metadata PUBLIC-BOOTSTRAP.json [--trusted-proxy IP]
+  mini enrollment-view --socket SOCKET [--config CONFIG]
+  mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
+  mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
+  mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
   mini enc-public --secret KEY
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
@@ -589,7 +612,7 @@ type Result<T> = std::result::Result<T, String>;
 /// images, and the proxy never reaches the operator socket anyway.
 #[cfg(unix)]
 const REMOTE_COMMANDS: &[&str] = &[
-    "workspace", "enroll", "join", "shell", "submit", "query", "retry", "author", "inspect",
+    "workspace", "enroll", "join", "pay-claim", "shell", "submit", "query", "retry", "author", "inspect",
     "describe", "profile",
 ];
 
@@ -651,6 +674,13 @@ impl Args {
             if command == OsStr::new("channel") && flag == OsStr::new("--follow") {
                 let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
                 values.push((flag, value));
+                continue;
+            }
+            // `mini join --solana|--wait|--renew` (PAY.md §11.6) is `mini join --mode MODE`.
+            if command == OsStr::new("join")
+                && matches!(rendered.as_ref(), "--solana" | "--wait" | "--renew")
+            {
+                values.push((OsString::from("--mode"), OsString::from(&rendered[2..])));
                 continue;
             }
             if !rendered.starts_with("--") || rendered.len() == 2 {
@@ -1565,7 +1595,8 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
         "operation": operation,
         "host": null,
         "config": utf8_path(&config)?,
-        "socket": SOCKET.get().map(|socket| transport::pinned_address(socket)).transpose()?
+        "socket": SOCKET.get().map(|socket| transport::pinned_address(socket)).transpose()?,
+        "sshIdentity": ssh_identity()
     });
     if host.as_os_str().is_empty() {
         manifest["hostSha256"] = json!(host_image_sha256(host)?);
@@ -1574,6 +1605,25 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     }
     write_json_new(&directory.join("attempt.json"), &manifest)
 }
+
+/// Select a private SSH transport credential without changing shared ssh config.
+fn pin_ssh_identity(path: &Path) -> Result<()> {
+    let path = absolute(path)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|e| format!("SSH identity: {e}"))?;
+    if !metadata.is_file() { return Err("SSH identity must be a regular file".into()); }
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err("SSH identity must not be accessible to group or others".into());
+        }
+    }
+    match SSH_IDENTITY.get() {
+        Some(existing) if existing != &path => Err("SSH identity differs from the retained transport credential".into()),
+        Some(_) => Ok(()),
+        None => SSH_IDENTITY.set(path).map_err(|_| "cannot pin SSH identity".into()),
+    }
+}
+fn ssh_identity() -> Option<&'static Path> { SSH_IDENTITY.get().map(PathBuf::as_path) }
 
 /// Pins, for this process, the Host digest a remote workspace or attempt
 /// recorded. A second, different pin within one process is refused.
@@ -2014,6 +2064,9 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
     if value.get("format").and_then(Value::as_str) != Some("minidregg-resource-client-attempt-v1") {
         return Err(format!("unsupported attempt manifest {}", path.display()));
+    }
+    if let Some(identity) = value.get("sshIdentity").and_then(Value::as_str) {
+        pin_ssh_identity(Path::new(identity))?;
     }
     let host = match value.get("host") {
         Some(Value::String(host)) => PathBuf::from(host),
@@ -2787,8 +2840,43 @@ fn continuity(
     }
 }
 
+/// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
+/// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
+/// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
+/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config.
+#[cfg(unix)]
+fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
+    let frame = transport::invoke(socket, config, 112, &[])?;
+    let body = match frame.as_slice() {
+        [112, body @ ..] => body,
+        [code, rest @ ..] => {
+            return Err(format!(
+                "the Host refused the enrollment view (frame {code}): {}",
+                String::from_utf8_lossy(rest)
+            ))
+        }
+        [] => return Err("the Host returned an empty frame".into()),
+    };
+    let kind = b"pay-enrolment-view";
+    let mut request = (kind.len() as u16).to_le_bytes().to_vec();
+    request.extend_from_slice(kind);
+    request.extend_from_slice(body);
+    let inspected = transport::invoke(socket, config, 8, &request)?;
+    let json = match inspected.as_slice() {
+        [8, json @ ..] => json,
+        _ => return Err("the Host could not decode its own enrollment view".into()),
+    };
+    let value: Value =
+        serde_json::from_slice(json).map_err(|e| format!("invalid enrollment view JSON: {e}"))?;
+    if value.get("view").and_then(Value::as_str) != Some("DREGG/PAY/ENROLMENT-VIEW/v3") {
+        return Err("the Host's enrollment view is not DREGG/PAY/ENROLMENT-VIEW/v3".into());
+    }
+    print_json(&value)
+}
+
 fn run(mut args: Args) -> Result<()> {
     replan::configure(args.optional("replan-max"))?;
+    if let Some(identity) = args.optional("ssh-identity") { pin_ssh_identity(&path(identity))?; }
     let mut socket_argument = args.optional("socket");
     #[cfg(unix)]
     if let Some(destination) = args.optional("remote") {
@@ -2818,6 +2906,10 @@ fn run(mut args: Args) -> Result<()> {
         ));
     }
     match args.command.to_string_lossy().as_ref() {
+        #[cfg(unix)]
+        "join" if args.peek("memo-version").and_then(OsStr::to_str)==Some("v2") => join_solana_v2::run(args),
+        #[cfg(unix)]
+        "join" if matches!(args.peek("mode").and_then(OsStr::to_str), Some("solana" | "wait" | "renew")) => join_solana::run(args),
         #[cfg(unix)]
         "join" => participant_enrollment::join(args),
         #[cfg(unix)]
@@ -2866,6 +2958,17 @@ fn run(mut args: Args) -> Result<()> {
         "story-law" => story::law_command(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
+        #[cfg(unix)]
+        "pay-claim" => pay_claim::run(args),
+        #[cfg(unix)]
+        "enrollment-bootstrap" => enrollment_bootstrap::run(args),
+        "enrollment-view" => {
+            let config = args.optional("config").map(path);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("enrollment-view requires --socket")?;
+            let config = config.unwrap_or_else(|| socket.with_extension("config"));
+            enrollment_view(socket, &config)
+        }
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;

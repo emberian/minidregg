@@ -18,6 +18,66 @@ use serde_json::Value;
 use crate::config::Asset;
 use crate::model::{parse_key, parse_sig, Key, Reason, Refusal, Sig};
 
+/// Highest transaction format decoded below; also used by RPC and fixture requests.
+/// Verified 2026-10-02 against https://solana.com/docs/rpc/json-structures
+/// and https://solana.com/upgrades/larger-transaction-sizes.
+pub const MAX_SUPPORTED_TRANSACTION_VERSION: u64 = 1;
+
+/// Validate the version-dependent JSON shape before trusting any chain facts.
+/// The official RPC schema gives v1 a four-field transactionConfig, omits
+/// addressTableLookups, and says v1 has no lookup tables. Resource settings are
+/// checked structurally, never interpreted as payment or compute-price semantics.
+///
+/// An omitted version remains accepted for old legacy captures: the RPC schema
+/// documents undefined version information, and our historical fixtures use it.
+/// It cannot carry the v1 config marker. Explicit null/unknown versions refuse.
+fn transaction_version(result: &Value) -> Result<(), Refusal> {
+    let version = match result.get("version") {
+        None => None,
+        Some(Value::String(name)) if name == "legacy" => None,
+        Some(Value::Number(number)) => Some(number.as_u64()
+            .filter(|n| *n <= MAX_SUPPORTED_TRANSACTION_VERSION)
+            .ok_or_else(|| Refusal::malformed("unsupported transaction version"))?),
+        _ => return Err(Refusal::malformed("unsupported transaction version")),
+    };
+    let message = result.pointer("/transaction/message")
+        .and_then(Value::as_object)
+        .ok_or_else(|| Refusal::malformed("transaction message is not an object"))?;
+    if version != Some(1) {
+        if message.contains_key("transactionConfig") {
+            return Err(Refusal::malformed("transactionConfig is only valid for v1"));
+        }
+        return Ok(());
+    }
+    let config = message.get("transactionConfig").and_then(Value::as_object)
+        .ok_or_else(|| Refusal::malformed("v1 transactionConfig must be an object"))?;
+    let fields = ["computeUnitLimit", "heapSize", "loadedAccountsDataSizeLimit", "priorityFee"];
+    if config.len() != fields.len() || fields.iter().any(|field|
+        !config.get(*field).is_some_and(|value| value.is_null() || value.as_u64().is_some())) {
+        return Err(Refusal::malformed("v1 transactionConfig requires four nullable integer fields"));
+    }
+    if message.contains_key("addressTableLookups") {
+        return Err(Refusal::malformed("v1 omits addressTableLookups"));
+    }
+    // jsonParsed includes resolved keys directly; v1 has only transaction keys.
+    let keys = message.get("accountKeys").and_then(Value::as_array)
+        .ok_or_else(|| Refusal::malformed("v1 accountKeys must be a parsed array"))?;
+    if keys.iter().any(|key| key.get("source").and_then(Value::as_str) != Some("transaction")) {
+        return Err(Refusal::malformed("v1 account key must come from the transaction"));
+    }
+    // Some older fixture/providers retain the empty metadata object. Accept
+    // those empty lists, but never append lookup addresses to a v1 key list.
+    if let Some(loaded) = result.pointer("/meta/loadedAddresses").filter(|v| !v.is_null()) {
+        let object = loaded.as_object()
+            .ok_or_else(|| Refusal::malformed("v1 loadedAddresses must be absent or empty"))?;
+        if object.len() != 2 || ["writable","readonly"].iter().any(|field|
+            !object.get(*field).and_then(Value::as_array).is_some_and(Vec::is_empty)) {
+            return Err(Refusal::malformed("v1 cannot contain loaded addresses"));
+        }
+    }
+    Ok(())
+}
+
 fn wrong(reason: Reason, what: &str, got: &Key, want: &Key) -> Refusal {
     Refusal::new(
         reason,
@@ -162,6 +222,7 @@ pub fn transaction_credit(
     if result.is_null() {
         return Ok(TxOutcome::Pruned);
     }
+    transaction_version(result)?;
     let first = result
         .pointer("/transaction/signatures/0")
         .and_then(Value::as_str)

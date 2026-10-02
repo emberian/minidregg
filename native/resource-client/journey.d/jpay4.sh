@@ -133,6 +133,7 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
            "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
            "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
+           "clockTickers": [], "tailBound":"1000000",
            "factoryPredicate": {"type": "all", "predicates": []},
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(EMBER), "factoryControllerCapability": str(FACTORY_CONTROL),
@@ -413,9 +414,14 @@ row("kernel per-observation refusals: the report is probed; each record quaranti
     and len(os.listdir(os.path.join(OBS, "pay", "quarantine"))) == 2 and balance(8) == bal8,
     f"quarantined={sorted(q)} {summary(r)}")
 
-journal_dir = os.path.join(STATE, "journal")
+journal_dir = os.path.join(STATE, "tick", "ticks")
 def journal_lines():
-    return [json.loads(l) for f in sorted(os.listdir(journal_dir)) for l in open(os.path.join(journal_dir, f))]
+    # Full ticks are the durable audit authority; legacy daily files are historical.
+    files = [os.path.join(journal_dir, f) for f in sorted(os.listdir(journal_dir)) if f.endswith(".json")]
+    pending = os.path.join(STATE, "tick", "pending.json")
+    if os.path.exists(pending):
+        files.append(pending)
+    return [event for f in files for event in json.load(open(f))["events"]]
 before = [e for e in journal_lines() if e["reason"] == "belowJournalFloor"]
 t = tick("J", c + 10, "retained", ("happy", "enrol-dust"), enrol_row=True)
 dust = [e for e in journal_lines() if e["reason"] == "belowJournalFloor"]

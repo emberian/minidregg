@@ -221,7 +221,7 @@ pub(crate) fn check_commitment(
     Ok(Some(view))
 }
 
-fn public_file(path: &Path) -> Result<[u8; 32]> {
+pub(crate) fn public_file(path: &Path) -> Result<[u8; 32]> {
     fs::read(path)
         .map_err(|error| format!("cannot read public key {}: {error}", path.display()))?
         .try_into()

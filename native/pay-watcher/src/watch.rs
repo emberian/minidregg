@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 
 use crate::config::{BookEntry, Config};
 use crate::decode::{signatures_of, token_accounts, transaction_credit, SigEntry, TxOutcome};
+use crate::decode::MAX_SUPPORTED_TRANSACTION_VERSION;
 use crate::memo;
 use crate::model::{
     base58, hex, unbase58, unhex, Clock, Event, Key, Observation, Reason, Refusal, Sig,
@@ -387,7 +388,7 @@ fn view_index(
                     {
                         "encoding": "jsonParsed",
                         "commitment": "finalized",
-                        "maxSupportedTransactionVersion": 0,
+                        "maxSupportedTransactionVersion": MAX_SUPPORTED_TRANSACTION_VERSION,
                     },
                 ]),
             )?;

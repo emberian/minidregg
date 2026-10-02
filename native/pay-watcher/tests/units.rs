@@ -223,3 +223,22 @@ fn curl_transport_refuses_an_oversized_answer_and_surfaces_rpc_errors() {
     let _ = server.join();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn cold_entry_get_has_no_body_and_cleans_spool() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let response = br#"{"type":"minidregg-enrollment-bootstrap-v1"}"#.to_vec();
+    let server = serve_once(listener, response.clone());
+    let dir = spool("cold-get");
+    let t = CurlTransport::new("bootstrap",format!("http://127.0.0.1:{port}/mini/v1/metadata"),&dir).unwrap();
+    assert!(t.request("DELETE",None).is_err());
+    assert!(t.request("GET",Some(b"bad")).is_err());
+    assert_eq!(t.request("GET",None).unwrap(),response);
+    let sent = String::from_utf8(server.join().unwrap()).unwrap();
+    assert!(sent.starts_with("GET /mini/v1/metadata HTTP/1.1\r\n"));
+    assert!(sent.ends_with("\r\n\r\n"));
+    assert!(!sent.to_ascii_lowercase().contains("content-length:"));
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(),0);
+    std::fs::remove_dir(dir).unwrap();
+}
