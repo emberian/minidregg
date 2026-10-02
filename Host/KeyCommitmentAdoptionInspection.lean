@@ -36,6 +36,11 @@ private def publicKey (json : Json) (field : String) : Except String (List UInt8
   return bytes
 
 def parseRequest (json : Json) : Except String NativeHostKeyCommitmentAdoption.PlanRequest := do
+  let object ← json.getObj?
+  let expected := ["subject", "nonce", "currentPublicKey", "nextPublicKey"]
+  let actual := object.foldl (init := []) (fun names key _ => key :: names)
+  unless actual.length == expected.length && actual.all expected.contains do
+    throw "adoption request has missing or unknown fields"
   return ⟨⟨← natural json "subject"⟩, ← natural json "nonce",
     ← publicKey json "currentPublicKey", ← publicKey json "nextPublicKey"⟩
 
