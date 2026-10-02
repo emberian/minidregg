@@ -104,6 +104,30 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "exit", usage: "exit", operation: "local" },
 ];
 
+/// One command catalog for help, completion and member action discovery.
+/// The owning modules keep their actual grammars; callers use this iterator.
+pub(crate) fn command_catalog() -> impl Iterator<Item = &'static Verb> {
+    VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS)
+}
+
+/// Subcommands spelled by the command's actual usage, without another table.
+fn subcommands(verb: &str) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    if let Some(command) = command_catalog().find(|v| v.name == verb) {
+        for alternative in command.usage.split('|') {
+            let mut words = alternative.split_whitespace();
+            if words.next() == Some(verb) {
+                if let Some(word) = words.next() {
+                    if word.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+                        names.insert(word.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
 /// What this shell is, stated as data: printed verbatim at the top of `help`
 /// and when an interactive session starts. Nothing classifies it.
 pub(crate) const HOSTED_CUSTODY_BANNER: &str = "hosted shell: your signing key is a file on this box; root can read and sign; for a key that never leaves your machine use `mini --remote` (see FRIENDS.md)";
@@ -2640,14 +2664,14 @@ fn help_text(topic: Option<&str>) -> String {
     match topic {
         Some("chat") => crate::chat::HELP.to_owned(),
         Some("story") => crate::story::HELP.to_owned(),
-        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS).find(|v| v.name == name) {
+        Some(name) => match command_catalog().find(|v| v.name == name) {
             Some(v) => format!("{}\n  = {}\n", v.usage, v.operation),
             None => format!("no verb {name}\n"),
         },
         None => {
             let mut text = format!("{HOSTED_CUSTODY_BANNER}\n");
             text.push_str("Every verb is one client operation; the Host decides. Words: 'literal', \"escaped\", {json} or [json], @FILE (HOME/requests/FILE).\n");
-            for v in VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS) {
+            for v in command_catalog() {
                 text.push_str(&format!("  {:<10} {}\n", v.name, v.usage));
             }
             text.push_str("Endings on stderr: usage: (2)  error: client (1)  refused: Host (3)  undecided: Host (4).\n");
@@ -2775,7 +2799,9 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let enrolled = || stems(&session.home.join("enroll"), "", |_| false);
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
-        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
+        (_, 0) => command_catalog().map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
+        ("room" | "key" | "chat", 1) => subcommands(verb),
+        ("ask" | "dismiss" | "summon", 1) => refs(),
         ("read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
@@ -2796,13 +2822,14 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
             "transclusions", "follow", "quote"]
             .map(String::from)
             .to_vec(),
+        ("room", 2) if !matches!(w[1].as_str(), "new" | "welcome" | "template" | "invite" | "kick" | "seal" | "rotate" | "register" | "rewrap" | "leave" | "index" | "bind" | "rename" | "unbind") => refs(),
         ("doc", 2) if !matches!(w[1].as_str(), "new" | "append" | "edit" | "annotate" | "link" | "push") => refs(),
         ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "annotate" | "link" | "push" | "transclude") => refs(),
         ("doc", 4) if w[1] == "link" => refs(),
         ("board", 1) => ["new", "add", "move", "take"].map(String::from).to_vec(),
         ("board", 3) if w[1] != "new" => refs(),
         ("help", 1) => {
-            let mut all: Vec<String> = VERBS.iter().map(|v| v.name.to_owned()).collect();
+            let mut all: Vec<String> = command_catalog().map(|v| v.name.to_owned()).collect();
             all.push("guide".into());
             all
         }
@@ -3622,7 +3649,7 @@ mod tests {
         assert_eq!(complete(&s, "doc show "), ["factory", "shared"]);
         assert_eq!(complete(&s, "doc link x shared f"), ["factory"]);
         assert_eq!(complete(&s, "board m"), ["move"]);
-        assert_eq!(complete(&s, "help g"), ["guide"]);
+        assert_eq!(complete(&s, "help g"), ["go", "guide"]);
         assert_eq!(complete(&s, "read "), ["factory", "shared"]);
         assert_eq!(complete(&s, "read s"), ["shared"]);
         assert_eq!(complete(&s, "publish "), ["grant-newcomer"]);
@@ -4012,6 +4039,25 @@ mod tests {
         assert_eq!(plan(&s, "help guide").unwrap(), Plan::Guide);
         assert_eq!(plan(&s, "help doc").unwrap(), Plan::Help(Some("doc".into())));
         assert!(plan(&s, "inbox all").is_err());
+    }
+
+    #[test]
+    fn every_owned_command_is_discoverable_in_help_completion() {
+        let s = session();
+        let help = complete(&s, "help ");
+        for command in command_catalog() {
+            assert!(help.contains(&command.name.to_owned()), "{} missing from help completion", command.name);
+            assert!(!help_text(Some(command.name)).starts_with("no verb"));
+        }
+    }
+
+    #[test]
+    fn module_subcommands_are_derived_from_their_actual_usage() {
+        let s = session();
+        assert!(complete(&s, "key p").contains(&"providers".to_owned()));
+        assert!(complete(&s, "key c").contains(&"choose".to_owned()));
+        assert!(complete(&s, "room st").contains(&"status".to_owned()));
+        assert!(complete(&s, "chat e").contains(&"enter".to_owned()));
     }
 
     #[test]
