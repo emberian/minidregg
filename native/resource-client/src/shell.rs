@@ -1281,9 +1281,15 @@ fn execute(session: &Session, plan: Plan) -> Ending {
             .collect(),
     };
     let _ = super::take_host_decision();
+    let _ = super::replan::take_count();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::run(args)))
         .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
     let _ = io::stdout().flush();
+    // The cost of the timer race, visible: how often this command observed again.
+    let replanned = super::replan::take_count();
+    if result.is_ok() && replanned > 0 {
+        eprintln!("(re-planned {replanned}×)");
+    }
     let decision = super::take_host_decision();
     match (result, decision) {
         (Ok(()), _) => Ending::Done,

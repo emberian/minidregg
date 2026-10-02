@@ -1670,70 +1670,91 @@ fn authoring_refused(generation: &Path) -> Result<bool> {
 /// Author the reserved source through op91 in versioned generations.
 ///
 /// A generation retains exactly one signed factory observation and at most one
-/// Host reply; it is never rewritten. When the latest generation's retained
-/// reply is a refusal, and no custody attempt is bound for this request, a new
-/// generation authors the SAME source with a fresh observation. At most one
-/// generation is superseded per call, and never one whose observation was
-/// taken in this same call. Once a generation holds an intent, it is final.
+/// Host reply; it is never rewritten. Once a generation holds an intent, it is
+/// final. A refused generation is superseded by a new generation that authors
+/// the SAME source with a fresh observation, and only while no custody attempt
+/// is bound for this request: a refusal retained from an earlier call, or a
+/// retained observation from an earlier call refused now, is superseded once;
+/// a generation observed in this call is superseded only when `stale` finds
+/// the Host answering its own `stale-root` to that observation (the timer race
+/// at birth), at most `replan::max()` times (the shared `replan` loop).
 fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
     mut observe: impl FnMut() -> Result<PathBuf>,
     mut author_one: impl FnMut(&Path, Option<&Path>) -> Result<()>,
+    mut stale: impl FnMut(&Path) -> bool,
 ) -> Result<PathBuf> {
     if !base.exists() {
         make_private_dir(base)?;
     }
     private_dir(base)?;
-    let mut superseded = false;
-    let mut observed_now = false;
-    loop {
-        let generations = authoring_generations(base)?;
-        let current = match generations.last() {
-            Some(current) => current.clone(),
+    let latest = || -> Result<PathBuf> {
+        match authoring_generations(base)?.last() {
+            Some(current) => Ok(current.clone()),
             None => {
                 let first = base.join("g0001");
                 make_private_dir(&first)?;
-                first
+                Ok(first)
             }
-        };
-        private_dir(&current)?;
-        if authoring_refused(&current)? {
-            if observed_now || superseded {
-                return Err(format!(
-                    "current birth authoring refused with a fresh factory observation; retained {}",
-                    current.join("reply.frame").display()
-                ));
-            }
-            if participant_namespace::is_bound(reservation)? {
-                return Err(
-                    "refused authoring generation has a bound attempt; exact custody only".into(),
-                );
-            }
-            make_private_dir(&base.join(format!("g{:04}", generations.len() + 1)))?;
-            superseded = true;
-            continue;
         }
-        if current.join("reply.frame").exists() {
-            return Ok(current);
+    };
+    let supersede = || -> Result<()> {
+        if participant_namespace::is_bound(reservation)? {
+            return Err(
+                "refused authoring generation has a bound attempt; exact custody only".into(),
+            );
         }
-        let observation = if current.join("factory-observation.bin").exists() {
-            None
-        } else {
-            observed_now = true;
-            Some(observe()?)
-        };
-        match author_one(&current, observation.as_deref()) {
-            Ok(()) => return Ok(current),
-            Err(error) if authoring_refused(&current)? => {
-                eprintln!(
-                    "workspace birth authoring refused in {}: {error}",
-                    current.display()
-                );
-            }
-            Err(error) => return Err(error),
-        }
+        let next = authoring_generations(base)?.len() + 1;
+        make_private_dir(&base.join(format!("g{next:04}")))
+    };
+    if authoring_refused(&latest()?)? {
+        supersede()?;
     }
+    let observed_now = std::cell::Cell::new(false);
+    let authored = crate::replan::replan(
+        "birth authoring",
+        || {
+            let current = latest()?;
+            private_dir(&current)?;
+            if current.join("reply.frame").exists() && !authoring_refused(&current)? {
+                return Ok(current);
+            }
+            let observation = if current.join("factory-observation.bin").exists() {
+                observed_now.set(false);
+                None
+            } else {
+                observed_now.set(true);
+                Some(observe()?)
+            };
+            match author_one(&current, observation.as_deref()) {
+                Ok(()) => Ok(current),
+                Err(error) => {
+                    if authoring_refused(&current)? {
+                        eprintln!(
+                            "workspace birth authoring refused in {}: {error}",
+                            current.display()
+                        );
+                    }
+                    Err(error)
+                }
+            }
+        },
+        |_, _| match latest() {
+            Ok(current) if authoring_refused(&current).unwrap_or(false) => {
+                !observed_now.get() || stale(&current)
+            }
+            _ => false,
+        },
+        |_| supersede(),
+    );
+    authored.map_err(|error| match latest() {
+        Ok(current) if authoring_refused(&current).unwrap_or(false) => format!(
+            "current birth authoring refused with a fresh factory observation ({error}); retained {}",
+            current.join("reply.frame").display()
+        ),
+        _ => error,
+    })
 }
 
 /// Reserve, author and submit one birth under a workspace name. Returns the
@@ -1977,6 +1998,7 @@ fn birth(
                     current_birth::Route::Resource,
                 )
             },
+            |generation| crate::observation_stale(&host, &config, generation),
         )?
     };
     let intent_path = current_birth::retained_intent(&author_dir, current_birth::Route::Resource)?;
@@ -3172,6 +3194,7 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"stale"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
@@ -3188,6 +3211,7 @@ mod tests {
             &reservation,
             || panic!("no observation after an intent"),
             |_, _| panic!("no authoring after an intent"),
+            |_| panic!("no probe after an intent"),
         )
         .unwrap();
         assert_eq!(again, base.join("g0002"));
@@ -3217,6 +3241,7 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"stale"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
@@ -3236,6 +3261,7 @@ mod tests {
                 fs::write(generation.join("reply.frame"), [255, 3]).unwrap();
                 Err("refused".into())
             },
+            |_| false,
         );
         assert!(refused.is_err());
         assert_eq!(observed.get(), 1);
@@ -3246,10 +3272,87 @@ mod tests {
             &reservation,
             || observation_file(&root, &observed),
             |generation, observation| fake_author(generation, observation, b"never"),
+            |_| false,
         )
         .unwrap();
         assert_eq!(chosen, base.join("g0002"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replan_birth_authoring_stale_observation_reobserves_until_it_lands() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let (root, base, reservation) = generation_fixture("stale-race");
+        let observed = std::cell::Cell::new(0);
+        let probed = std::cell::Cell::new(0);
+        // The first two fresh observations are raced (the Host refuses them and
+        // answers stale-root to a probe); the third lands.
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| {
+                fake_author(generation, observation, b"never")?;
+                if observed.get() <= 2 {
+                    fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                    return Err("current resource birth authoring refused".into());
+                }
+                Ok(())
+            },
+            |_| {
+                probed.set(probed.get() + 1);
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0003"));
+        assert_eq!((observed.get(), probed.get()), (3, 2));
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
+        assert_eq!(fs::read(base.join("g0003/reply.frame")).unwrap(), [91, 7]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replan_birth_authoring_is_bounded_and_names_the_attempts() {
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::replan::set_max(5);
+        let (root, base, reservation) = generation_fixture("stale-bound");
+        let observed = std::cell::Cell::new(0);
+        let refused = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"never").and_then(|()| {
+                fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                Err("current resource birth authoring refused".into())
+            }),
+            |_| true,
+        )
+        .unwrap_err();
+        assert_eq!(observed.get(), 6);
+        assert_eq!(authoring_generations(&base).unwrap().len(), 6);
+        assert!(refused.contains("all 6 attempts (5 re-plans"), "{refused}");
+        assert!(refused.contains("g0006/reply.frame"), "{refused}");
+        // --replan-max 0: one observation, reported, the old behaviour.
+        crate::replan::set_max(0);
+        let (root0, base0, reservation0) = generation_fixture("stale-zero");
+        let observed0 = std::cell::Cell::new(0);
+        assert!(author_generations(
+            &base0,
+            &reservation0,
+            || observation_file(&root0, &observed0),
+            |generation, _| {
+                fs::write(generation.join("reply.frame"), [255, 1]).unwrap();
+                Err("refused".into())
+            },
+            |_| true,
+        )
+        .is_err());
+        assert_eq!(observed0.get(), 1);
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(root0).unwrap();
     }
 
     #[test]
@@ -3272,6 +3375,7 @@ mod tests {
             &reservation,
             || panic!("no observation under bound custody"),
             |_, _| panic!("no authoring under bound custody"),
+            |_| panic!("no probe under bound custody"),
         );
         assert!(refused.is_err());
         assert_eq!(authoring_generations(&base).unwrap().len(), 1);

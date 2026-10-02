@@ -353,8 +353,10 @@ fn sealed(generation: &Path) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
 
 /// Plan, seal and submit once; after a possible submission only the exact
 /// retained ingress is looked up. Before any submission, a generation whose
-/// retained Plan the Host no longer derives (a stale observation) is superseded
-/// once per call by a new generation of the same request. Re-running resumes.
+/// retained Plan (from an earlier call) the Host no longer derives is
+/// superseded once, and a generation whose fresh observation the Host answers
+/// `stale-root` is superseded by the shared `replan` loop: each new generation
+/// authors the same request with a fresh observation. Re-running resumes.
 pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
     decimal(grant.holder, "provisioning holder")?;
     match fs::DirBuilder::new().mode(0o700).create(grant.directory) {
@@ -379,31 +381,34 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
         pinned(&prior, "ingressSha256", &digest(&ingress))?;
         return lookup_exact(grant, &capability, &ingress);
     }
-    let mut existing = generations(grant.directory)?;
-    let mut superseded = false;
-    let generation = loop {
-        let current = match existing.last() {
-            Some(current) => current.clone(),
-            None => new_generation(grant.directory, 0)?,
-        };
-        drain::private_dir(&current)?;
-        if current.join("seal.json").exists() {
-            break current;
-        }
-        let retained_plan = current.join("plan.frame").exists();
-        match plan(grant, &request, &capability, &current) {
-            Ok(_) => break current,
-            Err(error) if retained_plan && !superseded => {
-                eprintln!(
-                    "provisioning generation {} is stale ({error}); authoring the same request anew",
-                    current.display()
-                );
-                existing.push(new_generation(grant.directory, existing.len())?);
-                superseded = true;
-            }
-            Err(error) => return Err(error),
+    let latest = || -> Result<PathBuf> {
+        let existing = generations(grant.directory)?;
+        match existing.last() {
+            Some(current) => Ok(current.clone()),
+            None => new_generation(grant.directory, 0),
         }
     };
+    // A Plan retained from an earlier call is stale by age, not by a race.
+    let earlier = std::cell::Cell::new(latest()?.join("plan.frame").exists());
+    let generation = crate::replan::replan(
+        "provision plan",
+        || {
+            let current = latest()?;
+            drain::private_dir(&current)?;
+            if !current.join("seal.json").exists() {
+                plan(grant, &request, &capability, &current)?;
+            }
+            Ok(current)
+        },
+        |error, decision| {
+            if earlier.replace(false) {
+                eprintln!("provisioning generation is stale ({error}); authoring the same request anew");
+                return true;
+            }
+            crate::participant_enrollment::stale_refusal(grant.host, grant.socket, grant.config, decision)
+        },
+        |_| new_generation(grant.directory, generations(grant.directory)?.len()).map(|_| ()),
+    )?;
     let ingress = if generation.join("seal.json").exists() {
         sealed(&generation)?.2
     } else {

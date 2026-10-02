@@ -120,6 +120,30 @@ pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
+/// Whether an enrollment Host refusal is the Host's own `stale-root`, decoded
+/// by the Host itself over the same session (op8 `inspect outcome`).
+pub(crate) fn stale_refusal(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    decision: Option<&HostDecision>,
+) -> bool {
+    match decision {
+        Some(HostDecision::RefusedFrame { decoded: None, encoded, .. }) => {
+            let kind = b"outcome";
+            let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
+            payload.extend_from_slice(kind);
+            payload.extend_from_slice(encoded);
+            session_invoke(host, socket, config, 8, &payload)
+                .ok()
+                .filter(|frame| frame.first() == Some(&8))
+                .and_then(|frame| serde_json::from_slice::<Value>(&frame[1..]).ok())
+                .is_some_and(|outcome| crate::replan::outcome_is_stale_root(&outcome))
+        }
+        decision => crate::replan::is_stale_root(decision),
+    }
+}
+
 pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
@@ -692,70 +716,85 @@ fn plan(mut args: Args) -> Result<()> {
     };
     retain_exact(&directory.join("config.json"), &config_bytes)?;
     let retained_config = directory.join("config.json");
-    let (signed, factory_root, authority_root) = signed_factory_observation(
-        &FactoryObservation {
-            host: &host,
-            socket: &public_socket,
-            config: &retained_config,
-            directory: &directory,
-            sponsor: &sponsor,
-            nonce: field(&request, "nonce")?,
-            factory: &factory_target,
-            observe: &observe,
+    // The factory observation, the command over its roots and the Plan are one
+    // re-plannable unit: nothing is bound or submitted until the Plan is
+    // validated, so a Host stale-root (a tick, certify or write between the
+    // observation and its use) retires them under replanned/ and observes again.
+    let (command, plan, plan_view) = crate::replan::replan(
+        "enroll plan",
+        || {
+            let (signed, factory_root, authority_root) = signed_factory_observation(
+                &FactoryObservation {
+                    host: &host,
+                    socket: &public_socket,
+                    config: &retained_config,
+                    directory: &directory,
+                    sponsor: &sponsor,
+                    nonce: field(&request, "nonce")?,
+                    factory: &factory_target,
+                    observe: &observe,
+                },
+                &sponsor_signing,
+            )?;
+            let factory_root = factory_root.as_str();
+            let authority_root = authority_root.as_str();
+            let command_source = json!({"sponsor":sponsor,"control":control,
+                "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
+                "expectedAuthorityRoot":authority_root,
+                "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
+                    "subject":subject,"publicKey":public_key,
+                    "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
+            save_json_staged(&directory.join("source.json"), &command_source)?;
+            transform(
+                &host,
+                &public_socket,
+                &retained_config,
+                7,
+                Some(COMMAND_KIND),
+                &directory.join("source.json"),
+                &directory.join("command.bin"),
+            )?;
+            let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
+            let command_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                COMMAND_KIND,
+                &directory.join("command.bin"),
+                &directory.join("command.json"),
+            )?;
+            if field(&command_view, "type")? != "participant-key-enrollment-v1"
+                || field(&command_view, "canonical")? != hex(&command)
+                || command_view.get("key") != Some(&command_source["key"])
+            {
+                return Err("enrollment canonical command differs from reserved source".into());
+            }
+            let plan = staged_invoke(
+                &host,
+                &operation_socket,
+                &retained_config,
+                &directory,
+                "plan",
+                86,
+                &pair(&signed, &command)?,
+            )?;
+            let plan_view = inspect(
+                &host,
+                &public_socket,
+                &retained_config,
+                PLAN_KIND,
+                &directory.join("plan.bin"),
+                &directory.join("plan.json"),
+            )?;
+            validate_plan(&plan_view, &command, &plan)?;
+            Ok((command, plan, plan_view))
         },
-        &sponsor_signing,
+        |_, decision| stale_refusal(&host, &public_socket, &retained_config, decision),
+        |number| {
+            crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
+                .map(|_| ())
+        },
     )?;
-    let factory_root = factory_root.as_str();
-    let authority_root = authority_root.as_str();
-    let command_source = json!({"sponsor":sponsor,"control":control,
-        "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
-        "expectedAuthorityRoot":authority_root,
-        "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
-            "subject":subject,"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
-    save_json_staged(&directory.join("source.json"), &command_source)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        7,
-        Some(COMMAND_KIND),
-        &directory.join("source.json"),
-        &directory.join("command.bin"),
-    )?;
-    let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
-    let command_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        COMMAND_KIND,
-        &directory.join("command.bin"),
-        &directory.join("command.json"),
-    )?;
-    if field(&command_view, "type")? != "participant-key-enrollment-v1"
-        || field(&command_view, "canonical")? != hex(&command)
-        || command_view.get("key") != Some(&command_source["key"])
-    {
-        return Err("enrollment canonical command differs from reserved source".into());
-    }
-    let plan = staged_invoke(
-        &host,
-        &operation_socket,
-        &retained_config,
-        &directory,
-        "plan",
-        86,
-        &pair(&signed, &command)?,
-    )?;
-    let plan_view = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        PLAN_KIND,
-        &directory.join("plan.bin"),
-        &directory.join("plan.json"),
-    )?;
-    validate_plan(&plan_view, &command, &plan)?;
     pinned(&request, "hostSha256", &host_image_sha256(&host)?)?;
     pinned(
         &request,

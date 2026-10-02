@@ -48,6 +48,7 @@ mod participant_namespace;
 mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
+mod replan;
 #[cfg(unix)]
 mod proxy;
 #[cfg(unix)]
@@ -285,7 +286,10 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini [--remote DEST] COMMAND [options]
+  mini [--remote DEST] COMMAND [options] [--replan-max N]
+    --replan-max N: when a tick, certify or another write lands between an observation and
+    its use, the Host answers stale-root; mini observes again up to N times (default 5;
+    MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
   mini keygen --secret KEY --public PUBLIC [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini join --key KEY
   mini join --remote DEST --key KEY --sponsor-plan PLAN.json --dir JOIN-ROOT
@@ -1324,6 +1328,11 @@ fn authorize_observation(
     Ok(Observed { signed })
 }
 
+/// Observe, prepare, sign, assemble and (unless `prepare_only`) submit one
+/// intent under the exact attempt `directory`. A Host `stale-root` (the state
+/// moved between the challenge and its use) re-plans the SAME intent with a
+/// fresh observation in the same attempt path (`replan`); the superseded plan
+/// is kept under `directory/replanned/`.
 fn submit(
     host: &Path,
     config: &Path,
@@ -1334,6 +1343,23 @@ fn submit(
     prepare_only: bool,
 ) -> Result<()> {
     create_dir(directory)?;
+    replan::replan(
+        "submit",
+        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only),
+        replan::stale_root,
+        |number| replan::retire_attempt(directory, number),
+    )
+}
+
+fn submit_once(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    directory: &Path,
+    prepare_only: bool,
+) -> Result<()> {
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -1397,6 +1423,30 @@ fn submit(
     print_confirmed_outcome(&outcome)
 }
 
+/// Whether the Host answers its own `stale-root` to the signed observation a
+/// refused birth authoring generation retained: the observation is presented
+/// to `query` once more, its answer kept as `stale-probe.view` or the refusal
+/// recorded. An answered probe means the refusal was not the timer race; a
+/// generation is probed at most once.
+#[cfg(unix)]
+pub(crate) fn observation_stale(host: &Path, config: &Path, generation: &Path) -> bool {
+    let probe = generation.join("stale-probe.view");
+    let signed = generation.join("factory-observation.bin");
+    if probe.exists() || !signed.is_file() {
+        return false;
+    }
+    let earlier = take_host_decision();
+    let answered = host_files(host, config, &[Path::new("query"), &signed, &probe]);
+    let decision = take_host_decision();
+    if answered.is_err() {
+        let _ = fs::write(&probe, format!("{decision:?}\n"));
+    }
+    if let Some(earlier) = earlier {
+        note_host_decision(earlier);
+    }
+    answered.is_err() && replan::is_stale_root(decision.as_ref())
+}
+
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
@@ -1411,6 +1461,8 @@ fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<Str
     }
 }
 
+/// One signed read. A Host `stale-root` between the challenge and the query
+/// observes again (`replan`); a read commits nothing.
 fn query_retained(
     host: &Path,
     config: &Path,
@@ -1421,6 +1473,23 @@ fn query_retained(
     directory: &Path,
 ) -> Result<Value> {
     create_dir(directory)?;
+    replan::replan(
+        "signed read",
+        || query_once(host, config, intent, intent_kind, key, inspection_kind, directory),
+        replan::stale_root,
+        |number| replan::retire_attempt(directory, number),
+    )
+}
+
+fn query_once(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    inspection_kind: &str,
+    directory: &Path,
+) -> Result<Value> {
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -2261,6 +2330,7 @@ fn continuity(
 }
 
 fn run(mut args: Args) -> Result<()> {
+    replan::configure(args.optional("replan-max"))?;
     let mut socket_argument = args.optional("socket");
     #[cfg(unix)]
     if let Some(destination) = args.optional("remote") {
