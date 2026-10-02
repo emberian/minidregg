@@ -69,7 +69,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
       profile config.federation ambient.height ingress.spec decoded.source.birth
   appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
-  appReadOnly : (ApplicationShareIssueDelegation.readGuard appPrepared).cellId ∉
+  appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
     (GrainResourceBirthTransaction.writes birth grain).map
       DurableDataIntent.DataWrite.cellId
   atomic : ApplicationShareIssueAtomicBirth.Checked sourceReady config.deployment
@@ -121,7 +121,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
         | return .error refused
       let .ok appChecked ← ApplicationShareIssueDelegation.check native appPrepared
           ingress.appEnvelope | return .error refused
-      if appReadOnly : (ApplicationShareIssueDelegation.readGuard appPrepared).cellId ∉
+      if appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
           (GrainResourceBirthTransaction.writes birth grain).map
             DurableDataIntent.DataWrite.cellId then
         match ApplicationShareIssueAtomicBirth.check sourceReady config.deployment

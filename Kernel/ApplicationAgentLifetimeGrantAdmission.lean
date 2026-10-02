@@ -50,7 +50,7 @@ structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
     ⟨birth.prepared.directory, birth.prepared.authority⟩ profile config.federation
       height ingress.spec birth.descriptor
   appChecked : ApplicationAgentLifetimeGrantDelegation.Checked appPrepared ingress.appEnvelope
-  appReadOnly : (ApplicationAgentLifetimeGrantDelegation.readGuard appPrepared).cellId ∉
+  appReadOnly : ∀ guard ∈ ApplicationAgentLifetimeGrantDelegation.readGuards appPrepared, guard.cellId ∉
     birth.prepared.writes.map DurableDataIntent.DataWrite.cellId
   atomic : ApplicationAgentLifetimeGrantAtomicBirth.Checked sourceReady config.deployment
     birth.prepared.writes
@@ -103,7 +103,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
           | return .error refused
         let .ok appChecked ← ApplicationAgentLifetimeGrantDelegation.check native appPrepared
           ingress.appEnvelope | return .error refused
-        if appReadOnly : (ApplicationAgentLifetimeGrantDelegation.readGuard appPrepared).cellId ∉
+        if appReadOnly : ∀ guard ∈ ApplicationAgentLifetimeGrantDelegation.readGuards appPrepared, guard.cellId ∉
             birth.prepared.writes.map DurableDataIntent.DataWrite.cellId then
           match ApplicationAgentLifetimeGrantAtomicBirth.check ready config.deployment
               birth.prepared.writes with
