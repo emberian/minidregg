@@ -225,20 +225,22 @@ theorem mark_stale_after_edit (author : PrincipalRef) (operation : OperationId)
     (accepted : step author operation document context progress (.editAtom edit) = .ok next) :
     markFresh next.1 record = false := by
   simp only [step] at accepted
-  unfold replaceAtom at accepted
   split at accepted
+  · unfold replaceAtom at accepted
+    split at accepted
+    · cases accepted
+    · split at accepted
+      · cases accepted
+      · cases accepted
+        have stored : Hyperdocument.lookup
+            (progress.1.set ⟨.atoms, edit.atomId⟩ (some (sourceEditAtomRecord author operation edit))) .atoms
+            edit.atomId = some (sourceEditAtomRecord author operation edit) := by
+          unfold Hyperdocument.lookup
+          rw [Store.Store.set_eq]
+          try exact rfl
+        simp only [markFresh, anchored, markTargetRevision, stored, sourceEditAtomRecord_revision]
+        split <;> simp [later]
   · cases accepted
-  · split at accepted
-    · cases accepted
-    · cases accepted
-      have stored : Hyperdocument.lookup
-          (progress.1.set ⟨.atoms, edit.atomId⟩ (some (editAtomRecord operation edit))) .atoms
-          edit.atomId = some (editAtomRecord operation edit) := by
-        unfold Hyperdocument.lookup
-        rw [Store.Store.set_eq]
-        try exact rfl
-      simp only [markFresh, anchored, markTargetRevision, stored, editAtomRecord_revision]
-      split <;> simp [later]
 
 /-- A mark writes the annotations field and nothing of the body: a capability
 scoped to `fields = {annotations}` covers it, and (`edit_is_body_write`) such
