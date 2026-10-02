@@ -173,6 +173,8 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
       | .scalar actions => !actions.isEmpty
       | .content content => !content.actions.isEmpty
       | .append _ => true
+      | .world actions => !actions.isEmpty
+      | .kindDefinition _ => true
       | .read => false) do
     throw "original call has no authored publication to the named resource"
   let messageId :=

@@ -122,6 +122,13 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
     | .append request => .mkObj
         [("type", toJson "append"), ("topicBytes", number request.topic.length),
          ("payloadBytes", number request.payload.length)]
+    | .world actions => .mkObj
+        [("type", toJson "world"), ("actionCount", number actions.length),
+         ("exactActionsHex", hex ((Tower256ConcreteBackend.StreamCodec.list WorldKindInstance.actionStream).encode actions))]
+    | .kindDefinition definition => .mkObj
+        [("type", toJson "kindDefinition"), ("kind", number definition.descriptor.kind),
+         ("revision", number definition.descriptor.revision),
+         ("exactDefinitionHex", hex (WorldKindCell.definitionStream.encode definition))]
     | .read => .mkObj [("type", toJson "read")]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]
