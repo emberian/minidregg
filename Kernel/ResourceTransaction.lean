@@ -254,7 +254,7 @@ theorem command_decode_canonical {bytes : List UInt8} {command : Command}
 
 /-- Empty lists never reach preparation; the default merely makes this total. -/
 def Command.first (command : Command) : Target :=
-  command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none⟩
+  command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none, none, none⟩
 
 def framedCommandBytes (domain semantics : Digest) (encodedCommand : List UInt8) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
@@ -638,6 +638,7 @@ def Target.contentStore? (target : Target) (cell : TargetCell target) :
     | content _ => exact some cell.logical
     | append _ => exact none
     | read => exact some cell.logical
+    | world _ | kindDefinition _ => exact none
 
 structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -697,6 +698,8 @@ theorem PreparedTarget.scalar_ratchets {deployment : Deployment}
     {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
     {capability : CapabilityId} {version : Nat} {root : Digest}
     {actions : List DeclaredActionLowering.Action} {observe : Option CapabilityId}
+    {audienceEpoch : Option Nat}
+    {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
     (prepared : PreparedTarget deployment directory snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩)
     {key : List UInt8}
@@ -713,6 +716,8 @@ theorem PreparedTarget.content_ratchets {deployment : Deployment}
     {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
     {capability : CapabilityId} {version : Nat} {root : Digest}
     {content : ContentResource.Command} {observe : Option CapabilityId}
+    {audienceEpoch : Option Nat}
+    {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
     (prepared : PreparedTarget deployment directory snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩)
     {key : List UInt8}
