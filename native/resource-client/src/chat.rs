@@ -54,7 +54,7 @@ use crate::shell::{Session, Verb, EXIT_CLIENT, EXIT_OK, EXIT_REFUSED, EXIT_USAGE
 use crate::workspace::{bounded_json, member, member_path, private_file, random_nonce};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
@@ -976,6 +976,24 @@ pub(crate) fn merge(mut entries: Vec<Entry>, founder: Option<String>) -> Feed {
 
 /// Read the roster and every member stream (paging), and merge. Streams that
 /// cannot be read are reported in `missing` with the Host's refusal line.
+/// Split the roster by the Host's `who` view of the room, read under this
+/// session's room grant: (current members, former members).
+fn current_members(session: &Session, room: &Room, roster: Roster) -> Result<(Roster, Vec<(String, String)>), Done> {
+    let ws = workspace_record(session).map_err(error)?;
+    let grant = reference(session, &room.grant).map_err(error)?;
+    let who = signed_read(session, &ws, &room.name, "who", &grant, "who", &[])?;
+    let current: BTreeSet<String> = who
+        .get("members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.get("subject").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let (members, former): (Vec<_>, Vec<_>) =
+        roster.members.into_iter().partition(|(subject, _)| current.contains(subject));
+    Ok((Roster { founder: roster.founder, members }, former))
+}
+
 fn read_room(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String>), Done> {
     let mut held = Held::open(session, room)?;
     held.roster(session, room)?;
@@ -1476,7 +1494,15 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
         Line::Invite { room, subject, name, enc, verbs } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs),
         Line::Ls { room, since, import, json: as_json } => {
             let room = match room {
-                Some(name) => load_room(session, &name),
+                // `room ls` is listed under `room`: a room made by `room new` (or
+                // imported) has no chat record, and is read through its own
+                // reference, whose capability observes the room.
+                Some(name) => load_room(session, &name).or_else(|missing| match reference(session, &name) {
+                    Ok(_) => Ok(Room { name: name.clone(), grant: name.clone(), stream: None }),
+                    Err(_) => Err(format!(
+                        "no room {name}: neither a chat room of this session nor a reference of its workspace ({missing})"
+                    )),
+                }),
                 None => current_room(session),
             }
             .map_err(error)?;
@@ -1528,6 +1554,10 @@ fn founder_note(session: &Session, room: &Room) {
 fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow: bool, as_json: bool, held: bool) -> Result<(), Done> {
     let names = names(session);
     let (feed, roster, missing) = if held { read_held(session, room)? } else { read_room(session, room)? };
+    // The roster keeps a row for everyone ever invited; who is a member NOW is
+    // the Host's `who` view (the subjects whose capability covers the room), so a
+    // kicked or departed member is not counted (AUDIT-ROOMS, client defect 7).
+    let (roster, former) = if held { (roster, Vec::new()) } else { current_members(session, room, roster)? };
     let mut out = std::io::stdout();
     let shown: Vec<usize> = (1..=feed.feed.len())
         .filter(|n| since.is_none_or(|h| feed.feed[n - 1].height > h))
@@ -1537,13 +1567,21 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
         let state = json!({"type":"mini-chat-room-v1","room":room.name,"founder":roster.founder,
             "members":roster.members.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>(),
             "topic":feed.topic.as_ref().map(|t| t.0.clone()),"pin":feed.pin.map(|p| p.0),
-            "entries":feed.feed.len(),"unreadable":missing});
+            "entries":feed.feed.len(),"unreadable":missing,
+            "former":former.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>()});
         let _ = writeln!(out, "{state}");
         for n in &shown[start..] {
             let _ = writeln!(out, "{}", entry_json(&feed, *n, &names));
         }
     } else {
-        let _ = writeln!(out, "{}", header(room, &feed, &roster, &names));
+        let mut line = header(room, &feed, &roster, &names);
+        if !former.is_empty() {
+            line.push_str(&format!(
+                " · no longer members: {}",
+                former.iter().map(|(s, _)| names.of(s)).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        let _ = writeln!(out, "{line}");
         for m in &missing {
             let _ = writeln!(out, "[unreadable] {m}");
         }

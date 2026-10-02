@@ -42,8 +42,10 @@ abbrev Context := ResourceObservationAdmission.Context
 
 variable {deployment : Deployment} {durable : Durable}
 
-/-- What an unauthenticated requester may be told. Before its signature has
-verified, a refusal names only facts the challenge endpoint already publishes:
+/-- What a requester may be told before its header signatures verify. (Before that, the
+request itself is authenticated by the intent signature -- `authenticated`, FIX-DISCLOSE --
+so this reaches only the subject's own key.) A refusal here names only facts the challenge
+endpoint already publishes:
 whether the named subject has an enrolled key (the challenge's public
 enrollment coordinate) and whether the signed challenge's world root is current
 (the world root is a public challenge field). Every other pre-signature
@@ -417,11 +419,103 @@ theorem headerAt_exact (context : Context deployment durable)
       header context profile federation genesisHeight intent grant := by
   rfl
 
+/-! ## Authentication before any target is read (FIX-DISCLOSE)
+
+The challenge used to be unauthenticated: for an intent naming a present target it issued
+headers, for an absent one it refused `undisclosed`, so a key that was never enrolled
+learned whether an id exists by naming any enrolled subject. Now every observation request
+carries the subject's signature over the intent's bytes, and the Host checks it against the
+subject's current key before it reads anything about the intent's targets. A request that
+does not authenticate is refused on one path that reads only the subject's key standing:
+`unknownKey` for a subject with no current live Ed25519 key (a public enrollment
+coordinate), `badSignature` otherwise. -/
+
+/-- The key an observation request must be signed by: the subject's current signing key,
+registered and not revoked, Ed25519. A subject without one is `unknownKey`. -/
+def intentKey (context : Context deployment durable) (subject : SubjectId) :
+    Except Refusal (List UInt8) :=
+  match CredentialAuthorityState.currentSigningKey context.authority.snapshot.logical subject with
+  | none => .error (.of .unknownKey)
+  | some key =>
+      if CredentialAuthorityState.keyStanding context.authority.snapshot.cell
+          (CredentialAuthorityState.signingKeyRevocation key) = .live ∧
+          key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
+          key.publicKey.length = 32 then
+        .ok key.publicKey
+      else .error (.of .unknownKey)
+
+/-- The native verdict on an intent signature: the subject's key over the intent's own
+framed bytes. It is given no target, no directory and no Book. A subject without a key
+is not verified at all. -/
+def intentVerdict (native : CredentialSignatureIO.NativeConfig)
+    (key : Except Refusal (List UInt8)) (intent : Intent) (signature : List UInt8) :
+    IO (Except CredentialSignatureIO.Error Bool) :=
+  match key with
+  | .error _ => pure (.ok false)
+  | .ok publicKey => CredentialSignatureIO.verify native publicKey (intentCodec.encode intent) signature
+
+/-- The authentication decision: only the exact positive verdict under a selected key
+authenticates; every other verdict is `badSignature`. -/
+def authenticated (key : Except Refusal (List UInt8))
+    (verdict : Except CredentialSignatureIO.Error Bool) : Except Refusal Unit :=
+  match key with
+  | .error refusal => .error refusal
+  | .ok _ =>
+      match verdict with
+      | .ok true => .ok ()
+      | _ => .error (.of .badSignature)
+
+/-- An unauthenticated request's refusal is a function of the subject's key alone: any
+two verdicts that are not the exact positive one give the same refusal. -/
+theorem authenticated_unverified (key : Except Refusal (List UInt8))
+    (left right : Except CredentialSignatureIO.Error Bool)
+    (leftFails : left ≠ .ok true) (rightFails : right ≠ .ok true) :
+    authenticated key left = authenticated key right := by
+  cases key with
+  | error refusal => rfl
+  | ok publicKey =>
+      rcases left with _ | (_ | _) <;> rcases right with _ | (_ | _) <;>
+        simp_all [authenticated]
+
+/-- Only the exact positive verdict authenticates. -/
+theorem authenticated_ok_iff (key : Except Refusal (List UInt8))
+    (verdict : Except CredentialSignatureIO.Error Bool) :
+    authenticated key verdict = .ok () ↔ (∃ publicKey, key = .ok publicKey) ∧ verdict = .ok true := by
+  cases key with
+  | error refusal => simp [authenticated]
+  | ok publicKey => rcases verdict with _ | (_ | _) <;> simp [authenticated]
+
+/-- A subject's key is selected, or refused `unknownKey`. -/
+theorem intentKey_refusal (context : Context deployment durable) (subject : SubjectId)
+    (refusal : Refusal) (refused : intentKey context subject = .error refusal) :
+    refusal = .of .unknownKey := by
+  unfold intentKey at refused
+  split at refused
+  · cases refused; rfl
+  · split at refused
+    · cases refused
+    · cases refused; rfl
+
+/-- An unauthenticated refusal names only `unknownKey` or `badSignature`. -/
+theorem authenticated_refusal (context : Context deployment durable) (subject : SubjectId)
+    (verdict : Except CredentialSignatureIO.Error Bool) (refusal : Refusal)
+    (refused : authenticated (intentKey context subject) verdict = .error refusal) :
+    refusal = .of .unknownKey ∨ refusal = .of .badSignature := by
+  cases selected : intentKey context subject with
+  | error reason =>
+      rw [selected] at refused
+      cases refused
+      exact Or.inl (intentKey_refusal context subject _ selected)
+  | ok publicKey =>
+      rw [selected] at refused
+      rcases verdict with _ | (_ | _) <;> simp [authenticated] at refused <;>
+        (subst refused; exact Or.inr rfl)
+
 /-- The challenge at a given clock: the one the read's law is judged at is the
 loaded snapshot's (`challenge`). -/
 def challengeAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (clock : ClockCell.Clock) : Except Refusal Challenge := do
+    (clock : ClockCell.Clock) (intentSignature : List UInt8) : Except Refusal Challenge := do
   let worldRoot := durable.worldRoot
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
@@ -429,16 +523,16 @@ def challengeAt (context : Context deployment durable) (profile : CanonicalRunti
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
     worldRoot, context.authority.snapshot.cell.root,
-    genesisHeight + durable.image.accepted.length, clock.now, clock.slot, headers⟩
+    genesisHeight + durable.image.accepted.length, clock.now, clock.slot, headers, intentSignature⟩
 
 /-- The success payload contains no field values, balances or policy source.
 The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data.
 The clock it names is public (the clock view publishes it). -/
 def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except Refusal Challenge := do
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) : Except Refusal Challenge := do
   let clock ← need .operationRejected (ClockCellDomain.load deployment durable.snapshot)
-  challengeAt context profile federation genesisHeight intent clock.clock
+  challengeAt context profile federation genesisHeight intent clock.clock intentSignature
 
 def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
@@ -474,7 +568,8 @@ structure AuthorizedIntent (context : Context deployment durable) (profile : Can
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) where
   private mk ::
   suppliedChallenge : Challenge
-  challengeExact : challenge context profile federation genesisHeight intent = .ok suppliedChallenge
+  challengeExact : challenge context profile federation genesisHeight intent
+    suppliedChallenge.intentSignature = .ok suppliedChallenge
   footprint : footprintExact context intent = .ok ()
   grants : (index : Fin intent.grants.length) →
     CheckedGrant context profile federation genesisHeight intent (intent.grants.get index)
@@ -530,15 +625,18 @@ theorem challengeMismatch_same_root (expected supplied : Challenge)
     challengeMismatch expected supplied = .of .undisclosed := by
   simp [challengeMismatch, world, authority, height]
 
-/-- Stale challenges are refused against the current world root.
-No grant means no successful footprint. No callback can mint a read token.
-Before the signature verifies only `preAuthentication` reasons are named. -/
-def authorize (native : CredentialSignatureIO.NativeConfig)
+/-- The authorization of an AUTHENTICATED signed observation: stale challenges are
+refused against the current world root; no grant means no successful footprint; no
+callback can mint a read token. Before the header signatures verify only
+`preAuthentication` reasons are named. Reached only through `authorize`, after the
+intent signature verified (`authenticated`). -/
+def authorizeAuthenticated (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
     IO (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
-  match derived : challenge context profile federation genesisHeight intent with
+  match derived : challenge context profile federation genesisHeight intent
+      signed.challenge.intentSignature with
   | .error reason => return .error (preAuthentication reason)
   | .ok expected =>
       if same : expected = signed.challenge then
@@ -550,6 +648,45 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
         else return .error (preAuthentication (.of .malformed))
       else return .error (challengeMismatch expected signed.challenge)
 
+/-- **Every signed observation authenticates before it reads a target.** The intent
+signature the challenge carries is checked against the subject's current key
+(`intentVerdict`, reading only the subject's key, the intent's bytes and the signature);
+only an authenticated request reaches the target-reading authorization. -/
+def authorize (native : CredentialSignatureIO.NativeConfig)
+    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
+    IO (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
+  let key := intentKey context signed.challenge.intent.subject
+  let verdict ← intentVerdict native key signed.challenge.intent signed.challenge.intentSignature
+  match authenticated key verdict with
+  | .error refusal => return .error refusal
+  | .ok () => authorizeAuthenticated native context profile federation genesisHeight signed
+
+/-- The signed path is the authentication, then the target-reading authorization. -/
+theorem authorize_authenticates_first (native : CredentialSignatureIO.NativeConfig)
+    (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
+    authorize native context profile federation genesisHeight signed = (do
+      let verdict ← intentVerdict native (intentKey context signed.challenge.intent.subject)
+        signed.challenge.intent signed.challenge.intentSignature
+      match authenticated (intentKey context signed.challenge.intent.subject) verdict with
+      | .error refusal => return .error refusal
+      | .ok () => authorizeAuthenticated native context profile federation genesisHeight signed) :=
+  rfl
+
+/-- **`unenrolled_signed_refusal_independent_of_target`.** A signed observation whose
+intent signature does not verify under the subject's current key (a key that was never
+enrolled, or any wrong key) is refused by `authenticated` alone, with the same refusal
+whatever its intent names: two such requests by one subject are refused identically. -/
+theorem unenrolled_signed_refusal_independent_of_target (context : Context deployment durable)
+    (left right : Signed)
+    (subject : left.challenge.intent.subject = right.challenge.intent.subject)
+    (leftVerdict rightVerdict : Except CredentialSignatureIO.Error Bool)
+    (leftFails : leftVerdict ≠ .ok true) (rightFails : rightVerdict ≠ .ok true) :
+    authenticated (intentKey context left.challenge.intent.subject) leftVerdict =
+      authenticated (intentKey context right.challenge.intent.subject) rightVerdict := by
+  rw [subject]
+  exact authenticated_unverified _ _ _ leftFails rightFails
 /-- The opening of a cell root: the store frame and one item per entry
 (`StoreHiding.items`), opened where the reader may see it.  A kind without a
 store wire has none. -/
@@ -1540,12 +1677,44 @@ theorem accepted_footprint_exact
     (accepted : AuthorizedIntent context profile federation height intent) :
     footprintExact context intent = .ok () := accepted.footprint
 
+/-- A grant naming an absent slot is not selected. -/
+theorem select_absent (context : Context deployment durable) (grant : GrantRef)
+    (absent : context.directory.directory.slots grant.target = .absent) :
+    select context grant = none := by
+  unfold select
+  split
+  · rfl
+  · rename_i packed present
+    rw [absent] at present
+    cases present
+
+/-- **The refuting pole, kept as the authenticated half.** The challenge itself still reads
+the target: for a single-grant intent whose footprint matches, an absent target is refused
+(`noGrant`, told as `undisclosed` by `preAuthentication`), while a present one is issued.
+Before FIX-DISCLOSE this was op 4's whole answer, to any key; now only an authenticated
+subject reaches it (`authorize`, `NativeHost.challengeAnswer`). -/
+theorem challenge_absent_target_refused (context : Context deployment durable)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
+    (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) (grant : GrantRef)
+    (single : intent.grants = [grant]) (foot : footprintExact context intent = .ok ())
+    (clock : ClockCellDomain.Loaded deployment durable.snapshot)
+    (clockLoaded : ClockCellDomain.load deployment durable.snapshot = some clock)
+    (absent : context.directory.directory.slots grant.target = .absent) :
+    (challenge context profile federation genesisHeight intent intentSignature).mapError
+      preAuthentication = .error (.of .undisclosed) := by
+  unfold challenge
+  simp only [clockLoaded, need, bind, Except.bind]
+  unfold challengeAt
+  simp only [foot, single, headerAt, select_absent context grant absent, need, List.mapM_cons,
+    bind, Except.bind, Except.mapError, pure, Except.pure]
+  rfl
+
 /-- **Challenge binding (DATAMODEL §3.4).**  A challenge carries the world root
 and the height of the one loaded image it was computed from. -/
 theorem challengeAt_bound {context : Context deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
-    {genesisHeight : Nat} {intent : Intent} {clock : ClockCell.Clock} {issued : Challenge}
-    (h : challengeAt context profile federation genesisHeight intent clock = .ok issued) :
+    {genesisHeight : Nat} {intent : Intent} {clock : ClockCell.Clock} {issued : Challenge} {intentSignature : List UInt8}
+    (h : challengeAt context profile federation genesisHeight intent clock intentSignature = .ok issued) :
     issued.worldRoot = durable.worldRoot ∧
       issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
       issued.clockNow = clock.now ∧ issued.clockSlot = clock.slot := by
@@ -1562,8 +1731,8 @@ theorem challengeAt_bound {context : Context deployment durable}
 /-- The clock a successful challenge names is the loaded snapshot's clock cell. -/
 theorem challenge_names_clock {context : Context deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
-    {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
-    (h : challenge context profile federation genesisHeight intent = .ok issued) :
+    {genesisHeight : Nat} {intent : Intent} {issued : Challenge} {intentSignature : List UInt8}
+    (h : challenge context profile federation genesisHeight intent intentSignature = .ok issued) :
     ∃ clock, ClockCellDomain.load deployment durable.snapshot = some clock ∧
       issued.worldRoot = durable.worldRoot ∧
       issued.height = genesisHeight + NativeHostCodec.height durable.image ∧
@@ -1577,8 +1746,8 @@ theorem challenge_names_clock {context : Context deployment durable}
 
 theorem challenge_bound {context : Context deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
-    {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
-    (h : challenge context profile federation genesisHeight intent = .ok issued) :
+    {genesisHeight : Nat} {intent : Intent} {issued : Challenge} {intentSignature : List UInt8}
+    (h : challenge context profile federation genesisHeight intent intentSignature = .ok issued) :
     issued.worldRoot = durable.worldRoot ∧
       issued.height = genesisHeight + NativeHostCodec.height durable.image := by
   obtain ⟨_, _, world, height, _⟩ := challenge_names_clock h

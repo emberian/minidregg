@@ -163,7 +163,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JDV J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -251,6 +251,7 @@ TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
 TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
 TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
+TITLE[JDISCLOSE]="disclosure: a narrowed refusal, authentication before any target, the installer's lockout, eight client fixes"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -956,6 +957,7 @@ step_JLS() { hook jlawsat "lawsat-journey.sh: the EVAL falsifier is UNSATISFIABL
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
 step_JROT() { hook jrot "a thief holding the daily key cannot rotate (notPrecommitted, noPossession); the friend rotates with the committed next key; the old key's write is refused; grants survive; a second rotation; a --no-prerotation subject cannot rotate; restart; audit re-admits (lane k-prerotate)"; }
+step_JDISCLOSE() { hook jdisclose "a --fields 1 guest is refused naming no clause over field 2 and never its value, with one frame whatever field 2 holds, while the owner keeps clause and value; a never-enrolled key gets one frame at challenge for a present and an absent target; a law its installer can never pass is refused without --i-lock-myself-out, sealed keeps --allow-unsatisfiable, a law it can never change warns; can --all, room ls, inspect law, help forget, a stale delegation hint, tail members, a sealed doc read back and sealed by cell (lane fix-disclose)" shell; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
@@ -1036,6 +1038,7 @@ run_step JPAY4 J0
 run_step JPAY6 J0
 run_step JP2 J0
 run_step JROT J1
+run_step JDISCLOSE J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 journey_shortdir_return

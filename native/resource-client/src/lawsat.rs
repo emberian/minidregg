@@ -151,7 +151,12 @@ pub(crate) fn unsat_lines(answer: &Value, query_part: &str) -> Vec<String> {
                         sources_text(constraint, query_part)
                     ));
                 }
-                let sum = entry.get("sum").and_then(Value::as_i64).unwrap_or(0);
+                let sum = entry
+                    .get("sumText")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| entry.get("sum").map(Value::to_string))
+                    .unwrap_or_else(|| "?".into());
                 lines.push(format!(
                     "  (added up, they say 0 <= {sum}, which no value can make true)"
                 ));
@@ -208,10 +213,31 @@ fn unknown_text(answer: &Value) -> String {
     }
 }
 
-/// The two answers `law check` and the install check share.
+/// The verb tag of a re-law (`request/verb` 4 is `install`).
+const INSTALL_VERB: &str = "4";
+
+/// The installer's own pins (`Host/LawSat.lean` `lockoutExtra`): the request
+/// subject, and for the re-law question the verb `install` too.
+fn installer_pins(subject: &str, relaw: bool) -> Value {
+    let me = json!({"type":"eq","slot":"request/subject","value":subject});
+    if relaw {
+        json!({"type":"all","predicates":[me, {"type":"eq","slot":"request/verb","value":INSTALL_VERB}]})
+    } else {
+        me
+    }
+}
+
+/// The answers `law check` and the install check share: any step, any write,
+/// and the installer's own two questions (FIX-DISCLOSE): can I ever act under
+/// this law (`self_lockout_detected`), and can I ever change it
+/// (`relaw_lockout_detected`)? The last two are asked only of a law some step
+/// satisfies; a law no step satisfies is already refused as unsatisfiable.
 struct Check {
     any: Value,
     write: Value,
+    subject: String,
+    mine: Option<Value>,
+    relaw: Option<Value>,
 }
 
 fn check(root: &Path, workspace: &Value, law: &Value) -> Result<Check> {
@@ -220,7 +246,57 @@ fn check(root: &Path, workspace: &Value, law: &Value) -> Result<Check> {
         "outside" => any.clone(),
         _ => ask(root, workspace, law, Some(&verb_is_write()), false, "write")?,
     };
-    Ok(Check { any, write })
+    let subject = member(workspace, "subject")?.to_owned();
+    let (mine, relaw) = match verdict(&any) {
+        "witness" => (
+            Some(ask(root, workspace, law, Some(&installer_pins(&subject, false)), false, "mine")?),
+            Some(ask(root, workspace, law, Some(&installer_pins(&subject, true)), false, "relaw")?),
+        ),
+        _ => (None, None),
+    };
+    Ok(Check { any, write, subject, mine, relaw })
+}
+
+/// The installer can never act under the law: a certificate to its own question.
+fn locks_out(check: &Check) -> bool {
+    check.mine.as_ref().is_some_and(|mine| verdict(mine) == "unsat")
+}
+
+/// The installer can never change the law (but may act under it otherwise).
+fn locks_relaw(check: &Check) -> bool {
+    !locks_out(check) && check.relaw.as_ref().is_some_and(|relaw| verdict(relaw) == "unsat")
+}
+
+fn lockout_lines(check: &Check) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(mine) = &check.mine {
+        match verdict(mine) {
+            "unsat" => {
+                lines.push(format!(
+                    "LOCKS YOU OUT: no request by you (subject {}) can ever pass this law: you could not read, write, delegate or change it again.",
+                    check.subject
+                ));
+                lines.extend(unsat_lines(mine, "your own subject pin"));
+                return lines;
+            }
+            "witness" => lines.push(format!("for you: admits e.g. {}", witness_text(mine))),
+            _ => lines.push(format!("for you: {}", unknown_text(mine))),
+        }
+    }
+    if let Some(relaw) = &check.relaw {
+        match verdict(relaw) {
+            "unsat" => {
+                lines.push(format!(
+                    "WARNING: you (subject {}) can never change this law once it is installed (no re-law by you can pass).",
+                    check.subject
+                ));
+                lines.extend(unsat_lines(relaw, "your own re-law pin"));
+            }
+            "witness" => lines.push(format!("re-law: you can change it, e.g. {}", witness_text(relaw))),
+            _ => lines.push(format!("re-law: {}", unknown_text(relaw))),
+        }
+    }
+    lines
 }
 
 fn check_lines(check: &Check) -> Vec<String> {
@@ -254,6 +330,7 @@ fn check_lines(check: &Check) -> Vec<String> {
         }
         _ => lines.push(format!("writes: {}", unknown_text(&check.write))),
     }
+    lines.extend(lockout_lines(check));
     lines
 }
 
@@ -269,15 +346,36 @@ pub(super) fn law_check(root: &Path, workspace: &Value, predicate: &Path) -> Res
 
 /// The install-time check, run before an install-policy proposal is authored.
 /// Refuses (locally; nothing is proposed) a law that admits no step unless
-/// `allow_unsatisfiable`; warns on a law no write can pass.
+/// `allow_unsatisfiable`, and a law that admits no step BY THE INSTALLER unless
+/// `allow_lockout` (`--i-lock-myself-out`); warns on a law no write can pass and
+/// on a law its installer can never change.
 pub(super) fn install_check(
     root: &Path,
     workspace: &Value,
     law: &Value,
     allow_unsatisfiable: bool,
+    allow_lockout: bool,
 ) -> Result<()> {
     let checked = check(root, workspace, law)?;
     let lines = check_lines(&checked);
+    if locks_out(&checked) && !allow_lockout {
+        let mut message = vec![format!(
+            "law-locks-you-out: no request by you (subject {}) can ever pass this law, so it was not proposed.",
+            checked.subject
+        )];
+        message.extend(lockout_lines(&checked).into_iter().skip(1));
+        message.push(
+            "once installed you could not read, write, delegate or re-law this cell; \
+             to install it anyway, repeat the line with --i-lock-myself-out"
+                .into(),
+        );
+        return Err(message.join("\n"));
+    }
+    if locks_out(&checked) {
+        eprintln!("law check: installing it anyway (--i-lock-myself-out): you will not be able to act on this cell again");
+    } else if locks_relaw(&checked) {
+        eprintln!("law check: this law can never be changed by you once installed (like `sealed`, which may be what you mean)");
+    }
     if verdict(&checked.any) == "unsat" && !allow_unsatisfiable {
         let mut message = vec![
             "law-unsatisfiable: this law can never pass, so it was not proposed.".to_owned(),

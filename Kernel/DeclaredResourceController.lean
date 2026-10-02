@@ -652,13 +652,74 @@ def firstRangeLeaf [DecidableEq F]
   ((List.finRange command.targets.length).map some ++ [none]).findSome?
     (rangeLeaf prepared tuple)
 
-/-- The first leg (targets in order, then the authority leg) whose law names a
-failing clause. -/
 def firstLawLeaf [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
   ((List.finRange command.targets.length).map some ++ [none]).findSome?
     (lawLeaf prepared tuple)
+
+/-- The law refusal of one leg as a requester whose grant on that leg names
+`fieldsOf incidence` is told it: the same resolved committed law on the same witness
+states as `lawLeaf`, explained only through slots that grant covers
+(`Refusal.lawDeniedFor`, FIX-DISCLOSE). -/
+def lawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option Refusal := do
+  let wanted := (tuple.request incidence).2
+  let context := step prepared tuple incidence
+  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
+    context.oldState context.newState
+  if Minidregg.Pred.eval committed.record.predicate witness.oldState witness.newState then none
+  else some (Refusal.lawDeniedFor (fieldsOf incidence) committed.record.predicate
+    witness.oldState witness.newState)
+
+/-- Narrowing changes what a refusal says, never whether there is one: a leg is refused
+exactly when its law names a failing clause (`lawLeaf`, hence exactly when submission's
+compiled check rejects, `lawLeaf_refuses_iff_verifies_rejects`). -/
+theorem lawRefusal_isSome [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    (lawRefusal fieldsOf prepared tuple incidence).isSome =
+      (lawLeaf prepared tuple incidence).isSome := by
+  unfold lawRefusal lawLeaf
+  dsimp only
+  cases (policyConfig prepared tuple incidence).registry.resolve
+      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
+  | none => simp
+  | some committed =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      split
+      · next accepts =>
+          rw [(LawLeaf.of_none_iff _ _ _).mpr accepts]
+          rfl
+      · next rejects =>
+          cases named : LawLeaf.of committed.record.predicate _ _ with
+          | none =>
+              have := (LawLeaf.of_none_iff _ _ _).mp named
+              exact absurd this rejects
+          | some _ => rfl
+
+/-- The first leg (targets in order, then the authority leg) whose law refuses, as the
+requester is told it. -/
+def firstLawRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+    (lawRefusal fieldsOf prepared tuple)
+
+/-- Numeric range/cast diagnostics use the same leg-specific disclosure scope. -/
+def firstRangeRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
+    (rangeLeaf prepared tuple i).map (Refusal.lawInputRangeFor (fieldsOf i))
+
+def firstCastRefusal [DecidableEq F] (fieldsOf : Incidence command → Option (Finset CellField))
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option Refusal :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome? fun i =>
+    (castAliasLeg prepared tuple i).map fun (x, y) => Refusal.castAliasFor (fieldsOf i) x y
 
 structure SignedCommand where
   commandBytes : List UInt8

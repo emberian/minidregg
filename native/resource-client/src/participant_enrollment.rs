@@ -540,6 +540,13 @@ pub(crate) fn signed_factory_observation(
         }
         Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
     }
+    // Op 4 is authenticated before the Host reads the factory: the intent's bytes
+    // and the sponsor's signature over them, in the session's pair framing.
+    let intent_signature = signing.sign(&query_bytes).to_bytes();
+    let length: u32 = query_bytes.len().try_into().map_err(|_| "factory intent too large")?;
+    let mut request = length.to_le_bytes().to_vec();
+    request.extend_from_slice(&query_bytes);
+    request.extend_from_slice(&intent_signature);
     let challenge = staged_invoke(
         input.host,
         input.socket,
@@ -547,7 +554,7 @@ pub(crate) fn signed_factory_observation(
         &observation,
         "challenge",
         4,
-        &query_bytes,
+        &request,
     )?;
     let challenge_json = inspect(
         input.host,

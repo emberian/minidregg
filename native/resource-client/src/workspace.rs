@@ -2197,12 +2197,41 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
+/// The private room a CELL is sealed under, as this workspace knows it: the
+/// `sealedIn` mark of this reference, or of any other reference to the same
+/// cell (AUDIT-ROOMS, client defect 3: the mark was per reference name, so a
+/// second import of a sealed doc wrote plaintext into the private room).
+pub(crate) fn sealed_room(root: &Path, reference: &Value) -> Option<String> {
+    if let Some(room) = reference.get("sealedIn").and_then(Value::as_str) {
+        return Some(room.to_owned());
+    }
+    let target = reference.get("target").and_then(Value::as_str)?;
+    let kind = reference.get("kind").and_then(Value::as_str);
+    let mut names: Vec<String> = fs::read_dir(root.join("refs"))
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(".json").map(ref_name_of_file))
+        .collect();
+    names.sort();
+    names.into_iter().find_map(|name| {
+        let other = crate::workspace::reference(root, &name).ok()?;
+        (other.get("target").and_then(Value::as_str) == Some(target)
+            && other.get("kind").and_then(Value::as_str) == kind)
+            .then(|| other.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
+            .flatten()
+    })
+}
+
 /// The private room a target is sealed under: the proposal's `--private ROOM`,
-/// or the room its reference was born in (`sealedIn`).
-fn sealing_room(explicit: Option<&str>, reference: &Value) -> Option<String> {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| reference.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
+/// or the room its cell was born in (`sealed_room`).
+fn sealing_room(explicit: Option<&str>, root: &Path, reference: &Value) -> Option<String> {
+    explicit.map(str::to_owned).or_else(|| sealed_room(root, reference))
+}
+
+/// Whether a signed view holds a private-cell envelope (`DREGG/PRIVATE-CELL`
+/// atoms of the private schema).
+fn holds_sealed(view: &Value, target: &str) -> bool {
+    private::open_view(&mut view.clone(), "", target, None) > 0
 }
 
 /// The client's own observations of one plan named different world or
@@ -2350,7 +2379,16 @@ fn propose_summary_once(
                     .as_object()
                     .ok_or("target payload must be an object")?;
                 let read_only = payload.get("type").and_then(Value::as_str) == Some("read");
-                let sealing = match sealing_room(private_room_name, &reference) {
+                let sealing = match sealing_room(private_room_name, root, &reference) {
+                    // A cell that already holds sealed lines is a private room's,
+                    // whatever this reference is called: refuse to write plaintext
+                    // into it when the room is not known here.
+                    None if !read_only && holds_sealed(&view, target) => {
+                        return Err(format!(
+                            "{local_name} holds sealed lines (a private room's cell) and this workspace does not know \
+                             its room: name it with --private ROOM, or read and write it through the reference it was born under"
+                        ))
+                    }
                     None => None,
                     Some(room) => {
                         if !room_keys.contains_key(&room) {
@@ -4953,6 +4991,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 }
                 return read_private(&root, &workspace, &name, &room);
             }
+            // A cell born in a private room is read through its room's keys,
+            // as `tail` does (AUDIT-ROOMS, client defect 2).
+            if action == "read" {
+                if let Some(room) = sealed_room(&root, &reference(&root, &name)?) {
+                    return read_private(&root, &workspace, &name, &room);
+                }
+            }
             read(
                 &root,
                 &workspace,
@@ -4983,11 +5028,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .map(|value| os_string(value, "private room"))
                 .transpose()?;
             args.finish()?;
-            let room = room.or_else(|| {
-                reference(&root, &name)
-                    .ok()
-                    .and_then(|r| r.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
-            });
+            let room = room.or_else(|| reference(&root, &name).ok().and_then(|r| sealed_room(&root, &r)));
             match room {
                 Some(room) => roomkey::tail(&root, &workspace, &name, &start, &count, &room),
                 None => read(&root, &workspace, &name, "tail", Some((&start, &count)), false),
@@ -5272,10 +5313,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 args.optional("allow-unsatisfiable").as_deref().and_then(OsStr::to_str),
                 Some("true")
             );
+            let allow_lockout = matches!(
+                args.optional("i-lock-myself-out").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
             args.finish()?;
             let source = bounded_json(&request)?;
             if source.get("action").and_then(Value::as_str) == Some("install-policy") {
-                lawsat::install_check(&root, &workspace, &source["predicate"], allow)?;
+                lawsat::install_check(&root, &workspace, &source["predicate"], allow, allow_lockout)?;
             }
             propose(&root, &workspace, &request, &proposal_id, room.as_deref())
         }

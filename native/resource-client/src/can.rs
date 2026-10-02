@@ -182,7 +182,9 @@ pub(super) fn can(root: &Path, workspace: &Value, name: Option<&str>, all: bool)
             for entry in fs::read_dir(root.join("refs")).map_err(|error| error.to_string())? {
                 let file = entry.map_err(|error| error.to_string())?.file_name();
                 if let Some(stem) = file.to_str().and_then(|f| f.strip_suffix(".json")) {
-                    names.push(stem.to_owned());
+                    // A file stem spells a reference name with '.' for '/' (`lab.index` is
+                    // `lab/index`); the name is what `reference` reads back.
+                    names.push(crate::workspace::ref_name_of_file(stem));
                 }
             }
             names.sort();

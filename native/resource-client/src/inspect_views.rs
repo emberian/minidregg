@@ -88,7 +88,8 @@ fn names(root: &Path, name: Option<&str>) -> Result<Vec<String>> {
     for entry in fs::read_dir(root.join("refs")).map_err(|error| error.to_string())? {
         let file = entry.map_err(|error| error.to_string())?.file_name();
         if let Some(stem) = file.to_str().and_then(|f| f.strip_suffix(".json")) {
-            names.push(stem.to_owned());
+            // `lab.index` on disk is the reference `lab/index`.
+            names.push(crate::workspace::ref_name_of_file(stem));
         }
     }
     names.sort();
@@ -176,11 +177,17 @@ fn law(root: &Path, workspace: &Value, name: &str, json_out: bool) -> Result<()>
         Ok(bytes) => Value::String(hex(&bytes)),
         Err(_) => Value::Null,
     };
+    // The reader's own capability: which fields its grant names, so a field
+    // missing from a narrowed read is told apart from one that is absent.
+    let capability = match signed_view_bytes(root, workspace, &reference, "capability")? {
+        Ok(bytes) => Value::String(hex(&bytes)),
+        Err(_) => Value::Null,
+    };
     render(
         root,
         workspace,
         "law",
-        &json!({"name":name,"policy":hex(&policy),"resource":resource}),
+        &json!({"name":name,"policy":hex(&policy),"resource":resource,"capability":capability}),
         json_out,
     )?;
     Ok(())
