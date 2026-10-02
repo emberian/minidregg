@@ -128,9 +128,12 @@ it grants no physical permit, dispatches no HTTP request, and charges no submiss
 Operator assembly 37 stays private. Future HTTP requests still need their ordinary
 fresh source admission.
 
-The five observations must share one native head. An unrelated write can interrupt
-inspection; the command asks the member to inspect again rather than weakening
-currentness. A shared one-image observation batch is the next simplification.
+The five observations use the shared one-image query batch, with each ordinary
+singleton query independently admitted and returned in its existing signed format.
+Shared-name references additionally retain and verify their room/index binding
+guards in that same image. The app consumer forwards only the five original proofs
+to operation 194, preserving its exact full/current grant checks. A later write
+before final admission can still refuse the read-only inspection.
 Browser entry remains unavailable until actual registered proxy metadata and a
 member-owned protected bootstrap credential are delivered. No route URL is invented.
 The source candidate activates operations 193/194 for scoped native qualification.

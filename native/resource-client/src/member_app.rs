@@ -208,10 +208,9 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
     }
     let mut reads = vec![];
     let mut challenge: Option<Value> = None;
-    for r in &refs {
-        let (_, current, signed) = workspace::signed_view(root, pin, r, "resource")?;
+    for (_, current, signed) in workspace::signed_views(root, pin, &refs, "resource")? {
         if let Some(first) = &challenge {
-            for key in ["domain", "semantics", "height", "worldRoot"] {
+            for key in ["domain", "semantics", "height", "worldRoot", "authorityRoot"] {
                 if current[key] != first[key] {
                     return Err("App state changed during inspection; run app status again".into());
                 }
