@@ -14,12 +14,17 @@ import Compiler.CanonicalRuntimeProfile
 import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
+import Compiler.WorldKindLawDependencies
+import Kernel.WorldKindProjection
+import Compiler.PhysicalLawResolution
+import Compiler.ComposedLawDiagnostics
 import Compiler.ResourceTargetAdmission
 import Compiler.CanonicalAccountView
 import Compiler.ResourceAuthorityProjection
 import Kernel.ContentResource
 import Kernel.DeclaredResourceProjection
 import Theory.RoomAuthorization
+import Theory.StoreFootprint
 import Kernel.ClockCellDomain
 import Theory.AssertAxioms
 
@@ -101,11 +106,13 @@ def readCandidate {kind : ResourceKind} (wanted : Request kind)
       (readPatch physical) rfl trivial).choose
     postcondition := rfl }
 
-def resourceSlots (target : Nat) : (kind : CanonicalCellRegistry.Kind) →
+def resourceSlots (subject : SubjectId) (target : Nat) : (kind : CanonicalCellRegistry.Kind) →
     Store (CanonicalCellRegistry.layout kind) → List (String × Int)
   | .content, logical => ContentResource.project logical logical ⟨[]⟩
   | .declaredObject, logical | .accountMetadata, logical | .declaredProgram, logical =>
       DeclaredResourceProjection.project target logical logical
+  | .worldInstance, logical => WorldKindProjection.project subject logical logical
+  | .worldKind, logical => WorldKindProjection.definitionProject logical logical
   | _, _ => []
 
 def sourceStore (context : Context deployment durable) : CanonicalPolicyRegistry.PayloadStore where
@@ -132,6 +139,9 @@ structure Prepared (context : Context deployment durable) (profile : CanonicalRu
   /-- The deployment clock of the snapshot the read is answered from. -/
   clock : Kernel.ClockCellDomain.Loaded deployment durable.snapshot
   clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot = some clock
+  kindDependencies : WorldKindLawDependencies.Dependencies
+  kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory.directory
+    wanted.target.value = some kindDependencies
 
 /-- Each refusing branch names its reason. The request is host-built from the
 same image, so a component mismatch means the caller asked for something other
@@ -155,9 +165,13 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
                   | some values =>
                     match clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
                     | none => .error (.of .operationRejected)
-                    | some clock => .ok ⟨observed, observeExact, domainExact, semanticsExact,
-                        policyExact, epochExact, revisionExact, values, balancesExact, clock,
-                        clockLoaded⟩
+                    | some clock =>
+                        match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
+                            context.directory.directory wanted.target.value with
+                        | none => .error (.of .operationRejected)
+                        | some dependencies => .ok ⟨observed, observeExact, domainExact, semanticsExact,
+                            policyExact, epochExact, revisionExact, values, balancesExact, clock,
+                            clockLoaded, dependencies, dependenciesExact⟩
                 else .error (.of .staleRoot)
               else .error (.of .staleRoot)
             else .error (.of .malformed)
@@ -175,14 +189,15 @@ cell's resource slots. Observation admission and the room birth gate
 def projectWith (clock : Kernel.ClockCell.Clock) {kind : ResourceKind} (wanted : Request kind) (contextBytes : List UInt8)
     (physical : CanonicalCellRegistry.Kind) (accountBalances : List (Nat × Int))
     (logical : Store (CanonicalCellRegistry.layout physical)) : Minidregg.Pred.State :=
-  ⟨Kernel.ClockCell.slots clock ++ CanonicalRuntimeProfile.requestSlots wanted ++
+  ⟨Kernel.ClockCell.slots clock ++ [("target/storageKind", Int.ofNat physical.tag.toNat)] ++
+    CanonicalRuntimeProfile.requestSlots wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 contextBytes ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer physical).codec.encode logical) ++
     ResourceAuthorityProjection.bytesSlots "account/bytes" 0
       (CanonicalAccountView.balanceStream.encode accountBalances) ++
     accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2)) ++
-    resourceSlots wanted.target.value physical logical⟩
+    resourceSlots wanted.subject wanted.target.value physical logical⟩
 
 def project (prepared : Prepared context profile wanted marker capability contextBytes)
     (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
@@ -192,12 +207,24 @@ def step (prepared : Prepared context profile wanted marker capability contextBy
   PolicyStepContext.ofCandidate (project prepared) profile.semantics
     (readCandidate wanted prepared.observed.before.kind prepared.observed.before.payload prepared.observed.rootExact)
 
-def policyConfig (prepared : Prepared context profile wanted marker capability contextBytes) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile context.authority.snapshot (sourceStore context)
-    (sourceCapabilityPortal context.authority.snapshot marker) (step prepared)
+def policyConfig (prepared : Prepared context profile wanted marker capability contextBytes) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot context.directory.directory
+    (sourceCapabilityPortal context.authority.snapshot marker) (step prepared) wanted.target.value
+    prepared.kindDependencies.additional
 
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
+
+def capabilityEvidenceChecked (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
+    Except RefusalReason (Evidence (portal prepared) context.authority.snapshot.authState wanted) :=
+  (policyConfig prepared).capabilityEvidenceChecked wanted capability () signature () (fun _ => ())
+
+def lawReadGuards (prepared : Prepared context profile wanted marker capability contextBytes) :
+    Option (List (Nat × Digest)) :=
+  PhysicalLawResolution.readGuards context.authority.snapshot context.directory.directory
+    profile.semantics wanted.target.value prepared.kindDependencies.additional |>.map
+      (· ++ prepared.kindDependencies.readGuards)
 
 /-- The fields the reader's capability names (K-FIELDS), which narrow what a law refusal
 tells it (`Refusal.lawDeniedFor`, FIX-DISCLOSE). A capability that does not read names no
@@ -221,28 +248,18 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
   let config := policyConfig prepared
-  match sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature with
+  match capabilityEvidenceChecked prepared signature with
   | .error reason => .error (.of reason)
   | .ok evidence =>
-      match config.registry.resolve wanted.policyId wanted.policyRevision with
+      match config.resolve? with
       | none => .error (Refusal.lawDenied none)
       | some committed =>
-          let witness := canonicalWitness profile.compilerProfile.compiler committed
-            (step prepared).oldState (step prepared).newState
-          match CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
+          let witness := committed.witness
+          match ComposedPolicyAdmission.admit config wanted
               evidence witness (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
-          | none =>
-              match LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
-                  witness.oldState witness.newState with
-              | some leaf => .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf)
-              | none =>
-                  match castAlias F (intsOf committed.record.predicate
-                      witness.oldState witness.newState) with
-                  | some (x, y) => .error (Refusal.castAliasFor (readerFields context kind capability) x y)
-                  | none => .error (Refusal.lawDeniedFor (readerFields context kind capability)
-                      committed.record.predicate witness.oldState witness.newState)
+          | none => .error (ComposedLawDiagnostics.publicRefusal
+              (readerFields context kind capability) committed)
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -256,8 +273,7 @@ theorem authorizeChecked_capability_reason
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (reason : RefusalReason)
-    (refused : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .error reason) :
+    (refused : capabilityEvidenceChecked prepared signature = .error reason) :
     authorizeChecked prepared signature = .error (.of reason) := by
   simp only [authorizeChecked, refused]
 
@@ -269,30 +285,28 @@ theorem authorizeChecked_lawDenied
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
-    (committed : CommittedPolicy)
-    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
-    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+    (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared))
+    (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
+    (resolved : (policyConfig prepared).resolve? =
       some committed)
-    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
-      wanted evidence
-      (canonicalWitness profile.compilerProfile.compiler committed
-        (step prepared).oldState (step prepared).newState)
+    (denied : ComposedPolicyAdmission.admit (policyConfig prepared) wanted evidence
+      committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = true)
-    (castExact : castInjOn F (intsOf committed.record.predicate
+    (castExact : castInjOn F (intsOf committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState)) :
     authorizeChecked prepared signature = .error (Refusal.lawDeniedFor
-      (readerFields context kind capability) committed.record.predicate
+      (readerFields context kind capability) committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
-    committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
-  have noAlias := (castAlias_none_iff F (intsOf committed.record.predicate
+    committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
+  have noAlias := (castAlias_none_iff F (intsOf committed.head.committed.record.localComponent.guarded
     (step prepared).oldState (step prepared).newState)).mpr castExact
-  simp only [authorizeChecked, supplied, resolved, denied]
-  simp only [canonicalWitness, none_, noAlias]
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, none_, noAlias]
 
 /-- With every order clause in range, a law refused because two integers of its
 step share a field image is reported as `lawInputRange` naming the two integers,
@@ -301,26 +315,24 @@ theorem authorizeChecked_castAlias
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
-    (committed : CommittedPolicy) (x y : Int)
-    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
-    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+    (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (x y : Int)
+    (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
+    (resolved : (policyConfig prepared).resolve? =
       some committed)
-    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
-      wanted evidence
-      (canonicalWitness profile.compilerProfile.compiler committed
-        (step prepared).oldState (step prepared).newState)
+    (denied : ComposedPolicyAdmission.admit (policyConfig prepared) wanted evidence
+      committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = true)
-    (alias_ : castAlias F (intsOf committed.record.predicate
+    (alias_ : castAlias F (intsOf committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState) = some (x, y)) :
     authorizeChecked prepared signature = .error (Refusal.castAliasFor (readerFields context kind capability) x y) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
-    committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
-  simp only [authorizeChecked, supplied, resolved, denied]
-  simp only [canonicalWitness, none_, alias_]
+    committed.head.committed.record.localComponent.guarded (step prepared).oldState (step prepared).newState).mpr inRange
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, none_, alias_]
 
 /-- A law refused while one of its order clauses compares two values outside the
 native order range is reported as `lawInputRange`, naming that clause and the two
@@ -329,22 +341,20 @@ theorem authorizeChecked_lawInputRange
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
-    (committed : CommittedPolicy) (leaf : LawLeaf)
-    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
-    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+    (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (leaf : LawLeaf)
+    (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
+    (resolved : (policyConfig prepared).resolve? =
       some committed)
-    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
-      wanted evidence
-      (canonicalWitness profile.compilerProfile.compiler committed
-        (step prepared).oldState (step prepared).newState)
+    (denied : ComposedPolicyAdmission.admit (policyConfig prepared) wanted evidence
+      committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
-    (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
+    (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.head.committed.record.localComponent.guarded
       (step prepared).oldState (step prepared).newState = some leaf) :
     authorizeChecked prepared signature = .error (Refusal.lawInputRangeFor (readerFields context kind capability) leaf) := by
-  simp only [authorizeChecked, supplied, resolved, denied]
-  simp only [canonicalWitness, out]
+  simp only [authorizeChecked, supplied, resolved, denied,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal]
+  simp only [policyConfig, PhysicalLawResolution.config, out]
 
 /-- The clause a read refusal names is false on the step the law was
 evaluated on. -/
@@ -352,15 +362,15 @@ theorem authorizeChecked_leaf_fails
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
-    (committed : CommittedPolicy) (leaf : LawLeaf)
-    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
-    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+    (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared)) (leaf : LawLeaf)
+    (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
+    (resolved : (policyConfig prepared).resolve? =
       some committed)
     (refused : authorizeChecked prepared signature = .error (Refusal.lawDenied (some leaf))) :
-    committed.record.predicate.subterm leaf.path = some leaf.clause ∧
+    committed.head.committed.record.localComponent.guarded.subterm leaf.path = some leaf.clause ∧
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
-  simp only [authorizeChecked, supplied, resolved] at refused
+  simp only [authorizeChecked, supplied, resolved,
+    ComposedLawDiagnostics.publicRefusal, ComposedLawDiagnostics.localRefusal] at refused
   split at refused
   · split at refused
     · simp only [Refusal.lawInputRangeFor] at refused
@@ -380,16 +390,13 @@ theorem authorizeChecked_admitted
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
     (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
-    (committed : CommittedPolicy)
+    (committed : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared))
     (authorized : Authorized (portal prepared) context.authority.snapshot.authState wanted)
-    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
-    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+    (supplied : capabilityEvidenceChecked prepared signature = .ok evidence)
+    (resolved : (policyConfig prepared).resolve? =
       some committed)
-    (accepted : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
-      wanted evidence
-      (canonicalWitness profile.compilerProfile.compiler committed
-        (step prepared).oldState (step prepared).newState)
+    (accepted : ComposedPolicyAdmission.admit (policyConfig prepared) wanted evidence
+      committed.witness
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = some authorized) :
     authorizeChecked prepared signature = .ok authorized := by
@@ -570,34 +577,26 @@ theorem authorize_names_stored
   intro authorization accepted
   unfold authorize authorizeChecked at accepted
   dsimp only at accepted
-  cases supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
-      (sourceStore context) marker (step prepared) wanted capability signature with
-  | error reason =>
-    simp [supplied, Except.toOption] at accepted
+  cases supplied : capabilityEvidenceChecked prepared signature with
+  | error reason => simp [supplied, Except.toOption] at accepted
   | ok evidence =>
-  cases resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision with
-  | none =>
-    simp [supplied, resolved, Except.toOption] at accepted
-  | some committed =>
-  simp only [supplied, resolved] at accepted
-  split at accepted
-  · split at accepted
-    · simp [Except.toOption] at accepted
-    · split at accepted <;> simp [Except.toOption] at accepted
-  · rename_i authorized admitted
-    simp only [Except.toOption] at accepted
-    injection accepted with same
-    subst same
-    have someEvidence : sourceCapabilityOnlyEvidence profile.compilerProfile context.authority.snapshot
-        (sourceStore context) marker (step prepared) wanted capability signature = some evidence := by
-      rw [← sourceCapabilityOnlyEvidenceChecked_toOption, supplied]
-      rfl
-    obtain ⟨stored, read, named⟩ := sourceCapabilityOnlyEvidence_names_parent
-      profile.compilerProfile context.authority.snapshot (sourceStore context) marker (step prepared)
-      wanted capability signature someEvidence
-    refine ⟨stored, read, ?_⟩
-    rw [CanonicalPolicyAdmission.admit_preserves_evidence _ _ _ _ _ _ _ _ admitted]
-    exact named
+    cases resolved : (policyConfig prepared).resolve? with
+    | none => simp [supplied, resolved, Except.toOption] at accepted
+    | some committed =>
+      simp only [supplied, resolved] at accepted
+      split at accepted
+      · simp [Except.toOption] at accepted
+      · rename_i authorized admitted
+        simp only [Except.toOption] at accepted
+        injection accepted with same
+        subst same
+        have named := ComposedPolicyAdmission.Config.capabilityEvidence_names_stored
+          (policyConfig prepared) wanted capability () signature () (fun _ => ())
+          (evidence := evidence) (by simpa only [capabilityEvidenceChecked] using supplied)
+        obtain ⟨stored, read, identity⟩ := named
+        refine ⟨stored, read, ?_⟩
+        rw [ComposedPolicyAdmission.admit_preserves_evidence _ _ _ _ _ _ _ admitted]
+        exact identity
 
 /-- Refusal: an observer — however valid their signature — whose named stored
 capability is not admissible for the request is refused. -/
@@ -681,7 +680,8 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
       | key => some (declaredField key)
   -- A stream's entries are its body: a scope naming fields reads and appends a
   -- stream only when it names `body`.
-  | .stream, _ => some .body
+  | .stream, _ | .worldKind, _ => some .body
+  | .worldInstance, _ => none
   -- Exhaustive on purpose: a new registry kind must say whether it has fields.
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _
   | .nockProgram, _ | .clock, _ => none
@@ -801,66 +801,9 @@ theorem narrowBalances_only_named {fields : Option (Finset CellField)}
     CellField.NamedBy fields (.balance pair.1) := by
   simpa [narrowBalances] using (List.mem_filter.mp member).2
 
-/-- The addresses among `candidates` one write changed. -/
-def changedWithin {L : Layout.{0, 0, 0}} (candidates : Finset (Address L)) (pre post : Store L) :
-    Finset (Address L) :=
-  candidates.filter fun address => pre address ≠ post address
+export Minidregg.Theory.StoreFootprint (changedWithin changed mem_changed
+  changedWithin_eq_changed footprintOf footprint footprint_touched_exact)
 
-/-- Every address one write changed. -/
-def changed {L : Layout.{0, 0, 0}} (pre post : Store L) : Finset (Address L) :=
-  changedWithin (pre.support ∪ post.support) pre post
-
-theorem mem_changed {L : Layout.{0, 0, 0}} {pre post : Store L} {address : Address L} :
-    address ∈ changed pre post ↔ pre address ≠ post address := by
-  constructor
-  · intro member; exact (Finset.mem_filter.mp member).2
-  · intro different
-    refine Finset.mem_filter.mpr ⟨?_, different⟩
-    by_cases before : pre address = none
-    · exact Finset.mem_union_right _ (DFinsupp.mem_support_iff.mpr (by
-        rw [before] at different; exact fun h => different h.symm))
-    · exact Finset.mem_union_left _ (DFinsupp.mem_support_iff.mpr before)
-
-/-- Any candidate set outside which nothing changed finds exactly the changed
-addresses. The controller's candidates are the patch's write footprint
-(`Patch.run_frame`), so it never scans the whole cell. -/
-theorem changedWithin_eq_changed {L : Layout.{0, 0, 0}} {candidates : Finset (Address L)}
-    {pre post : Store L} (frame : ∀ address, address ∉ candidates → pre address = post address) :
-    changedWithin candidates pre post = changed pre post := by
-  ext address
-  rw [mem_changed]
-  constructor
-  · intro member; exact (Finset.mem_filter.mp member).2
-  · intro different
-    exact Finset.mem_filter.mpr ⟨by_contra fun outside => different (frame address outside),
-      different⟩
-
-/-- What a write changed, field by field, over a set of changed addresses: the
-touched fields, and on each the summed change of its numeric values
-(`amount`; absence counts as `0`). -/
-def footprintOf {L : Layout.{0, 0, 0}} (changedSet : Finset (Address L))
-    (field : Address L → CellField)
-    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L) :
-    Footprint :=
-  let value := fun (store : Store L) (address : Address L) =>
-    match store address with | some v => amount address v | none => 0
-  { touched := changedSet.image field
-    delta := fun named => ∑ address ∈ changedSet.filter (fun a => field a = named),
-      (value post address - value pre address) }
-
-/-- The footprint of a write: `footprintOf` at every changed address. -/
-def footprint {L : Layout.{0, 0, 0}} (field : Address L → CellField)
-    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L) :
-    Footprint :=
-  footprintOf (changed pre post) field amount pre post
-
-/-- A field is touched exactly when some address of it changed. -/
-theorem footprint_touched_exact {L : Layout.{0, 0, 0}} (field : Address L → CellField)
-    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L)
-    (named : CellField) :
-    named ∈ (footprint field amount pre post).touched ↔
-      ∃ address, pre address ≠ post address ∧ field address = named := by
-  simp only [footprint, footprintOf, Finset.mem_image, mem_changed]
 #assert_axioms authorizeChecked_lawInputRange
 #assert_axioms authorizeChecked_castAlias
 
@@ -888,11 +831,11 @@ end Minidregg.Kernel.ResourceObservationAdmission
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reviewer_reads_annotations_not_body
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two
-/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.mem_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.StoreFootprint.mem_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.mem_changed
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named
-/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.changedWithin_eq_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.StoreFootprint.changedWithin_eq_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.changedWithin_eq_changed
-/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.footprint_touched_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.StoreFootprint.footprint_touched_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.footprint_touched_exact

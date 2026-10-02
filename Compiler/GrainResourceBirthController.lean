@@ -288,7 +288,7 @@ structure PreparedSourceBirth {F : Type} [Field F]
     durable source.birth (DeclaredResourceController.operationMarker deployment.domain semantics
       (source.grainCommand tariff))
 
-def prepareSourceBirth {F : Type} [Field F]
+def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (durable : ResourceBirthController.Concrete.Durable)

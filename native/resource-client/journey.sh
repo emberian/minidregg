@@ -206,6 +206,7 @@ TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole
 TITLE[J14]="Hermes as librarian: summon with a budget, links and a digest, asks answered from history, a no-grant edit, out of budget, topup, a restart, dismiss returns the rest"
 TITLE[J15]="a story: the author seals a table; two players play it under the law it generates, a GM narrates"
 TITLE[J17]="a week in the place: credit, pay, the concierge, the window expires outside-validity, renewal, conservation"
+TITLE[JLI]="room exports: existing child signed reads and writes, pinned revisions, cycles, private refusals and replay"
 TITLE[KTPL]="room templates: a room born with a map (index, wall, notes) from a file of shell lines"
 TITLE[JPRIV1]="a private room: the operator stores and serves ciphertext; a kick rotates the key"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
@@ -918,6 +919,7 @@ step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write,
 step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves the root and every sealed leaf (the blinding ratchets), a return to an old value is invisible, the owner re-derives the ratcheted salts, restart and audit replay the ratchet (lanes k-narrow-hide, k-hide-rotate)"; }
 step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) tuples through mini shell; nothing sealed is on the Store or in a signed read before the close, a public price is; the right opening installs, a wrong, partial, replayed or repeated opening and every out-of-phase write are refused by name; the runner settles on revealed bids only (lane sealed-market; supersedes KHQ)" shell; }
 step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a leave renounces the member grant and takes the attenuated invite with it (notHolder for a stranger, alreadyRevoked twice, exact retry replays, re-invite is a new grant), a kick still works, a realm refuses fake wells, restart and audit (lanes k-room-3c, k-renounce)" shell; }
+step_JLI() { hook jlawinherit "Current room exports constrain existing children through real signed read, mutation and install paths; pinned prior revisions conjoin, actual cycles refuse, hidden ancestors stay hidden and exact retries replay" shell; }
 step_KTPL() { hook jtemplates "P-DOC-TEMPLATES rows: room new --template workroom births lab/index (only the founder writes the map), lab/wall (a stream), lab/notes, lab/tasks with the map's links; the same file piped into mini shell by hand births the same shape; a member reads the map and is refused editing it by its clause while writing notes; a bad template stops at its line; social welcomes a member with their own stream; story; restart and audit (lane p-templates)" shell; }
 step_J14() { hook j14 "P-HERMES-ROOM rows: A summons Hermes into lab as librarian with budget 100; B creates two docs and says three things; Hermes links both from lab-index and writes a digest; asks are answered in its stream from the signed history; its edit of a doc it holds no grant on is refused no-grant; each turn pays the tariff; out of budget refuses bookRefused and Hermes says so; topup resumes; a kill mid-write resolves by exact lookup and a kill after send is never resent; dismiss revokes and returns the remainder; the budget account conserves; cold audit (lane p-hermes-room; needs GRAIN_RUNTIME, TEST_PROVIDER)" shell; }
 step_J15() { hook j15 "P-STORY rows: story new tale --from tale births the room and the table; the author edits before the seal and is refused after it (sealed); players join a sealed story only; legal moves admitted; a skip, a rewind, an absent take, a second take, a conditional exit without the key refused naming the table's clause; one player cannot move another's cell; the author can neither move nor re-law a player's cell; the GM narrates, a player is refused; the Host-decoded law on a cell is law.player.json; restart mid-story keeps each place; both reach an end; cold audits (lane p-story)" shell; }
@@ -999,6 +1001,7 @@ run_step K12H J5
 run_step WEB K12C K12T K12M K12H
 run_step KW J5
 run_step K10C J5
+run_step JLI J5
 run_step KTPL J5
 run_step J15 J5
 run_step J17 J5

@@ -15,6 +15,8 @@ import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.TypedCellHyperedgeArtifact
 import Compiler.CanonicalRuntimeProfile
 import Theory.PolicyInstall
+import Compiler.PhysicalLawResolution
+import Compiler.CandidateLawResolution
 
 namespace Minidregg.Kernel.PolicyInstallController
 
@@ -184,6 +186,7 @@ inductive Reject where
   | policyUnavailable
   | policyRejected
   | capability
+  | candidateGraph
   | nativeSignature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
 
@@ -243,11 +246,11 @@ def addressSlots : Nat → List UInt8 → List (String × Int)
 identity is fixed by the declaration; projected slots cannot replace its
 complete source/effect commitment. -/
 def project (wanted : Request .program) (declaration : Declaration)
-    (logical : Store layout) :
+    (logical : Store layout) (storageKind : Nat := 0) :
     Minidregg.Pred.State :=
   let header := CanonicalRuntimeProfile.requestSlots wanted
   let fields := currentHead logical declaration.source.policyId
-  { slots := header ++
+  { slots := ("target/storageKind", Int.ofNat storageKind) :: header ++
       match fields with
       | none => []
       | some head =>
@@ -293,6 +296,8 @@ def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Request
 
 structure Prepared (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) where
   declaration : Declaration
+  additional : List LawComposition.PolicyRef := []
+  storageKind : Nat := 0
   candidate : Candidate (family profile snapshot context) snapshot.cell declaration ()
 
 def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
@@ -300,7 +305,8 @@ def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {context 
     CredentialAuthorityDomain.Prepared snapshot (patch snapshot prepared.declaration) :=
   prepared.candidate.modeEvidence.update.prepared
 
-def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8) :
+def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8)
+    (additional : List LawComposition.PolicyRef := []) (storageKind : Nat := 0) :
     Except Reject (Prepared profile snapshot context) :=
   match decodeDeclaration bytes with
   | none => .error .malformedDeclaration
@@ -308,6 +314,8 @@ def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
       let checked ← prepareChecked profile snapshot context declaration
       .ok
         { declaration := declaration
+          additional := additional
+          storageKind := storageKind
           candidate :=
             { preStateBound := rfl
               modeEvidence := checked
@@ -318,7 +326,8 @@ def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
 def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     (prepared : Prepared profile snapshot context) : PolicyStepContext :=
   PolicyStepContext.ofCandidate
-    (project (request profile snapshot context prepared.declaration) prepared.declaration)
+    (fun logical => project (request profile snapshot context prepared.declaration) prepared.declaration
+      logical prepared.storageKind)
     profile.semantics prepared.candidate
 
 /-- Policy replacement has no signature-only or opaque-proof evidence mode.
@@ -328,18 +337,37 @@ abbrev controlPortal := CredentialAuthorityPolicyRegistry.sourceCapabilityPortal
 def Prepared.policyConfig [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     (prepared : Prepared profile snapshot context) (store : PayloadStore) :
-    CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile snapshot store
-    (controlPortal snapshot (requestDigest profile snapshot context prepared.declaration).value) prepared.step
+    ComposedPolicyAdmission.Config F where
+  snapshot := snapshot
+  store := store
+  base := controlPortal snapshot (requestDigest profile snapshot context prepared.declaration).value
+  profile := profile.compilerProfile
+  step := prepared.step
+  target := prepared.declaration.source.policyId.value
+  additional := prepared.additional
+  resolutionBudget := PhysicalLawResolution.resolutionBudget
 
-abbrev Prepared.Accepted [DecidableEq F]
+/-- Authorization remains the ordinary accepted effect. The candidate closure
+is retained beside it, so successful installation cannot discard its checked
+post-state dependency graph. This check does not evaluate the candidate law. -/
+structure Prepared.Accepted [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) (store : PayloadStore) :=
+    (prepared : Prepared profile snapshot context) (store : PayloadStore) extends
   AcceptedCellEffect
     (portal := (prepared.policyConfig (F := F) store).portal)
     (authState := snapshot.authState)
     (family profile snapshot context) (request profile snapshot context prepared.declaration)
-    snapshot.cell prepared.declaration ()
+    snapshot.cell prepared.declaration () where
+  candidateGraph : PolicyComponentResolution.LoadedRoots
+    (CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent
+      prepared.update.validated.apply)
+    (CandidateLawResolution.overlay store prepared.declaration.source)
+    prepared.declaration.source.semantics
+    (CandidateLawResolution.changedRoots prepared.declaration.source)
+  candidateExact : CandidateLawResolution.validate snapshot store prepared.update.validated.apply
+    prepared.declaration.source PhysicalLawResolution.resolutionBudget = .ok candidateGraph
+  candidateSupported : Minidregg.Compiler.supported profile.compilerProfile.compiler
+    (ResolvedLawCompilation.predicate candidateGraph.resolved) = true
 
 /-- The old stored policy-control capability is mandatory. A valid signature alone
 is never authority to replace a resource's law. The native receipt binds use of
@@ -353,23 +381,29 @@ def Prepared.admit [DecidableEq F]
   let wanted := request profile snapshot context prepared.declaration
   let auth := snapshot.authState
   let config := prepared.policyConfig store
-  match sourceCapabilityOnlyEvidence profile.compilerProfile snapshot store
-      (requestDigest profile snapshot context prepared.declaration).value prepared.step
-      wanted controlCapability receipt with
-  | none => .error .capability
-  | some evidence =>
+  match config.capabilityEvidenceChecked wanted controlCapability () receipt () (fun _ => ()) with
+  | .error _ => .error .capability
+  | .ok evidence =>
       if epoch : wanted.policyEpoch = auth.policyEpoch wanted.policyId then
         if revision : wanted.policyRevision = auth.policyRevision wanted.policyId then
-          match config.registry.resolve wanted.policyId wanted.policyRevision with
+          match config.resolve? with
           | none => .error .policyUnavailable
           | some committed =>
-              let witness := canonicalWitness profile.compilerProfile.compiler committed
-                prepared.step.oldState prepared.step.newState
-              match CanonicalPolicyAdmission.admit config auth wanted evidence witness
+              let witness := committed.witness
+              match ComposedPolicyAdmission.admit config wanted evidence witness
                   (.policy wanted.policyId wanted.policyRevision) epoch revision with
               | none => .error .policyRejected
               | some authorization =>
-                  .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
+                  match candidateExact : CandidateLawResolution.validate snapshot store
+                      prepared.update.validated.apply prepared.declaration.source
+                      PhysicalLawResolution.resolutionBudget with
+                  | .error _ => .error .candidateGraph
+                  | .ok candidateGraph =>
+                      if candidateSupported : Minidregg.Compiler.supported profile.compilerProfile.compiler
+                          (ResolvedLawCompilation.predicate candidateGraph.resolved) = true then
+                        .ok ⟨prepared.candidate.accept authorization rfl rfl rfl .sealed trivial,
+                          candidateGraph, candidateExact, candidateSupported⟩
+                      else .error .unsupportedPolicy
         else .error .policyRevision
       else .error .policyEpoch
 
@@ -453,18 +487,18 @@ This holds for every accepted token, not only for calls through `run`. -/
 theorem Installed.old_policy_evaluated [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
     (installed : Installed profile snapshot context store) :
-    ∃ committed,
-      (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
-        context.policyRevision = some committed ∧
-      Minidregg.Pred.eval committed.record.predicate
-        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
-        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical) = true := by
-  have verified : (installed.prepared.policyConfig (F := F) store).verifies
-      (request profile snapshot context installed.prepared.declaration)
-      installed.accepted.authorization.policyWitness = true := by
-    have accepted := installed.accepted.authorization.policyVerified
-    exact (Bool.and_eq_true_iff.mp accepted).2
-  exact (canonical_context_verifies_sound installed.prepared.step rfl verified).2.2.2
+    ∃ graph : PolicyComponentResolution.LoadedGraph snapshot store profile.semantics
+        installed.prepared.declaration.source.policyId.value installed.prepared.additional,
+      PolicyComponentResolution.loadTarget snapshot store profile.semantics
+        installed.prepared.declaration.source.policyId.value
+        PhysicalLawResolution.resolutionBudget installed.prepared.additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical installed.prepared.storageKind)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical installed.prepared.storageKind) = true := by
+  exact ComposedPolicyAdmission.authorized_effective_law
+    (installed.prepared.policyConfig store)
+    (request profile snapshot context installed.prepared.declaration)
+    installed.accepted.authorization
 
 /-- The accepted post is the one install patch applied to the old cell. -/
 theorem Installed.post_logical [DecidableEq F]
@@ -533,21 +567,23 @@ theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
     (finalState : Store layout)
     (preserved : (family profile snapshot context).Postcondition installed.prepared.declaration
       () finalState) :
-    ∃ committed,
-      (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
-        context.policyRevision = some committed ∧
-      Minidregg.Pred.eval committed.record.predicate
-        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
-        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState) = true := by
-  obtain ⟨committed, resolved, evaluated⟩ := installed.old_policy_evaluated
+    ∃ graph : PolicyComponentResolution.LoadedGraph snapshot store profile.semantics
+        installed.prepared.declaration.source.policyId.value installed.prepared.additional,
+      PolicyComponentResolution.loadTarget snapshot store profile.semantics
+        installed.prepared.declaration.source.policyId.value
+        PhysicalLawResolution.resolutionBudget installed.prepared.additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical installed.prepared.storageKind)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState installed.prepared.storageKind) = true := by
+  obtain ⟨graph, resolved, evaluated⟩ := installed.old_policy_evaluated
   have headExact : currentHead finalState installed.prepared.declaration.source.policyId =
       some ⟨installed.prepared.declaration.source.version,
         policyRecordDigest installed.prepared.declaration.source⟩ := preserved.1
-  have viewExact : project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState =
-      project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical := by
+  have viewExact : project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState installed.prepared.storageKind =
+      project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical installed.prepared.storageKind := by
     unfold project
     rw [headExact, installed.source_selected_in_post]
-  exact ⟨committed, resolved, by rw [viewExact]; exact evaluated⟩
+  exact ⟨graph, resolved, by rw [viewExact]; exact evaluated⟩
 
 /-- The predecessor and source revision are checked against the actual old head, not
 only against fields asserted in the installation declaration. -/
