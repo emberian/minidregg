@@ -110,6 +110,9 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
         drain_posts(root,workspace,&publication,text(&prior,"namespace")?,"publish")?;
     }
     let previous=current_members(&home)?;
+    if device_path.is_some() && previous.len()>=4096 {
+        return Err("protected audience already has the maximum 4096 device entries".into());
+    }
     let actual=super::observe(root,workspace,&reference,&signed)?;
     let retained=roster_entries(&previous)?;
     if json!(retained)!=actual.roster["entries"] {return Err("local member custody is not the current admitted roster; synchronize before freezing".into());}
@@ -304,13 +307,15 @@ fn recover_locked(root:&Path,workspace:&Value,name:&str,change:&str)->Result<()>
     if selected!=predecessor && selected!=dir {
         return Err("another membership epoch superseded this recovery; current custody remains selected".into());
     }
-    retain_json(&predecessor.join("next-membership.json"),&json!({"change":change}))?;
+    let claim=predecessor.join("next-membership.json");
+    if claim.exists() && read(&claim)?["change"]!=change {
+        return Err(format!("another membership change owns this epoch; recover {}",text(&read(&claim)?,"change")?));
+    }
     let namespace=text(&stage,"namespace")?;
     let catalog=text(&stage,"catalog")?;
     let catalog_ref=ws::reference(root,catalog)?;
     let grants=json!([{"kind":"object","target":reference["target"],"capability":reference["observeCapability"]}]);
     let control=text(&reference,"controlCapability")?;
-    phase(root,workspace,name,&dir,&stage,"freeze",json!({"control":control,"transition":stage["transition"],"grants":grants}))?;
     let members_path=dir.join("members.json");
     let members=if members_path.exists(){rows(&read(&members_path)?)?}else{
         let mut members=rows(&stage["membersBefore"])?;
@@ -323,12 +328,15 @@ fn recover_locked(root:&Path,workspace:&Value,name:&str,change:&str)->Result<()>
                 "generation":device["generation"],"keyCommitment":device["keyCommitment"],
                 "kemPublic":device["kemPublic"],"dhPublic":device["dhPublic"]}));
         }else{
-            for (i,member) in members.iter().filter(|m|m["subject"]==stage["subject"]).enumerate(){
-                for (resource,field) in [(name,"capability"),(catalog,"catalogCapability")] {
-                    let Some(cap)=member.get(field).and_then(Value::as_str) else{continue};
-                    let standing=ws::standing_grants(root,workspace,resource,text(&stage,"subject")?)?;
-                    if !standing.iter().any(|(held,_)|held==cap){continue;}
-                    action(root,workspace,&dir,namespace,&format!("revoke-{i}-{field}"),json!({
+            // Revoke every currently standing grant governed by these two
+            // local resources, including grants from interrupted invitations.
+            // Ambient room grants govern other resources and are not removed
+            // by a document-only membership change.
+            for (resource,role,target) in [(name,"document",text(&reference,"target")?),
+                (catalog,"catalog",text(&catalog_ref,"target")?)] {
+                let standing=ws::standing_grants(root,workspace,resource,text(&stage,"subject")?)?;
+                for (cap,_) in standing.into_iter().filter(|(_,policy)|policy==target) {
+                    action(root,workspace,&dir,namespace,&format!("revoke-{role}-{cap}"),json!({
                         "type":"minidregg-workspace-proposal-v1","action":"revoke","name":resource,
                         "recipient":stage["subject"],"capability":cap}))?;
                 }
@@ -337,6 +345,11 @@ fn recover_locked(root:&Path,workspace:&Value,name:&str,change:&str)->Result<()>
         }
         retain_json(&members_path,&json!(members))?;members
     };
+    // Finish fallible grant construction before freezing. A new observer has
+    // ciphertext but no epoch package; no historical key is disclosed here.
+    // Failed preflight leaves the current editor usable and no epoch claim.
+    retain_json(&claim,&json!({"change":change}))?;
+    phase(root,workspace,name,&dir,&stage,"freeze",json!({"control":control,"transition":stage["transition"],"grants":grants}))?;
     let frozen=read(&dir.join("freeze-accepted.json"))?;
     let epoch=increment(text(&frozen["audience"],"epoch")?)?;
     let entries=roster_entries(&members)?;
