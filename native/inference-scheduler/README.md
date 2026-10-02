@@ -36,6 +36,8 @@ deployment; this file is not an assertion of Pug's hardware):
 {
   "version": 1,
   "max_jobs": 10000,
+  "max_terminal_receipts": 1000000,
+  "max_receipt_bytes": 8589934592,
   "max_queued_per_principal": 16,
   "max_active_per_principal": 2,
   "lease_ms": 60000,
@@ -206,8 +208,38 @@ not a combined native-host or real-model qualification.
 
 Before deployment, exercise the joined controller against the current Mini host,
 inventory Pug's machines, measure safe concurrency,
-and test backend stop/restart under load. Member-visible queue state, backend health, resident-model changes, durable state compaction/migration and
-live-token forwarding remain work. Terminal records currently count toward
-`max_jobs`; hitting the configured retention bound refuses new work and never
-silently deletes deduplication evidence. The initial snapshot store suits
-qualification, not an unbounded production history.
+and test backend stop/restart under load. Member-visible queue state, backend health, resident-model changes and live-token
+forwarding remain work.
+
+## Terminal retention and archive capacity
+
+`max_jobs` bounds nonterminal work (queued, placed, running and uncertain), not
+lifetime completions. The service writes immutable exact terminal receipts into
+its private `receipts/` archive before removing full jobs from the hot snapshot.
+File fsync and archive-directory fsync precede snapshot replacement. Restart
+reconciles a durable receipt with an older live snapshot after a crash in that
+interval; it never redispatches the completed job. Addressed retries load only
+that exact receipt. Changed content, another controller, another lease and
+another completion outcome remain refused; stale unsent lease guards survive.
+Running and uncertain records are never archived or evicted.
+
+The archive has independent count and byte limits, defaulting to one million
+receipts and 8 GiB. Admission reserves 128 KiB of archive space for each live job
+so completion can remain durable even near the configured budget. Status exposes
+`terminal_receipts`, `receipt_bytes`, `max_terminal_receipts` and
+`max_receipt_bytes`; historical terminal/drained counts include the archive.
+Completed jobs therefore keep releasing live capacity, while an exhausted
+archive explicitly refuses fresh admission. Exact historical inspection and
+reconciliation still work. Operators may increase the archive budgets and
+restart: these resource limits do not change the identity/placement fingerprint.
+Snapshot and **the whole receipts directory** must be backed up together; loss of
+previously recorded archive capacity fails startup rather than forgetting IDs.
+No operator command deletes receipts. Destructive retention needs a separate,
+explicit generation/retirement contract that can refuse all expired IDs; arbitrary
+request digests cannot safely be forgotten merely because a receipt is old.
+
+The bounded hot snapshot and durable archive support a finite declared operating
+budget, not an infinite-disk promise. Reopen scans bounded receipt metadata;
+normal startup uses saved outcome summaries, rebuilding them after an interrupted
+archive/snapshot cut. A configured per-receipt bound is also fail closed: unusually
+large stale-lease history requires preservation and reconciliation, never eviction.

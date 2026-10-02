@@ -27,6 +27,19 @@ pub struct Service {
     directory: PathBuf,
     _lock: File,
     poisoned: bool,
+    receipts: usize,
+    receipt_bytes: u64,
+    drained_receipts: usize,
+}
+
+// Bound one receipt including stale unsent lease guards. Admission reserves
+// this much disk for every accepted live job before allowing provider work.
+const MAX_RECEIPT_BYTES: u64 = 128 * 1024;
+fn receipt_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|v| v.is_ascii_digit() || (b'a'..=b'f').contains(&v))
 }
 
 fn private(path: &Path, directory: bool) -> Result<()> {
@@ -69,7 +82,7 @@ impl Service {
             return Err("another scheduler owns this state directory".into());
         }
         let state_path = directory.join("state.json");
-        let mut core = match fs::symlink_metadata(&state_path) {
+        let core = match fs::symlink_metadata(&state_path) {
             Ok(meta) => {
                 private(&state_path, false)?;
                 if meta.len() > 128 * 1024 * 1024 {
@@ -81,19 +94,188 @@ impl Service {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Core::new(&config)?,
             Err(error) => return Err(error.to_string()),
         };
-        core.recover(&config)?;
-        let service = Self {
+        let archive = directory.join("receipts");
+        match fs::create_dir(&archive) {
+            Ok(()) => {
+                fs::set_permissions(&archive, fs::Permissions::from_mode(0o700))
+                    .map_err(|e| e.to_string())?;
+                File::open(directory)
+                    .and_then(|dir| dir.sync_all())
+                    .map_err(|e| e.to_string())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        private(&archive, true)?;
+        let mut receipts = 0usize;
+        let mut receipt_bytes = 0u64;
+        for entry in fs::read_dir(&archive).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            // Only our reusable incomplete write can be ignored. Complete files
+            // are immutable; fail closed on foreign names and objects.
+            if path.file_name().and_then(|v| v.to_str()) == Some("pending") {
+                private(&path, false)?;
+                continue;
+            }
+            let id = path
+                .file_name()
+                .and_then(|v| v.to_str())
+                .ok_or("invalid receipt name")?;
+            if !receipt_id(id) {
+                return Err("invalid receipt name".into());
+            }
+            private(&path, false)?;
+            let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+            if size > MAX_RECEIPT_BYTES {
+                return Err("terminal receipt exceeds bound".into());
+            }
+            receipts += 1;
+            receipt_bytes = receipt_bytes
+                .checked_add(size)
+                .ok_or("receipt bytes overflow")?;
+        }
+        if receipts < core.archived_receipts || receipt_bytes < core.archived_bytes {
+            return Err("terminal receipt archive lost evidence; restore complete archive".into());
+        }
+        let mut drained_receipts = core.archived_drained;
+        if receipts != core.archived_receipts || receipt_bytes != core.archived_bytes {
+            // A crash during receipt-before-snapshot retirement may leave extra
+            // receipts. Rebuild only summary metadata; never discard evidence.
+            drained_receipts = 0;
+            for entry in fs::read_dir(&archive).map_err(|e| e.to_string())? {
+                let path = entry.map_err(|e| e.to_string())?.path();
+                if path.file_name().and_then(|v| v.to_str()) == Some("pending") {
+                    continue;
+                }
+                let job: crate::core::Job =
+                    serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
+                        .map_err(|e| e.to_string())?;
+                if !matches!(job.state, crate::core::State::Terminal { .. }) {
+                    return Err("nonterminal archive record".into());
+                }
+                drained_receipts += usize::from(matches!(
+                    job.state,
+                    crate::core::State::Terminal {
+                        outcome: crate::core::Outcome::Drained,
+                        ..
+                    }
+                ));
+            }
+        }
+        let mut service = Self {
             config,
             core,
             directory: directory.into(),
             _lock: lock,
             poisoned: false,
+            receipts,
+            receipt_bytes,
+            drained_receipts,
         };
-        service.save(&service.core)?;
+        let mut next = service.core.clone();
+        for id in next.jobs.keys().cloned().collect::<Vec<_>>() {
+            if let Some(receipt) = service.receipt(&id)? {
+                let old = &next.jobs[&id];
+                if old.controller != receipt.controller
+                    || old.principal != receipt.principal
+                    || old.pool != receipt.pool
+                    || old.order != receipt.order
+                    || old.request != receipt.request
+                    || !old.superseded_unsent.is_subset(&receipt.superseded_unsent)
+                {
+                    return Err("terminal archive conflicts with live snapshot identity".into());
+                }
+                // Durable physical completion wins over the older snapshot's
+                // running state when death occurred before hot retirement.
+                next.jobs.insert(id, receipt);
+            }
+        }
+        next.recover(&service.config)?;
+        service.save(&mut next)?;
+        service.core = next;
         Ok(service)
     }
 
-    fn save(&self, state: &Core) -> Result<()> {
+    fn receipt(&self, id: &str) -> Result<Option<crate::core::Job>> {
+        if !receipt_id(id) {
+            return Err("invalid receipt identity".into());
+        }
+        let path = self.directory.join("receipts").join(id);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+            Ok(meta) if meta.len() > MAX_RECEIPT_BYTES => {
+                return Err("terminal receipt exceeds bound".into())
+            }
+            Ok(_) => {}
+        }
+        private(&path, false)?;
+        let job: crate::core::Job =
+            serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        if job.request.id != id || !matches!(job.state, crate::core::State::Terminal { .. }) {
+            return Err("invalid terminal receipt".into());
+        }
+        Ok(Some(job))
+    }
+
+    fn save(&mut self, state: &mut Core) -> Result<()> {
+        // Receipt fsync + directory fsync precede retiring a terminal snapshot
+        // record. A crash between them leaves two identical representations.
+        let terminal: Vec<_> = state
+            .jobs
+            .iter()
+            .filter(|(_, job)| matches!(job.state, crate::core::State::Terminal { .. }))
+            .map(|(id, job)| (id.clone(), job.clone()))
+            .collect();
+        for (id, job) in terminal {
+            if let Some(saved) = self.receipt(&id)? {
+                if saved != job {
+                    return Err("terminal receipt conflicts with snapshot".into());
+                }
+            } else {
+                let bytes = serde_json::to_vec(&job).map_err(|e| e.to_string())?;
+                if bytes.len() as u64 > MAX_RECEIPT_BYTES
+                    || self.receipts >= self.config.max_terminal_receipts
+                    || self.receipt_bytes.saturating_add(bytes.len() as u64)
+                        > self.config.max_receipt_bytes
+                {
+                    return Err("terminal receipt archive exhausted; preserve state and increase archive budget".into());
+                }
+                let archive = self.directory.join("receipts");
+                let temporary = archive.join("pending");
+                if temporary.exists() {
+                    private(&temporary, false)?;
+                }
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&temporary)
+                    .map_err(|e| e.to_string())?;
+                file.write_all(&bytes).map_err(|e| e.to_string())?;
+                file.sync_all().map_err(|e| e.to_string())?;
+                fs::rename(&temporary, archive.join(&id)).map_err(|e| e.to_string())?;
+                File::open(&archive)
+                    .and_then(|dir| dir.sync_all())
+                    .map_err(|e| e.to_string())?;
+                self.receipts += 1;
+                self.receipt_bytes += bytes.len() as u64;
+                self.drained_receipts += usize::from(matches!(
+                    job.state,
+                    crate::core::State::Terminal {
+                        outcome: crate::core::Outcome::Drained,
+                        ..
+                    }
+                ));
+            }
+            state.jobs.remove(&id);
+        }
+        state.archived_receipts = self.receipts;
+        state.archived_bytes = self.receipt_bytes;
+        state.archived_drained = self.drained_receipts;
         // The exclusive process lock makes this one reusable temporary name safe.
         // O_NOFOLLOW and file ownership prevent a stale foreign path being followed.
         let temporary = self.directory.join("state.pending");
@@ -136,12 +318,45 @@ impl Service {
         // Apply to a candidate. No acknowledgement or in-memory admission before fsync.
         let mut next = self.core.clone();
         next.schedule(&self.config, now)?;
+        // Load only the addressed exact terminal receipt. Archive history never
+        // occupies live admission memory or becomes dispatchable work.
+        let requested_id = match &command {
+            Command::Enqueue { job, .. } => Some(job.id.as_str()),
+            Command::Inspect { id, .. }
+            | Command::Dispatch { id, .. }
+            | Command::Finish { id, .. }
+            | Command::Cancel { id, .. } => Some(id.as_str()),
+            _ => None,
+        };
+        if let Some(id) = requested_id {
+            if !next.jobs.contains_key(id) {
+                if let Some(job) = self.receipt(id)? {
+                    next.jobs.insert(id.into(), job);
+                }
+            }
+        }
         let id = match command {
             Command::Status { .. } | Command::StatusGroups { .. } | Command::Drain { .. } => {
                 return Err("operator command requires operator path".into())
             }
             Command::Enqueue { job, .. } => {
                 let id = job.id.clone();
+                if !next.jobs.contains_key(&id) {
+                    let live = next
+                        .jobs
+                        .values()
+                        .filter(|job| !matches!(job.state, crate::core::State::Terminal { .. }))
+                        .count();
+                    if self.receipts.saturating_add(live).saturating_add(1)
+                        > self.config.max_terminal_receipts
+                        || self
+                            .receipt_bytes
+                            .saturating_add((live as u64 + 1).saturating_mul(MAX_RECEIPT_BYTES))
+                            > self.config.max_receipt_bytes
+                    {
+                        return Err("terminal receipt archive admission full; increase archive budget, never delete receipts".into());
+                    }
+                }
                 next.enqueue(&self.config, &controller, job, now)?;
                 id
             }
@@ -166,7 +381,7 @@ impl Service {
         next.schedule(&self.config, now)?;
         let reply = next.inspect(&controller, &id)?;
         if next != self.core {
-            if let Err(error) = self.save(&next) {
+            if let Err(error) = self.save(&mut next) {
                 self.poisoned = true;
                 return Err(error);
             }
@@ -214,19 +429,26 @@ impl Service {
         }
         next.schedule(&self.config, now)?;
         if next != self.core {
-            if let Err(error) = self.save(&next) {
+            if let Err(error) = self.save(&mut next) {
                 self.poisoned = true;
                 return Err(error);
             }
             self.core = next;
         }
-        Ok(Status::from_core(
+        let mut status = Status::from_core(
             &self.config,
             &self.core,
             after,
             usize::from(limit),
             group_after,
-        ))
+        );
+        status.counts.terminal += self.receipts;
+        status.counts.drained += self.drained_receipts;
+        status.terminal_receipts = self.receipts;
+        status.receipt_bytes = self.receipt_bytes;
+        status.max_terminal_receipts = self.config.max_terminal_receipts;
+        status.max_receipt_bytes = self.config.max_receipt_bytes;
+        Ok(status)
     }
 
     pub fn serve(&mut self, socket_path: &Path) -> Result<()> {
@@ -340,6 +562,10 @@ pub struct JobStatus {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
+    pub terminal_receipts: usize,
+    pub receipt_bytes: u64,
+    pub max_terminal_receipts: usize,
+    pub max_receipt_bytes: u64,
     pub draining: bool,
     pub quiescent: bool,
     pub counts: Counts,
@@ -429,6 +655,10 @@ impl Status {
             });
         }
         let mut status = Self {
+            terminal_receipts: 0,
+            receipt_bytes: 0,
+            max_terminal_receipts: config.max_terminal_receipts,
+            max_receipt_bytes: config.max_receipt_bytes,
             draining: core.draining,
             quiescent: counts.placed + counts.running + counts.uncertain == 0,
             counts,

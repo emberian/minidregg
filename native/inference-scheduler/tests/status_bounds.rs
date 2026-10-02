@@ -77,6 +77,8 @@ fn escaped_job_labels_and_many_groups_paginate_after_durable_drain() {
     groups.insert("g0000".into(), 64);
     let config = Config {
         version: 1,
+        max_terminal_receipts: 1000000,
+        max_receipt_bytes: 8 * 1024 * 1024 * 1024,
         max_jobs: 200,
         max_queued_per_principal: 100,
         max_active_per_principal: 64,

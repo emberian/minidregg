@@ -17,6 +17,8 @@ fn config() -> Config {
     };
     Config {
         version: 1,
+        max_terminal_receipts: 1000000,
+        max_receipt_bytes: 8 * 1024 * 1024 * 1024,
         max_jobs: 100,
         max_queued_per_principal: 4,
         max_active_per_principal: 2,

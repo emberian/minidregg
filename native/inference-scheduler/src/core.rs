@@ -6,7 +6,12 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
+    /// Bound for nonterminal work, independent of lifetime completions.
     pub max_jobs: usize,
+    #[serde(default = "default_receipts")]
+    pub max_terminal_receipts: usize,
+    #[serde(default = "default_receipt_bytes")]
+    pub max_receipt_bytes: u64,
     pub max_queued_per_principal: usize,
     pub max_active_per_principal: usize,
     pub lease_ms: u64,
@@ -126,6 +131,12 @@ pub struct Core {
     pub version: u32,
     pub config_digest: String,
     pub jobs: BTreeMap<String, Job>,
+    #[serde(default)]
+    pub archived_receipts: usize,
+    #[serde(default)]
+    pub archived_bytes: u64,
+    #[serde(default)]
+    pub archived_drained: usize,
     pub service_us: BTreeMap<String, u64>,
     pub next: u64,
     pub virtual_floor: u64,
@@ -143,11 +154,21 @@ fn hash(value: &str) -> bool {
             .all(|v| v.is_ascii_hexdigit() && !v.is_ascii_uppercase())
 }
 
+fn default_receipts() -> usize {
+    1_000_000
+}
+fn default_receipt_bytes() -> u64 {
+    8 * 1024 * 1024 * 1024
+}
+
 impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.version != 1
             || self.max_jobs == 0
             || self.max_jobs > 100_000
+            || self.max_terminal_receipts < self.max_jobs
+            || self.max_terminal_receipts > 100_000_000
+            || self.max_receipt_bytes < 128 * 1024
             || self.max_queued_per_principal == 0
             || self.max_active_per_principal == 0
             || !(100..=300_000).contains(&self.lease_ms)
@@ -191,7 +212,15 @@ impl Config {
         Ok(())
     }
     pub fn fingerprint(&self) -> String {
-        digest(&serde_json::to_vec(self).expect("serializable config"))
+        // Archive resource policy can be increased without changing identity or
+        // physical placement under retained leases.
+        let mut value = serde_json::to_value(self).expect("serializable config");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("max_terminal_receipts");
+        value.as_object_mut().unwrap().remove("max_receipt_bytes");
+        digest(&serde_json::to_vec(&value).expect("serializable config"))
     }
 }
 
@@ -214,6 +243,9 @@ impl Core {
             version: 1,
             config_digest: config.fingerprint(),
             jobs: BTreeMap::new(),
+            archived_receipts: 0,
+            archived_bytes: 0,
+            archived_drained: 0,
             service_us: BTreeMap::new(),
             next: 1,
             virtual_floor: 0,
@@ -268,8 +300,14 @@ impl Core {
         if request.queue_deadline_ms <= now {
             return Err("queue deadline elapsed".into());
         }
-        if self.jobs.len() >= config.max_jobs {
-            return Err("retained job capacity exhausted".into());
+        if self
+            .jobs
+            .values()
+            .filter(|job| !matches!(job.state, State::Terminal { .. }))
+            .count()
+            >= config.max_jobs
+        {
+            return Err("active job capacity exhausted".into());
         }
         let count = self
             .jobs

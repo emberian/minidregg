@@ -17,6 +17,8 @@ fn config() -> Config {
     let uid = unsafe { libc::geteuid() };
     Config {
         version: 1,
+        max_terminal_receipts: 1000000,
+        max_receipt_bytes: 8 * 1024 * 1024 * 1024,
         max_jobs: 100,
         max_queued_per_principal: 8,
         max_active_per_principal: 1,
