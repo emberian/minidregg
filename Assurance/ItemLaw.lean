@@ -276,13 +276,22 @@ variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
   {durable : Durable} {command : Command}
 
-/-- The leg's installed law is the item law at `p`. -/
+/-- The authenticated effective closure includes the item law at `p` as an active component. -/
 def ItemInstalled (p : Params)
     {prepared : PreparedInvocation deployment profile ambient durable command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
-  ∀ committed, (policyConfig prepared tuple incidence).registry.resolve
-      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed →
-    committed.record.predicate = itemLaw p
+  Minidregg.Kernel.LawHistory.ActiveComponent
+    (policyConfig prepared tuple incidence) (itemLaw p)
+
+/-- Derive the installed-law assurance premise from the receiver's cached,
+authenticated effective graph; no caller assertion or second resolver is used. -/
+def checkInstalled (p : Params)
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
+      (policyConfig prepared tuple incidence)) :
+    Option (PLift (ItemInstalled p tuple incidence)) :=
+  Minidregg.Kernel.LawHistory.checkActiveComponent resolved (itemLaw p)
 
 /-- **Kernel form of clauses 1 and 4.** On every leg the controller admitted under the item law, a
 mutate was by the holder, or by the referee with zero `owner`/`where`/`worn` deltas. -/
@@ -296,8 +305,8 @@ theorem kernel_holder_or_referee (p : Params)
       (x = p.REF ∧ (step prepared tuple incidence).newState.get "resource/field/2/delta" = some 0 ∧
         (step prepared tuple incidence).newState.get "resource/field/3/delta" = some 0 ∧
         (step prepared tuple incidence).newState.get "resource/field/4/delta" = some 0) := by
-  obtain ⟨committed, resolved, holds⟩ := Minidregg.Kernel.LawHistory.checked_leg_policy_eval leg
-  rw [installed committed resolved] at holds
+  have holds := Minidregg.Kernel.LawHistory.checked_leg_component_eval leg
+    (itemLaw p) installed
   exact holder_or_referee p _ _ x holds verb subject
 
 end Kernel

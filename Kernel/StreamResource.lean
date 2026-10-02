@@ -72,10 +72,11 @@ variable (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
 address: the stream head's, whatever the stream's length. -/
 theorem append_footprint (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head) :
     Patch.accessFootprint (targetPatch snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre) =
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre) =
       {StreamCell.headAddress} := by
   change Patch.accessFootprint (match StreamCell.headOf pre.logical with
     | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
@@ -88,10 +89,11 @@ theorem append_footprint (kind : ResourceKind) (id : Nat) (capability : Capabili
 head's next position, with the head's tail as its parent. -/
 theorem append_entry_at_next (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head) :
     appendedEntry snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre =
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
       some ⟨id, head.count + 1, head.tail, streamRecord snapshot semantics ambient command request⟩ := by
   change (StreamCell.headOf pre.logical).map (fun head => StreamCell.appendEntry id head
     (streamRecord snapshot semantics ambient command request)) = _
@@ -103,7 +105,8 @@ head bound to a fleet topic is refused `wrongRole`: only the fleet receiver
 appends to a topic. -/
 theorem room_append_refuses_topic_head (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (unmoved : root = pre.root)
     (topicOk : request.topic.length ≤ StreamCell.maxTopicBytes)
@@ -112,7 +115,7 @@ theorem room_append_refuses_topic_head (kind : ResourceKind) (id : Nat) (capabil
     (stream : Digest) (fleet : head.binding = .topic stream)
     (channel : DomainEpoch.admitAppend pre.logical command.subject request = .ok ()) :
     computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre = .error .wrongRole := by
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .wrongRole := by
   subst object current
   simp [computeTarget, ← unmoved, topicOk, payloadOk, channel, loaded, fleet]
   rfl
@@ -123,11 +126,12 @@ one read of one stream: the first moves the root, so the second refuses (and
 `StreamCell.same_head_refused`: its head write is no longer enabled). -/
 theorem append_same_stream_serialises (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe⟩)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (moved : root ≠ pre.root) :
     computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe⟩ pre = .error .staleTarget := by
+        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .staleTarget := by
   subst object current
   simp [computeTarget, moved]
   rfl

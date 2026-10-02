@@ -212,12 +212,19 @@ for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
   done
 done
 
-for command in jq lake file find sort join comm xargs shasum uname cmp head awk uniq realpath; do
+for command in jq lake file find sort join comm xargs shasum uname cmp head awk uniq realpath python3; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
   }
 done
+
+if [[ "$build_umbrella" == 1 ]]; then
+  command -v flock >/dev/null 2>&1 || {
+    printf 'build-native-host: umbrella requires flock\n' >&2
+    exit 69
+  }
+fi
 
 # The source root is this script's parent directory. It is a git checkout only
 # when git names that same directory as its top level: an extracted
@@ -302,7 +309,8 @@ on_signal() {
 }
 for seat_number in 1 2; do
   candidate="$cycle_dir/lean-seat-$seat_number"
-  if mkdir "$candidate" 2>/dev/null; then
+  # Acquire with one syscall, independent of utility-level race handling.
+  if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
     seat_dir=$(cd "$candidate" && pwd -P)
     printf 'pid=%s\nstarted_utc=%s\nroot=%s\n' \
       "$BASHPID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
@@ -1236,19 +1244,16 @@ set -u
 : "${MINIDREGG_LEAN_LOCK:?}"
 : "${MINIDREGG_LEAN_WRAPPER_LOG:?}"
 
-while ! mkdir "$MINIDREGG_LEAN_LOCK" 2>/dev/null; do
-  sleep 0.1
-done
+# Keep the descriptor inherited by the compiler, so interruption of its shell
+# cannot release the seat while the real compiler is still running.
+exec 8>"${MINIDREGG_LEAN_LOCK}.flock"
+flock 8
 
 child=""
-cleanup() {
-  rmdir "$MINIDREGG_LEAN_LOCK" 2>/dev/null || true
-}
 forward_signal() {
   signal=$1
   [[ -z "$child" ]] || kill -"$signal" "$child" 2>/dev/null || true
 }
-trap cleanup EXIT
 trap 'forward_signal HUP' HUP
 trap 'forward_signal INT' INT
 trap 'forward_signal TERM' TERM

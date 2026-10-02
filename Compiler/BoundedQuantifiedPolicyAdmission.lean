@@ -100,9 +100,10 @@ theorem lower_existsView_correct {F Index : Type} [Field F] [DecidableEq F]
 
 /-! ## The committed canonical policy gate, specialized to a universal view -/
 
-/-- A resolved committed policy whose source predicate is a finite universal
-inherits the canonical gate's exact reflection.  No quantifier-specific portal
-or verifier is introduced. -/
+/-- A resolved neutral local policy whose source predicate is a finite
+universal inherits the canonical gate's exact reflection. Composed sources
+require authenticated closure admission; this theorem does not substitute the
+local predicate for that closure. No quantifier-specific verifier is introduced. -/
 theorem canonical_forallView_verifies_iff
     {F Index : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
@@ -111,6 +112,7 @@ theorem canonical_forallView_verifies_iff
     (predicateExact : committed.record.predicate = forallView range body)
     (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
+    (neutralExact : committed.record.neutral = true)
     (policyIdExact : committed.record.policyId = request.policyId)
     (versionExact : committed.record.version = request.policyRevision)
     (domainExact : committed.record.domain = request.domain)
@@ -127,7 +129,7 @@ theorem canonical_forallView_verifies_iff
     config.verifies request (canonicalWitness config.compilerProfile.compiler committed oldState newState) = true <->
       range.all (fun index =>
         Minidregg.Pred.eval (body index) oldState newState) = true := by
-  rw [canonical_verifies_iff_eval resolved policyIdExact versionExact domainExact
+  rw [canonical_verifies_iff_eval resolved neutralExact policyIdExact versionExact domainExact
     semanticsExact recordDigestExact stepExact profileCompatible profileSemanticsExact supportedExact
     rangesExact castExact]
   rw [predicateExact, eval_forallView]
