@@ -27,7 +27,8 @@ or `instance show NAME` opens the existing complete JSON view and retains the
 editing base; `home NAME` itself does not edit the object.
 
 Incomplete retained signed calls offer `lookup ID` to recover the exact operation.
-A confirmed receipt or typed native refusal is terminal. The view never suggests
+A confirmed receipt, or a typed native refusal in the newest retained outcome, is
+terminal. A later uncertain retry still requires exact lookup. The view never suggests
 submitting a new operation to resolve uncertain work.
 
 Retained app exports appear in `home` with the connector's existing exact status.
@@ -91,3 +92,11 @@ revocation rights, and emits the manager selector after all phases are confirmed
 This shell checkpoint must be composed with SPK's `workspace::app_lifecycle`
 consumer and the typed source policy author before claiming the journey works.
 The catalog and nested completion derive their operation words from this grammar.
+
+Retained lifecycle requests also appear in `home`, with their current phase and
+the owning workflow's prepare, submit or exact recovery action. This section
+reports retained evidence; source admission is still required for future effects.
+Reading it never prepares a call or publishes a manager selector. If all six
+phases were confirmed before selector publication was interrupted, the view
+keeps publication pending and offers recovery of that same request. Busy or
+unsafe request custody appears unavailable.

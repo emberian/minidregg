@@ -36,10 +36,14 @@ fn directory(path: &Path) -> Result<()> {
 }
 
 fn lock(path: &Path) -> Result<File> {
+    request_lock(path, true)
+}
+
+fn request_lock(path: &Path, create: bool) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(create)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(path)
@@ -277,6 +281,73 @@ fn selectors(state: &Path, decl: &Value) -> Result<Value> {
         "snapshotCapability":caps[2],"snapshotObserveCapability":caps[2]}))
 }
 
+fn workflow_result(state: &Path, decl: &Value, id: &str, index: usize) -> Result<Value> {
+    let mut result = json!({"type":"mini-member-app-lifecycle-result-v1","requestId":id,
+        "complete":index == 6,"owner":member(decl,"owner")?,"manager":member(decl,"manager")?,
+        "state":state,"origin":"member-retained-workflow","currentness":"retained-evidence",
+        "authority":"requires-current-source-admission"});
+    if index == 6 {
+        let selector = state.join("management-selector.json");
+        if selector.exists() {
+            if bounded_json(&selector)? != selectors(state, decl)? {
+                return Err("retained lifecycle selector differs from confirmed phases".into());
+            }
+            result["managementSelector"] = json!(selector);
+        } else {
+            result["selectorPublicationPending"] = json!(true);
+            result["nextAction"] = json!("recover");
+        }
+    } else {
+        result["phase"] = json!(PHASES[index]);
+        let prepared = phase_dir(state,index).join("prepared.json");
+        result["prepared"] = json!(prepared.exists());
+        result["nextAction"] = json!("prepare");
+        if prepared.exists() {
+            let record = bounded_json(&prepared)?;
+            let attempt = member_path(&record,"attempt")?;
+            result["nextAction"] = json!(if attempt.join("call.bin").exists() {"recover"} else if attempt.exists() {"prepare"} else {"submit"});
+        }
+    }
+    Ok(result)
+}
+
+/// Reads only this member's existing retained workflow. It never resolves a
+/// live grant, advances a phase, signs a call, or publishes a manager selector.
+pub(crate) fn retained_status(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
+    validate_name(id)?;
+    if id.len() > 40 { return Err("lifecycle request ID exceeds 40 bytes".into()); }
+    let base = root.join("app-lifecycle");
+    private_dir(&base)?;
+    let state = base.join(id);
+    private_dir(&state)?;
+    let _guard = request_lock(&state.join(".lock"), false)?;
+    let decl = bounded_json(&state.join("declaration.json"))?;
+    let refs: [Value;3] = decl["references"].as_array().ok_or("lifecycle references absent")?
+        .clone().try_into().map_err(|_| "lifecycle requires three references")?;
+    if decl != declaration(workspace, &refs, member(&decl,"manager")?)? {
+        return Err("retained lifecycle consent differs from current member".into());
+    }
+    let mut index = 0;
+    while index < 6 {
+        let phase = phase_dir(&state,index);
+        if !phase.exists() { break; }
+        private_dir(&phase)?;
+        let prepared = phase.join("prepared.json");
+        if !prepared.exists() { break; }
+        let record = bounded_json(&prepared)?;
+        let attempt = member_path(&record,"attempt")?;
+        let attempts = fs::canonicalize(root.join("attempts")).map_err(|e|e.to_string())?;
+        if attempt.parent() != Some(attempts.as_path()) {
+            return Err("lifecycle attempt outside workspace".into());
+        }
+        if !attempt.exists() { break; }
+        private_dir(&attempt)?;
+        if !matches!(retained_attempt_outcome(&attempt)?, AttemptOutcome::Confirmed(_)) { break; }
+        index += 1;
+    }
+    workflow_result(&state,&decl,id,index)
+}
+
 pub(super) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> {
     let _quiet = QuietReplies(crate::QUIET_WORKER.swap(true, std::sync::atomic::Ordering::Relaxed));
     let op = os_string(args.required("op")?, "lifecycle operation")?;
@@ -398,18 +469,10 @@ pub(super) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
             publish_phase(root, &phase)?;
         }
     }
-    let result = if index == 6 {
-        let selector = state.join("management-selector.json");
-        retain(&selector, &selectors(&state, &decl)?)?;
-        json!({"type":"mini-member-app-lifecycle-result-v1","requestId":id,"complete":true,
-            "owner":member(&decl,"owner")?,"manager":manager,"managementSelector":selector,
-            "authority":"requires-current-source-admission","state":state})
-    } else {
-        json!({"type":"mini-member-app-lifecycle-result-v1","requestId":id,"complete":false,
-            "phase":PHASES[index],"prepared":phase_dir(&state,index).join("prepared.json").exists(),
-            "owner":member(&decl,"owner")?,"manager":manager,"state":state,
-            "authority":"requires-current-source-admission"})
-    };
+    if index == 6 {
+        retain(&state.join("management-selector.json"), &selectors(&state, &decl)?)?;
+    }
+    let result = workflow_result(&state, &decl, &id, index)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?
@@ -425,6 +488,82 @@ mod tests {
             json!({"name":format!("app-{i}"),"kind":"object","target":(530101+i).to_string(),
             "observeCapability":(960000+i).to_string(),"operationCapability":(960000+i).to_string(),"controlCapability":(960010+i).to_string()})
         })
+    }
+    fn status_fixture() -> (PathBuf,PathBuf,Value) {
+        let root = std::env::temp_dir().join(format!("app-lifecycle-status-{}",random_nonce().unwrap()));
+        directory(&root).unwrap();
+        directory(&root.join("attempts")).unwrap();
+        directory(&root.join("app-lifecycle")).unwrap();
+        let state = root.join("app-lifecycle/one");
+        directory(&state).unwrap();
+        drop(lock(&state.join(".lock")).unwrap());
+        let workspace = json!({"subject":"7"});
+        retain(&state.join("declaration.json"),&declaration(&workspace,&refs(),"8").unwrap()).unwrap();
+        (root,state,workspace)
+    }
+    fn status_phase(root: &Path,state: &Path,index: usize) -> PathBuf {
+        let phase = phase_dir(state,index);
+        directory(&phase).unwrap();
+        let attempt = root.join("attempts").join(format!("phase-{index}"));
+        directory(&attempt).unwrap();
+        private_file(&attempt.join("call.bin"),b"exact").unwrap();
+        retain(&phase.join("prepared.json"),&json!({"attempt":attempt,
+            "summary":{"delegation":{"childCapability":(980000+index).to_string()}}})).unwrap();
+        attempt
+    }
+    #[test]
+    fn retained_status_never_creates_absent_requests_and_refuses_foreign_owner() {
+        let (root,state,workspace) = status_fixture();
+        assert!(retained_status(&root,&workspace,"missing").is_err());
+        assert!(!root.join("app-lifecycle/missing").exists());
+        let before: std::collections::BTreeSet<_> = fs::read_dir(&state).unwrap().map(|r|r.unwrap().file_name()).collect();
+        let first = retained_status(&root,&workspace,"one").unwrap();
+        assert_eq!(first["phase"],"app-policy");
+        assert_eq!(first["nextAction"],"prepare");
+        assert!(retained_status(&root,&json!({"subject":"9"}),"one").is_err());
+        let after: std::collections::BTreeSet<_> = fs::read_dir(&state).unwrap().map(|r|r.unwrap().file_name()).collect();
+        assert_eq!(before,after);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn retained_status_preserves_exact_uncertainty_without_continuity_writes() {
+        let (root,state,workspace) = status_fixture();
+        let attempt = status_phase(&root,&state,0);
+        retain(&attempt.join("outcome.json"),&json!({"type":"refused"})).unwrap();
+        retain(&attempt.join("retry-0001.json"),&json!({"type":"uncertain"})).unwrap();
+        let before: std::collections::BTreeSet<_> = fs::read_dir(&attempt).unwrap().map(|r|r.unwrap().file_name()).collect();
+        let result = retained_status(&root,&workspace,"one").unwrap();
+        assert_eq!(result["phase"],"app-policy");
+        assert_eq!(result["nextAction"],"recover");
+        let after: std::collections::BTreeSet<_> = fs::read_dir(&attempt).unwrap().map(|r|r.unwrap().file_name()).collect();
+        assert_eq!(before,after);
+        assert!(!root.join("receipt-continuity").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn retained_status_repairs_only_an_incomplete_unsubmitted_preparation() {
+        let (root,state,workspace) = status_fixture();
+        let attempt = status_phase(&root,&state,0);
+        fs::remove_file(attempt.join("call.bin")).unwrap();
+        let result = retained_status(&root,&workspace,"one").unwrap();
+        assert_eq!(result["nextAction"],"prepare");
+        assert!(!attempt.join("call.bin").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn retained_status_keeps_completed_selector_publication_pending() {
+        let (root,state,workspace) = status_fixture();
+        for index in 0..6 {
+            let attempt = status_phase(&root,&state,index);
+            retain(&attempt.join("outcome.json"),&json!({"type":"confirmed","confirmation":"installed"})).unwrap();
+        }
+        let result = retained_status(&root,&workspace,"one").unwrap();
+        assert_eq!(result["complete"],true);
+        assert_eq!(result["selectorPublicationPending"],true);
+        assert_eq!(result["nextAction"],"recover");
+        assert!(result.get("managementSelector").is_none());
+        assert!(!state.join("management-selector.json").exists());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn owner_zero_and_distinct_manager_are_bound_without_transfer() {

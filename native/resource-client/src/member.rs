@@ -171,6 +171,40 @@ fn connector_operations(root: &Path, pin: &Value) -> Result<Vec<Value>> {
     Ok(rows)
 }
 
+/// Discovery stays within the member's workspace. The lifecycle owner decides
+/// phase and next action; home never interprets controller or grant custody.
+fn lifecycle_operations(root: &Path, pin: &Value) -> Result<Vec<Value>> {
+    let parent = root.join("app-lifecycle");
+    if !parent.exists() { return Ok(vec![]); }
+    workspace::private_dir(&parent)?;
+    let mut rows = vec![];
+    for entry in std::fs::read_dir(&parent).map_err(|e|e.to_string())? {
+        let entry = entry.map_err(|e|e.to_string())?;
+        if !entry.file_type().map_err(|e|e.to_string())?.is_dir() { continue; }
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else { continue; };
+        if workspace::validate_name(&id).is_err() || id.len() > 40 { continue; }
+        let mut row = json!({"id":id,"origin":"member-retained-workflow",
+            "currentness":"retained-evidence","authority":"requires-current-source-admission",
+            "actions":[{"label":"status","command":format!("app delegate-lifecycle status {id}")}]});
+        match workspace::app_lifecycle::retained_status(root,pin,&id) {
+            Ok(status) => {
+                for field in ["complete","phase","prepared","owner","manager","selectorPublicationPending"] {
+                    if let Some(value) = status.get(field) { row[field] = value.clone(); }
+                }
+                row["status"] = json!(if status["complete"] == true {"complete"} else {"in-progress"});
+                if let Some(action) = status["nextAction"].as_str() {
+                    row["actions"].as_array_mut().unwrap().push(json!({"label":action,
+                        "command":format!("app delegate-lifecycle {action} {id}")}));
+                }
+            }
+            Err(_) => row["status"] = json!("unavailable"),
+        }
+        rows.push(row);
+    }
+    rows.sort_by(|a,b|a["id"].as_str().cmp(&b["id"].as_str()));
+    Ok(rows)
+}
+
 /// World objects carry their own descriptor and natural-key map. Presentation
 /// follows the signed descriptor instead of a host list of board/poll kinds.
 fn programmable_object(view: &Value) -> Option<Value> {
@@ -236,6 +270,7 @@ fn projection_with(root: &Path, pin: &Value, config: &Value, selected: Option<&s
         "world":{"domain":config["domain"],"expectedSeed":config["expectedSeed"],"origin":"pinned-member-config"},"resources":resources,
         "unavailable":unavailable,"recovery":pending_attempts(root)?,
         "documentExports":connector_operations(root,&pin)?,
+        "appLifecycles":lifecycle_operations(root,&pin)?,
         "actions":[{"label":"providers","command":"key providers"},
             {"label":"provider grants","command":"key ls"},
             {"label":"credits","command":"pay status"},
@@ -409,6 +444,13 @@ fn render(value: &Value) -> String {
         }
         if let Some(message) = operation["message"].as_str() {
             text.push_str(&format!("  {message}\n"));
+        }
+    }
+    for operation in value["appLifecycles"].as_array().into_iter().flatten() {
+        text.push_str(&format!("\nApp delegation {} · {}\n", operation["id"].as_str().unwrap_or("?"),
+            operation["phase"].as_str().unwrap_or_else(|| operation["status"].as_str().unwrap_or("unavailable"))));
+        for action in operation["actions"].as_array().into_iter().flatten() {
+            text.push_str(&format!("  {}\n",action["command"].as_str().unwrap_or("")));
         }
     }
     text.push_str("\nProviders: key providers · Credits: pay status · Recent work: history\n");

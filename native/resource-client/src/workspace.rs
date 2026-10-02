@@ -65,7 +65,7 @@ mod world_kind;
 #[path = "law_export.rs"]
 mod law_export;
 #[path = "app_lifecycle.rs"]
-mod app_lifecycle;
+pub(crate) mod app_lifecycle;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
