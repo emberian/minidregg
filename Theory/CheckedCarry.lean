@@ -12,6 +12,7 @@ counterexample to numeric narrowing, and shared origin consumption. No theorem
 below claims that copying cells into fresh genesis preserves the native journal.
 -/
 import Theory.TypedAuthorization
+import Theory.AssertAxioms
 
 namespace Minidregg.Theory.CheckedCarry
 
@@ -54,8 +55,8 @@ theorem disposition_total {source : List Cell} {relation : Cell → Cell → Pro
     (∃ target, plan.decideCell i = .keep target) ∨
     (∃ reason, plan.decideCell i = .drop reason) := by
   cases choice : plan.decideCell i with
-  | keep target => exact .inl ⟨target, choice⟩
-  | drop reason => exact .inr ⟨reason, choice⟩
+  | keep target => exact .inl ⟨target, rfl⟩
+  | drop reason => exact .inr ⟨reason, rfl⟩
 
 theorem duplicate_output_refused {source : List Cell} {relation : Cell → Cell → Prop} (plan : Plan source relation)
     (i j : Fin source.length) (different : i ≠ j) (left right : Cell)
@@ -131,6 +132,46 @@ theorem neutral_write_scope_iff {old next : AuthState}
     scope.CoversWrite old.parent request footprint ↔
       scope.CoversWrite next.parent request footprint := by
   rw [same.parent]
+
+/-! Concrete semantic poles: changed commitments alone preserve an inhabited
+capability judgment, while revocation and a reset height do not. These do not
+reuse the demo portal's permissive cryptographic verifier. -/
+
+namespace AuthorityPoles
+
+def rerooted : AuthState :=
+  { demoState with
+    capabilityRoot := ⟨130⟩
+    revocationRoot := ⟨131⟩
+    policyRoot := ⟨133⟩
+    policyAddress := fun _ _ => ⟨134⟩ }
+
+theorem same_meaning : AuthorityMeaning demoState rerooted :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+theorem commitments_changed :
+    demoState.capabilityRoot ≠ rerooted.capabilityRoot ∧
+      demoState.policyRoot ≠ rerooted.policyRoot := by decide
+
+theorem live_capability_survives_rerooting :
+    demoCapability.Admissible rerooted demoRequest :=
+  neutral_capability_forward same_meaning demoCapability demoRequest demoCapability_admissible
+
+def revoked : AuthState :=
+  { rerooted with revoked := {.capability demoCapability.id} }
+
+theorem fresh_revoked_capability_refused :
+    ¬ demoCapability.Admissible revoked demoRequest := by
+  intro accepted
+  exact accepted.selfNotRevoked (by simp [revoked])
+
+theorem resetting_segment_height_does_not_refresh_grant :
+    ¬ demoCapability.Admissible rerooted { demoRequest with height := 0 } := by
+  intro accepted
+  have lower := accepted.validFrom
+  norm_num [demoCapability] at lower
+
+end AuthorityPoles
 
 /-! ## Meaning, not field-number inclusion -/
 
@@ -321,5 +362,20 @@ theorem changed_origin_meaning_refuses (journal : List Receipt)
     admit (⟨request.origin, oldMeaning, recorded⟩ :: journal)
       request allowed candidate = .refused := by
   simp [admit, TranslatedRequest.recovery, recover, changed]
+
+#assert_axioms disposition_total
+#assert_axioms duplicate_output_refused
+#assert_axioms no_drop_at
+#assert_axioms neutral_capability_iff
+#assert_axioms neutral_write_scope_iff
+#assert_axioms AuthorityPoles.live_capability_survives_rerooting
+#assert_axioms AuthorityPoles.fresh_revoked_capability_refused
+#assert_axioms AuthorityPoles.resetting_segment_height_does_not_refresh_grant
+#assert_axioms TitleMigration.copied_title_grant_not_semantic_narrowing
+#assert_axioms TitleMigration.translated_title_grant_preserves_meaning
+#assert_axioms TitleMigration.translated_effect_exact
+#assert_axioms original_acceptance_makes_translation_replay
+#assert_axioms fresh_revoked_translation_refuses
+#assert_axioms changed_origin_meaning_refuses
 
 end Minidregg.Theory.CheckedCarry
