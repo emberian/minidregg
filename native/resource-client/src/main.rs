@@ -57,6 +57,8 @@ mod replan;
 #[cfg(unix)]
 mod proxy;
 #[cfg(unix)]
+mod public_proxy;
+#[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
 mod relay;
@@ -523,6 +525,7 @@ usage:
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
@@ -2878,6 +2881,14 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-operator requires --socket")?;
             transport::serve_operator(socket, &host, &config)
+        }
+        #[cfg(unix)]
+        "serve-public-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
+            public_proxy::serve(socket, &upstream, &config)
         }
         "host-command" => {
             let host = path(args.required("host")?);

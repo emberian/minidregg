@@ -565,7 +565,7 @@ pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
     Ok(file)
 }
 
-fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
             if !metadata.file_type().is_file()
@@ -606,7 +606,7 @@ fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
+pub(crate) fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
     if operator && !path.exists() && legacy_config_exists {
         return Err("existing public service pin cannot be upgraded to operator mode".into());
     }
@@ -620,7 +620,7 @@ fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> 
     )
 }
 
-fn clear_stale_socket(path: &Path) -> Result<(), String> {
+pub(crate) fn clear_stale_socket(path: &Path) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -1236,7 +1236,9 @@ fn serve_connection(
         return refuse(&mut stream, "host frame exceeds bound");
     }
     if !(if rules.operator {
-        allowed_operator_operation(&request)
+        // The owner-private listener is the single Host endpoint for both
+        // lifecycle clients and the separately filtered public ingress relay.
+        allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
         allowed_operation(&request, rules.catalog_enabled)
     }) {
@@ -1263,7 +1265,7 @@ fn serve_connection(
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     unsafe extern "C" {
         fn getpeereid(socket: i32, uid: *mut u32, gid: *mut u32) -> i32;
     }
@@ -1279,7 +1281,7 @@ fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     #[repr(C)]
     struct Ucred {
         pid: i32,
@@ -1313,11 +1315,11 @@ fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     target_os = "openbsd",
     target_os = "netbsd"
 )))]
-fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
+pub(crate) fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
     Err("operator peer credentials are unavailable on this platform".into())
 }
 
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
