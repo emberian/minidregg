@@ -464,7 +464,7 @@ def bindingCommand (domain semantics : Digest) (report : Report)
   pure ⟨report.subject,
     operationNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-      .content ⟨actions⟩, none⟩], none⟩
+      .content ⟨actions⟩, none, none, none⟩], none⟩
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
@@ -485,7 +485,7 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
   ⟨report.subject,
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-     .content ⟨actions⟩, none⟩], none⟩
+     .content ⟨actions⟩, none, none, none⟩], none⟩
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (reply : Reply)
