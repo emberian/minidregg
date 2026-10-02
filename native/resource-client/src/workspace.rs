@@ -2572,7 +2572,7 @@ fn propose_request(
 ) -> Result<Value> {
     crate::replan::replan(
         "propose",
-        || propose_summary_once(root, workspace, request, proposal_id, private_room_name, fresh),
+        || propose_summary_once(root, workspace, request, proposal_id, private_room_name, fresh, None),
         |error, _| error == OBSERVATIONS_MOVED,
         |_| Ok(()),
     )
@@ -2585,6 +2585,7 @@ fn propose_summary_once(
     proposal_id: &str,
     private_room_name: Option<&str>,
     fresh: bool,
+    append_origin: Option<&str>,
 ) -> Result<Value> {
     validate_name(proposal_id)?;
     let request = request.clone();
@@ -3134,14 +3135,13 @@ fn propose_summary_once(
     let intent_bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     let intent_sha = format!("{:x}", Sha256::digest(&intent_bytes));
     let proposal_dir = root.join("proposals").join(proposal_id);
-    if proposal_dir.exists() {
-        private_dir(&proposal_dir)?;
-        for entry in fs::read_dir(&proposal_dir).map_err(|error| error.to_string())? {
-            if entry.map_err(|error| error.to_string())?.file_name() != crate::replan::REPLANNED {
-                return Err("proposal already holds authored input".into());
-            }
-        }
-    } else { make_private_dir(&proposal_dir)?; }
+    make_private_dir(&proposal_dir)?;
+    // Close the derived alias before any authored intent becomes visible.
+    if let Some(original) = append_origin {
+        private_file(&proposal_dir.join("append-origin.json"), &serde_json::to_vec(&json!({
+            "type":"minidregg-workspace-derived-append-v1","originalProposal":original
+        })).map_err(|error|error.to_string())?)?;
+    }
     private_file(
         &proposal_dir.join("request.json"),
         &serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?,
@@ -3171,7 +3171,17 @@ pub(crate) fn submit_intent(
     prepare_only: bool,
     explicit_attempt: Option<&Path>,
 ) -> Result<()> {
-    let attempt = if let Some(explicit) = explicit_attempt {
+    let source = absolute(source)?;
+    let append_input = append_recovery_input(root, &source, kind, prepare_only)?;
+    // This is physical custody of one logical append, not source authority.
+    // Hold only this proposal's lock throughout its single-attempt call chain.
+    let _append_guard = append_input.as_ref().map(|(_, dir, _)| {
+        private_dir(dir)?;
+        crate::transport::service_lock(&dir.join("append-submit.lock"))
+    }).transpose()?;
+    let attempt = if let Some((request, dir, _)) = &append_input {
+        bind_append_attempt(root, dir, request, &source, explicit_attempt)?
+    } else if let Some(explicit) = explicit_attempt {
         let candidate = absolute(explicit)?;
         let parent = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
         let candidate_parent = candidate
@@ -3186,25 +3196,44 @@ pub(crate) fn submit_intent(
     } else {
         new_attempt(root)?.0
     };
-    let source = absolute(source)?;
     if kind == "intent" {
         bind_delegation_attempt(root, workspace, &source, &attempt)?;
     }
     eprintln!("workspace attempt: {}", attempt.display());
-    if let Some((request, proposal_dir, proposal_id)) = append_recovery_input(root, &source, kind, prepare_only)? {
-        crate::create_dir(&attempt)?;
+    if let Some((request, _, proposal_id)) = append_input {
+        if attempt.exists() {
+            private_dir(&attempt)?;
+            // No active call means submission has not happened. Preserve any
+            // partial pre-call files; accepted outcomes still cannot retire.
+            crate::replan::retire_next(&attempt)?;
+        } else { crate::create_dir(&attempt)?; }
         let refresh = std::cell::Cell::new(false);
+        let selected_source = std::cell::RefCell::new(source.clone());
         let result = crate::replan::replan(
             "document append",
             || {
                 // Select the new preimage after backoff, so waiting cannot
                 // itself stale the newly authored append command.
                 if refresh.get() {
-                    propose_request(root, workspace, &request, &proposal_id, None, false)?;
+                    // Keep the original proposal immutable across every crash
+                    // cut. A refresh is a separately retained derived proposal.
+                    let refreshed = format!("append-{}", random_nonce()?);
+                    let summary = crate::replan::replan("append authoring",
+                        || propose_summary_once(root, workspace, &request, &refreshed, None, false, Some(&proposal_id)),
+                        |error,_|error==OBSERVATIONS_MOVED, |_|Ok(()))?;
+                    let refreshed_dir = root.join("proposals").join(&refreshed);
+                    let refreshed_source = refreshed_dir.join("intent.json");
+                    check_append_successor(&request, &bounded_json(&selected_source.borrow())?, &bounded_json(&refreshed_source)?)?;
+                    selected_source.replace(refreshed_source);
+                    replace_private_file(&attempt.join("append-proposal.json"), &serde_json::to_vec(&json!({
+                        "type":"minidregg-workspace-append-proposal-v1","originalProposal":proposal_id,
+                        "proposalId":refreshed,"intentSha256":summary["intentSha256"],
+                        "requestSha256":format!("{:x}",Sha256::digest(serde_json::to_vec(&request).map_err(|error|error.to_string())?))
+                    })).map_err(|error|error.to_string())?)?;
                     refresh.set(false);
                 }
                 crate::submit_once(&workspace_host(workspace)?, &member_path(workspace, "config")?,
-                    &source, OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
+                    &selected_source.borrow(), OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
             },
             |_, decision| {
                 if crate::replan::is_stale_root(decision) { return true; }
@@ -3213,16 +3242,13 @@ pub(crate) fn submit_intent(
                 if !final_refused && !crate::replan::is_prepare_stale_target(decision) { return false; }
                 // A refusal alone does not establish preimage drift. The
                 // original observer proves it independently through a signed read.
-                match append_preimage_moved(root, workspace, &request, &source) {
+                match append_preimage_moved(root, workspace, &request, &selected_source.borrow()) {
                     Ok(moved) => { refresh.set(moved); moved },
                     Err(error) => { eprintln!("append recovery read failed: {error}"); false }
                 }
             },
             |_| {
                 crate::replan::retire_next(&attempt)?;
-                if refresh.get() && source.exists() {
-                    crate::replan::retire_next(&proposal_dir)?;
-                }
                 Ok(())
             },
         );
@@ -3248,6 +3274,52 @@ pub(crate) fn submit_intent(
     Ok(())
 }
 
+fn bind_append_attempt(root: &Path, proposal: &Path, request: &Value, source: &Path,
+    explicit: Option<&Path>) -> Result<PathBuf> {
+    let path = proposal.join("append-attempt.json");
+    let request_sha = format!("{:x}",Sha256::digest(serde_json::to_vec(request).map_err(|error|error.to_string())?));
+    let intent_sha = format!("{:x}",Sha256::digest(fs::read(source).map_err(|error|error.to_string())?));
+    // Read the durable binding BEFORE allocating a default attempt.
+    let attempt = if path.exists() {
+        let metadata = fs::symlink_metadata(&path).map_err(|error|error.to_string())?;
+        if metadata.uid() != unsafe {libc::geteuid()} || metadata.mode() & 0o077 != 0 || metadata.nlink() != 1 {
+            return Err("append custody binding must be owner-private with one link".into());
+        }
+        let saved = bounded_json(&path)?;
+        if saved.as_object().map_or(true, |row|row.len()!=4)
+            || saved["type"] != "minidregg-workspace-append-attempt-v1"
+            || saved["requestSha256"] != request_sha || saved["intentSha256"] != intent_sha {
+            return Err("append custody binding differs from canonical proposal".into());
+        }
+        let bound = member_path(&saved,"attempt")?;
+        if let Some(explicit) = explicit {
+            if absolute(explicit)? != bound { return Err(format!("append is bound to exact attempt {}",bound.display())); }
+        }
+        bound
+    } else if let Some(explicit) = explicit { absolute(explicit)? }
+    else { new_attempt(root)?.0 };
+    let parent = fs::canonicalize(root.join("attempts")).map_err(|error|error.to_string())?;
+    if !attempt.is_absolute() || attempt.parent().map(fs::canonicalize).transpose().map_err(|error|error.to_string())?
+        .as_deref() != Some(parent.as_path()) {
+        return Err("append bound attempt must be a direct child of workspace attempts".into());
+    }
+    if !path.exists() && fs::symlink_metadata(&attempt).is_ok() {
+        return Err("new append binding requires an unused attempt; another operation already owns this path".into());
+    }
+    match fs::symlink_metadata(attempt.join("call.bin")) {
+        Ok(_) => return Err(format!("append is bound to exact attempt {}; recover its retained call with retry (lookup or resubmit)",attempt.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.to_string()),
+    }
+    if !path.exists() {
+        replace_private_file(&path,&serde_json::to_vec(&json!({
+            "type":"minidregg-workspace-append-attempt-v1","requestSha256":request_sha,
+            "intentSha256":intent_sha,"attempt":attempt
+        })).map_err(|error|error.to_string())?)?;
+    }
+    Ok(attempt)
+}
+
 /// Automatic root selection is safe to refresh only for an append-only
 /// high-level request. An explicit CAS, edit, push, raw content command or run
 /// claim keeps the exact authored semantics and is never regenerated here.
@@ -3270,13 +3342,18 @@ fn append_request_name(request: &Value) -> Option<&str> {
 
 fn append_recovery_input(root: &Path, source: &Path, kind: &str, prepare_only: bool)
     -> Result<Option<(Value, PathBuf, String)>> {
-    if prepare_only || kind != "intent" || source.file_name() != Some(OsStr::new("intent.json")) {
-        return Ok(None);
-    }
     let source = fs::canonicalize(source).map_err(|error| error.to_string())?;
     let Some(dir) = source.parent() else { return Ok(None) };
     let proposals = fs::canonicalize(root.join("proposals")).map_err(|error| error.to_string())?;
     if dir.parent() != Some(proposals.as_path()) { return Ok(None); }
+    if dir.join("append-origin.json").exists() {
+        let origin = bounded_json(&dir.join("append-origin.json"))?;
+        if origin["type"] != "minidregg-workspace-derived-append-v1" { return Err("invalid derived append designator".into()); }
+        return Err(format!("derived append belongs to proposal {}; recover that proposal's exact attempt",member(&origin,"originalProposal")?));
+    }
+    if prepare_only || kind != "intent" || source.file_name() != Some(OsStr::new("intent.json")) {
+        return Ok(None);
+    }
     if !dir.join("request.json").exists() || !dir.join("proposal.json").exists() { return Ok(None); }
     let request = bounded_json(&dir.join("request.json"))?;
     if append_request_name(&request).is_none() { return Ok(None); }
@@ -3288,6 +3365,17 @@ fn append_recovery_input(root: &Path, source: &Path, kind: &str, prepare_only: b
     let id = dir.file_name().and_then(OsStr::to_str).ok_or("proposal ID is not UTF-8")?;
     if member(&summary, "proposalId")? != id { return Err("append proposal ID differs from path".into()); }
     Ok(Some((request, dir.to_owned(), id.to_owned())))
+}
+
+fn check_append_successor(request: &Value, prior: &Value, next: &Value) -> Result<()> {
+    let before = &prior["purpose"]["draft"]["command"];
+    let after = &next["purpose"]["draft"]["command"];
+    if before["subject"] != after["subject"] || !append_lowering_matches(request,&after["targets"][0])
+        || ["target","kind","capability","observeCapability","schemaVersion"].iter()
+            .any(|field| before["targets"][0][*field] != after["targets"][0][*field]) {
+        return Err("append target or grants changed during recovery authoring; no new call was submitted".into());
+    }
+    Ok(())
 }
 
 fn append_preimage_moved(root: &Path, workspace: &Value, request: &Value, source: &Path) -> Result<bool> {
@@ -6415,6 +6503,51 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn append_custody_recovery_keeps_original_and_fences_unknown_call() {
+        let root = std::env::temp_dir().join(format!("append-custody-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        super::make_private_dir(&root).unwrap();
+        super::make_private_dir(&root.join("attempts")).unwrap();
+        super::make_private_dir(&root.join("proposals")).unwrap();
+        let proposal = root.join("proposals/op"); super::make_private_dir(&proposal).unwrap();
+        let request = serde_json::json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+            "targets":[{"name":"notes","payload":{"type":"document","actions":[{"type":"append","text":"once"}]}}]});
+        let source = proposal.join("intent.json");
+        super::private_file(&source,b"original intent").unwrap();
+        super::private_file(&proposal.join("request.json"),&serde_json::to_vec(&request).unwrap()).unwrap();
+        let attempt = super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap();
+        assert!(!attempt.exists(),"binding is durable before mkdir/assembly");
+        assert_eq!(super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap(),attempt,
+            "restart before mkdir must use same bound path");
+        assert!(super::bind_append_attempt(&root,&proposal,&request,&source,Some(&root.join("attempts/other"))).is_err());
+        super::make_private_dir(&attempt).unwrap();
+        super::private_file(&attempt.join("intent.json"),b"partial pre-call intent").unwrap();
+        assert_eq!(super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap(),attempt);
+        crate::replan::retire_next(&attempt).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(),b"original intent");
+        assert_eq!(super::bounded_json(&proposal.join("request.json")).unwrap(),request);
+        assert_eq!(std::fs::read(attempt.join("replanned/01/intent.json")).unwrap(),b"partial pre-call intent");
+        super::private_file(&attempt.join("call.bin"),b"child exact call, reply lost").unwrap();
+        let error = super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap_err();
+        assert!(error.contains("recover its retained call"),"{error}");
+        assert_eq!(std::fs::read(attempt.join("call.bin")).unwrap(),b"child exact call, reply lost");
+        let mut changed = request; changed["targets"][0]["payload"]["actions"][0]["text"] = serde_json::json!("changed");
+        assert!(super::bind_append_attempt(&root,&proposal,&changed,&source,None).is_err());
+        let other = root.join("proposals/other"); super::make_private_dir(&other).unwrap();
+        super::private_file(&other.join("intent.json"),b"other intent").unwrap();
+        std::fs::remove_file(attempt.join("call.bin")).unwrap();
+        assert!(super::bind_append_attempt(&root,&other,&changed,&other.join("intent.json"),Some(&attempt)).unwrap_err()
+            .contains("unused attempt"),"unrelated proposal cannot steal an existing pre-call attempt");
+        let child = root.join("proposals/child"); super::make_private_dir(&child).unwrap();
+        super::private_file(&child.join("append-origin.json"),br#"{"type":"minidregg-workspace-derived-append-v1","originalProposal":"op"}"#).unwrap();
+        for (name,kind,prepare_only) in [("intent.json","intent",false),("intent.bin","binary",false),("intent.json","intent",true)] {
+            let source=child.join(name); if !source.exists() {super::private_file(&source,b"child source").unwrap();}
+            assert!(super::append_recovery_input(&root,&source,kind,prepare_only).unwrap_err().contains("belongs to proposal op"));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn append_recovery_preserves_explicit_pins_and_other_document_operations() {
         let request = serde_json::json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
             "targets":[{"name":"room/notes","payload":{"type":"document","actions":[{"type":"append","text":"hello"}]}}]});
@@ -6438,6 +6571,14 @@ mod tests {
         assert!(!super::append_lowering_matches(&changed, &target));
         let mut encrypted = target.clone(); encrypted["payload"]["actions"][0]["kind"] = serde_json::json!({"type":"sealed"});
         assert!(!super::append_lowering_matches(&request, &encrypted));
+        let before=serde_json::json!({"purpose":{"draft":{"command":{"subject":"7","targets":[{
+            "kind":"object","target":"10","capability":"11","observeCapability":"12","schemaVersion":7,
+            "payload":target["payload"]}]}}}});
+        assert!(super::check_append_successor(&request,&before,&before).is_ok());
+        for field in ["target","capability","observeCapability"] {
+            let mut replaced=before.clone(); replaced["purpose"]["draft"]["command"]["targets"][0][field]=serde_json::json!("different");
+            assert!(super::check_append_successor(&request,&before,&replaced).is_err(),"{field}");
+        }
     }
 
     use super::*;
