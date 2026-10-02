@@ -8,7 +8,12 @@ namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Kernel.MultiCellHyperedge
+open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
+
+-- Config is an index here. Do not normalize the complete directory/portal
+-- construction while elaborating the finite row's dependent projections.
+attribute [local irreducible] policyConfigFromStep CanonicalRuntimeProfile.Profile.compilerProfile
 
 variable {F : Type} [Field F]
 variable {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -23,7 +28,7 @@ structure PreparedPolicyLeg [DecidableEq F]
   private mk ::
   context : PolicyStepContext
   contextExact : context = step prepared tuple incidence
-  law : ComposedPolicyAdmission.PreparedLaw
+  law : ComposedPolicyAdmission.PreparedLaw (F := F)
     (policyConfigFromStep prepared incidence context)
   resolved : (policyConfigFromStep prepared incidence context).resolve? = some law
   predicate : Minidregg.Pred.Pred
@@ -84,7 +89,9 @@ def PreparedPolicyLeg.lawRefusal [DecidableEq F]
 private theorem config_step [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
-    (policyConfig prepared tuple incidence).step = step prepared tuple incidence := rfl
+    (policyConfig prepared tuple incidence).step = step prepared tuple incidence := by
+  unfold policyConfig policyConfigFromStep PhysicalLawResolution.config
+  rfl
 
 theorem preparePolicyLeg_range [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
