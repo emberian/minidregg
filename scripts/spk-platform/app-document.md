@@ -62,6 +62,9 @@ doc app-export recover export-1
 doc app-export rebase export-1 export-2
 ```
 
+New export and rebase IDs contain 1..60 ASCII letters, digits or hyphens, leaving
+room for their ordinary retained document proposal name.
+
 Capture retains encrypted exact CSV bytes, source observations and receipt in
 `WORKSPACE/app-documents/ID`. Publication appends those bytes with app generation,
 exporter, body digest and original native operation attribution through ordinary
@@ -71,3 +74,32 @@ writer failure before any call; it preserves the original export and claims one
 unused successor. Unknown source capture or document admission remains retained
 and is never replaced by a new physical export. Restore the complete workspace,
 including `app-documents/storage.key`, with its writer quiesced.
+
+`app-document-journey.py INPUT.json` receives one provisioned connector through
+capture, publication, repeat publication, exact lookup, and an independent
+member's readback. Its input is:
+
+```json
+{
+  "protocol": "mini-app-document-journey-v1",
+  "root": "/absolute/private/receiving-evidence",
+  "provisioned": "/absolute/provision/result.json",
+  "provisionedSha256": "RESULT_SHA256",
+  "mini": {"path": "/absolute/coherent/mini", "sha256": "MINI_SHA256"},
+  "endpoint": "https://connector.example/", "ca": "/absolute/route-ca.pem",
+  "operation": "export-1", "taskReference": "task",
+  "documentReference": "document",
+  "reader": {"workspace": "/absolute/other-member/workspace", "document": "room/notes"}
+}
+```
+
+The runner requires the exact Mini pin held in the provision's coherent fixture,
+the same canonical Store config and socket for exporter and reader, and the
+fixture's sealed Host bytes for both (byte-identical executable aliases work).
+It retains the private binding using the checkpoint helper's atomic custody
+recipe. Existing operations use status and exact recovery; definite refusals
+stop for an explicit destination rebase. It verifies one export attribution,
+the exported byte count and digest, the independent read's actual document
+target, and unchanged call bytes and receipt on repeat. Journey logs hold only
+readback hashes and result metadata; document plaintext stays in memory.
+Source revocation and browser rendering remain separate receiving checks.
