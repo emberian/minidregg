@@ -79,3 +79,67 @@ class ReceivingContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MultiuserWorkload(unittest.TestCase):
+    def spec(self, size=5):
+        keys = [str(1000 + i) for i in range(size)]
+        return {"prefix": "receiving", "members": {key: {"subject": key} for key in keys},
+                "maxConcurrency": 16}
+
+    def test_arbitrary_subject_inventory_has_no_named_pair(self):
+        plan = joined.workload(self.spec())
+        self.assertEqual(plan["members"], ["1000", "1001", "1002", "1003", "1004"])
+        self.assertEqual(plan["rooms"]["shared"]["owner"], "1000")
+
+    def test_selected_sweeps_are_pairs_and_cover_overlapping_disjoint_groups(self):
+        spec = self.spec(100)
+        small = joined.selected_spec(spec, {"population": 5, "concurrency": 4}, 2)
+        plan = joined.workload(small)
+        self.assertEqual((len(plan["members"]), plan["concurrency"]), (5, 4))
+        self.assertEqual(set(plan["rooms"]), {"shared", "overlap", "disjoint"})
+        self.assertEqual(set(plan["rooms"]["overlap"]["members"]) & set(plan["rooms"]["disjoint"]["members"]), set())
+        with self.assertRaisesRegex(ValueError, "resource limit"):
+            joined.selected_spec(spec, {"population": 20, "concurrency": 17}, 0)
+        with self.assertRaisesRegex(ValueError, "provisioned members"):
+            joined.selected_spec(spec, {"population": 101, "concurrency": 1}, 0)
+
+    def test_exact_room_schema_boundary_is_not_global_population_capacity(self):
+        spec = self.spec(500)
+        self.assertEqual(len(joined.workload(spec)["rooms"]["shared"]["members"]), 500)
+        with self.assertRaisesRegex(ValueError, "499 non-founder"):
+            joined.workload(self.spec(501))
+        spec = self.spec(1000)
+        keys = list(spec["members"])
+        spec["rooms"] = {"first": {"owner": keys[0], "members": keys[:500]},
+                         "second": {"owner": keys[500], "members": keys[500:]}}
+        self.assertEqual(len(joined.workload(spec)["members"]), 1000)
+
+    def test_duplicate_display_aliases_have_distinct_owner_and_room_scope(self):
+        spec = self.spec()
+        keys = list(spec["members"])
+        spec["rooms"] = {"first": {"name": "lab", "owner": keys[0], "members": keys[:3]},
+                         "second": {"name": "lab", "owner": keys[3], "members": keys[3:]}}
+        self.assertEqual(len(joined.workload(spec)["rooms"]), 2)
+        spec["rooms"]["second"]["owner"] = keys[0]
+        spec["rooms"]["second"]["members"].append(keys[0])
+        with self.assertRaisesRegex(ValueError, "duplicate room aliases"):
+            joined.workload(spec)
+
+    def test_unassigned_member_and_duplicate_selection_are_refused(self):
+        spec = self.spec()
+        spec["rooms"] = {"small": {"owner": "1000", "members": ["1000", "1001"]}}
+        with self.assertRaisesRegex(ValueError, "no workload group"):
+            joined.workload(spec)
+        spec["workload"] = {"members": ["1000", "1000"], "concurrency": 1}
+        with self.assertRaisesRegex(ValueError, "selected member"):
+            joined.workload(spec)
+
+    def test_member_alias_is_used_in_actual_write_command(self):
+        journey = object.__new__(joined.Journey)
+        journey.spec = {"prefix": "joined"}
+        room = {"name": "lab", "memberNames": {"1001": "joined-r2"}}
+        with patch.object(journey, "shell", return_value="") as shell, \
+                patch.object(journey, "json_shell", return_value={"transactionId": "7"}):
+            write = journey.member_write(2, room, 1, "1001")
+        self.assertIn("joined-r2/notes", shell.call_args.args[2])
+        self.assertEqual(write["member"], "1001")
