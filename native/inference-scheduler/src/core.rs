@@ -144,6 +144,10 @@ pub struct Core {
     pub draining: bool,
 }
 
+/// Finite crash/restart history per unsent request. All guards remain exact;
+/// exhaustion terminalizes only that definitely-unsent placement as NotSent.
+pub const MAX_UNSENT_LEASE_GUARDS: usize = 1024;
+
 fn text(value: &str) -> bool {
     !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
@@ -267,6 +271,16 @@ impl Core {
         request: Request,
         now: u64,
     ) -> Result<()> {
+        // The direct core API has the same request-body bound as the socket.
+        // Together with the bounded old-lease set, every terminal receipt fits
+        // the archive reservation made before accepting work.
+        if serde_json::to_vec(&request)
+            .map_err(|e| e.to_string())?
+            .len()
+            > crate::MAX_FRAME
+        {
+            return Err("scheduler request exceeds frame bound".into());
+        }
         if !hash(&request.id)
             || !hash(&request.request_digest)
             || !text(&request.model)
@@ -742,9 +756,22 @@ impl Core {
                     lease,
                     ..
                 } => {
-                    job.superseded_unsent.insert(lease);
                     credits.push((job.principal.clone(), estimated_us));
-                    State::Queued
+                    if job.superseded_unsent.len() >= MAX_UNSENT_LEASE_GUARDS
+                        && !job.superseded_unsent.contains(&lease)
+                    {
+                        // This placement never crossed the send boundary. Retire
+                        // only this exhausted retry history, retaining all old
+                        // guards and this final exact lease. Other members keep
+                        // receiving; an explicit fresh request can be admitted.
+                        State::Terminal {
+                            outcome: Outcome::NotSent,
+                            lease: Some(lease),
+                        }
+                    } else {
+                        job.superseded_unsent.insert(lease);
+                        State::Queued
+                    }
                 }
                 State::Dispatched {
                     lease,

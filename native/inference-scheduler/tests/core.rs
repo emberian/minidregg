@@ -557,3 +557,113 @@ fn refundable_estimate_is_not_the_joining_principals_service_floor() {
     assert!(matches!(state(&core, "b", &newcomer), State::Placed { .. }));
     assert_eq!(state(&core, "a2", &backlog), State::Queued);
 }
+
+#[test]
+fn selected_population_concurrency_pairs_share_principals_and_preserve_held_slots() {
+    for (population, concurrency) in [(2, 1), (5, 4), (20, 4), (100, 16)] {
+        let mut cfg = config();
+        cfg.max_jobs = population * 2 + 1;
+        cfg.max_queued_per_principal = 1;
+        cfg.max_active_per_principal = 1;
+        cfg.groups.insert("gpu-a".into(), concurrency);
+        cfg.controllers.clear();
+        for member in 0..population {
+            for controller in 0..2 {
+                cfg.controllers.insert(
+                    format!("subject-{member}-controller-{controller}"),
+                    Registration {
+                        uid: 1000,
+                        principal: format!("actual-subject-{}", 500 + member),
+                        pool: "members".into(),
+                    },
+                );
+            }
+        }
+        let mut core = Core::new(&cfg).unwrap();
+        let mut jobs = vec![];
+        for member in 0..population {
+            let controller = format!("subject-{member}-controller-0");
+            let request = enqueue(
+                &mut core,
+                &cfg,
+                &controller,
+                &format!("population-{population}-member-{member}"),
+            );
+            jobs.push((controller, request));
+        }
+        let (controller, held) = &jobs[0];
+        let ticket = lease(&core, controller, held);
+        core.dispatch(controller, &held.id, ticket, "unknown-response".into(), 1)
+            .unwrap();
+        core.finish(controller, &held.id, ticket, Outcome::Uncertain, 2)
+            .unwrap();
+        let extra_controller = "subject-0-controller-1";
+        let extra = enqueue(
+            &mut core,
+            &cfg,
+            extra_controller,
+            &format!("population-{population}-extra-controller"),
+        );
+        assert_eq!(state(&core, extra_controller, &extra), State::Queued);
+        assert!(core
+            .enqueue(
+                &cfg,
+                controller,
+                job(&format!("population-{population}-over-limit")),
+                2
+            )
+            .unwrap_err()
+            .contains("principal queue"));
+        if concurrency == 1 {
+            // A held physical slot cannot magically serve another member. An
+            // independent host still works under the same population limit.
+            core.cancel(&jobs[1].0, &jobs[1].1.id).unwrap();
+            let independent = Request {
+                model: "plain".into(),
+                tools: false,
+                ..job("independent-population")
+            };
+            core.enqueue(&cfg, &jobs[1].0, independent.clone(), 2)
+                .unwrap();
+            assert!(
+                matches!(state(&core, &jobs[1].0, &independent), State::Placed { group, .. } if group == "gpu-b")
+            );
+        } else {
+            let mut completed = 0;
+            while completed < population - 1 {
+                let mut progressed = false;
+                for (controller, request) in jobs.iter().skip(1) {
+                    if let State::Placed { lease, .. } = state(&core, controller, request) {
+                        core.finish(controller, &request.id, lease, Outcome::NotSent, 3)
+                            .unwrap();
+                        completed += 1;
+                        progressed = true;
+                    }
+                }
+                core.schedule(&cfg, 3).unwrap();
+                assert!(
+                    progressed,
+                    "held member blocked others at {population}/{concurrency}"
+                );
+                assert!(matches!(
+                    state(&core, &jobs[0].0, held),
+                    State::Uncertain { .. }
+                ));
+                assert_eq!(state(&core, extra_controller, &extra), State::Queued);
+                let occupied = core
+                    .jobs
+                    .values()
+                    .filter(|job| {
+                        matches!(
+                            job.state,
+                            State::Placed { .. }
+                                | State::Dispatched { .. }
+                                | State::Uncertain { .. }
+                        )
+                    })
+                    .count();
+                assert!(occupied <= concurrency);
+            }
+        }
+    }
+}

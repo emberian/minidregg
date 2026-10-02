@@ -216,9 +216,12 @@ forwarding remain work.
 `max_jobs` bounds nonterminal work (queued, placed, running and uncertain), not
 lifetime completions. The service writes immutable exact terminal receipts into
 its private `receipts/` archive before removing full jobs from the hot snapshot.
-File fsync and archive-directory fsync precede snapshot replacement. Restart
-reconciles a durable receipt with an older live snapshot after a crash in that
-interval; it never redispatches the completed job. Addressed retries load only
+The complete terminal transition, including fairness refund/elapsed counters,
+is first fsynced in the hot snapshot. Receipt file and directory fsync then
+precede a second snapshot that retires it. Restart finishes an interrupted
+archive/retirement cut with those same counters; it never redispatches completed
+work. A newer receipt paired with an unresolved older snapshot is an incomplete
+backup and is refused. Addressed retries load only
 that exact receipt. Changed content, another controller, another lease and
 another completion outcome remain refused; stale unsent lease guards survive.
 Running and uncertain records are never archived or evicted.
@@ -243,3 +246,10 @@ budget, not an infinite-disk promise. Reopen scans bounded receipt metadata;
 normal startup uses saved outcome summaries, rebuilding them after an interrupted
 archive/snapshot cut. A configured per-receipt bound is also fail closed: unusually
 large stale-lease history requires preservation and reconciliation, never eviction.
+The direct core API enforces the same64 KiB request bound as the socket, and each
+request retains at most1024 exact unsent restart guards. Reaching that guard
+bound terminalizes only that definitely-unsent placement as `NotSent`, preserving
+every old guard and the current exact lease. Other principals continue receiving;
+the retired request needs a fresh explicit prompt rather than automatic retry.
+Running/uncertain work is never terminalized by this bound, and no old lease
+becomes newly dispatchable.

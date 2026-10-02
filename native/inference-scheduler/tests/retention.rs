@@ -170,7 +170,7 @@ fn many_completed_jobs_keep_live_capacity_bounded_and_exact_receipts_after_resta
 }
 
 #[test]
-fn death_between_receipt_and_hot_retirement_recovers_completion_without_resend() {
+fn death_between_receipt_and_hot_retirement_keeps_completion_and_fairness() {
     let fixture = Fixture::new("crash");
     let cfg = config();
     let mut service = Service::open(cfg.clone(), &fixture.0).unwrap();
@@ -187,7 +187,8 @@ fn death_between_receipt_and_hot_retirement_recovers_completion_without_resend()
             attempt: "attempt-0".into(),
         },
     );
-    let old = fs::read(fixture.0.join("state.json")).unwrap();
+    let mut old: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
     let terminal = call(
         &mut service,
         Command::Finish {
@@ -197,11 +198,26 @@ fn death_between_receipt_and_hot_retirement_recovers_completion_without_resend()
             outcome: Outcome::Ended,
         },
     );
+    let uninterrupted: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
+    // The first durable terminal snapshot includes the same fairness transition
+    // as the uninterrupted final snapshot, before receipt/hot retirement.
+    old.jobs
+        .insert(terminal.request.id.clone(), terminal.clone());
+    old.service_us = uninterrupted.service_us.clone();
+    old.virtual_floor = uninterrupted.virtual_floor;
     drop(service);
-    // This is the exact persisted cut between durable receipt and atomic snapshot.
-    fs::write(fixture.0.join("state.json"), old).unwrap();
+    fs::write(
+        fixture.0.join("state.json"),
+        serde_json::to_vec(&old).unwrap(),
+    )
+    .unwrap();
     let mut service = Service::open(cfg, &fixture.0).unwrap();
     assert_eq!(enqueue(&mut service, 0), terminal);
+    let recovered: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
+    assert_eq!(recovered.service_us, uninterrupted.service_us);
+    assert_eq!(recovered.virtual_floor, uninterrupted.virtual_floor);
     assert!(service
         .execute(
             unsafe { libc::geteuid() },
@@ -290,4 +306,90 @@ fn uncertain_work_never_retires_and_archive_limit_has_safe_actionable_recovery()
             outcome: Outcome::Ended,
         },
     );
+}
+
+#[test]
+fn not_sent_refund_is_durable_before_terminal_receipt_and_partial_backup_is_refused() {
+    let fixture = Fixture::new("refund");
+    let cfg = config();
+    let mut service = Service::open(cfg.clone(), &fixture.0).unwrap();
+    let placed = enqueue(&mut service, 0);
+    let active_bytes = fs::read(fixture.0.join("state.json")).unwrap();
+    let terminal = finish(&mut service, &placed);
+    let final_state: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
+    assert_eq!(final_state.service_us["member-500"], 0);
+    let mut transition = final_state.clone();
+    transition
+        .jobs
+        .insert(terminal.request.id.clone(), terminal.clone());
+    transition.archived_receipts = 0;
+    transition.archived_bytes = 0;
+    drop(service);
+    fs::write(
+        fixture.0.join("state.json"),
+        serde_json::to_vec(&transition).unwrap(),
+    )
+    .unwrap();
+    let mut service = Service::open(cfg.clone(), &fixture.0).unwrap();
+    assert_eq!(enqueue(&mut service, 0), terminal);
+    let recovered: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
+    assert_eq!(recovered.service_us, final_state.service_us);
+    drop(service);
+    // An old active snapshot paired with a newer archive is an incomplete
+    // backup, not a valid crash cut; never invent the missing fairness data.
+    fs::write(fixture.0.join("state.json"), active_bytes).unwrap();
+    assert!(Service::open(cfg, &fixture.0).is_err());
+}
+
+#[test]
+fn oversized_route_inventory_is_refused_before_live_admission() {
+    let cfg = config();
+    let mut core = Core::new(&cfg).unwrap();
+    let mut request = job(0);
+    request.allowed_endpoints = (0..64)
+        .map(|i| format!("https://example.test/{i}/{}", "x".repeat(2000)))
+        .collect();
+    assert!(core
+        .enqueue(&cfg, "one", request, 1)
+        .unwrap_err()
+        .contains("frame bound"));
+    assert!(core.jobs.is_empty());
+}
+
+#[test]
+fn old_lease_guard_exhaustion_retires_only_definitely_unsent_work() {
+    let fixture = Fixture::new("guards");
+    let cfg = config();
+    let mut service = Service::open(cfg.clone(), &fixture.0).unwrap();
+    let placed = enqueue(&mut service, 0);
+    drop(service);
+    let mut snapshot: Core =
+        serde_json::from_slice(&fs::read(fixture.0.join("state.json")).unwrap()).unwrap();
+    snapshot
+        .jobs
+        .get_mut(&placed.request.id)
+        .unwrap()
+        .superseded_unsent = (1000..1000 + MAX_UNSENT_LEASE_GUARDS as u64).collect();
+    let bytes = serde_json::to_vec(&snapshot).unwrap();
+    fs::write(fixture.0.join("state.json"), &bytes).unwrap();
+    let mut service = Service::open(cfg, &fixture.0).unwrap();
+    let final_job = call(
+        &mut service,
+        Command::Inspect {
+            controller: "one".into(),
+            id: placed.request.id.clone(),
+        },
+    );
+    assert!(matches!(
+        final_job.state,
+        State::Terminal {
+            outcome: Outcome::NotSent,
+            ..
+        }
+    ));
+    assert_eq!(final_job.superseded_unsent.len(), MAX_UNSENT_LEASE_GUARDS);
+    let next = enqueue(&mut service, 1);
+    assert!(matches!(next.state, State::Placed { .. }));
 }

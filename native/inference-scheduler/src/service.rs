@@ -175,19 +175,11 @@ impl Service {
         let mut next = service.core.clone();
         for id in next.jobs.keys().cloned().collect::<Vec<_>>() {
             if let Some(receipt) = service.receipt(&id)? {
-                let old = &next.jobs[&id];
-                if old.controller != receipt.controller
-                    || old.principal != receipt.principal
-                    || old.pool != receipt.pool
-                    || old.order != receipt.order
-                    || old.request != receipt.request
-                    || !old.superseded_unsent.is_subset(&receipt.superseded_unsent)
-                {
-                    return Err("terminal archive conflicts with live snapshot identity".into());
+                // Completion and its fairness counters must already be in the
+                // durable terminal snapshot before this receipt can exist.
+                if next.jobs[&id] != receipt {
+                    return Err("terminal archive conflicts with unresolved snapshot; restore matching snapshot and archive".into());
                 }
-                // Durable physical completion wins over the older snapshot's
-                // running state when death occurred before hot retirement.
-                next.jobs.insert(id, receipt);
             }
         }
         next.recover(&service.config)?;
@@ -220,14 +212,18 @@ impl Service {
     }
 
     fn save(&mut self, state: &mut Core) -> Result<()> {
-        // Receipt fsync + directory fsync precede retiring a terminal snapshot
-        // record. A crash between them leaves two identical representations.
+        // Persist the whole transition, including fairness refunds/elapsed
+        // service, before publishing receipts. The second snapshot retires only
+        // terminal jobs whose receipts are then fully durable.
         let terminal: Vec<_> = state
             .jobs
             .iter()
             .filter(|(_, job)| matches!(job.state, crate::core::State::Terminal { .. }))
             .map(|(id, job)| (id.clone(), job.clone()))
             .collect();
+        if !terminal.is_empty() {
+            self.save_snapshot(state)?;
+        }
         for (id, job) in terminal {
             if let Some(saved) = self.receipt(&id)? {
                 if saved != job {
@@ -276,6 +272,10 @@ impl Service {
         state.archived_receipts = self.receipts;
         state.archived_bytes = self.receipt_bytes;
         state.archived_drained = self.drained_receipts;
+        self.save_snapshot(state)
+    }
+
+    fn save_snapshot(&self, state: &Core) -> Result<()> {
         // The exclusive process lock makes this one reusable temporary name safe.
         // O_NOFOLLOW and file ownership prevent a stale foreign path being followed.
         let temporary = self.directory.join("state.pending");
