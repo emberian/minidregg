@@ -129,6 +129,7 @@ import Kernel.ApplicationLifecycleCompletionReceiver
 import Kernel.ApplicationLifecycleCompletionV2Receiver
 import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
+import Host.ApplicationDispatchReady
 import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
 import Host.ApplicationStreamContinuityInspection
@@ -6082,6 +6083,38 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 193 =>
+                            let (planBytes, signatureBytes) ← splitPair payload
+                            let signatures ← decodeSignatures signatureBytes
+                            let ready ← if settings.carryRegistry.isSome then do
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              ApplicationDispatchReady.assembledReadySuffix session.verified planBytes signatures
+                            else do
+                              let session ← sessionWalked pinnedConfig state
+                              ApplicationDispatchReady.assembledReadyVerified session.verified planBytes signatures
+                            return ((193 : UInt8), ready.compress.toUTF8.toList)
+                        | 194 =>
+                            let (request, authenticated) ← splitPair payload
+                            let (signature, observations) ← splitPair authenticated
+                            let (appRead, rest) ← splitPair observations
+                            let (packageRead, rest) ← splitPair rest
+                            let (sessionRead, rest) ← splitPair rest
+                            let (enrollmentRead, ticketRead) ← splitPair rest
+                            let reads := [appRead, packageRead, sessionRead, enrollmentRead, ticketRead]
+                            let result ← if settings.carryRegistry.isSome then do
+                              let session ← sessionCarriedWalked pinnedConfig state carriedState settings
+                              ApplicationDispatchReady.authenticatedPlanSuffix session.verified request signature reads
+                            else do
+                              let session ← sessionWalked pinnedConfig state
+                              ApplicationDispatchReady.authenticatedPlanVerified session.verified request signature reads
+                            match result with
+                            | .ok plan =>
+                                let bytes := ApplicationDispatchAuthoring.planCodec.encode plan
+                                unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                                  throw (RequestRefusal.malformed "member app plan exceeds host frame bound")
+                                return ((194 : UInt8), bytes)
+                            | .error _ => return ((255 : UInt8), failure .operationRejected
+                                "application-authenticated-plan" "undisclosed")
                         | 187 =>
                             let opened ← sessionOpened pinnedConfig state
                             let bytes ← IO.ofExcept <|

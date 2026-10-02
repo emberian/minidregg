@@ -363,6 +363,23 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // P-AFFORDANCES dry run: one signed observation (as op 1) and one
         // signature list. The Host re-plans, assembles and commits nothing.
         [130, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        // Member app readiness is exact plan + detached signatures; native
+        // assembly and current specialized admission have no physical effect.
+        [193, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair)
+            .is_some_and(|(plan, signatures)| !plan.is_empty() && !signatures.is_empty()),
+        // Exact request, one current-key signature, and five full current
+        // resource observations. Old operator preparation36 stays private.
+        [194, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .and_then(|(request, rest)| exact_pair(rest).map(|(signature, reads)| (request, signature, reads)))
+            .is_some_and(|(request, signature, mut reads)| {
+                if request.is_empty() || signature.len() != 64 { return false; }
+                for _ in 0..4 {
+                    let Some((read, rest)) = exact_pair(reads) else { return false; };
+                    if read.is_empty() { return false; }
+                    reads = rest;
+                }
+                !reads.is_empty()
+            }),
         // C-SAT-2 law-sat: one law-sat request (JSON); the Host reads no Store.
         [150, request @ ..] => !request.is_empty() && request.len() < HOST_MAX_FRAME,
         // Key pre-rotation: plan (one command), assembly (one plan and one raw
@@ -2129,6 +2146,28 @@ done"#;
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
+    #[test]
+    fn member_app_frames_are_bounded_and_private_preparation_stays_private() {
+        fn pair(a:&[u8],b:&[u8])->Vec<u8> {
+            let mut p=(a.len() as u32).to_le_bytes().to_vec();p.extend(a);p.extend(b);p
+        }
+        let mut reads=vec![5];
+        for read in [4,3,2,1] {reads=pair(&[read],&reads);}
+        let plan=pair(&[1],&pair(&[7;64],&reads));
+        let mut frame=vec![194];frame.extend(plan.clone());
+        assert!(allowed_operation(&frame,false));
+        let mut short=vec![194];short.extend(pair(&[1],&pair(&[7;63],&reads)));
+        assert!(!allowed_operation(&short,false));
+        let mut missing=vec![194];missing.extend(pair(&[1],&pair(&[7;64],&[5])));
+        assert!(!allowed_operation(&missing,false));
+        let mut empty=vec![194];empty.extend(pair(&[],&pair(&[7;64],&reads)));
+        assert!(!allowed_operation(&empty,false));
+        let mut ready=vec![193];ready.extend(pair(&[1],&[2]));
+        assert!(allowed_operation(&ready,false));
+        assert!(!allowed_operation(&[193,1],false));
+        assert!(!allowed_operation(&[36,1],false));
+        assert!(!allowed_operation(&[37,1],false));
+    }
     #[test]
     fn public_fn_operations_have_no_path_payload() {
         assert!(allowed_operation(&[12], false));

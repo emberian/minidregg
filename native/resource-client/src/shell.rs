@@ -52,7 +52,7 @@ pub(crate) struct Verb {
 }
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "app", usage: "app delegate-lifecycle prepare ID NAME --package PKG --snapshot SNAP --manager SUBJECT | app delegate-lifecycle prepare|submit|recover|status ID", operation: "member-signed lifecycle management delegation with retained exact recovery" },
+    Verb { name: "app", usage: "app status NAME [--json] | app delegate-lifecycle prepare ID NAME --package PKG --snapshot SNAP --manager SUBJECT | app delegate-lifecycle prepare|submit|recover|status ID", operation: "current app admission | member-signed lifecycle management delegation with retained exact recovery" },
     Verb { name: "home", usage: "home [REF] [--json]", operation: "mini member --dir WORKSPACE [--name REF]: your resources and exact recovery actions; REF checks current Mini authority" },
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
@@ -1160,7 +1160,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
     };
     Ok(match verb.as_str() {
         "app" => {
-            if !w.get(1).is_some_and(|v|v=="delegate-lifecycle") {return Err(u.to_owned());}
+            if w.get(1).is_some_and(|v|v=="delegate-lifecycle") {
                 if !matches!(w.len(),4|11) || !matches!(w[2].as_str(),"prepare"|"submit"|"recover"|"status") {return Err(u.to_owned());}
                 crate::workspace::validate_name(&w[3])?;
                 let mut flags=vec![flag("dir",ws()),flag("action","app-lifecycle"),flag("request-id",&w[3]),flag("op",&w[2])];
@@ -1182,6 +1182,14 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         flag("snapshot-name",options["--snapshot"]),flag("manager",options["--manager"])]);
                 }
                 client("workspace",flags)
+            } else {
+                if w.len()<3 || w[1]!="status" || w.len()>4 || (w.len()==4 && w[3]!="--json") {
+                    return Err(u.to_owned());
+                }
+                let mut args=vec![flag("dir",ws()),flag("action","app-status"),flag("name",&w[2])];
+                if w.len()==4 {args.push(flag("json","true"));}
+                client("member",args)
+            }
         }
         "home" => {
             let mut args = w[1..].to_vec();
@@ -4115,6 +4123,16 @@ mod tests {
         assert!(plan(&s,"doc app-export publish sheet-one extra").is_err());
     }
 
+    #[test]
+    fn app_status_routes_current_readonly_member_admission() {
+        let s=session();
+        let p=client(plan(&s,"app status sheet --json").unwrap());
+        assert_eq!(p.0,"member");
+        assert!(p.1.contains(&("action".into(),"app-status".into())));
+        assert!(p.1.contains(&("name".into(),"sheet".into())));
+        assert!(plan(&s,"app status sheet extra").is_err());
+        assert!(plan(&s,"app submit sheet").is_err());
+    }
     #[test]
     fn home_checks_only_the_selected_member_reference() {
         let s = session();

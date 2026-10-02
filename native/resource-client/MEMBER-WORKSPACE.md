@@ -100,3 +100,38 @@ Reading it never prepares a call or publishes a manager selector. If all six
 phases were confirmed before selector publication was interrupted, the view
 keeps publication pending and offers recovery of that same request. Busy or
 unsafe request custody appears unavailable.
+
+## Member app admission successor
+
+`app status NAME [--json]` uses the existing app reference and its member-owned
+session provenance. The `provenance.memberApp` contract is `mini-member-app-v1`
+with subject, appId, generation, session, sessionGeneration, descriptor,
+ticketResource, issueIndex, packageManifest, snapshotManifest, references
+(package/session/enrollment/ticket workspace names), and browser (currently null).
+The app reference supplies the fifth observation grant. These names and selectors
+are hints; every source read and admission rechecks current native authority.
+
+Operation 194 takes a canonical dispatch-author request, a current member signature
+over `MINI/APPLICATION/AUTHENTICATED-PLAN/v1\nDOMAIN\nSEMANTICS\n` followed by the
+exact request bytes, and five current full signed resource observations. Each
+observation must use that member and the exact source-derived target/grant. Only
+then may the existing specialized planner return unsigned signing headers. The
+client checks the exact request/plan, expected generations, and every slot against
+its source-current member key before signing. Operator preparation 36 stays private.
+
+Operation 193 takes a pair of that canonical plan and the strict detached-signature
+list. It uses existing pure assembly and `NativeHostReplay.admitDispatchVerified`
+(or its ordinary suffix counterpart), checking current source and exact call absence.
+An accepted historical call never establishes readiness. The typed result names
+the observed domain, semantics, world root, height and member/app/session generation;
+it grants no physical permit, dispatches no HTTP request, and charges no submission.
+Operator assembly 37 stays private. Future HTTP requests still need their ordinary
+fresh source admission.
+
+The five observations must share one native head. An unrelated write can interrupt
+inspection; the command asks the member to inspect again rather than weakening
+currentness. A shared one-image observation batch is the next simplification.
+Browser entry remains unavailable until actual registered proxy metadata and a
+member-owned protected bootstrap credential are delivered. No route URL is invented.
+Operations 193/194 remain reserved during the scoped compiler/native receiving phase;
+this successor must not be treated as available in an older sealed Host.

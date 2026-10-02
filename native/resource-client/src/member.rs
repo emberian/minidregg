@@ -1,6 +1,9 @@
 //! Member workspace projection. Local references are discovery hints; selected
 //! resources are read through the member's existing signed Mini authority.
 //! No controller state, custody secret or second resource registry is consulted.
+#[path = "member_app.rs"]
+mod application;
+
 use crate::{workspace, Args, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -284,6 +287,12 @@ fn projection_with(root: &Path, pin: &Value, config: &Value, selected: Option<&s
             "height":challenge["height"],"worldRoot":challenge["worldRoot"],"clock":challenge["clock"],
             "target":reference["target"],"resourceRoot":view.pointer("/cell/root"),
             "balances":view.get("balances")});
+        if reference.pointer("/provenance/memberApp").is_some() {
+            value["resources"][0]["actions"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"label":"app authorization","command":format!("app status {name}")}));
+        }
         if let Some(object) = programmable_object(&view) {
             let command = object["command"].as_str().unwrap();
             value["resources"][0]["actions"]
@@ -472,13 +481,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         Some(v) if v == std::ffi::OsStr::new("true") => true,
         _ => return Err("--json must be true or false".into()),
     };
+    let action = args
+        .optional("action")
+        .map(|v| v.into_string().map_err(|_| "member action must be UTF-8"))
+        .transpose()?;
     args.finish()?;
-    let value = projection(&root, name.as_deref())?;
+    let value = match action.as_deref() {
+        None | Some("workspace") => projection(&root, name.as_deref())?,
+        Some("app-status") => application::status(
+            &root,
+            &workspace::load(&root)?,
+            name.as_deref().ok_or("App status requires a reference")?,
+        )?,
+        _ => return Err("Unknown member action".into()),
+    };
     if json_output {
         println!(
             "{}",
             serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?
         );
+    } else if action.as_deref() == Some("app-status") {
+        println!(
+            "{} · authorization is current at height {}",
+            value["name"].as_str().unwrap_or("app"),
+            value["height"].as_str().unwrap_or("?")
+        );
+        println!("Browser entry is not configured.");
     } else {
         print!("{}", render(&value));
     }
