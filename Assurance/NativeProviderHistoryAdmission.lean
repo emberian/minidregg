@@ -33,6 +33,9 @@ def expiredAt (height : Nat) (h : SignedHeader) : Bool :=
 -- Actual receiving parser accepts this unsigned fixture through semantic
 -- preparation only; cryptographic finish is intentionally not fabricated.
 #guard acceptedAt 20 (NativePlanHeight.pinHeader 20 header)
+-- A same-height prefix does NOT retire this still-admissible call: its next
+-- append position is outside that prefix. Strict advancement is essential.
+#guard !(20 + 1 ≤ (20 : Nat))
 #guard expiredAt 21 (NativePlanHeight.pinHeader 20 header)
 #guard acceptedAt 21 header
 #guard expiredAt 20 (NativePlanHeight.pinHeader 20 { header with validUntil := 19 })

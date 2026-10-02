@@ -16,6 +16,7 @@ admission contends. Retry must preserve the signed call; fresh signing requires
 fresh continuity. Recorded exact invocation replay precedes deadline admission.
 -/
 import Kernel.NativeHost
+import Kernel.NativeHostSession
 
 namespace Minidregg.Kernel.NativePlanHeight
 
@@ -156,5 +157,78 @@ theorem recorded_replay_before_deadline {F : Type} [Field F] [DecidableEq F] {R 
     DeclaredResourceController.withAcceptedLoadedFrom deployment profile ambient native durable
       directory signed acceptedResult ordinaryResult = ordinaryResult (.replayed record) := by
   simp only [DeclaredResourceController.withAcceptedLoadedFrom, decoded, recorded]
+
+/-!
+Retiring an old *pending settlement attempt* needs more than native contention.
+`NativeConfig.append` maps a native conflict to contention, and
+`receiveLoadedDetailedWithFresh` also returns contention for differing readback.
+Neither result alone says that the head advanced or that the call is absent.
+
+The caller first performs exact replay lookup, then obtains fresh API17
+continuity for the original reserve and optional exact fence. That verifier
+checks the original prefix receipts and excludes any other provider write;
+the retained pending call must be the exact settlement, not the allowed fence.
+Its original signed headers must be bound to the retained pinned plan.
+
+The lemmas below consume the real receiving deadline gate and a verifier-minted
+prefix at a strictly greater logical height, with ONE fixed config/genesis.
+An already-admitted old call can only append at a position covered by that
+prefix. A future admission of the same deadline is impossible in an extension
+of that exact image (seed and all prior records, not just a numeric height).
+
+The physical connection is explicit, not an assumed theorem about Rust:
+SQLite `durable_read` validates and publishes its retained head under the
+anchor lock before returning. `durable_append_with_hook` takes the same lock
+and BEGIN IMMEDIATE, never replaces an existing log entry, and inserts only
+at head+1. `anchor_head` rejects rollback or a changed retained entry/seed.
+`NativeHostSession.refresh` rejects shrinking history; `extendVerified` checks
+the exact seed and accepted-record prefix. Thus a delayed already-admitted
+append to a covered, different entry cannot install. Replaced Stores, changed
+genesis/config, unavailable/absent/unknown outcomes, and naked counters do not
+supply this evidence. Only Pending may retire; the response, hold and all
+unrelated uncertainty remain. A new signing attempt requires fresh continuity.
+-/
+
+/-- Any old in-flight admission's one append position is already within the
+freshly checked prefix. The exact continuity witness separately excludes that
+settlement from this prefix, and the physical append contract forbids overwrite. -/
+theorem admitted_append_within_checked_prefix {NativeError : Type}
+    {config : NativeHost.Config} (checked : NativeHostSession.Walked config)
+    (subject : Nat) (domain message state registry oldEnvelope : List UInt8)
+    (prepared : CredentialSignedEnvelopeController.Prepared) (admittedCount : Nat)
+    (accepted : CredentialSignedEnvelopeController.prepare (NativeError := NativeError)
+      subject domain message state registry oldEnvelope = .ok prepared)
+    (sameGenesisHeight : prepared.state.height = config.genesisHeight + admittedCount)
+    (beyondDeadline : prepared.envelope.header.validUntil <
+      NativeHost.logicalHeight config checked.target) :
+    admittedCount + 1 ≤ checked.target.image.accepted.length := by
+  have bounded := receiving_prepare_deadline subject domain message state registry oldEnvelope
+    prepared accepted
+  rw [sameGenesisHeight] at bounded
+  unfold NativeHost.logicalHeight at beyondDeadline
+  omega
+
+/-- The same old signed deadline cannot be admitted against any extension of
+the exact checked image. Both walked images share the fixed configuration;
+the explicit image equality retains the same seed and every old record. -/
+theorem no_new_admission_after_checked_prefix {NativeError : Type}
+    {config : NativeHost.Config} (checked future : NativeHostSession.Walked config)
+    (samePrefix : ∃ suffix, future.target.image =
+      { checked.target.image with accepted := checked.target.image.accepted ++ suffix })
+    (subject : Nat) (domain message state registry oldEnvelope : List UInt8)
+    (prepared : CredentialSignedEnvelopeController.Prepared) (oldDeadline : Nat)
+    (accepted : CredentialSignedEnvelopeController.prepare (NativeError := NativeError)
+      subject domain message state registry oldEnvelope = .ok prepared)
+    (sameSignedDeadline : prepared.envelope.header.validUntil = oldDeadline)
+    (sameGenesisHeight : prepared.state.height = NativeHost.logicalHeight config future.target)
+    (beyondDeadline : oldDeadline < NativeHost.logicalHeight config checked.target) : False := by
+  have bounded := receiving_prepare_deadline subject domain message state registry oldEnvelope
+    prepared accepted
+  rw [sameGenesisHeight, sameSignedDeadline] at bounded
+  rcases samePrefix with ⟨suffix, exactImage⟩
+  have lengthExact := congrArg (fun image : DurableReceiver.Image => image.accepted.length) exactImage
+  simp only [List.length_append] at lengthExact
+  unfold NativeHost.logicalHeight at bounded beyondDeadline
+  omega
 
 end Minidregg.Kernel.NativePlanHeight
