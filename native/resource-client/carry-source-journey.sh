@@ -131,6 +131,18 @@ run reviewer-publish "$MINI" workspace --action publish-delegation --dir "$WS" -
 run reviewer-import "$MINI" workspace --action import --dir "$WS" --name reviewer --from-ref "$WS/proposals/reviewer/recipient-reference.json"
 run reviewer-read "$MINI" workspace --action read --dir "$WS" --name reviewer
 jq -e '[.cell.entries[]? | select(.type == "atom")] | length == 0' "$RUN/logs/reviewer-read.out" >/dev/null
+printf '%s\n' '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"reviewer","payload":{"type":"content","actions":[{"type":"link","link":"601","source":null,"target":{"type":"external","scheme":"6874747073","authority":"6578616d706c65","path":"2f"},"relation":"1"}]}}]}' >"$RUN/annotation.json"
+run annotation-propose "$MINI" workspace --action propose --dir "$WS" --request "$RUN/annotation.json" --proposal-id annotation
+run annotation-submit "$MINI" workspace --action submit --dir "$WS" --intent "$WS/proposals/annotation/intent.json" --attempt "$WS/attempts/annotation"
+jq -e '.type == "confirmed" and .confirmation == "installed"' "$WS/attempts/annotation/outcome.json" >/dev/null
+printf '%s\n' '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"reviewer","payload":{"type":"content","actions":[{"type":"createAtom","atom":"257","kind":{"type":"text"},"payload":"6d7573742062652072656675736564"}]}}]}' >"$RUN/forbidden-body.json"
+run forbidden-body-propose "$MINI" workspace --action propose --dir "$WS" --request "$RUN/forbidden-body.json" --proposal-id forbidden-body
+refused forbidden-body-submit "$MINI" workspace --action submit --dir "$WS" --intent "$WS/proposals/forbidden-body/intent.json" --attempt "$WS/attempts/forbidden-body"
+jq -e '.type == "refused"' "$WS/attempts/forbidden-body/outcome.json" >/dev/null
+run final-document-read "$MINI" workspace --action read --dir "$WS" --name notes
+jq -e '[.cell.entries[] | select(.type == "atom")] | length == 2' "$RUN/logs/final-document-read.out" >/dev/null
+run final-reviewer-read "$MINI" workspace --action read --dir "$WS" --name reviewer
+jq -e '[.cell.entries[]?.type] == ["link"]' "$RUN/logs/final-reviewer-read.out" >/dev/null
 stop_server
 run source-audit "$HOST" "$CONFIG" audit
 run source-profile "$HOST" "$CONFIG" profile
