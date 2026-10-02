@@ -3365,13 +3365,14 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
   let birthFee := if mode = "renew" then 0 else
     PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
       config.tariff opened.authority.snapshot.cell height identities 0
-  -- Two rounds of room+founder stream, document, application and application
-  -- session births. Counts follow their actual source constructors: five
-  -- transactions, eight births, sixteen grants. Byte-priced deployments must
-  -- choose an explicit starter budget; resource counts cannot quote their bytes.
+  -- One room+founder stream, document, application and application session,
+  -- plus one hundred ordinary transaction base charges for an initial work
+  -- session: 105 transactions, eight births, sixteen grants. Provider tokens
+  -- and compute have separate tariffs and are not promised by this allowance.
+  -- Byte-priced deployments choose a budget explicitly; counts cannot quote bytes.
   let suggestion : Option Nat := if mode = "renew" then some 0 else
     if config.tariff.perInitialPayloadByte = 0 then
-      some (2 * (5 * config.tariff.base + 8 * config.tariff.perBirth + 16 * config.tariff.perGrant))
+      some (105 * config.tariff.base + 8 * config.tariff.perBirth + 16 * config.tariff.perGrant)
     else none
   let starterInput ← field "$" "starterCredit" obj
   let starter ← if starterInput == .null then
