@@ -114,7 +114,7 @@ class World:
         return r.returncode, last
     def cell(self, n, law):
         r = self.mini("--action", "create", "--dir", self.ws, "--name", n, "--storage", "declared",
-            "--predicate", path("permit-all.json"))
+            "--predicate", path("permit-all.json"), "--fields", "%d-%d" % (IRON, SWORD))
         target = json.load(open(os.path.join(self.ws, "refs", f"{n}.json")))["target"] if r.returncode == 0 else None
         rc, last = self.submit(f"fill-{n}", scalar(n, [create(IRON, 3), create(WOOD, 2), create(SWORD, 0)]))
         req = {"type": "minidregg-workspace-proposal-v1", "action": "install-policy", "name": n, "predicate": law}

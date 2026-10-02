@@ -250,7 +250,7 @@ row("runner --emit-sample = kernel sampleOf, byte for byte: pinned (at heights 2
 
 # 4. the job cell: fields 2-4 filled, the law: every mutation is one of the three programs' checked product
 r = mini("--action", "create", "--dir", WS, "--name", "jobs", "--storage", "declared",
-    "--predicate", path("permit-all.json"))
+    "--predicate", path("permit-all.json"), "--fields", "%d-%d,%d-14" % (IRON, SWORD, BLOB))  # 2-4, the noun pair 9-10, the unrelated 11, the max rows 12-14
 JOBS = json.load(open(os.path.join(WS, "refs", "jobs.json")))["target"] if r.returncode == 0 else None
 rc, last = submit("fill", scalar([create(IRON, 3), create(WOOD, 2), create(SWORD, 0)]))
 LAW = {"type": "any", "predicates": [

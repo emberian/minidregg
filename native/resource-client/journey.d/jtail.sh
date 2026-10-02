@@ -100,7 +100,7 @@ row "genesis system cell" "certified 0, tailBound $L" \
   "rc=$(rc v0) certified=$(v v0 certifiedHeight) tailBound=$(v v0 tailBound) head=$(v v0 head)" \
   "$([ "$(rc v0)" = 0 ] && [ "$(v v0 certifiedHeight)" = 0 ] && [ "$(v v0 tailBound)" = "$L" ]; echo $?)"
 
-run create "$MINI" workspace --action create --dir "$WS" --name tb --storage declared --predicate "$REQ/open.json"
+run create "$MINI" workspace --action create --dir "$WS" --name tb --storage declared --predicate "$REQ/open.json" --fields open  # K-FIELD-CLOSURE: each write creates a fresh field
 row "create resource tb (open law)" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
 
 view v1; h1=$(v v1 head)
