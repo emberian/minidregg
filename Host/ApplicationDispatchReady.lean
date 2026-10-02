@@ -43,8 +43,7 @@ private def authorizePlan (config : Config) (opened : Opened config)
   let key := NativeObservationController.intentKey context dispatch.session.subject
   let verdict ← match key with
     | .error _ => pure (.ok false)
-    | .ok publicKey => CredentialSignatureIO.verify config.signature publicKey
-        (authenticationBytes config requestBytes) signature
+    | .ok publicKey => CredentialSignatureIO.verify config.signature publicKey (authenticationBytes config requestBytes) signature
   match NativeObservationController.authenticated key verdict with
   | .error _ => return stopped
   | .ok _ => pure ()
