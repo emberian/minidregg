@@ -2242,7 +2242,15 @@ done"#;
                 let previous = serde_json::json!({"checkedAcceptedCount":"7","checkedWorldRoot":"42"});
                 let resolved = crate::provider_continuity::resolution_payload(&payload, &previous).unwrap();
                 assert!(allowed_operation(&[vec![17], resolved.clone()].concat(), false));
-                assert!(!allowed_operation(&[vec![17], resolved[..resolved.len()-1].to_vec()].concat(), false));
+                // The final root is the second word of an exact pair, without
+                // its own length prefix. Dropping only '2' from '42' produces
+                // the well-framed root '4'; the Host must reject its history,
+                // not the ingress. Truncating the entire root is malformed.
+                assert!(!allowed_operation(&[vec![17], resolved[..resolved.len()-2].to_vec()].concat(), false));
+                let mut noncanonical = resolved.clone();
+                let end = noncanonical.len();
+                noncanonical[end-2..].copy_from_slice(b"04");
+                assert!(!allowed_operation(&[vec![17], noncanonical].concat(), false));
                 let mut trailing = resolved;
                 trailing.push(0);
                 assert!(!allowed_operation(&[vec![17], trailing].concat(), false));
