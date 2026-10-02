@@ -2353,6 +2353,7 @@ private def walk (config : Config) (opened : Opened config)
       frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
+      AuditTiming.beginRecord timing index (fun _ => admissionPhase record)
       match ← AuditTiming.measure timing (fun _ => admissionPhase record)
           (derive config opened issues reserves begins beginsV2 claimsV2
             beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
