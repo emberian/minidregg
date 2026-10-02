@@ -117,6 +117,12 @@ pub(super) fn definition(source: &Value, target: Option<&str>) -> Result<Value> 
     Ok(value)
 }
 
+/// Signed readback includes derived methods for inspection. Birth receives only
+/// the source descriptor and defaults; inspection fields are never constructor input.
+fn selected_definition(data: &Value, target: &str) -> Result<Value> {
+    definition(&json!({"descriptor":data["descriptor"],"defaults":data["defaults"]}), Some(target))
+}
+
 fn cell<'a>(view: &'a Value, role: &str) -> Result<&'a Value> {
     view.get("cell")
         .and_then(|cell| cell.get(role))
@@ -271,7 +277,8 @@ pub(super) fn create(
                     return Err("signed kind descriptor identity differs from target".into());
                 }
                 json!({"fromKind":target,"expectedKindRoot":member(&view["cell"],"root")?,
-                    "expectedKindRevision":member(&data["descriptor"],"revision")?, "definition":data})
+                    "expectedKindRevision":member(&data["descriptor"],"revision")?,
+                    "definition":selected_definition(data, target)?})
             }
         }
         _ => return Err("choose exactly one definition or --from kind reference".into()),
@@ -331,6 +338,19 @@ mod tests {
         value["defaults"][0]["field"] = json!("55");
         assert!(definition(&value, None).is_err());
     }
+    #[test]
+    fn signed_kind_readback_supplies_only_canonical_constructor_source() {
+        let mut source = sample();
+        source["descriptor"]["kind"] = json!("99");
+        let mut readback = source.clone();
+        readback["methods"] = json!([{ "name":"inspection-only", "program":"7", "outputs":[] }]);
+        assert!(definition(&readback, Some("99")).is_err());
+        assert_eq!(selected_definition(&readback, "99").unwrap(), source);
+        assert!(selected_definition(&readback, "88").is_err());
+        readback["defaults"][0]["value"] = json!("4A");
+        assert!(selected_definition(&readback, "99").is_err());
+    }
+
     #[test]
     fn named_edit_uses_read_descriptor_and_exact_old_value() {
         let mut seen = json!({"descriptor":sample()["descriptor"],"entries":[{"field":"8","key":"7","value":"1"}]});
