@@ -6,7 +6,7 @@ namespace Minidregg.Compiler.PhysicalLawResolution
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.LawComposition
-open Minidregg.Theory.PermanentCellAllocation
+open Minidregg.Theory.CellRegistry
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 open Minidregg.Compiler.PolicyComponentResolution
@@ -54,5 +54,30 @@ def loadTarget (snapshot : Snapshot)
     (semantics : Digest) (target budget : Nat) (additional : List PolicyRef := []) :
     Option (GuardedRoots snapshot directory semantics (targetRoots snapshot target additional)) :=
   loadRoots snapshot directory semantics (targetRoots snapshot target additional) budget
+
+/-- Source-owned resource bound shared by all native composition consumers.
+Budget exhaustion refuses; it never truncates a restriction conjunction. -/
+def resolutionBudget : Nat := 4096
+
+def config {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (base : Portal)
+    (step : PolicyStepContext) (target : Nat) (additional : List PolicyRef := []) :
+    ComposedPolicyAdmission.Config F where
+  snapshot := snapshot
+  store := payloadStore snapshot directory
+  base := base
+  profile := profile
+  step := step
+  target := target
+  additional := additional
+  resolutionBudget := resolutionBudget
+
+def readGuards (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry)
+    (semantics : Digest) (target : Nat) (additional : List PolicyRef := []) :
+    Option (List (Nat × Digest)) :=
+  (loadTarget snapshot directory semantics target resolutionBudget additional).map
+    GuardedRoots.sourceGuards
 
 end Minidregg.Compiler.PhysicalLawResolution
