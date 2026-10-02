@@ -135,7 +135,10 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
     q.pending=retained;
     if let Some(r)=&mut q.selected {
         if terminal(state,r)? {q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;}
-        else if !eligible(&r.entry) {record(state,r,"cancelled",json!({"basis":"source-membership-revoked"}))?;q.selected=None;}
+        else if !eligible(&r.entry) {
+            if r.started.is_some() {return Err("started request author revoked; retained for exact recovery".into());}
+            record(state,r,"cancelled",json!({"basis":"source-membership-revoked"}))?;q.selected=None;
+        }
         else if let Some(fresh)=entries.iter().find(|e|same_entry(e,&r.entry)) {r.entry=fresh.clone();}
         else if r.started.is_some() {return Err("started request source unreadable; exact recovery required".into());}
         else {q.pending.push(q.selected.take().unwrap());}
@@ -257,6 +260,16 @@ mod tests {
         assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
         p["requestBinding"]["assignment"]=json!("2");assert!(select(&p,&state,Limits::default()).unwrap().is_some());
         started(&state,"prompt","input").unwrap();p["requestBinding"]["assignment"]=json!("3");assert!(select(&p,&state,Limits::default()).is_err());
+        fs::remove_dir_all(state).unwrap();
+    }
+    #[test]fn started_revoked_request_retains_native_recovery_custody() {
+        let state=fixture("started-revoked");let mut p=prepared(vec![entry("20",1),entry("21",2)]);
+        select(&p,&state,Limits::default()).unwrap();started(&state,"source-prompt","input").unwrap();
+        let before=fs::read(path(&state)).unwrap();
+        p["sourceRoom"]["members"]=json!([{"subject":"21","stream":"21"}]);
+        let error=select(&p,&state,Limits::default()).unwrap_err();assert!(error.contains("exact recovery"));
+        assert_eq!(fs::read(path(&state)).unwrap(),before,"revocation cannot erase a started request");
+        assert!(!fs::read_dir(&state).unwrap().flatten().any(|e|e.file_name().to_string_lossy().ends_with("-cancelled.json")));
         fs::remove_dir_all(state).unwrap();
     }
     #[test]fn initial_history_over_hundred_is_not_limited_to_recent_tail() {
