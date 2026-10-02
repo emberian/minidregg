@@ -202,8 +202,9 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     let observation : NativeObservationCodec.Intent :=
       ⟨⟨7⟩, 70071, .query ⟨.object, cfg.deployment.factoryId, .resource⟩,
         [⟨.object, cfg.deployment.factoryId, ⟨46⟩⟩]⟩
-    let challenge ← match NativeHost.challengeLoaded host initial
-        (NativeObservationCodec.intentCodec.encode observation) with
+    let (_, intentSignature) ← sign signer 7 (NativeObservationCodec.intentCodec.encode observation)
+    let challenge ← match ← NativeHost.challengeLoaded host initial
+        (NativeObservationCodec.intentCodec.encode observation) intentSignature with
       | .error reason => throw (IO.userError s!"factory observation challenge: {reason}")
       | .ok value => pure value
     let [observationHeader] := challenge.headers
