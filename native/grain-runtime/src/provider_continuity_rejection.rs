@@ -289,13 +289,13 @@ pub(super) fn inspect(
     pending: &Pending,
     mut prove_sender_stopped: impl FnMut() -> Result<()>,
 ) -> Result<Option<VerifiedRejection>> {
-    prove_sender_stopped()?;
     let path = pending.attempt.join(MARKER);
     match fs::symlink_metadata(&path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("continuity rejection marker stat: {e}")),
         Ok(_) => {}
     }
+    prove_sender_stopped()?;
     let bytes = read(&path, 65_536)?;
     let marker: Marker =
         serde_json::from_slice(&bytes).map_err(|e| format!("continuity rejection marker: {e}"))?;
@@ -453,7 +453,11 @@ mod tests {
         let (root, config, pending) = fixture();
         assert!(inspect(&config, &pending, || Err("sender still running".into())).is_err());
         fs::remove_file(pending.attempt.join(MARKER)).unwrap();
-        assert!(inspect(&config, &pending, || Ok(())).unwrap().is_none());
+        assert!(inspect(&config, &pending, || Err(
+            "unrelated sender proof is not consumed without a marker".into()
+        ))
+        .unwrap()
+        .is_none());
         std::os::unix::fs::symlink(root.join("missing"), pending.attempt.join(MARKER)).unwrap();
         assert!(inspect(&config, &pending, || Ok(())).is_err());
         fs::remove_dir_all(root).unwrap();

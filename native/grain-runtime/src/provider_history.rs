@@ -104,6 +104,12 @@ fn validate_fence_source(
 
 impl Runtime {
     pub(super) fn retire_continuity_rejection(&mut self, pending: &Pending) -> Result<bool> {
+        if !matches!(
+            pending.operation.as_str(),
+            "provider settle" | "provider recovery settle" | "provider disconnect"
+        ) {
+            return Ok(false);
+        }
         let evidence = provider_continuity_rejection::inspect(&self.config, pending, || {
             if self.startup_recovery_active {
                 self.quiescence_recovery_stop_proof()
