@@ -370,6 +370,8 @@ def Visibility.visibleTo
 inductive AnnotationContent (Body : Type uBody) (Reference : Type uRef)
   | inline (body : Body)
   | reference (target : Reference)
+  /-- Confidential authored bytes stay distinguished from opened inline data. -/
+  | sealed (ciphertext wrapping : Body)
 deriving DecidableEq
 
 /-- An annotation targets either a whole sovereign document or an atom-backed
@@ -962,6 +964,7 @@ def decodeAnnotationRecord?
     match record.body with
     | .inline bytes => .inline bytes
     | .reference document => .reference document
+    | .sealed ciphertext wrapping _ _ => .sealed ciphertext wrapping
   let decoded := fun target =>
     some { id := id
            author := record.author

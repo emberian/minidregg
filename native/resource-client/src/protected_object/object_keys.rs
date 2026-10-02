@@ -311,6 +311,37 @@ impl Store {
         self.save()?;
         Ok(wire)
     }
+    /// Retain an immutable authored fragment and its independent content key.
+    /// Exact retries return the original signed ciphertext; audience changes
+    /// subsequently wrap this key without resealing or reattributing the body.
+    pub(crate) fn prepare_fragment(&mut self, current: &AdmittedAnchor,
+        context: &Context, writer: &SigningKey, plain: &[u8]) -> Result<(Zeroizing<[u8;32]>, Vec<u8>)> {
+        if !self.healthy || !current.active || context.object != current.object
+            || context.epoch != current.epoch || context.transition != current.transition {
+            return Err("fresh active fragment audience required".into());
+        }
+        self.reconcile_anchor(current)?;
+        let id=hex(&context.operation);
+        let plain_hash=hex(&Sha256::digest(plain));
+        let writer_id=hex(&writer.verifying_key().to_bytes());
+        if let Some(old)=self.state["fragments"].get(&id) {
+            if old["plainHash"]!=json!(plain_hash) || old["writer"]!=json!(writer_id)
+                || old["context"]!=json!(hex(&context.bytes())) {
+                return Err("authored fragment already bound to another plaintext/context".into());
+            }
+            let key=Zeroizing::new(unhex(old["key"].as_str().ok_or("invalid fragment key")?)?
+                .try_into().map_err(|_|"invalid fragment key length")?);
+            return Ok((key,unhex(old["wire"].as_str().ok_or("invalid fragment wire")?)?));
+        }
+        let mut key=Zeroizing::new([0u8;32]);
+        SystemRandom::new().fill(&mut *key).map_err(|_|"fragment randomness unavailable")?;
+        let wire=object_messages::seal(context,&key,writer,plain)?;
+        if !self.state["fragments"].is_object(){self.state["fragments"]=json!({});}
+        self.state["fragments"][&id]=json!({"context":hex(&context.bytes()),"wire":hex(&wire),
+            "plainHash":plain_hash,"writer":writer_id,"key":hex(&*key)});
+        self.save()?;
+        Ok((key,wire))
+    }
     /// Retain the complete package and canonical source intent before invoking
     /// the Host author or publishing any phase artifact. Binary authoring can be
     /// resumed from these exact JSON bytes; the key is never generated again.

@@ -9,6 +9,8 @@ pub(crate) enum Exposure {
     Structure,
     CreateText,
     EditText,
+    Annotation,
+    RewrapAnnotation,
     Unsupported,
 }
 
@@ -40,7 +42,8 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
         "createRun" => (&["type", "run", "atoms"], Exposure::Structure),
         "editElement" => (&["type", "element", "revision", "op"], Exposure::Structure),
         "link" => (&["type", "link", "source", "target", "relation"], Exposure::Unsupported),
-        "annotate" => (&["type", "annotation", "atom", "revision", "body"], Exposure::Unsupported),
+        "annotate" => (&["type", "annotation", "atom", "revision", "body"], Exposure::Annotation),
+        "rewrapAnnotation" => (&["type", "annotation", "before", "wrapping"], Exposure::RewrapAnnotation),
         "transclude" => (&["type", "transclusion", "link", "request"], Exposure::Unsupported),
         "unlink" => (&["type", "link"], Exposure::Unsupported),
         "mark" => (&["type", "mark", "target", "revision", "kind"], Exposure::Unsupported),
@@ -72,6 +75,8 @@ pub(crate) fn classify(action: &Value) -> Result<Exposure> {
             decimal(&op["child"])?;
         }
         "createAtom" | "editAtom" => decimal(&action["atom"])? ,
+        "annotate" => {decimal(&action["annotation"])?;decimal(&action["atom"])?;decimal(&action["revision"])?;}
+        "rewrapAnnotation" => decimal(&action["annotation"])? ,
         _ => {}
     }
     Ok(exposure)
@@ -110,9 +115,9 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_private_actions_remain_refused() {
+    fn comments_have_a_sealing_contract_and_unknown_private_actions_refuse() {
         let annotate = json!([{"type":"annotate","annotation":"1","atom":"2","revision":"3","body":"736563726574"}]);
-        assert!(actions(&annotate, true).is_err());
+        assert!(actions(&annotate, true).is_ok());
         assert!(actions(&annotate, false).is_ok());
         assert!(actions(&json!([{"type":"futureAction","payload":"secret"}]), true).is_err());
     }

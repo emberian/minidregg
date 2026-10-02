@@ -868,7 +868,7 @@ pub(crate) fn seal_content(lowered: Value, room: &str, cell: &str, key: &RoomKey
                 action["kind"] = private_kind;
                 action["payload"] = Value::String(hex(&envelope.to_bytes()));
             }
-            Exposure::Unsupported => return Err("private content action has no sealing contract".into()),
+            Exposure::Unsupported | Exposure::Annotation | Exposure::RewrapAnnotation => return Err("private content action requires protected-document audience enrollment".into()),
         }
     }
     Ok(lowered)

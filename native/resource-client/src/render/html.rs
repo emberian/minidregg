@@ -65,7 +65,7 @@ fn annotation(a: &Annotation) -> String {
         escape(&a.id),
         a.fresh,
         escape(&a.author),
-        escape(&a.body)
+        format!("{}{}",escape(&a.body),a.key_wrapping.as_ref().map(|event|format!(" <small class=key-wrapping>{}</small>",escape(event))).unwrap_or_default())
     )
 }
 
@@ -256,6 +256,7 @@ mod tests {
     fn structural_rows_do_not_produce_blank_or_duplicate_line_numbers() {
         let mut note = row(Body::Section, None);
         note.annotations.push(Annotation {
+            key_wrapping: None,
             id: "3".into(),
             author: "you".into(),
             fresh: true,

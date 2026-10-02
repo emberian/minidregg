@@ -79,6 +79,7 @@ pub struct Annotation {
     pub author: String,
     pub fresh: bool,
     pub body: String,
+    pub key_wrapping: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -203,6 +204,11 @@ fn annotation_of(view: &View, entry: &Value) -> Annotation {
         format!("[retained mark {}, range {}{}] {}",
             mark["kindDigest"].as_str().unwrap_or("?"), mark["range"],
             if mark["tombstoned"] == true { ", retired" } else { "" }, payload)
+    } else if body["type"]=="sealed" {
+        entry["private"]["text"].as_str().map(str::to_owned)
+            .or_else(||entry["private"]["hex"].as_str().map(|bytes|format!("[binary annotation: {bytes}]")))
+            .or_else(||entry["private"].as_str().map(str::to_owned))
+            .unwrap_or_else(||"[private: annotation epoch is locked or unreadable]".to_owned())
     } else { match body["type"].as_str() {
         Some("inline") => {
             String::from_utf8_lossy(&decode_hex(body["bytes"].as_str().unwrap_or(""))).into_owned()
@@ -215,6 +221,10 @@ fn annotation_of(view: &View, entry: &Value) -> Annotation {
         author: author_text(view.me, &entry["author"]),
         fresh: entry["fresh"] == true,
         body,
+        key_wrapping: if entry["body"]["type"]=="sealed" && entry["body"]["wrappedAt"]!=entry["operation"] {
+            Some(format!("key wrapping updated by {} at {}",author_text(view.me,&entry["body"]["wrappedBy"]),
+                entry["body"]["wrappedAt"].as_str().unwrap_or("?")))
+        } else {None},
     }
 }
 
@@ -456,7 +466,7 @@ impl RenderedLine {
 }
 
 fn annotation_json(annotation: &Annotation) -> Value {
-    json!({"id":annotation.id,"author":annotation.author,"fresh":annotation.fresh,"body":annotation.body})
+    json!({"id":annotation.id,"author":annotation.author,"fresh":annotation.fresh,"body":annotation.body,"keyWrapping":annotation.key_wrapping})
 }
 
 impl Rendered {

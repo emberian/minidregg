@@ -63,7 +63,7 @@ fn annotation(indent: &str, a: &Annotation) -> String {
         "{indent}     ↳ {} ({}): {}",
         a.author,
         if a.fresh { "fresh" } else { "stale" },
-        one_line(&a.body)
+        format!("{}{}",one_line(&a.body),a.key_wrapping.as_ref().map(|event|format!(" [{event}]")).unwrap_or_default())
     )
 }
 

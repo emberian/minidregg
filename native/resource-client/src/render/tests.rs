@@ -260,3 +260,17 @@ fn legacy_mark_is_visible_metadata_not_invented_formatting() {
     assert!(!rendered.document_annotations[0].body.contains("bad framing"));
     assert!(rendered.lines.is_empty());
 }
+
+#[test]
+fn opened_binary_comment_and_wrapper_provenance_are_distinct_from_locked_body() {
+    let document=json!({});let entries=Vec::new();let names=BTreeMap::new();let sources=BTreeMap::new();
+    let view=View{document:&document,entries:&entries,names:&names,sources:&sources,me:"7"};
+    let entry=json!({"type":"annotation","id":"12","author":{"subject":"7"},"operation":"4","fresh":false,
+        "body":{"type":"sealed","ciphertext":"opaque","wrapping":"opaque","wrappedBy":{"subject":"8"},"wrappedAt":"5"},
+        "private":{"hex":"ff00"}});
+    let rendered=annotation_of(&view,&entry);
+    assert_eq!(rendered.author,"you");assert_eq!(rendered.body,"[binary annotation: ff00]");
+    assert_eq!(rendered.key_wrapping.as_deref(),Some("key wrapping updated by subject 8 at 5"));
+    let mut locked=entry;locked["private"]=json!("[private: annotation epoch is locked or unreadable]");
+    assert!(annotation_of(&view,&locked).body.contains("locked"));
+}

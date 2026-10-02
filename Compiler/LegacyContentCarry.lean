@@ -141,6 +141,54 @@ def markRecordStream : StreamCodec MarkRecord :=
     (by intro record; rfl)
 
 
+/-- Frozen source-v2 annotation body; target confidential variants are never
+accepted under this legacy wire identity. -/
+inductive AnnotationBody where
+  | inline (bytes : List UInt8)
+  | reference (document : DocumentId)
+  deriving DecidableEq, Repr
+
+structure AnnotationRecord where
+  document : DocumentId
+  anchor : Hyperdocument.AnnotationAnchor
+  body : AnnotationBody
+  author : PrincipalRef
+  operation : OperationId
+  visibilityPolicy : Digest
+  tombstonedAt : Option OperationId
+  deriving DecidableEq, Repr
+
+def annotationBodyStream : StreamCodec AnnotationBody :=
+  StreamCodec.xmap (StreamCodec.sum bytesStream (identifierStream .v1 .document))
+    (fun | .inline bytes => .inl bytes | .reference document => .inr document)
+    (fun | .inl bytes => .inline bytes | .inr document => .reference document)
+    (by intro body; cases body <;> rfl)
+
+def annotationRecordStream : StreamCodec AnnotationRecord :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .document)
+      (StreamCodec.product HyperdocumentCell.annotationAnchorStream
+        (StreamCodec.product annotationBodyStream
+          (StreamCodec.product principalRefStream
+            (StreamCodec.product (identifierStream .v1 .operationIntent)
+              (StreamCodec.product digestStream
+                (StreamCodec.option (identifierStream .v1 .operationIntent))))))))
+    (fun record => (record.document, record.anchor, record.body, record.author,
+      record.operation, record.visibilityPolicy, record.tombstonedAt))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1,
+      wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
+    (by intro record; rfl)
+
+def AnnotationRecord.toCurrent (record : AnnotationRecord) : Hyperdocument.AnnotationRecord :=
+  { document := record.document
+    anchor := record.anchor
+    body := match record.body with | .inline bytes => .inline bytes | .reference document => .reference document
+    author := record.author
+    operation := record.operation
+    visibilityPolicy := record.visibilityPolicy
+    tombstonedAt := record.tombstonedAt }
+
+
 def Value : Hyperdocument.Namespace → Type
   | .elements => ElementRecord
   | .marks => MarkRecord
@@ -151,7 +199,7 @@ def Value : Hyperdocument.Namespace → Type
   | .conflicts => Hyperdocument.ConflictRecord
   | .links => Hyperdocument.LinkRecord
   | .transclusions => Hyperdocument.TransclusionRecord
-  | .annotations => Hyperdocument.AnnotationRecord
+  | .annotations => AnnotationRecord
   | .blinding => Digest
 
 instance valueDecidableEq (space : Hyperdocument.Namespace) : DecidableEq (Value space) := by
@@ -173,7 +221,7 @@ def valueStream : (space : Hyperdocument.Namespace) → StreamCodec (Value space
   | .conflicts => HyperdocumentCell.conflictRecordStream
   | .links => HyperdocumentCell.linkRecordStream
   | .transclusions => HyperdocumentCell.transclusionRecordStream
-  | .annotations => HyperdocumentCell.annotationRecordStream
+  | .annotations => annotationRecordStream
   | .blinding => digestStream
 
 def recordVersion : Hyperdocument.Namespace → String
@@ -388,7 +436,7 @@ private def preserveUnchanged (entry : Entry Legacy.layout) (store : CurrentStor
   | ⟨⟨.conflicts, key⟩, value⟩ => store.set ⟨.conflicts, key⟩ (some value)
   | ⟨⟨.links, key⟩, value⟩ => store.set ⟨.links, key⟩ (some value)
   | ⟨⟨.transclusions, key⟩, value⟩ => store.set ⟨.transclusions, key⟩ (some value)
-  | ⟨⟨.annotations, key⟩, value⟩ => store.set ⟨.annotations, key⟩ (some value)
+  | ⟨⟨.annotations, key⟩, value⟩ => store.set ⟨.annotations, key⟩ (some value.toCurrent)
   | ⟨⟨.blinding, key⟩, value⟩ => store.set ⟨.blinding, key⟩ (some value)
   | ⟨⟨.elements, _⟩, _⟩ | ⟨⟨.marks, _⟩, _⟩ => store
 

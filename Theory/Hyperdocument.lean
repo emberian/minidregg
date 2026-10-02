@@ -558,6 +558,10 @@ inductive AnnotationAnchor where
 inductive AnnotationBody where
   | inline (bytes : List UInt8)
   | reference (document : DocumentId)
+  /-- Authored ciphertext stays immutable; custody maintenance replaces only its
+  encrypted fragment-key wrapper, with source-owned maintenance provenance. -/
+  | sealed (ciphertext wrapping : List UInt8) (wrappedBy : PrincipalRef)
+      (wrappedAt : OperationId)
   deriving DecidableEq, Repr
 
 structure AnnotationRecord where

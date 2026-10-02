@@ -839,6 +839,25 @@ private def markSpec (path : String) (json : Lean.Json) : Result ContentResource
   | other =>
       failAt (path ++ ".type") s!"unknownKind: {other} (expected bold, italic, code, heading or link)"
 
+/-- Protected body provenance is normalized by the content receiver. -/
+private def annotationBody (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationBody := do
+  if let .str _ := json then return .inline (← decodeHex path json)
+  let obj ← exactObject path ["type", "ciphertext", "wrapping"] json
+  if (← string (path ++ ".type") (← field path "type" obj)) != "sealed" then
+    failAt path "annotation body must be inline bytes or a sealed fragment"
+  else
+    pure (.sealed (← decodeHex (path ++ ".ciphertext") (← field path "ciphertext" obj))
+      (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj))
+      ⟨⟨0⟩, .object, ⟨0⟩⟩ ⟨⟨0⟩⟩)
+
+private def annotationBefore (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationRecord := do
+  let bytes ← decodeHex path json
+  match HyperdocumentCell.annotationRecordStream.toLawful.decode bytes with
+  | some value =>
+      if HyperdocumentCell.annotationRecordStream.encode value = bytes then pure value
+      else failAt path "annotation guard is not canonical"
+  | none => failAt path "invalid exact annotation guard"
+
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
   let (tag, _) ← tagged path json
   match tag with
@@ -881,7 +900,12 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
       pure (.annotate (← identifier (path ++ ".annotation") (← field path "annotation" obj))
         (← identifier (path ++ ".atom") (← field path "atom" obj))
         (← identifier (path ++ ".revision") (← field path "revision" obj))
-        (← decodeHex (path ++ ".body") (← field path "body" obj)))
+        (← annotationBody (path ++ ".body") (← field path "body" obj)))
+  | "rewrapAnnotation" =>
+      let obj ← exactObject path ["type", "annotation", "before", "wrapping"] json
+      pure (.rewrapAnnotation (← identifier (path ++ ".annotation") (← field path "annotation" obj))
+        (← annotationBefore (path ++ ".before") (← field path "before" obj))
+        (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
   | "unlink" =>
       let obj ← exactObject path ["type", "link"] json
       pure (.unlink (← identifier (path ++ ".link") (← field path "link" obj)))
@@ -4562,6 +4586,9 @@ private def annotationBodyJson : Hyperdocument.AnnotationBody → Lean.Json
   | .inline bytes => .mkObj [("type", "inline"), ("bytes", hexJson bytes)]
   | .reference document => .mkObj [("type", "reference"),
       ("document", decimal document.digest.value)]
+  | .sealed ciphertext wrapping wrappedBy wrappedAt => .mkObj [
+      ("type", "sealed"), ("ciphertext", hexJson ciphertext), ("wrapping", hexJson wrapping),
+      ("wrappedBy", principalJson wrappedBy), ("wrappedAt", decimal wrappedAt.digest.value)]
 
 private def markAnchorJson : Hyperdocument.MarkAnchor → Lean.Json
   | .range range => .mkObj [("type", "range"), ("range", stableRangeJson range)]
@@ -4631,7 +4658,8 @@ private def contentEntryJson (store : ContentResource.ContentStore)
       let record : Hyperdocument.AnnotationRecord := record
       .mkObj (([("type", "annotation"), ("id", decimal identifier.digest.value),
         ("anchor", annotationAnchorJson record.anchor), ("body", annotationBodyJson record.body),
-        ("author", principalJson record.author),
+        ("author", principalJson record.author), ("operation", decimal record.operation.digest.value),
+        ("tombstonedAt", optionalIdentifierJson record.tombstonedAt),
         ("fresh", .bool (ContentResource.annotationFresh store record)),
         ("canonical", canonical)] : List (String × Lean.Json)) ++
           LegacyContentView.markFields stableRangeJson record)

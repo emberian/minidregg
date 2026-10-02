@@ -1,6 +1,7 @@
 //! One durable current-text rewrite for conversion and membership rotation.
 //! Ciphertext and carried formatting have separate source receipts. Original
-//! marks, links and annotations remain historical records with their authors.
+//! marks and links remain historical records with their authors. Annotation
+//! ciphertext/authorship stays immutable while its fragment-key custody rotates.
 use super::*;
 use super::super as ws;
 use std::{fs,path::Path,collections::BTreeSet};
@@ -21,9 +22,36 @@ fn visible(document:&Value)->Result<BTreeSet<String>> {
 fn atom<'a>(entries:&'a [Value],id:&str)->Result<&'a Value> {
     entries.iter().find(|r|r["type"]=="atom"&&r["id"]==id).ok_or("rewrite atom disappeared".into())
 }
+/// A current epoch header never substitutes for successfully authenticated
+/// opening. Validate every live comment before selecting bounded maintenance.
+pub(super) fn pending_annotations(raw:&[Value],opened:&[Value],epoch:u64,limit:usize)->Result<Vec<Value>> {
+    let mut selected=Vec::new();
+    for annotation in raw.iter().filter(|r|r["type"]=="annotation"&&r["tombstonedAt"].is_null()) {
+        if annotation["body"]["type"]!="sealed" {
+            return Err("live annotation has no immutable authored-fragment custody contract".into());
+        }
+        let display=opened.iter().find(|r|r["type"]=="annotation"&&r["id"]==annotation["id"])
+            .ok_or("annotation disappeared from opened projection")?;
+        if display["private"]["text"].as_str().is_none()&&display["private"]["hex"].as_str().is_none(){
+            return Err("live annotation is locked; membership completion is withheld".into());
+        }
+        if super::annotations::epoch(&annotation["body"])?!=epoch&&selected.len()<limit {
+            selected.push(annotation.clone());
+        }
+    }
+    Ok(selected)
+}
 pub(super) fn validate_current(read:&ws::DocumentRead)->Result<()> {
     let visible=visible(&read.document)?;
     for id in visible {plaintext(atom(&read.entries,&id)?)?;}
+    for annotation in read.entries.iter().filter(|r|r["type"]=="annotation"&&r["tombstonedAt"].is_null()) {
+        if annotation["body"]["type"]!="sealed" {
+            return Err("membership requires sealed authored annotations; original public annotation history is retained".into());
+        }
+        if !annotation["private"].is_object() {
+            return Err("membership requires every live annotation key to be openable".into());
+        }
+    }
     Ok(())
 }
 fn planned_marks(entries:&[Value],atoms:&BTreeSet<String>)->Result<Vec<Value>> {
@@ -43,10 +71,14 @@ fn plans(dir:&Path)->Result<Vec<(u64,std::path::PathBuf)>> {
     found.sort_by_key(|r|r.0);Ok(found)
 }
 fn rekey_request(name:&str,plan:&Value)->Result<Value> {
-    let edits=plan["atoms"].as_array().ok_or("rewrite plan lacks atoms")?.iter().map(|a|
+    let mut edits=plan["atoms"].as_array().ok_or("rewrite plan lacks atoms")?.iter().map(|a|
         Ok(json!({"type":"editAtom","atom":a["atom"],"before":ws::atom_record(&a["rawBefore"])?,
             "kind":{"type":"text"},"payload":a["plaintext"],"tombstone":false})))
         .collect::<Result<Vec<Value>>>()?;
+    for annotation in plan["annotations"].as_array().into_iter().flatten() {
+        edits.push(json!({"type":"rewrapAnnotation","annotation":annotation["id"],
+            "before":annotation["canonical"],"wrapping":annotation["body"]}));
+    }
     Ok(json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{
         "name":name,"expectedTargetRoot":plan["root"],"payload":{"type":"content","actions":edits}}]}))
 }
@@ -179,7 +211,8 @@ pub(super) fn current(root:&Path,workspace:&Value,name:&str,dir:&Path,namespace:
                 "kind":{"type":"text"},"payload":plain,"tombstone":false}));
             if edits.len()==64{break;}
         }
-        if edits.is_empty(){
+        let annotations=pending_annotations(raw,&read.entries,epoch,64-edits.len())?;
+        if edits.is_empty()&&annotations.is_empty(){
             let current_root=text(&read.view["cell"],"root")?;
             if all_formatting_at(dir,current_root)? {return Ok(current_root.to_owned());}
             restore(root,workspace,name,dir,namespace)?;
@@ -188,7 +221,7 @@ pub(super) fn current(root:&Path,workspace:&Value,name:&str,dir:&Path,namespace:
         let number=members::next_post(dir,"rekey")?;
         let label=format!("rekey-{number}");
         let plan=json!({"type":"mini-protected-current-rewrite-plan-v1","root":read.view["cell"]["root"],
-            "atoms":atoms,"marks":planned_marks(raw,&selected)?,"epoch":epoch.to_string(),"signedView":read.view});
+            "atoms":atoms,"annotations":annotations,"marks":planned_marks(raw,&selected)?,"epoch":epoch.to_string(),"signedView":read.view});
         retain_json(&dir.join(format!("rewrite-plan-{number}.json")),&plan)?;
         let request=rekey_request(name,&plan)?;
         if let Err(error)=members::action(root,workspace,dir,namespace,&label,request) {

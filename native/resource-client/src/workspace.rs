@@ -1443,7 +1443,8 @@ pub(crate) struct DocumentRead {
 pub(crate) fn opened_entries(root: &Path, workspace: &Value, reference: &Value, view: &Value) -> Result<Vec<Value>> {
     if view.is_null() { return Ok(Vec::new()); }
     let mut display = view.clone();
-    if entries(view)?.iter().any(|entry| protected_document::is_kind(&entry["kind"])) {
+    if entries(view)?.iter().any(|entry| protected_document::is_kind(&entry["kind"])
+        || (entry["type"]=="annotation"&&entry["body"]["type"]=="sealed")) {
         display["cell"]["entries"] = json!(protected_document::opened_entries(root, reference, view)?);
     }
     let has_private = entries(view)?.iter().any(|entry| entry["type"] == "atom"

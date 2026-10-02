@@ -17,7 +17,7 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v7 (`DREGG/CONTENT/MUTATE` ++ [7]) adds `mark` and `unmark` to
+Command grammar v8 adds protected annotation wrappers to v7, which added `mark` and `unmark` to
 v6, which added `unlink` to v5, which gave a document an element tree.  `createDocument` makes the root, an empty container; `createAtom` and
 `transclude` append their new leaf (an `atom` or `embed` element carrying the
 record's own identifier) to the root; and `editElement` splices a detached
@@ -55,6 +55,7 @@ whose state holds the opening (`openingHolds`).  A reader sees the transcluded
 bytes only through its own read of the source, current or `at` the opening's
 height (`renderTransclusion`).
 -/
+import Theory.AssertAxioms
 import Compiler.HyperdocumentCell
 import Compiler.ResourceBirthCodec
 
@@ -256,7 +257,10 @@ inductive Action where
   | createRun (runId : RunId) (atoms : List AtomId)
   /-- Annotate `atom` as last read at `revision`; refused `staleAtom` if it moved. -/
   | annotate (annotation : AnnotationId) (atom : AtomId) (revision : OperationId)
-      (body : List UInt8)
+      (body : AnnotationBody)
+  /-- Replace only a protected annotation's key wrapping. Authored ciphertext,
+  author, operation and anchor remain byte-identical under an exact record guard. -/
+  | rewrapAnnotation (annotation : AnnotationId) (before : AnnotationRecord) (wrapping : List UInt8)
   /-- Transclude a range of another document (`snapshot` or `live`): a
   `TransclusionRecord` holding the opening, and a forward link to it. -/
   | transclude (transclusion : TransclusionId) (link : LinkId) (request : TranscludeRequest)
@@ -275,17 +279,17 @@ inductive Action where
   | unmark (mark : MarkId)
   deriving DecidableEq
 
-abbrev ActionWire := Sum (ElementId × Digest)
+abbrev OriginalActionWire := Sum (ElementId × Digest)
   (Sum (AtomId × AtomKind × List UInt8)
     (Sum EditAtomPayload
       (Sum (LinkId × Option StableRange × LinkTarget × Digest)
         (Sum (RunId × List AtomId)
-          (Sum (AnnotationId × AtomId × OperationId × List UInt8)
+          (Sum (AnnotationId × AtomId × OperationId × AnnotationBody)
             (Sum (TransclusionId × LinkId × TranscludeRequest)
               (Sum EditElement (Sum ElementId (Sum LinkId
                 (Sum (MarkId × MarkRequest) MarkId))))))))))
 
-def actionWireStream : StreamCodec ActionWire :=
+def originalActionWireStream : StreamCodec OriginalActionWire :=
   StreamCodec.sum
     (StreamCodec.product (identifierStream .v1 .element) digestStream)
     (StreamCodec.sum
@@ -302,7 +306,7 @@ def actionWireStream : StreamCodec ActionWire :=
             (StreamCodec.sum
               (StreamCodec.product (identifierStream .v1 .annotation)
                 (StreamCodec.product (identifierStream .v1 .atom)
-                  (StreamCodec.product (identifierStream .v1 .operationIntent) bytesStream)))
+                  (StreamCodec.product (identifierStream .v1 .operationIntent) HyperdocumentCell.annotationBodyStream)))
               (StreamCodec.sum
                 (StreamCodec.product (identifierStream .v1 .transclusion)
                   (StreamCodec.product (identifierStream .v1 .link) transcludeRequestStream))
@@ -313,41 +317,50 @@ def actionWireStream : StreamCodec ActionWire :=
                         (StreamCodec.product (identifierStream .v1 .mark) markRequestStream)
                         (identifierStream .v1 .mark)))))))))))
 
+abbrev ActionWire := Sum OriginalActionWire (AnnotationId × AnnotationRecord × List UInt8)
+
+def actionWireStream : StreamCodec ActionWire :=
+  StreamCodec.sum originalActionWireStream
+    (StreamCodec.product (identifierStream .v1 .annotation)
+      (StreamCodec.product HyperdocumentCell.annotationRecordStream bytesStream))
+
 def Action.toWire : Action → ActionWire
-  | .createDocument root schema => .inl (root, schema)
-  | .createAtom atom kind payload => .inr (.inl (atom, kind, payload))
-  | .editAtom edit => .inr (.inr (.inl edit))
+  | .createDocument root schema => .inl (.inl (root, schema))
+  | .createAtom atom kind payload => .inl (.inr (.inl (atom, kind, payload)))
+  | .editAtom edit => .inl (.inr (.inr (.inl edit)))
   | .link linkId source target relation =>
-      .inr (.inr (.inr (.inl (linkId, source, target, relation))))
-  | .createRun runId atoms => .inr (.inr (.inr (.inr (.inl (runId, atoms)))))
+      .inl (.inr (.inr (.inr (.inl (linkId, source, target, relation)))))
+  | .createRun runId atoms => .inl (.inr (.inr (.inr (.inr (.inl (runId, atoms))))))
   | .annotate annotationId atom revision body =>
-      .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body))))))
+      .inl (.inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body)))))))
   | .transclude transclusion linkId request =>
-      .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request)))))))
-  | .editElement edit => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit)))))))
-  | .createContainer element => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element))))))))
-  | .unlink linkId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId)))))))))
+      .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request))))))))
+  | .editElement edit => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit))))))))
+  | .createContainer element => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element)))))))))
+  | .unlink linkId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId))))))))))
   | .mark markId request =>
-      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request)))))))))))
-  | .unmark markId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId)))))))))))
+      .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request))))))))))))
+  | .unmark markId => .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId))))))))))))
+  | .rewrapAnnotation annotation before wrapping => .inr (annotation, before, wrapping)
 
 def Action.ofWire : ActionWire → Action
-  | .inl (root, schema) => .createDocument root schema
-  | .inr (.inl (atom, kind, payload)) => .createAtom atom kind payload
-  | .inr (.inr (.inl edit)) => .editAtom edit
-  | .inr (.inr (.inr (.inl (linkId, source, target, relation)))) =>
+  | .inl (.inl (root, schema)) => .createDocument root schema
+  | .inl (.inr (.inl (atom, kind, payload))) => .createAtom atom kind payload
+  | .inl (.inr (.inr (.inl edit))) => .editAtom edit
+  | .inl (.inr (.inr (.inr (.inl (linkId, source, target, relation))))) =>
       .link linkId source target relation
-  | .inr (.inr (.inr (.inr (.inl (runId, atoms))))) => .createRun runId atoms
-  | .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body)))))) =>
+  | .inl (.inr (.inr (.inr (.inr (.inl (runId, atoms)))))) => .createRun runId atoms
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body))))))) =>
       .annotate annotationId atom revision body
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request))))))) =>
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request)))))))) =>
       .transclude transclusion linkId request
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit))))))) => .editElement edit
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element)))))))) => .createContainer element
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId))))))))) => .unlink linkId
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request))))))))))) =>
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit)))))))) => .editElement edit
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element))))))))) => .createContainer element
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId)))))))))) => .unlink linkId
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request)))))))))))) =>
       .mark markId request
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId))))))))))) => .unmark markId
+  | .inl (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId)))))))))))) => .unmark markId
+  | .inr (annotation, before, wrapping) => .rewrapAnnotation annotation before wrapping
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -364,7 +377,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 7
+def commandVersion : Nat := 8
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -392,16 +405,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 through version-6 command frames refuse to decode. -/
+/-- Version-1 through version-7 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
-    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -410,6 +423,8 @@ inductive Reject where
   | emptyActions
   | duplicateAddress
   | staleAtom
+  | staleAnnotation
+  | unprotectedAnnotation
   | wrongDocument
   | invalidPatch
   | invalidRun
@@ -470,6 +485,21 @@ def replaceAtom (document : DocumentId) (progress : Progress) (atom : AtomId)
   else
     .ok (progress.1.set ⟨.atoms, atom⟩ (some after),
       progress.2 ++ [.write .atoms atom before after])
+
+/-- An exact source guard preserves immutable authored data; only encrypted
+fragment-key custody and its source-attributed maintenance event change. -/
+def rewrapAnnotation (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress : Progress) (annotation : AnnotationId)
+    (before : AnnotationRecord) (wrapping : List UInt8) : Except Reject Progress :=
+  if before.document ≠ document ∨ before.tombstonedAt ≠ none then .error .wrongDocument
+  else if (show Option AnnotationRecord from progress.1 ⟨.annotations, annotation⟩) ≠ some before then
+    .error .staleAnnotation
+  else match before.body with
+    | .sealed ciphertext _ _ _ =>
+        let after := { before with body := .sealed ciphertext wrapping author operation }
+        .ok (progress.1.set ⟨.annotations, annotation⟩ (some after),
+          progress.2 ++ [.write .annotations annotation before after])
+    | _ => .error .unprotectedAnnotation
 
 /-- Retire a live link of `document`: the exact stored record guards the write,
 and only `tombstonedAt` changes. -/
@@ -537,8 +567,11 @@ readers, since a resource view is the whole cell.  No other value is written. -/
 def cellReaders : Digest := ⟨0⟩
 
 def annotationRecord (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
-    (atom : AtomId) (revision : OperationId) (body : List UInt8) : AnnotationRecord :=
-  ⟨document, .atom atom revision, .inline body, author, operation, cellReaders, none⟩
+    (atom : AtomId) (revision : OperationId) (body : AnnotationBody) : AnnotationRecord :=
+  let body := match body with
+    | .sealed ciphertext wrapping _ _ => .sealed ciphertext wrapping author operation
+    | body => body
+  ⟨document, .atom atom revision, body, author, operation, cellReaders, none⟩
 
 /-! ## The stored reference: an opening, never bytes -/
 
@@ -895,6 +928,8 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
       if pinCheck progress.1 document atom revision operation then
         allocate progress .annotations annotationId (annotationRecord author operation document atom revision body)
       else .error .staleAtom
+  | .rewrapAnnotation annotation before wrapping =>
+      rewrapAnnotation author operation document progress annotation before wrapping
   | .transclude transclusion link request =>
       match context.sourceRead request.source with
       | none => .error .sourceNotCovered
@@ -1287,6 +1322,20 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
       split at accepted
       · exact allocate_executes pre progress next _ _ _ holds accepted
       · cases accepted
+  | rewrapAnnotation annotation before wrapping =>
+      simp only [step, rewrapAnnotation] at accepted
+      split at accepted
+      · cases accepted
+      · split at accepted
+        · cases accepted
+        · rename_i present
+          cases shape : before.body with
+          | inline bytes => simp [shape] at accepted
+          | reference source => simp [shape] at accepted
+          | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+              simp only [shape] at accepted
+              cases accepted
+              exact executes_append pre progress _ holds ⟨rfl, not_not.mp present⟩
   | transclude transclusion link request =>
       cases covered : context.sourceRead request.source with
       | none => simp [step, covered] at accepted
@@ -1487,6 +1536,7 @@ def Action.tag : Action → Nat
   | .unlink .. => 9
   | .mark .. => 10
   | .unmark .. => 11
+  | .rewrapAnnotation .. => 12
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -1589,6 +1639,45 @@ def project (before' after' : ContentStore) (command : Command) : List (String �
    ("content/atoms/low-min", touchedMin atomLow command),
    ("content/atoms/low-max", touchedMax atomLow command)]
 
+/-- Maintenance requires the exact complete prior record and preserves every
+original provenance field and immutable ciphertext. Only key custody changes. -/
+theorem rewrapAnnotation_guarded_post (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (annotation : AnnotationId)
+    (before : AnnotationRecord) (wrapping : List UInt8)
+    (accepted : rewrapAnnotation author operation document progress annotation before wrapping = .ok next) :
+    progress.1 ⟨.annotations, annotation⟩ = some before ∧
+      ∃ ciphertext oldWrapping oldAuthor oldOperation,
+        before.body = .sealed ciphertext oldWrapping oldAuthor oldOperation ∧
+        next = (progress.1.set ⟨.annotations, annotation⟩
+          (some { before with body := .sealed ciphertext wrapping author operation }),
+          progress.2 ++ [.write .annotations annotation before
+            { before with body := .sealed ciphertext wrapping author operation }]) := by
+  unfold rewrapAnnotation at accepted
+  split at accepted
+  · cases accepted
+  · split at accepted
+    · cases accepted
+    · rename_i present
+      cases shape : before.body with
+      | inline bytes => simp [shape] at accepted
+      | reference source => simp [shape] at accepted
+      | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+          simp only [shape] at accepted
+          cases accepted
+          exact ⟨not_not.mp present, ciphertext, oldWrapping, oldAuthor, oldOperation, rfl, rfl⟩
+
+/-- Annotation custody maintenance cannot alter document text or structure. -/
+theorem rewrapAnnotation_preserves_body (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (annotation : AnnotationId)
+    (before : AnnotationRecord) (wrapping : List UInt8)
+    (accepted : rewrapAnnotation author operation document progress annotation before wrapping = .ok next)
+    (address : Hyperdocument.Address) (outside : address.1 ≠ .annotations) :
+    next.1 address = progress.1 address := by
+  obtain ⟨_, ciphertext, _, _, _, _, post⟩ :=
+    rewrapAnnotation_guarded_post author operation document progress next annotation before wrapping accepted
+  rw [post]
+  exact Store.Store.set_ne _ _ _ address (fun same => outside (congrArg Sigma.fst same))
+
 /-! ## Annotations: attached to a read revision, never touching the body -/
 
 /-- An accepted annotate allocates exactly one annotation record and changes
@@ -1596,7 +1685,7 @@ no other address: every record outside the annotations namespace — atoms,
 runs, elements, the document — is the record it was. -/
 theorem annotate_preserves_body (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (context : Context) (progress next : Progress) (annotationId : AnnotationId) (atom : AtomId)
-    (revision : OperationId) (body : List UInt8)
+    (revision : OperationId) (body : AnnotationBody)
     (accepted : step author operation document context progress (.annotate annotationId atom revision body) = .ok next)
     (address : Hyperdocument.Address) (outside : address.1 ≠ .annotations) :
     next.1 address = progress.1 address := by
@@ -1613,7 +1702,7 @@ theorem annotate_preserves_body (author : PrincipalRef) (operation : OperationId
 named revision is refused `staleAtom`, before anything is written. -/
 theorem annotate_stale_refused (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (context : Context) (progress : Progress) (annotationId : AnnotationId) (atom : AtomId)
-    (revision : OperationId) (body : List UInt8)
+    (revision : OperationId) (body : AnnotationBody)
     (moved : ∀ record, Hyperdocument.lookup progress.1 .atoms atom = some record →
       record.revision ≠ revision) :
     step author operation document context progress (.annotate annotationId atom revision body) = .error .staleAtom := by
@@ -1628,7 +1717,7 @@ theorem annotate_stale_refused (author : PrincipalRef) (operation : OperationId)
 operation, is annotated. -/
 theorem annotate_fresh_admitted (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (context : Context) (progress : Progress) (annotationId : AnnotationId) (atom : AtomId)
-    (record : AtomRecord) (body : List UInt8)
+    (record : AtomRecord) (body : AnnotationBody)
     (found : Hyperdocument.lookup progress.1 .atoms atom = some record)
     (local_ : record.document = document) (earlier : record.revision ≠ operation)
     (fresh : progress.1 ⟨.annotations, annotationId⟩ = none) :
@@ -2082,6 +2171,19 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
       split at accepted
       · exact keepsAt_allocate_other revision progress next _ _ _ accepted (by decide)
       · cases accepted
+  | rewrapAnnotation annotation before wrapping =>
+      simp only [step, rewrapAnnotation] at accepted
+      split at accepted
+      · cases accepted
+      · split at accepted
+        · cases accepted
+        · cases shape : before.body with
+          | inline bytes => simp [shape] at accepted
+          | reference source => simp [shape] at accepted
+          | sealed ciphertext oldWrapping oldAuthor oldOperation =>
+              simp only [shape] at accepted
+              cases accepted
+              exact keepsAt_set_other revision progress.1 .annotations annotation _ (by decide)
   | transclude transclusion link request =>
       cases covered : context.sourceRead request.source with
       | none => simp [step, covered] at accepted
@@ -2346,5 +2448,8 @@ theorem live_reads_only_its_run (earlier later : ContentStore) (opening : RangeO
 #guard_msgs (whitespace := lax) in #print axioms step_keepsAt
 /-- info: 'Minidregg.Kernel.ContentResource.Reaches.keepsAt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Reaches.keepsAt
+
+#assert_axioms rewrapAnnotation_guarded_post
+#assert_axioms rewrapAnnotation_preserves_body
 
 end Minidregg.Kernel.ContentResource

@@ -13,6 +13,8 @@ use zeroize::Zeroizing;
 pub(crate) mod members;
 #[path = "protected_rewrite.rs"]
 mod rewriting;
+#[path = "protected_annotations.rs"]
+mod annotations;
 #[path = "protected_document_conversion.rs"]
 mod conversion;
 
@@ -113,6 +115,7 @@ impl Audience {
         for action in result["actions"].as_array_mut().expect("validated actions") {
             match content_privacy::classify(action)? {
                 Exposure::Structure => {},
+                Exposure::Annotation | Exposure::RewrapAnnotation => annotations::seal(self,action,operation,store,writer)?,
                 Exposure::Unsupported => return Err("protected document action has no disclosure contract".into()),
                 Exposure::CreateText | Exposure::EditText => {
                     let atom = nat32(text(action,"atom")?)?;
@@ -253,6 +256,17 @@ pub(crate) fn opened_entries(root:&std::path::Path,reference:&Value,view:&Value)
     let (state,key)=custody_paths(root);
     let store=if state.exists() && key.exists() {Some(custody(root)?)} else {None};
     for atom in &mut entries {
+        if atom["type"]=="annotation" && atom["body"]["type"]=="sealed" {
+            let opened=store.as_ref().ok_or_else(||"protected annotation epoch key is not held".to_owned())
+                .and_then(|store|annotations::open(super::member(reference,"target")?,atom,store));
+            atom["private"]=match opened {
+                Ok(bytes)=>match String::from_utf8(bytes) {
+                    Ok(text)=>json!({"text":text}),Err(error)=>json!({"hex":crate::hex(error.as_bytes())}),
+                },
+                Err(_)=>json!("[private: annotation epoch is locked or unreadable]"),
+            };
+            continue;
+        }
         if atom["type"]!="atom" || !is_kind(&atom["kind"]) {continue;}
         let opened=store.as_ref().ok_or_else(||"protected document epoch key is not held".to_owned())
             .and_then(|store|open_atom(super::member(reference,"target")?,text(atom,"id")?,text(atom,"payload")?,store));
@@ -772,7 +786,7 @@ pub(crate) fn reject_fresh_legacy(actions:&Value) -> Result<()> {
         match content_privacy::classify(action)? {
             Exposure::CreateText => return Err("fresh private text requires protected-document audience enrollment; existing data and drafts are retained".into()),
             Exposure::EditText if action["tombstone"] != true => return Err("fresh private text requires protected-document audience enrollment; existing data and drafts are retained".into()),
-            Exposure::Unsupported => return Err("private document action has no disclosure contract".into()),
+            Exposure::Unsupported | Exposure::Annotation | Exposure::RewrapAnnotation => return Err("private document action requires protected-document audience enrollment".into()),
             _ => {}
         }
     }
@@ -811,6 +825,62 @@ mod tests {
         assert!(Audience::from_checked(&v,&bad,"72").is_err());
         let mut frozen=v.clone();frozen["active"]=json!(false);
         assert!(Audience::from_checked(&frozen,&c,"72").is_err());
+    }
+    #[test]
+    fn annotation_only_projection_opens_without_any_body_atom() {
+        let root=std::env::temp_dir().join(format!("mini-comment-projection-{}",super::super::random_nonce().unwrap()));
+        super::super::make_private_dir(&root).unwrap();ensure_custody(&root).unwrap();
+        let (v,c)=source(7,9);let audience=Audience::from_checked(&v,&c,"72").unwrap();
+        let mut store=custody(&root).unwrap();store.retain(&audience.anchor,&[8;32]).unwrap();
+        let actions=json!([{"type":"annotate","annotation":"12","atom":"10","revision":"6","body":"ff00"}]);
+        let sealed=audience.seal_actions(&actions,&[4;32],&mut store,&SigningKey::from_bytes(&[7;32])).unwrap();
+        drop(store);
+        let entry=json!({"type":"annotation","id":"12","anchor":{"type":"atom","atom":"10","revision":"6"},
+            "body":sealed["actions"][0]["body"]});
+        let signed=json!({"cell":{"entries":[entry]}});
+        let opened=super::super::opened_entries(&root,&json!({}),&json!({"target":"72"}),&signed).unwrap();
+        assert_eq!(opened[0]["private"]["hex"],"ff00");
+        assert!(signed["cell"]["entries"][0].get("private").is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn authored_annotation_rotation_preserves_cipher_and_new_member_needs_only_current_epoch() {
+        let (v,c)=source(7,9);let audience=Audience::from_checked(&v,&c,"72").unwrap();
+        let (root,mut original)=store();original.retain(&audience.anchor,&[8;32]).unwrap();
+        let writer=SigningKey::from_bytes(&[7;32]);
+        let actions=json!([{"type":"annotate","annotation":"12","atom":"10","revision":"6","body":crate::hex(b"authored comment")}]);
+        let first=audience.seal_actions(&actions,&[4;32],&mut original,&writer).unwrap();
+        assert_eq!(first,audience.seal_actions(&actions,&[4;32],&mut original,&writer).unwrap());
+        let mut changed=actions.clone();changed[0]["body"]=json!(crate::hex(b"forged retry"));
+        assert!(audience.seal_actions(&changed,&[4;32],&mut original,&writer).is_err());
+        let entry=json!({"type":"annotation","id":"12","anchor":{"type":"atom","atom":"10","revision":"6"},
+            "body":first["actions"][0]["body"],"author":{"subject":"7"}});
+        assert_eq!(annotations::open("72",&entry,&original).unwrap(),b"authored comment");
+        let (v,c)=source(8,12);let current=Audience::from_checked(&v,&c,"72").unwrap();
+        original.retain(&current.anchor,&[9;32]).unwrap();
+        let maintenance=json!([{"type":"rewrapAnnotation","annotation":"12","before":"exact canonical guard", "wrapping":entry["body"]}]);
+        let updated=current.seal_actions(&maintenance,&[5;32],&mut original,&SigningKey::from_bytes(&[11;32])).unwrap();
+        assert_eq!(updated,current.seal_actions(&maintenance,&[5;32],&mut original,&SigningKey::from_bytes(&[11;32])).unwrap());
+        let mut newest=entry.clone();newest["body"]["wrapping"]=updated["actions"][0]["wrapping"].clone();
+        assert_eq!(newest["body"]["ciphertext"],entry["body"]["ciphertext"]);
+        let (reader_root,mut reader)=store();reader.retain(&current.anchor,&[9;32]).unwrap();
+        assert!(reader.historical_key(&audience.anchor).is_err());
+        assert_eq!(annotations::open("72",&newest,&reader).unwrap(),b"authored comment");
+        let mut wrong_anchor=newest.clone();wrong_anchor["anchor"]["revision"]=json!("5");
+        assert!(annotations::open("72",&wrong_anchor,&reader).is_err());
+        assert!(annotations::open("73",&newest,&reader).is_err());
+        let mut forged=newest.clone();let mut cipher=private::decode_hex(text(&forged["body"],"ciphertext").unwrap()).unwrap();
+        *cipher.last_mut().unwrap()^=1;forged["body"]["ciphertext"]=json!(crate::hex(&cipher));
+        assert!(annotations::open("72",&forged,&reader).is_err());
+        let mut broken_wrap=newest.clone();let mut wrap=private::decode_hex(text(&broken_wrap["body"],"wrapping").unwrap()).unwrap();
+        *wrap.last_mut().unwrap()^=1;broken_wrap["body"]["wrapping"]=json!(crate::hex(&wrap));
+        assert_eq!(annotations::epoch(&broken_wrap["body"]).unwrap(),current.anchor.epoch);
+        assert!(annotations::open("72",&broken_wrap,&reader).is_err());
+        let mut locked=broken_wrap.clone();locked["private"]=json!("[private: annotation epoch is locked or unreadable]");
+        assert!(rewriting::pending_annotations(&[broken_wrap],&[locked],current.anchor.epoch,64).is_err());
+        let mut opened=newest.clone();opened["private"]=json!({"text":"authored comment"});
+        assert!(rewriting::pending_annotations(&[newest],&[opened],current.anchor.epoch,64).unwrap().is_empty());
+        drop(original);drop(reader);std::fs::remove_dir_all(root).unwrap();std::fs::remove_dir_all(reader_root).unwrap();
     }
     #[test]
     fn protected_atoms_have_distinct_stable_operations_and_historical_context() {

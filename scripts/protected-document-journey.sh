@@ -116,6 +116,23 @@ elif mode=='shared':
         if value in ('PROTECTED-DOCS-first','PROTECTED-DOCS-second'):
             assert epoch(new[a['id']])==target, 'current text was not rekeyed'
             assert old[a['id']]['payload']!=new[a['id']]['payload'], 'ciphertext did not rotate'
+elif mode=='annotations':
+    before,after=map(load,args[:2]);wanted=args[2]
+    def annotations(v, projection=False):
+        return {x['id']:x for x in (v['openedEntries'] if projection else v['view']['cell']['entries']) if x['type']=='annotation'}
+    old,new=annotations(before),annotations(after)
+    matches=[x['id'] for x in annotations(before,True).values() if isinstance(x.get('private'),dict) and x['private'].get('text')==wanted]
+    assert len(matches)==1, 'expected exactly one authored comment'
+    aid=matches[0];a,b=old[aid],new[aid]
+    for key in ('author','operation','anchor','tombstonedAt'):
+        assert a[key]==b[key], f'annotation origin changed: {key}'
+    assert a['body']['ciphertext']==b['body']['ciphertext'], 'authored ciphertext was resealed'
+    assert a['body']['wrapping']!=b['body']['wrapping'], 'annotation key wrapping did not rotate'
+    assert annotations(after,True)[aid]['private']['text']==wanted, 'legitimate member cannot open old comment'
+elif mode=='annotation-stale':
+    view=load(args[0]);wanted=args[1]
+    matches=[a for a in view['openedEntries'] if a['type']=='annotation' and isinstance(a.get('private'),dict) and a['private'].get('text')==wanted]
+    assert len(matches)==1 and matches[0]['fresh'] is False, 'historical anchor was silently rebased'
 elif mode=='same-atoms':
     assert raw(load(args[0]))==raw(load(args[1])), 'refused write changed source atoms'
 elif mode=='rotation':
@@ -151,6 +168,9 @@ printf 'PROTECTED-DOCS-first\nPROTECTED-DOCS-second\nPROTECTED-DOCS-detached-his
 ok owner "doc push pd-seed $DOC @pd-edit.md"
 pull owner "$SD/seed.txt"; seen owner "$SD/seed-seen.json"
 ok owner "doc remove $DOC 3"
+pull owner "$SD/annotation-anchor.txt"
+ok owner "doc annotate pd-comment $DOC 1 PROTECTED-DOCS-owner-comment"
+ok owner 'submit pd-comment'
 pull owner "$SD/before-share.txt"; seen owner "$SD/before-share-seen.json"
 check 'line removal preserves the encrypted historical atom' python3 "$SD/assert.py" detached \
   "$SD/seed-seen.json" "$SD/before-share-seen.json" PROTECTED-DOCS-detached-history owner
@@ -166,13 +186,24 @@ pull member "$SD/member-shared.txt"; seen member "$SD/member-shared-seen.json"
 check 'member opens exactly the placed text' cmp "$SD/before-share.txt" "$SD/member-shared.txt"
 check 'shared current atoms use new epoch' python3 "$SD/assert.py" shared \
   "$SD/before-share-seen.json" "$SD/member-shared-seen.json" "$SD/invitation.json"
+check 'new member opens old authored comment without resealing it' python3 "$SD/assert.py" annotations \
+  "$SD/before-share-seen.json" "$SD/member-shared-seen.json" PROTECTED-DOCS-owner-comment
+ok member "doc show $DOC"; check 'comment appears in member rendered view' grep -F PROTECTED-DOCS-owner-comment "$OUT"
+check 'current atom rekey retains original comment anchor with honest stale marker' python3 "$SD/assert.py" annotation-stale \
+  "$SD/member-shared-seen.json" PROTECTED-DOCS-owner-comment
 check 'new member cannot open untouched detached history' python3 "$SD/assert.py" detached \
   "$SD/seed-seen.json" "$SD/member-shared-seen.json" PROTECTED-DOCS-detached-history member
 
 pull member "$MEMBER_HOME/requests/pd-edit.md"
 printf 'PROTECTED-DOCS-member-first\nPROTECTED-DOCS-second\n' >"$MEMBER_HOME/requests/pd-edit.md"
 ok member "doc push pd-member-edit $DOC @pd-edit.md"
-pull owner "$SD/owner-after-member.txt"
+pull owner "$SD/owner-after-member.txt"; seen owner "$SD/owner-after-member-seen.json"
+check 'text editing preserves readable comment and original stale anchor' python3 "$SD/assert.py" annotation-stale \
+  "$SD/owner-after-member-seen.json" PROTECTED-DOCS-owner-comment
+pull member "$SD/member-comment-anchor.txt"
+ok member "doc annotate pd-member-comment $DOC 2 PROTECTED-DOCS-member-comment"
+ok member 'submit pd-member-comment'
+pull member "$SD/member-comments.txt"; seen member "$SD/member-comments-seen.json"
 check 'owner receives member edit' cmp "$MEMBER_HOME/requests/pd-edit.md" "$SD/owner-after-member.txt"
 pull member "$MEMBER_HOME/requests/pd-stale.md"
 ok owner "doc edit pd-owner-edit $DOC 1 PROTECTED-DOCS-owner-newer"
@@ -224,6 +255,10 @@ pull owner "$SD/rotated.txt"
 ok owner "doc edit pd-post-cut $DOC 2 PROTECTED-DOCS-owner-after-cut"
 ok owner 'submit pd-post-cut'
 pull owner "$SD/owner-final.txt"; seen owner "$SD/owner-final-seen.json"
+check 'revocation rotates owner comment wrapping while retaining its authorship' python3 "$SD/assert.py" annotations \
+  "$SD/member-comments-seen.json" "$SD/owner-final-seen.json" PROTECTED-DOCS-owner-comment
+check 'revocation rotates departed author comment wrapping while retaining its authorship' python3 "$SD/assert.py" annotations \
+  "$SD/member-comments-seen.json" "$SD/owner-final-seen.json" PROTECTED-DOCS-member-comment
 check 'owner editing resumes after revocation rotation' grep -Fx PROTECTED-DOCS-owner-after-cut "$SD/owner-final.txt"
 check 'owner still opens historical epoch; detached atom never rekeyed' python3 "$SD/assert.py" detached \
   "$SD/seed-seen.json" "$SD/owner-final-seen.json" PROTECTED-DOCS-detached-history owner

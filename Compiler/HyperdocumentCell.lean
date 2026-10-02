@@ -270,9 +270,14 @@ def annotationAnchorStream : StreamCodec AnnotationAnchor :=
     (by intro anchor; cases anchor <;> rfl)
 
 def annotationBodyStream : StreamCodec AnnotationBody :=
-  StreamCodec.xmap (StreamCodec.sum bytesStream (identifierStream .v1 .document))
-    (fun | .inline bytes => .inl bytes | .reference document => .inr document)
-    (fun | .inl bytes => .inline bytes | .inr document => .reference document)
+  StreamCodec.xmap
+    (StreamCodec.sum bytesStream (StreamCodec.sum (identifierStream .v1 .document)
+      (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+        (StreamCodec.product principalRefStream (identifierStream .v1 .operationIntent))))))
+    (fun | .inline bytes => .inl bytes | .reference document => .inr (.inl document)
+         | .sealed ciphertext wrapping author operation => .inr (.inr (ciphertext, wrapping, author, operation)))
+    (fun | .inl bytes => .inline bytes | .inr (.inl document) => .reference document
+         | .inr (.inr (ciphertext, wrapping, author, operation)) => .sealed ciphertext wrapping author operation)
     (by intro body; cases body <;> rfl)
 
 def annotationRecordStream : StreamCodec AnnotationRecord :=
@@ -371,11 +376,12 @@ ids, so a v1–v4 content cell refuses to load. -/
 def contentRecordVersion : Hyperdocument.Namespace → String
   | .elements => "v4"
   | .marks => "v2"
-  | .atoms | .annotations => "v2"
+  | .atoms => "v2"
+  | .annotations => "v3"
   | _ => "v1"
 
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v5"
+  name := "minidregg/hyperdocument-content/v6"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream
