@@ -3227,6 +3227,14 @@ def deriveSuffixVerified {config : Config} {anchor : Opened config} {target : Du
     IO (Except String (SuffixDerived config verified.opened)) :=
   deriveSuffixAt config anchor verified.origin verified.opened verified.context bytes
 
+/-- Retain the computational ordinary dispatch admission from this suffix's
+own issue cache. No external origin or caller-supplied witness is inserted. -/
+def admitDispatchSuffixVerified {config : Config} {anchor : Opened config} {target : Durable}
+    (old : SuffixVerified config anchor target)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
+    IO (Except String (DispatchAt config old.opened ingress)) :=
+  admitDispatchAt config old.opened old.issues ingress
+
 /-- Audit a target suffix from an actual validated image. This does not confer
 operator authority on the anchor; that obligation belongs to the carry receiver.
 The suffix walk performs native admission, full-record comparison, tail-law
