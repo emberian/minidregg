@@ -4,6 +4,7 @@
 # updated 2026-10-01: BRAID-HOST: the final pay/C3 receivers (PayEnrol*, PayObservation*, PurseRefill*, JobMoney*), hermes-tariff ProviderRoute, host-malformed Host.RequestRefusal, p-affordances Host.DryRun, hot-path Compiler.NativeCoprocess enter; UMBRELLA-SPLIT dropped no Host module (0 left)  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 72 150, Selvage 12 151, Assurance 0 126, Host 46 55, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-01: BRAID-HOST: host-keccak brings the fast cSHAKE (Compiler.Sp800185Cshake256Fast, Compiler.Sp800185Cshake256Spec under the Core umbrella) and Compiler.NatDigits255Fast into the Host  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 75 153, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-01: INTEGRATOR-2 merges 2-3: braid-proof brings k-narrow-hide (Compiler.StoreHiding, Theory.StoreNormalize) and ch-client (Kernel.DomainEpoch, Kernel.DomainEpochLaw, Theory.Channel, Theory.Channel.Cell/Lease/Trace) into the Host; durable-tags brings Compiler.DurableLogTags  [counts: Minidregg 0 1, Theory 51 90, Kernel 233 302, Pred 4 8, Effects 0 3, Compiler 77 155, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
+# updated 2026-10-01: braid-compute merge (INTEGRATOR-3): the Host now runs K-EVAL (Compiler.Evaluator, Kernel.Run/NockEntry/Door replace Kernel.NockRun), K-ORDER over ZMod 2^127-1 (Compiler.Mersenne127, PredOrderWide, PredRangeLeaf), K-FIELD-CLOSURE (Kernel.FieldClosure), the job law (Kernel.Job over Kernel.LawView), C14 certify and the tail bound (Kernel.CertifyReceiver, SystemCell, SystemCellDomain, TailBound) and the NC shapes (Theory.Eval, Theory.NockCost.Shape, Kernel.NockProgramCell.Sample)  [counts: Minidregg 0 1, Theory 53 94, Kernel 243 311, Pred 4 8, Effects 0 3, Compiler 81 161, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -37,6 +38,7 @@ Compiler.DurableReceiverCodec
 Compiler.DurableReceiverIO
 Compiler.Emit
 Compiler.EmitSerialize
+Compiler.Evaluator
 Compiler.FiniteDependentMapCodec
 Compiler.FnEvidenceCodec
 Compiler.GrainResourceBirthAuthority
@@ -45,6 +47,7 @@ Compiler.GrainResourceBirthHostCodec
 Compiler.HyperdocumentCell
 Compiler.HyperdocumentCodec
 Compiler.IntStream
+Compiler.Mersenne127
 Compiler.MinidreggV1Artifact
 Compiler.NatDigits255Fast
 Compiler.NativeCoprocess
@@ -60,6 +63,8 @@ Compiler.PolicyRecordCodec
 Compiler.PolicySourceCell
 Compiler.PredCompile
 Compiler.PredOrderGadget
+Compiler.PredOrderWide
+Compiler.PredRangeLeaf
 Compiler.RealmWellCodec
 Compiler.RefusalReason
 Compiler.ResourceAuthorityProjection
@@ -245,6 +250,7 @@ Kernel.CapabilityDelegationController
 Kernel.CapabilityDelegationReceiver
 Kernel.CapabilityRevocationController
 Kernel.CapabilityRevocationReceiver
+Kernel.CertifyReceiver
 Kernel.ClockCell
 Kernel.ClockCellDomain
 Kernel.ClockTickReceiver
@@ -256,10 +262,12 @@ Kernel.DeclaredResourceProjection
 Kernel.DeclaredResourceScalar
 Kernel.DomainEpoch
 Kernel.DomainEpochLaw
+Kernel.Door
 Kernel.DurableCheckpoint
 Kernel.DurableCommitProtocol
 Kernel.DurableDataIntent
 Kernel.DurableReceiver
+Kernel.FieldClosure
 Kernel.FleetTurn
 Kernel.FleetTurnReceiver
 Kernel.FnCatalogOwnRProgress
@@ -309,9 +317,11 @@ Kernel.GrainResourceBirthReceiver
 Kernel.GrainResourceBirthTransaction
 Kernel.HyperdocumentEventLog
 Kernel.HyperdocumentIndexSync
+Kernel.Job
 Kernel.JobMoney
 Kernel.JobMoneyReceiver
 Kernel.JointSlots
+Kernel.LawView
 Kernel.MultiCellHyperedge
 Kernel.NativeHistorySelection
 Kernel.NativeHost
@@ -323,8 +333,9 @@ Kernel.NativeHostSession
 Kernel.NativeObservationController
 Kernel.NativeReserveContinuity
 Kernel.NockDoor
+Kernel.NockEntry
 Kernel.NockProgramCell
-Kernel.NockRun
+Kernel.NockProgramCell.Sample
 Kernel.ParticipantFactoryProvisioning
 Kernel.ParticipantFactoryProvisioningReceiver
 Kernel.ParticipantKeyEnrollment
@@ -354,7 +365,11 @@ Kernel.ResourceBirthPolicyController
 Kernel.ResourceBirthReceiver
 Kernel.ResourceObservationAdmission
 Kernel.ResourceTransaction
+Kernel.Run
 Kernel.SparseAuthenticatedState
+Kernel.SystemCell
+Kernel.SystemCellDomain
+Kernel.TailBound
 Kernel.Turn
 Kernel.TypedCellHyperedge
 Kernel.World
@@ -406,12 +421,14 @@ Theory.DeclaredActionLowering
 Theory.DeclaredTurn
 Theory.DisclosureDeclaration
 Theory.EffectDeclaration
+Theory.Eval
 Theory.GuardedAdvice
 Theory.Hyperdocument
 Theory.HyperdocumentOperationIntent
 Theory.HyperdocumentOperations
 Theory.IndexedProgram
 Theory.Nock
+Theory.NockCost.Shape
 Theory.Noun
 Theory.PlanBinding
 Theory.PolicyInstall

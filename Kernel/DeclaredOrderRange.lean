@@ -90,6 +90,14 @@ theorem scalarSlots_inR (before after : Values)
 theorem uint64_inFieldR (x : Int) (h0 : 0 ≤ x) (h1 : x < 2 ^ 64) : InFieldR x := by
   refine ⟨?_, ?_⟩ <;> norm_num [fieldBound] at * <;> omega
 
+/-- `0` is in the field range. -/
+theorem zero_inFieldR : InFieldR 0 := by decide
+
+/-- The field range is half-open: its bound is outside it. -/
+theorem fieldBound_not_inFieldR : ¬ InFieldR fieldBound := by decide
+
 #assert_axioms scalarSlots_inR
+#assert_axioms zero_inFieldR
+#assert_axioms fieldBound_not_inFieldR
 
 end Minidregg.Kernel.DeclaredOrderRange

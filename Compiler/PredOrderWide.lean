@@ -29,6 +29,12 @@ def InBand (B x : Int) : Prop := -B ≤ x ∧ x < B
 instance (B x : Int) : Decidable (InBand B x) :=
   inferInstanceAs (Decidable (-B ≤ x ∧ x < B))
 
+/-- The band has members: `0 ∈ [-1, 1)`. -/
+theorem inBand_one_zero : InBand 1 0 := by decide
+
+/-- And an edge: the band is half-open, `1 ∉ [-1, 1)`. -/
+theorem not_inBand_one_one : ¬ InBand 1 1 := by decide
+
 theorem intOf_inBand {B : Int} (hB : 0 < B) {st : State} (s : Slot)
     (h : ∀ x ∈ stateVals st, InBand B x) : InBand B (intOf st s) := by
   unfold intOf
@@ -124,5 +130,7 @@ theorem castInjOn_zmod_of_inBand {q : Nat} [Fact q.Prime] {B : Int} (hB : 2 * B 
 
 #assert_axioms inputsInRange_of_intsOf_inBand
 #assert_axioms castInjOn_zmod_of_inBand
+#assert_axioms inBand_one_zero
+#assert_axioms not_inBand_one_one
 
 end Minidregg.Compiler

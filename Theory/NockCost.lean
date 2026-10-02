@@ -649,6 +649,15 @@ def OracleSound (O : Oracle) : Prop :=
 
 theorem noSummaries_sound : OracleSound noSummaries := fun _ _ _ _ h => by simp [noSummaries] at h
 
+/-- An oracle that prices every formula at zero steps. -/
+def overclaimingOracle : Oracle := fun _ _ => some (0, .any)
+
+/-- **Refuting pole**: a zero-step summary is never a price -- with zero depth and budget the run
+is exhausted, which `Sound` forbids once the budget covers the summary. -/
+theorem overclaimingOracle_not_sound : ¬ OracleSound overclaimingOracle := by
+  intro h
+  exact (h .any (.atom 0) 0 .any rfl (.atom 0) rfl 0 0).2 (Nat.le_refl 0) (Nat.le_refl 0) rfl
+
 theorem Sound.of_succ {B : Nat} {o : Shape} {s f : Noun} (hB : 1 ≤ B)
     (h : ∀ d b, Res.within (exec (d + 1) (b + 1) s f) (b + 1) B o ∧
       (B ≤ d + 1 → B ≤ b + 1 → exec (d + 1) (b + 1) s f ≠ .exhausted)) : Sound B o s f := by
@@ -1214,6 +1223,7 @@ open Minidregg.Theory.AssertAxioms
 #assert_axioms cost_never_under_counts_decrement
 #assert_axioms cost_loop_outside
 #assert_axioms forgeSample_cue
+#assert_axioms overclaimingOracle_not_sound
 
 /-- info: 'Minidregg.Theory.NockCost.pole_forge_cues' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_cues._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_cues

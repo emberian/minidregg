@@ -156,6 +156,9 @@ theorem R_extremes_reversed_refused :
 /-- One past `R` is no longer covered by `order_agrees_with_eval_on_R`'s premise. -/
 theorem one_past_R : ¬ InR rangeBound := by decide
 
+/-- And `0` is covered: the premise is satisfiable. -/
+theorem zero_inR : InR 0 := by decide
+
 /-- A two-clause law: `verb == write; field 0 <= field 1`. -/
 def edgeLaw : Pred := Pred.all [.eq "request/verb" 2, balanceLaw]
 
@@ -206,5 +209,6 @@ theorem R_never_aliases : castAlias Field [-rangeBound, rangeBound - 1, 0, 1, wa
 #assert_axioms width_edge_in_range
 #assert_axioms width_edge_plus_one_named
 #assert_axioms width_lower_edge_named
+#assert_axioms zero_inR
 
 end Minidregg.Compiler.NativeOrderPoles
