@@ -100,30 +100,62 @@ def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
 inductive Result (config : Config) where
   | permitted (permit : Permit config)
   | rejected (detail : String)
+  /-- Emitted only before entering the durable receiver; no append was attempted. -/
+  | noRecordRefused
   | contention
   | unavailable (detail : String)
   | uncertain (detail : String)
 
-/-- A warm Host session carries `old` from initial verified replay or exact
-extension. Every request still runs fresh current native admission. No full
-history walk is repeated merely to select the original share issue. A
-duplicate ordinary DRC transaction ID, including a different outer HTTP
-wrapper under the same signed command, conflicts before CAS. -/
-def receiveVerified (config : Config) {target : Durable}
+/-- The fresh private response uses a distinct exact tag/payload. A native
+receiver may retire only this attempt's matching active marker on this verdict;
+ordinary outcomes and transport errors are not equivalent evidence. -/
+def noRecordRefusalBytes : List UInt8 :=
+  "DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1".toUTF8.toList
+
+/-- A private resident's immutable route constraint. This grants no authority;
+current signed dispatch admission remains mandatory. The distinct envelope
+prevents accidental interpretation as an ordinary op34 request. -/
+structure RouteConstraint where
+  domain : Digest
+  semantics : Digest
+  binding : ApplicationStreamContinuity.Binding
+  deriving DecidableEq
+
+def routeConstraintStream : StreamCodec RouteConstraint :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      ApplicationStreamContinuity.bindingStream))
+    (fun c => (c.domain, c.semantics, c.binding))
+    (fun (domain, semantics, binding) => ⟨domain, semantics, binding⟩)
+    (by intro c; cases c; rfl)
+
+def routeBoundCodec : LawfulCodec (RouteConstraint × List UInt8) :=
+  NativeHostCodec.framed
+    "DREGG/APPLICATION/ROUTE-BOUND-DISPATCH/v1".toUTF8.toList
+    (StreamCodec.product routeConstraintStream bytesStream)
+
+def routeMatches (config : Config) {opened : Opened config}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    (admitted : NativeHostReplay.DispatchAt config opened ingress)
+    (constraint : RouteConstraint) : Bool :=
+  constraint.domain == config.deployment.domain &&
+    constraint.semantics == config.profile.semantics &&
+    constraint.binding == ApplicationStreamContinuity.bindingFor admitted
+
+/-- The immutable route comparison and the spend use the SAME freshly checked
+candidate. The existing signed roots and durable CAS guards remain unchanged;
+a separate preflight observation cannot create a time-of-check gap here. -/
+def receiveAdmitted (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)
-    (bytes : List UInt8) : IO (Result config) := do
-  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
-    | return .rejected "noncanonical special dispatch ingress"
-  if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
-    return .rejected "stream continuity probes are read-only and cannot open an app stream"
-  if ingress.dispatch.dispatch.session.origin != .human then
-    return .rejected "v1 committed dispatch permit requires human-origin session"
-  let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
-    | return .rejected "dispatch issue absent from verified chronological prefix"
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (admitted : NativeHostReplay.DispatchAt config old.opened ingress)
+    (constraint : Option RouteConstraint) : IO (Result config) := do
+  if constraint.isSome && !(constraint.all (routeMatches config admitted)) then
+    return .noRecordRefused
   let derived := admitted.toDerived
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
-    return .rejected "dispatch transaction identity already used"
+    return .noRecordRefused
   let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
@@ -142,6 +174,51 @@ def receiveVerified (config : Config) {target : Durable}
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
 
+
+/-- A mismatched locally registered route cannot invoke the durable receiver,
+create a delivery permit, or bill a dispatch. This equality includes every
+physical effect of this branch, rather than only its returned verdict. -/
+theorem mismatched_route_never_submits (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (admitted : NativeHostReplay.DispatchAt config old.opened ingress)
+    (constraint : RouteConstraint)
+    (mismatch : routeMatches config admitted constraint = false) :
+    receiveAdmitted config old ingress admitted (some constraint) =
+      pure .noRecordRefused := by
+  simp [receiveAdmitted, mismatch]
+
+private def receiveVerifiedWith (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (bytes : List UInt8) (constraint : Option RouteConstraint) : IO (Result config) := do
+  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
+    | return .noRecordRefused
+  if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request then
+    return .noRecordRefused
+  if ingress.dispatch.dispatch.session.origin != .human then
+    return .noRecordRefused
+  let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
+    | return .noRecordRefused
+  receiveAdmitted config old ingress admitted constraint
+
+/-- The ordinary receiver retains its existing signed current admission and
+CAS behavior. Historical receipt recovery still cannot produce a permit. -/
+def receiveVerified (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (bytes : List UInt8) : IO (Result config) :=
+  receiveVerifiedWith config old bytes none
+
+/-- Private-only route-bound dispatch. The constraint is a resident restriction,
+not a replacement for signed authority or an unsigned planning attestation. -/
+def receiveRouteBoundVerified (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (bytes : List UInt8) : IO (Result config) := do
+  let some (constraint, ingress) := routeBoundCodec.decode bytes
+    | return .noRecordRefused
+  receiveVerifiedWith config old ingress (some constraint)
+
+#assert_axioms mismatched_route_never_submits
+
 /-- Even fully signed authority material for a continuity probe cannot be
 submitted to the app-open receiver. Refusal occurs before admission/CAS. -/
 theorem continuity_probe_never_submits (config : Config) {target : Durable}
@@ -151,8 +228,8 @@ theorem continuity_probe_never_submits (config : Config) {target : Durable}
     (probe : ingress.dispatch.dispatch.request =
       ApplicationStreamContinuity.probeRequest challenge) :
     receiveVerified config old (ApplicationDispatchAdmissionIngress.codec.encode ingress) =
-      pure (.rejected "stream continuity probes are read-only and cannot open an app stream") := by
-  simp [receiveVerified, ApplicationDispatchAdmissionIngress.codec.decode_encode,
+      pure .noRecordRefused := by
+  simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     probe, ApplicationStreamContinuity.probe_reserved]
 
 theorem route_probe_never_submits (config : Config) {target : Durable}
@@ -161,8 +238,8 @@ theorem route_probe_never_submits (config : Config) {target : Durable}
     (challenge : ApplicationRouteAdmission.Challenge)
     (probe : ingress.dispatch.dispatch.request = ApplicationRouteAdmission.probeRequest challenge) :
     receiveVerified config old (ApplicationDispatchAdmissionIngress.codec.encode ingress) =
-      pure (.rejected "stream continuity probes are read-only and cannot open an app stream") := by
-  simp [receiveVerified, ApplicationDispatchAdmissionIngress.codec.decode_encode,
+      pure .noRecordRefused := by
+  simp [receiveVerified, receiveVerifiedWith, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     probe, ApplicationRouteAdmission.probe_reserved]
 
 #assert_axioms route_probe_never_submits

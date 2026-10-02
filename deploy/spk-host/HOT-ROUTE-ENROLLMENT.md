@@ -66,15 +66,27 @@ streams cannot survive generation STOP, and revoked tickets remain refused by
 source admission.
 
 Every dispatch through a hot-added route must match its admitted namespace,
-app generation, session generation, principal, ticket, and fingerprint. A new
-Mini-valid dispatch with a different binding is refused before fd3 delivery.
-Currently this comparison occurs after Mini commits the dispatch: it finishes
-that physical journal record as undelivered, so another participant is not
-blocked by its one-shot marker. Such a mismatch can therefore leave a billed
-Mini dispatch record. Moving this route pin into pre-CAS signed authoring would
-avoid that record and remains a separate improvement. Initial START routes keep
-the existing per-request current-admission path and do not yet have this hot
-registration pin.
+app generation, session generation, principal, ticket, and fingerprint. The
+resident first checks the route binding against fixed custody and its pinned
+Host namespace, before authoring or creating submit markers. It then uses
+private opcode 164 with a source-authored `application-route-bound-dispatch`
+envelope containing that exact binding and the newly signed ingress. Mini
+compares the binding to the same checked current admission used for submission,
+before constructing the durable transaction or entering CAS. A stale route
+binding therefore creates no dispatch/billing record and never reaches fd3.
+The existing post-commit physical guard remains as a final integration check.
+Initial/restarted routes continue to use ordinary dispatch opcode 34 and
+per-request current admission, without the hot registration pin.
+
+Mini reports a definitively pre-CAS refusal from either operation as opcode 164
+with the exact payload `DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1` (no
+newline). Only this complete response from the fresh private invocation releases
+the matching generation-wide submit marker. The attempt marker, ingress,
+envelope and refusal frame remain retained; the same attempt cannot be retried.
+This lets an unrelated B route continue after a revoked/stale A request.
+Generic source outcomes, malformed frames, transport failures and marker drift
+retain the global marker for audit because they do not establish that no Store
+record was written.
 
 Stream invalidation is ticket-scoped for every human route, and additionally
 bound to the exact admitted identity for hot routes. An old revoked token's
@@ -85,6 +97,7 @@ or retry can revive an ended lease.
 Scoped Rust tests cover an actual local poll loop adding B while A's upgraded
 socket remains open, exact retry/change refusal over the private socket,
 private-file/hash/generation checks, a bounded slow input, current-admission
-refusal without registration, dispatch epoch/fingerprint pins, and old-grant
-versus new-grant stream isolation. Actual Mini enrollment/revocation, two-user
+refusal without registration, dispatch epoch/fingerprint pins, old-grant
+versus new-grant stream isolation, exact route-bound envelope selectors, and
+no-record refusal/uncertain-marker isolation over the private response framing. Actual Mini enrollment/revocation, two-user
 editing, and restart journeys must also be qualified on the joined candidate.

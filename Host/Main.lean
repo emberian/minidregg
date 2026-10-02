@@ -1790,9 +1790,11 @@ the external host must fence process generation and reconcile uncertain
 delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+    (payload : List UInt8) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
   let session ← sessionWalked config state
-  let result ← ApplicationDispatchReceiver.receiveVerified config session.verified payload
+  let result ← if routeBound then
+      ApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
+    else ApplicationDispatchReceiver.receiveVerified config session.verified payload
   match result with
   | .permitted permit =>
       let handed ← permit.withFreshTip fun committedBytes =>
@@ -1802,6 +1804,8 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .noRecordRefused =>
+      writeSessionFrame output 164 ApplicationDispatchReceiver.noRecordRefusalBytes
   | .rejected _ =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -2001,7 +2005,9 @@ partial def serveSession (config : NativeHost.Config)
   let (operation, payload) ← match frame.toList with
     | [] => throw (IO.userError "empty native host frame")
     | operation :: payload => pure (operation, payload)
-  if operation == 154 then
+  if operation == 164 then
+    dispatchApplicationSubmitSession config state payload output true
+  else if operation == 154 then
     dispatchRouteAdmissionSession config state payload output
   else if operation == 152 then
     dispatchStreamContinuitySession config state payload output
@@ -4935,7 +4941,8 @@ def run (arguments : List String) : IO UInt32 := do
             (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
       | "author", [kind, input, output] =>
-          let source ← if kind == "application-route-admission-request" ||
+          let source ← if kind == "application-route-bound-dispatch" ||
+              kind == "application-route-admission-request" ||
               kind == "application-route-admission-challenge" ||
               kind == "application-stream-continuity-request" ||
               kind == "application-stream-continuity-challenge" ||
@@ -4954,7 +4961,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (
-            if kind == "application-route-admission-challenge" then
+            if kind == "application-route-bound-dispatch" then
+              ApplicationRouteAdmissionInspection.authorBoundDispatch config source
+            else if kind == "application-route-admission-challenge" then
               ApplicationRouteAdmissionInspection.authorChallenge config source
             else if kind == "application-route-admission-request" then
               ApplicationRouteAdmissionInspection.authorRequest source

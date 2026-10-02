@@ -120,6 +120,8 @@ impl ResidentHuman<'_> {
             http,
             &operation_id,
             &attempt_dir,
+            self.route_binding,
+            self.continuity_namespace,
         )
         .inspect_err(|_| {
             // A failed current-authority check (including unavailable authority)

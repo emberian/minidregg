@@ -9,6 +9,7 @@ use crate::dispatch_inspection::{
 };
 use crate::hostd::{DispatchIdentity, Journal};
 use crate::native_dispatch::{parse_op34_response, Op34Reply};
+use crate::stream_continuity::ContinuityBinding;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -20,6 +21,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const HOST_MAX_FRAME: usize = 12_102_760;
+const ROUTE_BOUND_DISPATCH_OPCODE: u8 = 164;
+const NO_RECORD_REFUSAL: &[u8] = b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1";
 const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
 const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
@@ -460,7 +463,11 @@ impl PrivateOperator {
         let mut reply = vec![0u8; length + 4];
         reply[..4].copy_from_slice(&prefix);
         read_exact_deadline(&mut stream, &mut reply[4..], deadline)?;
-        if reply[4] != operation && reply[4] != 255 {
+        let dispatch_reply = (operation == ROUTE_BOUND_DISPATCH_OPCODE && reply[4] == 34)
+            || (operation == 34
+                && reply[4] == ROUTE_BOUND_DISPATCH_OPCODE
+                && &reply[5..] == NO_RECORD_REFUSAL);
+        if reply[4] != operation && reply[4] != 255 && !dispatch_reply {
             return Err(invalid("Mini operator reply opcode mismatch"));
         }
         Ok(reply)
@@ -657,18 +664,7 @@ impl RecordedDispatch {
     /// fence leaves both physical and native attempt records for audit.
     pub(crate) fn finish(self, journal: &Journal, delivered: bool) -> io::Result<()> {
         journal.finish_dispatch(&self.identity, delivered)?;
-        if fs::read(&self.active_marker)? != self.active_bytes {
-            return Err(invalid(
-                "native submit marker drift after physical completion",
-            ));
-        }
-        fs::remove_file(&self.active_marker)?;
-        File::open(
-            self.active_marker
-                .parent()
-                .ok_or_else(|| invalid("marker parent absent"))?,
-        )?
-        .sync_all()
+        retire_active_marker(&self.active_marker, &self.active_bytes)
     }
 }
 
@@ -711,7 +707,7 @@ impl CommittedDispatch {
 }
 
 /// The attempt directory is new and durable before any mutation. A marker is
-/// fsynced before op34; once present, this function refuses to run again for
+/// fsynced before op34/164; once present, submission refuses to run again for
 /// the same attempt even if the Host response was lost. Historical op35 may
 /// inform an audit, but it can never mint a fresh physical delivery permit.
 fn author_signed_ingress(
@@ -778,35 +774,101 @@ fn author_signed_ingress(
     Ok(ingress.to_vec())
 }
 
-pub(crate) fn author_and_submit(
-    operator: &PrivateOperator,
+fn validate_route_binding(
     custody: &FixedAuthoring,
-    http: &HttpProjection<'_>,
-    operation_id: &str,
+    binding: Option<&ContinuityBinding>,
+    namespace: &(String, String),
+) -> io::Result<()> {
+    if let Some(binding) = binding {
+        binding.validate()?;
+        if binding.domain != namespace.0
+            || binding.semantics != namespace.1
+            || binding.app != custody.app
+            || binding.session != custody.session
+            || binding.subject != custody.subject
+            || binding.ticket_resource != custody.ticket_resource
+        {
+            return Err(invalid(
+                "fixed route binding differs from custody or pinned namespace",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Mini represents its 256-bit digests as Nats; Rust retains little-endian bytes.
+fn digest_decimal(bytes: &[u8; 32]) -> String {
+    let mut digits = vec![0_u8];
+    for byte in bytes.iter().rev() {
+        let mut carry = u16::from(*byte);
+        for digit in &mut digits {
+            let value = u16::from(*digit) * 256 + carry;
+            *digit = (value % 10) as u8;
+            carry = value / 10;
+        }
+        while carry != 0 {
+            digits.push((carry % 10) as u8);
+            carry /= 10;
+        }
+    }
+    digits
+        .iter()
+        .rev()
+        .map(|digit| char::from(b'0' + *digit))
+        .collect()
+}
+
+fn route_bound_dispatch_json(binding: &ContinuityBinding, ingress: &[u8]) -> serde_json::Value {
+    json!({"domain":binding.domain,"semantics":binding.semantics,
+        "app":binding.app,"appGeneration":binding.app_generation,"session":binding.session,
+        "sessionGeneration":binding.session_generation,"subject":binding.subject,
+        "ticketResource":binding.ticket_resource,"sessionFingerprint":digest_decimal(&binding.session_fingerprint),
+        "ingressHex":hex(ingress)})
+}
+
+fn retire_active_marker(path: &Path, expected: &[u8]) -> io::Result<()> {
+    if fs::read(path)? != expected {
+        return Err(invalid(
+            "native submit marker drift after definite completion",
+        ));
+    }
+    fs::remove_file(path)?;
+    File::open(
+        path.parent()
+            .ok_or_else(|| invalid("marker parent absent"))?,
+    )?
+    .sync_all()
+}
+
+struct SubmittedDispatch {
+    frame: Vec<u8>,
+    active_marker: PathBuf,
+    active_bytes: Vec<u8>,
+}
+
+/// Only the fresh private response from this call can certify no Store record.
+/// Keep per-attempt evidence and prohibit its replay even after releasing the
+/// generation-wide marker so an unrelated participant can make progress.
+fn submit_once(
     attempt_dir: &Path,
-) -> io::Result<CommittedDispatch> {
+    operation_id: &str,
+    ingress: &[u8],
+    opcode: u8,
+    submission: &[u8],
+    invoke: impl FnOnce(u8, &[u8]) -> io::Result<Vec<u8>>,
+) -> io::Result<SubmittedDispatch> {
+    if !matches!(opcode, 34 | ROUTE_BOUND_DISPATCH_OPCODE) {
+        return Err(invalid("native dispatch submit opcode refused"));
+    }
     let parent = attempt_dir
         .parent()
         .ok_or_else(|| invalid("attempt parent missing"))?;
-    let ingress = author_signed_ingress(
-        operator,
-        custody,
-        http,
-        operation_id,
-        attempt_dir,
-        Instant::now() + RESPONSE_DEADLINE,
-    )?;
     let marker = json!({"protocol":"mini-spk-dispatch-submit-requested-v1",
-        "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(&ingress))});
-    write_new(
-        attempt_dir,
-        "submit-requested.json",
-        &serde_json::to_vec(&marker)?,
-    )?;
-    let active_marker = parent.join("native-dispatch-active.json");
+        "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(ingress)),
+        "submitOpcode":opcode,"submissionSha256":hex(&Sha256::digest(submission))});
     let active_bytes = serde_json::to_vec(&marker)?;
-    // The global marker is separate from the attempt so a new operation ID
-    // cannot bypass an earlier uncertain op34 by choosing a different dir.
+    write_new(attempt_dir, "submit-requested.json", &active_bytes)?;
+    let active_marker = parent.join("native-dispatch-active.json");
     let mut active_file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -816,9 +878,66 @@ pub(crate) fn author_and_submit(
     active_file.write_all(&active_bytes)?;
     active_file.sync_all()?;
     File::open(parent)?.sync_all()?;
-    let reply = operator.invoke(34, &ingress)?;
-    write_new(attempt_dir, "op34-frame.bin", &reply)?;
-    let payload = match parse_op34_response(&reply)? {
+    let frame = invoke(opcode, submission)?;
+    write_new(attempt_dir, &format!("op{opcode}-frame.bin"), &frame)?;
+    let mut refusal = Vec::with_capacity(NO_RECORD_REFUSAL.len() + 5);
+    refusal.extend_from_slice(&((NO_RECORD_REFUSAL.len() + 1) as u32).to_le_bytes());
+    refusal.push(ROUTE_BOUND_DISPATCH_OPCODE);
+    refusal.extend_from_slice(NO_RECORD_REFUSAL);
+    if frame == refusal {
+        // Source issues this unique frame only before entering durable submit.
+        // Generic outcomes, EOF and malformed frames never reach this branch.
+        retire_active_marker(&active_marker, &active_bytes)?;
+        return Err(invalid("Mini dispatch refused before any Store record"));
+    }
+    Ok(SubmittedDispatch {
+        frame,
+        active_marker,
+        active_bytes,
+    })
+}
+
+pub(crate) fn author_and_submit(
+    operator: &PrivateOperator,
+    custody: &FixedAuthoring,
+    http: &HttpProjection<'_>,
+    operation_id: &str,
+    attempt_dir: &Path,
+    route_binding: Option<&ContinuityBinding>,
+    namespace: &(String, String),
+) -> io::Result<CommittedDispatch> {
+    // Fail before creating an attempt or entering any native authoring route.
+    validate_route_binding(custody, route_binding, namespace)?;
+    let deadline = Instant::now() + RESPONSE_DEADLINE;
+    let ingress =
+        author_signed_ingress(operator, custody, http, operation_id, attempt_dir, deadline)?;
+    let (opcode, submission) = match route_binding {
+        None => (34, ingress.clone()),
+        Some(binding) => {
+            let input = write_new(
+                attempt_dir,
+                "route-bound-dispatch.json",
+                &serde_json::to_vec(&route_bound_dispatch_json(binding, &ingress))?,
+            )?;
+            let envelope = operator.tool_until(
+                "author",
+                "application-route-bound-dispatch",
+                &input,
+                &attempt_dir.join("route-bound-dispatch.bin"),
+                deadline,
+            )?;
+            (ROUTE_BOUND_DISPATCH_OPCODE, envelope)
+        }
+    };
+    let submitted = submit_once(
+        attempt_dir,
+        operation_id,
+        &ingress,
+        opcode,
+        &submission,
+        |opcode, bytes| operator.invoke_until(opcode, bytes, deadline),
+    )?;
+    let payload = match parse_op34_response(&submitted.frame)? {
         Op34Reply::CommittedBytes(payload) => payload.to_vec(),
         Op34Reply::OutcomeBytes(_) => {
             return Err(invalid("Mini op34 did not commit a delivery permit"))
@@ -845,8 +964,8 @@ pub(crate) fn author_and_submit(
     Ok(CommittedDispatch {
         payload,
         matched,
-        active_marker,
-        active_bytes,
+        active_marker: submitted.active_marker,
+        active_bytes: submitted.active_bytes,
     })
 }
 
@@ -1007,6 +1126,318 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct BoundFixture(PathBuf);
+    impl BoundFixture {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root =
+                std::env::temp_dir().join(format!("bound-dispatch-{}-{nonce}", std::process::id()));
+            DirBuilder::new().mode(0o700).create(&root).unwrap();
+            Self(root)
+        }
+        fn attempt(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            DirBuilder::new().mode(0o700).create(&path).unwrap();
+            path
+        }
+    }
+    impl Drop for BoundFixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn bound_fixture() -> (FixedAuthoring, ContinuityBinding) {
+        let custody = serde_json::from_value(json!({
+            "protocol":"mini-spk-human-dispatch-custody-v1","app":"17","subject":"8","session":"27","sessionKind":"web",
+            "issueIndex":"1","ticketResource":"37","packageManifest":"40","snapshotManifest":"41","sessionObserveCapability":"42",
+            "manifestObserveCapability":"43","enrollmentObserveCapability":"44","signers":[{"role":"0","index":"0","keyId":"9","keyEpoch":"0","publicKeyHex":"00".repeat(32),"seedPath":"/unused/seed"}]
+        })).unwrap();
+        let binding = ContinuityBinding {
+            domain: "1".into(),
+            semantics: "2".into(),
+            app: "17".into(),
+            app_generation: "4".into(),
+            session: "27".into(),
+            session_generation: "3".into(),
+            subject: "8".into(),
+            ticket_resource: "37".into(),
+            session_fingerprint: [255; 32],
+        };
+        (custody, binding)
+    }
+    fn no_record_frame() -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&((NO_RECORD_REFUSAL.len() + 1) as u32).to_le_bytes());
+        frame.push(ROUTE_BOUND_DISPATCH_OPCODE);
+        frame.extend_from_slice(NO_RECORD_REFUSAL);
+        frame
+    }
+    #[test]
+    fn bound_dispatch_private_transport_accepts_only_defined_cross_opcode_replies() {
+        let root = BoundFixture::new();
+        let host = root.0.join("host");
+        fs::copy("/usr/bin/true", &host).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();
+        let config = root.0.join("config.json");
+        fs::write(&config, b"{}").unwrap();
+        let socket = root.0.join("operator.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        let operator = PrivateOperator {
+            host: host.clone(),
+            config: config.clone(),
+            socket,
+            host_sha256: hex(&Sha256::digest(fs::read(host).unwrap())),
+            config_sha256: hex(&Sha256::digest(b"{}")),
+        };
+        let frame = |opcode: u8, payload: &[u8]| {
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&((payload.len() + 1) as u32).to_le_bytes());
+            frame.push(opcode);
+            frame.extend_from_slice(payload);
+            frame
+        };
+        let cases = vec![
+            (34, no_record_frame(), true),
+            (
+                ROUTE_BOUND_DISPATCH_OPCODE,
+                frame(34, b"source committed permit"),
+                true,
+            ),
+            (
+                34,
+                frame(ROUTE_BOUND_DISPATCH_OPCODE, b"not a no-record refusal"),
+                false,
+            ),
+            (36, no_record_frame(), false),
+            (
+                ROUTE_BOUND_DISPATCH_OPCODE,
+                frame(36, b"wrong operation"),
+                false,
+            ),
+        ];
+        let server_cases = cases.clone();
+        let server = std::thread::spawn(move || {
+            for (expected, response, _) in server_cases {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut prefix = [0; 4];
+                stream.read_exact(&mut prefix).unwrap();
+                let mut request = vec![0; u32::from_le_bytes(prefix) as usize];
+                stream.read_exact(&mut request).unwrap();
+                let config_len = u32::from_le_bytes(request[1..5].try_into().unwrap()) as usize;
+                assert_eq!(request[5 + config_len + 32], expected);
+                stream.write_all(&response).unwrap();
+            }
+        });
+        for (opcode, response, accepted) in cases {
+            let actual = operator.invoke(opcode, b"request");
+            if accepted {
+                assert_eq!(actual.unwrap(), response);
+            } else {
+                assert_eq!(
+                    actual.unwrap_err().to_string(),
+                    "Mini operator reply opcode mismatch"
+                );
+            }
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn bound_dispatch_authoring_preserves_exact_binding_and_ingress() {
+        let (_, binding) = bound_fixture();
+        assert_eq!(
+            route_bound_dispatch_json(&binding, &[0, 1, 254, 255]),
+            json!({
+                "domain":"1","semantics":"2","app":"17","appGeneration":"4","session":"27","sessionGeneration":"3",
+                "subject":"8","ticketResource":"37",
+                "sessionFingerprint":"115792089237316195423570985008687907853269984665640564039457584007913129639935",
+                "ingressHex":"0001feff"
+            })
+        );
+        for bytes in [[0; 32], [255; 32], std::array::from_fn(|n| n as u8)] {
+            assert_eq!(
+                crate::stream_continuity::digest(&digest_decimal(&bytes)).unwrap(),
+                bytes
+            );
+        }
+        assert_eq!(digest_decimal(&[0; 32]), "0");
+    }
+    #[test]
+    fn bound_dispatch_wrong_local_custody_or_namespace_never_enters_native_pipeline() {
+        let root = BoundFixture::new();
+        let (custody, binding) = bound_fixture();
+        let namespace = ("1".into(), "2".into());
+        let operator = PrivateOperator {
+            host: root.0.join("absent-host"),
+            config: root.0.join("absent-config"),
+            socket: root.0.join("absent-socket"),
+            host_sha256: "00".repeat(32),
+            config_sha256: "00".repeat(32),
+        };
+        let http = HttpProjection {
+            method: "GET",
+            path_and_query: "",
+            ordered_headers: &[],
+            body: &[],
+            route: crate::dispatch_inspection::Route::Browser,
+        };
+        for field in ["domain", "semantics", "app", "session", "subject", "ticket"] {
+            let mut wrong = binding.clone();
+            match field {
+                "domain" => wrong.domain = "9".into(),
+                "semantics" => wrong.semantics = "9".into(),
+                "app" => wrong.app = "9".into(),
+                "session" => wrong.session = "9".into(),
+                "subject" => wrong.subject = "9".into(),
+                _ => wrong.ticket_resource = "9".into(),
+            }
+            let attempt = root.0.join(field);
+            let error = author_and_submit(
+                &operator,
+                &custody,
+                &http,
+                "1",
+                &attempt,
+                Some(&wrong),
+                &namespace,
+            )
+            .err()
+            .expect("local mismatch must refuse");
+            assert_eq!(
+                error.to_string(),
+                "fixed route binding differs from custody or pinned namespace"
+            );
+            assert!(!attempt.exists());
+            assert!(!root.0.join("native-dispatch-active.json").exists());
+        }
+        validate_route_binding(&custody, Some(&binding), &namespace).unwrap();
+    }
+    #[test]
+    fn bound_dispatch_definite_revoked_a_refusal_releases_b_without_replaying_a() {
+        for opcode in [34, ROUTE_BOUND_DISPATCH_OPCODE] {
+            let root = BoundFixture::new();
+            let a = root.attempt("a");
+            let refusal = no_record_frame();
+            let result = submit_once(
+                &a,
+                "1",
+                b"a ingress",
+                opcode,
+                b"a submission",
+                |op, payload| {
+                    assert_eq!(op, opcode);
+                    assert_eq!(payload, b"a submission");
+                    Ok(refusal.clone())
+                },
+            );
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "Mini dispatch refused before any Store record"
+            );
+            assert!(!root.0.join("native-dispatch-active.json").exists());
+            assert!(a.join("submit-requested.json").exists());
+            assert_eq!(
+                fs::read(a.join(format!("op{opcode}-frame.bin"))).unwrap(),
+                refusal
+            );
+            assert!(submit_once(
+                &a,
+                "1",
+                b"a ingress",
+                opcode,
+                b"a submission",
+                |_, _| panic!("same attempt must never be replayed")
+            )
+            .is_err());
+            let b = root.attempt("b");
+            let submitted = submit_once(&b, "2", b"b ingress", 34, b"b submission", |op, bytes| {
+                assert_eq!(op, 34);
+                assert_eq!(bytes, b"b submission");
+                Ok(b"private committed response".to_vec())
+            })
+            .unwrap();
+            assert_eq!(submitted.frame, b"private committed response");
+            assert!(submitted.active_marker.exists());
+            retire_active_marker(&submitted.active_marker, &submitted.active_bytes).unwrap();
+        }
+    }
+    #[test]
+    fn bound_dispatch_uncertain_or_malformed_refusal_preserves_global_marker() {
+        let valid = no_record_frame();
+        let mut wrong_tag = valid.clone();
+        wrong_tag[4] = 34;
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        let mut truncated = valid.clone();
+        truncated.pop();
+        let mut wrong_payload = valid.clone();
+        *wrong_payload.last_mut().unwrap() ^= 1;
+        for response in [
+            wrong_tag,
+            trailing,
+            truncated,
+            wrong_payload,
+            b"generic source outcome".to_vec(),
+        ] {
+            let root = BoundFixture::new();
+            let a = root.attempt("a");
+            let submitted = submit_once(
+                &a,
+                "1",
+                b"ingress",
+                ROUTE_BOUND_DISPATCH_OPCODE,
+                b"request",
+                |_, _| Ok(response),
+            )
+            .unwrap();
+            assert!(submitted.active_marker.exists());
+            let b = root.attempt("b");
+            assert!(
+                submit_once(&b, "2", b"ingress", 34, b"request", |_, _| panic!(
+                    "uncertain A must block B"
+                ))
+                .is_err()
+            );
+        }
+        let root = BoundFixture::new();
+        let a = root.attempt("a");
+        assert!(submit_once(
+            &a,
+            "1",
+            b"ingress",
+            ROUTE_BOUND_DISPATCH_OPCODE,
+            b"request",
+            |_, _| Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "lost response"
+            ))
+        )
+        .is_err());
+        assert!(root.0.join("native-dispatch-active.json").exists());
+        let root = BoundFixture::new();
+        let a = root.attempt("a");
+        assert!(submit_once(
+            &a,
+            "1",
+            b"ingress",
+            ROUTE_BOUND_DISPATCH_OPCODE,
+            b"request",
+            |_, _| {
+                fs::write(root.0.join("native-dispatch-active.json"), b"changed").unwrap();
+                Ok(valid)
+            }
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(root.0.join("native-dispatch-active.json")).unwrap(),
+            b"changed"
+        );
+    }
 
     #[test]
     fn full_unix_backlog_obeys_connect_deadline_and_recovers() {

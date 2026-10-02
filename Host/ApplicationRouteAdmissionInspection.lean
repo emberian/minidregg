@@ -1,6 +1,6 @@
 /- Canonical route-admission presentation. Private receiver provenance, not
 this inspector's JSON, authenticates a current registration. -/
-import Kernel.ApplicationRouteAdmission
+import Kernel.ApplicationDispatchReceiver
 import Host.ApplicationStreamContinuityInspection
 
 namespace Minidregg.Host.ApplicationRouteAdmissionInspection
@@ -65,5 +65,30 @@ def inspect (bytes : List UInt8) : Except String Json := do
      ("sessionFingerprint", decimal b.fingerprint.value),
      ("tip", .mkObj [("height", decimal tip.height),
        ("chain", decimal tip.chain.value), ("worldRoot", decimal tip.worldRoot.value)])]
+
+
+/-- A fixed private resident restriction wrapped around an otherwise ordinary
+signed dispatch. Neither this JSON nor its codec mints Mini authority. -/
+def authorBoundDispatch (config : NativeHost.Config) (json : Json) : Except String (List UInt8) := do
+  let obj ← exactObject ["domain", "semantics", "app", "appGeneration", "session",
+    "sessionGeneration", "subject", "ticketResource", "sessionFingerprint", "ingressHex"] json
+  let domain ← nat (← field obj "domain")
+  let semantics ← nat (← field obj "semantics")
+  unless domain == config.deployment.domain.value && semantics == config.profile.semantics.value do
+    throw "route-bound namespace differs from pinned source"
+  let fingerprint ← nat (← field obj "sessionFingerprint")
+  unless fingerprint < 2^256 do throw "route-bound fingerprint exceeds digest"
+  let binding : ApplicationStreamContinuity.Binding :=
+    { app := ← nat (← field obj "app")
+      appGeneration := ← int (← field obj "appGeneration")
+      session := ← nat (← field obj "session")
+      sessionGeneration := ← int (← field obj "sessionGeneration")
+      subject := ← nat (← field obj "subject")
+      ticketResource := ← nat (← field obj "ticketResource")
+      fingerprint := ⟨fingerprint⟩ }
+  let ingress ← hex 12102760 (← field obj "ingressHex")
+  unless !ingress.isEmpty do throw "empty route-bound signed ingress"
+  pure <| ApplicationDispatchReceiver.routeBoundCodec.encode
+    (⟨config.deployment.domain, config.profile.semantics, binding⟩, ingress)
 
 end Minidregg.Host.ApplicationRouteAdmissionInspection
