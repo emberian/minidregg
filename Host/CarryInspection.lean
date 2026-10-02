@@ -150,11 +150,10 @@ private def readEdgeText (path : System.FilePath) : IO String := do
 never imported from the untrusted edge body. The caller keeps its custody lock
 while this runs, verifies old-anchor -> old-cut continuity, and atomically adopts
 only the verified new start after the target endpoint proves it or an extension. -/
-def verifyRequest (config : NativeHost.Config) (request : Json) : IO (Except String Json) := do
+def verifyRequestWithIdentity (expected : Identity) (request : Json) : IO (Except String Json) := do
   try
-    let expected ← liftResult (parseIdentity (← liftResult (field request "oldIdentity")))
-    let configured : Identity := ⟨config.deployment.domain, config.profile.semantics, config.expectedSeed⟩
-    if expected != configured then return .error "carry verifier source profile differs from current trusted configuration"
+    let requested ← liftResult (parseIdentity (← liftResult (field request "oldIdentity")))
+    if requested != expected then return .error "carry verifier source identity differs from trusted profile"
     let operator ← liftResult (hex (← liftResult (field request "operatorPublicKey")) 32)
     let registryString ← liftResult (stringField request "sourceCapsulePath")
     let registry ← IO.FS.realPath registryString
@@ -210,5 +209,68 @@ def verifyRequest (config : NativeHost.Config) (request : Json) : IO (Except Str
           ("targetVerifierDigest", .str (encodeHex edge.body.targetCapsule.host)),
           ("trust", .str "explicit-authorized-external-handoff")])
   catch error => return .error s!"carry edge refused: {error}"
+
+
+/-- Normal Host callers still bind the source to their compiled configuration. -/
+def verifyRequest (config : NativeHost.Config) (request : Json) : IO (Except String Json) :=
+  verifyRequestWithIdentity
+    ⟨config.deployment.domain, config.profile.semantics, config.expectedSeed⟩ request
+
+/-- Bootstrap for a separately installed generic verifier. Its old identity
+comes only from the client's preexisting capsule, not from the edge or the
+target runtime. OLD_CONFIG must be the exact independently registered config.
+The old trusted executable re-describes that config before any target runs. -/
+def registeredSourceIdentity (configuration : System.FilePath) (request : Json) :
+    IO (Except String Identity) := do
+  try
+    let registryString ← liftResult (stringField request "sourceCapsulePath")
+    let registry ← IO.FS.realPath registryString
+    let pins ← liftResult (field request "sourceCapsulePins")
+    for (name, pin) in [("verifier", "verifierSha256"), ("original-config.json", "configSha256"),
+        ("profile.json", "profileSha256"), ("signature-verifier", "signatureVerifierSha256")] do
+      let path := registry / name
+      let resolved ← IO.FS.realPath path
+      if resolved != path then return .error "registered verifier capsule path changed"
+      liftResult (← checkedFile path (← liftResult (stringField pins pin)))
+    liftResult (← checkedFile configuration (← liftResult (stringField pins "configSha256")))
+    let signaturePath ← liftResult (stringField pins "signatureVerifierPath")
+    if signaturePath != (registry / "signature-verifier").toString then
+      return .error "registered signature verifier escapes capsule"
+    let profileText ← readEdgeText (registry / "profile.json")
+    let profile ← liftResult (Json.parse profileText)
+    let identity : Identity := ⟨← liftResult (digestValue (← liftResult (field profile "domain"))),
+      ← liftResult (digestValue (← liftResult (field profile "semantics"))),
+      ← liftResult (digestValue (← liftResult (field profile "expectedSeed")))⟩
+    let pinned ← liftResult (parseIdentity (← liftResult (field pins "identity")))
+    let requested ← liftResult (parseIdentity (← liftResult (field request "oldIdentity")))
+    if identity != pinned || identity != requested then
+      return .error "registered old verifier identity differs from client custody"
+    let described ← IO.Process.output {
+      cmd := (registry / "verifier").toString
+      args := #[(registry / "original-config.json").toString, "profile"] }
+    if described.exitCode != 0 || described.stderr != "" || described.stdout != profileText then
+      return .error "old trusted verifier no longer describes its registered profile"
+    return .ok identity
+  catch error => return .error s!"registered old verifier refused: {error}"
+
+/-- The profile command performs no edge lookup and executes no target code. -/
+def registeredVerifierProfile (configuration : System.FilePath) (request : Json) :
+    IO (Except String Json) := do
+  match ← registeredSourceIdentity configuration request with
+  | .error detail => return .error detail
+  | .ok identity =>
+    match field request "sourceCapsulePins" with
+    | .error detail => return .error detail
+    | .ok pins => return .ok (Json.mkObj [
+      ("algorithm", .str "minidregg-carry-verifier-v1"),
+      ("identity", identityJson identity),
+      ("sourceCapsulePins", pins),
+      ("edgeAlgorithm", .str "minidregg-carry-edge-v1")])
+
+def verifyRegisteredRequest (configuration : System.FilePath) (request : Json) :
+    IO (Except String Json) := do
+  match ← registeredSourceIdentity configuration request with
+  | .error detail => return .error detail
+  | .ok identity => verifyRequestWithIdentity identity request
 
 end Minidregg.Host.CarryInspection
