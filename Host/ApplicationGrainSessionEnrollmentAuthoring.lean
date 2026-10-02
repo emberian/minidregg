@@ -273,6 +273,34 @@ def prepareRequestCarried (config : Config) (opened : Opened config)
     throw "noncanonical session enrollment request"
   prepareCarried config opened custody request
 
+/-- Both sides of a carried service use their actual provenance: old issues
+come from the retained profile, new issues from the admitted target suffix. -/
+def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
+    Except String Plan := do
+  if request.issueIndex < anchor.durable.image.accepted.length then
+    let some origin := verified.origin
+      | throw "old session issue lacks authenticated carried origin"
+    let custody ← origin.rebindChecked verified.opened.durable
+    prepareCarried config verified.opened custody request
+  else
+    let some prior := verified.issues.find? (fun issue =>
+        issue.index == request.issueIndex &&
+        issue.evidence.spec.ticket.resource == request.ticketResource)
+      | throw "exact target-suffix event22 ticket issue absent"
+    if prior.evidence.record.event.codecVersion != 22 then
+      throw "enrollment requires target-suffix event22 ticket issue"
+    prepareForIssue config verified.opened request prior.evidence.spec prior.receipt
+
+def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
+    Except String Plan := do
+  let some request := requestCodec.decode bytes
+    | throw "noncanonical session enrollment request"
+  if requestCodec.encode request != bytes then
+    throw "noncanonical session enrollment request"
+  prepareSuffix config verified request
+
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
     Except String Plan := do
@@ -334,6 +362,16 @@ def assembleCurrentCarried (config : Config) (opened : Opened config)
   let fresh ← prepareCarried config opened custody plan.request
   if planCodec.encode fresh != planCodec.encode plan then
     throw "carried session enrollment plan no longer current"
+  assemble fresh signatures
+
+
+def assembleCurrentSuffix (config : Config) {anchor : Opened config} {target : Durable}
+    (verified : NativeHostReplay.SuffixVerified config anchor target)
+    (plan : Plan) (signatures : List (List UInt8)) :
+    Except String (List UInt8) := do
+  let fresh ← prepareSuffix config verified plan.request
+  if planCodec.encode fresh != planCodec.encode plan then
+    throw "session enrollment plan no longer current in carried service"
   assemble fresh signatures
 
 end Minidregg.Host.ApplicationGrainSessionEnrollmentAuthoring
