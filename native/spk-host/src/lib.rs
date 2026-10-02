@@ -26,6 +26,8 @@ mod agent_api_server;
 #[cfg(target_os = "linux")]
 mod agent_api_wire;
 #[cfg(target_os = "linux")]
+pub mod broker;
+#[cfg(target_os = "linux")]
 mod claim_descriptor;
 #[cfg(target_os = "linux")]
 mod claim_native;
@@ -40,7 +42,7 @@ mod dispatch_delivery;
 #[cfg(target_os = "linux")]
 mod dispatch_inspection;
 #[cfg(target_os = "linux")]
-mod dispatch_native;
+pub mod dispatch_native;
 #[cfg(target_os = "linux")]
 mod dispatch_web_input;
 #[cfg(target_os = "linux")]
@@ -59,6 +61,8 @@ pub mod launch_descriptor_native;
 mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
+#[cfg(target_os = "linux")]
+mod grain_export;
 #[cfg(target_os = "linux")]
 mod grain_route;
 #[cfg(target_os = "linux")]
@@ -96,6 +100,17 @@ pub mod sandbox;
 #[cfg(target_os = "linux")]
 pub mod seccomp;
 #[cfg(target_os = "linux")]
+mod setid_bound;
+#[cfg(target_os = "linux")]
 mod spawn_gate;
 #[cfg(target_os = "linux")]
 mod volume_custody;
+#[cfg(target_os = "linux")]
+mod web_socket;
+#[cfg(target_os = "linux")]
+mod stream_continuity;
+
+#[cfg(target_os = "linux")]
+mod route_admission;
+#[cfg(target_os = "linux")]
+pub mod resident_route_control;

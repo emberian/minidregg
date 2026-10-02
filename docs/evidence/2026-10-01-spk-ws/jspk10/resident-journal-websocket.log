@@ -1,0 +1,58 @@
+2026-10-01T18:48:05-04:00 persvati systemd[1]: Started mini-spk-a7801-g2.service - Mini SPK resident app 7801 generation 2 store 3ba0652aeefcff79.
+2026-10-01T19:04:10-04:00 persvati spk-host[1408532]: spk-host: websocket op 2 closed by the client (carried 2008 up, 1447 down)
+2026-10-01T19:06:13-04:00 persvati spk-host[1408532]: spk-host: websocket op 8 closed by the client (carried 262008 up, 254079 down)
+2026-10-01T19:06:44-04:00 persvati spk-host[1408532]: spk-host: websocket op 9 cut: wsByteCap (4194304 bytes/min, class S; carried 2161500 up, 2049855 down)
+2026-10-01T19:07:11-04:00 persvati spk-host[1408532]: spk-host: websocket op 4 closed by the app (carried 26 up, 249 down)
+2026-10-01T19:07:11-04:00 persvati spk-host[1408532]: spk-host: websocket op 7 closed by the app (carried 14 up, 245 down)
+2026-10-01T19:07:11-04:00 persvati spk-host[1408532]: spk-host: websocket op 6 closed by the app (carried 20 up, 247 down)
+2026-10-01T19:07:11-04:00 persvati spk-host[1408532]: spk-host: websocket op 5 closed by the app (carried 26 up, 249 down)
+2026-10-01T19:14:59-04:00 persvati systemd[1]: Stopping mini-spk-a7801-g2.service - Mini SPK resident app 7801 generation 2 store 3ba0652aeefcff79...
+2026-10-01T19:14:59-04:00 persvati systemd[1]: Stopped mini-spk-a7801-g2.service - Mini SPK resident app 7801 generation 2 store 3ba0652aeefcff79.
+2026-10-01T19:32:13-04:00 persvati systemd[1]: Started mini-spk-a7801-g4.service - Mini SPK resident app 7801 generation 4 store 3ba0652aeefcff79.
+2026-10-01T19:48:56-04:00 persvati spk-host[2142415]: spk-host: websocket op 1 closed by the client (carried 2008 up, 1447 down)
+2026-10-01T20:10:48-04:00 persvati systemd[1]: Stopping mini-spk-a7801-g4.service - Mini SPK resident app 7801 generation 4 store 3ba0652aeefcff79...
+2026-10-01T20:10:48-04:00 persvati systemd[1]: Stopped mini-spk-a7801-g4.service - Mini SPK resident app 7801 generation 4 store 3ba0652aeefcff79.
+2026-10-01T19:01:03-04:00 persvati systemd[1]: Started mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store f8218bfd6707a6ed.
+2026-10-01T19:07:57-04:00 persvati spk-host[1559599]: spk-host: websocket op 2 closed by the client (carried 224 up, 161 down)
+2026-10-01T19:07:57-04:00 persvati spk-host[1559599]: spk-host: websocket op 3 closed by the client (carried 78 up, 965 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket open refused: wsConcurrencyCap (32 open, class S cap 32)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 5 closed by the client (carried 518 up, 288 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 7 closed by the client (carried 373 up, 1093 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 8 closed by the client (carried 359 up, 1087 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 6 closed by the client (carried 380 up, 1096 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 9 closed by the client (carried 352 up, 1084 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 10 closed by the client (carried 345 up, 1081 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 11 closed by the client (carried 338 up, 1078 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 12 closed by the client (carried 331 up, 1075 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 13 closed by the client (carried 324 up, 1072 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 14 closed by the client (carried 310 up, 1066 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 15 closed by the app (carried 303 up, 1063 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 16 closed by the app (carried 289 up, 1057 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 17 closed by the app (carried 282 up, 1054 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 18 closed by the app (carried 268 up, 1048 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 19 closed by the app (carried 261 up, 1045 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 20 closed by the app (carried 247 up, 1039 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 21 closed by the app (carried 240 up, 1036 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 22 closed by the app (carried 233 up, 1033 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 23 closed by the app (carried 226 up, 1030 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 24 closed by the app (carried 212 up, 1024 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 25 closed by the app (carried 205 up, 1021 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 26 closed by the app (carried 191 up, 1015 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 27 closed by the client (carried 184 up, 1012 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 28 closed by the app (carried 170 up, 1006 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 32 closed by the client (carried 121 up, 985 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 33 closed by the client (carried 114 up, 982 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 34 closed by the client (carried 100 up, 976 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 36 closed by the client (carried 79 up, 967 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 29 closed by the app (carried 163 up, 1003 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 30 closed by the app (carried 149 up, 997 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 31 closed by the app (carried 135 up, 991 down)
+2026-10-01T19:23:20-04:00 persvati spk-host[1559599]: spk-host: websocket op 35 closed by the app (carried 86 up, 970 down)
+2026-10-01T19:24:03-04:00 persvati spk-host[1559599]: spk-host: websocket op 37 ended: client write: Broken pipe (os error 32) (carried 0 up, 88 down)
+2026-10-01T19:40:00-04:00 persvati systemd[1]: Stopping mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store f8218bfd6707a6ed...
+2026-10-01T19:40:00-04:00 persvati systemd[1]: Stopped mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store f8218bfd6707a6ed.
+2026-10-01T18:59:44-04:00 persvati systemd[1]: Started mini-spk-a5901-g2.service - Mini SPK resident app 5901 generation 2 store a709941d1a287bf6.
+2026-10-01T19:05:51-04:00 persvati spk-host[1544333]: spk-host: websocket op 2 ended: client read: Connection reset by peer (os error 104) (carried 466 up, 662 down)
+2026-10-01T19:05:51-04:00 persvati spk-host[1544333]: spk-host: websocket op 3 ended: client read: Connection reset by peer (os error 104) (carried 163 up, 297 down)
+2026-10-01T19:11:29-04:00 persvati systemd[1]: Stopping mini-spk-a5901-g2.service - Mini SPK resident app 5901 generation 2 store a709941d1a287bf6...
+2026-10-01T19:11:29-04:00 persvati systemd[1]: Stopped mini-spk-a5901-g2.service - Mini SPK resident app 5901 generation 2 store a709941d1a287bf6.

@@ -272,7 +272,7 @@ for route in hermes-a hermes-b; do
       >"$EVIDENCE/agents/verified/$label-owner.stdout"
     parent_root=$(jq -er '.cell.root' \
       "$EVIDENCE/agents/verified/$label-owner/view.json")
-    authority=$(jq -er '.signing[0].authorityRoot' \
+    authority=$(jq -er '.authorityRoot' \
       "$EVIDENCE/agents/verified/$label-owner/challenge.json")
     jq -n --arg s "$controller_subject" --arg t "$parent_task" \
       --arg p "$parent_owner" --arg child "$child" \

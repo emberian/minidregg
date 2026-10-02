@@ -1,0 +1,19 @@
+store	store	PASS	168.039090892	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-gogs/store/base/workroom(noapplicationborn)
+gogs	package	INFO	-	aede44cf19129337aae68b699332457415155356Bclass=Skind=webapp=2601
+gogs	birth-a	PASS	36.027806136	
+gogs	install-a	PASS	455.463663327	{"app":"2601","appUid":949,"class":"S","completion":{"committedClaimSha256":"5ad3d65cfa1cb1c95c59be626b46c70893941bd074da5367aecf2738f11ecb8a","completionReceipt":{"acceptedCount":"17","eventId":"1075
+gogs	share-a	PASS	291.934243225	{"app":"2601","descriptor":"2611","directory":"/var/lib/minidregg/grains/spk-apps-root/ea6119bd7fd556fb/host/apps/2601/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+gogs	start-a	PASS	459.055260133	{"app":"2601","completion":{"admittedSha256":"0ca1c9e4a4876bc7b1195942729119e4cf9ccc2e2247a8ffdc235783950af3a6","completionReceipt":{"acceptedCount":"25","eventId":"42731025748262573286894970334544826
+gogs	floor-a	PASS	.277732681	floor-heldapp-processes=3unit=mini-spk-a2601-g2.service
+gogs	enroll-a	PASS	78.216897316	
+gogs	get-a	PASS	47.912877563	200
+gogs	get-a-http	200	-	bytes=9734<!DOCTYPEhtml><html><headdata-suburl=""><metahttp-equiv="Content-Type"content="text/html;charset=UTF-8"/><metahttp-equiv="X-UA-Compatible"content=
+gogs	metrics-g1-get	PASS	-	{"memoryPeak":"412790784","pidsPeak":"43","procs":"6","processNames":"2bwrap,1gogs,1launcher.sh,1sandstorm-http-,1spk-host"}
+gogs	metrics-g1	PASS	-	{"memoryPeak":"412790784","pidsPeak":"43","procs":"6","processNames":"2bwrap,1gogs,1launcher.sh,1sandstorm-http-,1spk-host"}
+gogs	stop-a	PASS	1362.773586449	{"activeState":"inactive","app":"2601","elapsedMs":"1361068","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2601-g2.service"}
+gogs	start-a2	PASS	1036.679859280	{"app":"2601","completion":{"admittedSha256":"b65c7491727f6190e873001dc6cfe611b9e3f53b95b7fa3333b69d9b24193e17","completionReceipt":{"acceptedCount":"33","eventId":"57080440308222019914467789366283712
+gogs	floor-a2	PASS	.342689613	floor-heldapp-processes=3unit=mini-spk-a2601-g4.service
+gogs	enroll-a2	PASS	94.819778850	
+gogs	get-a2	PASS	40.076994977	200
+gogs	get-a2-http	200	-	bytes=9734<!DOCTYPEhtml><html><headdata-suburl=""><metahttp-equiv="Content-Type"content="text/html;charset=UTF-8"/><metahttp-equiv="X-UA-Compatible"content=
+gogs	metrics-g2	PASS	-	{"memoryPeak":"456953856","pidsPeak":"42","procs":"6","processNames":"2bwrap,1gogs,1launcher.sh,1sandstorm-http-,1spk-host"}

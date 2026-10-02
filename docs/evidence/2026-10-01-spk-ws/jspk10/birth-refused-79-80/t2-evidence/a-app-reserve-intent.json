@@ -1,0 +1,33 @@
+{
+  "grain": {
+    "task": "7902",
+    "subject": "8",
+    "capability": "81",
+    "observeCapability": "81",
+    "schemaVersion": "1",
+    "expectedTargetRoot": "76573474633213305245396424743484866020198740280861586825822809196486530161073",
+    "context": {
+      "operationId": "51000",
+      "payload": "grain journey workroom"
+    },
+    "before": {
+      "generation": "1",
+      "status": "1",
+      "remaining": "47",
+      "reserved": "0"
+    },
+    "operation": {
+      "type": "reserve",
+      "amount": "5"
+    },
+    "publications": []
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "7902",
+      "capability": "81"
+    }
+  ],
+  "intentNonce": "51000"
+}

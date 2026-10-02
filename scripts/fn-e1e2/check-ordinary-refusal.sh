@@ -30,7 +30,7 @@ EOF
   --view resource --dir "$ROOT/gateway-before-denial" \
   >"$ROOT/gateway-before-denial.stdout"
 TARGET_ROOT=$(jq -er '.cell.root' "$ROOT/gateway-before-denial/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$ROOT/gateway-before-denial/challenge.json")
+AUTHORITY_ROOT=$(jq -er '.authorityRoot' "$ROOT/gateway-before-denial/challenge.json")
 BEFORE_HEIGHT=$(jq -er '.height' "$ROOT/gateway-before-denial/challenge.json")
 
 jq -n --arg ordinary "$ORDINARY" --arg targetRoot "$TARGET_ROOT" \

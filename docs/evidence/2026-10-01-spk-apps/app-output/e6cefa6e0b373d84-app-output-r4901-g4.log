@@ -1,0 +1,4 @@
+Mountingwebdavfromdatadir/var/davros/data
+Storingtemporaryfilesin/var/davros/tmp
+Davrosstartedin165ms,listeningonport8000
+[0mGET/dav/survey.txt[32m200[0m21.071ms-31[0m

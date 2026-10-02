@@ -1,0 +1,8 @@
+nodeapp.js--cors--vm
+Pleaseconnectto:http://persvati:33411/
+Fallingbacktovm.CreateContextbackend
+Cross-OriginResourceSharing(CORS)enabled.
+Expressserverlisteningonport33411indevelopmentmode
+Zappa0.5.0"Youcan'tdothatonstageanymore"orchestratingtheshow
+[Error:Redisconnectiontolocalhost:6379failed-connectECONNREFUSED]
+==>FallingbacktoJSONstorage:/var/dump.json

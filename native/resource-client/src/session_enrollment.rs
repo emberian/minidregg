@@ -495,6 +495,38 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
     print_json(&result)
 }
 
+/// Re-decode canonical source Plan bytes; old cached JSON may predate additive
+/// source inspection fields. This is presentation, not a native verdict.
+pub(super) fn inspect_plan_exact(directory: &Path) -> Result<Value> {
+    let pinned = pin(directory)?;
+    let output = fresh_inspection_path(directory, "reenroll-plan")?;
+    let fresh = source_inspect(&pinned.host, &pinned.config, PLAN_ROUTE,
+        &directory.join("plan.bin"), &output)?;
+    same_pin(directory, &pinned)?;
+    exact_plan(&fresh, &inspected(directory, "request-inspected.json")?, &pinned.request, &pinned.plan)?;
+    Ok(fresh)
+}
+fn fresh_inspection_path(directory: &Path, stem: &str) -> Result<PathBuf> {
+    (0..10_000).map(|i| directory.join(format!("{stem}-{i:04}.json")))
+        .find(|p| !p.exists()).ok_or_else(|| "enrollment inspection names exhausted".into())
+}
+/// Exact historical native lookup followed by fresh source decoding. Host and
+/// config must be the caller's pinned execution image; never use an old image
+/// against a Store after a compatible upgrade.
+pub(super) fn authenticated_anchor(directory: &Path, host: &Path, config: &Path, socket: &Path, inspector: &Path) -> Result<Value> {
+    let (pinned, ingress) = sealed(directory)?;
+    if pinned.host != host || pinned.socket != socket || bounded(&pinned.config, 65_536)? != bounded(config, 65_536)? {
+        return Err("enrollment anchor execution pins differ".into());
+    }
+    lookup(directory)?;
+    let output = fresh_inspection_path(directory, "reenroll-ingress")?;
+    let fresh = source_inspect(inspector, &pinned.config, INGRESS_ROUTE,
+        &directory.join("ingress.bin"), &output)?;
+    same_seal(directory, &pinned, &ingress)?;
+    exact_ingress(&fresh, &inspected(directory, "plan-inspected.json")?, &pinned.request, &ingress)?;
+    Ok(fresh)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

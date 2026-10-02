@@ -1,0 +1,7 @@
+{
+  "config": "/var/lib/minidregg/grains/spk-ws-run/j10/t2/evidence/tool-state/config.json",
+  "format": "minidregg-resource-client-attempt-v1",
+  "host": "/var/lib/minidregg/grains/spk-ws-bin/minidregg-host",
+  "operation": "query",
+  "socket": "/var/lib/minidregg/grains/spk-ws-run/j10/t2/sock/participant/host.sock"
+}

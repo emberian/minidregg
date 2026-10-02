@@ -4,6 +4,7 @@ admission, a freshly won durable CAS, exact complete post-image readback and
 validation. Already-present and reply-lost readback preserves the original
 receipt, but cannot mint another physical delivery permit.
 -/
+import Compiler.ApplicationReceivingDomain
 import Kernel.ApplicationDispatchAgentProjection
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentReceiver
@@ -86,7 +87,7 @@ theorem Permit.won_fresh_installed {config : Config} (permit : Permit config) :
 private def permitCodec : LawfulCodec
     (ApplicationDispatchAgentProjection.Paid × NativeHostCodec.Receipt) :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2".toUTF8.toList
+    ApplicationReceivingDomain.agentDispatchCommittedPermitFrame
     (StreamCodec.product ApplicationDispatchAgentProjection.paidStream
       NativeHostCodec.receiptStream)
 

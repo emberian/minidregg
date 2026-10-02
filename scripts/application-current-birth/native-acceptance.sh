@@ -105,7 +105,7 @@ reserve_tool() {
     --slurpfile read "$EVIDENCE/$name-before/view.json" \
     --slurpfile challenge "$EVIDENCE/$name-before/challenge.json" \
     '{grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$n,payload:"current app birth reserve"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -140,7 +140,6 @@ birth_source() {
         {kind:"object",target:"7902",capability:"81"},
         {kind:"object",target:"7901",capability:"73"}],
       shell:{tariff:{base:"2",perBirth:"1"},
-        authorityRoot:$challenge[0].signing[0].authorityRoot,
         source:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
           creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"},
         tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,
@@ -192,9 +191,9 @@ query_policy snapshot-policy 8 8403 145 "$EVIDENCE/workroom/tool.key" 43205
 jq -e --arg target "8401" \
   '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/app-born/view.json" >/dev/null
-jq -e '.cell.document == "8402" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/package-born/view.json" >/dev/null
-jq -e '.cell.document == "8403" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/snapshot-born/view.json" >/dev/null
 for target in app package snapshot; do
   case "$target" in
@@ -240,7 +239,7 @@ query_policy descriptor-policy 8 8405 149 "$EVIDENCE/workroom/tool.key" 44205
 jq -e --arg target "8404" \
   '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/session-born/view.json" >/dev/null
-jq -e '.cell.document == "8405" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/descriptor-born/view.json" >/dev/null
 for target in session descriptor; do
   if [ "$target" = session ]; then id=8404; else id=8405; fi

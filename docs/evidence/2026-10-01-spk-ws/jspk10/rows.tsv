@@ -1,0 +1,34 @@
+t1-store	PASS	107s	profile                      exit=0 .566393035s
+t1-birth-a	PASS	22s	birth-a                      exit=0 21.872134805s
+t1-install-a	PASS	206s	install-a                    exit=0 205.948018357s
+t1-share-a	PASS	155s	share-a                      exit=0 154.464716748s
+t1-start-a	PASS	221s	start-a                      exit=0 221.812506527s
+t1-enroll-a	PASS	32s	enroll-a                     exit=0 31.371906589s
+t1-get-a	PASS	28s	200
+t1-ws-deliver	FAIL	0s	exit 1: ValueError: invalid literal for int() with base 10: '63f20145d5dcaf12d84d283007e2da31c6d439e3eaf180aa7d9baebb1d3b36f1.json' | 
+t2-store	PASS	115s	profile                      exit=0 .602769236s
+t3-store	PASS	118s	profile                      exit=0 .455858500s
+t2-birth-a	PASS	19s	birth-a                      exit=0 19.188634804s
+t3-birth-a	PASS	19s	birth-a                      exit=0 19.756305121s
+t3-install-a	PASS	154s	install-a                    exit=0 153.954201957s
+t2-install-a	PASS	222s	install-a                    exit=0 221.350412770s
+t3-share-a	PASS	160s	share-a                      exit=0 159.689027306s
+t2-share-a	PASS	174s	share-a                      exit=0 173.819276993s
+t3-start-a	PASS	267s	start-a                      exit=0 266.410441296s
+t1-ws-deliver	PASS	42s	{"row": "ntfy-deliver", "openSeconds": 21.217, "postStatus": "200", "deliveredAfterPostSeconds": 0.0, "message": "published over POST 580070549", "recordsBefore": 1, "afterOpen": 2, "afterPost": 3, "afterFrames": 3, "afterClose": 3, "framesExchanged": 400, "openRecord": {"op": 2, "type": "application-dispatch-committed-inspection-v2", "method": "WEBSOCKET", "streamed": true, "path": "m6grain/ws", "acceptedCount": "28"}, "postRecord": {"op": 3, "type": "application-dispatch-committed-inspection-v2", "method": "POST", "streamed": false, "path": "m6grain", "acceptedCount": "29"}}
+t3-enroll-a	PASS	34s	enroll-a                     exit=0 34.454939189s
+t3-get-a	PASS	19s	200
+t2-start-a	PASS	285s	start-a                      exit=0 285.000243504s
+t3-ws-ddp	PASS	48s	{"row": "meteor-ddp", "openSeconds": [23.013, 24.143], "firstMessages": ["{\"server_id\":\"0\"}", "{\"msg\":\"connected\",\"session\":\"EeWrKt9eMNznS6fAg\"}"], "connected": {"msg": "connected", "session": "EeWrKt9eMNznS6fAg"}, "lists": 1, "methodResult": {"msg": "result", "id": "1", "result": [{"_id": "Cvm29CvW62bBSrXxT", "listId": "NuvCrg67MKJadtRPz", "text": "todo over the socket 915185856", "checked": false, "createdAt": {"$date": 1790895926880}}]}, "secondSocketAdded": {"msg": "added", "collection": "todos", "id": "Cvm29CvW62bBSrXxT", "fields": {"listId": "NuvCrg67MKJadtRPz", "text": "todo over the socket 915185856", "checked": false, "createdAt": {"$date": 1790895926880}}}, "recordsBefore": 1, "afterOpen": 2, "afterMethod": 2, "afterSecondOpen": 3}
+t2-enroll-a	PASS	51s	enroll-a                     exit=0 51.705541915s
+t2-get-a	PASS	28s	200
+t1-ws-flood	PASS	179s	{"row": "flood", "burst": {"pings": 2000, "pongs": 2000, "seconds": 0.038, "framesPerSecond": 104916.0, "bytesPerSecond": 13743999.4}, "flood": {"openRecordAdded": 1, "recordsDuringFlood": 0, "cut": {"afterSeconds": 1.243, "clientBytesSent": 2161762, "pongsReceived": 16140, "end": "eof"}}, "bystanders": 4, "afterFloodPostStatus": "200", "afterFloodDelivered": 4, "residentRssKiB": 31472}
+t2-ws-coedit	PASS	77s	{"row": "ethercalc-coedit", "openSeconds": [23.257, 27.373], "engineIo": {"pingInterval": 25000, "upgrades": []}, "recordsBefore": 1, "afterOpens": 3, "afterEdit": 3, "afterCsvGet": 4, "editSeenOnOtherSocketSeconds": 0.002, "broadcast": {"type": "execute", "room": "wsroom", "user": "alice", "cmdstr": "set A1 text t co-edit-41558482", "saveundo": false}, "csvStatus": "200", "csvHasValue": true}
+t3-stop-a	PASS	892s	stop-a                       exit=0 891.944778795s
+t2-ws-caps	PASS	940s	{"row": "caps", "class": "S", "opened": 32, "openSeconds": [18.27, 17.642, 17.338, 27.039, 22.288, 24.073, 23.27, 21.078, 19.095, 27.774, 28.612, 32.362, 36.681, 31.263, 28.579, 22.025, 28.11, 21.683, 28.844, 24.848, 35.9, 28.155, 27.711, 25.354, 26.929, 41.52, 37.104, 33.542, 32.882, 36.364, 36.859, 33.796], "openSecondsMin": 17.338, "openSecondsMedian": 28.11, "openSecondsMax": 41.52, "recordsBefore": 4, "afterOpens": 36, "afterRefusal": 36, "refused": {"status": "429", "refusal": ["wsConcurrencyCap"]}, "broadcastReceivedBy": 31, "aliveAtBroadcast": 32, "residentRssKiB": {"before": 38792, "with": 39324, "perSocket": 16.6}, "unitMemoryCurrent": {"before": 162213888, "with": 173150208}, "openAfterClose": null, "recordsAfterReopen": 37}
+t1-ws-stop	FAIL	1375s	exit 1:  | {"row": "hold", "heldSeconds": 441.9, "end": "socket closed", "closedAt": 1790896499.9104683}
+t1-start-a2	PASS	850s	start-a2                     exit=0 849.316956358s
+t1-enroll-a2	PASS	82s	enroll-a2                    exit=0 81.943517704s
+t1-ws-deliver2	PASS	75s	{"row": "ntfy-deliver", "openSeconds": 33.846, "postStatus": "200", "deliveredAfterPostSeconds": 0.0, "message": "published over POST 588631111", "recordsBefore": 0, "afterOpen": 1, "afterPost": 2, "afterFrames": 2, "afterClose": 2, "framesExchanged": 400, "openRecord": {"op": 1, "type": "application-dispatch-committed-inspection-v2", "method": "WEBSOCKET", "streamed": true, "path": "m6grain/ws", "acceptedCount": "46"}, "postRecord": {"op": 2, "type": "application-dispatch-committed-inspection-v2", "method": "POST", "streamed": false, "path": "m6grain", "acceptedCount": "47"}}
+t2-stop-a	FAIL	2165s	exit 1:  | stop-a                       exit=1 2164.705807708s
+t1-ws-stop2	PASS	2868s	STOP began 1790898580.224910189, socket ended 1790899848.9303741 (socket closed), STOP completed 1790901406.655321392; {"generation":"4","activeState":"inactive","elapsedMs":"2825240"}

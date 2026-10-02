@@ -11,9 +11,15 @@
 //! artifacts; an attempt they leave uncertain is reported and never retried.
 //!
 //! The only record written here that is not derivable from Mini is the
-//! physical placement of the instance (its app UID), `placement.json`. The
-//! root volume registration later records the same UID and is rechecked.
+//! physical placement of the instance (its app UID and size class),
+//! `placement.json`, a copy of what the root broker allocated.
+//!
+//! `grain` runs as the Store operator, never as root. Every root-only step
+//! (app UID allocation, the per-app slice, image publication, the /var
+//! volume, the resident unit, starting and stopping it) is one typed request
+//! to `mini-spk-broker` (`crate::broker`).
 
+use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
 use crate::materialize::verify_installed_spk;
@@ -27,14 +33,21 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[path = "grain_profile_upgrade.rs"]
+mod profile_upgrade;
+
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_SPK: u64 = 256 * 1024 * 1024;
 const PACKAGE_STORE: &str = "/var/lib/minidregg/spk/packages";
-const INBOX: &str = "/var/lib/minidregg/spk/inbox";
-const VOLUME_REGISTRY: &str = "/etc/minidregg/spk/volumes";
-const VOLUME_MOUNTS: &str = "/var/lib/minidregg/spk/vars";
-const HOST_IDENTITY: &str = "/etc/minidregg/spk/host-identity";
-const START_WAIT: Duration = Duration::from_secs(900);
+/// How long `grain start` waits for the resident's START completion before
+/// reporting UNRESOLVED (the resident keeps going either way). Measured on
+/// final (SPK-APPS 2026-10-01): a START is BEGIN, claim, launch, report,
+/// sign, op70 and op38, several of which replay the Store's history in the
+/// Host; 245-626 s at load 20-45, and op38 alone 6.5 min at load 45. At
+/// 900 s the operator gave up on STARTs that then completed, and a harness
+/// that stopped the Store services on that verdict wedged them. 30 minutes
+/// until the Host's replay is fixed (task HOST-KECCAK).
+const START_WAIT: Duration = Duration::from_secs(1800);
 
 /// Mini plan signing-slot order per lifecycle kind (role, index). Mini's plan
 /// inspection remains decisive: a differing slot list refuses before signing.
@@ -179,9 +192,13 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    genesis_config_sha256: Option<String>,
+    #[serde(default)]
+    ws_authority_lease_seconds: Option<u64>,
     protocol: String,
     state_root: PathBuf,
     mini_host: PathBuf,
@@ -195,14 +212,11 @@ struct HostProfile {
     management_seed: PathBuf,
     completion_custodian_seed: PathBuf,
     completion_semantics: String,
+    grains_root: PathBuf,
     bwrap: PathBuf,
     bwrap_sha256: String,
     spk_host: PathBuf,
     spk_host_sha256: String,
-    ingest_helper: PathBuf,
-    volume_helper: PathBuf,
-    app_uids: Vec<u32>,
-    volume_mib: u64,
 }
 
 struct HostIdentity {
@@ -214,20 +228,41 @@ struct Host {
     profile: HostProfile,
     identity: HostIdentity,
     management_key_id: String,
+    /// The Store key: the first 16 hex of the SHA-256 of the Store's pinned
+    /// genesis config (unique per Store: it carries the Store's random
+    /// completion custodian key). Volume, mount, witness and slice names
+    /// carry it. K-SPK replaces it with the genesis deployment id.
+    store: String,
+    // Serializes profile selection with grain lifecycle operations.
+    _profile_lock: File,
 }
 
 impl Host {
     fn load(path: &Path) -> io::Result<Self> {
+        if unsafe { libc::geteuid() } == 0 {
+            return Err(invalid(
+                "grain runs as the Store operator; root steps go through mini-spk-broker",
+            ));
+        }
         let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
-        if profile.protocol != "mini-spk-grain-host-v1"
-            || path.parent() != Some(profile.state_root.as_path())
+        if let Some(seconds) = profile.ws_authority_lease_seconds {
+            crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
+        }
+        let profile_lock = profile_upgrade::lock(&profile.state_root, false)?;
+        profile_upgrade::validate_selected(path, &profile)?;
+        let genesis = profile
+            .genesis_config_sha256
+            .as_ref()
+            .unwrap_or(&profile.mini_config_sha256);
+        let store = genesis.get(..16).unwrap_or("").to_owned();
+        if profile.protocol != "mini-spk-grain-host-v2"
+            || !hex64(genesis)
+            || !broker::store_key(&store)
+            || profile.state_root != profile.grains_root.join(&store).join("host")
             || !lifecycle_selector::decimal(&profile.management_subject)
             || !lifecycle_selector::decimal(&profile.management_key_epoch)
             || !hex64(&profile.management_public_key_hex)
             || !lifecycle_selector::decimal(&profile.completion_semantics)
-            || profile.app_uids.is_empty()
-            || profile.app_uids.contains(&0)
-            || !(64..=16384).contains(&profile.volume_mib)
             || ![
                 &profile.state_root,
                 &profile.mini_host,
@@ -237,8 +272,7 @@ impl Host {
                 &profile.completion_custodian_seed,
                 &profile.bwrap,
                 &profile.spk_host,
-                &profile.ingest_helper,
-                &profile.volume_helper,
+                &profile.grains_root,
             ]
             .iter()
             .all(|path| path.is_absolute())
@@ -248,7 +282,7 @@ impl Host {
         private_dir(&profile.state_root)?;
         pinned_executable(&profile.bwrap, &profile.bwrap_sha256)?;
         pinned_executable(&profile.spk_host, &profile.spk_host_sha256)?;
-        let identity = read_host_identity()?;
+        let identity = read_host_identity(&profile.state_root)?;
         let operator = operator_of(&profile);
         let (subject, key) = lifecycle_selector::pinned_management(&operator)?;
         if subject != profile.management_subject {
@@ -260,6 +294,8 @@ impl Host {
             profile,
             identity,
             management_key_id: key,
+            store,
+            _profile_lock: profile_lock,
         })
     }
 
@@ -285,31 +321,23 @@ fn operator_of(profile: &HostProfile) -> PrivateOperator {
     }
 }
 
-/// Root-published two-line host identity (see deploy/spk-host/README.md).
-fn read_host_identity() -> io::Result<HostIdentity> {
-    let meta = fs::symlink_metadata(HOST_IDENTITY)?;
-    if !meta.is_file() || meta.uid() != 0 || meta.permissions().mode() & 0o777 != 0o600 {
-        return Err(invalid("root host identity custody refused"));
-    }
-    let text = fs::read_to_string(HOST_IDENTITY)?;
-    let lines: Vec<_> = text.lines().collect();
-    match lines.as_slice() {
-        [deployment, host] => {
-            let deployment_id = deployment
-                .strip_prefix("deployment_id=")
-                .filter(|v| hex64(v))
-                .ok_or_else(|| invalid("deployment identity malformed"))?;
-            let host_id = host
-                .strip_prefix("host_id=")
-                .filter(|v| hex64(v))
-                .ok_or_else(|| invalid("host identity malformed"))?;
-            Ok(HostIdentity {
-                deployment_id: deployment_id.into(),
-                host_id: host_id.into(),
-            })
-        }
-        _ => Err(invalid("root host identity shape refused")),
-    }
+/// The root host identity (`/etc/minidregg/spk/host-identity`, root 0600) as
+/// the broker reported it at `init-store`. The operator keeps a copy only to
+/// pin what the root volume witness must carry; a wrong copy refuses START.
+fn read_host_identity(state_root: &Path) -> io::Result<HostIdentity> {
+    let value = read_json(&state_root.join("host-identity.json"))?;
+    let field = |name: &str| -> io::Result<String> {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|v| hex64(v))
+            .map(str::to_owned)
+            .ok_or_else(|| invalid(format!("host identity {name} malformed")))
+    };
+    Ok(HostIdentity {
+        deployment_id: field("deploymentId")?,
+        host_id: field("hostId")?,
+    })
 }
 
 /// The admitted application resource: an accepted current-application birth.
@@ -361,105 +389,72 @@ pub(crate) struct Placement {
     app_gid: u32,
     volume_resource: String,
     volume_mib: u64,
+    class: String,
 }
 
 pub(crate) fn load_placement(path: &Path) -> io::Result<Placement> {
     let placement: Placement = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
-    if placement.protocol != "mini-spk-grain-placement-v1" {
+    if placement.protocol != "mini-spk-grain-placement-v2" {
         return Err(invalid("grain placement protocol refused"));
     }
     placement.selector.validate()?;
     Ok(placement)
 }
 
-fn account_gid(uid: u32) -> io::Result<u32> {
-    let entry = unsafe { libc::getpwuid(uid) };
-    if entry.is_null() {
-        return Err(invalid(format!("app UID {uid} has no account")));
-    }
-    let gid = unsafe { (*entry).pw_gid };
-    if gid == 0 {
-        return Err(invalid("app account primary group is root"));
-    }
-    Ok(gid)
+fn reply_u32(reply: &Value, name: &str) -> io::Result<u32> {
+    reply
+        .get(name)
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+        .filter(|v| *v != 0)
+        .ok_or_else(|| invalid(format!("broker reply lacks {name}")))
 }
 
-/// UIDs already bound: other instances' placements and every root volume
-/// registration. A root registration is a durable physical fact; it wins.
-fn bound_uids(host: &Host, except_app: &str) -> io::Result<Vec<(u32, String)>> {
-    let mut bound = Vec::new();
-    let apps = host.profile.state_root.join("apps");
-    if exists(&apps)? {
-        for entry in fs::read_dir(&apps)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name == except_app {
-                continue;
-            }
-            let path = entry.path().join("placement.json");
-            if exists(&path)? {
-                bound.push((load_placement(&path)?.app_uid, name));
-            }
-        }
-    }
-    if exists(Path::new(VOLUME_REGISTRY))? {
-        for entry in fs::read_dir(VOLUME_REGISTRY)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(resource) = name.strip_suffix(".conf") else {
-                continue;
-            };
-            if resource == except_app {
-                continue;
-            }
-            let text = fs::read_to_string(entry.path())?;
-            if let Some(uid) = text
-                .lines()
-                .find_map(|line| line.strip_prefix("app_uid="))
-                .and_then(|v| v.parse::<u32>().ok())
-            {
-                bound.push((uid, resource.to_owned()));
-            }
-        }
-    }
-    Ok(bound)
-}
-
-fn place(host: &Host, selector: &LifecycleSelector, raw_sha256: &str) -> io::Result<Placement> {
+/// The broker allocates the app UID from its own pool (the operator never
+/// chooses a UID) and renders the app's slice for its size class.
+fn place(
+    host: &Host,
+    selector: &LifecycleSelector,
+    raw_sha256: &str,
+    class: &str,
+) -> io::Result<Placement> {
     let app_dir = host.app_dir(&selector.app);
     private_directory(&host.profile.state_root.join("apps"))?;
     private_directory(&app_dir)?;
     let path = app_dir.join("placement.json");
-    let bound = bound_uids(host, &selector.app)?;
     if exists(&path)? {
         let placement = load_placement(&path)?;
-        if placement.selector != *selector || placement.raw_sha256 != raw_sha256 {
+        if placement.selector != *selector
+            || placement.raw_sha256 != raw_sha256
+            || placement.class != class
+        {
             return Err(invalid(
-                "application already placed with a different package or selector",
+                "application already placed with a different package, selector or class",
             ));
-        }
-        if let Some((_, other)) = bound.iter().find(|(uid, _)| *uid == placement.app_uid) {
-            return Err(invalid(format!(
-                "placed app UID is also bound to resource {other}"
-            )));
         }
         return Ok(placement);
     }
-    let uid = host
-        .profile
-        .app_uids
-        .iter()
-        .copied()
-        .find(|uid| !bound.iter().any(|(bound, _)| bound == uid))
-        .ok_or_else(|| invalid("host app UID pool exhausted"))?;
+    let placed = broker::call(&Request::Place {
+        store: host.store.clone(),
+        app: selector.app.clone(),
+    })?;
+    let cgroup = broker::call(&Request::SetCgroup {
+        store: host.store.clone(),
+        app: selector.app.clone(),
+        class: class.to_owned(),
+    })?;
     let placement = Placement {
-        protocol: "mini-spk-grain-placement-v1".into(),
+        protocol: "mini-spk-grain-placement-v2".into(),
         selector: selector.clone(),
         raw_sha256: raw_sha256.into(),
-        app_uid: uid,
-        app_gid: account_gid(uid)?,
+        app_uid: reply_u32(&placed, "appUid")?,
+        app_gid: reply_u32(&placed, "appGid")?,
         volume_resource: selector.app.clone(),
-        volume_mib: host.profile.volume_mib,
+        volume_mib: cgroup
+            .get("volumeMib")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| invalid("broker reply lacks volumeMib"))?,
+        class: class.to_owned(),
     };
     derived_file(&path, &serde_json::to_vec_pretty(&placement)?)?;
     Ok(placement)
@@ -598,48 +593,16 @@ fn image_dir(raw_sha256: &str) -> PathBuf {
     Path::new(PACKAGE_STORE).join(format!("sha256-{raw_sha256}"))
 }
 
-fn run_helper(program: &Path, args: &[&str]) -> io::Result<String> {
-    let output = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "{} {} failed: {}{}",
-            program.display(),
-            args.join(" "),
-            stdout,
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    Ok(stdout)
-}
-
 /// Root publishes one immutable image per signed-SPK hash, shared by every
-/// instance of that package. The bounded ingest unit is the only writer.
-fn ensure_image(host: &Host, placement: &Placement, staged: &Path) -> io::Result<()> {
+/// instance of that package; the broker runs the bounded ingest unit.
+fn ensure_image(host: &Host, placement: &Placement) -> io::Result<()> {
     let image = image_dir(&placement.raw_sha256);
     if !exists(&image)? {
-        let inbox = Path::new(INBOX).join(format!("grain-{}.spk", placement.raw_sha256));
-        if !exists(&inbox)? {
-            let temp = Path::new(INBOX).join(format!(".grain-{}.tmp", placement.raw_sha256));
-            let _ = fs::remove_file(&temp);
-            fs::copy(staged, &temp)?;
-            fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
-            File::open(&temp)?.sync_all()?;
-            fs::rename(&temp, &inbox)?;
-        }
-        let uid = placement.app_uid.to_string();
-        run_helper(
-            &host.profile.ingest_helper,
-            &[
-                host.profile.spk_host.to_str().ok_or_else(|| invalid("path"))?,
-                &host.profile.spk_host_sha256,
-                inbox.to_str().ok_or_else(|| invalid("path"))?,
-                &uid,
-            ],
-        )?;
+        broker::call(&Request::Ingest {
+            store: host.store.clone(),
+            app: placement.selector.app.clone(),
+            sha256: placement.raw_sha256.clone(),
+        })?;
     }
     let installed = verify_installed_spk(&image, placement.app_uid)?;
     if installed.raw_sha256 != placement.raw_sha256 {
@@ -648,45 +611,36 @@ fn ensure_image(host: &Host, placement: &Placement, staged: &Path) -> io::Result
     Ok(())
 }
 
-fn registration(resource: &str) -> io::Result<Option<String>> {
-    let path = Path::new(VOLUME_REGISTRY).join(format!("{resource}.conf"));
-    if !exists(&path)? {
-        return Ok(None);
-    }
-    Ok(Some(fs::read_to_string(path)?))
-}
-
-fn ensure_volume(host: &Host, placement: &Placement, volume_id: &str) -> io::Result<()> {
+/// Create (once) and attest the Store-keyed /var volume. A fresh witness is
+/// published on every call; START and STOP each consume one.
+fn mount_volume(
+    host: &Host,
+    placement: &Placement,
+    volume_id: &str,
+    import_sha256: Option<String>,
+) -> io::Result<Value> {
     if !hex64(volume_id) {
         return Err(invalid("source volume ID malformed"));
     }
-    let uid = placement.app_uid.to_string();
-    let mib = placement.volume_mib.to_string();
-    let resource = &placement.volume_resource;
-    match registration(resource)? {
-        None => {
-            run_helper(
-                &host.profile.volume_helper,
-                &["create", resource, &uid, &mib, volume_id],
-            )?;
-        }
-        Some(text) => {
-            let expected = [
-                format!("app_uid={uid}"),
-                format!("size_mib={mib}"),
-                format!("volume_id={volume_id}"),
-                format!("deployment_id={}", host.identity.deployment_id),
-                format!("host_id={}", host.identity.host_id),
-            ];
-            if !expected.iter().all(|line| text.lines().any(|l| l == line)) {
-                return Err(invalid(
-                    "root volume registration differs from placement or Mini volume ID",
-                ));
-            }
-            run_helper(&host.profile.volume_helper, &["verify", resource, &uid, &mib])?;
-        }
+    let reply = broker::call(&Request::MountVolume {
+        store: host.store.clone(),
+        app: placement.selector.app.clone(),
+        volume_id: volume_id.to_owned(),
+        import_sha256,
+    })?;
+    if reply_u32(&reply, "appUid")? != placement.app_uid
+        || reply.get("sizeMib").and_then(Value::as_u64) != Some(placement.volume_mib)
+    {
+        return Err(invalid("broker volume differs from placement"));
     }
-    Ok(())
+    Ok(reply)
+}
+
+fn persistent_var(host: &Host, placement: &Placement) -> PathBuf {
+    host.profile
+        .grains_root
+        .join("vars")
+        .join(broker::volume_name(&host.store, &placement.volume_resource))
 }
 
 const INSTALL_ATTEMPT_ARTIFACTS: &[&str] = &[
@@ -698,16 +652,43 @@ const INSTALL_ATTEMPT_ARTIFACTS: &[&str] = &[
     "lifecycle-claim-v3-active.json",
 ];
 
-/// `spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk`
-fn install(host: &Host, source: &Path, receipt: &Path, spk: &Path) -> io::Result<Value> {
+/// `spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk
+/// [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX]`
+fn install(
+    host: &Host,
+    source: &Path,
+    receipt: &Path,
+    spk: &Path,
+    class: &str,
+    import: Option<(&Path, &str)>,
+) -> io::Result<Value> {
     let (selector, owner) = admitted_application(source, receipt)?;
     if owner != host.profile.management_subject {
         return Err(invalid(
             "application owner is not this host's lifecycle management subject",
         ));
     }
+    broker::class(class)?;
     let (raw_sha256, staged, qualification) = stage_package(host, spk)?;
-    let placement = place(host, &selector, &raw_sha256)?;
+    // An import is checked completely before any Mini effect: the exporter's
+    // signature, the image bytes, the package and the class all bind.
+    let imported = match import {
+        None => None,
+        Some((dir, key)) => Some(crate::grain_export::verify_import(
+            dir,
+            key,
+            &raw_sha256,
+            class,
+            &host.profile.grains_root.join(&host.store).join("imports"),
+        )?),
+    };
+    let placement = place(host, &selector, &raw_sha256, class)?;
+    if let Some(imported) = &imported {
+        derived_file(
+            &host.app_dir(&selector.app).join("import.json"),
+            &serde_json::to_vec_pretty(&imported.record)?,
+        )?;
+    }
     let custody = write_custody(host, &selector)?;
     let journal = host.app_dir(&selector.app).join("install");
     private_directory(&journal)?;
@@ -747,7 +728,8 @@ fn install(host: &Host, source: &Path, receipt: &Path, spk: &Path) -> io::Result
         }
         crate::install_service::prepare(&config_path)?;
     }
-    ensure_image(host, &placement, &staged)?;
+    let _ = &staged;
+    ensure_image(host, &placement)?;
     if !exists(&journal.join("install-completed-v2.json"))? {
         crate::install_service::complete(&config_path)?;
     }
@@ -757,11 +739,19 @@ fn install(host: &Host, source: &Path, receipt: &Path, spk: &Path) -> io::Result
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("prepared INSTALL lacks source volume ID"))?
         .to_owned();
-    ensure_volume(host, &placement, &volume_id)?;
+    mount_volume(
+        host,
+        &placement,
+        &volume_id,
+        imported.as_ref().map(|i| i.image_sha256.clone()),
+    )?;
     let completed = read_json(&journal.join("install-completed-v2.json"))?;
     Ok(json!({
-        "protocol":"mini-spk-grain-install-v1",
+        "protocol":"mini-spk-grain-install-v2",
         "app":selector.app,
+        "store":host.store,
+        "class":placement.class,
+        "imported":imported.as_ref().map(|i| i.record.clone()),
         "rawSha256":raw_sha256,
         "appUid":placement.app_uid,
         "volumeIdHex":volume_id,
@@ -790,17 +780,7 @@ struct Run {
 }
 
 fn stop_completed(dir: &Path) -> io::Result<bool> {
-    let mut current = dir.join("stop-completion");
-    for _ in 0..8 {
-        if !exists(&current)? {
-            return Ok(false);
-        }
-        if exists(&current.join("receipt-anchor.json"))? {
-            return Ok(true);
-        }
-        current = current.join("replan");
-    }
-    Ok(false)
+    Ok(stop_receipt(dir)?.is_some())
 }
 
 fn decimal_u64(value: Option<&Value>) -> Option<u64> {
@@ -872,57 +852,36 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     Ok(runs)
 }
 
-fn unit_active(unit: &str) -> io::Result<String> {
+fn unit_property(unit: &str, property: &str) -> io::Result<String> {
     let output = Command::new("/usr/bin/systemctl")
-        .args(["--system", "show", unit, "--property=ActiveState", "--value"])
+        .args(["--system", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-const RUNTIME_UNITS: &str = "/run/systemd/system";
+fn unit_active(unit: &str) -> io::Result<String> {
+    unit_property(unit, "ActiveState")
+}
 
-/// The resident's system unit is installed (as a runtime unit) rather than
-/// transient: systemd unloads a stopped transient unit, and STOP must audit a
-/// loaded, inactive unit with no invocation and an empty exact cgroup. The
-/// file is derived from the host profile and the generation's resident config;
-/// it is not enabled, so boot does not start it (a later `grain start` does).
-fn ensure_unit(host: &Host, unit: &str, config_path: &Path) -> io::Result<()> {
-    let text = format!(
-        "[Unit]\nDescription=Mini SPK resident {unit}\n\n[Service]\nType=exec\n\
-         ExecStart={} resident-run {}\nKillMode=control-group\nMemoryMax=2G\n\
-         TasksMax=512\nNoNewPrivileges=yes\nUMask=0077\n",
-        host.profile.spk_host.display(),
-        config_path.display(),
-    );
-    let path = Path::new(RUNTIME_UNITS).join(unit);
-    let current = fs::read(&path).ok();
-    if current.as_deref() != Some(text.as_bytes()) {
-        if current.is_some() {
-            return Err(invalid(format!(
-                "runtime unit {} differs from its derivation",
-                path.display()
-            )));
-        }
-        let temp = Path::new(RUNTIME_UNITS).join(format!(".{unit}.tmp"));
-        let _ = fs::remove_file(&temp);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o644)
-            .open(&temp)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&temp, &path)?;
+/// The resident unit is rendered by the broker from its own template (the
+/// operator passes only store, app and generation) as a loaded runtime unit:
+/// STOP audits a loaded, inactive unit with no invocation and an empty exact
+/// cgroup. It runs as the operator under the app's class slice, and its
+/// failure starts the app's supervisor. Re-installing the same generation is
+/// idempotent.
+fn install_unit(host: &Host, app: &str, generation: u64) -> io::Result<String> {
+    let reply = broker::call(&Request::InstallUnit {
+        store: host.store.clone(),
+        app: app.to_owned(),
+        generation: generation.to_string(),
+        runtime_sha256: Some(host.profile.spk_host_sha256.clone()),
+    })?;
+    let unit = broker::resident_unit(app, &generation.to_string());
+    if reply.get("unit").and_then(Value::as_str) != Some(unit.as_str()) {
+        return Err(invalid("broker installed a different unit"));
     }
-    let status = Command::new("/usr/bin/systemctl")
-        .args(["--system", "daemon-reload"])
-        .stdin(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(io::Error::other("systemctl daemon-reload failed"));
-    }
-    Ok(())
+    Ok(unit)
 }
 
 #[derive(Deserialize)]
@@ -968,6 +927,7 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
 
 /// `spk-host grain start PROFILE APP`
 fn start(host: &Host, app: &str) -> io::Result<Value> {
+    profile_upgrade::require_ready_runtime(&host.profile)?;
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
     let placement = load_placement(&app_dir.join("placement.json"))?;
@@ -988,7 +948,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     for run in &runs {
         match &run.state {
             RunState::Running => {
-                let unit = format!("mini-spk-a{app}-g{}.service", run.generation);
+                let unit = broker::resident_unit(app, &run.generation.to_string());
                 return Ok(json!({"protocol":"mini-spk-grain-start-v1","app":app,
                     "generation":run.generation.to_string(),"unit":unit,
                     "already":"running","activeState":unit_active(&unit)?}));
@@ -1060,15 +1020,12 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
             "application has no route; `grain route` must bind at least one entrance",
         ));
     }
-    run_helper(
-        &host.profile.volume_helper,
-        &["attest", &placement.volume_resource],
-    )?;
-    let unit = format!("mini-spk-a{app}-g{generation}.service");
+    mount_volume(host, &placement, &volume_id, None)?;
+    let unit = broker::resident_unit(app, &generation.to_string());
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
-    let resident = json!({
+    let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
         "journalDir":journal,
         "imageDir":install_config["imageDir"],
@@ -1078,8 +1035,11 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         "volumeResource":placement.volume_resource.parse::<u64>()
             .map_err(|_| invalid("volume resource exceeds host range"))?,
         "expectedVolumeId":volume_id,
-        "persistentVar":Path::new(VOLUME_MOUNTS).join(&placement.volume_resource),
+        "persistentVar":persistent_var(host, &placement),
         "persistentVarMaxBytes":placement.volume_mib * 1024 * 1024,
+        "sizeClass":placement.class,
+        "grainsRoot":host.profile.grains_root,
+        "store":host.store,
         "deploymentId":host.identity.deployment_id,
         "hostId":host.identity.host_id,
         "bwrap":host.profile.bwrap,
@@ -1109,24 +1069,17 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         "entrances":entrances,
         "agents":[],
     });
+    if let Some(seconds) = host.profile.ws_authority_lease_seconds {
+        resident["wsAuthorityLeaseSeconds"] = json!(seconds);
+    }
+
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
-    // A failed earlier incarnation of this exact unit name may still be loaded.
-    let _ = Command::new("/usr/bin/systemctl")
-        .args(["--system", "reset-failed", &unit])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    ensure_unit(host, &unit, &config_path)?;
+    install_unit(host, app, generation)?;
     let started = Instant::now();
-    let status = Command::new("/usr/bin/systemctl")
-        .args(["--system", "start", &unit])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() && !matches!(unit_active(&unit)?.as_str(), "failed" | "inactive") {
-        return Err(io::Error::other(format!("systemctl start {unit} failed")));
+    if let Err(error) = broker::call(&Request::Start { unit: unit.clone() }) {
+        if !matches!(unit_active(&unit)?.as_str(), "failed" | "inactive") {
+            return Err(error);
+        }
     }
     let completed = journal.join("start-completed-v3.json");
     loop {
@@ -1191,14 +1144,16 @@ fn stop(host: &Host, app: &str) -> io::Result<Value> {
         "completionAttemptDir":journal.join("stop-completion"),
     });
     derived_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
-    let unit = format!("mini-spk-a{app}-g{}.service", target.generation);
-    ensure_unit(host, &unit, &journal.join("resident.json"))?;
+    let unit = install_unit(host, app, target.generation)?;
     // STOP consumes a fresh root volume witness, like START.
     let placement = load_placement(&app_dir.join("placement.json"))?;
-    run_helper(
-        &host.profile.volume_helper,
-        &["attest", &placement.volume_resource],
-    )?;
+    let prepared = read_json(&app_dir.join("install").join("install-prepared-v2.json"))?;
+    let volume_id = prepared
+        .pointer("/begin/volumeIdHex")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("prepared INSTALL lacks volume ID"))?
+        .to_owned();
+    mount_volume(host, &placement, &volume_id, None)?;
     let started = Instant::now();
     crate::lifecycle_v3_stop_service::run(&config_path)?;
     Ok(json!({
@@ -1218,8 +1173,10 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
     let install = app_dir.join("install");
     let runs = scan_runs(&app_dir)?;
     Ok(json!({
-        "protocol":"mini-spk-grain-status-v1",
+        "protocol":"mini-spk-grain-status-v2",
         "app":app,
+        "store":host.store,
+        "class":placement.class,
         "rawSha256":placement.raw_sha256,
         "appUid":placement.app_uid,
         "installPrepared":exists(&install.join("install-prepared-v2.json"))?,
@@ -1232,25 +1189,251 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
                 RunState::Stopped => "stopped".to_owned(),
                 RunState::Uncertain(reason) => format!("uncertain: {reason}"),
             },
-            "unitActiveState":unit_active(&format!("mini-spk-a{app}-g{}.service", run.generation))
+            "unit":broker::resident_unit(app, &run.generation.to_string()),
+            "unitActiveState":unit_active(&broker::resident_unit(app, &run.generation.to_string()))
+                .unwrap_or_default(),
+            "slice":unit_property(&broker::resident_unit(app, &run.generation.to_string()), "Slice")
                 .unwrap_or_default(),
         })).collect::<Vec<_>>(),
     }))
 }
 
+/// `spk-host grain supervise PROFILE APP`, started by the failed resident
+/// unit's `OnFailure=` (as the operator, via the broker-rendered supervisor
+/// template). A generation is never relaunched in place: the crashed one is
+/// STOPped through Mini (the exact-unit audit proves the dead incarnation) and
+/// a continue-START of the next generation follows. An uncertain record is
+/// reported and never retried (exit 3; the template does not restart on it).
+fn supervise(host: &Host, app: &str) -> io::Result<Value> {
+    let app_dir = host.app_dir(app);
+    private_dir(&app_dir)?;
+    let runs = scan_runs(&app_dir)?;
+    let Some(latest) = runs.iter().rev().find(|run| run.state != RunState::NeverBegun) else {
+        return Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,"action":"none",
+            "reason":"never started"}));
+    };
+    let unit = broker::resident_unit(app, &latest.generation.to_string());
+    match &latest.state {
+        RunState::Stopped => Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
+            "action":"none","reason":"stopped by a completed STOP"})),
+        RunState::Uncertain(reason) if reason.starts_with("START") => {
+            // A START that failed after its claim (phase 9) leaves the app
+            // wedged until Mini's `reconcileFailedStart` (9 -> 2) is admitted.
+            crate::grain_export::reconcile_failed_start(app, latest.generation)
+        }
+        // A STOP this supervisor (or the operator) began resumes from STOP's
+        // own journal: exact recovery, never a second claim.
+        RunState::Uncertain(reason) if reason.starts_with("STOP") => {
+            let stopped = stop(host, app)?;
+            let started = start(host, app)?;
+            Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
+                "action":"resume-stop-and-continue","stop":stopped,"start":started}))
+        }
+        RunState::Uncertain(reason) => Err(unresolved(format!(
+            "{} is uncertain ({reason}); the supervisor does not retry it",
+            latest.dir.display()
+        ))),
+        RunState::NeverBegun => unreachable!("filtered above"),
+        RunState::Running => {
+            let state = unit_active(&unit)?;
+            if matches!(state.as_str(), "active" | "activating" | "reloading") {
+                return Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
+                    "action":"none","reason":format!("{unit} is {state}")}));
+            }
+            let crashed_at = Instant::now();
+            let stopped = stop(host, app)?;
+            let started = start(host, app)?;
+            Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
+                "action":"stop-and-continue","crashed":{"unit":unit,"activeState":state,
+                    "generation":latest.generation.to_string()},
+                "stop":stopped,"start":started,
+                "elapsedMs":crashed_at.elapsed().as_millis().to_string()}))
+        }
+    }
+}
+
+/// `spk-host grain export PROFILE APP OUT_DIR`: the stopped volume's bytes
+/// bound to the STOP receipt that fenced them, signed by this Store's
+/// completion custodian.
+fn export(host: &Host, app: &str, out: &Path) -> io::Result<Value> {
+    let app_dir = host.app_dir(app);
+    private_dir(&app_dir)?;
+    let placement = load_placement(&app_dir.join("placement.json"))?;
+    let runs = scan_runs(&app_dir)?;
+    let latest = runs
+        .iter()
+        .rev()
+        .find(|run| run.state != RunState::NeverBegun)
+        .ok_or_else(|| invalid("export refused: never started"))?;
+    if latest.state != RunState::Stopped {
+        return Err(invalid(format!(
+            "export refused: generation {} is not stopped by a completed STOP",
+            latest.generation
+        )));
+    }
+    let receipt = stop_receipt(&latest.dir)?
+        .ok_or_else(|| invalid("export refused: STOP receipt absent"))?;
+    let prepared = read_json(&app_dir.join("install").join("install-prepared-v2.json"))?;
+    let volume_id = prepared
+        .pointer("/begin/volumeIdHex")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("prepared INSTALL lacks volume ID"))?
+        .to_owned();
+    let copied = broker::call(&Request::ExportVolume {
+        store: host.store.clone(),
+        app: app.to_owned(),
+    })?;
+    crate::grain_export::write_export(
+        out,
+        &copied,
+        &json!({
+            "store":host.store,
+            "app":app,
+            "volumeIdHex":volume_id,
+            "packageRawSha256":placement.raw_sha256,
+            "class":placement.class,
+            "volumeMib":placement.volume_mib,
+            "stopGeneration":latest.generation.to_string(),
+        }),
+        &fs::read(&receipt)?,
+        &host.profile.completion_custodian_seed,
+    )
+}
+
+/// The STOP completion's retained receipt (following bounded replans).
+fn stop_receipt(dir: &Path) -> io::Result<Option<PathBuf>> {
+    let mut current = dir.join("stop-completion");
+    for _ in 0..8 {
+        if !exists(&current)? {
+            return Ok(None);
+        }
+        let receipt = current.join("receipt-anchor.json");
+        if exists(&receipt)? {
+            return Ok(Some(receipt));
+        }
+        current = current.join("replan");
+    }
+    Ok(None)
+}
+
 pub fn usage() -> &'static str {
-    "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk | \
+    "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk \
+     [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] | \
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
-     grain stop PROFILE APP | grain status PROFILE APP"
+     grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
+     grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
+     grain init-store GRAINS_ROOT MINI_CONFIG | grain backup PROFILE | \
+     grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
+     grain register-route --socket PATH --request PATH | \
+     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
+}
+
+fn install_options(rest: &[String]) -> io::Result<(String, Option<(PathBuf, String)>)> {
+    let mut class = "S".to_owned();
+    let mut import = None;
+    let mut key = None;
+    let mut index = 0;
+    while index < rest.len() {
+        match (rest[index].as_str(), rest.get(index + 1)) {
+            ("--class", Some(value)) => class = value.clone(),
+            ("--import", Some(value)) => import = Some(PathBuf::from(value)),
+            ("--exporter-key", Some(value)) => key = Some(value.clone()),
+            _ => return Err(invalid(usage())),
+        }
+        index += 2;
+    }
+    match (import, key) {
+        (None, None) => Ok((class, None)),
+        (Some(dir), Some(key)) => Ok((class, Some((dir, key)))),
+        _ => Err(invalid("--import and --exporter-key go together")),
+    }
+}
+
+/// `spk-host grain init-store GRAINS_ROOT MINI_CONFIG`: the broker creates
+/// this Store's operator-owned state directory under the grains root.
+fn init_store(root: &Path, config: &Path) -> io::Result<Value> {
+    let bytes = fs::read(config)?;
+    let store = format!("{:x}", Sha256::digest(&bytes))[..16].to_owned();
+    let reply = broker::call(&Request::InitStore { store: store.clone() })?;
+    let expected = root.join(&store).join("host");
+    if reply.get("stateRoot").and_then(Value::as_str) != expected.to_str() {
+        return Err(invalid("broker grains root differs from the requested one"));
+    }
+    private_directory(&expected)?;
+    let identity = json!({"deploymentId":reply.get("deploymentId"),"hostId":reply.get("hostId")});
+    let path = expected.join("host-identity.json");
+    if !exists(&path)? {
+        derived_file(&path, &serde_json::to_vec_pretty(&identity)?)?;
+    }
+    let held = read_host_identity(&expected)?;
+    if Some(held.deployment_id.as_str()) != reply.get("deploymentId").and_then(Value::as_str)
+        || Some(held.host_id.as_str()) != reply.get("hostId").and_then(Value::as_str)
+    {
+        return Err(invalid("retained host identity differs from the broker's"));
+    }
+    Ok(json!({"protocol":"mini-spk-grain-init-store-v1","store":store,"stateRoot":expected}))
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, profile] = args {
+        if verb == "current-profile" {
+            return profile_upgrade::current_profile(Path::new(profile));
+        }
+        if verb == "runtime-status" {
+            return profile_upgrade::runtime_status(Path::new(profile));
+        }
+    }
+    if let [verb, profile, admission] = args {
+        if verb == "adopt-runtime" {
+            return profile_upgrade::adopt_runtime(Path::new(profile), Path::new(admission));
+        }
+    }
+    if let [verb, socket_flag, socket, request_flag, request] = args {
+        if verb == "register-route" && socket_flag == "--socket" && request_flag == "--request" {
+            return Ok(serde_json::to_value(
+                crate::resident_route_control::register_file(
+                    Path::new(socket),
+                    Path::new(request),
+                )?,
+            )?);
+        }
+    }
+    if let [verb, profile, admission] = args {
+        if verb == "rebind-profile" {
+            return profile_upgrade::rebind(Path::new(profile), Path::new(admission));
+        }
+    }
+    if let [verb, root, config] = args {
+        if verb == "init-store" {
+            return init_store(Path::new(root), Path::new(config));
+        }
+    }
+    if let [verb, root, instance] = args {
+        if verb == "supervise-instance" {
+            let (store, app) = instance
+                .split_once('-')
+                .filter(|(store, app)| broker::store_key(store) && broker::decimal(app))
+                .ok_or_else(|| invalid("supervisor instance must be STORE-APP"))?;
+            let state_root = Path::new(root).join(store).join("host");
+            let profile = profile_upgrade::selected_path(&state_root)?;
+            let host = Host::load(&profile)?;
+            return supervise(&host, app);
+        }
+    }
     match args {
         [verb, profile, rest @ ..] => {
             let host = Host::load(Path::new(profile))?;
             match (verb.as_str(), rest) {
-                ("install", [source, receipt, spk]) => {
-                    install(&host, Path::new(source), Path::new(receipt), Path::new(spk))
+                ("install", [source, receipt, spk, options @ ..]) => {
+                    let (class, import) = install_options(options)?;
+                    install(
+                        &host,
+                        Path::new(source),
+                        Path::new(receipt),
+                        Path::new(spk),
+                        &class,
+                        import.as_ref().map(|(dir, key)| (dir.as_path(), key.as_str())),
+                    )
                 }
                 ("route", [app, request]) => {
                     crate::grain_route::route(&host_view(&host), app, Path::new(request))
@@ -1258,6 +1441,10 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 ("start", [app]) => start(&host, app),
                 ("stop", [app]) => stop(&host, app),
                 ("status", [app]) => status(&host, app),
+                ("session-intents", [app]) => profile_upgrade::session_intents(&host, app),
+                ("supervise", [app]) => supervise(&host, app),
+                ("export", [app, out]) => export(&host, app, Path::new(out)),
+                ("backup", []) => broker::call(&Request::Backup {}),
                 _ => Err(invalid(usage())),
             }
         }

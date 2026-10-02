@@ -142,7 +142,7 @@ def prepare (config : Config) (opened : Opened config)
     { kind := .object, target := descriptor,
       capability := request.descriptorCapability,
       observeCapability := some request.descriptorObserveCapability,
-      schemaVersion := 1, expectedTargetRoot := descriptorCell.payload.root,
+      schemaVersion := ContentResource.commandVersion, expectedTargetRoot := descriptorCell.payload.root,
       payload := .content ⟨[action]⟩ }
   let command := ApplicationGrainSession.Operation.command
     (.enroll appState.generation) ticket.participant.subject

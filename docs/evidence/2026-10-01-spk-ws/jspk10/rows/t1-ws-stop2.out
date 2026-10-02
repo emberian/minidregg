@@ -1,0 +1,3 @@
+holding: {"openSeconds": 41.63548162113875, "at": 1790898579.755849}
+{"row": "hold", "heldSeconds": 1269.2, "end": "socket closed", "closedAt": 1790899848.9303741}
+STOP began 1790898580.224910189, socket ended 1790899848.9303741 (socket closed), STOP completed 1790901406.655321392; {"generation":"4","activeState":"inactive","elapsedMs":"2825240"}

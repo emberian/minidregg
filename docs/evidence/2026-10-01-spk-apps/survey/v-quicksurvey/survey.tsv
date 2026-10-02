@@ -1,0 +1,22 @@
+store	store	PASS	166.519612498	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-quicksurvey/store/base/workroom(noapplicationborn)
+quick-survey	package	INFO	-	4e32f38d64f000bcfbb19a6a1b6926f830898496Bclass=Mkind=webapp=2201
+quick-survey	birth-a	PASS	32.870373383	
+quick-survey	install-a	FAIL	37.800799724	spk-host:grainrefused:mini-spk-brokerrefused:appUIDpoolexhausted
+quick-survey	package	INFO	-	4e32f38d64f000bcfbb19a6a1b6926f830898496Bclass=Mkind=webapp=2201
+quick-survey	birth-a	PASS	.050811661	
+quick-survey	install-a	PASS	490.990071375	{"app":"2201","appUid":947,"class":"M","completion":{"committedClaimSha256":"7925e29faaf88e4bf2c874659a6b3ca2ff16e8522fe45bd08249431d41f3ad04","completionReceipt":{"acceptedCount":"17","eventId":"1117
+quick-survey	share-a	PASS	273.570731985	{"app":"2201","descriptor":"2211","directory":"/var/lib/minidregg/grains/spk-apps-root/74fe35db1a217890/host/apps/2201/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+quick-survey	start-a	PASS	477.235668744	{"app":"2201","completion":{"admittedSha256":"f4a4a836d29f0c2415ffe798da9e4f005e0cec90bf656686d51ca8b79388e9b8","completionReceipt":{"acceptedCount":"25","eventId":"61267624890439568700160660728330501
+quick-survey	floor-a	PASS	.507732425	floor-heldapp-processes=3unit=mini-spk-a2201-g2.service
+quick-survey	enroll-a	PASS	78.882522669	
+quick-survey	get-a	PASS	45.104049214	200
+quick-survey	get-a-http	200	-	bytes=1015UQs8~WM8n4r@:wOZ@lan!ov&)"l`Iu`BRZJr`EQhjcYh+`=ZNz@Ct|
+quick-survey	metrics-g1-get	PASS	-	{"memoryPeak":"565534720","pidsPeak":"33","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}
+quick-survey	metrics-g1	PASS	-	{"memoryPeak":"565534720","pidsPeak":"33","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}
+quick-survey	stop-a	PASS	1363.005719643	{"activeState":"inactive","app":"2201","elapsedMs":"1361286","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2201-g2.service"}
+quick-survey	start-a2	PASS	1026.029352388	{"app":"2201","completion":{"admittedSha256":"0d0ec4cff6fb84a8d476da5b37bd8de2b1d1e0fe471564fe80c2c5a17600de96","completionReceipt":{"acceptedCount":"33","eventId":"95371635569202654340222122706575059
+quick-survey	floor-a2	PASS	.391779714	floor-heldapp-processes=3unit=mini-spk-a2201-g4.service
+quick-survey	enroll-a2	PASS	86.311649146	
+quick-survey	get-a2	PASS	43.337445534	200
+quick-survey	get-a2-http	200	-	bytes=1015UQs8~WM8n4r@:wOZ@lan!ov&)"l`Iu`BRZJr`EQhjcYh+`=ZNz@Ct|
+quick-survey	metrics-g2	PASS	-	{"memoryPeak":"586727424","pidsPeak":"33","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}

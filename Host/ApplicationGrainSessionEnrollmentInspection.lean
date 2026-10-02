@@ -39,6 +39,23 @@ private def roleJson (role : RoleAssignment) : Json :=
     ("roleSchemaRoot", decimal role.roleSchemaRoot.value),
     ("roleVersion", decimal role.roleVersion)]
 
+/-- Source-decoded identity, used only with exact retained frame and private
+historical lookup. This representation is not a current enrollment grant. -/
+private def enrollmentJson (enrollment : Enrollment) : Json :=
+  .mkObj [("app", decimal enrollment.app),
+    ("appGeneration", .str (toString enrollment.appGeneration)),
+    ("session", decimal enrollment.session),
+    ("sessionGeneration", .str (toString enrollment.sessionGeneration)),
+    ("subject", decimal enrollment.subject.value),
+    ("capability", decimal enrollment.capability.value),
+    ("descriptorResource", decimal enrollment.descriptorResource),
+    ("kind", .str <| match enrollment.kind with | .web => "web" | .api => "api"),
+    ("role", roleJson enrollment.role),
+    ("origin", match enrollment.origin with
+      | .human => .mkObj [("type", "human")]
+      | .agent task generation => .mkObj [("type", "agent"),
+          ("task", decimal task), ("generation", .str (toString generation))])]
+
 private def requestJson (request : Request) : Json :=
   .mkObj [("type", "application-session-enrollment-request-v1"),
     ("canonicalRequestHex", hex <| requestCodec.encode request),
@@ -85,6 +102,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
     ("canonicalRequestHex", hex <| requestCodec.encode plan.request),
     ("request", requestJson plan.request),
     ("enrollmentHex", hex <| enrollmentCodec.encode plan.enrollment),
+    ("enrollment", enrollmentJson plan.enrollment),
     ("issueReceiptHex", hex <| receiptStream.encode plan.issueReceipt),
     ("issueReceipt", receiptJson plan.issueReceipt),
     ("appRoot", decimal plan.appRoot.value),
@@ -109,6 +127,7 @@ def inspectIngress (bytes : List UInt8) : Except String Json := do
     ("canonicalRequestHex", hex <| requestCodec.encode ingress.request),
     ("request", requestJson ingress.request),
     ("enrollmentHex", hex <| enrollmentCodec.encode ingress.enrollment),
+    ("enrollment", enrollmentJson ingress.enrollment),
     ("issueReceiptHex", hex <| receiptStream.encode ingress.issueReceipt),
     ("issueReceipt", receiptJson ingress.issueReceipt),
     ("appRoot", decimal ingress.appRoot.value),

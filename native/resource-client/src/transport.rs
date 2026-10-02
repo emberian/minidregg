@@ -376,8 +376,11 @@ fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         [151, payload @ ..] => continuity_request(payload),
+        // Read-only signed stream authority checks remain operator-private.
+        [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // Route-bound164 uses the same mutating dispatch receiver with an extra immutable restriction.
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
-        | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80 | 82 | 84 | 85, payload @ ..] => {
+        | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80 | 82 | 84 | 85 | 164, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -833,7 +836,7 @@ pub(crate) fn invoke_pinned_deadline(
             String::from_utf8_lossy(&reply[1..])
         ));
     }
-    if reply[0] != operation && reply[0] != 255 {
+    if !response_operation_matches(operation, &reply) {
         return Err(format!(
             "uncertain host response: unexpected operation {}",
             reply[0]
@@ -948,6 +951,20 @@ fn connect_unix_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStrea
     }
 }
 
+// The same source dispatch receiver returns tag34 permits/outcomes for a
+// route-bound164 request. Its dedicated no-record verdict may answer either
+// request; only exact bytes distinguish it from an uncertain outcome.
+fn response_operation_matches(operation: u8, reply: &[u8]) -> bool {
+    match reply.split_first() {
+        Some((&tag, _)) if tag == operation || tag == 255 => true,
+        Some((&34, _)) if operation == 164 => true,
+        Some((&164, payload)) if operation == 34 => {
+            payload == b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1"
+        }
+        _ => false,
+    }
+}
+
 fn invoke_inner(
     socket: &Path,
     config: &Path,
@@ -981,7 +998,7 @@ fn invoke_inner(
             String::from_utf8_lossy(&reply[1..])
         ));
     }
-    if reply[0] != operation && reply[0] != 255 {
+    if !response_operation_matches(operation, &reply) {
         return Err(format!(
             "uncertain host response: unexpected operation {}",
             reply[0]
@@ -2203,14 +2220,29 @@ done"#;
     }
 
     #[test]
+    fn dispatch_response_tags_require_exact_no_record_verdict() {
+        let mut refused = vec![164];
+        refused.extend_from_slice(b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1");
+        assert!(response_operation_matches(34, &refused));
+        assert!(response_operation_matches(164, &[34, 1]));
+        assert!(response_operation_matches(34, &[34, 1]));
+        assert!(!response_operation_matches(152, &refused));
+        refused.push(0);
+        assert!(!response_operation_matches(34, &refused));
+        assert!(!response_operation_matches(34, &[164]));
+        assert!(!response_operation_matches(154, &[34, 1]));
+        assert!(!response_operation_matches(34, &[]));
+    }
+
+    #[test]
     fn lifecycle_and_dispatch_routes_are_bounded_and_operator_only() {
-        for operation in [22, 23, 26, 27, 34, 35, 38, 39] {
+        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152, 154, 164] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operation(&[operation, 1], true));
             assert!(!allowed_operator_operation(&[operation]));
         }
         let oversized = vec![1; HOST_MAX_FRAME];
-        for operation in [22, 23, 26, 27, 34, 35, 38, 39] {
+        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152, 154, 164] {
             let mut request = vec![operation];
             request.extend_from_slice(&oversized);
             assert!(!allowed_operator_operation(&request));

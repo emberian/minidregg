@@ -107,6 +107,10 @@ pub(crate) enum Route<'a> {
     },
 }
 
+/// The method token of a streamed dispatch: Sandstorm's `openWebSocket`
+/// (Kernel `ApplicationDispatchAdmission.streamedOpenMethod`).
+pub(crate) const STREAMED_OPEN_METHOD: &str = "WEBSOCKET";
+
 pub(crate) struct HttpProjection<'a> {
     pub method: &'a str,
     pub path_and_query: &'a str,
@@ -197,7 +201,7 @@ pub(crate) fn match_inspection(
         return Err(invalid("Mini committed inspection size refused"));
     }
     let parsed: Value = serde_json::from_slice(inspection_json)?;
-    if string(&parsed, "type")? != "application-dispatch-committed-inspection-v1"
+    if string(&parsed, "type")? != "application-dispatch-committed-inspection-v2"
         || decimal(&parsed, "frameByteCount")? != committed_payload.len().to_string()
         || string(&parsed, "frameHex")? != hex(committed_payload)
     {
@@ -241,6 +245,11 @@ pub(crate) fn match_inspection(
     }
     let request = member(&parsed, "request")?;
     let (app_path, query) = app_route_path(http)?;
+    // A streamed dispatch (the WebSocket open) is marked in the committed
+    // record itself; the projection must agree with the method it signed.
+    if member(request, "streamed")?.as_bool() != Some(http.method == STREAMED_OPEN_METHOD) {
+        return Err(invalid("Mini streamed-dispatch mark differs from the HTTP open"));
+    }
     if string(request, "methodHex")? != hex(http.method.as_bytes())
         || string(request, "pathHex")? != hex(app_path.as_bytes())
         || string(request, "queryHex")? != hex(query.as_bytes())
@@ -341,13 +350,13 @@ mod tests {
 
     fn fixture(payload: &[u8]) -> Value {
         json!({
-            "type":"application-dispatch-committed-inspection-v1",
+            "type":"application-dispatch-committed-inspection-v2",
             "frameByteCount":payload.len().to_string(),"frameHex":hex(payload),
             "app":{"resource":"6100","generation":"1"},
             "session":{"kind":"api","resource":"6209","appResource":"6100",
                 "appGeneration":"1","generation":"0","subject":"9","origin":{"type":"human"}},
             "identity":{"principalHex":"a".repeat(64)},
-            "request":{"operationId":"7","methodHex":hex(b"GET"),
+            "request":{"operationId":"7","methodHex":hex(b"GET"),"streamed":false,
                 "pathHex":hex(b"repo.git/info/refs"),"queryHex":hex(b"service=git-upload-pack"),
                 "bodyHex":"","headers":[{"nameHex":hex(b"accept"),
                     "valueHex":hex(b"application/x-git-upload-pack-advertisement"),"generated":false}]},
@@ -394,6 +403,51 @@ mod tests {
         assert_eq!(inspected.principal, [0xaa; 32]);
         assert_eq!(inspected.before_world_root, "111");
         assert_eq!(inspected.after_world_root, "222");
+    }
+
+    /// The streamed mark and the method agree, or the projection refuses: an
+    /// open is never delivered from a record that says GET, nor a GET from a
+    /// record marked streamed.
+    #[test]
+    fn streamed_mark_must_agree_with_the_open() {
+        let payload = b"private op34 payload (transport fixture only)";
+        let headers = vec![(
+            "accept".into(),
+            "application/x-git-upload-pack-advertisement".into(),
+        )];
+        let custody = FixedCustody {
+            app: "6100",
+            subject: "9",
+            session: "6209",
+            ticket: "6309",
+        };
+        let projection = |method| HttpProjection {
+            method,
+            path_and_query: "info/refs?service=git-upload-pack",
+            ordered_headers: &headers,
+            body: b"",
+            route: Route::Api {
+                signed_path: "/repo.git/",
+            },
+        };
+        let mut open = fixture(payload);
+        open["request"]["methodHex"] = json!(hex(STREAMED_OPEN_METHOD.as_bytes()));
+        open["request"]["streamed"] = json!(true);
+        let open = serde_json::to_vec(&open).unwrap();
+        assert_eq!(
+            match_inspection(payload, &open, &projection(STREAMED_OPEN_METHOD), &custody)
+                .unwrap()
+                .method,
+            "WEBSOCKET"
+        );
+        let mut unmarked = fixture(payload);
+        unmarked["request"]["methodHex"] = json!(hex(STREAMED_OPEN_METHOD.as_bytes()));
+        let unmarked = serde_json::to_vec(&unmarked).unwrap();
+        assert!(match_inspection(payload, &unmarked, &projection(STREAMED_OPEN_METHOD), &custody).is_err());
+        let mut marked_get = fixture(payload);
+        marked_get["request"]["streamed"] = json!(true);
+        let marked_get = serde_json::to_vec(&marked_get).unwrap();
+        assert!(match_inspection(payload, &marked_get, &projection("GET"), &custody).is_err());
     }
 
     #[test]

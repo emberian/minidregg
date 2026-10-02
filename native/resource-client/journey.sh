@@ -805,7 +805,7 @@ step_J8() {
     || fail "deny-all install refused: $(tail -1 "$SD/submit.err")" || return
   accept "$A/outcome.json" || fail "deny-all not installed: $DETAIL" || return
   call nread "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name shared
-  root=$(jq -r '.signing[0].authorityRoot // empty' "$(read_attempt nread)/challenge.json" 2>/dev/null)
+  root=$(jq -r '.authorityRoot // empty' "$(read_attempt nread)/challenge.json" 2>/dev/null)
   scalar shared write 2 8 7 >"$REQ/j8-write.json"
   call npropose "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$REQ/j8-write.json" --proposal-id after-lock
   craft "$NEWCOMER_WS/proposals/after-law-v2/intent.json" "$NEWCOMER_SUBJECT" "$root" >"$REQ/j8-newcomer-crafted.json"

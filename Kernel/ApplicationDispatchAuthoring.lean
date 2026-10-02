@@ -145,7 +145,8 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
   if spec.ticket.resource != request.ticketResource then
     throw "custodian ticket differs from admitted issue"
   let ticket := spec.ticket
-  if !ApplicationDispatchAdmission.requestSafe request.http then
+  if !ApplicationDispatchAdmission.requestSafeFor (ticket.participant.origin == .human)
+      request.http then
     throw "unsupported or unsafe HTTP request shape"
   let appResource := ticket.scope.app
   let sessionResource := ticket.participant.session

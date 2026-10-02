@@ -1,0 +1,11 @@
+store	store	PASS	165.650232889	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/s/store/base/workroom(noapplicationborn)
+hacker-slides	package	INFO	-	f0277a5dce2e1c6af0cce188241411a416778192Bclass=Skind=webapp=4101
+hacker-slides	birth-a	PASS	39.866911320	
+hacker-slides	install-a	PASS	368.759747021	{"app":"4101","appUid":971,"class":"S","completion":{"committedClaimSha256":"5a4fcf7797045590577b0cb16617200d94497e624a486773ffa08c7de426ed93","completionReceipt":{"acceptedCount":"17","eventId":"4575
+hacker-slides	share-a	PASS	335.780763806	{"app":"4101","descriptor":"4111","directory":"/var/lib/minidregg/grains/spk-apps-root/d4290818962dc0bf/host/apps/4101/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+hacker-slides	start-a	FAIL	251.218234573	spk-host:grainrefused:residentunitmini-spk-a4101-g2.serviceisfailedbeforeSTARTcompletion;seejournalctl-umini-spk-a4101-g2.service
+hacker-slides	start-a-settled	FAIL	1	{"generation":"2","slice":"mini-spk-apps-grains-sd4290818962dc0bfa4101.slice","state":"uncertain:STARTattemptedwithoutacompletionrecord","unit":"mini-spk-a4101-g2.service","unitActiveState":"failed"}
+ethercalc	package	INFO	-	93bd2c296692368252ea7b5610a7930d11983992Bclass=Mkind=webapp=4201
+ethercalc	birth-b	PASS	30.976894329	
+ethercalc	install-b	PASS	802.152356975	{"app":"4201","appUid":973,"class":"M","completion":{"committedClaimSha256":"bf913f59373c3f85299f9c49856754da1af69628c9954038fca434d5a3c0747f","completionReceipt":{"acceptedCount":"29","eventId":"5294
+ethercalc	share-b	PASS	651.626153182	{"app":"4201","descriptor":"4211","directory":"/var/lib/minidregg/grains/spk-apps-root/d4290818962dc0bf/host/apps/4201/routes/owner-web","issueIndex":"32","kind":"web","name":"owner-web","protocol":"m

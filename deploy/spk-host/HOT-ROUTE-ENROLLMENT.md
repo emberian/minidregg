@@ -1,0 +1,139 @@
+# Hot participant enrollment
+
+A running resident can admit a new immutable participant route without restarting
+its app, replacing its fd3 RPC owner, or changing any existing stream lease:
+
+```sh
+spk-host grain register-route --socket /absolute/generation/journal/route-control.sock --request /absolute/private/register.json
+```
+
+The request is a same-operator-owned regular file, mode 0600, in a private 0700
+directory. It contains the strict JSON object below (coordinates are canonical
+decimal strings, hashes/nonces are lowercase hex):
+
+```json
+{
+  "protocol": "mini-spk-route-register-v1",
+  "registrationNonceHex": "<fresh 32-byte nonce>",
+  "expectedApp": "4501",
+  "expectedAppGeneration": "4",
+  "expectedSessionGeneration": "2",
+  "directory": "/absolute/new/route",
+  "dispatchCustody": "/absolute/private/new-custody.json",
+  "dispatchCustodySha256": "<SHA-256 of exact custody file>",
+  "custodianSha256": "<SHA-256 of exact route/custodian.json>",
+  "displayName": "Member",
+  "preferredHandle": "member"
+}
+```
+
+Create new custody and token files from the authenticated enrollment outcome;
+never rewrite an existing route's files. In particular, take the expected
+session generation from the exact source enrollment receipt. The resident
+checks custody/policy identity, all private token files, exact file hashes,
+expected app/process generation, and the signed package's API availability.
+The Unix control socket requires the resident operator's UID on both ends.
+Commands and replies use a bounded 4-byte little-endian length frame; input
+reads have an absolute two-second deadline. The source admission has its own
+bounded budget. Admission refusals affect their own connection; a failed or
+interrupted durable publication ends the resident before further requests.
+
+The native source admission checks a newly signed challenge against current
+Mini authority and the exact physical Store tip. The admission includes the
+registration nonce, namespace, app and session generations, principal, ticket,
+and session fingerprint. It does not open an app session, append a Store record,
+or bill a dispatch. Only after its result matches the fixed custody does the
+resident append a listener. Same-origin routes are allowed on distinct private
+socket paths. Exact duplicate admitted bindings are refused; a later session
+generation/fingerprint can create a new route, including with an unchanged
+ticket if current authority admits it.
+
+An already loaded initial/restarted route can be sealed once using this same
+command and source admission. Its directory, custody path, exact custody and
+custodian JSON hashes, display name, and handle must match the identity captured
+when START loaded it. `grain session-intents` exposes both retained file hashes
+for the enrollment orchestrator. Sealing sets the restriction at the existing
+route index; it does not replace the listener, custody, presentation or existing
+leases. It is allowed even when all 64 route slots are occupied. A new nonce
+cannot reseal an already pinned route; the exact original command remains an
+idempotent retry. Existing aliases may each be sealed to the same current
+binding, while new-directory duplicate-binding refusal remains unchanged.
+
+The success JSON reports `protocol`, `registrationNonceHex`, `routeIndex`,
+`app`, `appGeneration`, `session`, `sessionGeneration`, `subject`,
+`ticketResource`, `sessionFingerprintHex`, `admittedHeight`, and
+`admittedWorldRoot`. An identical retry returns that original registration
+receipt without adding another listener or renewing any lease. Reusing its nonce
+with a different request is refused. This is an acknowledgement of registration,
+not a new statement that authority remains current.
+
+The poll registry is append-only, with a maximum of 64 routes in one resident
+generation. Existing accepted sockets and stable route indices remain intact.
+Before changing a binding, listener registry or success cache, the resident
+publishes an owner-private record under the generation journal's `route-seals/`.
+It retains the exact request, reply and full source-admitted binding. Publication
+writes and fsyncs a new pending file, creates the final name without replacing
+an existing file, fsyncs the directory, removes the pending name and fsyncs
+again. In-memory changes follow that publication. Any failed publication or
+post-publication error ends the resident instead of continuing with an unbound
+route. Final records are immutable and partial pending records are retained.
+
+If the process remains alive but the caller loses its reply or journal write,
+retry the exact retained request/nonce: the cached receipt has the same index
+and no admission, publication, listener or lease is repeated. If the resident
+actually dies, any pending or final seal makes same-generation startup/control
+reopen fail closed before source admission or serving requests. Recovery is
+lifecycle STOP followed by a new generation and fresh authenticated enrollment;
+never delete the seal to make the generation appear unbound.
+
+Retained route directories are enumerated on a new generation START, with the
+same 64-route bound and a separately bounded resident configuration size.
+Distinct directories may retain the same origin, session and ticket after
+regrant. Until explicitly sealed, initial/restarted routes follow per-request
+current admission rather than carrying a previous generation pin. Old streams
+cannot survive generation STOP, and revoked tickets remain refused by source
+admission.
+
+Every dispatch through a hot-added route must match its admitted namespace,
+app generation, session generation, principal, ticket, and fingerprint. The
+resident first checks the route binding against fixed custody and its pinned
+Host namespace, before authoring or creating submit markers. It then uses
+private opcode 164 with a source-authored `application-route-bound-dispatch`
+envelope containing that exact binding and the newly signed ingress. Mini
+compares the binding to the same checked current admission used for submission,
+before constructing the durable transaction or entering CAS. A stale route
+binding therefore creates no dispatch/billing record and never reaches fd3.
+The existing post-commit physical guard remains as a final integration check.
+Initial/restarted routes continue to use ordinary dispatch opcode 34 and
+per-request current admission, without the hot registration pin.
+
+Mini first looks up the exact signed call before current admission. An accepted
+call returns its original receipt without another delivery permit; conflicting
+or unavailable history remains non-clearing. A marker-clearing refusal requires
+a typed proof that the exact canonical transaction is absent from authenticated
+history, followed by a physical-tip check at emission. A changed or unavailable
+tip returns uncertainty instead. Only that qualified refusal uses opcode 164
+with the exact payload `DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1` (no
+newline). Only this complete response from the fresh private invocation releases
+the matching generation-wide submit marker. The attempt marker, ingress,
+envelope and refusal frame remain retained; the same attempt cannot be retried.
+This lets an unrelated B route continue after a revoked/stale A request.
+Generic source outcomes, malformed frames, transport failures and marker drift
+retain the global marker for audit because they do not establish that no Store
+record was written.
+
+Stream invalidation is ticket-scoped for every human route, and additionally
+bound to the exact admitted identity for hot routes. An old revoked token's
+failure cannot cancel a new grant on the same principal/session. A changed
+successful projection only attenuates streams of its own ticket. No registration
+or retry can revive an ended lease.
+
+Scoped Rust tests cover an actual local poll loop adding B while A's upgraded
+socket remains open, exact retry/change refusal over the private socket,
+private-file/hash/generation checks, a bounded slow input, current-admission
+refusal without registration, dispatch epoch/fingerprint pins, old-grant
+versus new-grant stream isolation, exact route-bound envelope selectors, and
+no-record refusal/uncertain-marker isolation over the private response framing,
+one-time initial-route sealing, capacity/identity checks, and interrupted durable
+publication with fail-closed same-generation reopen. Actual Mini enrollment/revocation, two-user
+editing, and restart journeys must also be qualified on the joined candidate.

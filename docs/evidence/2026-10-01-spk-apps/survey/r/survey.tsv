@@ -1,0 +1,14 @@
+store	store	PASS	151.068502059	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/r/store/base/workroom(noapplicationborn)
+roundcube	package	INFO	-	75821fd8387c8b8756dc8c40956207e699225424Bclass=Mkind=webapp=8601
+roundcube	birth-a	PASS	37.041347674	
+roundcube	install-a	PASS	594.541615154	{"app":"8601","appUid":968,"class":"M","completion":{"committedClaimSha256":"8d13b4356b608197b4fd3951f8309f2553679ce5970550003f8cb4c48f079e51","completionReceipt":{"acceptedCount":"17","eventId":"1450
+roundcube	share-a	PASS	318.562181330	{"app":"8601","descriptor":"8611","directory":"/var/lib/minidregg/grains/spk-apps-root/4818c2246b17a0f3/host/apps/8601/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+roundcube	start-a	PASS	506.212486671	{"app":"8601","completion":{"admittedSha256":"686d5981d92e88c766fe6e891a9c58a7cb2fa373951934ae1943a80f98c5d4e7","completionReceipt":{"acceptedCount":"25","eventId":"10142330295264393563972694993423755
+roundcube	floor-a	PASS	.449126826	floor-heldapp-processes=12unit=mini-spk-a8601-g2.service
+roundcube	enroll-a	FAIL	21.083897849	mini:Nosuchfileordirectory(oserror2)
+roundcube	metrics-g1	PASS	-	{"memoryPeak":"501096448","pidsPeak":"21","procs":"15","processNames":"1bash,2bwrap,1launcher.sh,5nginx,3php5-fpm,1sandstorm-http-,1sandstorm-smtp-,1spk-host"}
+roundcube	stop-a	PASS	1210.092554871	{"activeState":"inactive","app":"8601","elapsedMs":"1208954","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a8601-g2.service"}
+radicale	package	INFO	-	4b137047cf1bdf5832397c3abc75efd621658732Bclass=Skind=webapp=8701
+radicale	birth-b	PASS	47.729599729	
+radicale	install-b	PASS	912.812725402	{"app":"8701","appUid":972,"class":"S","completion":{"committedClaimSha256":"18c196e99b5b37d887cd50c78505b0b8cdfaa181a6b7841c0607e63b3c95ae30","completionReceipt":{"acceptedCount":"33","eventId":"7167
+radicale	share-b	FAIL	735.004836405	spk-host:grainrefused:Nosuchfileordirectory(oserror2)

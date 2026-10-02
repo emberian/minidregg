@@ -1,0 +1,4 @@
+/opt/app/.sandstorm/launcher.sh:line23:/var/passwd:Permissiondenied
+doveconf:Fatal:Errorinconfigurationfile/etc/dovecot/dovecot.conf:default_login_userdoesn'texist:user
+waitingforphp5-fpmtobeavailableat/var/run/php5-fpm.sock
+startingsandstorm-smtp-bridge

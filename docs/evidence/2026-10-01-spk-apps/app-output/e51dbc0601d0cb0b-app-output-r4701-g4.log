@@ -1,0 +1,13 @@
+2026/10/0113:03:32[TRACE]Custompath:/opt/app/gogs/custom
+2026/10/0113:03:32[TRACE]Logpath:/var/gogs/log
+2026/10/0113:03:32[TRACE]LogMode:Console(Trace)
+2026/10/0113:03:32[INFO]Gogs0.11.34.1122
+2026/10/0113:03:32[INFO]CacheServiceEnabled
+2026/10/0113:03:32[INFO]SessionServiceEnabled
+2026/10/0113:03:32[INFO]GitVersion:2.1.4
+2026/10/0113:03:32[INFO]SQLite3Supported
+2026/10/0113:03:32[INFO]RunMode:Production
+2026/10/0113:03:32[TRACE]Doing:CheckRepoStats
+2026/10/0113:03:32[INFO]Listen:http://0.0.0.0:8000
+2026/10/0113:13:32[TRACE]Doing:MirrorUpdate
+2026/10/0113:23:32[TRACE]Doing:MirrorUpdate

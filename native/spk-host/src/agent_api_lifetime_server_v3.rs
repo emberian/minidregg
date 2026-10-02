@@ -295,7 +295,7 @@ impl ResidentLifetimeAgent<'_> {
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
         let physical =
-            physical_web_input(&matched, &http, self.display_name, self.preferred_handle)?;
+            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, "")?;
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal

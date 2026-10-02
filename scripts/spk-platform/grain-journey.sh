@@ -8,12 +8,16 @@
 # births below.
 #
 #   grain-journey.sh all RUN_ROOT            fresh Store to second instance
-#   grain-journey.sh phase RUN_ROOT NAME     one phase against RUN_ROOT
+#   grain-journey.sh phase RUN_ROOT NAME...  phases against RUN_ROOT
 #   grain-journey.sh stop-services RUN_ROOT  stop the Store services
 #
-# Runs as root on a grain host (see grain-store.sh). Pins are environment:
-#   BIN   directory holding minidregg-host-m6, mini, spk-host, helpers
-#   SPK   the signed sntfy package
+# Runs as the Store operator (`mini`), never root: every root step is a
+# request to mini-spk-broker, which must be serving. The Store services are
+# child processes of this journey (pid files under RUN/sock). Environment:
+#   BIN          directory holding the Host, mini, spk-host and Store helpers
+#   GRAIN_HOST   the Host binary (default BIN/minidregg-host)
+#   SPK          the signed sntfy package
+#   GRAINS_ROOT  the broker's grains root (the grain host state lives below)
 set -eu
 umask 077
 
@@ -24,7 +28,8 @@ shift 2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
 SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
-HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6e}
+HOST=${GRAIN_HOST:-$BIN/minidregg-host}
+GRAINS_ROOT=${GRAINS_ROOT:-/var/lib/mini/grains}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -33,9 +38,49 @@ WR=$STORE/base/workroom
 CONFIG=$WR/deployment/pinned-config.json
 PSOCK=$RUN/sock/participant/host.sock
 OSOCK=$RUN/sock/operator/host.sock
-PROFILE=$RUN/host/grain-host.json
 EV=$RUN/evidence
-UNIT_PREFIX=mini-grain-$(basename "$RUN")
+# Store identity belongs to the native host/broker. Retain its exact result;
+# never reconstruct a Store key from configuration bytes or scan directories.
+PROFILE_RESULT=$EV/profile-result.json
+STATE= PROFILE=
+state_paths() {
+  if [ -f "$PROFILE_RESULT" ]; then
+    jq -e --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" --arg init "$EV/init-store.json" '
+      .protocol == "mini-spk-grain-profile-result-v1" and
+      .miniConfig == $config and .miniConfigSha256 == $configSha and
+      .grainsRoot == $grains and .initStoreResult == $init and (.stateRoot | startswith($grains + "/")) and
+      .profilePath == (.stateRoot + "/grain-host.json")' "$PROFILE_RESULT" >/dev/null || {
+        echo "grain journey: retained profile result differs from this fixture" >&2; exit 1;
+      }
+    STATE=$(jq -er .stateRoot "$PROFILE_RESULT")
+    PROFILE=$(jq -er .profilePath "$PROFILE_RESULT")
+    jq -e --arg state "$STATE" '
+      .protocol == "mini-spk-grain-init-store-v1" and .stateRoot == $state' "$EV/init-store.json" >/dev/null || {
+        echo "grain journey: retained profile differs from native Store initialization" >&2; exit 1;
+      }
+    [ "$(realpath -- "$STATE")" = "$STATE" ] && [ -f "$PROFILE" ] || {
+      echo "grain journey: retained profile path is absent or noncanonical" >&2; exit 1;
+    }
+    jq -e --arg state "$STATE" --arg config "$CONFIG" --arg grains "$GRAINS_ROOT" \
+      --arg configSha "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" '
+      .stateRoot == $state and .miniConfig == $config and
+      .miniConfigSha256 == $configSha and .grainsRoot == $grains' "$PROFILE" >/dev/null || {
+        echo "grain journey: retained profile contradicts its result" >&2; exit 1;
+      }
+  fi
+}
+state_paths
+# Resource coordinates: GRAIN_A..GRAIN_I are the two-digit prefixes of
+# instance a..i's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
+# its size class (S, M or L); IMPORT_X (an export directory) with IMPORT_KEY
+# installs it from an export. Per instance, SPK_X names its package (default
+# SPK) and KIND_X its owner session kind (api: bearer token; web: browser
+# cookie); GET_PATH_X, POST_PATH_X/POST_BODY_X/POST_TYPE_X/POST_METHOD_X and
+# POLL_PATH_X name the get/post/poll requests (defaults: sntfy's);
+# ROLE_BASIS_X the owner's role basis (default role 0).
+A=${GRAIN_A:-91} B=${GRAIN_B:-92} C=${GRAIN_C:-93} D=${GRAIN_D:-94} E=${GRAIN_E:-95}
+F=${GRAIN_F:-96} G=${GRAIN_G:-97} H=${GRAIN_H:-98} I=${GRAIN_I:-99}
 
 fail() { echo "grain journey: $*" >&2; exit 1; }
 now() { date +%s.%N; }
@@ -66,32 +111,49 @@ confirmed() {
 }
 
 service_up() {
-  unit=$1 socket=$2 mode=$3
-  if [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ]; then
+  name=$1 socket=$2 mode=$3
+  pidfile=$RUN/sock/$name.pid
+  if [ -S "$socket" ] && [ -s "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    # Do not accept the old independent public native session as this proxy.
+    [ -s "$pidfile.mode" ] && [ "$(cat "$pidfile.mode")" = "$mode" ] ||
+      fail "$name service mode differs; retain this fixture and use a fresh one"
     return 0
   fi
-  systemctl reset-failed "$unit" 2>/dev/null || :
   mkdir -p -m 700 "${socket%/*}"
-  systemd-run --unit="$unit" --property=Type=exec --property=KillMode=control-group \
-    -- "$MINI" "$mode" --host "$HOST" --config "$CONFIG" --socket "$socket" >/dev/null
+  rm -f "$socket"
+  case "$mode" in
+    serve-operator)
+      set -- "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$socket" ;;
+    serve-public-proxy)
+      set -- "$MINI" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG" ;;
+    *) fail "unsupported fixture service mode $mode" ;;
+  esac
+  printf '%s\n' "$mode" >"$pidfile.mode"
+  setsid "$@" >"$RUN/sock/$name.log" 2>&1 </dev/null &
+  echo "$!" >"$pidfile"
   tick=0
   until [ -S "$socket" ]; do
-    [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ] ||
-      fail "$unit is not active"
-    tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "$unit socket timeout"
+    kill -0 "$(cat "$pidfile")" 2>/dev/null || fail "$name service exited"
+    tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "$name socket timeout"
     sleep 0.5
   done
 }
 
 services() {
-  service_up "$UNIT_PREFIX-participant.service" "$PSOCK" serve
-  service_up "$UNIT_PREFIX-operator.service" "$OSOCK" serve-operator
+  # One Host owns the Store. The public socket relays only its public envelope
+  # subset to that same private owner, with the exact config pin.
+  service_up operator "$OSOCK" serve-operator
+  service_up participant "$PSOCK" serve-public-proxy
+  # workroom_ready performs signed source reads in the following phase;
+  # socket existence here is process readiness, not native qualification.
 }
 
 stop_services() {
-  for unit in "$UNIT_PREFIX-participant.service" "$UNIT_PREFIX-operator.service"; do
-    systemctl stop "$unit" 2>/dev/null || :
-    systemctl reset-failed "$unit" 2>/dev/null || :
+  for name in participant operator; do
+    pidfile=$RUN/sock/$name.pid
+    [ -s "$pidfile" ] || continue
+    kill "$(cat "$pidfile")" 2>/dev/null || :
+    rm -f "$pidfile"
   done
 }
 
@@ -118,7 +180,7 @@ grain_op() (
     --slurpfile read "$EV/$name-before/view.json" \
     --slurpfile challenge "$EV/$name-before/challenge.json" '
     {grain:{task:$task,subject:$subject,capability:$cap,observeCapability:$cap,
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"grain journey workroom"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -169,7 +231,6 @@ birth() (
        {kind:"object",target:"7902",capability:"81"},
        {kind:"object",target:"7901",capability:"73"}]} +
     {($field):{tariff:{base:"2",perBirth:"1"},
-      authorityRoot:$challenge[0].signing[0].authorityRoot,
       ($inner):({genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
         creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"} + $spec),
       tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,
@@ -262,7 +323,7 @@ delegate_observe() (
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
         expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:$target,
-        expectedPreRoot:$c.signing[0].authorityRoot,
+        expectedPreRoot:$c.authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:[$target],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
      grants:[{kind:"object",target:$target,capability:$p.id}]}' >"$D-intent.json"
@@ -281,7 +342,7 @@ share() (
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
     "$EV/$label-app-author/source.json")
   birth_session "$label" "$nonce" "$app" "$session" "$kind" "$cap"
-  pkgdir=$RUN/host/apps/$app/install/launch-descriptor/package-v1
+  pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
   query "$label-app-state" 8 "$app" "$appcap" "$WR/tool.key" "$((nonce + 300))"
@@ -291,11 +352,11 @@ share() (
   mkdir -p -m 700 "$T"
   # The installed manifest's package root is the signed launch descriptor's
   # root (BEGIN v3 prospectiveManifest), not the package identity root.
-  launchroot=$(jq -er .root "$RUN/host/apps/$app/install/launch-descriptor/launch-inspection.json")
+  launchroot=$(jq -er .root "$STATE/apps/$app/install/launch-descriptor/launch-inspection.json")
   if [ ! -s "$T/issue/receipt-anchor.json" ]; then
     grain_op "$label-ticket-$ticket-reserve" 8 7902 81 "$WR/tool.key" "$((nonce + 400))" \
       '{"type":"reserve","amount":"3"}'
-    jq -n --arg app "$app" --arg session "$session" --arg descriptor "$descriptor" \
+    jq -n --argjson basis "$ROLE_BASIS" --arg app "$app" --arg session "$session" --arg descriptor "$descriptor" \
       --arg ticket "$ticket" --arg kind "$kind" --arg appcap "$appcap" \
       --arg scap "$cap" --arg tcap "$((cap + ticket % 100))" --arg nonce "$((nonce + 500))" \
       --arg pversion "$pversion" --arg schema "$schema" --arg version "$version" \
@@ -307,7 +368,7 @@ share() (
           participant:{session:$session,descriptorResource:$descriptor,kind:$kind,
             subject:"8",origin:{type:"human"},sessionCapability:$scap,
             appObserveCapability:$appcap,ticketObserveCapability:(($tcap|tonumber)+2|tostring)},
-          ceiling:{basis:{type:"role",id:"0"},added:[],removed:[],
+          ceiling:{basis:$basis,added:[],removed:[],
             roleSchemaRoot:$schema,roleVersion:$version},issueNonce:$nonce},
         issuer:"8",appDelegateCapability:$appcap,ticketOwnerCapability:$tcap,
         ticketControlCapability:(($tcap|tonumber)+1|tostring)},
@@ -358,7 +419,7 @@ enroll() (
     "$EV/$label-app-author/source.json")
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
     "$EV/$label-app-author/source.json")
-  pkgdir=$RUN/host/apps/$app/install/launch-descriptor/package-v1
+  pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
   query "$label-enroll-app-$nonce" 8 "$app" "$appcap" "$WR/tool.key" "$nonce"
@@ -379,18 +440,19 @@ enroll() (
   sview=$EV/$label-session-$nonce/view.json
   sgen=$(jq -er '[.cell.entries[] | select(.key.field == "2")][0].value' "$sview")
   status=$(jq -er '[.cell.entries[] | select(.key.field == "3")][0].value' "$sview")
-  if [ "$status" = 5 ]; then
+  # Session status is a (kind, status) tag: web 0-3, api 4-7; active is 1 or 5
+  # (Kernel/ApplicationGrainSession.tag). Closing writes active -> closed.
+  if [ "$status" = 5 ] || [ "$status" = 1 ]; then
     jq -n --arg s "$session" --arg c "$cap" --arg n "$((nonce + 2))" --arg g "$sgen" \
-      --arg g1 "$((sgen + 1))" --slurpfile read "$sview" \
+      --arg g1 "$((sgen + 1))" --arg st "$status" --arg st1 "$((status + 1))" --slurpfile read "$sview" \
       --slurpfile challenge "$EV/$label-session-$nonce/challenge.json" '
       {subject:"8",nonce:$n,grants:[{kind:"object",target:$s,capability:$c}],
        purpose:{type:"prepare",draft:{type:"invoke",command:{subject:"8",nonce:$n,
-         expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
          targets:[{kind:"object",target:$s,capability:$c,observeCapability:$c,
            schemaVersion:"1",expectedTargetRoot:$read[0].cell.root,
            payload:{type:"scalar",actions:[
              {type:"write",key:{type:"object",resource:$s,field:"2"},expected:$g,value:$g1},
-             {type:"write",key:{type:"object",resource:$s,field:"3"},expected:"5",value:"6"}]}}]}}}}' \
+             {type:"write",key:{type:"object",resource:$s,field:"3"},expected:$st,value:$st1}]}}]}}}}' \
       >"$EV/$label-close-g$gen-intent.json"
     "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
       --intent "$EV/$label-close-g$gen-intent.json" --key "$WR/tool.key" \
@@ -398,11 +460,11 @@ enroll() (
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
   count=$(jq -er .receipt.acceptedCount "$EV/$label-ticket-$ticket/issue/receipt-anchor.json")
-  jq -n --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
+  jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
     --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
     --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 3))" '
     {issueIndex:$index,ticketResource:$ticket,packageManifest:$pkg,
-     role:{basis:{type:"role",id:"0"},added:[],removed:[],
+     role:{basis:$basis,added:[],removed:[],
        roleSchemaRoot:$schema,roleVersion:$version},
      descriptorCapability:$dcap,sessionObserveCapability:$scap,
      descriptorObserveCapability:$dcap,manifestObserveCapability:$mcap,nonce:$nonce}' \
@@ -426,13 +488,30 @@ enroll() (
   [ -s "$N/receipt.json" ]
 )
 
-# http_post LABEL APP PATH BODY: one authenticated publish through the route.
+# cred KIND DIR: the transport credential for the owner route of that kind
+# (curl header arguments, one per line): the API bearer, or the browser
+# session cookie the bootstrap would set (the operator owns the route dir).
+cred() {
+  case "$1" in
+    api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
+    web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
+      -H "Origin: https://grain.test" ;;
+    *) echo "unknown route kind $1" >&2; return 1 ;;
+  esac
+}
+
+# http_post LABEL APP KIND PATH BODY [TYPE [METHOD]]: one authenticated write
+# through the route.
 http_post() (
-  label=$1 app=$2 path=$3 body=$4 kind=api
-  dir=$RUN/host/apps/$app/routes/owner-$kind
+  label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
+  dir=$STATE/apps/$app/routes/owner-$kind
+  cred "$kind" "$dir" >"$EV/$label.cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
+  rm -f "$EV/$label.cred"
   curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
-    -H "Content-Type: text/plain" --data-binary "$body" \
+    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Content-Type: $type" --data-binary "$body" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
 
@@ -440,75 +519,151 @@ http_post() (
 # Mini to author, sign and admit it (op36/37/34), then delivers it over fd3.
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
-  dir=$RUN/host/apps/$app/routes/owner-$kind
+  dir=$STATE/apps/$app/routes/owner-$kind
+  cred "$kind" "$dir" >"$EV/$label.cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
+  rm -f "$EV/$label.cred"
   curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
+    -H "Host: grain.test" "$@" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
 
+# floor APP: the M11 floor as the running app sees it. Every process in the
+# running generation's unit cgroup is listed with its own /proc status lines
+# (the kernel's view of that process: seccomp mode, NNP, capability sets,
+# uids); the app is the process that is neither the resident nor bwrap.
+floor() (
+  app=$1
+  unit=$("$SPK_HOST" grain status "$PROFILE" "$app" |
+    jq -er '[.runs[] | select(.state == "running")][-1].unit')
+  cg=$(systemctl show "$unit" --property=ControlGroup --value)
+  [ -n "$cg" ] || { echo "no cgroup for $unit" >&2; exit 1; }
+  found=0
+  # Processes are told apart by their kernel task name (`Name:` in status is
+  # world-readable; /proc/PID/exe is not, across UIDs or for a capable task).
+  for pid in $(cat "/sys/fs/cgroup$cg/cgroup.procs"); do
+    status=/proc/$pid/status
+    name=$(sed -n 's/^Name:[[:space:]]*//p' "$status" 2>/dev/null) || continue
+    printf 'pid=%s name=%s ' "$pid" "$name"
+    grep -E '^(Uid|NoNewPrivs|Seccomp|Seccomp_filters|CapInh|CapPrm|CapEff|CapBnd|CapAmb):' \
+      "$status" | tr '\t\n' '  '
+    echo
+    case "$name" in
+      spk-host)
+        # The resident: never root, holding exactly CAP_SETUID|CAP_SETGID,
+        # under its setid bound.
+        if grep -q '^Uid:[[:space:]]*0[[:space:]]' "$status"; then
+          echo "resident runs as root" >&2; exit 1
+        fi
+        grep -q '^CapEff:[[:space:]]*00000000000000c0$' "$status" &&
+          grep -q '^Seccomp:[[:space:]]*2$' "$status" ||
+          { echo "resident is not exactly setuid+setgid under its setid bound" >&2; exit 1; }
+        ;;
+      bwrap) ;;
+      *) grep -q '^Seccomp:[[:space:]]*2$' "$status" &&
+           grep -q '^NoNewPrivs:[[:space:]]*1$' "$status" &&
+           grep -q '^CapEff:[[:space:]]*0000000000000000$' "$status" &&
+           ! grep -q '^Uid:[[:space:]]*0[[:space:]]' "$status" &&
+           found=$((found + 1)) ;;
+    esac
+  done
+  [ "$found" -ge 1 ] || { echo "no app process under the floor in $unit" >&2; exit 1; }
+  echo "floor-held app-processes=$found unit=$unit"
+)
+
 write_profile() {
-  [ ! -e "$PROFILE" ] || return 0
-  mkdir -p -m 700 "$RUN/host"
+  state_paths
+  if [ -n "$PROFILE" ]; then
+    printf '%s\n' "$PROFILE_RESULT"
+    return 0
+  fi
+  [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
+  "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" >"$EV/init-store.json"
+  STATE=$(jq -er 'select(.protocol == "mini-spk-grain-init-store-v1") | .stateRoot' "$EV/init-store.json")
+  case "$STATE" in "$GRAINS_ROOT"/*) ;; *) fail "native Store root is outside the pinned grains root" ;; esac
+  [ -d "$STATE" ] && [ "$(realpath -- "$STATE")" = "$STATE" ] || fail "native Store root is absent or noncanonical"
+  PROFILE=$STATE/grain-host.json
+  [ ! -e "$PROFILE" ] || fail "profile already exists without this fixture result; preserve it"
   semantics=$(jq -er .semantics "$WR/operator-profile.json")
-  jq -n --arg root "$RUN/host" --arg host "$HOST" --arg hostSha "$(sha "$HOST")" \
+  jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" \
+    --arg hostSha "$(sha "$HOST")" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" --arg socket "$OSOCK" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" \
     --arg seed "$WR/tool.key" --arg completion "$STORE/custody/completion.seed" \
     --arg semantics "$semantics" --arg bwrap "$BWRAP" --arg bwrapSha "$(sha "$BWRAP")" \
-    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" \
-    --arg ingest "$BIN/spk-ingest" --arg volume "$BIN/spk-var-volume" '
-    {protocol:"mini-spk-grain-host-v1",stateRoot:$root,
+    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" '
+    {protocol:"mini-spk-grain-host-v2",stateRoot:$root,grainsRoot:$grains,
      miniHost:$host,miniHostSha256:$hostSha,miniConfig:$config,miniConfigSha256:$configSha,
      miniOperatorSocket:$socket,managementSubject:"8",managementKeyEpoch:"2",
      managementPublicKeyHex:$public,managementSeed:$seed,
      completionCustodianSeed:$completion,completionSemantics:$semantics,
-     bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha,
-     ingestHelper:$ingest,volumeHelper:$volume,
-     appUids:[994,993,992,991],volumeMib:512}' >"$PROFILE"
+     bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha}' >"$PROFILE"
   chmod 600 "$PROFILE"
+  jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" \
+    --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
+    --arg init "$EV/init-store.json" '
+    {protocol:"mini-spk-grain-profile-result-v1",profilePath:$profile,stateRoot:$state,
+     grainsRoot:$grains,miniConfig:$config,miniConfigSha256:$configSha,
+     initStoreResult:$init}' >"$PROFILE_RESULT"
+  printf '%s\n' "$PROFILE_RESULT"
 }
 
 
+# Phases: store, services, workroom, profile, then VERB-XN for instance X in
+# a b c d e and an optional repeat number N (enroll-a2, get-a2, ...). Nonces are
+# derived per instance so every signed command's nonce is fresh.
 run_phase() {
   case "$1" in
     store)
       [ -e "$STORE" ] || step store "$HERE/grain-store.sh" "$STORE" "$HOST" "$MINI" \
-        "$BIN/minidregg-link-sqlite-store" "$BIN/minidregg-credential-signature-verifier" ;;
-    services) step services services ;;
-    workroom) step workroom workroom_ready ;;
-    profile) step profile write_profile ;;
-    birth-a) step birth-a birth_app a 51000 9101 3101 ;;
-    birth-b) step birth-b birth_app b 61000 9201 3201 ;;
-    install-a) step install-a "$SPK_HOST" grain install "$PROFILE" \
-      "$EV/a-app-author/source.json" "$EV/a-app-attempt/outcome.json" "$SPK" ;;
-    install-b) step install-b "$SPK_HOST" grain install "$PROFILE" \
-      "$EV/b-app-author/source.json" "$EV/b-app-attempt/outcome.json" "$SPK" ;;
-    status-a) step status-a "$SPK_HOST" grain status "$PROFILE" 9101 ;;
-    share-a) step share-a share a 9101 9110 9120 3111 52000 api ;;
-    share-b) step share-b share b 9201 9210 9220 3211 62000 api ;;
-    share-b2) step share-b2 share b 9201 9210 9230 3211 64000 api ;;
-    enroll-b3) step enroll-b3 enroll b 9201 9210 9230 3211 66000 ;;
-    enroll-b4) step enroll-b4 enroll b 9201 9210 9230 3211 67000 ;;
-    start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" 9201 ;;
-    enroll-b2) step enroll-b2 enroll b 9201 9210 9230 3211 65000 ;;
-    get-b2) step get-b2 http_get get-b2-body 9201 /v1/health ;;
-    status-b) step status-b "$SPK_HOST" grain status "$PROFILE" 9201 ;;
-    status-a2) step status-a2 "$SPK_HOST" grain status "$PROFILE" 9101 ;;
-    status-b2) step status-b2 "$SPK_HOST" grain status "$PROFILE" 9201 ;;
-    start-b) step start-b "$SPK_HOST" grain start "$PROFILE" 9201 ;;
-    stop-b) step stop-b "$SPK_HOST" grain stop "$PROFILE" 9201 ;;
-    enroll-a) step enroll-a enroll a 9101 9110 9120 3111 53000 ;;
-    enroll-a2) step enroll-a2 enroll a 9101 9110 9120 3111 54000 ;;
-    enroll-b) step enroll-b enroll b 9201 9210 9220 3211 63000 ;;
-    get-a) step get-a http_get get-a-body 9101 /v1/health ;;
-    post-a) step post-a http_post post-a-body 9101 /m6grain "published at generation 2, before STOP" ;;
-    poll-a2) step poll-a2 http_get poll-a2-body 9101 "/m6grain/json?poll=1&since=all" ;;
-    get-a2) step get-a2 http_get get-a2-body 9101 /v1/health ;;
-    get-b) step get-b http_get get-b-body 9201 /v1/health ;;
-    start-a) step start-a "$SPK_HOST" grain start "$PROFILE" 9101 ;;
-    stop-a) step stop-a "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
-    start-a2) step start-a2 "$SPK_HOST" grain start "$PROFILE" 9101 ;;
-    stop-a2) step stop-a2 "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
+        "$BIN/minidregg-link-sqlite-store" "$BIN/minidregg-credential-signature-verifier"
+      state_paths
+      return ;;
+    services) step services services; return ;;
+    workroom) step workroom workroom_ready; return ;;
+    profile) step profile write_profile; return ;;
+  esac
+  phase=$1 verb=${1%-*} tail=${1##*-}
+  letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
+  case "$letter" in
+    a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
+  esac
+  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
+  eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
+  eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
+  eval "postm=\${POST_METHOD_$upper:-POST} pollp=\${POLL_PATH_$upper:-'/m6grain/json?poll=1&since=all'}"
+  eval "postb=\${POST_BODY_$upper:-'published by $letter before STOP'}"
+  # The owner's role basis in the share ceiling and the enrollment: role 0
+  # (sntfy's only role) unless ROLE_BASIS_X says otherwise, e.g.
+  # {"type":"allAccess"} for a package that declares no roles.
+  eval "ROLE_BASIS=\${ROLE_BASIS_$upper:-'{\"type\":\"role\",\"id\":\"0\"}'}"
+  export ROLE_BASIS
+  # NONCE_BASE_X moves an instance's nonces when its coordinates are reused
+  # after a refused attempt consumed some (every signed nonce is a nullifier).
+  eval "base=\${NONCE_BASE_$upper:-$((40000 + i * 10000))}"
+  app=${P}01
+  case "$verb" in
+    birth) step "$phase" birth_app "$letter" $((base + 1000)) "$app" "3${i}01" ;;
+    install)
+      if [ -n "$import" ]; then
+        step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
+          "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class" \
+          --import "$import" --exporter-key "$IMPORT_KEY"
+      else
+        step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
+          "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
+      fi ;;
+    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind" ;;
+    enroll) step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
+      $((base + 2000 + ${n:-1} * 1000)) ;;
+    start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
+    get) step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" ;;
+    post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
+    poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
+    floor) step "$phase" floor "$app" ;;
     *) fail "unknown phase $1" ;;
   esac
 }
@@ -518,6 +673,12 @@ case "$MODE" in
     [ "$#" -ge 1 ] || usage
     for phase in "$@"; do run_phase "$phase"; done ;;
   stop-services) stop_services ;;
+  jspk0)
+    for phase in store services workroom profile birth-a install-a share-a start-a floor-a \
+        enroll-a get-a post-a stop-a start-a2 floor-a2 enroll-a2 get-a2 poll-a2 stop-a2; do
+      run_phase "$phase"
+    done
+    step stop-services stop_services ;;
   all)
     for phase in store services workroom profile birth-a install-a share-a start-a \
         enroll-a get-a post-a stop-a start-a2 enroll-a2 get-a2 poll-a2 birth-b install-b \

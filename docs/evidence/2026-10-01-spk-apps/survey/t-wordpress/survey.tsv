@@ -1,0 +1,17 @@
+store	store	PASS	186.695786079	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/t-wordpress/store/base/workroom(noapplicationborn)
+wordpress	package	INFO	-	d6955e8f377ac431db17fd01855b3ce546887336Bclass=Mkind=webapp=4801
+wordpress	birth-a	PASS	39.157294350	
+wordpress	install-a	PASS	474.571689802	{"app":"4801","appUid":976,"class":"M","completion":{"committedClaimSha256":"0f26520cfdb996937b56db9f7cba79e4c24dce19be9889dce820a0e8b8011243","completionReceipt":{"acceptedCount":"17","eventId":"7245
+wordpress	share-a	PASS	296.389065751	{"app":"4801","descriptor":"4811","directory":"/var/lib/minidregg/grains/spk-apps-root/6e3379e7a4d49488/host/apps/4801/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+wordpress	start-a	PASS	543.837876116	{"app":"4801","completion":{"admittedSha256":"603cc721ef4bffb4f721518bbcd00f56f105b0a9d2b631a053043437354a9486","completionReceipt":{"acceptedCount":"25","eventId":"15657810483711514853358558577532708
+wordpress	floor-a	PASS	.370935979	floor-heldapp-processes=13unit=mini-spk-a4801-g2.service
+wordpress	enroll-a	PASS	78.353589963	
+wordpress	get-a	PASS	47.116113321	503
+wordpress	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+wordpress	metrics-g1-get	PASS	-	{"memoryPeak":"553062400","pidsPeak":"30","procs":"16","processNames":"2bwrap,1continue.sh,5nginx,3php-fpm7.3,1powerbox-http-p,1sandstorm-http-,1sleep,1spk-host,1start.sh"}
+wordpress	metrics-g1	PASS	-	{"memoryPeak":"553062400","pidsPeak":"30","procs":"16","processNames":"2bwrap,1continue.sh,5nginx,3php-fpm7.3,1powerbox-http-p,1sandstorm-http-,1sleep,1spk-host,1start.sh"}
+wordpress	stop-a	PASS	1212.332724450	{"activeState":"inactive","app":"4801","elapsedMs":"1211061","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a4801-g2.service"}
+wordpress	start-a2	PASS	1050.979436742	{"app":"4801","completion":{"admittedSha256":"5e2c852ccf2c77607e0bcf5e22bc6509cc2ff2d599f1755f4f971e194636cf24","completionReceipt":{"acceptedCount":"33","eventId":"72339868501962922119191428804694392
+wordpress	floor-a2	PASS	.460342298	floor-heldapp-processes=12unit=mini-spk-a4801-g4.service
+wordpress	enroll-a2	FAIL	15.599827454	mini:Nosuchfileordirectory(oserror2)
+wordpress	stop-a2	PASS	2779.745084437	{"activeState":"inactive","app":"4801","elapsedMs":"2778114","generation":"4","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a4801-g4.service"}

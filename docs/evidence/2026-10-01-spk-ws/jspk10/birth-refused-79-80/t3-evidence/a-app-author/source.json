@@ -1,0 +1,209 @@
+{
+  "subject": "8",
+  "nonce": "51100",
+  "grants": [
+    {
+      "kind": "object",
+      "target": "10",
+      "capability": "55"
+    },
+    {
+      "kind": "account",
+      "target": "8",
+      "capability": "42"
+    },
+    {
+      "kind": "object",
+      "target": "7902",
+      "capability": "81"
+    },
+    {
+      "kind": "object",
+      "target": "7901",
+      "capability": "73"
+    }
+  ],
+  "applicationGrainBirth": {
+    "tariff": {
+      "base": "2",
+      "perBirth": "1"
+    },
+    "applicationBirth": {
+      "genesis": {
+        "domain": "8501",
+        "factoryId": "10",
+        "resourceBookId": "11",
+        "authorityCellId": "12",
+        "federation": "9",
+        "tariffBase": "3",
+        "tariffPerBirth": "2",
+        "tariffPerGrant": "1",
+        "tariffPerInitialPayloadByte": "1",
+        "collector": "99",
+        "asset": "0",
+        "expectedSemantics": "105564448391014500949701451265300034062395527415228803040239869744793732914232",
+        "issuerEpoch": "2",
+        "genesisHeight": "10",
+        "factoryPredicate": {
+          "type": "any",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "request/subject",
+              "value": "7"
+            },
+            {
+              "type": "all",
+              "predicates": [
+                {
+                  "type": "eq",
+                  "slot": "request/subject",
+                  "value": "8"
+                },
+                {
+                  "type": "any",
+                  "predicates": [
+                    {
+                      "type": "eq",
+                      "slot": "request/verb",
+                      "value": "1"
+                    },
+                    {
+                      "type": "eq",
+                      "slot": "birth/mode/grain-backed",
+                      "value": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "enrollments": [
+          {
+            "key": {
+              "keyId": "7007",
+              "keyEpoch": "2",
+              "algorithm": "1",
+              "subject": "7",
+              "publicKey": "7719908d39d1bfae4d346a4e4adfd7ba0b62b0776ef9941809df4050632823c5",
+              "activeFrom": "0",
+              "activeUntil": "1000000"
+            },
+            "accountId": "7",
+            "spendCapabilityId": "41",
+            "controlCapabilityId": "51",
+            "factoryObserveCapabilityId": "54",
+            "initialBalance": "1000000",
+            "accountPredicate": {
+              "type": "all",
+              "predicates": []
+            }
+          },
+          {
+            "key": {
+              "keyId": "8008",
+              "keyEpoch": "2",
+              "algorithm": "1",
+              "subject": "8",
+              "publicKey": "da2e9c53b9348bf09bf27b46da2f6ff553ec6747567d7d456736d49a4a340248",
+              "activeFrom": "0",
+              "activeUntil": "1000000"
+            },
+            "accountId": "8",
+            "spendCapabilityId": "42",
+            "controlCapabilityId": "52",
+            "factoryObserveCapabilityId": "55",
+            "initialBalance": "1000000",
+            "accountPredicate": {
+              "type": "all",
+              "predicates": []
+            }
+          },
+          {
+            "key": {
+              "keyId": "9009",
+              "keyEpoch": "2",
+              "algorithm": "1",
+              "subject": "9",
+              "publicKey": "dbf70798a9ce7dad4e04029210aaedb73f79e90a8380713016a78251b03d74ba",
+              "activeFrom": "0",
+              "activeUntil": "1000000"
+            },
+            "accountId": "9",
+            "spendCapabilityId": "43",
+            "controlCapabilityId": "56",
+            "factoryObserveCapabilityId": "57",
+            "initialBalance": "1",
+            "accountPredicate": {
+              "type": "all",
+              "predicates": []
+            }
+          }
+        ],
+        "factoryControllerSubject": "7",
+        "factoryControllerCapability": "53",
+        "meterAllowance": {
+          "incidences": "10000000",
+          "turnBytes": "10000000",
+          "memoryTouches": "10000000",
+          "witnessBytes": "10000000",
+          "proofWork": "10000000",
+          "storageBytes": "10000000",
+          "networkBytes": "10000000",
+          "sideEffectCount": "10000000",
+          "feeDebit": "10000000",
+          "leaseByteBlocks": "10000000"
+        }
+      },
+      "template": {
+        "issuer": "5",
+        "ownerBudget": "100000",
+        "lifetime": "10000"
+      },
+      "creator": "8",
+      "nonce": "51100",
+      "sourceCapabilities": [
+        "42"
+      ],
+      "funding": [],
+      "feePayer": "8",
+      "application": {
+        "app": "8001",
+        "packageManifest": "8002",
+        "snapshotManifest": "8003",
+        "owner": "8",
+        "appOwnerCapability": "3101",
+        "appControlCapability": "3102",
+        "packageOwnerCapability": "3103",
+        "packageControlCapability": "3104",
+        "snapshotOwnerCapability": "3105",
+        "snapshotControlCapability": "3106"
+      }
+    },
+    "tool": {
+      "task": "7902",
+      "capability": "81",
+      "observeCapability": "81",
+      "targetRoot": "37479537689913451043118308071182016355817182026774025591792409036444342375952",
+      "before": {
+        "generation": "1",
+        "status": "3",
+        "remaining": "42",
+        "reserved": "5"
+      }
+    },
+    "parent": {
+      "task": "7901",
+      "capability": "73",
+      "observeCapability": "73",
+      "targetRoot": "93884220613094656162086989945034263021126095181010209610436430806537751075082",
+      "before": {
+        "generation": "1",
+        "status": "3",
+        "remaining": "99",
+        "reserved": "1"
+      }
+    }
+  }
+}

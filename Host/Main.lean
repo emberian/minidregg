@@ -129,6 +129,8 @@ import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
 import Host.ReceiptContinuity
+import Host.ApplicationStreamContinuityInspection
+import Host.ApplicationRouteAdmissionInspection
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationAgentLifetimeDispatchInspection
@@ -697,6 +699,10 @@ def loadSettings (path : System.FilePath) : IO Settings := do
 native view bytes. Query authority remains with the signed native read. -/
 def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :=
   if kind == "fn-inbox-resource" then FnInboxView.render bytes
+  else if kind == "application-route-admission-attestation" then
+    ApplicationRouteAdmissionInspection.inspect bytes
+  else if kind == "application-stream-continuity-attestation" then
+    ApplicationStreamContinuityInspection.inspect bytes
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
@@ -1663,6 +1669,22 @@ def checkedObjectRosterJson (audience : Theory.ObjectAudience.State)
     ("rosterBytes", toJson (Minidregg.Host.Json.encodeHex rosterBytes)),
     ("deviceSnapshot", toJson (toString audience.deviceSnapshot))]
 
+/-- The standalone and persistent author routes share the exact source helpers. -/
+def authorHost (config : NativeHost.Config)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
+    (kind : String) (source : Lean.Json) : Except String (List UInt8) :=
+  if kind == "application-route-bound-dispatch" then
+    ApplicationRouteAdmissionInspection.authorBoundDispatch config source
+  else if kind == "application-route-admission-challenge" then
+    ApplicationRouteAdmissionInspection.authorChallenge config source
+  else if kind == "application-route-admission-request" then
+    ApplicationRouteAdmissionInspection.authorRequest source
+  else if kind == "application-stream-continuity-challenge" then
+    ApplicationStreamContinuityInspection.authorChallenge config source
+  else if kind == "application-stream-continuity-request" then
+    ApplicationStreamContinuityInspection.authorRequest source
+  else Minidregg.Host.Json.author kind source (some config) providerRoutes
+
 /-- The live protocol keeps exact source-owned authoring and inspection in
 memory, while every state-dependent operation refreshes the verified tip. -/
 def dispatchSession (config : NativeHost.Config)
@@ -1726,7 +1748,7 @@ def dispatchSession (config : NativeHost.Config)
       if kind == "pay-claim-rotation" then
         unless source.length ≤ 4096 do throw (RequestRefusal.malformed "claim rotation JSON exceeds bound")
         return (7, ← RequestRefusal.clientBytes (Minidregg.Host.PayClaims.authorRotation value))
-      return (7, ← RequestRefusal.clientBytes (Minidregg.Host.Json.author kind value (some config) providerRoutes))
+      return (7, ← RequestRefusal.clientBytes (authorHost config providerRoutes kind value))
   | 8 =>
       let (kind, source) ← splitKind payload
       if kind == "object-audience" then
@@ -2032,9 +2054,11 @@ the external host must fence process generation and reconcile uncertain
 delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+    (payload : List UInt8) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
   let session ← sessionWalked config state
-  let result ← ApplicationDispatchReceiver.receiveVerified config session.verified payload
+  let result ← if routeBound then
+      ApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
+    else ApplicationDispatchReceiver.receiveVerified config session.verified payload
   match result with
   | .permitted permit =>
       let handed ← permit.withFreshTip fun committedBytes =>
@@ -2049,6 +2073,14 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         .confirmed committed.confirmation committed.receipt
       sessionSetWalked state committed.verified
+  | .historical receipt =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <| .confirmed .replayed receipt
+  | .noRecordRefused refusal =>
+      match ← refusal.withFreshTip (fun bytes => writeSessionFrame output 164 bytes) with
+      | .ok _ => pure ()
+      | .error detail =>
+          writeSessionFrame output 34 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
   | .rejected _ =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -2062,6 +2094,44 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
   | .uncertain detail =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+
+/-- Op152 is a read-only continuity challenge. It retains the same verified
+session and emits no event or paid dispatch. A fresh physical-tip callback is
+mandatory even when no history extension was needed at session refresh. -/
+def dispatchStreamContinuitySession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionWalked config state
+  match ← ApplicationStreamContinuity.receiveVerified config session.verified payload with
+  | .ok attestation =>
+      match ← attestation.withFreshTip (fun bytes => writeSessionFrame output 152 bytes) with
+      | .ok _ => pure ()
+      | .error detail =>
+          writeSessionFrame output 152 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .error _ =>
+      writeSessionFrame output 152 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused .operationRejected "stream-continuity".toUTF8.toList
+            "current continuation refused".toUTF8.toList)
+
+/-- Op154 admits a new immutable local route, never an app dispatch. -/
+def dispatchRouteAdmissionSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionWalked config state
+  match ← ApplicationRouteAdmission.receiveVerified config session.verified payload with
+  | .ok attestation =>
+      match ← attestation.withFreshTip (fun bytes => writeSessionFrame output 154 bytes) with
+      | .ok _ => pure ()
+      | .error detail =>
+          writeSessionFrame output 154 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .error _ =>
+      writeSessionFrame output 154 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused .operationRejected "route-admission".toUTF8.toList
+            "current route admission refused".toUTF8.toList)
 
 /-- Op46 hands out the distinct paid agent permit only from an exact event21
 CAS/readback and a final point-in-time physical tip check. Historical op47 is
@@ -2210,7 +2280,13 @@ def serveFrame (config : NativeHost.Config)
   let tracked : IO.FS.Stream :=
     { output with write := fun bytes => do wrote.set true; output.write bytes }
   try
-    if operation == 34 then
+    if operation == 164 then
+      dispatchApplicationSubmitSession config state payload tracked true
+    else if operation == 154 then
+      dispatchRouteAdmissionSession config state payload tracked
+    else if operation == 152 then
+      dispatchStreamContinuitySession config state payload tracked
+    else if operation == 34 then
       dispatchApplicationSubmitSession config state payload tracked
     else if operation == 46 then
       dispatchAgentSubmitSession config state payload tracked
@@ -5211,7 +5287,12 @@ def run (arguments : List String) : IO UInt32 := do
           writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimIngressJson config bytes))
           pure 0
       | "author", [kind, input, output] =>
-          let source ← if kind == "application-dispatch-request" ||
+          let source ← if kind == "application-route-bound-dispatch" ||
+              kind == "application-route-admission-request" ||
+              kind == "application-route-admission-challenge" ||
+              kind == "application-stream-continuity-request" ||
+              kind == "application-stream-continuity-challenge" ||
+              kind == "application-dispatch-request" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
@@ -5225,12 +5306,13 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-lifetime-reserve-request" ||
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
-          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source (some config)
-            (← IO.ofExcept settings.providerRoutes))
+          let bytes ← IO.ofExcept (authorHost config (← IO.ofExcept settings.providerRoutes) kind source)
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
-          let bytes ← if kind == "fn-inbox-resource" ||
+          let bytes ← if kind == "application-route-admission-attestation" ||
+              kind == "application-stream-continuity-attestation" ||
+              kind == "fn-inbox-resource" ||
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
@@ -5267,7 +5349,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
-          if kind == "application-dispatch-committed" ||
+          if kind == "application-route-admission-attestation" ||
+              kind == "application-stream-continuity-attestation" ||
+              kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
               kind == "fn-consumer-namespace-plan" ||

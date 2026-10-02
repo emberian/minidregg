@@ -1,0 +1,23 @@
+a	61	sntfy	/var/lib/minidregg/grains/spk-apps-survey/spk/sntfy.spk	S	api	/v1/health	POST	/m6grain	text/plain	published by a before STOP	/m6grain/json?poll=1&since=all	published by a before STOP
+b	62	simple-todos	/var/lib/minidregg/grains/spk-apps-survey/spk/simple-todos.spk	M	web	/	-	-	-	-	-	-
+c	63	hacker-slides	/var/lib/minidregg/grains/spk-apps-survey/spk/hacker-slides.spk	S	web	/	-	-	-	-	-	-
+d	64	ethercalc	/var/lib/minidregg/grains/spk-apps-survey/spk/ethercalc.spk	M	web	/	-	-	-	-	-	-
+a	65	davros	/var/lib/minidregg/grains/spk-apps-survey/spk/davros.spk	L	api	/	-	-	-	-	-	-
+b	66	wordpress	/var/lib/minidregg/grains/spk-apps-survey/spk/wordpress.spk	M	web	/	-	-	-	-	-	-
+c	67	gogs	/var/lib/minidregg/grains/spk-apps-survey/spk/gogs.spk	S	web	/	-	-	-	-	-	-
+a	86	roundcube	/var/lib/minidregg/grains/spk-apps-survey/spk/roundcube.spk	M	web	/	-	-	-	-	-	-
+b	87	radicale	/var/lib/minidregg/grains/spk-apps-survey/spk/radicale.spk	S	web	/	-	-	-	-	-	-
+a	41	hacker-slides	/var/lib/minidregg/grains/spk-apps-survey/spk/hacker-slides.spk	S	web	/	PUT	/slides.md	text/markdown	# survey slide written before STOP	/slides.md	survey slide written before STOP
+a	49	davros	/var/lib/minidregg/grains/spk-apps-survey/spk/davros.spk	L	api	/status.php	PUT	/dav/survey.txt	text/plain	davros file written before STOP	/dav/survey.txt	davros file written before STOP
+a	45	ethercalc	/var/lib/minidregg/grains/spk-apps-survey/spk/ethercalc.spk	M	web	/	PUT	/_/survey	text/csv	survey,written before STOP	/_/survey/csv	written before STOP
+a	47	gogs	/var/lib/minidregg/grains/spk-apps-survey/spk/gogs.spk	S	web	/	-	-	-	-	-	-
+a	48	wordpress	/var/lib/minidregg/grains/spk-apps-survey/spk/wordpress.spk	M	web	/	-	-	-	-	-	-
+a	58	roundcube	/var/lib/minidregg/grains/spk-apps-survey/spk/roundcube.spk	M	web	/	-	-	-	-	-	-
+a	57	hacker-slides	/var/lib/minidregg/grains/spk-apps-survey/spk/hacker-slides.spk	S	web	/slides.md	PUT	/slides.md	text/markdown	# survey slide written before STOP	/slides.md	survey slide written before STOP
+a	59	simple-todos	/var/lib/minidregg/grains/spk-apps-survey/spk/simple-todos.spk	M	web	/	-	-	-	-	-	-
+a	24	davros	/var/lib/minidregg/grains/spk-apps-survey/spk/davros.spk	L	api	/status.php	PUT	/dav/survey.txt	text/plain	davros file written before STOP	/dav/survey.txt	davros file written before STOP
+a	23	ethercalc	/var/lib/minidregg/grains/spk-apps-survey/spk/ethercalc.spk	M	web	/	PUT	/_/survey	text/csv	survey,written before STOP	/_/survey/csv	written before STOP
+a	26	gogs	/var/lib/minidregg/grains/spk-apps-survey/spk/gogs.spk	S	web	/	-	-	-	-	-	-
+a	22	quick-survey	/var/lib/minidregg/grains/spk-apps-survey/spk/quick-survey.spk	M	web	/	-	-	-	-	-	-
+a	27	radicale	/var/lib/minidregg/grains/spk-apps-survey/spk/radicale.spk	S	web	/	-	-	-	-	-	-
+a	25	wordpress	/var/lib/minidregg/grains/spk-apps-survey/spk/wordpress.spk	M	web	/	-	-	-	-	-	-

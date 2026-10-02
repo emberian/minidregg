@@ -1,0 +1,8 @@
+Oct 02 01:28:23 persvati systemd[1]: Starting mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store 5f59b1449ee347d6...
+Oct 02 01:28:23 persvati systemd[1]: Started mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store 5f59b1449ee347d6.
+Oct 02 01:31:34 persvati spk-host[1142073]: spk-host: dispatch unavailable (WebSocket): browser session base path is not an https origin
+Oct 02 01:37:06 persvati systemd[1]: Stopping mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store 5f59b1449ee347d6...
+Oct 02 01:37:06 persvati systemd[1]: mini-spk-a4501-g2.service: Killing process 1152900 (node) with signal SIGKILL.
+Oct 02 01:37:06 persvati systemd[1]: mini-spk-a4501-g2.service: Deactivated successfully.
+Oct 02 01:37:06 persvati systemd[1]: Stopped mini-spk-a4501-g2.service - Mini SPK resident app 4501 generation 2 store 5f59b1449ee347d6.
+Oct 02 01:37:06 persvati systemd[1]: mini-spk-a4501-g2.service: Consumed 46.110s CPU time, 481.6M memory peak.

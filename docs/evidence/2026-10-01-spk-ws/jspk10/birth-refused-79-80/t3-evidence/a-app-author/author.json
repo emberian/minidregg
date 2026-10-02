@@ -1,0 +1,11 @@
+{
+  "config": "/var/lib/minidregg/grains/spk-ws-run/j10/t3/evidence/a-app-author/config.json",
+  "factoryObservationSha256": null,
+  "host": "/var/lib/minidregg/grains/spk-ws-bin/minidregg-host",
+  "hostSha256": "48a60a9ca29bbe04b12821c9a217a221fb8d450e2863bf9f793a1f9531c125e4",
+  "operation": 30,
+  "route": "application",
+  "socket": "/var/lib/minidregg/grains/spk-ws-run/j10/t3/sock/participant/host.sock",
+  "sourceSha256": "370d3c8223f744858d2887f5950adb70b0cb669a078a508648edacea246123b6",
+  "type": "minidregg-current-application-birth-author-v1"
+}

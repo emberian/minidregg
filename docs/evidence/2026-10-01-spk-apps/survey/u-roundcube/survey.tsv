@@ -1,0 +1,19 @@
+store	store	PASS	161.100487161	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/u-roundcube/store/base/workroom(noapplicationborn)
+roundcube	package	INFO	-	75821fd8387c8b8756dc8c40956207e699225424Bclass=Mkind=webapp=5801
+roundcube	birth-a	PASS	40.019351334	
+roundcube	install-a	PASS	519.997641562	{"app":"5801","appUid":980,"class":"M","completion":{"committedClaimSha256":"b3f43434221b8118a048cc8af11afa8bb96ade7732622003203310a6567c4821","completionReceipt":{"acceptedCount":"17","eventId":"8573
+roundcube	share-a	PASS	334.127777222	{"app":"5801","descriptor":"5811","directory":"/var/lib/minidregg/grains/spk-apps-root/7101fc63619537e0/host/apps/5801/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+roundcube	start-a	PASS	532.573777021	{"app":"5801","completion":{"admittedSha256":"6a69840d12ea5708442d563aab919fc0bcb6254769906585a2e7a2f8712025cd","completionReceipt":{"acceptedCount":"25","eventId":"43461684964867827336170909699991431
+roundcube	floor-a	PASS	.356006639	floor-heldapp-processes=12unit=mini-spk-a5801-g2.service
+roundcube	enroll-a	PASS	85.808660155	
+roundcube	get-a	PASS	45.988381847	503
+roundcube	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+roundcube	metrics-g1-get	PASS	-	{"memoryPeak":"501112832","pidsPeak":"21","procs":"15","processNames":"1bash,2bwrap,1launcher.sh,5nginx,3php5-fpm,1sandstorm-http-,1sandstorm-smtp-,1spk-host"}
+roundcube	metrics-g1	PASS	-	{"memoryPeak":"501112832","pidsPeak":"21","procs":"15","processNames":"1bash,2bwrap,1launcher.sh,5nginx,3php5-fpm,1sandstorm-http-,1sandstorm-smtp-,1spk-host"}
+roundcube	stop-a	PASS	1286.791144415	{"activeState":"inactive","app":"5801","elapsedMs":"1285069","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a5801-g2.service"}
+roundcube	start-a2	PASS	985.522932679	{"app":"5801","completion":{"admittedSha256":"7b750826868951878d8a3f893bfa45f6dfea8a300e69b85030f10b3a8a81edf4","completionReceipt":{"acceptedCount":"33","eventId":"57583478633963867544028094334151867
+roundcube	floor-a2	PASS	.386783731	floor-heldapp-processes=12unit=mini-spk-a5801-g4.service
+roundcube	enroll-a2	PASS	84.806728975	
+roundcube	get-a2	PASS	38.582810758	200
+roundcube	get-a2-http	200	-	bytes=2397Xko8FX4tL6dmy(B%f"*Iq=lQN>yyCxstmz2^(Z<6HU:g*Vr.3,Q`V3kra9+x.(k
+roundcube	metrics-g2	PASS	-	{"memoryPeak":"597069824","pidsPeak":"21","procs":"15","processNames":"1bash,2bwrap,1launcher.sh,5nginx,3php5-fpm,1sandstorm-http-,1sandstorm-smtp-,1spk-host"}

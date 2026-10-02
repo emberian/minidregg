@@ -107,7 +107,7 @@ jq -e --arg atom "$atom" \
   '.cell.entries | all(.[]; .type != "atom" or .id != $atom)' \
   "$output/before/view.json" >/dev/null || die "selected AtomId already exists"
 root=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/view.json")
-authority=$(jq -er '.signing[0].authorityRoot | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/challenge.json")
+authority=$(jq -er '.authorityRoot | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/challenge.json")
 jq -n --arg subject "$subject" --arg observe "$observe_nonce" \
   --arg command "$command_nonce" --arg authority "$authority" \
   --arg resource "$resource" --arg capability "$capability" \

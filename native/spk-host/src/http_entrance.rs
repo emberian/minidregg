@@ -37,6 +37,9 @@ pub(crate) enum Method {
     Put,
     Patch,
     Delete,
+    /// A `GET` carrying a valid RFC 6455 upgrade: a streamed dispatch whose
+    /// one Mini write is the open (Sandstorm `openWebSocket`).
+    WebSocket,
 }
 
 impl Method {
@@ -49,6 +52,7 @@ impl Method {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::WebSocket => crate::dispatch_inspection::STREAMED_OPEN_METHOD,
         }
     }
     fn parse(value: &str) -> io::Result<Self> {
@@ -68,7 +72,7 @@ impl Method {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ReceivedRequest {
     pub method: Method,
     #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
@@ -82,6 +86,10 @@ pub(crate) struct ReceivedRequest {
     fetch_site: Option<String>,
     fetch_mode: Option<String>,
     fetch_dest: Option<String>,
+    /// The validated handshake of a WebSocket open; the entrance attaches the
+    /// client stream only after transport authentication.
+    pub websocket: Option<crate::web_socket::Handshake>,
+    pub upgrade_stream: Option<UnixStream>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,7 +139,7 @@ fn canonical_nat(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn valid_expected_host(host: &str) -> bool {
+pub(crate) fn valid_expected_host(host: &str) -> bool {
     if host.is_empty() || host.len() > 255 || host != host.to_ascii_lowercase() {
         return false;
     }
@@ -187,6 +195,10 @@ fn hex_digest(value: &str) -> io::Result<[u8; 32]> {
 
 impl CustodianPolicy {
     pub(crate) fn load(directory: &Path) -> io::Result<Self> {
+        Self::load_with_bytes(directory).map(|(policy, _)| policy)
+    }
+
+    pub(crate) fn load_with_bytes(directory: &Path) -> io::Result<(Self, Vec<u8>)> {
         let _ = Journal::open(directory)?;
         let file = OpenOptions::new()
             .read(true)
@@ -206,7 +218,18 @@ impl CustodianPolicy {
         if bytes.len() > 4096 {
             return Err(refuse("custodian config grew"));
         }
-        let parsed: PolicyFile = serde_json::from_slice(&bytes)?;
+        Ok((Self::from_bytes(&bytes)?, bytes))
+    }
+
+    pub(crate) fn verify_tokens(&self, directory: &Path) -> io::Result<()> {
+        read_private_token(directory, "browser.token", &self.browser_token_sha256)?;
+        read_private_token(directory, "bootstrap.token", &self.bootstrap_token_sha256)?;
+        read_private_token(directory, "api.token", &self.api_token_sha256)?;
+        Ok(())
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
+        let parsed: PolicyFile = serde_json::from_slice(bytes)?;
         if parsed.protocol != "mini-spk-custodian-v1"
             || !valid_expected_host(&parsed.expected_host)
             || !canonical_nat(&parsed.fixed_app)
@@ -402,6 +425,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     let mut fetch_site = None;
     let mut fetch_mode = None;
     let mut fetch_dest = None;
+    let mut connection = None;
+    let mut upgrade = None;
+    let mut websocket_key = None;
+    let mut websocket_version = None;
+    let mut websocket_protocol = None;
     let mut body_len = None;
     let mut ordinary_headers = Vec::new();
     for line in lines {
@@ -435,6 +463,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             "sec-fetch-site" => fetch_site = Some(value),
             "sec-fetch-mode" => fetch_mode = Some(value),
             "sec-fetch-dest" => fetch_dest = Some(value),
+            "connection" => connection = Some(value),
+            "upgrade" => upgrade = Some(value),
+            "sec-websocket-key" => websocket_key = Some(value),
+            "sec-websocket-version" => websocket_version = Some(value),
+            "sec-websocket-protocol" => websocket_protocol = Some(value),
             "content-length" => {
                 if value.is_empty()
                     || (value.len() > 1 && value.starts_with('0'))
@@ -462,6 +495,36 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     }
     let host = host.ok_or_else(|| refuse("missing HTTP Host"))?;
     let body_len = body_len.unwrap_or(0);
+    // An upgrade is a WebSocket open or nothing. Its subprotocol list is an
+    // app-visible input, so it is signed like an ordinary header; the
+    // extensions offer is declined (never forwarded, never accepted).
+    let (method, websocket) = match upgrade {
+        None => {
+            if websocket_key.is_some()
+                || websocket_version.is_some()
+                || websocket_protocol.is_some()
+            {
+                return Err(refuse("WebSocket header without an upgrade"));
+            }
+            (method, None)
+        }
+        Some(upgrade) => {
+            if method != Method::Get || body_len != 0 {
+                return Err(refuse("WebSocket upgrade is not a bodyless GET"));
+            }
+            let handshake = crate::web_socket::client_handshake(
+                connection.as_deref(),
+                &upgrade,
+                websocket_key.as_deref(),
+                websocket_version.as_deref(),
+            )?;
+            if let Some(protocols) = websocket_protocol {
+                crate::web_socket::protocols(Some(&protocols))?;
+                ordinary_headers.push(("sec-websocket-protocol".to_owned(), protocols));
+            }
+            (Method::WebSocket, Some(handshake))
+        }
+    };
     if body_len > MAX_BODY {
         return Err(refuse("HTTP body exceeds native bound"));
     }
@@ -484,6 +547,8 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             fetch_site,
             fetch_mode,
             fetch_dest,
+            websocket,
+            upgrade_stream: None,
         },
         body_len,
     ))
@@ -638,69 +703,55 @@ pub struct PrivateHttpEntrance {
 }
 
 impl PrivateHttpEntrance {
-    /// One resident process owns one fd3 RpcDriver and a bounded collection
-    /// of separately fixed participant origins. Native admission remains a
-    /// per-request duty of the callback; an entrance never supplies authority.
-    /// Poll an optional private auxiliary socket in the same MainPID as all
-    /// human entrances. Its callback must consume at most one ready request;
-    /// it shares the caller's single fd3 owner and cannot introduce a second
-    /// app process or RPC driver.
-    pub(crate) fn serve_many_with_aux(
-        entrances: &[Self],
+    /// Append-only registration keeps every existing participant index and
+    /// accepted stream intact. Auxiliary callbacks may append a listener only
+    /// after their own current Mini admission has succeeded.
+    pub(crate) fn serve_dynamic_with_aux(
+        mut entrances: Vec<Self>,
         auxiliary_fds: &[libc::c_int],
         mut dispatch: impl FnMut(
             Result<(usize, ReceivedRequest, EntranceKind, &CustodianPolicy), usize>,
+            &mut Vec<Self>,
         ) -> io::Result<Option<Vec<u8>>>,
     ) -> io::Result<()> {
-        if entrances.is_empty() || entrances.len() > 8 || auxiliary_fds.len() > 8 {
+        if entrances.is_empty() || auxiliary_fds.len() > 10 {
             return Err(refuse("resident entrance count refused"));
         }
-        for (index, entrance) in entrances.iter().enumerate() {
-            if entrances[..index].iter().any(|other| {
-                other.policy.expected_host == entrance.policy.expected_host
-                    || (other.socket_dev, other.socket_ino)
-                        == (entrance.socket_dev, entrance.socket_ino)
-                    || (other.policy.fixed_app == entrance.policy.fixed_app
-                        && other.policy.fixed_session == entrance.policy.fixed_session
-                        && other.policy.fixed_ticket == entrance.policy.fixed_ticket)
-            }) {
-                return Err(refuse("resident participant origin or session duplicated"));
-            }
-        }
-        let mut polls: Vec<libc::pollfd> = entrances
-            .iter()
-            .map(|entrance| libc::pollfd {
-                fd: entrance.listener.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            })
-            .collect();
-        for fd in auxiliary_fds {
-            if *fd < 0 || polls.iter().any(|poll| poll.fd == *fd) {
-                return Err(refuse("resident auxiliary fd refused"));
-            }
-            polls.push(libc::pollfd {
-                fd: *fd,
-                events: libc::POLLIN,
-                revents: 0,
-            });
-        }
         loop {
-            for poll in &mut polls {
-                poll.revents = 0;
+            if entrances.len() > crate::resident_route_control::MAX_ROUTES {
+                return Err(refuse("resident route limit reached"));
+            }
+            let prior_count = entrances.len();
+            let mut polls: Vec<libc::pollfd> = entrances
+                .iter()
+                .map(|entrance| libc::pollfd {
+                    fd: entrance.listener.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                })
+                .collect();
+            for fd in auxiliary_fds {
+                if *fd < 0 || polls.iter().any(|poll| poll.fd == *fd) {
+                    return Err(refuse("resident auxiliary fd refused"));
+                }
+                polls.push(libc::pollfd {
+                    fd: *fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                });
             }
             if !poll_entrances(&mut polls, -1)? {
                 continue;
             }
-            for (index, auxiliary) in polls.iter().skip(entrances.len()).enumerate() {
+            for (index, auxiliary) in polls.iter().skip(prior_count).enumerate() {
                 if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     return Err(refuse("resident auxiliary poll error"));
                 }
                 if auxiliary.revents & libc::POLLIN != 0 {
-                    let _ = dispatch(Err(index))?;
+                    let _ = dispatch(Err(index), &mut entrances)?;
                 }
             }
-            for (index, poll) in polls.iter().take(entrances.len()).enumerate() {
+            for (index, poll) in polls.iter().take(prior_count).enumerate() {
                 if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     return Err(refuse("resident entrance poll error"));
                 }
@@ -709,13 +760,15 @@ impl PrivateHttpEntrance {
                 }
                 let entrance = &entrances[index];
                 let (stream, _) = entrance.listener.accept()?;
+                let policy = entrance.policy.clone();
+                let directory = entrance.socket.parent().map(Path::to_path_buf);
                 if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
                     let _ = handle_stream_with(
                         stream,
-                        &entrance.policy,
-                        entrance.socket.parent(),
+                        &policy,
+                        directory.as_deref(),
                         &mut |request, kind, policy| {
-                            dispatch(Ok((index, request, kind, policy)))?
+                            dispatch(Ok((index, request, kind, policy)), &mut entrances)?
                                 .ok_or_else(|| refuse("resident HTTP response absent"))
                         },
                     );
@@ -725,7 +778,12 @@ impl PrivateHttpEntrance {
     }
 
     pub fn bind(directory: &Path) -> io::Result<Self> {
-        let policy = CustodianPolicy::load(directory)?;
+        Self::bind_fixed(directory, CustodianPolicy::load(directory)?)
+    }
+
+    /// The caller retains the already hash-checked policy; do not reopen a
+    /// mutable path after current source admission and silently change identity.
+    pub(crate) fn bind_fixed(directory: &Path, policy: CustodianPolicy) -> io::Result<Self> {
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -996,7 +1054,18 @@ fn handle_stream_with(
     }
     let kind = policy.authenticate(&mut request)?;
     let method = request.method;
-    let response = dispatch(request, kind, policy).unwrap_or_else(|_| unavailable_response(method));
+    if request.websocket.is_some() {
+        // The fd3 worker owns this duplicate once the open is admitted; on a
+        // refusal or failure the response below goes out on the original.
+        request.upgrade_stream = Some(stream.try_clone()?);
+    }
+    // The client sees one uniform 503; the operator's journal gets the
+    // reason (an admitted request that failed in delivery, an fd3 refusal,
+    // an unrepresentable app response), or a survey cannot say what broke.
+    let response = dispatch(request, kind, policy).unwrap_or_else(|error| {
+        eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
+        unavailable_response(method)
+    });
     stream.write_all(&response)
 }
 
@@ -1071,18 +1140,19 @@ mod tests {
             let mut agents = [agent_a, agent_b];
             let fds = [agents[0].as_raw_fd(), agents[1].as_raw_fd()];
             let mut count = 0;
-            let result = PrivateHttpEntrance::serve_many_with_aux(&[entrance], &fds, |event| {
-                let index = event.err().ok_or_else(|| refuse("unexpected human poll"))?;
-                let mut byte = [0u8; 1];
-                agents[index].read_exact(&mut byte)?;
-                seen_tx.send(index).unwrap();
-                count += 1;
-                if count == 2 {
-                    Err(refuse("poll fixture complete"))
-                } else {
-                    Ok(None)
-                }
-            });
+            let result =
+                PrivateHttpEntrance::serve_dynamic_with_aux(vec![entrance], &fds, |event, _| {
+                    let index = event.err().ok_or_else(|| refuse("unexpected human poll"))?;
+                    let mut byte = [0u8; 1];
+                    agents[index].read_exact(&mut byte)?;
+                    seen_tx.send(index).unwrap();
+                    count += 1;
+                    if count == 2 {
+                        Err(refuse("poll fixture complete"))
+                    } else {
+                        Ok(None)
+                    }
+                });
             assert!(result.is_err());
         });
         writer_b.write_all(b"b").unwrap();
@@ -1092,6 +1162,111 @@ mod tests {
         worker.join().unwrap();
         fs::remove_file(directory.join(".lock")).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn dynamic_poll_adds_route_without_closing_an_existing_upgraded_stream() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hot-poll-{}-{nonce}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let make = |name: &str, session: &str| {
+            let directory = root.join(name);
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&directory)
+                .unwrap();
+            let socket = directory.join("http.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let meta = fs::symlink_metadata(&socket).unwrap();
+            let mut policy = policy();
+            policy.fixed_session = session.into();
+            PrivateHttpEntrance {
+                listener,
+                socket,
+                socket_dev: meta.dev(),
+                socket_ino: meta.ino(),
+                _lock: File::create(directory.join(".lock")).unwrap(),
+                policy,
+            }
+        };
+        let a = make("a", "6208");
+        let b = make("b", "6209");
+        let a_path = a.socket.clone();
+        let b_path = b.socket.clone();
+        let (mut control, mut commands) = UnixStream::pair().unwrap();
+        let (seen, events) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut pending = Some(b);
+            let mut active_a: Option<UnixStream> = None;
+            let fds = [control.as_raw_fd()];
+            let result = PrivateHttpEntrance::serve_dynamic_with_aux(
+                vec![a],
+                &fds,
+                |event, routes| {
+                    match event {
+                        Err(0) => {
+                            let mut command = [0];
+                            control.read_exact(&mut command)?;
+                            if command[0] == 2 {
+                                return Err(refuse("fixture complete"));
+                            }
+                            routes.push(pending.take().unwrap());
+                            // A remains a live accepted transport while B is added.
+                            let stream = active_a.as_mut().unwrap();
+                            let mut payload = [0; 4];
+                            stream.read_exact(&mut payload)?;
+                            stream.write_all(&payload)?;
+                            seen.send(2).unwrap();
+                            Ok(None)
+                        }
+                        Ok((index, mut request, _, _)) => {
+                            if index == 0 {
+                                let mut stream = request.upgrade_stream.take().unwrap();
+                                stream.write_all(b"HTTP/1.1 101 Switching Protocols\r\n\r\n")?;
+                                active_a = Some(stream);
+                                seen.send(0).unwrap();
+                                Ok(Some(Vec::new()))
+                            } else {
+                                seen.send(index).unwrap();
+                                Ok(Some(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nb".to_vec()))
+                            }
+                        }
+                        Err(_) => unreachable!(),
+                    }
+                },
+            );
+            assert!(result.is_err());
+        });
+        let mut client_a = UnixStream::connect(a_path).unwrap();
+        client_a
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client_a.write_all(b"GET /live HTTP/1.1\r\nHost: friend.example.test\r\nOrigin: https://friend.example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n").unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), 0);
+        let mut head = [0; 36];
+        client_a.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"HTTP/1.1 101 Switching Protocols\r\n\r\n");
+        client_a.write_all(b"live").unwrap();
+        commands.write_all(&[1]).unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), 2);
+        let mut echo = [0; 4];
+        client_a.read_exact(&mut echo).unwrap();
+        assert_eq!(&echo, b"live");
+        let mut client_b = UnixStream::connect(b_path).unwrap();
+        client_b
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client_b.write_all(b"GET / HTTP/1.1\r\nHost: friend.example.test\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n").unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+        let mut response = Vec::new();
+        client_b.read_to_end(&mut response).unwrap();
+        assert!(response.ends_with(b"\r\n\r\nb"));
+        commands.write_all(&[2]).unwrap();
+        worker.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn policy() -> CustodianPolicy {
@@ -1168,6 +1343,53 @@ mod tests {
             EntranceKind::Browser
         );
         assert!(request.body.is_empty());
+    }
+
+    /// A browser WebSocket open is a streamed dispatch: an RFC 6455 GET
+    /// becomes the `WEBSOCKET` method, its subprotocol list is signed, and the
+    /// cookie route holds it to the same-origin rule of an unsafe method
+    /// (cross-site WebSocket hijacking is refused before Mini).
+    #[test]
+    fn browser_websocket_open_is_a_streamed_same_origin_request() {
+        let raw = "GET /socket.io/?EIO=3&transport=websocket HTTP/1.1\r\nHost: friend.example.test\r\nOrigin: https://friend.example.test\r\nSec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: websocket\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: chat\r\nSec-WebSocket-Extensions: permessage-deflate\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n";
+        let mut request = parsed(raw).unwrap();
+        assert_eq!(request.method, Method::WebSocket);
+        assert_eq!(request.method.as_str(), "WEBSOCKET");
+        assert_eq!(
+            request.websocket.as_ref().unwrap().accept,
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+        assert_eq!(
+            request.ordinary_headers,
+            [("sec-websocket-protocol".to_owned(), "chat".to_owned())]
+        );
+        assert_eq!(
+            policy().authenticate(&mut request).unwrap(),
+            EntranceKind::Browser
+        );
+        let mut no_origin =
+            parsed(&raw.replace("Origin: https://friend.example.test\r\n", "")).unwrap();
+        assert!(policy().authenticate(&mut no_origin).is_err());
+        let mut cross =
+            parsed(&raw.replace("https://friend.example.test", "https://evil.example.test"))
+                .unwrap();
+        assert!(policy().authenticate(&mut cross).is_err());
+        assert!(
+            parsed(&raw.replace("Sec-WebSocket-Version: 13", "Sec-WebSocket-Version: 8")).is_err()
+        );
+        assert!(
+            parsed(&raw.replace("Connection: keep-alive, Upgrade", "Connection: keep-alive"))
+                .is_err()
+        );
+        assert!(parsed(&raw.replace("GET /socket.io", "POST /socket.io")).is_err());
+        assert!(parsed(&raw.replace("Upgrade: websocket", "Upgrade: h2c")).is_err());
+        let stray = "GET / HTTP/1.1\r\nHost: friend.example.test\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+        assert!(parsed(stray).is_err());
+        let plain =
+            parsed("GET / HTTP/1.1\r\nHost: friend.example.test\r\nConnection: keep-alive\r\n\r\n")
+                .unwrap();
+        assert_eq!(plain.method, Method::Get);
+        assert!(plain.websocket.is_none());
     }
 
     #[test]

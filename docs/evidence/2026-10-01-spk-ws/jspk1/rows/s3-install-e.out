@@ -1,0 +1,3 @@
+install-e                    exit=0 316.814980880s
+{"app":"6601","store":"daeee12574c8707f","class":"S","imported":{"app":"6101","stopGeneration":"4","stopReceiptSha256":"def21a67f3491168762ac9f66e0b64123760b838b4d76c1e92a1a17be4d2bc9b","image":{"bytes":"536870912","file":"var.ext4","sha256":"027ea42447f45ce0559a6f93135d9a687957bfcca3224870a00a5cfe09414ddf"}}}
+imported /var re-owned to this grain's app UID 972

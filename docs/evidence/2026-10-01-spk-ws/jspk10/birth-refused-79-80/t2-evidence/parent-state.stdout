@@ -1,0 +1,48 @@
+{
+  "balances": [],
+  "cell": {
+    "entries": [
+      {
+        "key": {
+          "field": "1",
+          "resource": "7901",
+          "type": "object"
+        },
+        "value": "3"
+      },
+      {
+        "key": {
+          "field": "2",
+          "resource": "7901",
+          "type": "object"
+        },
+        "value": "99"
+      },
+      {
+        "key": {
+          "field": "3",
+          "resource": "7901",
+          "type": "object"
+        },
+        "value": "1"
+      },
+      {
+        "key": {
+          "field": "0",
+          "resource": "7901",
+          "type": "object"
+        },
+        "value": "1"
+      }
+    ],
+    "grain": {
+      "generation": "1",
+      "remaining": "99",
+      "reserved": "1",
+      "status": "3",
+      "task": "7901"
+    },
+    "root": "93884220613094656162086989945034263021126095181010209610436430806537751075082"
+  },
+  "type": "resource"
+}

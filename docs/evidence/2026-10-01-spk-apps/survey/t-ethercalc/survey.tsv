@@ -1,0 +1,19 @@
+store	store	PASS	178.666843483	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/t-ethercalc/store/base/workroom(noapplicationborn)
+ethercalc	package	INFO	-	93bd2c296692368252ea7b5610a7930d11983992Bclass=Mkind=webapp=4501
+ethercalc	birth-a	PASS	41.511891755	
+ethercalc	install-a	PASS	450.542609219	{"app":"4501","appUid":974,"class":"M","completion":{"committedClaimSha256":"a22a1644e66738f232e2a6c4a226fedab347bcd052a366260dd1c5975d1c284c","completionReceipt":{"acceptedCount":"17","eventId":"9816
+ethercalc	share-a	PASS	262.254914155	{"app":"4501","descriptor":"4511","directory":"/var/lib/minidregg/grains/spk-apps-root/a2492b849c17cc73/host/apps/4501/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+ethercalc	start-a	PASS	489.532461040	{"app":"4501","completion":{"admittedSha256":"e97851cf98c5c2882d5fdd06158c51f75f0789e3cdeee864cfd34223dcd15a5e","completionReceipt":{"acceptedCount":"25","eventId":"91236066845684339735903332662706336
+ethercalc	floor-a	PASS	.279062845	floor-heldapp-processes=4unit=mini-spk-a4501-g2.service
+ethercalc	enroll-a	PASS	80.075639601	
+ethercalc	get-a	PASS	44.244728230	503
+ethercalc	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+ethercalc	metrics-g1-get	PASS	-	{"memoryPeak":"501477376","pidsPeak":"18","procs":"7","processNames":"2bwrap,1make,1node,1run_grain.sh,1sandstorm-http-,1spk-host"}
+ethercalc	post-a	PASS	23.123365899	503
+ethercalc	post-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+ethercalc	metrics-g1	PASS	-	{"memoryPeak":"501477376","pidsPeak":"18","procs":"7","processNames":"2bwrap,1make,1node,1run_grain.sh,1sandstorm-http-,1spk-host"}
+ethercalc	stop-a	PASS	1333.035048379	{"activeState":"inactive","app":"4501","elapsedMs":"1331554","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a4501-g2.service"}
+ethercalc	start-a2	PASS	1069.394175880	{"app":"4501","completion":{"admittedSha256":"71bb19beeb8d9d906396f464ce26e09190e25b7bd097fc5207e20d51f691142a","completionReceipt":{"acceptedCount":"33","eventId":"10195068619955017310029800772588529
+ethercalc	floor-a2	PASS	.273715981	floor-heldapp-processes=4unit=mini-spk-a4501-g4.service
+ethercalc	enroll-a2	FAIL	17.303693915	mini:Nosuchfileordirectory(oserror2)
+ethercalc	stop-a2	PASS	3042.197283148	{"activeState":"inactive","app":"4501","elapsedMs":"3040761","generation":"4","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a4501-g4.service"}

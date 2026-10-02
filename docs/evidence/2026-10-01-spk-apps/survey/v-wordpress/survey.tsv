@@ -1,0 +1,19 @@
+store	store	PASS	169.533539913	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-wordpress/store/base/workroom(noapplicationborn)
+wordpress	package	INFO	-	d6955e8f377ac431db17fd01855b3ce546887336Bclass=Mkind=webapp=2501
+wordpress	birth-a	PASS	31.104390351	
+wordpress	install-a	PASS	443.899854098	{"app":"2501","appUid":950,"class":"M","completion":{"committedClaimSha256":"b0371a9438724ae2200584783f2cd76eb1ea7b0aa97295de818b1f74aaa4888e","completionReceipt":{"acceptedCount":"17","eventId":"9617
+wordpress	share-a	PASS	309.460477746	{"app":"2501","descriptor":"2511","directory":"/var/lib/minidregg/grains/spk-apps-root/92587e7c1bba6642/host/apps/2501/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+wordpress	start-a	PASS	475.173430385	{"app":"2501","completion":{"admittedSha256":"7161ae986e71576abdce748cf100b1cc8be6e80e52ee79a71e8058537563ab94","completionReceipt":{"acceptedCount":"25","eventId":"49642458971216485330717346052365726
+wordpress	floor-a	PASS	.541892208	floor-heldapp-processes=13unit=mini-spk-a2501-g2.service
+wordpress	enroll-a	PASS	82.506143261	
+wordpress	get-a	PASS	43.749492558	503
+wordpress	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+wordpress	metrics-g1-get	PASS	-	{"memoryPeak":"554045440","pidsPeak":"30","procs":"16","processNames":"2bwrap,1continue.sh,5nginx,3php-fpm7.3,1powerbox-http-p,1sandstorm-http-,1sleep,1spk-host,1start.sh"}
+wordpress	metrics-g1	PASS	-	{"memoryPeak":"554045440","pidsPeak":"30","procs":"16","processNames":"2bwrap,1continue.sh,5nginx,3php-fpm7.3,1powerbox-http-p,1sandstorm-http-,1sleep,1spk-host,1start.sh"}
+wordpress	stop-a	PASS	1355.802183507	{"activeState":"inactive","app":"2501","elapsedMs":"1354036","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2501-g2.service"}
+wordpress	start-a2	PASS	1026.750616381	{"app":"2501","completion":{"admittedSha256":"dddb76f31e412854b30961cd28ab03d5a561a3e5a6a222dcbb6d1694f4f7fb1f","completionReceipt":{"acceptedCount":"33","eventId":"11512382527142474811120277583106604
+wordpress	floor-a2	PASS	.467744307	floor-heldapp-processes=12unit=mini-spk-a2501-g4.service
+wordpress	enroll-a2	PASS	94.208215553	
+wordpress	get-a2	PASS	42.965506045	303
+wordpress	get-a2-http	303	-	bytes=0
+wordpress	metrics-g2	PASS	-	{"memoryPeak":"543416320","pidsPeak":"31","procs":"15","processNames":"2bwrap,1continue.sh,5nginx,3php-fpm7.3,1powerbox-http-p,1sandstorm-http-,1sleep,1spk-host"}

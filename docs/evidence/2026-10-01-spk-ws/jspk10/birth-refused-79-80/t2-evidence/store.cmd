@@ -1,0 +1,1 @@
+/var/lib/minidregg/grains/spk-ws-src/scripts/spk-platform/grain-store.sh /var/lib/minidregg/grains/spk-ws-run/j10/t2/store /var/lib/minidregg/grains/spk-ws-bin/minidregg-host /var/lib/minidregg/grains/spk-ws-bin/mini /var/lib/minidregg/grains/spk-ws-bin/minidregg-link-sqlite-store /var/lib/minidregg/grains/spk-ws-bin/minidregg-credential-signature-verifier

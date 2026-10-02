@@ -1,0 +1,6 @@
+*Runningonhttp://0.0.0.0:8000/
+*Restartingwithreloader
+127.0.0.1--[01/Oct/202614:44:59]"GET/slides.mdHTTP/1.1"200-
+127.0.0.1--[01/Oct/202614:49:47]"PUT/slides.mdHTTP/1.1"200-
+127.0.0.1--[01/Oct/202614:50:35]"GET/slides.mdHTTP/1.1"200-
+127.0.0.1--[01/Oct/202614:51:33]"GET/HTTP/1.1"500-

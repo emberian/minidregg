@@ -1,0 +1,11 @@
+{
+  "protocol": "mini-spk-broker-config-v1",
+  "grainsRoot": "/var/lib/mini/grains",
+  "operatorUser": "mini",
+  "unitPrefix": "mini",
+  "spkHost": "/usr/local/libexec/minidregg/spk-host",
+  "spkHostSha256": "<sha256 of the installed spk-host>",
+  "ingestHelper": "/usr/local/libexec/minidregg/spk-ingest",
+  "volumeHelper": "/usr/local/libexec/minidregg/spk-var-volume",
+  "appUids": [961, 962, 963, 964]
+}

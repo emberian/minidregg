@@ -66,6 +66,51 @@ fn value<'a>(line: &'a str, key: &str) -> io::Result<&'a str> {
         .ok_or_else(|| invalid("volume witness field order refused"))
 }
 
+/// Where a Store's volumes live: the broker's grains root and the Store key.
+/// Image, mount and witness names are `<store>-<resource>` below the root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VolumeSite {
+    pub(crate) grains_root: PathBuf,
+    pub(crate) store: String,
+}
+
+impl VolumeSite {
+    pub(crate) fn new(grains_root: &Path, store: &str) -> io::Result<Self> {
+        if !grains_root.is_absolute()
+            || store.len() != 16
+            || !store
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(invalid("volume site refused"));
+        }
+        Ok(Self {
+            grains_root: grains_root.to_path_buf(),
+            store: store.to_owned(),
+        })
+    }
+
+    fn name(&self, resource: u64) -> String {
+        format!("{}-{resource}", self.store)
+    }
+
+    pub(crate) fn backing(&self, resource: u64) -> PathBuf {
+        self.grains_root
+            .join("volumes")
+            .join(format!("{}.ext4", self.name(resource)))
+    }
+
+    pub(crate) fn mount(&self, resource: u64) -> PathBuf {
+        self.grains_root.join("vars").join(self.name(resource))
+    }
+
+    fn witness(&self, resource: u64) -> PathBuf {
+        self.grains_root
+            .join("attest")
+            .join(format!("{}.witness", self.name(resource)))
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct VolumeWitness {
     pub(crate) bytes: Vec<u8>,
@@ -79,12 +124,13 @@ pub(crate) struct VolumeWitness {
     pub(crate) backing_fs: String,
     pub(crate) image_ext4_uuid: String,
     pub(crate) mount: PathBuf,
+    site: VolumeSite,
     file_dev: u64,
     file_ino: u64,
 }
 
 impl VolumeWitness {
-    fn parse(bytes: Vec<u8>) -> io::Result<Self> {
+    fn parse(bytes: Vec<u8>, site: &VolumeSite) -> io::Result<Self> {
         if bytes.is_empty() || bytes.len() > MAX_WITNESS as usize || bytes.last() != Some(&b'\n') {
             return Err(invalid("volume witness framing refused"));
         }
@@ -117,8 +163,7 @@ impl VolumeWitness {
             .filter(|n| *n >= 64 * 1024 * 1024 && *n <= 16 * 1024 * 1024 * 1024)
             .ok_or_else(|| invalid("volume witness quota refused"))?;
         let backing = value(lines[7], "backing=")?;
-        let expected_backing = format!("/var/lib/minidregg/spk/images/{resource}.ext4");
-        if backing != expected_backing {
+        if Path::new(backing) != site.backing(resource) {
             return Err(invalid("volume witness backing path refused"));
         }
         let backing_fs = value(lines[8], "backing_fs=")?.to_owned();
@@ -129,11 +174,10 @@ impl VolumeWitness {
             .ok_or_else(|| invalid("volume witness backing size refused"))?;
         let image_ext4_uuid = value(lines[11], "image_ext4_uuid=")?.to_owned();
         let mount = value(lines[12], "mount=")?.to_owned();
-        let expected_mount = format!("/var/lib/minidregg/spk/vars/{resource}");
         if backing_size != quota_bytes
             || !stable_backing_fs(&backing_fs)
             || !uuid(&image_ext4_uuid)
-            || mount != expected_mount
+            || Path::new(&mount) != site.mount(resource)
         {
             return Err(invalid("volume witness filesystem mapping refused"));
         }
@@ -149,6 +193,7 @@ impl VolumeWitness {
             backing_fs,
             image_ext4_uuid,
             mount: PathBuf::from(mount),
+            site: site.clone(),
             file_dev: 0,
             file_ino: 0,
         })
@@ -173,7 +218,7 @@ impl VolumeWitness {
     }
 
     pub(crate) fn recheck_handoff(&self) -> io::Result<()> {
-        let fresh = read_root_witness(self.resource, false)?;
+        let fresh = read_root_witness(&self.site, self.resource, false)?;
         if fresh.file_dev != self.file_dev
             || fresh.file_ino != self.file_ino
             || fresh.bytes != self.bytes
@@ -202,13 +247,16 @@ fn root_chain(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn read_root_witness(resource: u64, require_recent: bool) -> io::Result<VolumeWitness> {
+fn read_root_witness(
+    site: &VolumeSite,
+    resource: u64,
+    require_recent: bool,
+) -> io::Result<VolumeWitness> {
     if resource == 0 || resource > 999_999_999_999_999_999 {
         return Err(invalid("attestation resource outside supported profile"));
     }
-    let parent = Path::new("/run/minidregg/spk/volume-attest");
-    root_chain(parent)?;
-    let path = parent.join(format!("{resource}.witness"));
+    let path = site.witness(resource);
+    root_chain(path.parent().ok_or_else(|| invalid("witness path"))?)?;
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -252,7 +300,7 @@ fn read_root_witness(resource: u64, require_recent: bool) -> io::Result<VolumeWi
     {
         return Err(invalid("root volume attestation changed while read"));
     }
-    let mut witness = VolumeWitness::parse(bytes)?;
+    let mut witness = VolumeWitness::parse(bytes, site)?;
     if witness.resource != resource {
         return Err(invalid("root volume attestation resource mismatch"));
     }
@@ -262,8 +310,10 @@ fn read_root_witness(resource: u64, require_recent: bool) -> io::Result<VolumeWi
 }
 
 /// The caller supplies only Mini-checked identifiers and private config pins.
-/// This reads the fixed root-owned handoff, not a caller-selected path.
+/// The handoff is the broker's root-owned witness below the grains root; every
+/// ancestor of it is checked root-owned and not group/world writable.
 pub(crate) fn read_attested_volume(
+    site: &VolumeSite,
     resource: u64,
     app_uid: u32,
     quota_bytes: u64,
@@ -271,7 +321,7 @@ pub(crate) fn read_attested_volume(
     expected_host_id: &str,
     expected_source_volume_id: &str,
 ) -> io::Result<VolumeWitness> {
-    let witness = read_root_witness(resource, true)?;
+    let witness = read_root_witness(site, resource, true)?;
     if witness.app_uid != app_uid
         || witness.quota_bytes != quota_bytes
         || witness.deployment_id != expected_deployment_id
@@ -290,12 +340,16 @@ mod tests {
     use super::*;
 
     fn example() -> Vec<u8> {
-        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource=8401\nvolume_id={}\napp_uid=2401\nquota_bytes=67108864\nbacking=/var/lib/minidregg/spk/images/8401.ext4\nbacking_fs=ext4:c254723a-a9b4-42d9-9f90-e08822823add\nbacking_inode=7654\nbacking_size=67108864\nimage_ext4_uuid=12345678-1234-1234-1234-123456789abc\nmount=/var/lib/minidregg/spk/vars/8401\n", "a".repeat(64), "b".repeat(64), "c".repeat(64)).into_bytes()
+        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource=8401\nvolume_id={}\napp_uid=2401\nquota_bytes=67108864\nbacking=/var/lib/mini/grains/volumes/0123456789abcdef-8401.ext4\nbacking_fs=ext4:c254723a-a9b4-42d9-9f90-e08822823add\nbacking_inode=7654\nbacking_size=67108864\nimage_ext4_uuid=12345678-1234-1234-1234-123456789abc\nmount=/var/lib/mini/grains/vars/0123456789abcdef-8401\n", "a".repeat(64), "b".repeat(64), "c".repeat(64)).into_bytes()
+    }
+
+    fn site() -> VolumeSite {
+        VolumeSite::new(Path::new("/var/lib/mini/grains"), "0123456789abcdef").unwrap()
     }
 
     #[test]
     fn stable_witness_parses_exact_root_profile() {
-        let parsed = VolumeWitness::parse(example()).unwrap();
+        let parsed = VolumeWitness::parse(example(), &site()).unwrap();
         assert_eq!(parsed.resource, 8401);
         assert_eq!(parsed.volume_id, "c".repeat(64));
         assert_eq!(parsed.backing_inode, 7654);
@@ -305,11 +359,14 @@ mod tests {
     #[test]
     fn witness_refuses_path_and_field_ambiguity() {
         let mut wrong = String::from_utf8(example()).unwrap();
-        wrong = wrong.replace("images/8401.ext4", "images/8402.ext4");
-        assert!(VolumeWitness::parse(wrong.into_bytes()).is_err());
+        wrong = wrong.replace("abcdef-8401.ext4", "abcdef-8402.ext4");
+        assert!(VolumeWitness::parse(wrong.into_bytes(), &site()).is_err());
         let mut wrong = example();
         wrong.extend_from_slice(b"\n");
-        assert!(VolumeWitness::parse(wrong).is_err());
+        assert!(VolumeWitness::parse(wrong, &site()).is_err());
+        // Another Store's volume of the same resource is not this Store's.
+        let other = VolumeSite::new(Path::new("/var/lib/mini/grains"), "fedcba9876543210").unwrap();
+        assert!(VolumeWitness::parse(example(), &other).is_err());
     }
 
     #[test]
@@ -318,7 +375,7 @@ mod tests {
             "backing_fs=ext4:c254723a-a9b4-42d9-9f90-e08822823add",
             "backing_fs=zfs:2533678408435541861",
         );
-        assert!(VolumeWitness::parse(text.into_bytes()).is_ok());
+        assert!(VolumeWitness::parse(text.into_bytes(), &site()).is_ok());
         assert!(!stable_backing_fs("zfs:0"));
         assert!(!stable_backing_fs("zfs:tank"));
     }

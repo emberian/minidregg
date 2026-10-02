@@ -76,8 +76,11 @@ fn add(headers: &mut String, name: &str, value: &str) -> io::Result<()> {
 }
 
 fn content_disposition(value: &str) -> io::Result<String> {
-    if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
-        return Err(invalid("WebSession download name refused"));
+    if value.len() > 1024 {
+        return Err(invalid("WebSession download name refused: longer than 1024 bytes"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(invalid("WebSession download name refused: control character"));
     }
     let mut encoded = String::new();
     for byte in value.bytes() {
@@ -92,7 +95,18 @@ fn content_disposition(value: &str) -> io::Result<String> {
     ))
 }
 
-fn relative_location(value: &str) -> io::Result<&str> {
+/// A redirect stays inside the grain: a relative location, or an absolute
+/// one on the route's own origin (`https://HOST`), which is rewritten to its
+/// path. An app builds the latter from X-Sandstorm-Base-Path (that origin):
+/// WordPress redirects `/` to `https://HOST/...` and answered 503 before
+/// (SPK-APPS 2026-10-01). Every other absolute or scheme-relative location
+/// is still refused (no open redirect off the grain's origin).
+fn relative_location<'a>(value: &'a str, origin: Option<&str>) -> io::Result<&'a str> {
+    let value = match origin.and_then(|origin| value.strip_prefix(origin)) {
+        Some("") => "/",
+        Some(rest) if rest.starts_with(['/', '?', '#']) => rest,
+        _ => value,
+    };
     field(value)?;
     if value.is_empty()
         || value != value.trim()
@@ -174,6 +188,17 @@ fn cookie_expires(epoch_seconds: i64) -> io::Result<String> {
 /// Serializes one already completed app response; the caller owns authority,
 /// deadline, exact request matching, and the no-retry decision.
 pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Result<Vec<u8>> {
+    serialize_for_origin(response, head_request, None)
+}
+
+/// `origin` is the browser route's `https://HOST`, the WebSession base path,
+/// so a redirect the app made absolute on it can be served (see
+/// `relative_location`).
+pub(crate) fn serialize_for_origin(
+    response: &WebResponse,
+    head_request: bool,
+    origin: Option<&str>,
+) -> io::Result<Vec<u8>> {
     if response.headers.len() + response.set_cookies.len() > MAX_HEADERS {
         return Err(invalid("too many WebSession response headers"));
     }
@@ -207,7 +232,12 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
                 add(&mut headers, "ETag", &etag(tag)?)?;
             }
             if !matches!(*status, 204 | 304) {
-                if let Some(name) = download_name {
+                // An empty download name is what sandstorm-http-bridge sends
+                // for a bare `Content-Disposition: attachment`; Sandstorm's
+                // shell treats it as no disposition (a falsy name), and so
+                // does this proxy. Measured: Davros's WebDAV GET of a file
+                // answered 503 on the refusal (SPK-APPS 2026-10-01).
+                if let Some(name) = download_name.as_deref().filter(|name| !name.is_empty()) {
                     add(
                         &mut headers,
                         "Content-Disposition",
@@ -247,7 +277,7 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
             switch_to_get,
             location,
         } => {
-            add(&mut headers, "Location", relative_location(location)?)?;
+            add(&mut headers, "Location", relative_location(location, origin)?)?;
             let status = match (*permanent, *switch_to_get) {
                 (false, false) => 307,
                 (true, false) => 308,
@@ -311,7 +341,17 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
         }
         match cookie.expiry {
             CookieExpiry::None => {}
-            CookieExpiry::Relative(seconds) => rendered.push_str(&format!("; Max-Age={seconds}")),
+            CookieExpiry::Relative(seconds) => {
+                // WebSession's relative expiry is a UInt64; a cookie the app
+                // expires in the past (a deletion) reaches us as a wrapped
+                // negative. Roundcube's `roundcube_sessauth=-del-` arrived as
+                // 18446744073709551556 and went out as a ~585-billion-year
+                // Max-Age, keeping the cookie it meant to delete (SPK-APPS).
+                // No real lifetime exceeds i64::MAX seconds: render it as an
+                // immediate expiry (RFC 6265: Max-Age <= 0 expires now).
+                let seconds = if seconds > i64::MAX as u64 { 0 } else { seconds };
+                rendered.push_str(&format!("; Max-Age={seconds}"))
+            }
             CookieExpiry::Absolute(seconds) => {
                 rendered.push_str(&format!("; Expires={}", cookie_expires(seconds)?))
             }
@@ -419,6 +459,31 @@ mod tests {
             location: "\\\\evil.example/".into(),
         };
         assert!(serialize(&reply, false).is_err());
+        // The route's own origin is served as its path; any other is refused,
+        // including a longer host that shares the origin as a prefix.
+        let origin = Some("https://grain.test");
+        for (absolute, path) in [
+            ("https://grain.test/wp-admin/", "Location: /wp-admin/\r\n"),
+            ("https://grain.test", "Location: /\r\n"),
+            ("https://grain.test?x=1", "Location: ?x=1\r\n"),
+        ] {
+            reply.result = WebResult::Redirect {
+                permanent: false,
+                switch_to_get: true,
+                location: absolute.into(),
+            };
+            let served = String::from_utf8(serialize_for_origin(&reply, false, origin).unwrap()).unwrap();
+            assert!(served.contains(path), "{absolute}: {served}");
+            assert!(serialize(&reply, false).is_err());
+        }
+        for foreign in ["https://grain.test.evil/", "https://grain.testx/", "http://grain.test/", "//grain.test/"] {
+            reply.result = WebResult::Redirect {
+                permanent: false,
+                switch_to_get: true,
+                location: foreign.into(),
+            };
+            assert!(serialize_for_origin(&reply, false, origin).is_err(), "{foreign}");
+        }
     }
 
     #[test]
@@ -445,6 +510,17 @@ mod tests {
         };
         let download = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
         assert!(download.contains("filename*=UTF-8''report%20%E4%BD%A0%E5%A5%BD.txt"));
+        // A bare `attachment` arrives as an empty name: no disposition, as
+        // Sandstorm's shell does; a control character is still refused.
+        if let WebResult::Content { download_name, .. } = &mut reply.result {
+            *download_name = Some(String::new());
+        }
+        let bare = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(bare.starts_with("HTTP/1.1 200") && !bare.contains("Content-Disposition"));
+        if let WebResult::Content { download_name, .. } = &mut reply.result {
+            *download_name = Some("a\r\nSet-Cookie: x=y".into());
+        }
+        assert!(serialize(&reply, false).is_err());
     }
 
     #[test]
@@ -476,6 +552,14 @@ mod tests {
         assert!(serialize(&reply, false).is_err());
         reply.set_cookies[0].path = "/".into();
         assert!(serialize(&reply, false).is_ok());
+        reply.set_cookies[0].name = "app_pref".into();
+        reply.set_cookies[0].expiry = CookieExpiry::Relative(3600);
+        let relative = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(relative.contains("; Max-Age=3600"));
+        // A deletion (expiry in the past) wraps the UInt64: expire now.
+        reply.set_cookies[0].expiry = CookieExpiry::Relative(18_446_744_073_709_551_556);
+        let deleted = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(deleted.contains("; Max-Age=0") && !deleted.contains("18446744073709551556"));
     }
 
     #[test]

@@ -3,7 +3,15 @@
 //! No public listener or mutating Git request is issued.
 #[path = "../rpc_adapter.rs"]
 mod rpc_adapter;
+#[path = "../web_socket.rs"]
+#[allow(dead_code)]
+mod web_socket;
+#[path = "../stream_continuity.rs"]
+#[allow(dead_code)]
+mod stream_continuity;
+use minidregg_spk_host::dispatch_native;
 
+use minidregg_spk_host::broker;
 use minidregg_spk_host::hostd;
 use minidregg_spk_host::sandbox::{spawn_sandbox, SandboxSpec};
 use minidregg_spk_rpc::{Method, RequestContext, SessionParameters, WebRequest, WebResult};
@@ -110,6 +118,7 @@ fn binding(kind: SessionKind, bits: [bool; 2], fingerprint: u8) -> SessionBindin
         session_resource,
         subject,
         projection_fingerprint: [fingerprint; 32],
+        ticket_resource: None,
         kind,
         params: params(identity, bits),
     }

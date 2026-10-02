@@ -1,0 +1,20 @@
+identity	PASS	0s	operator mini-spk-robust is not root; broker socket root-owned 0660
+refusals	PASS	0s	5/5 out-of-protocol requests refused with a reason
+s1-store	PASS	145s	profile                      exit=0 1.162130239s
+s1-birth-a	PASS	38s	birth-a                      exit=0 37.306995503s
+s1-install-a	PASS	433s	install-a                    exit=0 433.363543048s
+s1-share-a	PASS	287s	share-a                      exit=0 286.714576984s
+s1-start-a	PASS	506s	start-a                      exit=0 506.146932053s
+s1-floor-a	PASS	1s	floor-held app-processes=3 unit=mini-spk-a7101-g2.service
+s1-limits-a	PASS	0s	class S limits hold on mini-spk-apps-grains-sb85b044de5b08736a7101.slice (MemoryMax=536870912 CPUWeight=50 TasksMax=256 IOWeight=50)
+s1-enroll-a	PASS	85s	enroll-a                     exit=0 85.093613704s
+s1-get-a	PASS	42s	get-a                        exit=0 41.543632844s
+s1-post-a	PASS	40s	post-a                       exit=0 40.070910905s
+s1-kill-a	PASS	2594s	generation 2 killed -> supervisor STOP + continue -> generation 4 active 2593.664881900s after SIGKILL (supervisor activation .053769328s)
+s1-floor-a2	PASS	0s	floor-held app-processes=3 unit=mini-spk-a7101-g4.service
+s1-enroll-a2	PASS	76s	enroll-a2                    exit=0 76.921768608s
+s1-poll-a2	PASS	37s	poll returned "published by a before STOP" through 1 line(s)
+s1-backup	PASS	21s	backup of the RUNNING grain b85b044de5b08736-7101: frozen copy, e2fsck clean, /var listed without mounting
+s1-stop-a	PASS	3161s	stop-a                       exit=0 3160.628368976s
+s1-export-a	PASS	1s	export of 7101 bound to STOP receipt 2a6081aa7e5ca84e0443b9f6dc90119cf95d30acf409a59e4f6c0e4700d1a4e9, signed by d00bddb33f8af364a9a9c2fb574984e6cf25177eaf30a08a8a706d5f87757789
+s1-start-a3	FAIL	902s	exit 3: 

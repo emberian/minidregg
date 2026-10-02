@@ -360,6 +360,24 @@ fn systemd_show(unit: &str) -> io::Result<String> {
     String::from_utf8(output.stdout).map_err(|_| invalid("systemd unit inspection is not UTF-8"))
 }
 
+/// Resident units are installed and stopped by the root broker; the operator
+/// running STOP holds no unit-manager privilege. Root-run unit tests stop
+/// their own probe units directly.
+#[cfg(not(test))]
+fn stop_unit(unit: &str) -> io::Result<()> {
+    crate::broker::call(&crate::broker::Request::Stop { unit: unit.to_owned() }).map(|_| ())
+}
+
+#[cfg(test)]
+fn stop_unit(unit: &str) -> io::Result<()> {
+    let output = bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(invalid("exact systemd stop failed"))
+    }
+}
+
 fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
     let mut child = Command::new("/usr/bin/systemctl")
         .args(args)
@@ -592,11 +610,21 @@ impl UnitStopAudit {
             return Err(invalid("exact unit absent before stop"));
         }
         if let Some(expected) = record.invocation_id.as_deref() {
-            if property(&output, "InvocationID")? != expected
-                || property(&output, "ControlGroup")?
-                    != record.control_group.as_deref().unwrap_or("")
-            {
-                return Err(invalid("unit invocation/cgroup drift before stop"));
+            if property(&output, "InvocationID")? != expected {
+                return Err(invalid("unit invocation drift before stop"));
+            }
+            let group = property(&output, "ControlGroup")?;
+            if group != record.control_group.as_deref().unwrap_or("") {
+                // The recorded incarnation died (a crash): systemd keeps its
+                // InvocationID on the failed unit and has released its cgroup.
+                // Stopping it is fencing a dead incarnation, never another one.
+                let dead = group.is_empty()
+                    && matches!(property(&output, "ActiveState")?, "failed" | "inactive")
+                    && property(&output, "MainPID")? == "0"
+                    && matches!(property(&output, "Job")?, "0" | "");
+                if !dead {
+                    return Err(invalid("unit invocation/cgroup drift before stop"));
+                }
             }
         }
         Ok(())
@@ -1583,13 +1611,7 @@ impl Journal {
                     return Ok(());
                 }
                 UnitStopAudit::before_stop(&record)?;
-                let output =
-                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
-                if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(invalid("exact systemd stop failed"))
-                }
+                stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )
@@ -1609,13 +1631,7 @@ impl Journal {
             verify_volume,
             UnitStopAudit::before_stop,
             |unit| {
-                let output =
-                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
-                if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(invalid("exact systemd stop failed"))
-                }
+                stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )
@@ -1634,13 +1650,7 @@ impl Journal {
             true,
             UnitStopAudit::before_stop,
             |unit| {
-                let output =
-                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
-                if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(invalid("exact fenced systemd stop failed"))
-                }
+                stop_unit(unit)
             },
             UnitStopAudit::inspect,
         )

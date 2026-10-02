@@ -3,11 +3,13 @@
 //! Sandstorm session identity/permissions; HTTP labels and headers grant none.
 #![allow(dead_code)] // No HTTP delivery until native op34/claim join is complete.
 
-use crate::dispatch_inspection::{HttpProjection, MatchedInspection, Route};
+use crate::dispatch_inspection::{
+    HttpProjection, MatchedInspection, Route, STREAMED_OPEN_METHOD,
+};
 use crate::rpc_adapter::{SessionBinding, SessionKind};
 use minidregg_spk_rpc::{
     Body, Cookie, ETag, ETagPrecondition, Header, Method, RequestContext, SessionParameters,
-    WebRequest,
+    WebRequest, WebSocketOpen,
 };
 use std::io;
 
@@ -122,25 +124,96 @@ pub(crate) struct PhysicalWebInput {
     pub request: WebRequest,
 }
 
+/// An admitted streamed dispatch: the WebSocket open's session and call.
+pub(crate) struct PhysicalOpenInput {
+    pub binding: SessionBinding,
+    pub open: WebSocketOpen,
+}
+
+/// The one physical call a committed request reaches.
+enum Call {
+    Exchange(Method),
+    Open,
+}
+
+/// The streamed open of the same matched request. Only a record whose method
+/// is the streamed-open token projects here; every other header rule is the
+/// exchange's, plus the signed subprotocol list.
+pub(crate) fn physical_open_input(
+    matched: &MatchedInspection,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<PhysicalOpenInput> {
+    let (binding, call, context, body, protocols) =
+        project(matched, http, display_name, preferred_handle, base_path)?;
+    match (call, body) {
+        (Call::Open, None) => Ok(PhysicalOpenInput {
+            binding,
+            open: WebSocketOpen {
+                path_and_query: matched.app_path_and_query.clone(),
+                context,
+                protocols,
+            },
+        }),
+        _ => Err(invalid("Mini record is not a streamed open")),
+    }
+}
+
 /// `matched` must come from the private op34+source-inspection comparison.
 /// The display label/handle are operator-configured UI text, never auth data.
 /// Every accepted ordinary HTTP header is represented or the call refuses;
 /// there is no silent drop of a Mini-signed header.
+/// `base_path` is the browser route's origin, `https://HOST` with no
+/// trailing slash: Sandstorm's `WebSession.Params.basePath`, from which
+/// sandstorm-http-bridge builds `X-Sandstorm-Base-Path` and absolute URLs.
+/// The bridge refuses anything without a scheme ("Base URL does not have a
+/// protocol scheme"), so the old "/" failed every web session at its first
+/// request (SPK-APPS 2026-10-01: EtherCalc, WordPress, Gogs, Hacker Slides,
+/// Roundcube, Simple Todos all 503). An API session carries no base path.
 pub(crate) fn physical_web_input(
     matched: &MatchedInspection,
     http: &HttpProjection<'_>,
     display_name: &str,
     preferred_handle: &str,
+    base_path: &str,
 ) -> io::Result<PhysicalWebInput> {
-    let method = match matched.method.as_str() {
-        "GET" => Method::Get,
-        "HEAD" => Method::Head,
-        "POST" => Method::Post,
-        "PUT" => Method::Put,
-        "PATCH" => Method::Patch,
-        "DELETE" => Method::Delete,
+    let (binding, call, context, body, _) =
+        project(matched, http, display_name, preferred_handle, base_path)?;
+    let Call::Exchange(method) = call else {
+        return Err(invalid("a streamed open is not a WebSession exchange"));
+    };
+    Ok(PhysicalWebInput {
+        binding,
+        request: WebRequest {
+            method,
+            path_and_query: matched.app_path_and_query.clone(),
+            context,
+            body,
+        },
+    })
+}
+
+#[allow(clippy::type_complexity)]
+fn project(
+    matched: &MatchedInspection,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
+    let call = match matched.method.as_str() {
+        "GET" => Call::Exchange(Method::Get),
+        "HEAD" => Call::Exchange(Method::Head),
+        "POST" => Call::Exchange(Method::Post),
+        "PUT" => Call::Exchange(Method::Put),
+        "PATCH" => Call::Exchange(Method::Patch),
+        "DELETE" => Call::Exchange(Method::Delete),
+        STREAMED_OPEN_METHOD => Call::Open,
         _ => return Err(invalid("Mini method unavailable to WebSession")),
     };
+    let mut protocols = None;
     if display_name.len() > 1024
         || preferred_handle.len() > 256
         || display_name.contains(['\r', '\n', '\0'])
@@ -186,6 +259,14 @@ pub(crate) fn physical_web_input(
                     value: value.clone(),
                 });
             }
+            "sec-websocket-protocol" if matches!(call, Call::Open) => {
+                if protocols
+                    .replace(crate::web_socket::protocols(Some(value))?)
+                    .is_some()
+                {
+                    return Err(invalid("duplicate WebSocket subprotocol list"));
+                }
+            }
             _ => {
                 return Err(invalid(
                     "Mini signed header has no physical WebSession mapping",
@@ -200,7 +281,10 @@ pub(crate) fn physical_web_input(
     {
         return Err(invalid("WebSession context category exceeds bound"));
     }
-    let body = if matches!(method, Method::Post | Method::Put | Method::Patch) {
+    let body = if matches!(
+        call,
+        Call::Exchange(Method::Post | Method::Put | Method::Patch)
+    ) {
         let mime_type = content_type.unwrap_or("");
         Some(Body {
             mime_type: mime_type.to_owned(),
@@ -213,12 +297,22 @@ pub(crate) fn physical_web_input(
         }
         None
     };
-    let kind = match http.route {
-        Route::Browser => SessionKind::Web,
-        Route::Api { .. } => SessionKind::Api,
+    let (kind, base_path) = match http.route {
+        Route::Browser => {
+            let host = base_path
+                .strip_prefix("https://")
+                .ok_or_else(|| invalid("browser session base path is not an https origin"))?;
+            // This is the same origin that the custodian already validated.
+            // Keep its host[:port] grammar rather than a divergent DNS-only copy.
+            if !crate::http_entrance::valid_expected_host(host) {
+                return Err(invalid("browser session base path is not an https origin"));
+            }
+            (SessionKind::Web, base_path.to_owned())
+        }
+        Route::Api { .. } => (SessionKind::Api, String::new()),
     };
-    Ok(PhysicalWebInput {
-        binding: SessionBinding {
+    Ok((
+        SessionBinding {
             app: matched.app,
             process_generation: matched.app_generation,
             session_resource: matched
@@ -230,6 +324,7 @@ pub(crate) fn physical_web_input(
                 .parse()
                 .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
             projection_fingerprint: matched.session_fingerprint,
+            ticket_resource: None,
             kind,
             params: SessionParameters {
                 identity_id: matched.principal,
@@ -237,18 +332,16 @@ pub(crate) fn physical_web_input(
                 preferred_handle: preferred_handle.to_owned(),
                 permissions: matched.effective_bits.clone(),
                 tab_id: Vec::new(),
-                base_path: "/".to_owned(),
+                base_path,
                 user_agent: user_agent.unwrap_or("Mini SPK Host").to_owned(),
                 acceptable_languages: Vec::new(),
             },
         },
-        request: WebRequest {
-            method,
-            path_and_query: matched.app_path_and_query.clone(),
-            context,
-            body,
-        },
-    })
+        call,
+        context,
+        body,
+        protocols.unwrap_or_default(),
+    ))
 }
 
 #[cfg(test)]
@@ -299,7 +392,7 @@ mod tests {
                 signed_path: "/repo.git/",
             },
         };
-        let projected = physical_web_input(&matched(), &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.binding.params.identity_id, [0xaa; 32]);
         assert_eq!(projected.binding.params.permissions, [true, false]);
         assert_eq!(projected.binding.kind, SessionKind::Api);
@@ -322,7 +415,7 @@ mod tests {
             body: b"",
             route: Route::Api { signed_path: "/" },
         };
-        let projected = physical_web_input(&source, &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.binding.kind, SessionKind::Api);
         assert_eq!(projected.binding.params.identity_id, [0xaa; 32]);
         assert_eq!(projected.request.path_and_query, "team/json?poll=1");
@@ -339,7 +432,7 @@ mod tests {
             body,
             route: Route::Api { signed_path: "/" },
         };
-        let projected = physical_web_input(&source, &post, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &post, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.request.path_and_query, "");
         let posted = projected.request.body.unwrap();
         assert_eq!(posted.mime_type, "application/json");
@@ -366,7 +459,10 @@ mod tests {
             body: b"",
             route: Route::Browser,
         };
-        let projected = physical_web_input(&source, &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").unwrap();
+        assert_eq!(projected.binding.kind, SessionKind::Web);
+        assert_eq!(projected.binding.params.base_path, "https://friend.example.test");
+        assert!(physical_web_input(&source, &http, "Friend", "friend", "/").is_err());
         assert_eq!(projected.binding.kind, SessionKind::Web);
         assert_eq!(projected.request.context.cookies.len(), 2);
         assert_eq!(
@@ -379,7 +475,7 @@ mod tests {
             ordered_headers: &unsupported,
             ..http
         };
-        assert!(physical_web_input(&source, &http, "Friend", "friend").is_err());
+        assert!(physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").is_err());
     }
 
     #[test]
@@ -394,7 +490,7 @@ mod tests {
                 signed_path: "/repo.git/",
             },
         };
-        let input = physical_web_input(&matched(), &http, "Friend", "friend").unwrap();
+        let input = physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").unwrap();
         let body = input.request.body.unwrap();
         assert!(body.bytes.is_empty());
         assert!(body.mime_type.is_empty());
@@ -410,12 +506,62 @@ mod tests {
             body: b"",
             route: Route::Browser,
         };
-        assert!(physical_web_input(&matched(), &http, "Friend", "friend").is_err());
+        assert!(physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").is_err());
         let empty = HttpProjection {
             ordered_headers: &[],
             ..http
         };
-        assert!(physical_web_input(&matched(), &empty, &"a".repeat(1025), "friend").is_err());
-        assert!(physical_web_input(&matched(), &empty, "Friend", &"a".repeat(257)).is_err());
+        assert!(physical_web_input(&matched(), &empty, &"a".repeat(1025), "friend", "https://friend.example.test").is_err());
+        assert!(physical_web_input(&matched(), &empty, "Friend", &"a".repeat(257), "https://friend.example.test").is_err());
+        // A browser session needs an https origin as its base path (the bridge
+        // refuses a scheme-less one); a path or a foreign scheme is refused here.
+        assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "/").is_err());
+        assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "http://x.test").is_err());
+    }
+
+    #[test]
+    fn browser_origin_uses_custodian_host_and_port_grammar() {
+        let http = HttpProjection {
+            method: "GET", path_and_query: "sheet", ordered_headers: &[],
+            body: b"", route: Route::Browser,
+        };
+        for origin in ["https://localhost:18443", "https://grain.example.test", "https://grain.example.test:443"] {
+            let input = physical_web_input(&matched(), &http, "Friend", "friend", origin).unwrap();
+            assert_eq!(input.binding.params.base_path, origin);
+        }
+        for origin in ["https://localhost:0", "https://localhost:018443", "https://localhost:65536",
+            "https://localhost:18443/path", "https://user@localhost:18443", "https://LOCALHOST:18443",
+            "https://localhost:18443#fragment", "https://localhost:18443?query", "https://bad..host"] {
+            assert!(physical_web_input(&matched(), &http, "Friend", "friend", origin).is_err(), "{origin}");
+        }
+    }
+
+    /// A streamed record projects only as an open, with its signed
+    /// subprotocols; an exchange record never projects as an open, and the
+    /// subprotocol header never reaches an exchange.
+    #[test]
+    fn streamed_record_projects_only_as_an_open() {
+        let headers = vec![("sec-websocket-protocol".to_owned(), "chat, superchat".to_owned())];
+        let http = HttpProjection {
+            method: STREAMED_OPEN_METHOD,
+            path_and_query: "websocket",
+            ordered_headers: &headers,
+            body: b"",
+            route: Route::Browser,
+        };
+        let mut open = matched();
+        open.method = STREAMED_OPEN_METHOD.into();
+        open.app_path_and_query = "websocket".into();
+        let projected =
+            physical_open_input(&open, &http, "Friend", "friend", "https://friend.example.test").unwrap();
+        assert_eq!(projected.open.protocols, ["chat", "superchat"]);
+        assert_eq!(projected.open.path_and_query, "websocket");
+        assert_eq!(projected.binding.kind, SessionKind::Web);
+        assert!(physical_web_input(&open, &http, "Friend", "friend", "https://friend.example.test").is_err());
+        let mut get = matched();
+        get.method = "GET".into();
+        let get_http = HttpProjection { method: "GET", ..http };
+        assert!(physical_open_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
+        assert!(physical_web_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
     }
 }

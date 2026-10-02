@@ -5,8 +5,9 @@
 # births no application: applications are ordinary resource births, and a
 # signed package is installed on one by `spk-host grain install`.
 #
-# Runs as the grain operator (root on a grain host: the resident must drop to
-# per-app UIDs, and PrivateOperator requires the operator socket owner).
+# Runs as the grain operator (`mini`, never root): residents run as the same
+# user, because PrivateOperator requires the operator socket's owner; the app
+# UID switch is the broker-bounded CAP_SETUID/CAP_SETGID of the resident unit.
 set -eu
 umask 077
 

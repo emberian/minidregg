@@ -1,0 +1,40 @@
+{"tariffPerInitialPayloadByte": 1,
+ "tariffPerGrant": 1,
+ "tariffPerBirth": 2,
+ "tariffBase": 3,
+ "storageRoot":
+ "/var/lib/minidregg/grains/spk-ws-run/j10/t3/store/base/workroom/store",
+ "storageBinary":
+ "/var/lib/minidregg/grains/spk-ws-bin/minidregg-link-sqlite-store",
+ "signatureBinary":
+ "/var/lib/minidregg/grains/spk-ws-bin/minidregg-credential-signature-verifier",
+ "resourceBookId": 11,
+ "providerServices": null,
+ "providerMetering": null,
+ "ownerBudget": 100000,
+ "lifetime": 10000,
+ "lifecycleManagement": {"managementSubject": 8, "managementKeyId": 8008},
+ "issuer": 5,
+ "grainBirthTariff": {"perBirth": 1, "base": 2},
+ "genesisHeight": 10,
+ "fnReplyPoll": null,
+ "fnReplyCatalog": null,
+ "fnPoll": null,
+ "fnGateway": null,
+ "federation": 9,
+ "factoryId": 10,
+ "expectedSeed":
+ 103027614498941322516849961897115750746076897058517560710133952617041517885875,
+ "domain": 8501,
+ "continuityProviderResourceId": null,
+ "completionCustodianKey":
+ "ae92b5dcbe97ae5cc427e96e90ae3f4d07468fcfc4347a0a4865f22b006ef303",
+ "collector": 99,
+ "checkpointKey":
+ "/var/lib/minidregg/grains/spk-ws-run/j10/t3/store/base/workroom/deployment/checkpoint.key",
+ "checkpointEvery": null,
+ "authorityCellId": 12,
+ "asset": 0,
+ "agentLifetimeDispatchServices": null,
+ "agentLifetimeDispatchFixed": null,
+ "agentDispatchFixed": null}

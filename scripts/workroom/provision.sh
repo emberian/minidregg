@@ -208,7 +208,7 @@ done
 # tool identity. The source-authored parent rule permits that subject only the
 # pinned-generation witness no-op; the tool owns its own spendable task.
 PARENT_ROOT=$(jq -er '.cell.root' "$EVIDENCE/controller-born/view.json")
-PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/controller-born/challenge.json")
+PARENT_AUTHORITY=$(jq -er '.authorityRoot' "$EVIDENCE/controller-born/challenge.json")
 cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
 {"subject":"7","nonce":"31000","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
@@ -230,7 +230,7 @@ query_task delegated-parent 8 "$WORKROOM_PARENT_TASK" 73 "$EVIDENCE/tool.key" 31
 test "$(jq -er '.cell.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
 
 PUBLICATION_ROOT=$(jq -er '.cell.root' "$EVIDENCE/publication-born/view.json")
-PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/delegated-parent/challenge.json")
+PUBLICATION_AUTHORITY=$(jq -er '.authorityRoot' "$EVIDENCE/delegated-parent/challenge.json")
 cat >"$EVIDENCE/publication-delegation.json" <<EOF
 {"subject":"7","nonce":"31010","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
@@ -253,7 +253,7 @@ test "$(jq -er '.cell.root' "$EVIDENCE/delegated-publication/view.json")" = "$PU
 
 # Reads use a separate observe-only sibling grant. The MCP reader cannot use
 # the publication mutation authority or select an arbitrary target.
-PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+PUBLICATION_AUTHORITY=$(jq -er '.authorityRoot' \
   "$EVIDENCE/delegated-publication/challenge.json")
 cat >"$EVIDENCE/publication-read-delegation.json" <<EOF
 {"subject":"7","nonce":"31020","purpose":{"type":"prepare","draft":{
@@ -279,7 +279,7 @@ test "$(jq -er '.cell.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATI
 # The workroom is a real empty content page. A tool mutation grant and a
 # separate observe-only read grant are delegated from its owner capability.
 WORKROOM_ROOT=$(jq -er '.cell.root' "$EVIDENCE/workroom-born/view.json")
-WORKROOM_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+WORKROOM_AUTHORITY=$(jq -er '.authorityRoot' \
   "$EVIDENCE/delegated-read/challenge.json")
 cat >"$EVIDENCE/workroom-delegation.json" <<EOF
 {"subject":"7","nonce":"31030","purpose":{"type":"prepare","draft":{
@@ -302,7 +302,7 @@ confirmed "$EVIDENCE/workroom-delegation-attempt/outcome.json"
 query_task delegated-workroom 8 8001 95 "$EVIDENCE/tool.key" 31032
 test "$(jq -er '.cell.root' "$EVIDENCE/delegated-workroom/view.json")" = "$WORKROOM_ROOT"
 
-WORKROOM_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+WORKROOM_AUTHORITY=$(jq -er '.authorityRoot' \
   "$EVIDENCE/delegated-workroom/challenge.json")
 cat >"$EVIDENCE/workroom-read-delegation.json" <<EOF
 {"subject":"7","nonce":"31040","purpose":{"type":"prepare","draft":{

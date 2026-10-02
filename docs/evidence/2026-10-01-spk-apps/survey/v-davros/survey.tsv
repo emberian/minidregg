@@ -1,0 +1,28 @@
+store	store	PASS	174.051197645	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-davros/store/base/workroom(noapplicationborn)
+davros	package	INFO	-	c4c975c3adbeeb77fd928bb90202c049127209100Bclass=Lkind=apiapp=2401
+davros	birth-a	PASS	29.782233983	
+davros	install-a	FAIL	48.876716335	spk-host:grainrefused:mini-spk-brokerrefused:appUIDpoolexhausted
+davros	package	INFO	-	c4c975c3adbeeb77fd928bb90202c049127209100Bclass=Lkind=apiapp=2401
+davros	birth-a	PASS	.028630564	
+davros	install-a	PASS	459.424854133	{"app":"2401","appUid":948,"class":"L","completion":{"committedClaimSha256":"0679fb35792c71e4f33ffe0ee0e1eaa7a9fcd1b0d7b35f2f65e1bc74dc08057e","completionReceipt":{"acceptedCount":"17","eventId":"3222
+davros	share-a	PASS	310.850580188	{"app":"2401","descriptor":"2411","directory":"/var/lib/minidregg/grains/spk-apps-root/d7179650bbdd41f0/host/apps/2401/routes/owner-api","issueIndex":"20","kind":"api","name":"owner-api","protocol":"m
+davros	start-a	PASS	482.457704792	{"app":"2401","completion":{"admittedSha256":"5caac5a41d2a72346646c565b1ca890f7d639c251d7b92d71f243dbfe6c2add1","completionReceipt":{"acceptedCount":"25","eventId":"33025782477812683804895019775952794
+davros	floor-a	PASS	.247715159	floor-heldapp-processes=3unit=mini-spk-a2401-g2.service
+davros	enroll-a	PASS	81.587885142	
+davros	get-a	PASS	46.143992790	200
+davros	get-a-http	200	-	bytes=100{"installed":true,"maintenance":false,"version":"9.1.0.14","versionstring":"9.1.0RC4","edition":""}
+davros	metrics-g1-get	PASS	-	{"memoryPeak":"1130266624","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}
+davros	post-a	PASS	44.837299066	201
+davros	post-a-http	201	-	bytes=0
+davros	metrics-g1	PASS	-	{"memoryPeak":"1130266624","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}
+davros	stop-a	FAIL	579.474140103	spk-host:grainrefused:mini-spk-brokerreplyisnotJSON
+davros	post-a	FAIL	.022204521	curl:(7)Failedtoconnecttograin.testport80after0ms:Couldnotconnecttoserver
+davros	post-a-http	000	-	bytes=0
+davros	stop-a	PASS	1264.128637250	{"activeState":"inactive","app":"2401","elapsedMs":"1262608","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2401-g2.service"}
+davros	start-a2	PASS	995.764171538	{"app":"2401","completion":{"admittedSha256":"156911c3f42935b29afb48d34f858bfe788f8d0de9d49a9c72de100973e8e572","completionReceipt":{"acceptedCount":"34","eventId":"43298915863088293849424546926904975
+davros	floor-a2	PASS	.333261914	floor-heldapp-processes=3unit=mini-spk-a2401-g4.service
+davros	enroll-a2	PASS	107.596583440	
+davros	poll-a2	PASS	46.962920521	200
+davros	poll-a2-http	200	-	bytes=31davrosfilewrittenbeforeSTOP
+davros	survived	PASS	-	afterSTOP+continuethewritereadsback:davrosfilewrittenbeforeSTOP
+davros	metrics-g2	PASS	-	{"memoryPeak":"1257562112","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}

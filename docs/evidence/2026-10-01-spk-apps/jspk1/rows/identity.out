@@ -1,0 +1,3 @@
+client uid=983 user=mini-spk-robust groups=mini-spk-robust
+srw-rw---- 1 root mini-spk-robust 0 Oct  1 08:45 /run/mini-spk-broker.sock
+operator mini-spk-robust is not root; broker socket root-owned 0660

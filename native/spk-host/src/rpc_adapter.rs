@@ -6,17 +6,22 @@
 #![allow(dead_code)] // Staged until Mini exposes a checked current-session projection.
 
 use crate::hostd::DispatchIdentity;
+use crate::web_socket::{pump, switching_protocols, Limits, Slot, StreamLease, WeakStreamLease};
 use minidregg_spk_rpc::web_session_capnp;
 use minidregg_spk_rpc::{
-    dispatch_web, SessionParameters, SupervisorConnection, ViewInfo, WebRequest, WebResponse,
+    dispatch_web, open_web_socket, SessionParameters, SupervisorConnection, ViewInfo, WebRequest,
+    WebResponse, WebSocketOpen,
 };
 use std::collections::HashMap;
+use std::future::Future;
 use std::io;
 use std::os::unix::net::UnixStream;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as sync_mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
@@ -65,6 +70,8 @@ pub(crate) struct SessionBinding {
     pub session_resource: u64,
     pub subject: u64,
     pub projection_fingerprint: [u8; 32],
+    /// Human grant identity supplied by fixed custody after source projection.
+    pub ticket_resource: Option<String>,
     pub kind: SessionKind,
     pub params: SessionParameters,
 }
@@ -87,6 +94,57 @@ impl SessionBinding {
             subject: self.subject,
             kind: self.kind,
         }
+    }
+}
+
+/// Only live streams are retained (bounded by the generation socket cap).
+/// Notifications are physical attenuation, never grants of Mini authority.
+#[derive(Default)]
+struct StreamLeases(Vec<(SessionBinding, WeakStreamLease)>);
+
+impl StreamLeases {
+    fn observe(&mut self, binding: &SessionBinding) {
+        self.0.retain(|(prior, weak)| {
+            let Some(lease) = weak.upgrade() else {
+                return false;
+            };
+            if prior.key() == binding.key()
+                && prior.ticket_resource == binding.ticket_resource
+                && !same_projection(&prior.projection_fingerprint, &prior.params, binding)
+            {
+                lease.revoke();
+            }
+            lease.check().is_ok()
+        });
+    }
+
+    fn register(&mut self, binding: &SessionBinding, lease: &StreamLease) {
+        self.observe(binding);
+        self.0.push((binding.clone(), lease.downgrade()));
+    }
+
+    fn invalidate(
+        &mut self,
+        app: &str,
+        subject: &str,
+        session: &str,
+        ticket: &str,
+        exact: Option<&crate::stream_continuity::ContinuityBinding>,
+    ) {
+        self.0.retain(|(binding, weak)| {
+            let Some(lease) = weak.upgrade() else {
+                return false;
+            };
+            if binding.app.to_string() == app
+                && binding.subject.to_string() == subject
+                && binding.session_resource.to_string() == session
+                && binding.ticket_resource.as_deref() == Some(ticket)
+                && exact.is_none_or(|exact| lease.bound_to(exact))
+            {
+                lease.revoke();
+            }
+            lease.check().is_ok()
+        });
     }
 }
 
@@ -126,6 +184,97 @@ fn oldest_by_use<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Option<K> 
         .map(|(key, _)| key)
 }
 
+/// The app-side WebSession for one admitted binding: the cached one under an
+/// unchanged source projection, or a new one (evicting the least recent).
+#[allow(clippy::too_many_arguments)]
+async fn session_for(
+    supervisor: &SupervisorConnection,
+    sessions: &mut HashMap<SessionKey, CachedSession>,
+    sessions_created: &mut u64,
+    use_clock: &mut u64,
+    binding: &SessionBinding,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> io::Result<web_session_capnp::web_session::Client> {
+    let key = binding.key();
+    if sessions
+        .get(&key)
+        .is_some_and(|cached| !cache_matches(cached, binding))
+    {
+        sessions.remove(&key);
+    }
+    *use_clock = use_clock
+        .checked_add(1)
+        .ok_or_else(|| invalid("SPK session use counter exhausted"))?;
+    let session = if let Some(cached) = sessions.get_mut(&key) {
+        cached.last_use = *use_clock;
+        cached.client.clone()
+    } else {
+        let left = remaining(deadline)?;
+        let client = tokio::select! {
+            biased;
+            _ = wait_cancelled(cancelled) => Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "SPK caller disconnected during session setup")),
+            result = tokio::time::timeout(left, async {
+                match binding.kind {
+                    SessionKind::Web => {
+                        supervisor.new_web_session(&binding.params).await
+                    }
+                    SessionKind::Api => {
+                        supervisor.new_api_session(&binding.params).await
+                    }
+                }
+            }) => result.map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut,
+                    "SPK session timeout")
+            })?.map_err(io::Error::other),
+        }?;
+        if sessions.len() >= MAX_CACHED_SESSIONS {
+            let old = oldest_by_use(sessions.iter().map(|(key, cached)| (*key, cached.last_use)))
+                .ok_or_else(|| invalid("SPK session cache drift"))?;
+            sessions.remove(&old);
+        }
+        sessions.insert(
+            key,
+            CachedSession {
+                fingerprint: binding.projection_fingerprint,
+                params: binding.params.clone(),
+                client: client.clone(),
+                last_use: *use_clock,
+            },
+        );
+        *sessions_created = sessions_created
+            .checked_add(1)
+            .ok_or_else(|| invalid("SPK session creation counter exhausted"))?;
+        client
+    };
+    Ok(session)
+}
+
+/// Never block the LocalSet: it also owns every stream's expiry timer.
+async fn write_upgrade(
+    client: &UnixStream,
+    head: &[u8],
+    lease: &StreamLease,
+    deadline: Instant,
+) -> io::Result<()> {
+    lease.check()?;
+    client.set_nonblocking(true)?;
+    let mut writer = tokio::net::UnixStream::from_std(client.try_clone()?)?;
+    tokio::select! {
+        biased;
+        _ = lease.ended() => Err(invalid("wsAuthorityLeaseEnded")),
+        result = tokio::time::timeout(remaining(deadline)?, writer.write_all(head)) => {
+            result.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK upgrade write timeout"))?
+        },
+    }
+}
+
+/// Starts only after an admitted app open and successful 101. Transport code
+/// need not know operator credentials or native continuity wire formats.
+pub(crate) type StreamRenewal = Pin<Box<dyn Future<Output = ()> + Send>>;
+
 enum Command {
     View {
         deadline: Instant,
@@ -141,6 +290,19 @@ enum Command {
     },
     Stats {
         reply: sync_mpsc::SyncSender<RpcStats>,
+    },
+    OpenWebSocket {
+        binding: Box<SessionBinding>,
+        open: Box<WebSocketOpen>,
+        client: UnixStream,
+        accept: String,
+        limits: Limits,
+        slot: Slot,
+        lease: StreamLease,
+        renewal: StreamRenewal,
+        label: String,
+        deadline: Instant,
+        reply: sync_mpsc::SyncSender<io::Result<()>>,
     },
 }
 
@@ -267,9 +429,23 @@ pub(crate) struct RpcDriver {
     generation: u64,
     sender: mpsc::Sender<Command>,
     uncertain: bool,
+    leases: StreamLeases,
 }
 
 impl RpcDriver {
+    /// Failed current-authority admission invalidates only this fixed custody.
+    /// Synchronous signaling reaches pumps even while the worker awaits fd3.
+    pub(crate) fn invalidate_custody(
+        &mut self,
+        app: &str,
+        subject: &str,
+        session: &str,
+        ticket: &str,
+        exact: Option<&crate::stream_continuity::ContinuityBinding>,
+    ) {
+        self.leases.invalidate(app, subject, session, ticket, exact);
+    }
+
     pub(crate) fn prepare_cancellable(
         &mut self,
         identity: DispatchIdentity,
@@ -354,63 +530,16 @@ impl RpcDriver {
                                             "SPK caller disconnected before RPC",
                                         ));
                                     }
-                                    if sessions
-                                        .get(&key)
-                                        .is_some_and(|cached| !cache_matches(cached, &binding))
-                                    {
-                                        sessions.remove(&key);
-                                    }
-                                    use_clock = use_clock.checked_add(1).ok_or_else(|| {
-                                        invalid("SPK session use counter exhausted")
-                                    })?;
-                                    let session = if let Some(cached) = sessions.get_mut(&key) {
-                                        cached.last_use = use_clock;
-                                        cached.client.clone()
-                                    } else {
-                                        let left = remaining(deadline)?;
-                                        let client = tokio::select! {
-                                            biased;
-                                            _ = wait_cancelled(&cancelled) => Err(io::Error::new(
-                                                io::ErrorKind::Interrupted,
-                                                "SPK caller disconnected during session setup")),
-                                            result = tokio::time::timeout(left, async {
-                                                match binding.kind {
-                                                    SessionKind::Web => {
-                                                        supervisor.new_web_session(&binding.params).await
-                                                    }
-                                                    SessionKind::Api => {
-                                                        supervisor.new_api_session(&binding.params).await
-                                                    }
-                                                }
-                                            }) => result.map_err(|_| {
-                                                io::Error::new(io::ErrorKind::TimedOut,
-                                                    "SPK session timeout")
-                                            })?.map_err(io::Error::other),
-                                        }?;
-                                        if sessions.len() >= MAX_CACHED_SESSIONS {
-                                            let old = oldest_by_use(
-                                                sessions
-                                                    .iter()
-                                                    .map(|(key, cached)| (*key, cached.last_use)),
-                                            )
-                                            .ok_or_else(|| invalid("SPK session cache drift"))?;
-                                            sessions.remove(&old);
-                                        }
-                                        sessions.insert(
-                                            key,
-                                            CachedSession {
-                                                fingerprint: binding.projection_fingerprint,
-                                                params: binding.params.clone(),
-                                                client: client.clone(),
-                                                last_use: use_clock,
-                                            },
-                                        );
-                                        sessions_created =
-                                            sessions_created.checked_add(1).ok_or_else(|| {
-                                                invalid("SPK session creation counter exhausted")
-                                            })?;
-                                        client
-                                    };
+                                    let session = session_for(
+                                        &supervisor,
+                                        &mut sessions,
+                                        &mut sessions_created,
+                                        &mut use_clock,
+                                        &binding,
+                                        deadline,
+                                        &cancelled,
+                                    )
+                                    .await?;
                                     if cancelled.load(Ordering::Acquire) {
                                         return Err(io::Error::new(
                                             io::ErrorKind::Interrupted,
@@ -442,6 +571,67 @@ impl RpcDriver {
                                 }
                                 let _ = reply.send(result);
                             }
+                            Command::OpenWebSocket {
+                                binding,
+                                open,
+                                client,
+                                accept,
+                                limits,
+                                slot,
+                                lease,
+                                renewal,
+                                label,
+                                deadline,
+                                reply,
+                            } => {
+                                let key = binding.key();
+                                let not_cancelled = AtomicBool::new(false);
+                                let result = async {
+                                    lease.check()?;
+                                    let session = tokio::select! {
+                                        biased;
+                                        _ = lease.ended() => return Err(invalid("wsAuthorityLeaseEnded")),
+                                        result = session_for(
+                                            &supervisor,
+                                            &mut sessions,
+                                            &mut sessions_created,
+                                            &mut use_clock,
+                                            &binding,
+                                            deadline,
+                                            &not_cancelled,
+                                        ) => result?,
+                                    };
+                                    lease.check()?;
+                                    let left = remaining(deadline)?;
+                                    let opened = tokio::select! {
+                                        biased;
+                                        _ = lease.ended() => return Err(invalid("wsAuthorityLeaseEnded")),
+                                        result = open_web_socket(&session, &open, left) => result.map_err(io::Error::other)?,
+                                    };
+                                    lease.check()?;
+                                    // The 101 is written here, before any app byte
+                                    // can reach the client, and only after the app
+                                    // accepted the open.
+                                    let head = switching_protocols(&accept, &opened.protocols);
+                                    write_upgrade(&client, &head, &lease, deadline).await?;
+                                    Ok(opened)
+                                }
+                                .await;
+                                match result {
+                                    Ok(opened) => {
+                                        tokio::task::spawn_local(pump(
+                                            client, opened, limits, slot, label, lease,
+                                        ));
+                                        tokio::task::spawn_local(renewal);
+                                        let _ = reply.send(Ok(()));
+                                    }
+                                    Err(error) => {
+                                        sessions.remove(&key);
+                                        drop(slot);
+                                        let _ = reply.send(Err(error));
+                                    }
+                                }
+                            }
                             Command::Stats { reply } => {
                                 let _ = reply.send(RpcStats {
                                     sessions_created,
@@ -458,6 +648,7 @@ impl RpcDriver {
                 generation,
                 sender,
                 uncertain: false,
+                leases: StreamLeases::default(),
             }),
             Ok(Err(error)) => Err(io::Error::other(error)),
             Err(_) => Err(io::Error::new(
@@ -641,6 +832,7 @@ impl RpcDriver {
             ));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.leases.observe(&binding);
         self.sender
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
@@ -682,6 +874,7 @@ impl RpcDriver {
             return Err(invalid("SPK dispatch response bound refused"));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.leases.observe(&binding);
         self.sender
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
@@ -693,6 +886,87 @@ impl RpcDriver {
             })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
         self.receive(reply_rx, deadline)
+    }
+
+    /// One already-admitted WebSocket open. On success the worker has written
+    /// the 101 to `client` and owns it: its frames flow on the worker's
+    /// LocalSet until either side closes, and nothing further reaches Mini.
+    /// The slot holds the grain's concurrency place until then.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn open_web_socket(
+        &mut self,
+        binding: SessionBinding,
+        open: WebSocketOpen,
+        client: UnixStream,
+        accept: String,
+        limits: Limits,
+        slot: Slot,
+        lease: StreamLease,
+        renewal: StreamRenewal,
+        label: String,
+        timeout: Duration,
+    ) -> io::Result<()> {
+        let deadline = self.check_bound(timeout)?;
+        if binding.app != self.app || binding.process_generation != self.generation {
+            return Err(invalid("SPK WebSocket open identity refused"));
+        }
+        let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        lease.check()?;
+        self.leases.register(&binding, &lease);
+        self.sender
+            .try_send(Command::OpenWebSocket {
+                binding: Box::new(binding),
+                open: Box::new(open),
+                client,
+                accept,
+                limits,
+                slot,
+                lease,
+                renewal,
+                label,
+                deadline,
+                reply: reply_tx,
+            })
+            .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
+        self.receive_released(reply_rx, deadline)
+    }
+
+    /// A worker reply, success or refusal, is its release ACK: the command
+    /// has left the worker and its app-side session was evicted on failure,
+    /// so a refused open (an app that declines the upgrade answers with an
+    /// RPC exception through sandstorm-http-bridge) stays one-shot uncertain
+    /// in its own journal record without fencing the generation's other
+    /// participants, as a released cancellable dispatch does. Only a missing
+    /// ACK (deadline or worker exit) poisons the driver.
+    fn receive_released<T>(
+        &mut self,
+        reply: sync_mpsc::Receiver<io::Result<T>>,
+        deadline: Instant,
+    ) -> io::Result<T> {
+        let left = match remaining(deadline) {
+            Ok(left) => left,
+            Err(error) => {
+                self.uncertain = true;
+                return Err(error);
+            }
+        };
+        match reply.recv_timeout(left) {
+            Ok(result) => result,
+            Err(sync_mpsc::RecvTimeoutError::Timeout) => {
+                self.uncertain = true;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "SPK RPC result uncertain; no automatic resend",
+                ))
+            }
+            Err(sync_mpsc::RecvTimeoutError::Disconnected) => {
+                self.uncertain = true;
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "SPK RPC worker exited",
+                ))
+            }
+        }
     }
 
     /// Internal fixture/operations diagnostic; it conveys no authority.
@@ -733,6 +1007,7 @@ mod tests {
             session_resource: 6208,
             subject: 8,
             projection_fingerprint: [7; 32],
+            ticket_resource: Some("6408".into()),
             kind: SessionKind::Web,
             params: SessionParameters {
                 identity_id: [8; 32],
@@ -745,6 +1020,243 @@ mod tests {
                 acceptable_languages: vec!["en".into()],
             },
         }
+    }
+
+    struct RecordingStream(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    impl web_session_capnp::web_session::web_socket_stream::Server for RecordingStream {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            self.0
+                .send(params.get()?.get_message()?.to_vec())
+                .map_err(|_| capnp::Error::failed("recording stream closed".into()))
+        }
+    }
+
+    type TestStream = (
+        tokio::net::UnixStream,
+        tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+        tokio::sync::mpsc::Sender<Vec<u8>>,
+        tokio::task::JoinHandle<()>,
+    );
+
+    fn test_stream(lease: StreamLease, sockets: &crate::web_socket::OpenSockets) -> TestStream {
+        let (client, host) = UnixStream::pair().unwrap();
+        client.set_nonblocking(true).unwrap();
+        let client = tokio::net::UnixStream::from_std(client).unwrap();
+        let (to_app, app_reads) = tokio::sync::mpsc::unbounded_channel();
+        let (app_writes, from_app) = tokio::sync::mpsc::channel(16);
+        let limits = Limits {
+            class: "S",
+            max_open: 32,
+            bytes_per_minute: 1_000_000,
+        };
+        let slot = sockets.reserve(&limits).unwrap();
+        let session = minidregg_spk_rpc::WebSocketSession {
+            protocols: vec![],
+            to_app: capnp_rpc::new_client(RecordingStream(to_app)),
+            from_app,
+        };
+        let task = tokio::task::spawn_local(pump(
+            host,
+            session,
+            limits,
+            slot,
+            "lease test".into(),
+            lease,
+        ));
+        (client, app_reads, app_writes, task)
+    }
+
+    #[test]
+    fn stream_lease_two_delegates_revocation_and_silent_expiry() {
+        use tokio::io::AsyncReadExt;
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        LocalSet::new().block_on(&runtime, async {
+            let mut leases = StreamLeases::default();
+            let a = binding();
+            let b = SessionBinding {
+                subject: 9,
+                session_resource: 6209,
+                ..binding()
+            };
+            let lease_a = StreamLease::begin(Duration::from_secs(2)).unwrap();
+            let lease_b = StreamLease::begin(Duration::from_secs(1)).unwrap();
+            leases.register(&a, &lease_a);
+            leases.register(&b, &lease_b);
+            let sockets = crate::web_socket::OpenSockets::default();
+            let (mut client_a, mut reads_a, writes_a, task_a) = test_stream(lease_a, &sockets);
+            let (mut client_b, mut reads_b, writes_b, task_b) = test_stream(lease_b, &sockets);
+            client_a.write_all(b"A before").await.unwrap();
+            client_b.write_all(b"B before").await.unwrap();
+            assert_eq!(reads_a.recv().await.unwrap(), b"A before");
+            assert_eq!(reads_b.recv().await.unwrap(), b"B before");
+            // Queue fresh traffic, then notify before either pump can forward it.
+            client_a.write_all(b"A after").await.unwrap();
+            writes_a.send(b"secret after".to_vec()).await.unwrap();
+            leases.invalidate("91", "8", "6208", "6408", None);
+            tokio::time::timeout(Duration::from_millis(500), task_a)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(reads_a.recv().await.is_none());
+            assert!(writes_a.send(b"later".to_vec()).await.is_err());
+            let mut buf = [0; 32];
+            // Linux may report ECONNRESET when unread client ingress is dropped.
+            assert!(!matches!(client_a.read(&mut buf).await, Ok(n) if n > 0));
+            assert_eq!(sockets.open(), 1);
+            client_b.write_all(b"B after").await.unwrap();
+            assert_eq!(reads_b.recv().await.unwrap(), b"B after");
+            writes_b.send(b"B still reads".to_vec()).await.unwrap();
+            let n = client_b.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], b"B still reads");
+            // No authority notifications or HTTP activity: B still expires.
+            tokio::time::timeout(Duration::from_secs(3), task_b)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(sockets.open(), 0);
+            assert_eq!(client_b.read(&mut buf).await.unwrap(), 0);
+            assert!(reads_b.recv().await.is_none());
+        });
+    }
+
+    #[test]
+    fn stream_lease_projection_change_is_exact_and_regrant_does_not_revive() {
+        let mut leases = StreamLeases::default();
+        let a = binding();
+        let b = SessionBinding {
+            subject: 9,
+            ..binding()
+        };
+        let lease_a = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let lease_b = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&a, &lease_a);
+        leases.register(&b, &lease_b);
+        leases.observe(&a);
+        assert!(lease_a.check().is_ok());
+        let changed = SessionBinding {
+            projection_fingerprint: [42; 32],
+            ..a.clone()
+        };
+        leases.observe(&changed);
+        assert!(lease_a.check().is_err());
+        assert!(lease_b.check().is_ok());
+        leases.observe(&a);
+        assert!(lease_a.check().is_err());
+        let fresh = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&a, &fresh);
+        assert!(fresh.check().is_ok());
+    }
+
+    #[test]
+    fn revoked_old_ticket_cannot_cancel_regranted_same_session() {
+        let mut leases = StreamLeases::default();
+        let old = binding();
+        let fresh = SessionBinding {
+            ticket_resource: Some("6508".into()),
+            projection_fingerprint: [42; 32],
+            ..old.clone()
+        };
+        let old_lease = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let fresh_lease = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        leases.register(&old, &old_lease);
+        leases.invalidate("91", "8", "6208", "6408", None);
+        assert!(old_lease.check().is_err());
+        leases.register(&fresh, &fresh_lease);
+        // A failed old route request and even a valid old projection cannot
+        // attenuate another grant's streams on the same principal/session.
+        leases.invalidate("91", "8", "6208", "6408", None);
+        leases.observe(&old);
+        assert!(fresh_lease.check().is_ok());
+        assert!(old_lease.check().is_err());
+        leases.invalidate("91", "8", "6208", "6508", None);
+        assert!(fresh_lease.check().is_err());
+    }
+
+    #[test]
+    fn revoked_hot_epoch_cannot_cancel_new_epoch_on_same_ticket() {
+        use crate::stream_continuity::{ContinuityBinding, ContinuityTip};
+        let old = binding();
+        let prior = ContinuityBinding {
+            domain: "1".into(),
+            semantics: "2".into(),
+            app: old.app.to_string(),
+            app_generation: old.process_generation.to_string(),
+            session: old.session_resource.to_string(),
+            session_generation: "1".into(),
+            subject: old.subject.to_string(),
+            ticket_resource: "6408".into(),
+            session_fingerprint: old.projection_fingerprint,
+        };
+        let next = ContinuityBinding {
+            session_generation: "2".into(),
+            session_fingerprint: [42; 32],
+            ..prior.clone()
+        };
+        let next_session = SessionBinding {
+            projection_fingerprint: next.session_fingerprint,
+            ..old.clone()
+        };
+        let lease_old = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let lease_next = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        let tip = ContinuityTip {
+            height: "12".into(),
+            chain: Some("13".into()),
+            world_root: "14".into(),
+        };
+        lease_old
+            .bind_continuity(prior.clone(), tip.clone())
+            .unwrap();
+        lease_next.bind_continuity(next.clone(), tip).unwrap();
+        let mut leases = StreamLeases::default();
+        leases.register(&old, &lease_old);
+        leases.register(&next_session, &lease_next);
+        assert!(lease_old.check().is_err());
+        leases.invalidate("91", "8", "6208", "6408", Some(&prior));
+        assert!(lease_next.check().is_ok());
+        assert!(lease_old.check().is_err());
+        leases.invalidate("91", "8", "6208", "6408", Some(&next));
+        assert!(lease_next.check().is_err());
+    }
+
+    #[test]
+    fn stream_lease_late_open_and_backpressured_upgrade_end_without_polling() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            assert!(StreamLease::begin(Duration::ZERO).is_err());
+            let (host, client) = UnixStream::pair().unwrap();
+            let lease = StreamLease::begin(Duration::from_millis(1)).unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            assert!(write_upgrade(
+                &host,
+                b"101 forbidden",
+                &lease,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .await
+            .is_err());
+            client.set_nonblocking(true).unwrap();
+            let mut out = [0; 32];
+            assert_eq!(
+                std::io::Read::read(&mut &client, &mut out)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::WouldBlock
+            );
+            let lease = StreamLease::begin(Duration::from_millis(25)).unwrap();
+            let start = Instant::now();
+            assert!(write_upgrade(
+                &host,
+                &vec![0; 8 * 1024 * 1024],
+                &lease,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .await
+            .is_err());
+            assert!(start.elapsed() < Duration::from_millis(500));
+        });
     }
 
     #[test]
@@ -972,5 +1484,27 @@ mod tests {
         ));
         assert!(fence.worker_released());
         assert!(fence.matches_and_consume(&dispatch_identity()));
+    }
+
+    /// Both poles of the open's release rule: a refused open the worker
+    /// answered leaves the driver usable; an open with no ACK poisons it.
+    #[test]
+    fn released_open_refusal_keeps_driver_and_missing_ack_poisons() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let (sender, receiver) = sync_mpsc::sync_channel::<io::Result<()>>(1);
+        sender
+            .send(Err(io::Error::other("app declined the upgrade")))
+            .unwrap();
+        assert!(driver
+            .receive_released(receiver, Instant::now() + Duration::from_secs(1))
+            .is_err());
+        assert!(!driver.uncertain);
+        let (sender, receiver) = sync_mpsc::sync_channel::<io::Result<()>>(1);
+        drop(sender);
+        assert!(driver
+            .receive_released(receiver, Instant::now() + Duration::from_secs(1))
+            .is_err());
+        assert!(driver.uncertain);
     }
 }

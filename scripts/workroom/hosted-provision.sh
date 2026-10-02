@@ -140,7 +140,7 @@ done
 
 SEMANTICS=$(jq -er '.semantics' "$EVIDENCE/operator-profile.json")
 root=$(jq -er '.cell.root' "$EVIDENCE/b-parent-born/view.json")
-authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/b-parent-born/challenge.json")
+authority=$(jq -er '.authorityRoot' "$EVIDENCE/b-parent-born/challenge.json")
 jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authority" \
   '{subject:"9",nonce:"64100",purpose:{type:"prepare",draft:{type:"delegate-source",
     command:{kind:"object",domain:"8501",semantics:$semantics,subject:"9",
@@ -162,7 +162,7 @@ for grant in write read; do
     child=98 nonce=64210 verbs='["observe"]'; fi
   query "owner-before-b-$grant" 7 8001 89 "$EVIDENCE/controller.key" "$nonce" resource
   root=$(jq -er '.cell.root' "$EVIDENCE/owner-before-b-$grant/view.json")
-  authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/owner-before-b-$grant/challenge.json")
+  authority=$(jq -er '.authorityRoot' "$EVIDENCE/owner-before-b-$grant/challenge.json")
   jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authority" \
     --arg child "$child" --arg nonce "$nonce" --argjson verbs "$verbs" \
     '{subject:"7",nonce:($nonce+"1"),purpose:{type:"prepare",draft:{type:"delegate-source",
@@ -178,7 +178,7 @@ for grant in write read; do
   submit "b-content-$grant" "$EVIDENCE/controller.key"
 done
 query b-content-read 10 8001 98 "$EVIDENCE/tool-b.key" 64220 resource
-jq -e '.cell.document == "8001" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/b-content-read/view.json" >/dev/null
 
 # Both controllers will use one persistent Mini host started by the deployment

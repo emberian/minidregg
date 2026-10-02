@@ -1,0 +1,9 @@
+{"name":"3ba0652aeefcff79-7801","state":"stopped-exact","frozenMs":"374","sha256":"3d889d8c33b9593dd8d12ddd31aea474050f294fc0ab5af0176666f6407d96e0","e2fsck":"clean","rootListing":4}
+{"name":"59a2fd5a4c3859fb-6101","state":"running-frozen-crash-consistent","frozenMs":"315","sha256":"6819fd4319f717035d5e30ecc428f6024c7426d492bca1aa86f498a10f3f5214","e2fsck":"clean","rootListing":4}
+{"name":"a709941d1a287bf6-5901","state":"stopped-exact","frozenMs":"409","sha256":"b20afc9a0905ca789f8f751899081386dfeab05abd4c2cdb4c8dd9c9bbf2b608","e2fsck":"clean","rootListing":5}
+{"name":"f8218bfd6707a6ed-4501","state":"running-frozen-crash-consistent","frozenMs":"305","sha256":"6ad27c9a013b017e2a1f134e2d0d337024ec665ab89aaa262a9d9cdb64dd36e0","e2fsck":"clean","rootListing":4}
+2   40700 (2)    967    960    4096  1-Oct-2026 18:49 .
+2   40700 (2)    967    960    4096  1-Oct-2026 18:49 ..
+11   40700 (2)      0      0   16384  1-Oct-2026 18:45 lost+found
+13   40700 (2)    967    960    4096  1-Oct-2026 18:49 lib
+backup of the RUNNING grain 59a2fd5a4c3859fb-6101: frozen copy, e2fsck clean, /var listed without mounting

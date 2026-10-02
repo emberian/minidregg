@@ -131,7 +131,7 @@ deny_submit() {
 delegate() {
   label=$1 child=$2 verb=$3 query_label=$4 nonce=$5
   root=$(jq -er '.cell.root' "$EVIDENCE/$query_label/view.json")
-  authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/$query_label/challenge.json")
+  authority=$(jq -er '.authorityRoot' "$EVIDENCE/$query_label/challenge.json")
   jq -n --arg root "$root" --arg authority "$authority" --arg child "$child" \
     --arg verb "$verb" --arg nonce "$nonce" \
     '{subject:"7",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
@@ -154,7 +154,7 @@ make_edit() {
     --arg subject "$subject" --arg capability "$capability" \
     --arg payload "$payload" --arg nonce "$nonce" \
     '{subject:$subject,nonce:$nonce,purpose:{type:"prepare",draft:{type:"invoke",
-      command:{subject:$subject,expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      command:{subject:$subject,
         nonce:($nonce + "1"),targets:[{kind:"object",target:"8001",
           capability:$capability,
           observeCapability:(if $subject == "9" then "98" else null end),
@@ -194,7 +194,7 @@ jq -n --slurpfile view "$EVIDENCE/first-before/view.json" \
   --slurpfile challenge "$EVIDENCE/first-before/challenge.json" \
   --arg payload "$initial" \
   '{subject:"8",nonce:"60100",purpose:{type:"prepare",draft:{type:"invoke",
-    command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+    command:{subject:"8",
       nonce:"60101",targets:[{kind:"object",target:"8001",capability:"95",
         observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
@@ -232,7 +232,7 @@ jq -e --arg payload "$fourth" '.cell.entries | length == 1 and
 revoke() {
   label=$1 child=$2 observed=$3 nonce=$4
   root=$(jq -er '.cell.root' "$EVIDENCE/$observed/view.json")
-  authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/$observed/challenge.json")
+  authority=$(jq -er '.authorityRoot' "$EVIDENCE/$observed/challenge.json")
   jq -n --arg child "$child" --arg root "$root" --arg authority "$authority" \
     --arg nonce "$nonce" \
     '{subject:"7",nonce:$nonce,purpose:{type:"prepare",draft:{type:"revoke-source",
