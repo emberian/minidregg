@@ -478,13 +478,6 @@ inductive PreparationReject where
   | room (reason : RoomBirthGate.Refusal)
   deriving DecidableEq, Repr
 
-/-- Every component is obtained from this one restored image and the fixed
-production registry. The private constructor prevents a host from supplying
-an arbitrary authority snapshot, Book, allocation result or post-state.
-
-This is preparation, not acceptance: no policy authorization has been created.
-The upper receiving controller evaluates these exact candidates and retains
-all family modes and authorizations before exposing their physical intent. -/
 /-- The same old directory authenticates every world-kind source selected
 by an instance birth, including its exact descriptor and chosen source root. -/
 def KindsPresent (deployment : Deployment) (directory : Directory Nat Registry)
@@ -497,6 +490,13 @@ instance kindsPresentDecidable (deployment : Deployment) (directory : Directory 
   unfold KindsPresent
   infer_instance
 
+/-- Every component is obtained from this one restored image and the fixed
+production registry. The private constructor prevents a host from supplying
+an arbitrary authority snapshot, Book, allocation result or post-state.
+
+This is preparation, not acceptance: no policy authorization has been created.
+The upper receiving controller evaluates these exact candidates and retains
+all family modes and authorizations before exposing their physical intent. -/
 structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (descriptor : Descriptor Registry) where
   private mk ::
