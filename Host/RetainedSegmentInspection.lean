@@ -386,7 +386,7 @@ def serveReceiptByTransaction (config : NativeHost.Config) (current : NativeHost
 /-- Exact old special-dispatch recovery is receipt-only. Neither this route nor
 the old process can issue a physical delivery permit or submit an absent call. -/
 def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durable)
-    (registry : Registry) (payload : List UInt8) : IO (Except String Json) := do
+    (registry : Registry) (payload : List UInt8) : IO (Except String NativeHostCodec.Receipt) := do
   try
     if payload.isEmpty || payload.length > maxRawCall then
       return .error "retained dispatch request exceeds bound"
@@ -405,12 +405,14 @@ def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durab
       let value ← liftResult (receiptMetadata registry (← readJsonBounded inspected))
       if (← liftResult (stringField value "type")) != "confirmed" then
         return .error "retained dispatch lookup lost audited original"
-      if (← liftResult (natural (← liftResult (field value "acceptedCount")))) != index + 1 ||
-          (← liftResult (digest (← liftResult (field value "transactionId")))) != record.transactionId ||
-          (← liftResult (digest (← liftResult (field value "eventId")))) != record.event.eventId then
+      let count ← liftResult (natural (← liftResult (field value "acceptedCount")))
+      let transaction ← liftResult (digest (← liftResult (field value "transactionId")))
+      let event ← liftResult (digest (← liftResult (field value "eventId")))
+      let root ← liftResult (digest (← liftResult (field value "worldRoot")))
+      if count != index + 1 || transaction != record.transactionId || event != record.event.eventId then
         return .error "retained dispatch receipt differs from audited original"
       unchanged registry
-      return .ok value
+      return .ok ⟨transaction, event, count, root⟩
   catch _ => return .error "retained dispatch receipt unavailable"
 
 end Minidregg.Host.RetainedSegmentInspection
