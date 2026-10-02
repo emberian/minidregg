@@ -250,7 +250,7 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
     match exact : WorldKindLawDependencies.loadTarget deployment directory.directory
         ingress.declaration.source.policyId.value with
     | none => none
-    | some dependencies => some ⟨dependencies, exact⟩) .structuralDependencies
+    | some dependencies => some ⟨dependencies, rfl⟩) .structuralDependencies
   let structural := structuralChecked.val
   let kindValue := match directory.directory.slots ingress.declaration.source.policyId.value with
     | .present cell => some cell.1.tag.toNat
@@ -501,8 +501,9 @@ theorem AcceptedInstall.readGuards_exact
   have present := (List.mem_filter.mp member).1
   rcases List.mem_append.mp present with prepared | law
   · exact accepted.prepared.readGuards_exact guard prepared
-  · obtain ⟨pair, member, rfl⟩ := List.mem_map.mp law
-    exact of_decide_eq_true ((List.all_eq_true.mp accepted.lawGuardsBound) pair member)
+  · obtain ⟨pair, inLaw, pairExact⟩ := List.mem_map.mp law
+    cases pairExact
+    exact of_decide_eq_true ((List.all_eq_true.mp accepted.lawGuardsBound) pair inLaw)
 
 /-- Every dependency survives either as a read guard or as the same cell's
 pre-state-checked write leg. No inherited source read is silently dropped. -/
