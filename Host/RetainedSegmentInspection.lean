@@ -258,6 +258,7 @@ private def receiptMetadata (registry : Registry) (value : Json) : Except String
   if kind == "refused" then
     let reason ← stringField value "reason"
     return refused (if reason == "malformed" then "malformed-call" else "lookup-refused")
+  if kind == "unavailable" || kind == "uncertain" then return refused "capsule-unavailable"
   if kind != "confirmed" then return refused "lookup-refused"
   if (← stringField value "confirmation") != "replayed" then throw "receipt-invalid"
   let transaction ← digest (← field value "transactionId")
@@ -307,6 +308,40 @@ def serveLookup (config : NativeHost.Config) (current : NativeHost.Durable)
       return .ok bytes
   catch _ => return .error "malformed-call"
 
+
+/-- Preflight for ordinary lookup AND submit on a carried service. Only an
+explicit absent/malformed old-profile result permits trying the target path.
+Confirmed receipts are original metadata, never fresh target admission. -/
+def serveOriginalCall (config : NativeHost.Config) (current : NativeHost.Durable)
+    (registry : Registry) (rawSignedCall : List UInt8) :
+    IO (Except String NativeHostCodec.Outcome) := do
+  try
+    if rawSignedCall.isEmpty || rawSignedCall.length > maxRawCall then
+      return .ok (.refused .malformed "retained-lookup".toUTF8.toList
+        "malformed original call".toUTF8.toList)
+    IO.FS.withTempDir fun directory => do
+      let input := directory / "original-call.bin"
+      IO.FS.writeBinFile input rawSignedCall.toByteArray
+      let metadata ← lookupOutcome config current registry
+        ⟨registry.edge.body.source, rawSignedCall⟩ input directory
+      let kind ← liftResult (stringField metadata "type")
+      if kind == "absent" then return .ok .absent
+      if kind == "refused" then
+        let reason ← liftResult (stringField metadata "reason")
+        if reason == "malformed-call" then
+          return .ok (.refused .malformed "retained-lookup".toUTF8.toList
+            "old profile cannot decode this call".toUTF8.toList)
+        if reason == "capsule-unavailable" then
+          return .ok (.unavailable "retained original capsule unavailable".toUTF8.toList)
+        return .ok (.refused .conflict "retained-lookup".toUTF8.toList
+          "old profile reports an original transaction conflict".toUTF8.toList)
+      if kind != "confirmed" then return .error "retained original outcome unsupported"
+      let transaction ← liftResult (digest (← liftResult (field metadata "transactionId")))
+      let event ← liftResult (digest (← liftResult (field metadata "eventId")))
+      let count ← liftResult (natural (← liftResult (field metadata "acceptedCount")))
+      let root ← liftResult (digest (← liftResult (field metadata "worldRoot")))
+      return .ok (.confirmed .replayed ⟨transaction, event, count, root⟩)
+  catch _ => return .error "retained original call lookup unavailable"
 
 /-- Original transaction receipt metadata comes from the retained executable,
 never from recomputing an old prefix using today's profile. The accepted index
