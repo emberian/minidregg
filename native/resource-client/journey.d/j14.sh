@@ -173,6 +173,14 @@ finish() {
   echo "J14: $FAILED of $N rows not as expected; first: $FIRST_FAIL" >&2; exit 1
 }
 
+# Missing journal values must fail as evidence, never be interpreted as shell
+# variable names by arithmetic expansion (for example, the sentinel "none").
+is_nat() { [[ $1 =~ ^(0|[1-9][0-9]*)$ ]]; }
+require_nat() { # STEP LABEL VALUE: record a missing/malformed prerequisite and stop
+  checkp "$1" "$2 is a canonical nonnegative integer (got '$3')" is_nat "$3"
+  is_nat "$3" || finish
+}
+
 deliver() { # FROM-DIR TO-DIR: copy every json file not already there
   mkdir -p -m 700 "$2"
   local f
@@ -218,11 +226,13 @@ for f in alice bob hermes; do
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]}
 FEE=$(jq -r '.tariffBase' "$CONFIG")
+require_nat setup "the configured fee" "$FEE"
 TURN=$((PRICE + FEE))
 operator setup "NODE: the node's Hermes is subject $HS (HOME/hermes/node.json)" \
   sh -c "mkdir -p -m 700 '$H/alice/hermes' && printf '{\"subject\":\"%s\"}\n' '$HS' >'$H/alice/hermes/node.json'"
 ok setup alice "credit"
 A0=$(credit_of alice)
+require_nat setup "alice's initial signed balance" "$A0"
 
 # ------------------------------------------------ the room
 ok room alice "chat new lab"
@@ -236,16 +246,22 @@ operator room "DELIVER: bob's invitation" install -D -m 0600 "$H/alice/chat/invi
 ok room bob "chat join lab @lab-invite.json"
 
 # ------------------------------------------------ summon
+# Later recovery and payment assertions require a successful room setup and
+# summon. Preserve the first failed row rather than cascading into empty state.
+[ "$FAILED" = 0 ] || finish
 ok summon alice "summon lab as librarian --budget $BUDGET"
 cp "$OUT" "$SD/summon.out"
+[ "$RC" = 0 ] || finish
 OUTBOX=$H/alice/outbox/$HS
 checkp summon "the hand-off: account, invitation, index, digest, manifest" \
   sh -c "for f in lab-hermes lab-invite lab-index lab-digest summon-lab; do test -s '$OUTBOX/'\$f.json || exit 1; done"
+[ "$FAILED" = 0 ] || finish
 checkp summon "Hermes's account is owned by Hermes and funded $BUDGET" \
   jq -e --arg h "$HS" --arg b "$BUDGET" '.owner == $h and .funding == $b' "$OUTBOX/lab-hermes.json"
 PROGRAM_T=$(jq -r .program.target "$OUTBOX/summon-lab.json")
 ACCOUNT_T=$(jq -r .account.target "$OUTBOX/summon-lab.json")
 A1=$(credit_of alice)
+require_nat summon "alice's balance after summon" "$A1"
 N=$((N + 1)); WALL=-
 record summon check "alice paid the budget and the births (signed reads before/after)" "A0 - A1 >= $BUDGET" "$A0 - $A1 = $((A0 - A1))" \
   "$([ $((A0 - A1)) -ge "$BUDGET" ] && echo ok || echo FAIL)" "births: till, account, Hermes's stream, digest, program, and their fees"
@@ -350,6 +366,7 @@ H1=$(room_height lab)
 ok budget alice "ask lab what changed since $H1"
 hermes budget "a digest, then a turn the account cannot pay"
 BAL=$(credit_of hermes lab-hermes)
+require_nat budget "Hermes's balance before topup" "$BAL"
 checkp budget "the turn was refused bookRefused at plan and not attempted" \
   jq -s -e 'any(.[]; .event == "unpaid" and (.reason | test("bookRefused")))' "$JOURNAL"
 checkp budget "Hermes's account holds less than one turn ($BAL < $TURN)" test "$BAL" -lt "$TURN"
@@ -429,6 +446,8 @@ checkp send "the question asked before the kill is answered after it" \
 # ------------------------------------------------ dismiss: revoke, return the rest
 BEFORE_RETURN=$(credit_of hermes lab-hermes)
 A2=$(credit_of alice)
+require_nat dismiss "Hermes's balance before dismissal" "$BEFORE_RETURN"
+require_nat dismiss "alice's balance before dismissal" "$A2"
 ok dismiss alice "dismiss lab"
 cp "$OUT" "$SD/dismiss.out"
 operator dismiss "DELIVER: the dismissal into Hermes's inbox" deliver "$OUTBOX" "$H/hermes/inbox"
@@ -436,6 +455,7 @@ hermes dismiss "returns the remainder"
 RETURNED=$(jq -s -r '[.[] | select(.event == "returned")] | .[0].result.returned // "none"' "$JOURNAL")
 check dismiss "Hermes returned its balance less the fee" "$((BEFORE_RETURN - FEE))" "$RETURNED"
 check dismiss "Hermes's account is empty" 0 "$(credit_of hermes lab-hermes)"
+require_nat dismiss "the journaled return amount" "$RETURNED"
 check dismiss "alice received the remainder" "$((A2 + RETURNED))" "$(credit_of alice)"
 named dismiss hermes "read lab" "revoked|no-grant|noGrant"
 named dismiss hermes "doc show lab-index" "revoked|no-grant|noGrant"
@@ -444,6 +464,7 @@ checkp dismiss "room status no longer names a Hermes" sh -c "! grep -q '^  herme
 
 # ------------------------------------------------ balances: conservation
 T=$(paid_turns)
+require_nat balances "the journaled paid-turn count" "$T"
 check balances "Hermes's account: $BUDGET + $TOPUP - $T turns*($PRICE + fee $FEE) - returned - fee = 0" \
   0 "$((BUDGET + TOPUP - T * TURN - RETURNED - FEE))"
 operator balances "lab's till, read by the founder" "$MINI" credit --action balance --dir "$WS/alice" --account lab-till
