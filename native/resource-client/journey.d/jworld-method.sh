@@ -5,7 +5,7 @@
 # NEWCOMER_WS and NEWCOMER_SUBJECT from a source-matched transaction9 candidate with fresh compute activation.
 # NEWCOMER must have no admitted runs on the current compute day; ownerBudget
 # must cover 1M proofWork (as in jsync.sh: NEWPARTICIPANT_OWNER_BUDGET=1000000000000).
-# With a placeholder pay tariff, JOURNEY_WORLD supplies genesis + pay/observer.
+# With a placeholder pay tariff, the sponsor's factory control installs a valid one.
 # Exit zero requires useful effects, current law, actual quota/debits, and replay.
 set -euo pipefail
 umask 077
@@ -169,10 +169,9 @@ check fresh-compute-subject jq -e --arg subject "$NEWCOMER_SUBJECT" \
   echo 'JWORLD-METHOD requires an active source quote and a newcomer with zero admitted usage today; use the dedicated fresh after-core fixture.' >&2
   exit 1
 }
-# Only replace the invalid fresh tariff, via actual signed pay control.
+# Only replace the invalid fresh tariff, via signed factory-management control.
 # PayBookReceiver.bookPatch [] appends no rows and preserves the existing book.
 if ! jq -e '.computeQuote.creditAsset != null' "$D/initial.json" >/dev/null; then
-  test -n "${JOURNEY_WORLD:-}"
   ok_external current-pay-view python3 - "$CONFIG" "$SOCKET" "$D/pay-view.bin" <<'PAYVIEW'
 import socket,struct,sys
 config=open(sys.argv[1],"rb").read()
@@ -191,18 +190,18 @@ assert reply[0]==107, repr(reply[:100])
 open(sys.argv[3],"wb").write(reply[1:])
 PAYVIEW
   ok_external inspect-pay-view "$HOST" "$CONFIG" inspect pay-view "$D/pay-view.bin" "$D/pay-view.json"
-  ok_external tariff-source python3 - "$D/pay-view.json" "$JOURNEY_WORLD/genesis.json" "$D/tariff.json" <<'TARIFF'
+  ok_external tariff-source python3 - "$D/pay-view.json" "$SPONSOR_WS/refs/factory.json" "$D/tariff.json" <<'TARIFF'
 import json,sys
-view,genesis=(json.load(open(p)) for p in sys.argv[1:3])
+view,factory=(json.load(open(p)) for p in sys.argv[1:3])
 tariff={"version":str(int(view["tariff"]["version"])+1),"asset":"0",
  "mint":"8525966c00f39ff54ef5e537a4736af436494d1f1681c659bd98e37ac28beff1",
  "tokenProgram":"06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc",
  "decimals":"6","creditPerAtomic":"1","maxPerObservation":"2000000000",
  "minTickSlots":"1500","nodeHourRate":"5952380","enrolIndex":None,
  "journalFloor":"1000000","slashCallerPermille":"500"}
-json.dump({"control":genesis["payObserver"]["controlCapability"],"book":[],"tariff":tariff},open(sys.argv[3],"w"))
+json.dump({"control":factory["controlCapability"],"book":[],"tariff":tariff},open(sys.argv[3],"w"))
 TARIFF
-  ok_external install-compute-tariff "$MINI" pay book --dir "$JOURNEY_WORLD/pay/observer" --source "$D/tariff.json"
+  ok_external install-compute-tariff "$MINI" pay book --dir "$SPONSOR_WS" --source "$D/tariff.json"
 fi
 payer_snapshot ready
 check fixture-credit-asset jq -e '.computeQuote.creditAsset=="0" and (.balances|any(.[0]=="0" and .[1]=="1000"))' "$D/ready.json" >/dev/null
@@ -233,6 +232,8 @@ ok quota-instance-create dan 'create wm-quota --from wm-quota-kind open'
 cp "$D/alice/requests/poll.json" "$D/dan/requests/paid-poll.json"
 ok paid-poll-kind-create dan 'kind create wm-paid-poll @paid-poll.json open'
 ok paid-poll-instance-create dan 'create wm-paid-one --from wm-paid-poll open'
+ok paid-poll-initial-read dan 'instance show wm-paid-one'
+ok quota-initial-read dan 'instance show wm-quota'
 turn paid-poll-vote dan wm-paid-vote 'instance set wm-paid-vote wm-paid-one votes 7 1'
 payer_snapshot before-boundary
 check fresh-before-boundary jq -e --arg day "$QUOTA_DAY" \
@@ -305,11 +306,11 @@ check useful-method-charge jq -e --arg day "$QUOTA_DAY" --arg steps "$POLL_STEPS
 # Retained exact bytes after state and Book moved: success is replay, not a new run.
 ok paid-loop-retained dan 'instance call wm-paid-loop wm-quota count --fund wm-payer --max-compute-credits 30'
 check paid-loop-exact-intent cmp "$D/paid-loop-original.bin" "$NEWCOMER_WS/proposals/wm-paid-loop/intent.bin"
-ok paid-loop-retry dan 'submit wm-paid-loop'
+ok paid-loop-retry dan 'retry wm-paid-loop'
 uncharged paid-loop-retry paid-poll
 ok paid-close-retained dan 'instance call wm-paid-close wm-paid-one close --fund wm-payer --max-compute-credits 1000'
 check paid-close-exact-intent cmp "$D/paid-close-original.bin" "$NEWCOMER_WS/proposals/wm-paid-close/intent.bin"
-ok paid-close-retry dan 'submit wm-paid-close'
+ok paid-close-retry dan 'retry wm-paid-close'
 uncharged paid-close-retry paid-poll
 ok retry-counter-read dan 'instance show wm-quota'
 check retry-did-not-run-again jq -e '.value.entries|any(.field=="3" and .key=="0" and .value=="2")' "$OUT" >/dev/null
