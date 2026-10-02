@@ -1,0 +1,2059 @@
+{
+  "format": "mini-host-request-operations-v1",
+  "operations": [
+    {
+      "code": 0,
+      "symbol": "DESCRIBE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "describe",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 1,
+      "symbol": "AUTHORIZED_PREPARE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "authorized prepare",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 2,
+      "symbol": "SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 3,
+      "symbol": "LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 4,
+      "symbol": "OBSERVATION_CHALLENGE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "observation challenge",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 5,
+      "symbol": "AUTHORIZED_QUERY",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "authorized query",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 6,
+      "symbol": "PROFILE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "profile",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 7,
+      "symbol": "AUTHOR",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "author",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 8,
+      "symbol": "INSPECT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "inspect",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 9,
+      "symbol": "SIGNATURES",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "signatures",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 10,
+      "symbol": "OBSERVATION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "observation assemble",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 11,
+      "symbol": "CALL_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "kernel-client",
+      "purpose": "call assemble",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 12,
+      "symbol": "FN_POLL",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn poll",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 13,
+      "symbol": "FN_ACK",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn ack",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 14,
+      "symbol": "FN_REPLY_POLL",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn reply poll",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 15,
+      "symbol": "FN_REPLY_ACK",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn reply ack",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 16,
+      "symbol": "FN_ORIGIN_OUTBOX",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn origin outbox",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 17,
+      "symbol": "PROVIDER_CONTINUITY",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "inference",
+      "purpose": "provider continuity",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 18,
+      "symbol": "FN_ORIGIN_OUTBOX_EXPORT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn origin outbox export",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 19,
+      "symbol": "PROVIDER_USAGE_QUOTE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "inference",
+      "purpose": "provider usage quote",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 20,
+      "symbol": "SELECTED_RELEASE_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "selected-release",
+      "purpose": "selected release submit",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 21,
+      "symbol": "SELECTED_RELEASE_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "selected-release",
+      "purpose": "selected release lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 22,
+      "symbol": "APPLICATION_LIFECYCLE_BEGIN_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle begin submit",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 23,
+      "symbol": "APPLICATION_LIFECYCLE_BEGIN_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle begin lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 24,
+      "symbol": "SELECTED_SOURCE_PUBLISH_SUBMIT",
+      "status": "active",
+      "routes": [],
+      "owner": "selected-release",
+      "purpose": "selected source publish submit; currently Host stdio only, socket route not present",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 25,
+      "symbol": "SELECTED_SOURCE_PUBLISH_LOOKUP",
+      "status": "active",
+      "routes": [],
+      "owner": "selected-release",
+      "purpose": "selected source publish lookup; currently Host stdio only, socket route not present",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 26,
+      "symbol": "APPLICATION_LIFECYCLE_CLAIM_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle claim submit",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 27,
+      "symbol": "APPLICATION_LIFECYCLE_CLAIM_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle claim lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 28,
+      "symbol": "APPLICATION_SHARE_ISSUE_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application share issue submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 29,
+      "symbol": "APPLICATION_SHARE_ISSUE_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application share issue lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 30,
+      "symbol": "APPLICATION_CURRENT_BIRTH",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application current birth",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 31,
+      "symbol": "APPLICATION_SESSION_CURRENT_BIRTH",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Application session birth intent from verified current history",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 32,
+      "symbol": "APPLICATION_SHARE_ISSUE_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application share issue plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 33,
+      "symbol": "APPLICATION_SHARE_ISSUE_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application share issue assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 34,
+      "symbol": "APPLICATION_DISPATCH_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application dispatch submit",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 35,
+      "symbol": "APPLICATION_DISPATCH_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application dispatch lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 36,
+      "symbol": "APPLICATION_DISPATCH_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application dispatch plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 37,
+      "symbol": "APPLICATION_DISPATCH_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application dispatch assemble",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 38,
+      "symbol": "APPLICATION_LIFECYCLE_COMPLETION_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application lifecycle completion submit",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 39,
+      "symbol": "APPLICATION_LIFECYCLE_COMPLETION_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application lifecycle completion lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 40,
+      "symbol": "FN_NAMESPACE_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn namespace submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 41,
+      "symbol": "FN_NAMESPACE_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn namespace lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 42,
+      "symbol": "FN_NAMESPACE_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn namespace plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 43,
+      "symbol": "FN_NAMESPACE_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn namespace assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 44,
+      "symbol": "APPLICATION_LIFECYCLE_COMPLETION_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle completion plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 45,
+      "symbol": "APPLICATION_LIFECYCLE_COMPLETION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle completion assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 46,
+      "symbol": "AGENT_PAID_DISPATCH_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent paid dispatch submit",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 47,
+      "symbol": "AGENT_PAID_DISPATCH_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent paid dispatch lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 48,
+      "symbol": "AGENT_PAID_DISPATCH_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent paid dispatch plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 49,
+      "symbol": "AGENT_PAID_DISPATCH_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent paid dispatch assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 50,
+      "symbol": "APPLICATION_LIFECYCLE_BEGIN_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle begin plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 51,
+      "symbol": "APPLICATION_LIFECYCLE_BEGIN_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle begin assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 52,
+      "symbol": "APPLICATION_LIFECYCLE_CLAIM_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle claim plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 53,
+      "symbol": "APPLICATION_LIFECYCLE_CLAIM_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application lifecycle claim assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 54,
+      "symbol": "GRAIN_SHARE_ISSUE_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "grain share issue submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 55,
+      "symbol": "GRAIN_SHARE_ISSUE_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "grain share issue lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 56,
+      "symbol": "GRAIN_SHARE_ISSUE_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "grain share issue plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 57,
+      "symbol": "GRAIN_SHARE_ISSUE_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "grain share issue assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 58,
+      "symbol": "AGENT_RESERVE_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent reserve plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 59,
+      "symbol": "AGENT_RESERVE_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent reserve assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 60,
+      "symbol": "FN_SELECTED_COVERAGE_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn selected coverage submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 61,
+      "symbol": "FN_SELECTED_COVERAGE_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn selected coverage lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 62,
+      "symbol": "FN_EMPTY_PROGRESS_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn empty progress submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 63,
+      "symbol": "FN_EMPTY_PROGRESS_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn empty progress lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 64,
+      "symbol": "FN_FRONTIER_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn frontier plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 65,
+      "symbol": "FN_FRONTIER_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "fn-services",
+      "purpose": "fn frontier assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 66,
+      "symbol": "APPLICATION_LAUNCH_BEGIN_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch begin plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 67,
+      "symbol": "APPLICATION_LAUNCH_BEGIN_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch begin assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 68,
+      "symbol": "APPLICATION_LAUNCH_CLAIM_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch claim plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 69,
+      "symbol": "APPLICATION_LAUNCH_CLAIM_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch claim assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 70,
+      "symbol": "APPLICATION_LAUNCH_COMPLETION_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch completion plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 71,
+      "symbol": "APPLICATION_LAUNCH_COMPLETION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-lifecycle",
+      "purpose": "application launch completion assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 72,
+      "symbol": "AGENT_LIFETIME_GRANT_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime grant submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 73,
+      "symbol": "AGENT_LIFETIME_GRANT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime grant lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 74,
+      "symbol": "AGENT_LIFETIME_GRANT_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime grant plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 75,
+      "symbol": "AGENT_LIFETIME_GRANT_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime grant assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 76,
+      "symbol": "AGENT_LIFETIME_DISPATCH_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime dispatch submit",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 77,
+      "symbol": "AGENT_LIFETIME_DISPATCH_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime dispatch lookup",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 78,
+      "symbol": "AGENT_LIFETIME_DISPATCH_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime dispatch plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 79,
+      "symbol": "AGENT_LIFETIME_DISPATCH_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime dispatch assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 80,
+      "symbol": "AGENT_LIFETIME_RESERVE_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime reserve plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 81,
+      "symbol": "AGENT_LIFETIME_RESERVE_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "hermes",
+      "purpose": "agent lifetime reserve assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 82,
+      "symbol": "APPLICATION_SESSION_ENROLLMENT_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application session enrollment plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 83,
+      "symbol": "APPLICATION_SESSION_ENROLLMENT_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application session enrollment assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 84,
+      "symbol": "APPLICATION_SESSION_ENROLLMENT_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application session enrollment submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 85,
+      "symbol": "APPLICATION_SESSION_ENROLLMENT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "application session enrollment lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 86,
+      "symbol": "PARTICIPANT_KEY_ENROLLMENT_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant key enrollment plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 87,
+      "symbol": "PARTICIPANT_KEY_ENROLLMENT_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant key enrollment assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 88,
+      "symbol": "PARTICIPANT_KEY_ENROLLMENT_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant key enrollment submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 89,
+      "symbol": "PARTICIPANT_KEY_ENROLLMENT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant key enrollment lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 91,
+      "symbol": "CURRENT_RESOURCE_BIRTH",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "world",
+      "purpose": "current resource birth",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 92,
+      "symbol": "PARTICIPANT_PROVISIONING_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant provisioning plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 93,
+      "symbol": "PARTICIPANT_PROVISIONING_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant provisioning assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 94,
+      "symbol": "PARTICIPANT_PROVISIONING_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant provisioning submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 95,
+      "symbol": "PARTICIPANT_PROVISIONING_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "participant provisioning lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 96,
+      "symbol": "FLEET_TURN_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet turn plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 97,
+      "symbol": "FLEET_TURN_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet turn assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 98,
+      "symbol": "FLEET_TURN_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet turn submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 99,
+      "symbol": "FLEET_TURN_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet turn lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 100,
+      "symbol": "FLEET_TOPIC_POLL",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet topic poll",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 101,
+      "symbol": "FLEET_HEAD",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet head",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 102,
+      "symbol": "FLEET_RECEIPT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet receipt",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 103,
+      "symbol": "PAY_COMMAND_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay command plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 104,
+      "symbol": "PAY_COMMAND_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay command assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 105,
+      "symbol": "PAY_COMMAND_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay command submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 106,
+      "symbol": "PAY_COMMAND_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay command lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 107,
+      "symbol": "PAY_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay view",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 108,
+      "symbol": "PAY_OBSERVATION_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay observation plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 109,
+      "symbol": "PAY_OBSERVATION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay observation assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 110,
+      "symbol": "PAY_OBSERVATION_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay observation submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 111,
+      "symbol": "PAY_OBSERVATION_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay observation lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 112,
+      "symbol": "PAY_ENROLLMENT_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay enrollment view",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 113,
+      "symbol": "PAY_REFILL_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay refill plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 114,
+      "symbol": "PAY_REFILL_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay refill assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 115,
+      "symbol": "PAY_REFILL_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay refill submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 116,
+      "symbol": "PAY_REFILL_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay refill lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 117,
+      "symbol": "PAY_SELF_ENROLLMENT_PLAN",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay self enrollment plan; observer-signed operator route awaits payment integration",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 118,
+      "symbol": "PAY_SELF_ENROLLMENT_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay self enrollment assemble; observer-signed operator route awaits payment integration",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 119,
+      "symbol": "PAY_SELF_ENROLLMENT_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay self enrollment submit; observer-signed operator route awaits payment integration",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 120,
+      "symbol": "PAY_SELF_ENROLLMENT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay self enrollment lookup; observer-signed operator route awaits payment integration",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 121,
+      "symbol": "PAY_ENROLLMENT_QUOTE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "pay enrollment quote",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 123,
+      "symbol": "REALM_WELL_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "world",
+      "purpose": "realm well plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 124,
+      "symbol": "REALM_WELL_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "world",
+      "purpose": "realm well assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 125,
+      "symbol": "REALM_WELL_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "world",
+      "purpose": "realm well submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 126,
+      "symbol": "CLOCK_TICK_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "clock",
+      "purpose": "clock tick plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 127,
+      "symbol": "CLOCK_TICK_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "clock",
+      "purpose": "clock tick assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 128,
+      "symbol": "CLOCK_TICK_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "clock",
+      "purpose": "clock tick submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 129,
+      "symbol": "CLOCK_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "clock",
+      "purpose": "clock view",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 130,
+      "symbol": "AFFORDANCE_DRY_RUN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "world",
+      "purpose": "affordance dry run",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 131,
+      "symbol": "NOCK_PROGRAM_CHECK",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock program check",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 132,
+      "symbol": "NOCK_PROGRAM_SHOW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock program show",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 133,
+      "symbol": "NOCK_SAMPLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock sample",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 134,
+      "symbol": "NOCK_DRY_RUN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock dry run",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 135,
+      "symbol": "NOCK_APP_POKE_DRY_RUN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock app poke dry run",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 136,
+      "symbol": "NOCK_APP_PEEK",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock app peek",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 137,
+      "symbol": "NOCK_APP_STATE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "nock",
+      "purpose": "nock app state",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 140,
+      "symbol": "KEY_ROTATION_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "key rotation plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 141,
+      "symbol": "KEY_ROTATION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "key rotation assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 142,
+      "symbol": "KEY_ROTATION_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "key rotation submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 143,
+      "symbol": "KEY_ROTATION_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "key rotation lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 144,
+      "symbol": "KEY_ROTATION_STATUS",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "key rotation status",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 150,
+      "symbol": "LAW_SAT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "laws",
+      "purpose": "law sat",
+      "receiver": "dispatchSession"
+    },
+    {
+      "code": 151,
+      "symbol": "RECEIPT_CONTINUITY",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "receipt-continuity",
+      "purpose": "receipt continuity",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 152,
+      "symbol": "APPLICATION_STREAM_RENEW",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only signed stream authorization renewal",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 153,
+      "symbol": "CARRY_RECEIPT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "checked-carry",
+      "purpose": "Exact old-segment receipt metadata from original signed call; no historical content or submission",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 154,
+      "symbol": "APPLICATION_ROUTE_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only current application route inspection",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 160,
+      "symbol": "JOB_MONEY_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "job-money",
+      "purpose": "job money plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 161,
+      "symbol": "JOB_MONEY_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "job-money",
+      "purpose": "job money assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 162,
+      "symbol": "JOB_MONEY_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "job-money",
+      "purpose": "job money submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 163,
+      "symbol": "JOB_MONEY_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "job-money",
+      "purpose": "job money lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 164,
+      "symbol": "APPLICATION_ROUTE_BOUND_DISPATCH",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Dispatch bound to the admitted application route before CAS",
+      "receiver": "serveFrame"
+    },
+    {
+      "code": 170,
+      "symbol": "CERTIFY_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "history",
+      "purpose": "certify plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 171,
+      "symbol": "CERTIFY_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "history",
+      "purpose": "certify assemble",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 172,
+      "symbol": "CERTIFY_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "history",
+      "purpose": "certify submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 173,
+      "symbol": "CERTIFY_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "history",
+      "purpose": "certify view",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 180,
+      "symbol": "FLEET_INCOMING_LEDGER",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "fleet",
+      "purpose": "fleet incoming ledger",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 181,
+      "symbol": "PAY_CLAIM_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Exact pending payment claim view",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 182,
+      "symbol": "PAY_CLAIM_QUOTE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Quote current terms for a fixed deposited payment",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 183,
+      "symbol": "PAY_CLAIM_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Prepare signed accept-current-quote or pending-owner rotation",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 184,
+      "symbol": "PAY_CLAIM_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Assemble detached pending-claim signatures",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 185,
+      "symbol": "PAY_CLAIM_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Submit exact signed pending-claim command",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 186,
+      "symbol": "PAY_CLAIM_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "payments",
+      "purpose": "Exact pending-claim receipt lookup",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 187,
+      "symbol": "NEXT_KEY_ADOPTION_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "Source plan for participant adoption of a next-key commitment; bounded member self-service on activation, no route installed by reservation",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 188,
+      "symbol": "NEXT_KEY_ADOPTION_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "Assemble current-key authorization and next-key proof of possession; bounded member self-service on activation, no route installed by reservation",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 189,
+      "symbol": "NEXT_KEY_ADOPTION_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "Submit exact signed absent-to-present next-key commitment adoption; bounded member self-service on activation, no route installed by reservation",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 190,
+      "symbol": "NEXT_KEY_ADOPTION_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "identity",
+      "purpose": "Exact receipt-only next-key commitment adoption lookup; bounded member self-service on activation, no route installed by reservation",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 191,
+      "symbol": "CARRY_PAY_CLAIM_LOOKUP",
+      "status": "reserved",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "checked-carry/payments",
+      "purpose": "Original paid-claim receipt metadata via fixed old186/inspect adapter; LE32 header length<=1024 with fixed algorithm and originIdentity plus exact signed claim<=4096; no submit or historical content",
+      "receiver": null
+    },
+    {
+      "code": 192,
+      "symbol": "LAW_DIAGNOSTIC",
+      "status": "reserved",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "law-diagnostics",
+      "purpose": "Same-image authorized law diagnostic over original signed prepare and at most32 separately signed current-policy queries; DREGG/NATIVE-HOST/LAW-DIAGNOSTIC/v1 wrapper. Read-only optional Refusal; no change to ordinary observation footprint. No endpoint until bounded receiver and routes qualify.",
+      "receiver": null
+    }
+  ],
+  "response_markers": [
+    {
+      "code": 254,
+      "purpose": "Transport refusal: request never forwarded",
+      "request_reserved": true
+    },
+    {
+      "code": 255,
+      "purpose": "Host refusal/outcome envelope",
+      "request_reserved": true
+    },
+    {
+      "code": 164,
+      "purpose": "Private ordinary dispatch definitive no-record refusal; distinct from request164",
+      "request_reserved": false
+    }
+  ],
+  "client_constants": [
+    {
+      "path": "native/resource-client/src/agent_lifetime_grant.rs",
+      "constant": "ASSEMBLE_OPERATION",
+      "operation": "AGENT_LIFETIME_GRANT_ASSEMBLE"
+    },
+    {
+      "path": "native/resource-client/src/agent_lifetime_grant.rs",
+      "constant": "LOOKUP_OPERATION",
+      "operation": "AGENT_LIFETIME_GRANT_LOOKUP"
+    },
+    {
+      "path": "native/resource-client/src/agent_lifetime_grant.rs",
+      "constant": "PLAN_OPERATION",
+      "operation": "AGENT_LIFETIME_GRANT_PLAN"
+    },
+    {
+      "path": "native/resource-client/src/agent_lifetime_grant.rs",
+      "constant": "SUBMIT_OPERATION",
+      "operation": "AGENT_LIFETIME_GRANT_SUBMIT"
+    },
+    {
+      "path": "native/resource-client/src/agent_reserve/lifetime_v3.rs",
+      "constant": "ASSEMBLE_OPERATION",
+      "operation": "AGENT_LIFETIME_RESERVE_ASSEMBLE"
+    },
+    {
+      "path": "native/resource-client/src/agent_reserve/lifetime_v3.rs",
+      "constant": "PLAN_OPERATION",
+      "operation": "AGENT_LIFETIME_RESERVE_PLAN"
+    },
+    {
+      "path": "native/resource-client/src/participant_provisioning.rs",
+      "constant": "ASSEMBLE_OPERATION",
+      "operation": "PARTICIPANT_PROVISIONING_ASSEMBLE"
+    },
+    {
+      "path": "native/resource-client/src/participant_provisioning.rs",
+      "constant": "LOOKUP_OPERATION",
+      "operation": "PARTICIPANT_PROVISIONING_LOOKUP"
+    },
+    {
+      "path": "native/resource-client/src/participant_provisioning.rs",
+      "constant": "PLAN_OPERATION",
+      "operation": "PARTICIPANT_PROVISIONING_PLAN"
+    },
+    {
+      "path": "native/resource-client/src/participant_provisioning.rs",
+      "constant": "SUBMIT_OPERATION",
+      "operation": "PARTICIPANT_PROVISIONING_SUBMIT"
+    },
+    {
+      "path": "native/resource-client/src/pay.rs",
+      "constant": "CLOCK_VIEW_OP",
+      "operation": "CLOCK_VIEW"
+    },
+    {
+      "path": "native/resource-client/src/pay.rs",
+      "constant": "VIEW_OP",
+      "operation": "PAY_VIEW"
+    },
+    {
+      "path": "native/resource-client/src/session_enrollment.rs",
+      "constant": "ASSEMBLE_OP",
+      "operation": "APPLICATION_SESSION_ENROLLMENT_ASSEMBLE"
+    },
+    {
+      "path": "native/resource-client/src/session_enrollment.rs",
+      "constant": "LOOKUP_OP",
+      "operation": "APPLICATION_SESSION_ENROLLMENT_LOOKUP"
+    },
+    {
+      "path": "native/resource-client/src/session_enrollment.rs",
+      "constant": "PLAN_OP",
+      "operation": "APPLICATION_SESSION_ENROLLMENT_PLAN"
+    },
+    {
+      "path": "native/resource-client/src/session_enrollment.rs",
+      "constant": "SUBMIT_OP",
+      "operation": "APPLICATION_SESSION_ENROLLMENT_SUBMIT"
+    },
+    {
+      "path": "native/resource-client/src/join_solana_v2.rs",
+      "constant": "STATUS_OP",
+      "operation": "PAY_CLAIM_VIEW"
+    },
+    {
+      "path": "native/resource-client/src/join_solana_v2.rs",
+      "constant": "QUOTE_OP",
+      "operation": "PAY_CLAIM_QUOTE"
+    }
+  ]
+}

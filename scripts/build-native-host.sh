@@ -238,6 +238,9 @@ else
 fi
 cd "$root"
 
+# Fail before any compiler work when request allocations or routes diverge.
+python3 "$root/scripts/host-operations.py" --root "$root" check
+
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64) native_object_description='Mach-O 64-bit object arm64' ;;
   Linux:x86_64) native_object_description='ELF 64-bit LSB relocatable, x86-64' ;;

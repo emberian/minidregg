@@ -4,6 +4,7 @@
 # PASS). Each gate's output goes to stdout and to build-logs/local-gates/NAME.log;
 # the end is a one-line-per-gate summary with wall seconds. No fallback, no skip.
 #
+#   host-operations request-byte allocations match Host receivers and socket routes; mutation checks
 #   hygiene        no bare `#print axioms`, no project `axiom`; Assurance/SheetLaw.lean
 #                  §2 is the embed of the MUD sheet JSON (scripts/gen-sheetlaw.py --check)
 #   lake-build     lake build every lean_lib + every lean_exe in lakefile.toml (Minidregg,
@@ -43,11 +44,12 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
+GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
 
+g_host-operations() { python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py; }
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
 g_lake-build()    { echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
