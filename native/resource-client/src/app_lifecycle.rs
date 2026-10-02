@@ -243,6 +243,23 @@ fn publish_phase(root: &Path, phase: &Value) -> Result<()> {
     publish_delegation(root, proposal, &member_path(phase, "attempt")?)
 }
 
+fn retain_discovery(path: &Path, workspace: &Value, refs: &[Value; 3], manager: &str) -> Result<()> {
+    if path.exists() {
+        let sample = bounded_json(path)?;
+        let prior: [Value; 3] = sample["references"].as_array()
+            .ok_or("initial lifecycle discovery references absent")?.clone().try_into()
+            .map_err(|_| "initial lifecycle discovery must contain three references")?;
+        if declaration(workspace, &prior, manager)?["references"] != declaration(workspace, refs, manager)?["references"] {
+            return Err("initial lifecycle discovery authority changed before consent publication".into());
+        }
+        // Preserve the first discovery bytes, including historical metadata.
+        // Exact replay fsyncs the parent if an earlier publication lost its ack.
+        retain(path, &sample)
+    } else {
+        retain(path, &json!({"references":refs}))
+    }
+}
+
 fn selectors(state: &Path, decl: &Value) -> Result<Value> {
     let mut caps = Vec::new();
     for index in 3..6 {
@@ -314,10 +331,7 @@ pub(super) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
     ];
     let decl = declaration(workspace, &refs, &manager)?;
     if !retained.exists() {
-        retain(
-            &state.join("initial-discovery.json"),
-            &json!({"references":refs}),
-        )?;
+        retain_discovery(&state.join("initial-discovery.json"), workspace, &refs, &manager)?;
     }
     retain(&retained, &decl)?;
     let mut index = 0;
@@ -445,6 +459,26 @@ mod tests {
             declaration(&owner, &before, "8").unwrap(),
             declaration(&owner, &after, "8").unwrap()
         );
+    }
+    #[test]
+    fn first_discovery_cut_preserves_bytes_and_stable_consent() {
+        let temp = std::env::temp_dir().join(format!("app-lifecycle-discovery-{}", random_nonce().unwrap()));
+        directory(&temp).unwrap();
+        let _guard = lock(&temp.join(".lock")).unwrap();
+        let path = temp.join("initial-discovery.json");
+        let owner = json!({"subject":"7"});
+        let mut initial = refs();initial[0]["sharedName"]=json!("first");
+        retain_discovery(&path,&owner,&initial,"8").unwrap();
+        let bytes=fs::read(&path).unwrap();
+        // Crash before declaration publication; current discovery has evolved.
+        let mut current=initial.clone();current[0]["sharedName"]=json!("later");
+        current[0]["provenance"]=json!({"browser":"available"});
+        retain_discovery(&path,&owner,&current,"8").unwrap();
+        assert_eq!(fs::read(&path).unwrap(),bytes);
+        current[0]["target"]=json!("531101");
+        assert!(retain_discovery(&path,&owner,&current,"8").is_err());
+        assert_eq!(fs::read(&path).unwrap(),bytes);
+        fs::remove_dir_all(temp).unwrap();
     }
     #[test]
     fn exclusive_request_lock_is_bounded_and_recoverable() {
