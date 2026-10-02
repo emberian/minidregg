@@ -121,3 +121,5 @@ Each effect retains its exact intent and native attempt; a pending attempt or an
 intent published before its receipt blocks new effects and requires exact native
 recovery. Repeating a completed check rereads the current source without attaching
 or reserving again. This helper creates no Store, grants, members, or profiles.
+An operator-private exclusive lock covers the full readiness check and submission,
+so overlapping invocations refuse before replacing retained preparation input.

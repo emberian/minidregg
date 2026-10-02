@@ -1,4 +1,4 @@
-import importlib.util,json,tempfile,unittest
+import importlib.util,json,os,tempfile,unittest
 from pathlib import Path
 from unittest.mock import Mock
 p=Path(__file__).with_name('platform-task-readiness.py');spec=importlib.util.spec_from_file_location('ready',p);r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
@@ -13,6 +13,19 @@ class StateBoundary(unittest.TestCase):
  def test_unknown_held_other_generation_and_noncanonical_refuse(self):
   for role,state in [('parent',grain('1','3','2')),('parent',grain('2','3','1')),('parent',grain('1','1','0')),('tool',grain('1','3','1')),('tool',grain('2','1','0')),('tool',grain('01','1','0')),('tool',grain(1,'1','0'))]:
    with self.subTest(role=role,state=state),self.assertRaises(ValueError):r.classify(role,state)
+ def test_exclusive_root_lock_fences_overlap_and_is_not_inherited(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);os.chmod(root,0o700);fd=r.exclusive_root_lock(root)
+   try:
+    self.assertFalse(os.get_inheritable(fd))
+    with self.assertRaises(BlockingIOError):r.exclusive_root_lock(root)
+   finally:os.close(fd)
+   fd=r.exclusive_root_lock(root);os.close(fd)
+ def test_operation_lock_symlink_refuses(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);target=root/'target';target.write_text('unchanged');(root/'operation.lock').symlink_to(target)
+   with self.assertRaises(OSError):r.exclusive_root_lock(root)
+   self.assertEqual(target.read_text(),'unchanged')
  def instance(self,root):
   x=r.Ready.__new__(r.Ready);x.root=root;x.nonce=1;x.manifest={'mini':'mini','host':'host'};x.ctx={'config':'config','publicSocket':'socket'}
   return x

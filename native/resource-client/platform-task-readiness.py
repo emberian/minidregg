@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prepare supplied source tasks once; unknown native effects require exact recovery."""
-import argparse, hashlib, json, os, subprocess, time
+import argparse, fcntl, hashlib, json, os, stat, subprocess, time
 from pathlib import Path
 
 def require(ok, message):
@@ -27,6 +27,17 @@ def classify(role, grain):
         if generation=='1' and status in ('1','2') and reserved=='0': return 'ready'
     raise ValueError('task state is held or outside the fresh preparation contract; retain exact attempts')
 
+def exclusive_root_lock(root):
+    fd=os.open(Path(root)/'operation.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        st=os.fstat(fd)
+        require(stat.S_ISREG(st.st_mode) and st.st_uid==os.getuid() and st.st_mode&0o077==0,'private regular operation lock required')
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
 class Ready:
     def __init__(self, inputs, root):
         require(os.getuid()!=0,'run as the declared Store operator')
@@ -38,11 +49,14 @@ class Ready:
             require(digest(self.manifest[role])==self.manifest['sha256'][role],'native role bytes differ '+role)
         require(not self.root.is_symlink(),'evidence root must not be a symlink')
         contract={'protocol':'mini-platform-task-readiness-input-v1','platformInputs':str(self.input),'platformInputsSha256':digest(self.input),'identity':self.ctx['identity'],'helperSha256':digest(__file__)}
-        if self.root.exists():
-            st=self.root.stat();require(st.st_uid==os.getuid() and st.st_mode&0o077==0,'private evidence owner required')
+        if not self.root.exists(): self.root.mkdir(mode=0o700)
+        st=self.root.stat();require(st.st_uid==os.getuid() and st.st_mode&0o077==0,'private evidence owner required')
+        self.lock_fd=exclusive_root_lock(self.root)
+        if (self.root/'contract.json').exists():
             require(read(self.root/'contract.json')==contract,'retained preparation contract changed')
         else:
-            self.root.mkdir(mode=0o700);save(self.root/'contract.json',contract)
+            require(not any(p.name!='operation.lock' for p in self.root.iterdir()),'unbound evidence root is not empty')
+            save(self.root/'contract.json',contract)
         # A retained effect without a confirmed decision fences all fresh work.
         for attempt in self.root.glob('*-attempt'):
             require((attempt/'outcome.json').is_file() and read(attempt/'outcome.json').get('type')=='confirmed','unresolved preparation attempt; use exact native retry: '+str(attempt))
@@ -90,5 +104,7 @@ class Ready:
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--platform-inputs',required=True);parser.add_argument('--evidence',required=True);a=parser.parse_args()
-    os.umask(0o077);Ready(a.platform_inputs,a.evidence).run()
+    os.umask(0o077);ready=Ready(a.platform_inputs,a.evidence)
+    try: ready.run()
+    finally: os.close(ready.lock_fd)
 if __name__=='__main__':main()
