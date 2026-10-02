@@ -1522,12 +1522,44 @@ count and byte measure is of content alone. -/
 def lawStore (store : ContentStore) : ContentStore :=
   Minidregg.Theory.Store.Store.set store ⟨.blinding, ()⟩ none
 
+/-- The reserved external-link scheme for room-index names. Names remain actual
+bytes in ordinary hyperdocument links; neither a local hint nor a hash of a name
+is a namespace binding. -/
+def sharedNameScheme : List UInt8 := "mini-name".toUTF8.toList
+
+/-- A live shared name at one link slot; all other content is irrelevant. -/
+def sharedNameAt (store : ContentStore) : Store.Address Hyperdocument.layout → Option (List UInt8)
+  | ⟨.links, link⟩ =>
+      match Hyperdocument.lookup store .links link with
+      | some record =>
+          match record.target with
+          | .external scheme name _ =>
+              if scheme = sharedNameScheme ∧ record.tombstonedAt = none then some name else none
+          | _ => none
+      | none => none
+  | _ => none
+
+/-- Names are unique across the whole final cell, including two links created
+in one command. Retired links do not reserve names forever; atomic unlink/link
+can rename or replace a binding. This is a law-visible property, not a rule
+imposed on every document. -/
+def sharedNames (store : ContentStore) : List (List UInt8) :=
+  store.support.toList.filterMap (sharedNameAt store)
+
+def sharedNamesUnique (store : ContentStore) : Bool :=
+  decide (sharedNames store).Nodup
+
+theorem sharedNamesUnique_iff (store : ContentStore) :
+    sharedNamesUnique store = true ↔ (sharedNames store).Nodup := by
+  simp [sharedNamesUnique]
+
 /-- Source-derived policy inputs count actual committed bytes; no content or
 identity is reduced to a scalar identifier. -/
 def project (before' after' : ContentStore) (command : Command) : List (String × Int) :=
   let before := lawStore before'
   let after := lawStore after'
-  [("content/bytes/before", contentBytes before),
+  [("content/names/unique", if sharedNamesUnique after then 1 else 0),
+   ("content/bytes/before", contentBytes before),
    ("content/bytes/after", contentBytes after),
    ("content/bytes/delta", (contentBytes after : Int) - contentBytes before),
    ("content/entries/before", before.support.card),
