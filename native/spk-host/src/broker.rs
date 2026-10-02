@@ -716,8 +716,10 @@ impl Broker {
                     return Err(invalid("store directory identity drift"));
                 }
                 let (deployment_id, host_id) = host_identity()?;
-                Ok(json!({"stateRoot":dir.join("host"),"deploymentId":deployment_id,
-                    "hostId":host_id}))
+                Ok(
+                    json!({"stateRoot":dir.join("host"),"deploymentId":deployment_id,
+                    "hostId":host_id}),
+                )
             }
             Request::Place { store, app } => {
                 Self::check_coordinates(&store, &app)?;
@@ -1401,4 +1403,13 @@ mod tests {
             "mini-grains-s0123456789abcdefa7701.slice"
         );
     }
+}
+
+#[path = "broker_checkpoint.rs"]
+mod checkpoint;
+pub fn checkpoint_pause_check(config: &Path, input: &Path) -> io::Result<Value> {
+    checkpoint::check(config, input)
+}
+pub fn checkpoint_backup(config: &Path, out: &Path, input: &Path) -> io::Result<Value> {
+    checkpoint::backup(config, out, input)
 }

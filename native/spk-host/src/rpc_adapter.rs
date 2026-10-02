@@ -433,6 +433,18 @@ pub(crate) struct RpcDriver {
 }
 
 impl RpcDriver {
+    pub(crate) fn checkpoint_drain_streams(&mut self) -> io::Result<()> {
+        if self.uncertain {
+            return Err(invalid("checkpoint RPC outcome uncertain"));
+        }
+        for (_, weak) in self.leases.0.drain(..) {
+            if let Some(lease) = weak.upgrade() {
+                lease.revoke();
+            }
+        }
+        Ok(())
+    }
+
     /// Failed current-authority admission invalidates only this fixed custody.
     /// Synchronous signaling reaches pumps even while the worker awaits fd3.
     pub(crate) fn invalidate_custody(

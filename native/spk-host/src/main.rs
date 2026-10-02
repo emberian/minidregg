@@ -57,6 +57,29 @@ fn main() {
             return;
         }
     }
+    let checkpoint_result = match args.as_slice() {
+        [_, verb, config, input] if verb == "checkpoint-pause-check" => Some(
+            minidregg_spk_host::broker::checkpoint_pause_check(Path::new(config), Path::new(input)),
+        ),
+        [_, verb, config, out, input] if verb == "checkpoint-backup" => {
+            Some(minidregg_spk_host::broker::checkpoint_backup(
+                Path::new(config),
+                Path::new(out),
+                Path::new(input),
+            ))
+        }
+        _ => None,
+    };
+    if let Some(result) = checkpoint_result {
+        match result {
+            Ok(value) => println!("{value}"),
+            Err(error) => {
+                eprintln!("spk-host checkpoint: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.len() >= 4 && args[1] == "grain" {
         match minidregg_spk_host::grain::run(&args[2..]) {
             Ok(result) => {
@@ -67,7 +90,11 @@ fn main() {
                 eprintln!("spk-host: grain refused: {error}");
                 // An uncertain record is never retried: the supervisor template
                 // sets RestartPreventExitStatus=3.
-                std::process::exit(if error.to_string().starts_with("UNRESOLVED:") { 3 } else { 1 });
+                std::process::exit(if error.to_string().starts_with("UNRESOLVED:") {
+                    3
+                } else {
+                    1
+                });
             }
         }
     }

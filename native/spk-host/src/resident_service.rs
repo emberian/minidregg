@@ -148,6 +148,8 @@ fn default_stream_lease_seconds() -> u64 {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
+    #[serde(skip)]
+    loaded_sha256: String,
     protocol: String,
     journal_dir: PathBuf,
     image_dir: PathBuf,
@@ -733,7 +735,8 @@ fn reconcile_prior_start(
 impl ResidentConfig {
     fn load(path: &Path) -> io::Result<Self> {
         let bytes = private_file(path, MAX_RESIDENT_CONFIG)?;
-        let config: Self = serde_json::from_slice(&bytes)?;
+        let mut config: Self = serde_json::from_slice(&bytes)?;
+        config.loaded_sha256 = format!("{:x}", Sha256::digest(&bytes));
         if config.protocol != "mini-spk-resident-start-v3"
             || path.parent() != Some(config.journal_dir.as_path())
             || config.descriptor_attempt_dir.parent() != Some(config.journal_dir.as_path())
@@ -871,10 +874,16 @@ struct ResidentBound {
 
 impl ResidentBound {
     fn validate(&self, config: &ResidentConfig) -> io::Result<()> {
-        if config.app_uid != self.app_uid || config.app_gid != self.app_gid
-            || config.grains_root != self.grains_root || config.store != self.store
-            || crate::broker::socket_path(&config.grains_root, config.broker_socket.as_deref())? != self.broker_socket {
-            return Err(invalid("resident config differs from broker-rendered unit identity or endpoint"));
+        if config.app_uid != self.app_uid
+            || config.app_gid != self.app_gid
+            || config.grains_root != self.grains_root
+            || config.store != self.store
+            || crate::broker::socket_path(&config.grains_root, config.broker_socket.as_deref())?
+                != self.broker_socket
+        {
+            return Err(invalid(
+                "resident config differs from broker-rendered unit identity or endpoint",
+            ));
         }
         Ok(())
     }
@@ -898,8 +907,10 @@ impl ResidentBound {
             app_uid: id("MINI_SPK_APP_UID")?,
             app_gid: id("MINI_SPK_APP_GID")?,
             grains_root: PathBuf::from(var("MINI_SPK_GRAINS_ROOT")?),
-            broker_socket: PathBuf::from(std::env::var("MINI_SPK_BROKER_SOCKET")
-                .unwrap_or_else(|_| crate::broker::SOCKET.to_owned())),
+            broker_socket: PathBuf::from(
+                std::env::var("MINI_SPK_BROKER_SOCKET")
+                    .unwrap_or_else(|_| crate::broker::SOCKET.to_owned()),
+            ),
             store: var("MINI_SPK_STORE")?,
         })
     }
@@ -960,6 +971,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     crate::setid_bound::install(bound.app_uid, bound.app_gid)?;
     let mut config = ResidentConfig::load(config_path)?;
     bound.validate(&config)?;
+    crate::checkpoint_control::refuse_retained_pause(&config.journal_dir)?;
     resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
     let journal = Journal::open(&config.journal_dir)?
         .with_broker_endpoint(&config.grains_root, config.broker_socket.as_deref())?;
@@ -1373,6 +1385,17 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .collect();
     let app_exit_index = agent_fds.len();
     agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&app_exit));
+    let checkpoint =
+        crate::checkpoint_control::CheckpointControl::bind(crate::checkpoint_control::Binding {
+            app: claim.physical_begin.app.to_string(),
+            generation: claim.physical_begin.generation.to_string(),
+            journal_dir: config.journal_dir.clone(),
+            resident_config: config_path.to_path_buf(),
+            resident_config_sha256: config.loaded_sha256.clone(),
+            mini_config_sha256: config.mini_config_sha256.clone(),
+        })?;
+    let checkpoint_index = agent_fds.len();
+    agent_fds.push(checkpoint.as_raw_fd());
     let route_control_index = agent_fds.len();
     agent_fds.push(route_control.as_raw_fd());
     // One count for the generation: every participant's sockets share the
@@ -1382,6 +1405,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let continuity_namespace = operator.continuity_namespace(&config.journal_dir)?;
     PrivateHttpEntrance::serve_dynamic_with_aux(entrances, &agent_fds, |event, entrances| {
         if let Ok((index, request, kind, policy)) = event {
+            if checkpoint.paused() {
+                return Ok(Some(crate::http_entrance::admission_response(
+                    request.method,
+                    "busy",
+                )));
+            }
             let entry = &config.entrances[index];
             let mut human = ResidentHuman {
                 operator: &operator,
@@ -1412,6 +1441,33 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         };
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
+        }
+        if index == checkpoint_index {
+            checkpoint.poll_once(&journal, || {
+                resident.rpc.checkpoint_drain_streams()?;
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while ws_open.open() > 0 {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(invalid(
+                            "checkpoint stream drain incomplete; pause retained",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(())
+            })?;
+            return Ok(None);
+        }
+        if checkpoint.paused() {
+            if index == route_control_index {
+                route_control
+                    .poll_once(|_, _| Err(invalid("checkpoint pause fences route mutation")))?;
+            } else if let Some((listener, _, _)) = agent_routes.get(index) {
+                // No agent frame is read or admitted while paused. EOF cannot
+                // certify a no-record outcome; its client retains exact recovery.
+                drop(listener.accept_authenticated()?);
+            }
+            return Ok(None);
         }
         if index == route_control_index {
             route_control.poll_once(|request, publisher| {
@@ -1772,9 +1828,13 @@ mod tests {
     fn resident_endpoint_pin_must_match_unit_and_store() {
         let (dir, _, value) = resident_config_fixture();
         let mut config: ResidentConfig = serde_json::from_value(value).unwrap();
-        let mut bound = ResidentBound { app_uid: config.app_uid, app_gid: config.app_gid,
-            grains_root: config.grains_root.clone(), store: config.store.clone(),
-            broker_socket: PathBuf::from(crate::broker::SOCKET) };
+        let mut bound = ResidentBound {
+            app_uid: config.app_uid,
+            app_gid: config.app_gid,
+            grains_root: config.grains_root.clone(),
+            store: config.store.clone(),
+            broker_socket: PathBuf::from(crate::broker::SOCKET),
+        };
         assert!(bound.validate(&config).is_ok());
         config.broker_socket = Some(config.grains_root.join("broker.sock"));
         assert!(bound.validate(&config).is_err());

@@ -686,6 +686,20 @@ impl UnitStopAudit {
     }
 }
 
+/// Complete temp bytes are fsynced, renamed, then their parent is fsynced.
+/// Callers hold their custody lock and have validated any replacement identity.
+pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let directory=path.parent().ok_or_else(|| invalid("atomic custody parent absent"))?;
+    let nonce=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| invalid("clock before epoch"))?.as_nanos();
+    let temporary=directory.join(format!(".record-{}-{nonce}.tmp",std::process::id()));
+    let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary)?;
+    let result=(|| {
+        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path)?;File::open(directory)?.sync_all()
+    })();
+    if result.is_err() { let _=fs::remove_file(&temporary); }
+    result
+}
+
 /// One operation's protected directory, not a shared mutable app name. Its
 /// `record.json` is never removed: a fenced operation cannot be rearmed.
 #[derive(Clone, Debug)]
@@ -898,29 +912,7 @@ impl Journal {
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("hostd record too large"));
         }
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| invalid("clock before epoch"))?
-            .as_nanos();
-        let temporary = self
-            .directory
-            .join(format!(".record-{}-{nonce}.tmp", std::process::id()));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&temporary)?;
-        let result = (|| {
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            fs::rename(&temporary, self.directory.join("record.json"))?;
-            File::open(&self.directory)?.sync_all()
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
+        atomic_write_locked(&self.directory.join("record.json"), &bytes)
     }
 
     fn dispatch_path(&self, identity: &DispatchIdentity) -> PathBuf {
@@ -930,6 +922,40 @@ impl Journal {
 
     fn active_dispatch_path(&self) -> PathBuf {
         self.directory.join("dispatch-active.json")
+    }
+
+    /// Read-only settled-boundary check. The resident calls this only between
+    /// serialized receiving callbacks, never while native authoring can race it.
+    pub(crate) fn verify_dispatch_idle(&self) -> io::Result<()> {
+        self.with_lock(|this| {
+            let record = this.read_unlocked()?.ok_or_else(|| invalid("missing app BEGIN"))?;
+            record.verify_running_instance()?;
+            if record.phase != Phase::Running || record.dispatch_in_flight.is_some() {
+                return Err(invalid("checkpoint requires settled physical dispatch"));
+            }
+            for name in ["dispatch-active.json", "native-dispatch-active.json"] {
+                match fs::symlink_metadata(this.directory.join(name)) {
+                    Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                    Err(error) => return Err(error),
+                }
+            }
+            for entry in fs::read_dir(&this.directory)? {
+                let path = entry?.path();
+                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                if name.starts_with("dispatch-op-") && name.ends_with(".json") {
+                    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path)?;
+                    let mut bytes=Vec::new(); file.take(2049).read_to_end(&mut bytes)?;
+                    if bytes.len()>2048 { return Err(invalid("dispatch tombstone exceeds bound")); }
+                    let tombstone: DispatchTombstone=serde_json::from_slice(&bytes)?;
+                    let checked=this.read_dispatch_unlocked(&tombstone.identity)?;
+                    if checked.phase!=DispatchPhase::Delivered {
+                        return Err(invalid("checkpoint retains an unresolved historical dispatch"));
+                    }
+                }
+            }
+            Ok(())
+        })
     }
 
     /// Reserve a physical operation number before native authoring. The
