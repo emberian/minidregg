@@ -289,18 +289,301 @@ def recordSlots (height : Nat) (chain : Digest) (record : IntentRecord) : List (
   (.system, systemLeaf height chain) ::
     record.writes.map fun write => (.cell write.cellId.value, write.exactPost)
 
-def RootCache.writeAll (cache : RootCache) (slots : List (Key × Digest)) : RootCache :=
-  slots.foldl (fun cache slot => cache.write slot.1 slot.2) cache
+/-- The slot the cache holds at `k`'s index path, read down the tree (no hashing). -/
+def RootCache.occupant (cache : RootCache) (k : Key) : Option (Key × Digest) :=
+  cache.tree.find deployed.depth (deployed.ix k)
 
-theorem RootCache.writeAll_entries (cache : RootCache) :
-    ∀ slots : List (Key × Digest), (cache.writeAll slots).entries = cache.entries ++ slots
-  | [] => by simp [writeAll]
-  | slot :: slots => by
-      simp only [writeAll, List.foldl_cons]
-      rw [show List.foldl (fun cache slot => RootCache.write cache slot.1 slot.2)
-          (cache.write slot.1 slot.2) slots = (cache.write slot.1 slot.2).writeAll slots from rfl,
-        writeAll_entries (cache.write slot.1 slot.2) slots]
-      simp [RootCache.write]
+theorem RootCache.occupant_eq (cache : RootCache) (k : Key) :
+    cache.occupant k = slotsOf deployed.ix cache.entries (deployed.ix k) := by
+  have := find_good deployed deployedEmpties _ deployed.depth (deployed.ix k) [] cache.tree
+    (deployed.ix_length k) cache.good
+  simpa [RootCache.occupant] using this
+
+/-- Writing `k` evicts no other key: its index path is empty or already holds `k`. -/
+def RootCache.fresh (cache : RootCache) (k : Key) : Bool :=
+  match cache.occupant k with
+  | none => true
+  | some x => decide (x.1 = k)
+
+theorem RootCache.fresh_sound {cache : RootCache} {k : Key} (fresh : cache.fresh k = true) :
+    ∀ x, slotsOf deployed.ix cache.entries (deployed.ix k) = some x → x.1 = k := by
+  intro x hx
+  unfold RootCache.fresh at fresh
+  rw [cache.occupant_eq, hx] at fresh
+  simpa using fresh
+
+/-- Every key of the cache is found at its own index path: no two keys share one. -/
+def RootCache.injectiveCheck (cache : RootCache) : Bool :=
+  cache.entries.all fun e => match cache.occupant e.1 with
+    | some x => decide (x.1 = e.1)
+    | none => false
+
+theorem RootCache.injectiveCheck_sound {cache : RootCache} (checked : cache.injectiveCheck = true) :
+    KeysInjective deployed.ix cache.entries := by
+  apply keysInjective_of_occupants
+  intro e he
+  have found := List.all_eq_true.mp checked e he
+  rw [cache.occupant_eq] at found
+  cases hx : slotsOf deployed.ix cache.entries (deployed.ix e.1) with
+  | none => simp [hx] at found
+  | some x => exact ⟨x, rfl, by simpa [hx] using found⟩
+
+/-- Write the slots while none evicts another key: the advanced cache, or
+`none` at the first slot whose index path holds a different key. -/
+def RootCache.writeAllFresh? (cache : RootCache) : List (Key × Digest) → Option RootCache
+  | [] => some cache
+  | slot :: slots =>
+      if cache.fresh slot.1 then (cache.write slot.1 slot.2).writeAllFresh? slots else none
+
+theorem RootCache.writeAllFresh?_sound :
+    ∀ (cache : RootCache) (slots : List (Key × Digest)) (next : RootCache),
+      cache.writeAllFresh? slots = some next → KeysInjective deployed.ix cache.entries →
+      next.entries = cache.entries ++ slots ∧ KeysInjective deployed.ix next.entries
+  | cache, [], next, wrote, inj => by
+      simp only [writeAllFresh?, Option.some.injEq] at wrote
+      subst wrote
+      exact ⟨by simp, inj⟩
+  | cache, slot :: slots, next, wrote, inj => by
+      simp only [writeAllFresh?] at wrote
+      split at wrote
+      next fresh =>
+        have inj' : KeysInjective deployed.ix (cache.write slot.1 slot.2).entries :=
+          keysInjective_snoc deployed.ix inj slot (RootCache.fresh_sound fresh)
+        obtain ⟨entries, inj''⟩ := writeAllFresh?_sound _ slots next wrote inj'
+        refine ⟨?_, inj''⟩
+        rw [entries]
+        simp [RootCache.write]
+      next => cases wrote
+
+/-- **The cache holds the served entries `es`**: it gives every key the value
+`es` last gives it, and a checked flag says whether no two of its keys share an
+index path. Under the flag the cached root is the root of `es`
+(`RootsExact.root_eq`), though the cache was written in log order and `es` is
+in enumeration order. -/
+structure RootsExact (cache : RootCache) (es : List (Key × Digest)) where
+  agree : ∀ k, lastVal cache.entries k = lastVal es k
+  injective : Bool
+  injectiveSound : injective = true → KeysInjective deployed.ix cache.entries
+
+def RootsExact.ofEntries (es : List (Key × Digest)) : RootsExact (RootCache.ofEntries es) es :=
+  ⟨fun _ => rfl, (RootCache.ofEntries es).injectiveCheck, RootCache.injectiveCheck_sound⟩
+
+theorem RootsExact.root_eq {cache : RootCache} {es : List (Key × Digest)}
+    (exact : RootsExact cache es) (injective : exact.injective = true) :
+    cache.root = deployedRoot es := by
+  rw [cache.root_eq, Kernel.WorldRoot.deployedRoot_eq, Kernel.WorldRoot.deployedRoot_eq,
+    slotsOf_eq_of_lastVal deployed.ix (exact.injectiveSound injective) exact.agree]
+
+/-- Advance a cache holding `es` by the slot writes that take `es` to `es'`:
+one path per slot while no slot evicts another key; on an index collision (a
+collision of the deployed hash) a full rebuild of `es'`. -/
+def RootsExact.advance {cache : RootCache} {es es' : List (Key × Digest)}
+    (exact : RootsExact cache es) (slots : List (Key × Digest))
+    (step : ∀ k, lastVal es' k = (lastVal slots k).or (lastVal es k)) :
+    (next : RootCache) × RootsExact next es' :=
+  if injective : exact.injective = true then
+    match wrote : cache.writeAllFresh? slots with
+    | some next =>
+        let sound := RootCache.writeAllFresh?_sound cache slots next wrote
+          (exact.injectiveSound injective)
+        ⟨next, ⟨fun k => by rw [sound.1, lastVal_append, exact.agree, step], true,
+          fun _ => sound.2⟩⟩
+    | none => ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
+  else ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
+
+/-! ## The served entries, step by step -/
+
+theorem lastVal_cells_system {α : Type} (ids : List α) (key : α → Nat) (root : α → Digest) :
+    lastVal (ids.map fun id => (Key.cell (key id), root id)) Key.system = none := by
+  simp [lastVal, List.filter_map, Function.comp_def]
+
+/-- An enumeration without repeats gives a cell key its id's root, or nothing. -/
+theorem lastVal_cellIds (ids : List CellId) (nodup : ids.Nodup) (root : CellId → Digest) (n : Nat) :
+    lastVal (ids.map fun id => (Key.cell id.value, root id)) (Key.cell n) =
+      if (⟨n⟩ : CellId) ∈ ids then some (root ⟨n⟩) else none := by
+  induction ids with
+  | nil => simp [lastVal]
+  | cons a rest ih =>
+      rw [List.map_cons, lastVal_cons, ih (List.nodup_cons.mp nodup).2]
+      have fresh := (List.nodup_cons.mp nodup).1
+      by_cases same : a = ⟨n⟩
+      · subst same
+        simp [fresh]
+      · have ne : a.value ≠ n := fun h => same (by cases a; simp_all)
+        by_cases member : (⟨n⟩ : CellId) ∈ rest
+        · simp [member, ne]
+        · simp [member, ne, Ne.symm same]
+
+theorem lookupPost_member (writes : List DataWrite) (cellId : CellId) {post : Digest}
+    (found : DurableCommitProtocol.Snapshot.lookupPost cellId
+      (writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) = some post) :
+    cellId ∈ writes.map DataWrite.cellId := by
+  induction writes with
+  | nil => simp [DurableCommitProtocol.Snapshot.lookupPost] at found
+  | cons write rest ih =>
+      simp only [List.map_cons, DurableCommitProtocol.Snapshot.lookupPost] at found
+      split at found
+      next same => simp [same]
+      next => exact List.mem_cons_of_mem _ (ih found)
+
+theorem lookupPost_isSome (writes : List DataWrite) (cellId : CellId)
+    (member : cellId ∈ writes.map DataWrite.cellId) :
+    (DurableCommitProtocol.Snapshot.lookupPost cellId
+      (writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId))).isSome := by
+  induction writes with
+  | nil => cases member
+  | cons write rest ih =>
+      simp only [List.map_cons, DurableCommitProtocol.Snapshot.lookupPost]
+      split
+      · rfl
+      · rename_i differs
+        rcases List.mem_cons.mp member with same | inRest
+        · exact absurd same.symm differs
+        · exact ih inRest
+
+/-- Distinct written cells: a written cell key's last slot value is the
+executor's first-match post root. -/
+theorem lastVal_writes (writes : List DataWrite) (nodup : (writes.map DataWrite.cellId).Nodup)
+    (n : Nat) :
+    lastVal (writes.map fun write => (Key.cell write.cellId.value, write.exactPost)) (Key.cell n) =
+      DurableCommitProtocol.Snapshot.lookupPost ⟨n⟩
+        (writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) := by
+  induction writes with
+  | nil => simp [lastVal, DurableCommitProtocol.Snapshot.lookupPost]
+  | cons write rest ih =>
+      rw [List.map_cons, lastVal_cons, ih (List.nodup_cons.mp nodup).2]
+      simp only [List.map_cons, DurableCommitProtocol.Snapshot.lookupPost]
+      have fresh := (List.nodup_cons.mp nodup).1
+      by_cases same : write.cellId = ⟨n⟩
+      · rw [if_pos same]
+        cases later : DurableCommitProtocol.Snapshot.lookupPost (⟨n⟩ : CellId)
+            (rest.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) with
+        | none => simp [same]
+        | some post =>
+            exact absurd (same ▸ lookupPost_member rest ⟨n⟩ later) fresh
+      · have ne : write.cellId.value ≠ n := fun h => same (by cases h; rfl)
+        rw [if_neg same]
+        simp [ne]
+
+/-- **The served entries after an accepted intent** are the served entries
+before it overwritten by the intent's slot writes (`recordSlots`): the system
+slot's new leaf, and each written cell's post root. -/
+theorem entriesOf_step {rootBytes : List UInt8 → Digest} (image : Image)
+    (before next : DataSnapshot rootBytes) (intent : DataIntent rootBytes) (chain chain' : Digest)
+    (executed : DurableDataIntent.execute .complete before intent = .accepted next) (k : Key) :
+    lastVal (entriesOf (image.append intent) next chain') k =
+      (lastVal (recordSlots (image.accepted.length + 1) chain' (IntentRecord.ofIntent intent)) k).or
+        (lastVal (entriesOf image before chain) k) := by
+  have accepted : next = DataSnapshot.install before intent ∧
+      (intent.writes.map DataWrite.cellId).Nodup := by
+    unfold DurableDataIntent.execute at executed
+    split at executed
+    · split at executed <;> cases executed
+    · split at executed
+      · cases executed
+      · rename_i passed
+        cases executed
+        refine ⟨rfl, ?_⟩
+        unfold DataIntent.preflight at passed
+        split at passed
+        · cases passed
+        split at passed
+        · cases passed
+        split at passed
+        · cases passed
+        rename_i lower
+        unfold DurableCommitProtocol.Intent.preflight at lower
+        by_contra repeated
+        have mapped : ¬ (intent.erase.rootWrites.map DurableCommitProtocol.RootWrite.cellId).Nodup := by
+          simpa [DataIntent.erase, List.map_map, Function.comp_def] using repeated
+        simp only [mapped, decide_false, Bool.not_false, if_true] at lower
+        split at lower <;> cases lower
+  obtain ⟨installed, nodup⟩ := accepted
+  subst installed
+  cases k with
+  | system =>
+      simp only [entriesOf, recordSlots, lastVal_cons, lastVal_cells_system, lastVal_cells_system,
+        IntentRecord.ofIntent]
+      simp [Image.append]
+  | cell n =>
+      have newIds : ∀ id : CellId, id ∈ (image.append intent).cellIds ↔
+          id ∈ image.cellIds ∨ id ∈ intent.writes.map DataWrite.cellId := by
+        intro id
+        simp only [Image.cellIds, Image.append, List.mem_eraseDups, List.flatMap_append,
+          List.mem_append, List.flatMap_singleton, IntentRecord.ofIntent]
+        tauto
+      simp only [entriesOf, recordSlots, lastVal_cons, IntentRecord.ofIntent, reduceCtorEq,
+        if_false, Option.or_none]
+      have enumerated : ∀ img : Image, img.cellIds.Nodup := fun _ => nodup_eraseDups _
+      rw [lastVal_cellIds _ (enumerated _), lastVal_cellIds _ (enumerated _),
+        lastVal_writes _ nodup]
+      have roots : (DataSnapshot.install before intent).model.roots ⟨n⟩ =
+          (DurableCommitProtocol.Snapshot.lookupPost ⟨n⟩ intent.erase.rootWrites).getD
+            (before.model.roots ⟨n⟩) := rfl
+      rw [roots]
+      simp only [DataIntent.erase]
+      cases found : DurableCommitProtocol.Snapshot.lookupPost (⟨n⟩ : CellId)
+          (intent.writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) with
+      | some post =>
+          have member := lookupPost_member _ _ found
+          simp [(newIds ⟨n⟩).mpr (Or.inr member)]
+      | none =>
+          have unwritten : (⟨n⟩ : CellId) ∉ intent.writes.map DataWrite.cellId := by
+            intro member
+            have := lookupPost_isSome _ _ member
+            rw [found] at this
+            cases this
+          by_cases old : (⟨n⟩ : CellId) ∈ image.cellIds
+          · simp [(newIds ⟨n⟩).mpr (Or.inl old), old]
+          · have absent : (⟨n⟩ : CellId) ∉ (image.append intent).cellIds := by
+              rw [newIds]; tauto
+            simp [absent, old]
+
+/-- A cell list read back by `Seed.lookup` gives each listed id its own bytes. -/
+theorem seedLookup_map (ids : List CellId) (bytes : CellId → List UInt8) (id : CellId)
+    (member : id ∈ ids) : Seed.lookup (ids.map fun i => (i, bytes i)) id = some (bytes id) := by
+  induction ids with
+  | nil => cases member
+  | cons a rest ih =>
+      simp only [List.map_cons, Seed.lookup]
+      split
+      next same => subst same; rfl
+      next differs =>
+        rcases List.mem_cons.mp member with rfl | inRest
+        · exact absurd rfl differs
+        · exact ih inRest
+
+/-- Materializing the head and resuming from it with nothing to replay serves
+the same entries. -/
+theorem entriesOf_rebase {rootBytes : List UInt8 → Digest} (image : Image)
+    (snapshot rebased : DataSnapshot rootBytes) (chain : Digest)
+    (resumed : resume rootBytes image image.accepted.length (State.ofSnapshot image snapshot) =
+      some rebased) :
+    entriesOf image rebased chain = entriesOf image snapshot chain := by
+  unfold resume at resumed
+  split at resumed
+  · simp only [List.drop_length, replay, Option.some.injEq] at resumed
+    subst resumed
+    unfold entriesOf
+    congr 1
+    apply List.map_congr_left
+    intro id member
+    rw [← (State.snapshot rootBytes _ _).coherent id, ← snapshot.coherent id]
+    show (_, rootBytes ((Seed.lookup (State.ofSnapshot image snapshot).cells id).getD _)) = _
+    simp only [State.ofSnapshot]
+    rw [seedLookup_map _ _ _ member]
+    rfl
+  · cases resumed
 
 /-! ## The loaded, resumed image -/
 
@@ -317,6 +600,8 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   chainExact : chain = chainAfter logStart image.accepted
   /-- The world root, cached; `worldRoot_eq` below. -/
   roots : RootCache
+  /-- The cache holds the served entries (`Loaded.worldRoot_eq`). -/
+  rootsExact : RootsExact roots (entriesOf image snapshot chain)
   /-- The presence index of the accepted log, cached and advanced by one
   `admit` per append. It is a function of the log, never stored. -/
   index : PresenceIndex.Index
@@ -325,13 +610,20 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
 
-/-- The served world root: read, not recomputed. -/
+/-- The served world root: read off the cache, not recomputed, while no two
+cached keys share an index path; after an index collision (a collision of the
+deployed hash) evaluated in full. -/
 def Loaded.worldRoot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Digest :=
-  loaded.roots.root
+  if loaded.rootsExact.injective then loaded.roots.root
+  else deployedRoot (entriesOf loaded.image loaded.snapshot loaded.chain)
 
+/-- **The served root is C1's root of the served entries**, either way. -/
 theorem Loaded.worldRoot_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
-    loaded.worldRoot = deployedRoot loaded.roots.entries :=
-  loaded.roots.root_eq
+    loaded.worldRoot = deployedRoot (entriesOf loaded.image loaded.snapshot loaded.chain) := by
+  unfold Loaded.worldRoot
+  split
+  next injective => exact loaded.rootsExact.root_eq injective
+  next => rfl
 
 /-- Reuse the already resumed snapshot when a controller reconstructs its
 typed directory; this performs no second replay or cell update. -/
@@ -355,6 +647,7 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
       let chain := chainAfter logStart image.accepted
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
         rfl, RootCache.ofEntries (entriesOf image snapshot chain),
+        RootsExact.ofEntries (entriesOf image snapshot chain),
         PresenceIndex.ofRecords image.accepted, rfl⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
@@ -449,6 +742,7 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
             return .ok ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
               chainPrefixes_back logStart records,
               RootCache.ofEntries (entriesOf image snapshot headChain),
+              RootsExact.ofEntries (entriesOf image snapshot headChain),
               PresenceIndex.ofRecords image.accepted, rfl⟩
       else return .error "checkpoint beyond the log head"
 
@@ -496,18 +790,21 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     Loaded rootBytes :=
   let record := IntentRecord.ofIntent intent
   let chain := chainStep loaded.chain record
+  let roots := loaded.rootsExact.advance (recordSlots (loaded.image.accepted.length + 1) chain record)
+    (entriesOf_step loaded.image loaded.snapshot ready.next intent loaded.chain chain ready.executed)
   ⟨loaded.image.append intent, loaded.baseHeight, loaded.base, ready.next,
     by simp only [Image.append, List.length_append]; exact Nat.le_add_right_of_le loaded.withinLog,
     ready.resumed, loaded.logStart, chain,
     by show chainStep loaded.chain record = _
        rw [loaded.chainExact]; simp [chainAfter, Image.append, List.foldl_append, record],
-    loaded.roots.writeAll (recordSlots (loaded.image.accepted.length + 1) chain record),
+    roots.1, roots.2,
     loaded.index.admit (loaded.image.accepted.length + 1) record,
     by rw [loaded.indexExact]
        exact (PresenceIndex.ofRecords_snoc loaded.image.accepted record).symm⟩
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
-open of a checkpoint at the head would. -/
+open of a checkpoint at the head would. The root cache carries over: the
+rebased snapshot serves the same entries (`entriesOf_rebase`). -/
 def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Option (Loaded rootBytes) :=
   let state := State.ofSnapshot loaded.image loaded.snapshot
@@ -515,12 +812,12 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
   match resumed : resume rootBytes loaded.image height state with
   | none => none
   | some snapshot =>
-      let roots := RootCache.ofEntries (entriesOf loaded.image snapshot loaded.chain)
-      -- The incremental cache must agree with a full rebuild of the same
-      -- state; a disagreement keeps the old base (and `extendFrom` refuses).
-      if roots.root ≠ loaded.roots.root then none else
+      have same := entriesOf_rebase loaded.image loaded.snapshot snapshot loaded.chain resumed
       some ⟨loaded.image, height, state, snapshot, Nat.le_refl _, resumed, loaded.logStart,
-        loaded.chain, loaded.chainExact, roots, loaded.index, loaded.indexExact⟩
+        loaded.chain, loaded.chainExact, loaded.roots,
+        ⟨fun k => by rw [same]; exact loaded.rootsExact.agree k, loaded.rootsExact.injective,
+          loaded.rootsExact.injectiveSound⟩,
+        loaded.index, loaded.indexExact⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -530,9 +827,7 @@ theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loade
     loaded.rebaseD.image = loaded.image := by
   unfold rebaseD rebase
   dsimp only
-  split
-  · rfl
-  · split <;> rfl
+  split <;> rfl
 
 /-- **The index is the replay's index**: the cached index is the fold of the
 whole log, and equally the fold of the checkpoint's prefix advanced by the
@@ -616,13 +911,53 @@ theorem Loaded.atPrefix_from_checkpoint {rootBytes : List UInt8 → Digest}
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint
 
+/-- The checkpoint state's world-root entries are the served entries. -/
+theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)
+    (snapshot : DataSnapshot rootBytes) (chain : Digest) :
+    stateEntries rootBytes image.accepted.length chain (State.ofSnapshot image snapshot) =
+      entriesOf image snapshot chain := by
+  simp only [stateEntries, entriesOf, State.ofSnapshot, List.map_map]
+  congr 1
+  apply List.map_congr_left
+  intro id _
+  simp [snapshot.coherent id]
+
+/-- **A checkpoint sealed from the cached root is the specification seal**,
+byte for byte: the served root is the world root of the checkpoint body. -/
+theorem sealCheckpoint_uses_cached_root {rootBytes : List UInt8 → Digest} (key : MacKey)
+    (loaded : Loaded rootBytes) :
+    sealAt key loaded.image.accepted.length loaded.chain
+        (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot =
+      sealCheckpoint key rootBytes loaded.image.accepted.length loaded.chain
+        (State.ofSnapshot loaded.image loaded.snapshot) := by
+  apply sealAt_eq_sealCheckpoint
+  rw [loaded.worldRoot_eq, DurableCheckpointCodec.worldRoot, stateEntries_ofSnapshot]
+
+/-- The sealed root is `Kernel.WorldRoot`'s deployed root of the sealed body. -/
+theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
+    (loaded : Loaded rootBytes) :
+    (sealAt key loaded.image.accepted.length loaded.chain
+        (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).root =
+      DurableCheckpointCodec.worldRoot rootBytes
+        (sealAt key loaded.image.accepted.length loaded.chain
+          (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).body := by
+  rw [sealCheckpoint_uses_cached_root]
+  rfl
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.sealCheckpoint_uses_cached_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sealCheckpoint_uses_cached_root
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.worldRoot_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Loaded.worldRoot_eq
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.entriesOf_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms entriesOf_step
+
 /-- Seal and store a checkpoint of the head. A failed write loses nothing (the
 log is complete); the caller then keeps its old base. -/
 def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) : IO Bool := do
   let .ok key ← transport.key | return false
-  let sealed := sealCheckpoint key rootBytes loaded.image.accepted.length loaded.chain
-    (State.ofSnapshot loaded.image loaded.snapshot)
+  let sealed := sealAt key loaded.image.accepted.length loaded.chain
+    (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot
   match ← transport.putCheckpoint loaded.image.accepted.length (checkpointFrame.encode sealed) with
   | .error _ => return false
   | .ok () => return true
@@ -648,6 +983,47 @@ theorem afterCheckpoint_image {rootBytes : List UInt8 → Digest} (loaded : Load
   split
   · exact Loaded.rebaseD_image _
   · rfl
+
+/-- **The checkpoint differential** (operator diagnostic): rebuild the stored
+log's state at `height` the way the live host does (from the seed, one
+`extend` per record through the shared executor, a rebase at every due
+checkpoint), then seal it twice: from the cached root, as `storeCheckpoint`
+does, and from the root evaluated in full (`sealCheckpoint`). Returns both
+encodings and the stored checkpoint's bytes when it sits at `height`. -/
+def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → Digest) (height : Nat) :
+    IO (Except String (List UInt8 × List UInt8 × Option (List UInt8))) := do
+  let key ← match ← transport.key with
+    | .error message => return .error message
+    | .ok key => pure key
+  match ← transport.read 1 true with
+  | .error message => return .error message
+  | .ok none => return .error "durable store is not initialized"
+  | .ok (some stored) =>
+      let some seedBytes := stored.seed | return .error "durable seed missing"
+      let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
+      let records ← match decodeRecords stored.entries with
+        | .error message => return .error message
+        | .ok records => pure records
+      if height > records.length then return .error "height beyond the log head"
+      let initial ← match loadSeed rootBytes (transport.logStart seed) seed with
+        | .error message => return .error message
+        | .ok loaded => pure loaded
+      let mut current := initial
+      for record in records.take height do
+        let some intent := record.bind? rootBytes
+          | return .error "durable log record does not bind its roots"
+        match prepare current.image current.baseHeight current.base current.snapshot
+            current.withinLog current.resumed intent with
+        | .inl ready =>
+            let extended := current.extend ready
+            current := afterCheckpoint extended (checkpointDue transport extended)
+        | .inr _ => return .error "durable log does not replay through the canonical executor"
+      let state := State.ofSnapshot current.image current.snapshot
+      let cached := checkpointFrame.encode (sealAt key height current.chain state current.worldRoot)
+      let full := checkpointFrame.encode (sealCheckpoint key rootBytes height current.chain state)
+      let atHeight := stored.checkpoint.bind fun checkpoint =>
+        if checkpoint.height = height then some checkpoint.bytes else none
+      return .ok (cached, full, atHeight)
 
 /-- Read back the entry at `height`; exact equality with what this attempt
 proposed is the only confirmation. -/
@@ -764,7 +1140,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
       if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
         match current.rebase with
         | some rebased => return .ok rebased
-        | none => return .error "world root cache disagrees with a full rebuild"
+        | none => return .error "rebase at the head does not resume through the canonical executor"
       return .ok current
 
 /-- Explicit bootstrap, separate from receipt acceptance. An existing different

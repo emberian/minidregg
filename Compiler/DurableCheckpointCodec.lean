@@ -229,11 +229,26 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
       cshake256Bytes "DREGG/NATIVE-HOST/CHECKPOINT-BODY/v1".toUTF8.toList
         (bodyStream.encode body)))
 
+/-- Seal a checkpoint body under a supplied world root. The host supplies its
+cached root (`DurableReceiverIO.sealCheckpoint_uses_cached_root`); `openSealed`
+recomputes it from the body and refuses any other. -/
+def sealAt (key : MacKey) (height : Nat) (chain : Digest) (state : State) (root : Digest) : Sealed :=
+  let body : Body := ⟨key.id, height, chain, state⟩
+  ⟨body, root, checkpointMac key body root⟩
+
+/-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
     (state : State) : Sealed :=
-  let body : Body := ⟨key.id, height, chain, state⟩
-  let root := worldRoot rootBytes body
-  ⟨body, root, checkpointMac key body root⟩
+  sealAt key height chain state (worldRoot rootBytes ⟨key.id, height, chain, state⟩)
+
+/-- Sealing under any root equal to the body's world root is the
+specification seal, byte for byte. -/
+theorem sealAt_eq_sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
+    (chain : Digest) (state : State) {root : Digest}
+    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, state⟩) :
+    sealAt key height chain state root = sealCheckpoint key rootBytes height chain state := by
+  subst exact
+  rfl
 
 inductive OpenError where
   | malformed
@@ -257,7 +272,7 @@ theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (heig
     (chain : Digest) (state : State) :
     openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint key rootBytes height chain state)) =
       .ok ⟨key.id, height, chain, state⟩ := by
-  simp [openSealed, Framed.decode_encode, sealCheckpoint]
+  simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt]
   rfl
 
 /-- Refuting pole: a decodable checkpoint whose MAC is not the key's MAC of
@@ -295,7 +310,7 @@ theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → 
     (height : Nat) (chain : Digest) (state : State) (distinct : other.id ≠ key.id) :
     openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint other rootBytes height chain state)) =
       .error .foreignKey := by
-  simp [openSealed, Framed.decode_encode, sealCheckpoint, distinct]
+  simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl
 
 end Minidregg.Compiler.DurableCheckpointCodec
