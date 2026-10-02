@@ -24,10 +24,10 @@ structure Instance where
 
 def frame : List UInt8 := "DREGG/WORLD/INSTANCE".toUTF8.toList ++ [1]
 
-def encode (instance : Instance) : List UInt8 :=
+def encode (value : Instance) : List UInt8 :=
   frame ++ (StreamCodec.product bytesStream bytesStream).encode
-    (descriptorCodec.encode instance.descriptor,
-      StoreCodec.encode (wire instance.descriptor) instance.store)
+    (descriptorCodec.encode value.descriptor,
+      StoreCodec.encode (wire value.descriptor) value.store)
 
 def decode (bytes : List UInt8) : Option Instance := do
   if bytes.take frame.length != frame then none else do
@@ -35,8 +35,8 @@ def decode (bytes : List UInt8) : Option Instance := do
       (bytes.drop frame.length)
     let ⟨descriptor, valid⟩ ← decodeDefinition definition
     let store ← StoreCodec.decode (wire descriptor) payload
-    let instance := Instance.mk descriptor valid store
-    if ResourceBirthCodec.bytesEqual (encode instance) bytes then some instance else none
+    let value := Instance.mk descriptor valid store
+    if ResourceBirthCodec.bytesEqual (encode value) bytes then some value else none
 
 /-- Transport actions name a semantic field, not a positional namespace.
 The expected value is mandatory for replacement/deletion. -/
@@ -85,24 +85,24 @@ def lowerAll (descriptor : Descriptor) : List Action → Option (Patch (layout d
       let tail ← lowerAll descriptor rest
       some (head :: tail)
 
-structure Prepared (instance : Instance) where
-  patch : Patch (layout instance.descriptor)
-  valid : Patch.ValidFrom instance.store patch
+structure Prepared (value : Instance) where
+  patch : Patch (layout value.descriptor)
+  valid : Patch.ValidFrom value.store patch
 
-def prepare (instance : Instance) (actions : List Action) : Option (Prepared instance) := do
-  let patch ← lowerAll instance.descriptor actions
-  if valid : Patch.ValidFrom instance.store patch then some ⟨patch, valid⟩ else none
+def prepare (value : Instance) (actions : List Action) : Option (Prepared value) := do
+  let patch ← lowerAll value.descriptor actions
+  if valid : Patch.ValidFrom value.store patch then some ⟨patch, valid⟩ else none
 
-def Prepared.post {instance : Instance} (prepared : Prepared instance) : Instance :=
-  ⟨instance.descriptor, instance.valid, Patch.run instance.store prepared.patch⟩
+def Prepared.post {value : Instance} (prepared : Prepared value) : Instance :=
+  ⟨value.descriptor, value.valid, Patch.run value.store prepared.patch⟩
 
-theorem prepared_preserves_descriptor {instance : Instance} (prepared : Prepared instance) :
-    prepared.post.descriptor = instance.descriptor := rfl
+theorem prepared_preserves_descriptor {value : Instance} (prepared : Prepared value) :
+    prepared.post.descriptor = value.descriptor := rfl
 
-theorem prepared_preserves_rom {instance : Instance} (prepared : Prepared instance)
-    (address : Address (layout instance.descriptor))
-    (rom : (instance.descriptor.fields.get address.1).discipline = .rom) :
-    prepared.post.store address = instance.store address :=
-  instance_rom_preserved instance.descriptor instance.store prepared.patch address prepared.valid rom
+theorem prepared_preserves_rom {value : Instance} (prepared : Prepared value)
+    (address : Address (layout value.descriptor))
+    (rom : (value.descriptor.fields.get address.1).discipline = .rom) :
+    prepared.post.store address = value.store address :=
+  instance_rom_preserved value.descriptor value.store prepared.patch address prepared.valid rom
 
 end Minidregg.Kernel.WorldKindInstance

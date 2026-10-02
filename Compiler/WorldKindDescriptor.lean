@@ -182,21 +182,36 @@ theorem instance_rom_preserved (descriptor : Descriptor) (store : Store (layout 
     Patch.run store patch address = store address :=
   Patch.rom_preserved store patch address valid rom
 
-/-- Capability meaning is bound to the descriptor, including an all-fields
-scope. Selecting a later descriptor never implicitly widens an old grant. -/
-structure Scope where
-  descriptor : Descriptor
-  fields : Option (List Nat)
-  deriving DecidableEq, Repr
+/-- The actual authorization field inventory. A named map is one semantic
+field; a separate key-sensitive law can restrict which map entry is changed. -/
+def descriptorFields (descriptor : Descriptor) : Finset CellField :=
+  (descriptor.fields.map fun field => CellField.slot field.id).toFinset
 
-def Scope.Covers (scope : Scope) (descriptor : Descriptor) (field : Nat) : Prop :=
-  scope.descriptor = descriptor ∧
-  field ∈ descriptor.fields.map Field.id ∧
-  (scope.fields = none ∨ ∃ fields, scope.fields = some fields ∧ field ∈ fields)
+/-- Freeze all-fields authority to this descriptor's actual semantic inventory
+when constructing an instance grant or preparing a carry. This uses the existing
+capability Scope, not an alternative authorization model. Explicit old fields
+are intersected with the inventory; budgets, verbs, targets and delta bounds stay
+unchanged. Native grant construction must call this before claiming the rule. -/
+def bindScope (descriptor : Descriptor) (scope : Minidregg.Theory.TypedAuthorization.Scope .object) :
+    Minidregg.Theory.TypedAuthorization.Scope .object :=
+  { scope with fields := some (match scope.fields with
+      | none => descriptorFields descriptor
+      | some fields => fields ∩ descriptorFields descriptor) }
 
-theorem all_fields_does_not_cross_revision (old next : Descriptor) (field : Nat)
-    (changed : old ≠ next) : ¬ (Scope.mk old none).Covers next field := by
-  intro covered
-  exact changed covered.1
+/-- An actual covered write under a bound scope cannot affect a semantic field
+which was absent from the descriptor at grant construction/carry preparation. -/
+theorem bound_scope_covers_only_descriptor (descriptor : Descriptor)
+    (scope : Minidregg.Theory.TypedAuthorization.Scope .object)
+    (parentage : Parentage) (request : Request .object) (footprint : Footprint)
+    (covered : (bindScope descriptor scope).CoversWrite parentage request footprint)
+    (field : CellField) (touched : field ∈ footprint.touched) :
+    field ∈ descriptorFields descriptor := by
+  have named := fields_cover_write covered touched
+  cases old : scope.fields with
+  | none => simpa [bindScope, CellField.NamedBy, old] using named
+  | some fields =>
+      have member : field ∈ fields ∩ descriptorFields descriptor := by
+        simpa [bindScope, CellField.NamedBy, old] using named
+      exact (Finset.mem_inter.mp member).2
 
 end Minidregg.Compiler.WorldKindDescriptor
