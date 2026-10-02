@@ -151,3 +151,32 @@ The existing `session-reenroll` compatible-upgrade admission is not that ordinar
 client flow. Its new same-source reconnect mode and audited stopped-fence retirement
 are explicit remaining implementation/receiving work; automatic disaster restore
 has not been delivered by these callbacks.
+
+## Native Store transport visibility
+
+A root-owned broker configuration may declare `residentHomeReadOnlyPaths`, a
+bounded inventory of canonical protected regular files and operator socket
+parent directories. When a native resident refers to transport configuration,
+completion custody, or signing files below `/home` or `/root`, the broker
+requires those exact paths before installing its unit. The socket directory
+must contain the resident's actual operator-owned Unix endpoint. No additional
+writable paths are granted.
+
+The source renders a separate immutable unit drop-in with `ProtectHome=tmpfs`
+and exact `BindReadOnlyPaths`. Selected file parents are empty read-only tmpfs
+mounts with their original protected ownership and permissions; only the
+listed files are mounted inside. This preserves signing custody checks without
+revealing sibling files. The exact socket parent is bound read-only so its
+private directory custody and Unix connection remain available. The base
+unit, app bubblewrap root, and existing grain state/volume write limits remain
+in force. The inventory gives filesystem visibility; current native authority
+still decides every operation.
+
+An initial unit failure before native BEGIN can retry the same generation only
+with the ordinary source `never-begun` classification, current installed app
+observation, and failed inactive unit incarnation. An admitted or uncertain
+BEGIN is recovered through its exact retained attempt; visibility repair does
+not authorize another physical invocation. The current receiving app531101 has
+confirmed installation105/ticket112 and generation2 never-begun, with a
+sandbox visibility failure. Browser and checkpoint receiving remain pending
+until the source-rendered unit actually runs.

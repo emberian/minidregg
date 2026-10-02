@@ -667,6 +667,7 @@ mod tests {
         assert!(check_install_pin(Some("other"), "hash", false).is_err());
         assert!(check_install_pin(Some("hash"), "hash", true).is_ok());
         let config = BrokerConfig {
+            resident_home_read_only_paths: Vec::new(),
             protocol: "mini-spk-broker-config-v1".into(),
             grains_root: "/var/lib/grains".into(),
             broker_socket: None,
