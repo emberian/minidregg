@@ -946,6 +946,30 @@ private def worldValue : (codec : WorldKindDescriptor.ScalarCodec) →
   | .integer, path, json => int path json
   | .bytes, path, json => decodeHex path json
 
+private def worldMethodOutput (path : String) (json : Lean.Json) :
+    Result WorldKindMethods.OutputBinding := do
+  let obj ← exactObject path ["output", "field", "key"] json
+  pure ⟨← nat (path ++ ".output") (← field path "output" obj),
+    ← nat (path ++ ".field") (← field path "field" obj),
+    ← nat (path ++ ".key") (← field path "key" obj)⟩
+
+private def worldMethod (path : String) (json : Lean.Json) : Result WorldKindMethods.Method := do
+  let obj ← exactObject path ["name", "program", "outputs"] json
+  pure ⟨← string (path ++ ".name") (← field path "name" obj),
+    ⟨← nat (path ++ ".program") (← field path "program" obj)⟩,
+    ← list (path ++ ".outputs") worldMethodOutput (← field path "outputs" obj)⟩
+
+private def worldMethodJson (method : WorldKindMethods.Method) : Lean.Json :=
+  .mkObj [("name", .str method.name), ("program", decimal method.program.value),
+    ("outputs", .arr (method.outputs.toArray.map fun output =>
+      .mkObj [("output", decimal output.output), ("field", decimal output.field),
+        ("key", decimal output.key)]))]
+
+private def worldMethodsJson (value : WorldKindInstance.Instance) : Lean.Json :=
+  match WorldKindMethods.tableOf value with
+  | none => .null
+  | some methods => .arr (methods.toArray.map worldMethodJson)
+
 private def worldDefinition (path : String) (json : Lean.Json) :
     Result WorldKindCell.Definition := do
   let obj ← exactObject path ["descriptor", "defaults"] json
@@ -962,10 +986,29 @@ private def worldDefinition (path : String) (json : Lean.Json) :
     let key ← nat (at ++ ".key") (← field at "key" entry)
     let address : Store.Address (WorldKindDescriptor.layout descriptor) := ⟨space, key⟩
     if (store address).isSome then failAt at "duplicate default field/key"
-    let value ← worldValue (descriptor.fields.get space).codec
-      (at ++ ".value") (← field at "value" entry)
+    let raw ← field at "value" entry
+    let definition := descriptor.fields.get space
+    let value ← if definition.meaning = WorldKindMethods.tableMeaning && raw.getArr?.isOk then do
+        unless definition.codec = .bytes ∧ definition.discipline = .rom ∧ key = 0 do
+          failAt at "method table must be ROM bytes at key zero"
+        let methods ← list (at ++ ".value") worldMethod raw
+        unless WorldKindMethods.valid descriptor methods do
+          failAt at "ambiguous or invalid method output bindings"
+        match WorldKindInstance.decodeValue descriptor space
+            (WorldKindDescriptor.ScalarCodec.bytes.stream.encode (WorldKindMethods.encode methods)) with
+        | some value => pure value
+        | none => failAt at "method table field is not bytes"
+      else worldValue definition.codec (at ++ ".value") raw
     store := store.set address (some value)
-  pure ⟨descriptor, StoreCodec.encode (WorldKindDescriptor.wire descriptor) store⟩
+  let definition : WorldKindCell.Definition :=
+    ⟨descriptor, StoreCodec.encode (WorldKindDescriptor.wire descriptor) store⟩
+  if descriptor.fields.any (fun field => field.meaning == WorldKindMethods.tableMeaning) then
+    let value ← match definition.instantiate with
+      | some value => pure value
+      | none => failAt path "invalid method-bearing definition"
+    if (WorldKindMethods.tableOf value).isNone then
+      failAt path "method table requires one canonical ROM bytes slot and unambiguous bindings"
+  pure definition
 
 private def worldAction (descriptor : WorldKindDescriptor.Descriptor)
     (path : String) (json : Lean.Json) : Result WorldKindInstance.Action := do
@@ -1026,7 +1069,8 @@ private def worldKindJson (root : Digest) (store : Store.Store WorldKindCell.def
     | none => failAt "view-resource.worldKind" "invalid definition/defaults"
   pure <| .mkObj [("root", decimal root.value), ("worldKind", .mkObj
     [("descriptor", worldDescriptorJson value.descriptor),
-     ("defaults", worldEntriesJson value.descriptor value.store)])]
+     ("defaults", worldEntriesJson value.descriptor value.store),
+     ("methods", worldMethodsJson value)])]
 
 private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell.instanceLayout) :
     Result Lean.Json := do
@@ -1039,7 +1083,11 @@ private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell
   pure <| .mkObj [("root", decimal root.value), ("worldInstance", .mkObj
     [("descriptor", worldDescriptorJson value.descriptor),
      ("kindRoot", decimal binding.kindRoot.value),
-     ("entries", worldEntriesJson value.descriptor value.store)])]
+     ("entries", worldEntriesJson value.descriptor value.store),
+     ("sampleSlots", .arr <| ((WorldKindProjection.stateSlots "before" value ++
+       WorldKindProjection.stateSlots "after" value).toArray.map fun slot =>
+         Lean.Json.arr #[.str ("world/" ++ slot.1), signedDecimal slot.2])),
+     ("methods", worldMethodsJson value)])]
 
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do

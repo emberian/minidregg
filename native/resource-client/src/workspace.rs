@@ -5813,6 +5813,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             law_export::show(&root, &workspace, &name)
         }
+        "instance-call" => {
+            let name = os_string(args.required("name")?, "instance name")?;
+            let method = os_string(args.required("method")?, "method name")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            world_kind::call(&root,&workspace,&id,&name,&method)
+        }
         "kind-show" | "instance-show" => {
             let name = os_string(args.required("name")?, "resource name")?;
             args.finish()?;

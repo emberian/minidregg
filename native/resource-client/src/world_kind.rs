@@ -105,7 +105,14 @@ pub(super) fn definition(source: &Value, target: Option<&str>) -> Result<Value> 
             .iter()
             .find(|field| field["id"].as_str() == Some(id))
             .ok_or("default names unknown field")?;
-        primitive(member(field, "codec")?, member(entry, "value")?)?;
+        if field["meaning"] == "dregg/world/method-table/v1" && entry["value"].is_array() {
+            if field["codec"] != "bytes" || field["discipline"] != "rom" || key != "0" {
+                return Err("method table must be ROM bytes at key zero".into());
+            }
+            method_table(&value["descriptor"], &entry["value"])?;
+        } else {
+            primitive(member(field, "codec")?, member(entry, "value")?)?;
+        }
     }
     Ok(value)
 }
@@ -354,5 +361,154 @@ mod tests {
             &json!([{"type":"set","field":"membership","key":"0","value":"1"}])
         )
         .is_err());
+    }
+}
+
+
+fn method_table(descriptor: &Value, table: &Value) -> Result<()> {
+    let mut names = std::collections::BTreeSet::new();
+    let mut programs = std::collections::BTreeSet::new();
+    for method in table.as_array().ok_or("methods must be an array")? {
+        exact(method, &["name", "program", "outputs"])?;
+        let name = member(method, "name")?;
+        let program = member(method, "program")?;
+        field_decimal(program, "method program")?;
+        if name.is_empty() || !names.insert(name) || !programs.insert(program) {
+            return Err("methods need unique names and program identities".into());
+        }
+        let mut coordinates = std::collections::BTreeSet::new();
+        let mut addresses = std::collections::BTreeSet::new();
+        for output in method["outputs"].as_array().ok_or("method outputs must be an array")? {
+            exact(output, &["output", "field", "key"])?;
+            let coordinate = member(output, "output")?;
+            let id = member(output, "field")?;
+            let key = member(output, "key")?;
+            for value in [coordinate, id, key] { field_decimal(value, "method output coordinate")?; }
+            if !coordinates.insert(coordinate) || !addresses.insert((id,key)) {
+                return Err("method output coordinates and addresses must be unique".into());
+            }
+            let field = fields(descriptor)?.iter().find(|field| field["id"].as_str() == Some(id))
+                .ok_or("method output names unknown field")?;
+            if !matches!(member(field,"codec")?, "nat" | "int") || field["discipline"] == "rom" {
+                return Err("method output requires a writable numeric field".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn method_operation(workspace: &Value, operation: u8, payload: &[u8]) -> Result<Value> {
+    let frame = crate::session_invoke(&workspace_host(workspace)?,
+        &member_path(workspace,"socket")?, &member_path(workspace,"config")?, operation, payload)?;
+    match frame.split_first() {
+        Some((actual, body)) if *actual == operation =>
+            serde_json::from_slice(body).map_err(|e| format!("method op{operation}: {e}")),
+        _ => Err(format!("method op{operation} refused: {}",String::from_utf8_lossy(&frame))),
+    }
+}
+
+/// Translate evaluator output through the table read from the instance, never
+/// through method-specific client code. The receiving source repeats this match.
+fn method_actions(instance: &Value, method: &Value, dry: &Value) -> Result<Vec<Value>> {
+    let bindings = method["outputs"].as_array().ok_or("method lacks output bindings")?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut actions = Vec::new();
+    for write in dry["writes"].as_array().ok_or("method output has no field writes")? {
+        let parts = write.as_array().ok_or("method write must be a triple")?;
+        if parts.len() != 3 || parts[0].as_str() != Some("0") {
+            return Err("single-instance method emitted another participant's write".into());
+        }
+        let output = parts[1].as_str().ok_or("method output field is not decimal")?;
+        if !seen.insert(output) { return Err("method emitted duplicate output address".into()); }
+        let binding = bindings.iter().find(|binding| binding["output"].as_str() == Some(output))
+            .ok_or("method emitted undeclared output coordinate")?;
+        let field = fields(&instance["descriptor"] )?.iter()
+            .find(|field| field["id"] == binding["field"]).ok_or("method names missing field")?;
+        let value = parts[2].as_str().ok_or("method output value is not numeric")?;
+        primitive(member(field,"codec")?,value)?;
+        actions.push(json!({"type":"set","field":member(field,"name")?,"key":binding["key"],"value":value}));
+    }
+    Ok(actions)
+}
+
+/// A call prepares an ordinary signed transaction. Reusing the proposal ID
+/// returns its retained exact intent, without rerunning or repricing the method.
+pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_name: &str) -> Result<()> {
+    validate_name(id)?;
+    validate_ref_name(name)?;
+    let selector = json!({"instance":name,"method":method_name});
+    let directory = root.join("proposals").join(id);
+    if directory.exists() {
+        if bounded_json(&directory.join("method-request.json"))? != selector {
+            return Err("proposal ID already names a different method call".into());
+        }
+        let request = bounded_json(&directory.join("request.json"))?;
+        let summary = law_export::retained(root,id,&request)?.ok_or("retained method proposal disappeared")?;
+        return print_json(&summary);
+    }
+    let reference = reference(root,name)?;
+    let (view,_,_) = signed_view(root,workspace,&reference,"resource")?;
+    let instance = cell(&view,"worldInstance")?;
+    let table = instance["methods"].as_array().ok_or("instance has no canonical method table")?;
+    method_table(&instance["descriptor"],&instance["methods"])?;
+    let method = table.iter().find(|method| method["name"].as_str() == Some(method_name))
+        .ok_or("instance has no method with that name")?;
+    let program = member(method,"program")?;
+    let show = method_operation(workspace,132,program.as_bytes())?;
+    let slots = instance["sampleSlots"].as_array().ok_or("signed view lacks source sample slots")?;
+    let mut values = Vec::new();
+    for slot in show.pointer("/abi/sample").and_then(Value::as_array).ok_or("program lacks ABI sample")? {
+        if slot["target"].as_str() != Some("0") {
+            return Err("single-instance method reads another participant; use a composed invocation".into());
+        }
+        let name = member(slot,"slot")?;
+        let value = slots.iter().find(|pair| pair.get(0).and_then(Value::as_str) == Some(name))
+            .and_then(|pair| pair.get(1)).ok_or_else(|| format!("method sample slot {name} absent in signed view"))?;
+        values.push(json!(["0",name,value]));
+    }
+    let request = json!({"programId":program,"caller":member(workspace,"subject")?,"room":"0",
+        "targets":[reference["target"]],"values":values});
+    let dry = method_operation(workspace,134,request.to_string().as_bytes())?;
+    if dry["verdict"].as_str() != Some("ok") { return Err(format!("method did not finish: {dry}")); }
+    let actions = method_actions(instance,method,&dry)?;
+    let proposal = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+        "targets":[{"name":name,"payload":{"type":"worldNamed","actions":actions}}],
+        "run":{"programId":program,"sample":dry["sample"],"output":dry["output"],"steps":dry["steps"]}});
+    let summary = propose_request(root,workspace,&proposal,id,None,true)?;
+    private_file(&directory.join("method-request.json"),&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
+    print_json(&summary)
+}
+
+#[cfg(test)]
+mod method_tests {
+    use super::*;
+    fn instance() -> Value {
+        json!({"descriptor":{"kind":"77","revision":"1","fields":[
+          {"id":"3","name":"open","meaning":"poll/open","codec":"nat","discipline":"ram"},
+          {"id":"4","name":"title","meaning":"poll/title","codec":"bytes","discipline":"rom"}
+        ]},"entries":[]})
+    }
+    fn method() -> Value {
+        json!({"name":"close","program":"42","outputs":[{"output":"90","field":"3","key":"0"}]})
+    }
+    #[test]
+    fn output_coordinate_maps_to_declared_semantic_address() {
+        let actions = method_actions(&instance(),&method(),&json!({"writes":[["0","90","0"]]})).unwrap();
+        assert_eq!(actions,json!([{"type":"set","field":"open","key":"0","value":"0"}]).as_array().unwrap().clone());
+        assert!(method_actions(&instance(),&method(),&json!({"writes":[["0","3","0"]]})).is_err());
+        assert!(method_actions(&instance(),&method(),&json!({"writes":[["1","90","0"]]})).is_err());
+    }
+    #[test]
+    fn ambiguous_and_non_numeric_bindings_refuse() {
+        let mut m=method();
+        assert!(method_table(&instance()["descriptor"],&json!([m])).is_ok());
+        assert!(method_table(&instance()["descriptor"],&json!([m,m])).is_err());
+        m["outputs"][0]["field"]=json!("4");
+        assert!(method_table(&instance()["descriptor"],&json!([m])).is_err());
+    }
+    #[test]
+    fn duplicate_or_negative_natural_effect_refuses() {
+        assert!(method_actions(&instance(),&method(),&json!({"writes":[["0","90","0"],["0","90","0"]]})).is_err());
+        assert!(method_actions(&instance(),&method(),&json!({"writes":[["0","90","-1"]]})).is_err());
     }
 }

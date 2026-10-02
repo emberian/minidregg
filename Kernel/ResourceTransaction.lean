@@ -5,6 +5,7 @@ contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Compiler.NativeProtocolFrames
 import Kernel.DeclaredResourceScalar
 import Kernel.WorldKindProjection
+import Kernel.WorldKindMethods
 import Compiler.ObjectAudienceRoster
 import Kernel.ObjectAudience
 import Kernel.ContentResource
@@ -869,27 +870,26 @@ def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option Eval
       if object.value = target then some ⟨i, field.value, value⟩ else none
   | _ => none
 
-def targetWrites (i : Nat) (target : Target) : Option (List Eval.FieldWrite) :=
-  match target.payload with
-  | .scalar actions => actions.mapM (actionWrite i target.target)
-  | .content _ => none
-  -- A stream append is not a field write a program's output can name.
-  | .append _ | .world _ | .kindDefinition _ => none
-  -- An observe-only read makes no write.
-  | .read => some []
+/-- The actual pre-state supplies world method bindings. Output coordinates are
+program-local names, never substitutes for capability semantic field IDs. -/
+def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
+    (program : Digest) : Option (List Eval.FieldWrite) := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | scalar actions => exact actions.mapM (actionWrite i id)
+    | world actions => exact WorldKindMethods.writes pre program i actions
+    | content _ | append _ | kindDefinition _ => exact none
+    | read => exact some []
 
-def writesFrom : Nat → List Target → Option (List Eval.FieldWrite)
-  | _, [] => some []
-  | i, target :: rest => do
-      let here ← targetWrites i target
-      let later ← writesFrom (i + 1) rest
-      pure (here ++ later)
-
-/-- Every write the command makes, as field writes; `none` when any action is not
-an own-object field write (a move, a content edit) — under a run claim that is a
-write the program's output cannot name. -/
-def commandWrites (command : Command) : Option (List Eval.FieldWrite) :=
-  writesFrom 0 command.targets
+/-- Extract checked effects from every actual loaded participant. A world
+participant must bind the claimed immutable program in its retained ROM table. -/
+def commandWrites (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (program : Digest) : Option (List Eval.FieldWrite) := do
+  let groups ← (List.finRange command.targets.length).mapM fun i =>
+    targetWrites i.val command.targets[i] (pre i) program
+  pure groups.flatten
 
 /-- What the controller learned from a checked run: the claim, the evaluator it ran
 on (registry id), the ABI fuel, and the accepted product (its bytes, count, writes). -/
@@ -950,7 +950,7 @@ def checkClaim (disabled : List Digest) (domain : Digest) (directory : Directory
       let libraries ← program.abi.libraries.mapM fun library =>
         Run.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
       if !Run.librariesAgree program libraries then throw .libraryEvaluator
-      let writes ← Run.require .writeNotInOutput (commandWrites command)
+      let writes ← Run.require .writeNotInOutput (commandWrites command pre claim.programId)
       let verdict ← checkProgram E program libraries ambient command pre claim writes
       pure ⟨claim, E.id, program.abi.fuel, verdict⟩
 
@@ -1131,7 +1131,7 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
       program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram domain directory library)) = .ok libraries ∧
       Run.librariesAgree program libraries = true ∧
-      commandWrites command = some writes ∧
+      commandWrites command pre claim.programId = some writes ∧
       checked.fuel = program.abi.fuel ∧
       ProgramAccepted E program libraries ambient command pre checked.claim writes
         checked.verdict := by
@@ -1156,7 +1156,7 @@ theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
         · cases accepted
         rename_i hagree
         revert accepted
-        cases hwrites : commandWrites command with
+        cases hwrites : commandWrites command pre claim.programId with
         | none => intro accepted; cases accepted
         | some writes =>
           intro accepted
@@ -1242,7 +1242,7 @@ theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployme
       program.abi.libraries.mapM (fun library => Run.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory library)) =
           .ok libraries ∧
-      commandWrites command = some writes ∧
+      commandWrites command (fun i => (prepared.targets i).pre.logical) claim.programId = some writes ∧
       ProgramAccepted E program libraries ambient command (fun i => (prepared.targets i).pre.logical)
         claim writes checked.verdict := by
   have h := prepared.runChecked
