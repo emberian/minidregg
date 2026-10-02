@@ -19,6 +19,10 @@ if [[ $# == 1 && $1 == --launch-gate-protocol ]]; then
   exit 0
 fi
 
+if [[ $# == 1 && $1 == --controller-manager-protocol ]]; then
+  exec "$launch_gate" --controller-manager-protocol
+fi
+
 usage() {
   echo 'usage: bwrap --workspace ABS_DIR --runtime-root ABS_DIR --network none|host -- /agent/PROGRAM [ARG...]' >&2
   exit 64
@@ -157,7 +161,18 @@ unit_properties=(
   --property=KillMode=control-group "--property=RuntimeMaxSec=${runtime_max_sec}s"
   --property=MemoryMax=2G --property=TasksMax=128
 )
-[[ -z $controller_unit ]] || unit_properties+=("--property=BindsTo=$controller_unit")
+controller_manager=${MINI_GRAIN_CONTROLLER_MANAGER:-user}
+[[ $controller_manager == system || $controller_manager == user ]] || usage
+[[ ${MINI_GRAIN_WORKER_MANAGER:-user} == user ]] || usage
+# A system controller cannot be named by BindsTo in the USER manager. The
+# durable gate retains its exact incarnation and supervises the sandbox using
+# a pidfd. Legacy same-manager launches retain their existing BindsTo fence.
+if [[ $controller_manager == user && -n $controller_unit ]]; then
+  unit_properties+=("--property=BindsTo=$controller_unit")
+elif [[ $controller_manager == system ]]; then
+  [[ -n $controller_unit ]] || usage
+  "$launch_gate" check-lifetime "$MINI_GRAIN_STATE_DIR" "$MINI_GRAIN_UNIT"
+fi
 /usr/bin/systemd-run --user --wait --pipe --collect --unit="${MINI_GRAIN_UNIT}" \
   "${unit_properties[@]}" \
   "$launch_gate" run "$MINI_GRAIN_STATE_DIR" "$MINI_GRAIN_UNIT" -- \
