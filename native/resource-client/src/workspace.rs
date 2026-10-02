@@ -2,6 +2,8 @@
 //! A reference is a discovery hint. Every read and operation still goes through
 //! the signed observation, current Plan, and Lean admission in `main`.
 
+pub(crate) mod web_author;
+
 use crate::current_birth;
 use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
