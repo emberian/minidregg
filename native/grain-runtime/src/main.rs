@@ -17556,6 +17556,22 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() >= 2 && args[1] == "provider-table" {
+        if args.len() != 4 || args[2] != "check" {
+            eprintln!("usage: grain-runtime provider-table check FILE");
+            return ExitCode::from(2);
+        }
+        return match credentials::ProviderTable::load(Path::new(&args[3]), unsafe { libc::geteuid() }) {
+            Ok(table) => {
+                println!("provider table valid ({} rows)", table.rows.len());
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("provider table refused: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() == 2 && args[1] == "tool-id" {
         let mut bytes = [0u8; 16];
         let result =
@@ -17739,7 +17755,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
