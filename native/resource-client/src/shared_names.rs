@@ -63,7 +63,9 @@ pub(crate) fn binding(entry: &Value) -> Result<Option<Binding>> {
         .get("tombstonedAt")
         .ok_or("shared-name link lacks retirement state")?;
     if !retired.is_null() {
-        decimal(
+        // Retirement is a source-derived version event digest, not a short
+        // user-selected identifier. The native host emits its full width.
+        super::field_decimal(
             retired.as_str().ok_or("invalid shared-name retirement")?,
             "retirement",
         )?;
@@ -595,6 +597,19 @@ mod tests {
                 .len(),
             1
         );
+    }
+    #[test]
+    fn renamed_binding_accepts_native_full_width_retirement() {
+        let mut retired = link("board", "1");
+        retired["tombstonedAt"] =
+            json!("105864688476342976361059645019308680758459110999958598611326832182121287435193");
+        let names = bindings(&view(vec![retired.clone(), link("current", "2")])).unwrap();
+        assert!(!names.contains_key("board"));
+        assert_eq!(names["current"].target, "42");
+        for malformed in ["01", "-1", "", "not-an-event"] {
+            retired["tombstonedAt"] = json!(malformed);
+            assert!(bindings(&view(vec![retired.clone()])).is_err());
+        }
     }
     #[test]
     fn malformed_namespace_never_means_absence() {

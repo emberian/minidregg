@@ -44,7 +44,11 @@ fn collection(root: &Path, scope: &str) -> Result<Vec<String>> {
 
 /// Direct document projection shares the ordinary renderer and authenticated
 /// opened_entries boundary. Empty sources deliberately leave transclusions unresolved.
-fn direct(root: &Path, workspace: &Value, reference: &Value) -> Result<(Value, Value, Rendered)> {
+fn direct(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+) -> Result<(Value, Value, Rendered, usize)> {
     let (view, challenge, signed) = signed_view(root, workspace, reference, "resource")?;
     let bin = fs::read(signed.with_file_name("view.bin")).map_err(|e| e.to_string())?;
     let (attempt, _) = new_attempt(root)?;
@@ -69,7 +73,32 @@ fn direct(root: &Path, workspace: &Value, reference: &Value) -> Result<(Value, V
         sources: &BTreeMap::new(),
         me: member(workspace, "subject")?,
     })?;
-    Ok((view, challenge, rendered))
+    let locked = locked_text_rows(&display, &rendered);
+    Ok((view, challenge, rendered, locked))
+}
+
+/// Count only currently placed private atoms whose authenticated local opening
+/// is unavailable. Detached history and ordinary binary objects are not locked text.
+fn locked_text_rows(entries: &[Value], rendered: &Rendered) -> usize {
+    let locked: BTreeSet<&str> = entries
+        .iter()
+        .filter(|entry| {
+            entry["type"] == "atom"
+                && private::is_private_kind(&entry["kind"])
+                && private::opened_text(entry).ok().flatten().is_none()
+        })
+        .filter_map(|entry| entry["id"].as_str())
+        .collect();
+    rendered
+        .lines
+        .iter()
+        .filter(|line| {
+            line.line.is_some()
+                && line.row["atom"]
+                    .as_str()
+                    .is_some_and(|atom| locked.contains(atom))
+        })
+        .count()
 }
 
 fn query_text(query: &str) -> Result<String> {
@@ -179,19 +208,21 @@ pub(crate) fn search(
     let mut hits = Vec::new();
     let mut failures = 0;
     let mut truncated = false;
+    let mut locked_total = 0;
     let end = (offset + PAGE_SIZE).min(names.len());
     for name in &names[offset..end] {
         let mut read = || -> Result<Value> {
             let reference = reference(root, name)?;
             let target = member(&reference, "target")?;
-            let (_, challenge, rendered) = direct(root, workspace, &reference)?;
+            let (_, challenge, rendered, locked) = direct(root, workspace, &reference)?;
+            locked_total += locked;
             let (found, matching, omitted) = matches(&rendered, &needle, name, target, &challenge);
             let returned = found.len();
             truncated |= returned < matching;
             hits.extend(found);
             Ok(
                 json!({"name":name,"target":target,"status":"read","matchingLines":matching,
-                "returned":returned,"omittedNonTextOrTranscluded":omitted,
+                "returned":returned,"omittedNonTextOrTranscluded":omitted,"lockedTextRows":locked,
                 "rootRevision":rendered.root_revision,"worldRoot":challenge["worldRoot"],"height":challenge["height"]}),
             )
         };
@@ -209,7 +240,7 @@ pub(crate) fn search(
         "consistency":"each document independently read at its reported current signed head",
         "collectionFingerprint":fingerprint,"heldReferences":names.len(),"offset":offset,"through":end,
         "nextOffset":if end < names.len() {Some(end)} else {None},
-        "pageComplete":failures==0 && !truncated,"hitsTruncated":truncated,"documents":documents,"hits":hits,
+        "pageComplete":failures==0 && !truncated && locked_total==0,"lockedTextRows":locked_total,"hitsTruncated":truncated,"documents":documents,"hits":hits,
         "elapsedMs":started.elapsed().as_millis()}),
     )
 }
@@ -229,7 +260,7 @@ pub(crate) fn follow(
     if member(&reference, "target")? != target {
         return Err("reference now names a different document; search again".into());
     }
-    let (_, challenge, rendered) = direct(root, workspace, &reference)?;
+    let (_, challenge, rendered, _) = direct(root, workspace, &reference)?;
     let line = rendered
         .lines
         .iter()
@@ -297,6 +328,34 @@ mod tests {
         assert_eq!(hits[0]["atom"], "9");
         assert_eq!(hits[0]["snippet"], "hello EMBER");
     }
+    #[test]
+    fn locked_coverage_excludes_detached_history_and_opened_private_text() {
+        let mut rendered = Rendered {
+            shared_names: vec![],
+            root: json!("1"),
+            root_revision: json!("2"),
+            lines: vec![line(Body::Object {
+                label: "locked".into(),
+                bytes: vec![],
+                struck: false,
+            })],
+            document_annotations: vec![],
+            outline: vec![],
+            backlinks: vec![],
+        };
+        let kind = json!({"type":"inlineObject","schema":protected_document::schema()});
+        let mut entries = vec![
+            json!({"type":"atom","id":"9","kind":kind,"private":"locked"}),
+            json!({"type":"atom","id":"10","kind":kind,"private":"locked"}),
+        ];
+        assert_eq!(locked_text_rows(&entries, &rendered), 1);
+        entries[0]["private"] = json!({"text":"opened locally"});
+        assert_eq!(locked_text_rows(&entries, &rendered), 0);
+        entries[0]["private"] = json!("locked");
+        rendered.lines[0].line = None;
+        assert_eq!(locked_text_rows(&entries, &rendered), 0);
+    }
+
     #[test]
     fn unicode_context_is_bounded_and_query_is_nonempty() {
         assert!(query_text(" ").is_err());

@@ -67,6 +67,20 @@ fn details(value: &Value) -> String {
         "<details class=search-details><summary>Read details</summary><dl>{rows}</dl></details>"
     )
 }
+fn unavailable_hit(site: &Site, error: &str) -> Page {
+    let message = if error.contains("reference now names a different document") {
+        "This name now points to another document. Search again."
+    } else if error.contains("atom is no longer") {
+        "This line is no longer available in the current document."
+    } else if error.contains("refused") || error.contains("no-grant") || error.contains("revoked") {
+        "This document is not readable with your current access."
+    } else {
+        "This line could not be opened. Retry or search again."
+    };
+    Page { status:403, title:"Line unavailable".into(), stamp:Stamp::Unavailable,
+        body:format!("<p>{message}</p><p><a href=\"{}/search\">Search again</a></p><details><summary>Read details</summary><p>{}</p></details>",site.base(),escape(error)) }
+}
+
 pub(super) fn page(site: &Site, target: &str) -> Page {
     let base = site.base();
     let fields = match fields(target) {
@@ -120,6 +134,9 @@ pub(super) fn page(site: &Site, target: &str) -> Page {
             "<p>Some documents could not be read. Results cover the readable documents only.</p>",
         );
     }
+    if result["lockedTextRows"].as_u64().unwrap_or(0) > 0 {
+        body.push_str("<p>Some private text is locked and was not searched. Open the document to check access.</p>");
+    }
     if result["hitsTruncated"] == true {
         body.push_str("<p>Showing the first 100 matching lines from each document.</p>");
     }
@@ -145,6 +162,13 @@ pub(super) fn page(site: &Site, target: &str) -> Page {
     body.push_str("</ul><details><summary>Search coverage</summary><ul>");
     for doc in documents {
         if doc["status"] == "read" {
+            if doc["lockedTextRows"].as_u64().unwrap_or(0) > 0 {
+                body.push_str(&format!(
+                    "<li>{}: {} private text rows locked.</li>",
+                    escape(doc["name"].as_str().unwrap_or("")),
+                    doc["lockedTextRows"]
+                ));
+            }
             body.push_str(&format!(
                 "<li>{}: {} matching lines; {} shown. Read height {}.</li>",
                 escape(doc["name"].as_str().unwrap_or("")),
@@ -182,7 +206,7 @@ pub(super) fn hit(site: &Site, name: &str, target: &str, atom: &str, revision: &
     let value = match doc_search::follow(&site.root, &site.workspace, &name, target, atom, revision)
     {
         Ok(v) => v,
-        Err(e) => return simple(403, "Search hit unavailable", &e),
+        Err(e) => return unavailable_hit(site, &e),
     };
     let line = text(&value["line"]);
     let mut body = format!(

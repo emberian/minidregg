@@ -11,18 +11,23 @@ mkdir -p "$D/a/requests" "$D/b/requests" "$D/log"
 N=0
 printf 'step\tresult\n' >"$D/names.tsv"
 run() {
-  local who=$1 line=$2 ws home
+  local who=$1 line=$2 ws home rc=0
   N=$((N+1)); ws=$SPONSOR_WS; home=$D/a
   if [[ $who == b ]]; then ws=$NEWCOMER_WS; home=$D/b; fi
   printf '%s\n' "$line" >"$D/log/$N.line"
   "$MINI" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
-    --workspace "$ws" --home "$home" --line "$line" >"$D/log/$N.out" 2>"$D/log/$N.err"
+    --workspace "$ws" --home "$home" --line "$line" >"$D/log/$N.out" 2>"$D/log/$N.err" || rc=$?
+  printf '%s\n' "$rc" >"$D/log/$N.rc"
+  return "$rc"
 }
 ok() { run "$@"; printf '%s\tok\n' "$2" >>"$D/names.tsv"; }
 refused() {
   local pattern=$3 rc=0
   run "$1" "$2" || rc=$?
-  [[ $rc != 0 ]] && grep -Eiq "$pattern" "$D/log/$N.err"
+  if [[ $rc == 0 ]] || ! grep -Eiq "$pattern" "$D/log/$N.err"; then
+    printf 'expected refusal matching %s, got rc=%s: %s\n' "$pattern" "$rc" "$2" >&2
+    return 1
+  fi
   printf '%s\trefused\n' "$2" >>"$D/names.tsv"
 }
 expect_target() {

@@ -243,6 +243,8 @@ pub(crate) enum Stamp {
     EditBase(ReadContext),
     /// Search results use independent current authorized reads, not one shared head.
     CurrentReads(usize),
+    /// Fresh content could not be obtained; never label a retained hit current.
+    Unavailable,
     /// A signed read was made and the Host refused it.
     Refused,
 }
@@ -306,6 +308,7 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
         Stamp::CurrentReads(count) => format!(
             "Current authorized {}", if *count == 1 { "document read".to_owned() } else { format!("reads of {count} documents") }
         ),
+        Stamp::Unavailable => "Current text unavailable".into(),
         Stamp::Refused => format!(
             "subject <span class=id>{}</span> | the Host refused this page's signed read",
             escape(subject)
@@ -315,11 +318,16 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
             escape(subject)
         ),
     };
+    let context = match &page.stamp {
+        Stamp::Read(_) => format!("<details><summary>Authorized read</summary><p>{context}</p></details>"),
+        Stamp::EditBase(_) => format!("<details><summary>Editor base snapshot</summary><p>{context}</p></details>"),
+        _ => context,
+    };
     format!(
         "<!doctype html>\n<html lang=en><head><meta charset=utf-8>\
          <meta name=viewport content=\"width=device-width\"><meta name=referrer content=same-origin>\
          <title>{title} | mini</title><style>{CSS}</style></head><body>\n\
-         <header><nav><a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a></nav><h1>{title}</h1><p class=ctx>{context}</p></header>\n\
+         <header><nav><a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a></nav><h1>{title}</h1><div class=ctx>{context}</div></header>\n\
          <main>\n{body}</main></body></html>\n",
         title = escape(&page.title),
         body = page.body,
@@ -419,8 +427,7 @@ pub(crate) fn index_sections(
             out.push_str("</ul></section>\n");
         }
         None => out.push_str(
-            "<section><h2>Links</h2><p class=note>Links and backlinks are the link index's current view; \
-             a page at a past height does not show them.</p></section>\n",
+            "<section><h2>Links</h2><p class=note>Links and backlinks are available in the current document view.</p></section>\n",
         ),
     }
     if let Some(rows) = backlinks {
@@ -442,8 +449,7 @@ pub(crate) fn index_sections(
             ));
         }
         out.push_str(
-            "</ul>\n<p class=note>From the Host's link index, cut to the documents a standing grant of yours \
-             covers; a transclusion of this document counts as a backlink of it.</p></section>\n",
+            "</ul>\n<p class=note>Incoming links and embedded quotations visible to you.</p></section>\n",
         );
     }
     out
@@ -1004,9 +1010,10 @@ mod tests {
         let html = rendered(&document(), &entries).html("paper");
         let first = html.find("data-element=\"1002\"").unwrap();
         let struck = html.find("data-element=\"1001\"").unwrap();
-        let section = html.find("data-section=\"72\"").unwrap();
+        assert!(!html.contains("data-section=\"72\"")); // empty structural row is not a visible line
         let embed = html.find("data-transclusion=\"8001\"").unwrap();
-        assert!(first < struck && struck < section && section < embed);
+        assert!(first < struck && struck < embed);
+        assert!(html.contains("class=\"line struck\" style=\"list-style:none\""));
         assert!(html.contains(
             "data-element=\"1002\" data-kind=\"atom\" data-line=\"1\" data-atom=\"1002\" data-creator=\"7\" \
              data-revision=\"71\" data-struck=\"false\" data-marks=\"bold,~italic\""
@@ -1042,7 +1049,7 @@ mod tests {
         assert!(html.contains("data-backlink=\"45\" data-kind=\"transclusion\""));
         let past = index_sections("/t", &names, None, None);
         assert!(!past.contains("data-backlinks"));
-        assert!(past.contains("a page at a past height does not show them"));
+        assert!(past.contains("Links and backlinks are available in the current document view"));
     }
 
     /// A moved snapshot whose `at` read was refused `no-grant` renders the

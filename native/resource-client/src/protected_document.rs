@@ -274,7 +274,7 @@ pub(crate) fn device(root:&std::path::Path) -> Result<Value> {
 fn rewrite_reference(root:&std::path::Path,name:&str,value:&Value)->Result<()> {
     super::validate_ref_name(name)?;
     let refs=root.join("refs");
-    let temporary=refs.join(format!(".{name}.protected-{}",super::random_nonce()?));
+    let temporary=refs.join(format!(".{}.protected-{}",super::ref_file(name),super::random_nonce()?));
     super::private_file(&temporary,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
     std::fs::rename(&temporary,refs.join(format!("{}.json",super::ref_file(name)))).map_err(|e|e.to_string())?;
     std::fs::File::open(&refs).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
@@ -961,6 +961,19 @@ mod tests {
         assert_eq!(joined["sharedName"],selected["sharedName"]);
         put("wrong-catalog","100",None);put("conflicting-paper","72",Some("wrong-catalog"));
         assert!(reference_context(&root,selected).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn custody_reference_rewrite_supports_shared_path_names() {
+        let root=custody_workspace();
+        super::super::make_private_dir(&root.join("refs")).unwrap();
+        let name="lab/paper";
+        let value=json!({"target":"72","protectedDocument":{"version":"1","catalog":"catalog"}});
+        rewrite_reference(&root,name,&value).unwrap();
+        let path=root.join("refs").join(format!("{}.json",super::super::ref_file(name)));
+        assert_eq!(super::super::bounded_json(&path).unwrap(),value);
+        assert_eq!(std::fs::read_dir(root.join("refs")).unwrap().count(),1);
         std::fs::remove_dir_all(root).unwrap();
     }
 
