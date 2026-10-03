@@ -38,7 +38,7 @@ source_variant v1 1 1
 say 'kind create construct-parent @kind.json open'
 printf '%s\n' '{"selector":{"physicalKinds":["18"],"verbs":["2"]},"parents":[],"predicate":{"type":"all","predicates":[]}}' >"$RUN_DIR/home/requests/open-export.json"
 say 'law export construct-parent-open construct-parent @open-export.json'
-say 'submit construct-parent-open' 
+say 'submit construct-parent-open'
 say 'kind create construct-derived @kind.json open'
 say 'create construct-old --from construct-derived open'
 TARGET=$(jq -er '.target' "$WORKSPACE/refs/construct-derived.json")
