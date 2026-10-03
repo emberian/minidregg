@@ -144,7 +144,7 @@ pub(crate) const FRIENDS_GUIDE: &str = "/usr/local/lib/mini/FRIENDS.md";
 /// every verb (reads and delegations carry no `content/*` slot), so each
 /// content clause sits under `request/verb == 2` (mutate) and the other verbs
 /// (observe 1, delegate 3, installPolicy 4, revoke 5) pass.
-fn document_law(template: &str) -> Option<Value> {
+pub(crate) fn document_law(template: &str) -> Option<Value> {
     if template == "index" { return Some(crate::workspace::shared_names::index_law()); }
     let mutate = match template {
         // A bounded draft: anyone holding mutate may append and edit.

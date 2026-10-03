@@ -14,6 +14,9 @@
 //! start, so another local user or a page in the browser cannot read it.
 
 mod editor;
+mod create;
+mod inspect;
+mod resident;
 #[path = "web/world.rs"]
 mod world;
 #[path = "web/search.rs"]
@@ -46,6 +49,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .into_string()
         .map_err(|_| "--listen must be UTF-8".to_owned())?;
     let root = absolute(&path(args.required("dir")?))?;
+    let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?;
     args.finish()?;
     let address = loopback_address(&listen)?;
     let workspace = workspace::load(&root)?;
@@ -59,6 +63,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err(format!("bound {bound}, which is not 127.0.0.1"));
     }
     let site = Site {
+        home,
         subject: workspace::member(&workspace, "subject")?.to_owned(),
         root,
         workspace,
@@ -106,6 +111,7 @@ fn launch_token() -> Result<String> {
 }
 
 struct Site {
+    home: Option<PathBuf>,
     root: PathBuf,
     workspace: Value,
     subject: String,
@@ -221,7 +227,7 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }
     if request.method == "POST" {
         let parts: Vec<_> = segments.iter().map(String::as_str).collect();
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -570,6 +576,8 @@ impl Site {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
                     ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
+                    ["new-document",id] => create::post(self,id,&body,"create"),
+                    ["new-document",id,op] => create::post(self,id,&body,op),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
                 }
             }
@@ -583,6 +591,10 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
+            ["new-document"] => create::open(self,None,None),
+            ["new-document",id] => create::open(self,Some(id),None),
+            ["room",name,"new-document"] => create::open(self,None,Some(name)),
+            ["doc",name,"inspect"] => inspect::page(self,name),
             ["search-hit", name, target, atom, revision] => search::hit(self,name,target,atom,revision),
             ["doc", name] => self.doc(name, None),
             ["doc",name,"edit"] => editor::open(self,name,None),
@@ -594,6 +606,7 @@ impl Site {
             ["object",name,"behavior"] => world::page(self,name,true),
             ["board", name] => self.board(name),
             ["room", name] => self.room(name),
+            ["room",name,"resident"] => resident::page(self,name),
             ["stream", _] => simple(
                 501,
                 "Not on this tree",
@@ -687,7 +700,7 @@ impl Site {
                  read under your key; what you see is what your grants cover.</p>\n<table data-refs=\"{}\">\
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
-            ),
+            ) + &format!("<p><a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self),
         }
     }
 
@@ -768,7 +781,7 @@ impl Site {
             ));
         } else {
             body.push_str(&format!(
-                "<p class=note><a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | <a href=\"{base}/doc/{n}/history\">history</a></p>\n",
+                "<p class=note><a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | <a href=\"{base}/doc/{n}/history\">history</a> | <a href=\"{base}/doc/{n}/inspect\">source and comments</a></p>\n",
                 n = escape(name)
             ));
         }
@@ -870,7 +883,7 @@ impl Site {
             .filter(|other| self.born_in(other).as_deref() == Some(target.as_str()))
             .collect();
         let mut body = format!(
-            "<p>The room cell itself: {} entries, <a href=\"{base}/doc/{n}\">open it</a>.</p>\n\
+            "<p><a href=\"{base}/room/{n}/new-document\">Create a document in this room</a> | <a href=\"{base}/room/{n}/resident\">Resident requests and output</a></p><p>The room cell itself: {} entries, <a href=\"{base}/doc/{n}\">open it</a>.</p>\n\
              <section><h2>In this room</h2>\n<ul data-children=\"{}\">\n",
             entries.len(),
             children.len(),
@@ -926,6 +939,7 @@ fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
         400 => "Bad Request",
+        409 => "Conflict",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
@@ -1190,6 +1204,14 @@ moved 1002: after the start -> after 1001
         for word in ["POST", "PUT", "DELETE", "PATCH", "propose", "submit"] {
             assert!(!router.contains(word), "{word}");
         }
+    }
+
+    #[test]
+    fn creation_posts_are_bounded_to_exact_session_routes() {
+        for target in ["/secret/new-document/0123456789abcdef0123456789abcdef", "/secret/new-document/0123456789abcdef0123456789abcdef/lookup", "/secret/new-document/0123456789abcdef0123456789abcdef/finish"] {
+            assert!(matches!(gate(&request("POST",target,&[("host","127.0.0.1:8080")]),8080,"secret"),Gate::Route(_)));
+        }
+        assert!(matches!(gate(&request("POST","/secret/room/lab/new-document",&[("host","127.0.0.1:8080")]),8080,"secret"),Gate::Refuse(405,_)));
     }
 
     #[test]

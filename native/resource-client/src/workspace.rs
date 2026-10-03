@@ -3,6 +3,7 @@
 //! the signed observation, current Plan, and Lean admission in `main`.
 
 pub(crate) mod web_author;
+pub(crate) mod web_create;
 #[path = "app_document.rs"]
 pub(crate) mod app_document;
 
