@@ -32,6 +32,31 @@ theorem SpineHeadReady.extends {book : Book} {program : Program} {old next : Hea
   | reference row code captured => exact .reference (extension _ _ row) code (captured.extends extension)
   | value ready value => exact .value (ready.extends extension) value
 
+/-- A not-yet-peeled call may itself be a reducible application. Only its
+ultimate head is a reference or a source Value; each live argument is a Value. -/
+inductive SpineReady (book : Book) (program : Program) (heap : Heap) : Nat → Term → Prop
+  | head {pointer : Nat} {source : Term} :
+      SpineHeadReady book program heap pointer source → SpineReady book program heap pointer source
+  | application {pointer function argument : Nat} {q : Quan} {f x : Term} :
+      heap.get? pointer = some (.application q function argument) →
+      SpineReady book program heap function f → RetainedReady book program heap argument x →
+      (q.live = true → Value book x) → SpineReady book program heap pointer (.App q f x)
+
+theorem SpineReady.denotes {book : Book} {program : Program} {heap : Heap}
+    {pointer : Nat} {source : Term} (ready : SpineReady book program heap pointer source) :
+    Denotes program heap pointer source := by
+  induction ready with
+  | head ready => exact ready.retained.denotes
+  | application row function argument live ih => exact .application row ih argument.denotes
+
+theorem SpineReady.extends {book : Book} {program : Program} {old next : Heap}
+    {pointer : Nat} {source : Term} (extension : Extends old next)
+    (ready : SpineReady book program old pointer source) : SpineReady book program next pointer source := by
+  induction ready with
+  | head ready => exact .head (ready.extends extension)
+  | application row function argument live ih =>
+    exact .application (extension _ _ row) ih (argument.extends extension) live
+
 abbrev RetainedArguments (book : Book) (program : Program) (heap : Heap) :=
   All₂ (fun (pointer : Quan × Nat) (source : Arg) =>
     pointer.1 = source.1 ∧ RetainedReady book program heap pointer.2 source.2)
@@ -58,7 +83,7 @@ inductive ReadyControl (book : Book) (program : Program) (heap : Heap) : Control
       ReadyControl book program heap (.lookup index environment .evaluateValue) (Env.sub values index)
   | unspine {pointer original : Nat} {args : List (Quan × Nat)}
       {head origin : Term} {arguments : List Arg} :
-      SpineHeadReady book program heap pointer head → PendingCall book program heap original origin →
+      SpineReady book program heap pointer head → PendingCall book program heap original origin →
       RetainedArguments book program heap args arguments →
       origin = Term.spine head arguments → Values book arguments →
       ReadyControl book program heap (.unspine pointer original args) origin
@@ -103,7 +128,7 @@ theorem ReadyControl.denotes {book : Book} {program : Program} {heap : Heap}
   | basic ready => exact ready.denotes
   | lookupValue captured => exact .lookupValue captured.denotes
   | unspine head original args identity values =>
-    exact .unspine head.retained.denotes original.denotes args.denotes identity values
+    exact .unspine head.denotes original.denotes args.denotes identity values
   | walk code captured original args walkPrefix =>
     exact .walk code captured.denotes original.denotes args.denotes walkPrefix
   | classify code cursor application classifier captured original args walkPrefix =>
@@ -159,6 +184,8 @@ theorem ReadyState.start {book : Book} (limits : Limits) (library : Library) (en
 
 #assert_axioms SpineHeadReady.retained
 #assert_axioms SpineHeadReady.extends
+#assert_axioms SpineReady.denotes
+#assert_axioms SpineReady.extends
 #assert_axioms RetainedArguments.denotes
 #assert_axioms RetainedArguments.extends
 #assert_axioms ReadyControl.denotes

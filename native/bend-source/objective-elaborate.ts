@@ -16,7 +16,7 @@ const sha=(bytes:Uint8Array|string)=>createHash("sha256").update(bytes).digest("
 const failure=(node:any,message:string):never=>{throw {schema:"dregg.bend.compiler-diagnostic.v1",stage:"objective-core-elaboration",message,span:node?.span??null};};
 const duplicate=(names:string[])=>new Set(names).size!==names.length;
 const binderHints=new WeakMap<Core,any>();
-export function elaborate(modules:any[],entryModule:number,entryDefinition:string,args:any[]){
+export function elaborate(modules:any[],entryModule:number,entryDefinition:string,args:any){
  const globals=new Set<string>();
  for(const m of modules)for(const d of m.ast.declarations)if(d.kind!=="record"){
   const key=m.name+"."+(d.name??d.signature.name);if(globals.has(key))failure(d,"duplicate declaration "+key);globals.add(key);
@@ -129,9 +129,29 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   if(a&&typeof a==="object"&&!Array.isArray(a))return record(Object.entries(a).map(([name,value])=>({name,value:argument(value)})));
   return failure(null,"runtime arguments are canonical decimal Nat strings, Bool or records");
  };
- for(const arg of args)selected=app(selected,argument(arg));
+ const exactKeys=(value:any,expected:string[])=>value&&typeof value==="object"&&!Array.isArray(value)&&
+   Object.keys(value).sort().join("\0")===expected.slice().sort().join("\0");
+ const typedArgument=(a:any):Core=>{
+  if(a?.tag==="natural"&&exactKeys(a,["tag","value"])&&typeof a.value==="string"&&/^(0|[1-9][0-9]*)$/.test(a.value))return nat(a.value);
+  if(a?.tag==="boolean"&&exactKeys(a,["tag","value"])&&typeof a.value==="boolean")return term("boolean",{value:a.value});
+  if(a?.tag==="label"&&exactKeys(a,["tag","value"])&&typeof a.value==="string")return label(a.value);
+  if(a?.tag==="record"&&exactKeys(a,["tag","fields"])&&Array.isArray(a.fields)){
+   if(a.fields.some((f:any)=>!exactKeys(f,["name","value"])||typeof f.name!=="string")||duplicate(a.fields.map((f:any)=>f.name)))
+    failure(null,"typed record arguments require exact distinct named fields");
+   return record(a.fields.map((f:any)=>({name:f.name,value:typedArgument(f.value)})));
+  }
+  return failure(null,"malformed typed argument value; no implicit Nat/String coercion");
+ };
+ let argumentCodec:string;
+ if(Array.isArray(args)){
+  argumentCodec="legacy-canonical-nat-bool-record";
+  for(const arg of args)selected=app(selected,argument(arg));
+ }else if(exactKeys(args,["schema","values"])&&args.schema==="dregg.objective-bend.argument-values.v1"&&Array.isArray(args.values)){
+  argumentCodec="dregg.objective-bend.argument-values.v1";
+  for(const arg of args.values)selected=app(selected,typedArgument(arg));
+ }else failure(null,"arguments must select a supported complete value envelope");
  return {schema:"dregg.objective-bend.core.v2",edition:"objective-bend-1",term:selected,
-   sourceEntry:entry.name+"."+entryDefinition,sourceModules:modules.map(m=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256})),
+   sourceEntry:entry.name+"."+entryDefinition,argumentCodec,sourceModules:modules.map(m=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256})),
    declarationASTs:modules.map(m=>m.ast),status:"elaborated executable term; new typing and demand adequacy unqualified"};
 }
 // Source annotations are proposals. The Lean checker must construct a derivation

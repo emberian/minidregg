@@ -8,6 +8,7 @@ ordinary exact-charge profiles need a separately versioned phase tariff.
 import Kernel.BendActivityPendingAdmission
 import Kernel.BendPreparedOutput
 import Kernel.BendActivityRoutePermit
+import Kernel.BendActivityHomeGuard
 
 namespace Minidregg.Kernel.BendActivityDispatch
 open Minidregg.Theory
@@ -28,7 +29,7 @@ def actionStream : StreamCodec Action :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat bytesStream)
     (fun a => (a.pendingIndex,a.pendingSource)) (fun (i,b) => ⟨i,b⟩)
     (by intro a; cases a; rfl)
-def frame : List UInt8 := "DREGG/BEND/ACTIVITY-DISPATCH/v1".toUTF8.toList
+def frame : List UInt8 := "DREGG/BEND/ACTIVITY-DISPATCH/v2".toUTF8.toList
 def encode (action : Action) : List UInt8 := frame ++ actionStream.encode action
 def decode (bytes : List UInt8) : Option Action := NockProgramCodec.framedDecode frame actionStream bytes
 
@@ -68,18 +69,22 @@ structure Admitted {config : Config} {opened : Opened config} {action : Action}
   routePermit : BendActivityRoutePermit.Permit opened.durable.snapshot origin.pending.pin
     (statement config.deployment.domain config.profile.semantics application.command)
     (signedBytes config.deployment.domain config.profile.semantics application.signed)
+  homeContextExact : routePermit.context.homeProjectionBytes = origin.pending.action.homeProjectionBytes
+  home : BendActivityHomeGuard.Selected config opened origin.pending.action.homeProjectionBytes
+  homeReadOnly : ∀ guard ∈ home.guards, guard.cellId ∉ application.intent.writes.map DataWrite.cellId
   signatureExact : signedBytes config.deployment.domain config.profile.semantics application.signed =
     origin.pending.action.applicationSignedBytes
   active : ContentControlFrame.readPayload origin.pending.pin
     (opened.durable.snapshot.canonicalBytes origin.pending.pin.cell) =
     some (BendActivity.encode origin.pending.pending.record)
   guardReadOnly : origin.pending.pin.cell ∉ application.intent.writes.map DataWrite.cellId
+  phaseRetained : phaseGuard origin ∈ application.intent.readGuards
   output : BendPreparedOutput.Admitted application.prepared
     (signedBytes config.deployment.domain config.profile.semantics application.signed)
-    application.intent.writes (phaseGuard origin :: application.intent.readGuards)
+    application.intent.writes (home.guards ++ application.intent.readGuards)
   intent : DataIntent ResourceBirthCodec.rootBytes
   writesExact : intent.writes = application.intent.writes
-  guardsExact : intent.readGuards = phaseGuard origin :: application.intent.readGuards
+  guardsExact : intent.readGuards = home.guards ++ application.intent.readGuards
   chargeExact : intent.exactCharge = application.intent.exactCharge
   transactionExact : intent.transactionId = application.intent.transactionId
   eventExact : intent.event.canonicalBytes = encode action
@@ -98,29 +103,35 @@ def construct {config : Config} {opened : Opened config} {action : Action}
        (opened.durable.snapshot.canonicalBytes origin.pending.pin.cell) =
        some (BendActivity.encode origin.pending.pending.record) then
     if guardReadOnly : origin.pending.pin.cell ∉ application.intent.writes.map DataWrite.cellId then
-      let routePermit ← BendActivityRoutePermit.admit opened.durable.snapshot origin.pending.pin
-        (statement config.deployment.domain config.profile.semantics application.command) (signedBytes config.deployment.domain config.profile.semantics application.signed)
-      let guards := phaseGuard origin :: application.intent.readGuards
-      let .ok (some output) := BendPreparedOutput.admit application.prepared
-        (signedBytes config.deployment.domain config.profile.semantics application.signed)
-        application.intent.writes guards | none
-      let base := application.intent
-      let bytes := encode action
-      let intent : DataIntent ResourceBirthCodec.rootBytes :=
-        {base with
-          readGuards := guards
-          guardsReadOnly := by
-            intro guard member
-            rcases List.mem_cons.mp member with same | old
-            · cases same
-              exact guardReadOnly
-            · exact base.guardsReadOnly guard old
-          event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
-      if ready : intent.preflight opened.durable.snapshot = .ok () then
-        if gates : config.sourceGate none opened.durable.snapshot intent = .ok () then
-          some ⟨application,routePermit,signatureExact,active,guardReadOnly,output,intent,
-            rfl,rfl,rfl,rfl,rfl,ready,gates⟩
+      if phaseRetained : phaseGuard origin ∈ application.intent.readGuards then do
+       let routePermit ← BendActivityRoutePermit.admit opened.durable.snapshot origin.pending.pin
+         (statement config.deployment.domain config.profile.semantics application.command) (signedBytes config.deployment.domain config.profile.semantics application.signed)
+       if homeContextExact : routePermit.context.homeProjectionBytes = origin.pending.action.homeProjectionBytes then do
+        let home ← BendActivityHomeGuard.admit origin.pending.action.homeProjectionBytes application.shape application.accepted
+        if homeReadOnly : ∀ guard ∈ home.guards, guard.cellId ∉ application.intent.writes.map DataWrite.cellId then do
+         let guards := home.guards ++ application.intent.readGuards
+         let .ok (some output) := BendPreparedOutput.admit application.prepared
+           (signedBytes config.deployment.domain config.profile.semantics application.signed)
+           application.intent.writes guards | none
+         let base := application.intent
+         let bytes := encode action
+         let intent : DataIntent ResourceBirthCodec.rootBytes :=
+           {base with
+             readGuards := guards
+             guardsReadOnly := by
+               intro guard member
+               rcases List.mem_append.mp member with currentHome | original
+               · exact homeReadOnly guard currentHome
+               · exact base.guardsReadOnly guard original
+             event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
+         if ready : intent.preflight opened.durable.snapshot = .ok () then
+           if gates : config.sourceGate none opened.durable.snapshot intent = .ok () then
+             some ⟨application,routePermit,homeContextExact,home,homeReadOnly,signatureExact,active,guardReadOnly,phaseRetained,output,intent,
+               rfl,rfl,rfl,rfl,rfl,ready,gates⟩
+           else none
+         else none
         else none
+       else none
       else none
     else none
    else none
@@ -136,11 +147,42 @@ theorem stale_phase_refused {config : Config} {opened : Opened config} {action :
   apply stale_read_guard_rejected
   refine ⟨phaseGuard origin,?_,moved⟩
   rw [admitted.guardsExact]
-  exact List.mem_cons_self
+  exact List.mem_append_right _ admitted.phaseRetained
+
+/-- A transfer/credential/epoch change invalidates the same admitted native
+publication, even when its Activity checkpoint itself has not changed. -/
+theorem stale_home_refused {config : Config} {opened : Opened config} {action : Action}
+    {origin : Origin config opened action} (admitted : Admitted origin)
+    (guard : ReadGuard) (member : guard ∈ admitted.home.guards)
+    (later : DataSnapshot ResourceBirthCodec.rootBytes)
+    (moved : later.model.roots guard.cellId != guard.expectedRoot) :
+    admitted.intent.preflight later = .error .staleReadGuard := by
+  apply stale_read_guard_rejected
+  refine ⟨guard,?_,moved⟩
+  rw [admitted.guardsExact]
+  exact List.mem_append_left _ member
+
+/-- The only current application producer for this route. The central typed
+controller derives its source pin from the exact registered profile and checks
+the current pending permit before returning Accepted; ordinary admit is unused. -/
+def readApplication (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO (Except String (BendActivityIngress.Current config opened)) := do
+  let some (domain,semantics,signed) := decodeSignedBytes bytes | return .error "malformed native application"
+  if domain != config.deployment.domain || semantics != config.profile.semantics then return .error "native application scope mismatch"
+  let some command := commandCodec.decode signed.commandBytes | return .error "native application command malformed"
+  match prepareFrom config.deployment config.profile
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable (some opened.directory) command with
+  | .error _ => return .error "native current preparation refused"
+  | .ok prepared =>
+    if shape : PhysicalShape prepared then
+      match ← DeclaredResourceController.admitActivity config.signature prepared signed with
+      | .error _ => return .error "native current authority refused"
+      | .ok accepted => return .ok ⟨command,signed,prepared,shape,accepted⟩
+    else return .error "native physical shape refused"
 
 def admit {config : Config} {opened : Opened config} {action : Action}
     (origin : Origin config opened action) : IO (Except String (Admitted origin)) := do
-  let .ok application ← BendActivityPendingAdmission.readCurrent config opened
+  let .ok application ← readApplication config opened
       origin.pending.action.applicationSignedBytes | return .error "current application authority refused"
   let some admitted := construct origin application | return .error "application phase/capacity/funding refused"
   return .ok admitted
@@ -186,5 +228,6 @@ def receive {config : Config} {opened : Opened config} {action : Action}
 #assert_axioms bindOrigin
 #assert_axioms construct
 #assert_axioms stale_phase_refused
+#assert_axioms stale_home_refused
 #assert_axioms receive
 end Minidregg.Kernel.BendActivityDispatch

@@ -900,8 +900,12 @@ impl RoomTools<'_> {
     /// pid before it is waited on (the controller journals it: a submitter it
     /// can later prove stopped).
     pub fn line_with(&self, line: &str, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
+        self.line_with_input(line, None, spawned)
+    }
+
+    fn line_with_input(&self, line: &str, input: Option<&[u8]>, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
         let config = self.config;
-        let child = Command::new(&config.mini)
+        let mut child = Command::new(&config.mini)
             .arg("shell")
             .arg("--socket")
             .arg(&config.socket)
@@ -915,12 +919,21 @@ impl RoomTools<'_> {
             .arg(&config.home)
             .arg("--line")
             .arg(line)
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("{}: {e}", config.mini.display()))?;
         spawned(child.id());
+        if let Some(bytes) = input {
+            use std::io::Write;
+            let sent = child.stdin.take().ok_or("discovery stdin absent")?.write_all(bytes);
+            if let Err(error) = sent {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("discovery stdin: {error}"));
+            }
+        }
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
         Ok(LineRun {
             code: out.status.code().unwrap_or(-1),
@@ -971,11 +984,13 @@ impl RoomTools<'_> {
                 Ok(json!({"status":status.stdout,"budget":budget.trim()}))
             }
             "mini_stream_discovery" => {
-                only_keys(arguments,&["cursorFile","n"])?;
-                let cursor=arguments["cursorFile"].as_str().ok_or("discovery cursor file absent")?;
-                if cursor.contains(char::is_whitespace) {return Err("discovery cursor path contains whitespace".into());}
+                only_keys(arguments,&["cursor","n"])?;
+                let cursor = arguments.get("cursor").ok_or("discovery cursor absent")?;
+                if !cursor.is_object() { return Err("discovery cursor must be JSON object".into()); }
+                let bytes = serde_json::to_vec(cursor).map_err(|e| e.to_string())?;
+                if bytes.len() > 262144 { return Err("discovery cursor exceeds bound".into()); }
                 let n=bounded_decimal(arguments,"n",3)?.ok_or("discovery page size absent")?;
-                let run=Self::ok_or_ending(self.line(&format!("tail --in {room} --json --discover {cursor} -n {n}"))?)?;
+                let run=Self::ok_or_ending(self.line_with_input(&format!("tail --in {room} --json --discover-json - -n {n}"), Some(&bytes), &mut |_| {})?)?;
                 let mut docs=run.stdout.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok());
                 let state=docs.next().ok_or("discovery printed no room state")?;
                 Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
@@ -1246,6 +1261,31 @@ impl RoomTools<'_> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn discovery_pipes_bounded_json_and_never_reads_model_paths() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("mini-discovery-pipe-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        let mini = root.join("mini");
+        let received = root.join("received.json");
+        let argv = root.join("argv.txt");
+        fs::write(&mini, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncat > '{}'\nprintf '{{\"type\":\"room\"}}\\n'\n", argv.display(), received.display())).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = RoomToolsConfig { restrict_tools:true, mini, host:"/unused".into(), host_config:"/unused".into(), socket:"/unused".into(), workspace:root.join("workspace"), home:root.join("home"), room:"lab".into(), account:None };
+        let tools = RoomTools { config:&config };
+        assert!(tools.read("mini_stream_discovery", &json!({"cursorFile":"/etc/passwd","n":"10"})).is_err());
+        assert!(!received.exists());
+        let cursor = json!({"type":"mini-resident-discovery-v1","cursors":{},"retained":[],"padding":"x".repeat(140000)});
+        let expected = serde_json::to_vec(&cursor).unwrap();
+        assert!(tools.read("mini_stream_discovery", &json!({"cursor":cursor,"n":"10"})).is_ok());
+        assert_eq!(fs::read(&received).unwrap(), expected);
+        assert!(fs::read_to_string(&argv).unwrap().contains("tail --in lab --json --discover-json - -n 10"));
+        let huge = json!({"padding":"x".repeat(262144)});
+        assert!(tools.read("mini_stream_discovery", &json!({"cursor":huge,"n":"10"})).is_err());
+        assert_eq!(fs::read(&received).unwrap(), expected);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn birth_family() -> AllowedBirthFamily {
         AllowedBirthFamily {

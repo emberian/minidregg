@@ -1,6 +1,6 @@
 # This real Keccak proof is intentionally outside the default fast tests.
 [profile.default]
-default-filter = 'not (test(bounded_cshake_proof_binds_digest_and_validity) or test(shared_execution_rejects_inconsistent_private_wire))'
+default-filter = 'not (test(bounded_cshake_proof_binds_digest_and_validity) or test(shared_execution_rejects_inconsistent_private_wire) or test(admitted_controller_and_private_salt_share_one_proof))'
 
 [profile.heavy]
-default-filter = '(test(bounded_cshake_proof_binds_digest_and_validity) or test(shared_execution_rejects_inconsistent_private_wire))'
+default-filter = '(test(bounded_cshake_proof_binds_digest_and_validity) or test(shared_execution_rejects_inconsistent_private_wire) or test(admitted_controller_and_private_salt_share_one_proof))'

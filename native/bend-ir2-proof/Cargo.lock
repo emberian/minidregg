@@ -43,10 +43,12 @@ dependencies = [
  "p3-dft",
  "p3-field",
  "p3-fri",
+ "p3-matrix",
  "p3-merkle-tree",
  "p3-symmetric",
  "p3-uni-stark",
  "postcard",
+ "tiny-keccak",
 ]
 
 [[package]]

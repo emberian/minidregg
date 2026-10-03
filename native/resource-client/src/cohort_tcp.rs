@@ -599,6 +599,75 @@ fn paths(value: std::ffi::OsString) -> Result<Vec<PathBuf>> {
     }
     Ok(v.split(',').map(PathBuf::from).collect())
 }
+fn prepare_client_intent(
+    root: &Path,
+    caps: &Path,
+    output: &Path,
+    input: &Path,
+    p: &Profile,
+    keys: &[Vec<u8>],
+    epoch: u64,
+) -> Result<()> {
+    use crate::pq_mailbox as pq;
+    let ready = output.join(format!("epoch-{epoch}.payload"));
+    let intent = input.join(format!("epoch-{epoch}.intent"));
+    let v = read_private(&intent, p.payload)?;
+    if v.len() < 49 {
+        return Err("private source transport intent shape".into());
+    }
+    exact(root, &format!("epoch-{epoch}.intent"), &v)?;
+    if ready.exists() {
+        return Ok(());
+    }
+    let id = v[1..17].try_into().unwrap();
+    let (cap, packet) = match v[0] {
+        1 => {
+            let cap = v[17..49].try_into().unwrap();
+            (
+                cap,
+                pq::live_offer(epoch, p.width, p.payload, &keys, id, cap, &v[49..])?,
+            )
+        }
+        2 if v.len() == 114 => {
+            let cap = v[82..114].try_into().unwrap();
+            (
+                cap,
+                pq::live_fetch(
+                    epoch,
+                    p.width,
+                    p.payload,
+                    &keys,
+                    id,
+                    v[17] as usize,
+                    v[18..50].try_into().unwrap(),
+                    v[50..82].try_into().unwrap(),
+                    cap,
+                )?,
+            )
+        }
+        _ => return Err("unknown source transport intent; cover retained".into()),
+    };
+    pq::live_save_cap(&caps, epoch, p.width, p.payload, id, cap)?;
+    persist(&ready, &packet)
+}
+fn prepare_available_intents(
+    root: &Path,
+    caps: &Path,
+    output: &Path,
+    input: &Path,
+    p: &Profile,
+    keys: &[Vec<u8>],
+    start: u64,
+) -> Result<()> {
+    for epoch in start..p.first + p.epochs {
+        if input.join(format!("epoch-{epoch}.intent")).exists() {
+            if let Err(e) = prepare_client_intent(root, caps, output, input, p, keys, epoch) {
+                private_fault(root, epoch, &e)?;
+            }
+        }
+    }
+    Ok(())
+}
 fn private_fault(root: &Path, epoch: u64, error: &str) -> Result<()> {
     let path = root.join(format!("epoch-{epoch}.private-fault"));
     if path.exists() {
@@ -756,6 +825,10 @@ fn worker(
                 persist(&path, &pq::live_cover(epoch, p.width, p.payload, &keys)?)?;
             }
         }
+        // Existing immutable source outbox entries can be prepared ahead of
+        // their public opportunity. Do not block all future work on an empty
+        // earlier slot; late new entries still use the ordinary loop below.
+        prepare_available_intents(root, &caps, output, &inputs[0], p, &keys, start)?;
     }
     if action == "mailbox" {
         // Shared final audience cover is provisioned before ANY private offer or
@@ -794,44 +867,8 @@ fn worker(
             if !intent.exists() {
                 continue;
             }
-            let result = (|| {
-                let v = read_private(&intent, p.payload)?;
-                if v.len() < 49 {
-                    return Err("private source transport intent shape".into());
-                }
-                exact(root, &format!("epoch-{epoch}.intent"), &v)?;
-                let id = v[1..17].try_into().unwrap();
-                let (cap, packet) = match v[0] {
-                    1 => {
-                        let cap = v[17..49].try_into().unwrap();
-                        (
-                            cap,
-                            pq::live_offer(epoch, p.width, p.payload, &keys, id, cap, &v[49..])?,
-                        )
-                    }
-                    2 if v.len() == 114 => {
-                        let cap = v[82..114].try_into().unwrap();
-                        (
-                            cap,
-                            pq::live_fetch(
-                                epoch,
-                                p.width,
-                                p.payload,
-                                &keys,
-                                id,
-                                v[17] as usize,
-                                v[18..50].try_into().unwrap(),
-                                v[50..82].try_into().unwrap(),
-                                cap,
-                            )?,
-                        )
-                    }
-                    _ => return Err("unknown source transport intent; cover retained".into()),
-                };
-                pq::live_save_cap(&caps, epoch, p.width, p.payload, id, cap)?;
-                persist(&ready, &packet)
-            })();
-            if let Err(e) = result {
+            if let Err(e) = prepare_client_intent(root, &caps, output, &inputs[0], p, &keys, epoch)
+            {
                 private_fault(root, epoch, &e)?;
             }
             continue;
@@ -1128,6 +1165,47 @@ mod tests {
         ));
         directory(&p).unwrap();
         p
+    }
+    #[test]
+    fn preexisting_future_intent_prepares_before_idle_gap_without_changed_body_replacement() {
+        let root = temp();
+        let output = temp();
+        let input = temp();
+        let caps = root.join("caps");
+        let mut p = profile();
+        p.epochs = 8;
+        p.origin = now_ms().unwrap() + 600000;
+        let keys = (0..4)
+            .map(|_| crate::crypto_transit::generate_keypair().unwrap().public)
+            .collect::<Vec<_>>();
+        let intent = [
+            vec![1],
+            vec![9; 16],
+            vec![8; 32],
+            b"exact native envelope".to_vec(),
+        ]
+        .concat();
+        persist(&input.join("epoch-4.intent"), &intent).unwrap();
+        prepare_available_intents(&root, &caps, &output, &input, &p, &keys, 0).unwrap();
+        assert!(!output.join("epoch-0.payload").exists());
+        let ready = output.join("epoch-4.payload");
+        let exact = read_private(&ready, p.capacity()).unwrap();
+        prepare_available_intents(&root, &caps, &output, &input, &p, &keys, 0).unwrap();
+        assert_eq!(read_private(&ready, p.capacity()).unwrap(), exact);
+        fs::write(
+            input.join("epoch-4.intent"),
+            [
+                vec![1],
+                vec![9; 16],
+                vec![8; 32],
+                b"changed native envelope".to_vec(),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        prepare_available_intents(&root, &caps, &output, &input, &p, &keys, 0).unwrap();
+        assert!(root.join("epoch-4.private-fault").exists());
+        assert_eq!(read_private(&ready, p.capacity()).unwrap(), exact);
     }
     #[test]
     fn authenticated_cohort_record_binds_generation_slot_stage_epoch_and_padding() {

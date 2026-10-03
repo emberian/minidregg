@@ -66,13 +66,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     if !(args.len() == 6 && args[1] == "prove" || args.len() == 5 && args[1] == "verify") {
         return Err("usage: bend-ir2-proof prove descriptor.json public.csv trace.csv proof.bin; or verify descriptor.json public.csv proof.bin".into());
     }
-    let descriptor = parse_vm_descriptor2(&fs::read_to_string(&args[2])?)?;
+    let descriptor_bytes = fs::read_to_string(&args[2])?;
+    let descriptor = parse_vm_descriptor2(&descriptor_bytes)?;
     check_descriptor2_wellformed(&descriptor)?;
     require_subset(&descriptor)?;
     let public = read_fields(Path::new(&args[3]))?;
     if public.len() != descriptor.public_input_count { return Err("public length mismatch".into()); }
     let capacity = masking_budget::TraceCapacity::checked(masking_budget::MIN_TRACE_ROWS)?;
-    let config = config::for_capacity(capacity).map_err(|error| format!("proof entropy unavailable: {error}"))?;
+    let config = config::for_artifact(capacity, descriptor_bytes.as_bytes()).map_err(|error| format!("proof entropy unavailable: {error}"))?;
     if args[1] == "prove" {
         let row = read_fields(Path::new(&args[4]))?;
         if row.len() != descriptor.trace_width { return Err("trace width mismatch".into()); }
@@ -89,7 +90,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         check_proof_shape(&proof, capacity)?;
         verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config)?;
     }
-    println!("PASS profile={} mode={}; experimental backend conformance only", config::PROFILE, args[1]);
+    println!("PASS profile={} mode={}; experimental backend conformance only", config::ARTIFACT_PROFILE, args[1]);
     Ok(())
 }
 fn main() -> Result<(), Box<dyn Error>> { run() }

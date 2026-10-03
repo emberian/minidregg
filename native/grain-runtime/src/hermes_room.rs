@@ -539,8 +539,9 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
     let binding = json!({"world":ready["world"],
         "roomCell":ready["roomCell"],"assignment":ready["assignment"],"task":task,"handoff":ready["id"],"resident":manifest["hermes"]});
     let cursor_file=state.join("discovery.json");
-    crate::atomic_json(&cursor_file,&crate::resident_requests::discovery(state,&binding)?)?;
-    let tail=runner.tools.read("mini_stream_discovery",&json!({"cursorFile":cursor_file,"n":page_size.to_string()}))?;
+    let discovery = crate::resident_requests::discovery(state,&binding)?;
+    crate::atomic_json(&cursor_file,&discovery)?;
+    let tail=runner.tools.read("mini_stream_discovery",&json!({"cursor":discovery,"n":page_size.to_string()}))?;
     let entries:Vec<Value>=tail["entries"].as_array().into_iter().flatten()
         .filter(|entry|entry["author"].as_str()!=Some(me.as_str())).cloned().collect();
     let room = runner.tools.read("mini_room_ls", &json!({}))?;

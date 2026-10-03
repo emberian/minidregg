@@ -1,0 +1,101 @@
+Bend IR2 proof construction: qualified r31/r32, 2026-10-03
+
+New complete diagnostic producer/consumer
+---------------------------------------
+Verify/BendControllerCommitmentEmit.lean takes a file containing exactly32
+private OS-random salt bytes and a private fixture directory. It calls actual
+Assurance.BendObliviousMinimal.prepare (admission, code preparation, startup),
+unrolls the complete12-branch controller for2ticks, decodes the actual result,
+and rejects unless the expected Lab yes/count0 is reached. It aliases the
+44raw final-state bits, padded to6little-endian bytes, into the actual canonical
+Context/salt/payload frame and cSHAKE graph. One additional AND constrains
+execution handled and commitment validity together. This is an explicitly
+versioned RAW-STATE-DIAGNOSTIC payload, NOT the world Result codec.
+
+The resulting graph has240840gates,241147arithmetic columns and301public bits:
+combined success,44independently supplied initial-state bits,256digest bits.
+Private salt and internal wires are witness columns. The diagnostic Context
+is fixed sample data and grants NO world authority or disclosure permission.
+
+Actual Rust test admitted_controller_and_private_salt_share_one_proof passed
+in66.314s on the pinned warm backend. It produces and verifies one proof;
+changed initial-state input, success and digest are rejected. It exercises
+both execution and commitment in ONE proof, not two proofs with matching labels.
+The test is in nextest's heavy profile and excluded from its default profile.
+
+General arithmetic statement
+----------------------------
+Compiler/BendCommittedRunSound.direct_forces_both_success proves for an
+arbitrary satisfying field assignment to the complete graph's emitted direct
+AIR: the Boolean reading satisfies BOTH structurally embedded execution and
+commitment graphs, and both selected success bits are true. Public input0 is
+independently required to equal1. This is not restricted to the honest fixture.
+The existing Prepared constructor checks actual structural embeddings/validity.
+PCS proof verification implying this arithmetic premise is NOT yet formalized.
+
+Source refinement progress
+--------------------------
+Assurance/BendDirectUnrolledSource.acceptedRun_startedDirect_source now derives
+initial source representation and direct-entry source coverage from actual
+Machine.start/code/closure-allocation success, using the matched lifecycle
+r43 startup/coverage producer. It still requires reached raw controller/codec
+step conformance. Universal all-program coverage/refinement remains open.
+New lazy Objective Bend is a distinct language edition and inherits none of
+this CBV profile's statements without an explicit embedding/refinement.
+
+Masking progress and precise boundaries
+--------------------------------------
+Theory/BendQuotientMasking proves the pinned backend's dependent last-mask
+formula -sum(ci/c_last * freeMask), recomposition preservation, and a fixed
+observation coupling. Theory/BendQuotientSelectors derives normalization from
+the actual verifier's finite-product selector expression, rather than assuming
+normalization with unrelated weights. Theory/BendMaskingDescent constructs an
+actual prime-field polynomial from Frobenius-fixed interpolation coefficients,
+preserves degree and provides a bijection of bounded base-field mask spaces.
+
+Native quotient_masking.rs calls the ACTUAL HidingFriPcs.get_quotient_ldes,
+including DFT and bit-reversed rows, then the ACTUAL verifier recomposition
+helper at every LDE point. It checks2and4chunks of height32: chunks are really
+masked/nonzero but recombine to the original zero quotient. PASS0.017s. This
+is a correspondence regression, not a universal native DFT correctness proof.
+
+Still open: concrete BabyBear/quartic algebra correspondence; all query-orbit
+and degree budgets for the complete proof; joint/adaptive quotient+FRI+Merkle
+transcript hiding; computational commitment security; Fiat-Shamir/QROM
+soundness and composed security bound. The full-degree challenger conditions
+extension sampling and changes the protocol version; its distribution bound
+assumes uniform extension draws and does not prove the real sponge's security.
+No128bit/PQ/full-ZK claim is supported by these results.
+
+Preserved refutations
+--------------------
+The raw one-row backend regression still demonstrates recovery of the private
+trace from public verifier openings. CSPRNG replacement alone did not repair
+that disclosure. The unsafe capacities are refused by the experimental profile.
+The new path does not import Selvage's uninhabitable global injectivity premise
+for compressing commitments; collision reductions and actual computational
+assumptions must replace that premise. Existing2^-55 arithmetic and F5 bounds
+are not instantiated composition-security guarantees for this path.
+
+Reproduction (after repository's documented Bread dependency provisioning)
+-------------------------------------------------------------------------
+Use exact Cargo.lock and pinned P3 revision82cfad73. The only r32 dependency
+change is adding existing p3-matrix as a direct DEV dependency; no package
+revision changed. Build on the designated isolated resource-controlled host.
+
+cargo nextest run --release --locked --offline --test quotient_masking \
+  -E 'test(native_quotient_masks_preserve_verifier_recomposition)'
+
+Compile/run Verify/BendControllerCommitmentEmit.lean with the existing qualified
+Lean4.30 dependency closure and arguments PRIVATE_SALT_FILE PRIVATE_FIXTURE_DIR.
+Set BEND_CONTROLLER_COMMITMENT_FIXTURE and BEND_CONTROLLER_COMMITMENT_OUTPUT
+to owned private directories, then:
+
+cargo nextest run --profile heavy --release --locked --offline \
+  --test controller_commitment \
+  -E 'test(admitted_controller_and_private_salt_share_one_proof)'
+
+Do not publish the generated salt, trace or proof transcript as evidence of
+privacy. No world admission path has been switched from existing reexecution.
+The next native statement join is the authorized Accepted token's actual
+canonical input/Result/effects/charge codec producer, not caller-supplied labels.

@@ -600,6 +600,9 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     {
         return Err("agent reserve approval differs from exact source request or plan".into());
     }
+    // Unsigned retained plans also require current native reconstruction;
+    // an old operator frame or its local inspection is not signing consent.
+    crate::client_consent::operator_plan(&pin.host, &pin.config, 58, &pin.request, &pin.plan)?;
     let slots = inspected
         .get("slots")
         .and_then(Value::as_array)

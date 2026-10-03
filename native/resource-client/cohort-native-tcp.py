@@ -141,6 +141,11 @@ def scenario(name,real):
                 for begin in job_epochs:
                     ident=os.urandom(16);cap=os.urandom(32)
                     (source/f'epoch-{begin}.intent').write_bytes(b'\x01'+ident+cap+request)
+                    if a.native_workload=='every-eight':
+                        # Fixed spare application opportunity: exact same original
+                        # body/id/access, fresh outer epoch seal. Native gateway
+                        # caches or admits once; never a second semantic dispatch.
+                        (source/f'epoch-{begin+1}.intent').write_bytes(b'\x01'+ident+cap+request)
                     repairs=(begin+3,begin+7) if a.native_workload=='every-eight' else (3,7,N-1)
                     for epoch in set(repairs):
                         (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
@@ -227,7 +232,7 @@ def scenario(name,real):
             'records_observed':len(public),'records_expected':12*N,
             'min_wire_lateness_ms':min(latencies) if latencies else None,
             'max_wire_lateness_ms':max(latencies) if latencies else None,
-            'durable_produced_epoch_counts':counts,'valid_delivered_broadcast_epochs':valid_delivery,'native_workload':a.native_workload,'source_jobs_expected':2*len(job_epochs) if real else 0,'exact_native_final_outcomes': [((d/f'client{i}-opened'/f'epoch-{N-1}.payload').read_bytes()[4:]==expected if (d/f'client{i}-opened'/f'epoch-{N-1}.payload').exists() else False) for i in range(2)] if real else [],
+            'durable_produced_epoch_counts':counts,'valid_delivered_broadcast_epochs':valid_delivery,'native_workload':a.native_workload,'source_jobs_expected':2*len(job_epochs) if real else 0,'exact_native_final_outcomes': [((d/f'client{i}-opened'/f'epoch-{begin+7 if a.native_workload=="every-eight" else N-1}.payload').read_bytes()[4:]==expected if (d/f'client{i}-opened'/f'epoch-{begin+7 if a.native_workload=="every-eight" else N-1}.payload').exists() else False) for i in range(2) for begin in job_epochs] if real else [],
                      'actual_source_submissions':len(forwarded),
             'errors':errors},indent=2))
 # Historical lookup is read-only; preserve BOTH poles even if processing
@@ -240,5 +245,5 @@ for name,real in [('all-cover',False),('native-delayed',True)]:
         log.write(('REFUTED '+failures[-1]+'\n').encode())
 if failures:raise RuntimeError('; '.join(failures))
 assert results['all-cover']==results['native-delayed'],'public epoch/slot/phase/record shape changed with hidden work'
-log.write(b'PASS matched public shapes at 1s: all-cover and delayed actual native work; no missing broadcast, no catch-up burst; initial physical continuation and authorized fresh-cap repair fetch returned exact source outcome; exactly two source submissions.\n')
+log.write(('PASS matched public shapes at 1s: all-cover and delayed actual native work; no missing broadcast, no catch-up burst; retained requests and authorized fresh-cap repair fetch returned exact source outcomes; exactly '+str(2*len(job_epochs))+' source submissions.\n').encode())
 log.close()

@@ -24,7 +24,7 @@ theorem ReadyState.application {book : Book} (limits : Limits) (library : Librar
         obtain ⟨f,x,same,functionCode,argumentCode⟩ := sourceExact.application_fields q function argument found
         cases same
         rw [step_application limits library state pc environment function argument q control found room]
-        exact ReadyState.exact (.basic (.evaluate functionCode captured))
+        exact ReadyState.exact (contexts := .function q (Term.sub _ x) :: _) (.basic (.evaluate functionCode captured))
           (.cons (.function argumentCode captured) stack) cache empty
           (by intro result impossible; cases impossible)
 
@@ -45,7 +45,7 @@ theorem ReadyState.live_let {book : Book} (limits : Limits) (library : Library) 
         obtain ⟨v,f,same,valueCode,bodyCode⟩ := sourceExact.let_fields q value body found
         cases same
         rw [step_live_let limits library state pc environment value body q control found live room]
-        exact ReadyState.exact (.basic (.evaluate valueCode captured))
+        exact ReadyState.exact (contexts := .lett q (Term.sub _ f) live :: _) (.basic (.evaluate valueCode captured))
           (.cons (.lett bodyCode captured live) stack) cache empty
           (by intro result impossible; cases impossible)
 
@@ -66,7 +66,7 @@ theorem ReadyState.live_pair {book : Book} (limits : Limits) (library : Library)
         obtain ⟨a,b,same,firstCode,secondCode⟩ := sourceExact.pair_fields q first second found
         cases same
         rw [step_live_pair limits library state pc environment first second q control found live room]
-        exact ReadyState.exact (.basic (.evaluate firstCode captured))
+        exact ReadyState.exact (contexts := .first q (Term.sub _ b) live :: _) (.basic (.evaluate firstCode captured))
           (.cons (.first secondCode captured live) stack) cache empty
           (by intro result impossible; cases impossible)
 
@@ -87,7 +87,7 @@ theorem ReadyState.rewrite {book : Book} (limits : Limits) (library : Library) (
         obtain ⟨e,p,f,same,evidenceCode,motiveCode,bodyCode⟩ := sourceExact.rewrite_fields evidence motive body found
         cases same
         rw [step_rewrite limits library state pc environment evidence motive body control found room]
-        exact ReadyState.exact (.basic (.evaluate evidenceCode captured))
+        exact ReadyState.exact (contexts := .rewrite (Term.sub _ p) (Term.sub _ f) :: _) (.basic (.evaluate evidenceCode captured))
           (.cons (.rewrite bodyCode captured) stack) cache empty
           (by intro result impossible; cases impossible)
 

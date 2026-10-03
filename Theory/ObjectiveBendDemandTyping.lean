@@ -81,7 +81,7 @@ inductive ValueTyping (assumptions : Assumptions) (types : AddressTypes) : Runti
       ValueTyping assumptions types (.closure body environment)
         (.arrow annotation.reuse annotation.parameter annotation.domain annotation.codomain)
   | record {fields : List (String × Address)} {row : Ty} :
-      row.isRow assumptions.bounds 64 = true →
+      (∃ fuel, row.isRow assumptions.bounds fuel = true) →
       (∀ (fuel : Nat) (name : String) (member : Ty), row.lookup assumptions.bounds fuel name = some member →
         ∃ address, fields.find? (fun field => field.1 == name) = some (name,address) ∧
           types[address]? = some member) →
@@ -117,8 +117,9 @@ activity itself is separately enforced by the qualified BusyInvariant. -/
 inductive FrameTyping (assumptions : Assumptions) (types : AddressTypes) : Frame → Ty → Ty → Prop where
   | argument {argument : Term} {environment : Environment} {functionType domain codomain : Ty}
       {reuse : Reuse} {quantity : Quantity} :
-      ClosureTyping assumptions types ⟨argument,environment⟩ domain →
+      (argumentTyped : ClosureTyping assumptions types ⟨argument,environment⟩ domain) →
       callable functionType = .arrow reuse quantity domain codomain →
+      argumentAllowed assumptions quantity argumentTyped.context domain argumentTyped.uses = true →
       FrameTyping assumptions types (.argument argument environment) functionType codomain
   | update {address : Address} {type : Ty} : types[address]? = some type →
       FrameTyping assumptions types (.update address) type type
@@ -223,6 +224,40 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp [zeroUses]
   · intros; simp_all [addUses,List.length_zipWith]
+
+/-- Finite authored record rows are rows at some adequate probe depth.
+The graph value relation therefore imposes no arbitrary 64-member ceiling. -/
+theorem source_fields_row {assumptions : Assumptions} {context : Context}
+    {fields : List (String × Term)} {row : Ty} {uses : Uses}
+    (typed : FieldsTyping assumptions context fields row uses) :
+    ∃ fuel, row.isRow assumptions.bounds fuel = true := by
+  refine FieldsTyping.rec
+    (motive_1 := fun _ _ _ _ _ => True)
+    (motive_2 := fun _ _ row _ _ => ∃ fuel, row.isRow assumptions.bounds fuel = true)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context; exact ⟨1,rfl⟩
+  · intro context name body rest type row bu ru hb hr ihBody ihRest
+    obtain ⟨fuel,isRow⟩ := ihRest
+    exact ⟨fuel+1,isRow⟩
 
 /-- Every actual source derivation is lexically scoped. This connects checker
 success to the independently proved graph reference/busy invariants. -/

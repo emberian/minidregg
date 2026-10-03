@@ -76,6 +76,16 @@ name = "Host"
 name = "minidregg-host"
 root = "Host.Main"
 
+# Local custody consent, selected separately from the remote Host image.
+# The base entry refuses unsupported higher lifecycle families explicitly.
+[[lean_exe]]
+name = "minidregg-client-consent"
+root = "Host.ClientConsentSession"
+
+[[lean_exe]]
+name = "minidregg-client-consent-specialized"
+root = "Host.ClientConsentSpecializedSession"
+
 # B2 exit measurement: wall-clock of the compiled Kernel.World.fold over a
 # 1000-turn log (Kernel.WorldBench). Not part of the umbrella gate.
 [[lean_exe]]

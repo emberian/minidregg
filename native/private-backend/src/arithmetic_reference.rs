@@ -49,7 +49,31 @@ pub(crate) mod tests {
         right: u8,
         instance: u64,
     ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+        completed_network(
+            left,
+            right,
+            instance,
+            two_bit_addition(),
+            b"REFERENCE.NAT2.ADD/carry.retained/qualified4bits",
+        )
+    }
+    pub(crate) fn completed_network(
+        left: u8,
+        right: u8,
+        instance: u64,
+        network: Network,
+        source_binding: &[u8],
+    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
         assert!(left < 4 && right < 4);
+        assert_eq!(network.input_count, 4);
+        assert_eq!(
+            network
+                .gates
+                .iter()
+                .filter(|op| matches!(op, Op::And(..)))
+                .count(),
+            8
+        );
         let stocks = triple_king::tests::checked_inventory(8, instance);
         let g = stocks[0].generation().clone();
         let mut inputs = (0..4)
@@ -86,14 +110,9 @@ pub(crate) mod tests {
             let manifest = TripleManifest::from_checked(&stocks[i]);
             let plan = crate::circuit_batch::Plan {
                 generation: g.clone(),
-                network: two_bit_addition(),
+                network: network.clone(),
                 public_ticks: 1,
-                binding_bytes: binding(
-                    &manifest,
-                    &refs,
-                    b"REFERENCE.NAT2.ADD/carry.retained/qualified4bits",
-                )
-                .unwrap(),
+                binding_bytes: binding(&manifest, &refs, source_binding).unwrap(),
                 rows: (0..8).map(|j| manifest.row(j).unwrap()).collect(),
             };
             let (a, sock, root) =
@@ -102,7 +121,7 @@ pub(crate) mod tests {
                 plan,
                 &stocks[i],
                 refs,
-                b"REFERENCE.NAT2.ADD/carry.retained/qualified4bits",
+                source_binding,
                 &sock,
                 &root.join("burn"),
             )

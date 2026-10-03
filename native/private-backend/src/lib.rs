@@ -39,3 +39,15 @@ pub mod sealed_outbox;
 pub mod field_network;
 
 pub mod field_network_store;
+
+pub mod field_network_layers;
+
+pub mod private_output;
+
+mod private_initial;
+
+pub mod private_output_store;
+
+pub mod arithmetic_reference;
+
+pub mod native_worker;

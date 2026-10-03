@@ -11,13 +11,19 @@ set_option autoImplicit false
 
 def plan : Plan :=
   let graph := additionNetwork 2
-  let rows := (List.range graph.census.ands).map fun index =>
+  let rows := (List.range (andPositions graph).length).map fun index =>
     (⟨⟨42⟩,index⟩ : CorrelationId)
   ⟨⟨⟨0⟩,[3],7,11,⟨0⟩⟩,graph,1,[9],rows⟩
 
 theorem plan_valid : plan.valid = true := by
   simp only [plan, Minidregg.Compiler.ObliviousNatAddSemantics.additionNetwork2_shape]
-  decide
+  simp [Plan.valid, Minidregg.Compiler.ObliviousNetwork.Network.valid,
+    andPositions,
+    Minidregg.Compiler.ObliviousNetwork.Op.fits]
+  apply List.Nodup.map
+  · intro left right same
+    exact congrArg CorrelationId.row same
+  · exact List.nodup_range
 #assert_axioms plan_valid
 end Minidregg.Host.ObliviousNatAddEmit
 

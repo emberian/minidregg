@@ -91,10 +91,9 @@ def produce (compilerBytes : List UInt8) (tools : ToolBytes) :
     else pure 1
   let package : BendWorldSource.Package := {
     modules := [
-      { name := "Base", bytes := tools.base, imports := [] },
-      { name := "CapturedSource", bytes := surface.toUTF8.toList,
-        imports := [{ importAlias := "", moduleIndex := 0,
-          source := BendWorldSource.sourceId tools.base }] }]
+      ⟨"Base", tools.base, []⟩,
+      ⟨"CapturedSource", surface.toUTF8.toList,
+        [⟨"", 0, BendWorldSource.sourceId tools.base⟩]⟩]
     entryModule := 1
     entryDefinition := selectedDefinition }
   let profile : BendWorldProgramCodec.Profile := {
@@ -116,8 +115,14 @@ def produce (compilerBytes : List UInt8) (tools : ToolBytes) :
     backend := "bfv-public-source-v1"
     program := {
       evaluator := profile.evaluator, jam := core.bytes
-      abi := { version := NockProgramCodec.abiVersion, sample := [], outputs := [],
-        libraries := [], fuel := 1, door := none, context := .pinned }
+      abi := {
+        version := NockProgramCodec.abiVersion
+        sample := []
+        outputs := []
+        libraries := []
+        fuel := 1
+        door := none
+        context := .pinned }
       params := BendArtifactBinding.entryParams entry } }
   let _ ← BendArtifactBinding.check artifact compilerBytes
   checkWireProfile artifact compilerBytes

@@ -11,30 +11,35 @@ theorem CodeDenotes.application_fields {program : Program} {pointer : Nat} {sour
     (found : program.code[pointer]? = some (.app q function argument)) :
     ∃ (f x : Term), source = .App q f x ∧ CodeDenotes program function f ∧ CodeDenotes program argument x := by
   cases exact <;> simp_all
+  exact ⟨_, _, ⟨Eq.refl _, Eq.refl _⟩, by assumption, by assumption⟩
 
 theorem CodeDenotes.annotation_fields {program : Program} {pointer : Nat} {source : Term}
     (value type : Nat) (exact : CodeDenotes program pointer source)
     (found : program.code[pointer]? = some (.ann value type)) :
     ∃ (x t : Term), source = .Ann x t ∧ CodeDenotes program value x ∧ CodeDenotes program type t := by
   cases exact <;> simp_all
+  exact ⟨_, _, ⟨Eq.refl _, Eq.refl _⟩, by assumption, by assumption⟩
 
 theorem CodeDenotes.let_fields {program : Program} {pointer : Nat} {source : Term}
     (q : Quan) (value body : Nat) (exact : CodeDenotes program pointer source)
     (found : program.code[pointer]? = some (.lett q value body)) :
     ∃ (v f : Term), source = .Let q v f ∧ CodeDenotes program value v ∧ CodeDenotes program body f := by
   cases exact <;> simp_all
+  exact ⟨_, _, ⟨Eq.refl _, Eq.refl _⟩, by assumption, by assumption⟩
 
 theorem CodeDenotes.pair_fields {program : Program} {pointer : Nat} {source : Term}
     (q : Quan) (first second : Nat) (exact : CodeDenotes program pointer source)
     (found : program.code[pointer]? = some (.tup q first second)) :
     ∃ (a b : Term), source = .Tup q a b ∧ CodeDenotes program first a ∧ CodeDenotes program second b := by
   cases exact <;> simp_all
+  exact ⟨_, _, ⟨Eq.refl _, Eq.refl _⟩, by assumption, by assumption⟩
 
 theorem CodeDenotes.rewrite_fields {program : Program} {pointer : Nat} {source : Term}
     (evidence motive body : Nat) (exact : CodeDenotes program pointer source)
     (found : program.code[pointer]? = some (.rwt evidence motive body)) :
     ∃ (e p f : Term), source = .Rwt e p f ∧ CodeDenotes program evidence e ∧ CodeDenotes program motive p ∧ CodeDenotes program body f := by
   cases exact <;> simp_all
+  exact ⟨_, _, _, ⟨Eq.refl _, Eq.refl _, Eq.refl _⟩, by assumption, by assumption, by assumption⟩
 
 theorem CodeDenotes.code_exists {program : Program} {pointer : Nat} {source : Term}
     (exact : CodeDenotes program pointer source) : ∃ instruction, program.code[pointer]? = some instruction := by

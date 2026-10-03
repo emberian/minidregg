@@ -65,7 +65,7 @@ def author (j : Json) : Except String (List UInt8) := do
     ← nat (← field j "decisionCell"),⟨← nat (← field j "keysRoot")⟩,
     ⟨← nat (← field j "decisionRoot")⟩,⟨← nat (← field j "authorityRoot")⟩,
     priorEpoch,← bytes (← field j "priorIdentityHex"),← bytes (← field j "certificateHex"),
-    ⟨← nat (← field j "actor")⟩,← nat (← field j "capability"),
+    ⟨← nat (← field j "actor")⟩,← nat (← field j "releaseCapability"),
     ← bytes (← field j "operationHex"),deliveries⟩
   let some e := decodeEpoch r.certificate | throw "noncanonical epoch certificate192"
   if r.room ≥ 2^64 ∨ r.keysCell ≥ 2^64 ∨ r.actor.value ≥ 2^64 ∨
@@ -102,7 +102,7 @@ def inspect (wire : List UInt8) : Except String Json := do
     ("authorityRoot",.str (toString r.authorityRoot.value)),
     ("priorEpoch",r.priorEpoch.map (fun n => Json.str (toString n)) |>.getD .null),
     ("priorIdentityHex",.str (hex r.priorIdentity)),("certificateHex",.str (hex r.certificate)),
-    ("actor",.str (toString r.actor.value)),("capability",.str (toString r.capability)),
+    ("actor",.str (toString r.actor.value)),("releaseCapability",.str (toString r.capability)),
     ("operationHex",.str (hex r.operation)),("deliveries",.arr (r.deliveries.map fun d =>
       Json.mkObj [("member",.str (toString d.member)),("recordHex",.str (hex d.record)),
         ("roomCapability",.str (toString d.roomCapability)),

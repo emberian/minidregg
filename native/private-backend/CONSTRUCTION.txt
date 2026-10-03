@@ -233,7 +233,8 @@ operation is treated as free. Native funded packet/WAL lifetime and active
 output/recovery/GOD/security proof obligations remain open.
 
 
-New private_output/private_output_store source is WIP, NOT YET RUN. It consumes
+Private output/arithmetic focused r27 actual2/2PASS at15:16:10UTC
+(compile19.39s, execution24.245s). It consumes
 typed completed LayerEngine shares only after a stable output-to-recipient row
 is reserved/fsynced/read back. It uses n actual PrivSend instances; only one
 fixed selected party can reconstruct the output using n-f matching degree-f
@@ -250,7 +251,8 @@ program, not new Objective source/type/demand compiler adequacy. A peer-owned
 Lean addition generator remains WIP; source-origin interoperability is pending.
 New tests cover1+2,3+1,3+3 private result and pending/completed recovery, plus one
 malformed corrupt sender disappearing while remaining honest holders deliver.
-They are pending until an actual guarded run.
+Both completed in that guarded run, including malformed sender0 disappearing.
+Manifest22945d8c589fa462fb1f8b3e6f8d80d5e14e32d67ce580b7716bf73e62230709.
 
 Protocol5 requires explicit source enrollment. OutputMachine receiver binding
 does not grant output delivery: honest request_delivery still requires fresh
@@ -259,3 +261,63 @@ That native producer remains unjoined/denied. The plaintext recipient-result
 adapter is NOT successor resharing. Coherent fresh holder-private successor
 polynomials/randomness, cumulative exposure/fencing, active MPC/GOD and current
 audience output law remain concrete construction work, not Ready labels.
+
+
+New source-only r28: durable pre-seal DraftPublic uses the agreed native draft
+frame and only party/sequence/recipient-key profile/hiding commitment. Native
+INNER authoring precedes sealing, OUTER authoring follows exact retained cipher.
+Opaque native marker binds canonical party bytes/sequence/hiding64, never clear
+SIGN or nonce. InnerCredentialRequest mirrors actual source205 request encoding
+and binds recipient-opened original capsule/full generation before forwarding
+its inner credential. These are public projections and untrusted codec claims;
+no decoded response grants VerifiedPacket, current authority, output release or
+Qualified. Actual native205 closed original-prefix verifier is peer-owned WIP.
+The joined draft/marker/inner request adversarial restart check actual1/1PASS
+at15:43:51UTC; compile19.64s/test0.037s,111 unrelated skipped.
+
+New r29 source-only with_boolean_inputs generic public composition shifts all
+noninput SSA references/outputs and prepends counted qualification gates without
+changing the source graph's gate order. Exact full source bytes remain in the
+Plan binding; no input or tuple is read before whole Plan burn. Canonical native
+INNER outcome claims match original source index/party/sequence/hiding64 and
+require enrollment/receipt presence, but cannot mint native Checked/VerifiedPacket.
+Actual pinned native process/channel custody remains the source owner's join.
+
+Native retry repair source r29: explicit append-only refine_inner retains same
+private nonce/body/semantic commitment and every original/new credential/cipher.
+Default seal remains original idempotent; refined outer credentials cache exact
+version before release. Public lifetime permits at most8 refined versions per
+draft; exhaustion refuses, no indefinite liveness claim. UNKNOWN does not choose
+latest: source actual original readback must select exact retained capsule.
+No refinement grants source admission/current credentials or re-dispatch.
+
+Actual Lean compiler Nat2 fixture139bytes SHA
+d2bb4888e89cbf28b7ba5e3498b1833683dcb38fb5b74cc5e26893069c5d07d1
+is retained publicly. It has generic full-adder and forall4bit network2 arithmetic
+laws, emitted/roundtrip by real PrivateCircuitAllocationFast producer. New
+consumer uses this exact4input/11gate/4AND network, prepends4 qualification ANDs,
+rebinds full source bytes to actual input/checked stock/full generation and8
+physical rows, then recipient-only result/recovery. Synthetic fixture rows/gen
+are not source or stock authority. Focused compiler+version/outcome checks pending.
+
+Actual r29 three focused consumer checks PASS16:02:13UTC, compile19.48s/
+tests4.506s,112 unrelated skipped. Compiler-origin Nat2 graph -> actual ACSS/
+checked stock/layered MPC -> designated recipient result6 and completed reopen;
+explicit refined credential/cipher history restart and native claim refusers.
+Manifest4eeee0e83c4840fa7c8c1c5e6521e6cd2874e23f41f3fea670f7021d3e2f3376.
+
+New r30 SOURCE WIP closed Linux native_worker CLI (worker protectedConfig):
+fixed operator-private config pins recipient/context/roster/quota/key custody,
+immutable actual private-output bootstrap prefix, anchor and authenticated
+receiver WAL, actual native verifier executable SHA256 and fixed argv. Source
+local dispatch claims cannot choose those fields. Recipient opens exact sealed
+original, invokes actual image by inherited open descriptor with45s timeout,
+compares native original-prefix enrollment/receipt/index/party/semantic before
+actual receiver WAL. Image mismatch/process refusal cannot authorize. It does
+not initiate output delivery, export plaintext results, or create Qualified.
+Private egress is retained pending signed recipient sealing; public pending
+receipt uses locally OS-generated durable secret, not sender-known hiding nonce.
+Full local certified history is bounded16MiB separately from unchanged network
+203/mix bounds262078/262070. No implicit fragmentation or history truncation.
+Actual native205 configured entrypoint/source gate remains peer WIP, so no
+end-to-end native authority claim; two new scoped negative checks pending.

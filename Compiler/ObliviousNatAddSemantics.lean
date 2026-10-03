@@ -17,6 +17,19 @@ theorem fullAdder_run (network : Network) (left right carry : Nat) :
   simp [fullAdder, ObliviousNetwork.emit, Array.size_push, Nat.add_assoc]
   rfl
 
+/-- Physical shape is fixed by the builder; it is not semantic source gas. -/
+theorem fullAdder_shape (network : Network) (left right carry : Nat) :
+    let emitted := (fullAdder left right carry).run network
+    emitted.2.inputCount = network.inputCount ∧
+    emitted.2.gates.size = network.gates.size + 5 ∧
+    emitted.1.sum < emitted.2.inputCount + emitted.2.gates.size ∧
+    emitted.1.carry < emitted.2.inputCount + emitted.2.gates.size := by
+  rw [fullAdder_run]
+  dsimp only
+  simp only [Array.size_push]
+  repeat' constructor
+  all_goals first | rfl | omega
+
 /-- Every admitted existing wire has its value lifted through the exact five
 emitted gates. The proof is uniform in graph, input array and wire addresses. -/
 theorem fullAdder_value (network : Network) (inputs : Array Bool)
@@ -49,21 +62,40 @@ theorem fullAdder_value (network : Network) (inputs : Array Bool)
         ((network.evaluateWires inputs)[right]?.getD false) ((network.evaluateWires inputs)[carry]?.getD false)
   have leftDifferent0 : left ≠ next := by dsimp [next]; omega
   have leftDifferent1 : left ≠ next + 1 := by dsimp [next]; omega
-  have leftDifferent2 : left ≠ next + 2 := by dsimp [next]; omega
-  have leftDifferent3 : left ≠ next + 3 := by dsimp [next]; omega
-  have leftDifferent4 : left ≠ next + 4 := by dsimp [next]; omega
   have rightDifferent0 : right ≠ next := by dsimp [next]; omega
   have rightDifferent1 : right ≠ next + 1 := by dsimp [next]; omega
-  have rightDifferent2 : right ≠ next + 2 := by dsimp [next]; omega
-  have rightDifferent3 : right ≠ next + 3 := by dsimp [next]; omega
-  have rightDifferent4 : right ≠ next + 4 := by dsimp [next]; omega
   have carryDifferent0 : carry ≠ next := by dsimp [next]; omega
   have carryDifferent1 : carry ≠ next + 1 := by dsimp [next]; omega
   have carryDifferent2 : carry ≠ next + 2 := by dsimp [next]; omega
-  have carryDifferent3 : carry ≠ next + 3 := by dsimp [next]; omega
-  have carryDifferent4 : carry ≠ next + 4 := by dsimp [next]; omega
-  simp [gateStep, Array.getElem?_push, Array.size_push, size, sumBit, carryBit,
-    Nat.add_assoc, leftDifferent0, leftDifferent1, leftDifferent2, leftDifferent3, leftDifferent4, rightDifferent0, rightDifferent1, rightDifferent2, rightDifferent3, rightDifferent4, carryDifferent0, carryDifferent1, carryDifferent2, carryDifferent3, carryDifferent4]
+  have addressDifferent01 : next ≠ next + 1 := by omega
+  have addressDifferent02 : next ≠ next + 2 := by omega
+  have addressDifferent12 : next + 1 ≠ next + 2 := by omega
+  have addressDifferent13 : next + 1 ≠ next + 3 := by omega
+  have addressDifferent14 : next + 1 ≠ next + 4 := by omega
+  have addressDifferent23 : next + 2 ≠ next + 3 := by omega
+  simp only [gateStep, Array.getElem?_push, Array.size_push, size, sumBit, carryBit,
+    Nat.add_assoc, leftDifferent0, leftDifferent1, rightDifferent0, rightDifferent1, carryDifferent0, carryDifferent1, carryDifferent2, addressDifferent01, addressDifferent02, addressDifferent12, addressDifferent13, addressDifferent14, addressDifferent23,
+    Option.getD_some, ↓reduceIte]
+  exact ⟨True.intro,True.intro⟩
+
+/-- The same original input and existing wire values survive all emitted
+full-adder gates, allowing subsequent arithmetic blocks to share prior wires. -/
+theorem fullAdder_preserves (network : Network) (inputs : Array Bool)
+    (left right carry index : Nat) (earlier : index < (network.evaluateWires inputs).size) :
+    let emitted := (fullAdder left right carry).run network
+    (emitted.2.evaluateWires inputs)[index]? = (network.evaluateWires inputs)[index]? := by
+  let next := network.inputCount + network.gates.size
+  let suffix : Array Op := #[.xor left right,.xor next carry,.and left right,.and next carry,
+    .xor (next+2) (next+3)]
+  have gates : ((((network.gates.push (.xor left right)).push (.xor next carry)).push
+      (.and left right)).push (.and next carry)).push (.xor (next+2) (next+3)) =
+      network.gates ++ suffix := by
+    simp only [Array.push_eq_append, Array.append_assoc]
+    rfl
+  rw [fullAdder_run]
+  dsimp only
+  rw [gates]
+  exact append_preserves network suffix inputs index earlier
 
 /-- Exact arithmetic of the ACTUAL emitted sum/carry wires, for every admitted
 network/input and all three incoming Boolean wire values. -/
@@ -112,7 +144,9 @@ theorem additionNetwork2_integer (a0 a1 b0 b1 : Bool) :
   cases a0 <;> cases a1 <;> cases b0 <;> cases b1 <;> decide
 
 #assert_axioms fullAdder_run
+#assert_axioms fullAdder_shape
 #assert_axioms fullAdder_value
+#assert_axioms fullAdder_preserves
 #assert_axioms fullAdder_emitted_integer
 #assert_axioms additionNetwork2_shape
 #assert_axioms additionNetwork2_value

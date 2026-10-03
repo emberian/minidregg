@@ -34,6 +34,7 @@ mod fleet;
 mod append_proof;
 #[cfg(unix)]
 mod fleet_sign;
+mod bend_session;
 #[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
@@ -142,6 +143,7 @@ mod web;
 #[cfg(unix)]
 mod receipt_continuity;
 #[cfg(unix)]
+mod client_consent;
 mod workspace;
 #[cfg(unix)]
 #[path="protected_object/object_keys.rs"]
@@ -440,13 +442,20 @@ fn session_invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>> {
+    if (7..=11).contains(&operation) {
+        return client_consent::codec_frame(host, config, operation, payload);
+    }
     let selected_sha = host_image_sha256(host)?;
     if let Some(sha) = EXPECTED_HOST_SHA.get() {
         if sha != &selected_sha {
             return Err("selected Host image differs from durable worker pin".into());
         }
     }
-    transport::invoke_pinned(socket, config, &selected_sha, operation, payload)
+    let reply = transport::invoke_pinned(socket, config, &selected_sha, operation, payload)?;
+    if client_consent::plan_operation(operation) && reply.first()==Some(&operation) {
+        client_consent::operator_plan(host, config, operation, payload, &reply[1..])?;
+    }
+    Ok(reply)
 }
 
 #[cfg(unix)]
@@ -1090,12 +1099,23 @@ fn generate_key(
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
+    let pure = arguments.first().and_then(|word| word.to_str()).is_some_and(|verb|
+        matches!(verb, "author" | "inspect" | "signatures" | "observe-assemble" | "assemble"));
+    if pure {
+        if let Some(output) = client_consent::codec_process(host, config, arguments)? { return Ok(output); }
+        let local = client_consent::pure_host(host)?;
+        return local_process(&local, config, arguments);
+    }
     if let Some(socket) = SOCKET.get() {
         return socket_process(host, socket, config, arguments);
     }
     if host.as_os_str().is_empty() {
         return Err("no Host image and no socket: pass --remote or --socket".into());
     }
+    local_process(host, config, arguments)
+}
+
+fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     let mut command = Command::new(host);
     command.arg(config).args(arguments);
     // Audit progress must survive a timeout. Keep ordinary requests and
@@ -1669,6 +1689,9 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     } else {
         manifest["host"] = json!(utf8_path(&absolute(host)?)?);
     }
+    if let Some(pins) = client_consent::configured_record()? {
+        manifest["localConsent"] = pins;
+    }
     write_json_new(&directory.join("attempt.json"), &manifest)
 }
 
@@ -1731,22 +1754,21 @@ fn authorize_observation(
     } else {
         author(host, config, intent_kind, intent, &intent_bin)?;
     }
-    // The Host answers an observation only for a request its subject signed: the
-    // signature over the intent's own framed bytes is checked before any target is read.
-    let intent_bytes = fs::read(&intent_bin)
-        .map_err(|error| format!("cannot read {}: {error}", intent_bin.display()))?;
+    // The local native verifier binds the retained intent and current subject
+    // to custody before even the observation's initial signature is released.
+    let intent_bytes = client_consent::intent(host, config, &intent_bin, signing)?;
     write_new(&intent_signature, &signing.sign(&intent_bytes).to_bytes())?;
     host_files(
         host,
         config,
         &[Path::new("challenge"), &intent_bin, &intent_signature, &challenge_bin],
     )?;
-    let presentation = inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
+    inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
     encode_signatures(
         host,
         config,
         signing,
-        challenge_headers(&presentation)?,
+        client_consent::observation(host, config, &intent_bin, &intent_signature, &challenge_bin, signing)?,
         &signatures_json,
         &signatures_bin,
     )?;
@@ -1898,7 +1920,7 @@ fn submit_once(
         host,
         &retained_config,
         &signing,
-        plan_headers(&presentation)?,
+        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
         &signatures_json,
         &signatures_bin,
     )?;
@@ -2026,7 +2048,7 @@ pub(crate) fn dry_run(
         host,
         &retained_config,
         &signing,
-        plan_headers(&presentation)?,
+        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
         &directory.join("transaction-signatures.json"),
         &signatures_bin,
     )?;
@@ -2236,7 +2258,7 @@ fn query_batch_once(
         copy_new(intent, &source)?;
         let binary = child.join("intent.bin");
         author(host, &retained_config, OsStr::new("intent"), &source, &binary)?;
-        let bytes = fs::read(&binary).map_err(|e| e.to_string())?;
+        let bytes = client_consent::intent(host, &retained_config, &binary, &signing)?;
         let signature = signing.sign(&bytes).to_bytes();
         write_new(&child.join("intent-signature.bin"), &signature)?;
         let width: u32 = bytes.len().try_into().map_err(|_| "batch intent too large")?;
@@ -2269,7 +2291,8 @@ fn query_batch_once(
             }
         }
         encode_signatures(host, &retained_config, &signing,
-            challenge_headers(&presented)?, &child.join("observation-signatures.json"),
+            client_consent::observation(host, &retained_config, &child.join("intent.bin"),
+                &child.join("intent-signature.bin"), &binary, &signing)?, &child.join("observation-signatures.json"),
             &child.join("observation-signatures.bin"))?;
         let signed = child.join("signed-observation.bin");
         host_files(host, &retained_config, &[Path::new("observe-assemble"), &binary,
@@ -2327,6 +2350,7 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
     if let Some(identity) = value.get("sshIdentity").and_then(Value::as_str) {
         pin_ssh_identity(Path::new(identity))?;
     }
+    if let Some(pins) = value.get("localConsent") { client_consent::pin_record(pins)?; }
     let host = match value.get("host") {
         Some(Value::String(host)) => PathBuf::from(host),
         Some(Value::Null) => {
@@ -4414,6 +4438,12 @@ fn run(mut args: Args) -> Result<()> {
 fn main() -> ExitCode {
     #[cfg(unix)]
     let parsed = match env::args_os().nth(1) {
+        Some(command) if command == OsStr::new("bend-session-sign") => {
+            env::args_os().skip(2)
+                .map(|value| value.into_string().map_err(|_| "Bend session arguments must be UTF-8".to_owned()))
+                .collect::<Result<Vec<_>>>()
+                .and_then(|arguments| bend_session::run(&arguments))
+        }
         Some(command) if command == OsStr::new("fleet-sign") => {
             fleet_sign::run(env::args_os().skip(2).collect())
         }

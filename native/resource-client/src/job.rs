@@ -140,9 +140,11 @@ fn decimal(text: &str, what: &str) -> Result<String> {
 }
 
 fn arg(args: &mut Args, name: &str) -> Result<String> {
-    args.required(name)?
+    let value = args.required(name)?
         .into_string()
-        .map_err(|_| format!("--{name} must be UTF-8"))
+        .map_err(|_| format!("--{name} must be UTF-8"))?;
+    if name == "name" { name_ok(&value)?; }
+    Ok(value)
 }
 
 fn opt(args: &mut Args, name: &str) -> Result<Option<String>> {
@@ -190,11 +192,15 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<()> {
 
 fn jobs_dir(ws: &Ws) -> Result<PathBuf> {
     let dir = ws.root.join("jobs");
-    fs::create_dir_all(dir.join("req")).map_err(|error| format!("job: {}: {error}", dir.display()))?;
+    fs::create_dir(&dir).or_else(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { Ok(()) } else { Err(e) }).map_err(|e| e.to_string())?;
+    if !fs::symlink_metadata(&dir).map_err(|e| e.to_string())?.is_dir() { return Err("job directory must be a real directory".into()); }
+    fs::create_dir(dir.join("req")).or_else(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { Ok(()) } else { Err(e) }).map_err(|e| e.to_string())?;
+    if !fs::symlink_metadata(dir.join("req")).map_err(|e| e.to_string())?.is_dir() { return Err("job request directory must be a real directory".into()); }
     Ok(dir)
 }
 
 fn record_path(ws: &Ws, name: &str) -> Result<PathBuf> {
+    name_ok(name)?;
     Ok(jobs_dir(ws)?.join(format!("{name}.json")))
 }
 
@@ -202,13 +208,17 @@ fn record_path(ws: &Ws, name: &str) -> Result<PathBuf> {
 /// (created or imported outside `post`/`claim`) is known by that reference.
 fn record(ws: &Ws, name: &str) -> Result<Value> {
     let path = record_path(ws, name)?;
-    match fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| format!("job: {}: {error}", path.display())),
-        Err(_) => {
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            let bytes = crate::shell::session_fs::read(&ws.root, &path, 1 << 20)?;
+            serde_json::from_slice(&bytes).map_err(|error| format!("job: {}: {error}", path.display()))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             let reference = workspace::reference(&ws.root, name)
                 .map_err(|_| format!("job: no job {name} in this workspace (post, or claim it)"))?;
             Ok(json!({"type":"minidregg-job-v1","name":name,"job":field(&reference, "target")?}))
         }
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -226,8 +236,7 @@ fn window_of(ws: &Ws, name: &str, rec: &Value) -> Result<i128> {
 
 fn save(ws: &Ws, name: &str, value: &Value) -> Result<()> {
     let path = record_path(ws, name)?;
-    fs::write(&path, serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)
-        .map_err(|error| format!("job: {}: {error}", path.display()))
+    crate::shell::session_fs::replace(&ws.root, &path, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)
 }
 
 /// The job cell's fields, by a signed read under this workspace's reference.
@@ -285,7 +294,7 @@ fn write(ws: &Ws, id: &str, name: &str, actions: Vec<Value>, run_claim: Option<V
         request["run"] = claim;
     }
     let path = jobs_dir(ws)?.join("req").join(format!("{id}.json"));
-    fs::write(&path, request.to_string()).map_err(|error| format!("job: {}: {error}", path.display()))?;
+    crate::shell::session_fs::replace(&ws.root, &path, request.to_string().as_bytes())?;
     client(
         "workspace",
         &[("action", "propose".into()), ("dir", ws.root.clone().into()), ("request", path.into()), ("proposal-id", id.into())],
@@ -340,7 +349,7 @@ fn money(
     let command = json!({"subject":ws.subject,"capability":capability,"jobCapability":job_capability,
         "job":job,"action":action.to_string(),
         "account":account,"amount":amount,"nonce":nonce()?,"expectedAuthorityRoot":authority});
-    fs::write(dir.join("command.json"), command.to_string()).map_err(|e| e.to_string())?;
+    crate::shell::session_fs::replace(&ws.root, &dir.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "job-money", &command)?;
     let plan = match invoke(ws, 160, &command_bytes) {
         Ok(plan) => plan,
@@ -355,7 +364,7 @@ fn money(
             return Err(format!("{refused}{named}"));
         }
     };
-    fs::write(dir.join("plan.bin"), &plan).map_err(|e| e.to_string())?;
+    crate::shell::session_fs::replace(&ws.root, &dir.join("plan.bin"), &plan)?;
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
     let seed: [u8; 32] = private_bytes(&ws.key, 32)?
@@ -363,14 +372,14 @@ fn money(
         .map_err(|_| "job: workspace key must contain exactly 32 raw bytes")?;
     let signature = SigningKey::from_bytes(&seed).sign(&unhex(canonical)?).to_bytes();
     let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
-    fs::write(dir.join("ingress.bin"), &ingress).map_err(|e| e.to_string())?;
+    crate::shell::session_fs::replace(&ws.root, &dir.join("ingress.bin"), &ingress)?;
     submit_ingress(ws, dir, &ingress)
 }
 
 fn submit_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<Value> {
     let outcome = inspect(ws, "outcome", &invoke(ws, 162, ingress)?)?;
     let stem = format!("outcome-{}.json", nonce()?);
-    fs::write(dir.join(stem), outcome.to_string()).map_err(|e| e.to_string())?;
+    crate::shell::session_fs::replace(&ws.root, &dir.join(stem), outcome.to_string().as_bytes())?;
     if outcome.get("type").and_then(Value::as_str) == Some("confirmed") {
         Ok(outcome)
     } else {
@@ -475,7 +484,7 @@ fn post(ws: &Ws, mut args: Args) -> Result<Value> {
         .replace("{NEG_WINDOW}", &format!("-{window}"))
         .replace("{WINDOW}", &window.to_string());
     let law_path = jobs_dir(ws)?.join(format!("{name}.law.json"));
-    fs::write(&law_path, &law).map_err(|e| e.to_string())?;
+    crate::shell::session_fs::replace(&ws.root, &law_path, law.as_bytes())?;
     let ((), birth) = timed("post (birth)", || {
         client(
             "workspace",
@@ -832,4 +841,45 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     };
     println!("{}", serde_json::to_string(&value).map_err(|e| e.to_string())?);
     Ok(())
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+    #[test]
+    fn job_record_updates_are_atomic_and_symlinks_never_read_or_written() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("mini-job-record-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let ws = Ws { root:root.clone(), pin:json!({}), host:"/unused".into(), socket:"/unused".into(), config:"/unused".into(), key:"/unused".into(), subject:"0".into() };
+        let first = json!({"type":"minidregg-job-v1","job":"42","window":"10"});
+        save(&ws, "valid", &first).unwrap();
+        assert_eq!(record(&ws, "valid").unwrap(), first);
+        let second = json!({"type":"minidregg-job-v1","job":"42","window":"11"});
+        save(&ws, "valid", &second).unwrap();
+        assert_eq!(record(&ws, "valid").unwrap(), second);
+        let external = root.join("foreign.json");
+        fs::write(&external, b"retained foreign bytes").unwrap();
+        symlink(&external, root.join("jobs/escape.json")).unwrap();
+        assert!(record(&ws, "escape").is_err());
+        assert!(save(&ws, "escape", &second).is_err());
+        assert_eq!(fs::read(&external).unwrap(), b"retained foreign bytes");
+        symlink(&root, root.join("linked-jobs")).unwrap();
+        assert!(crate::shell::session_fs::replace(&root, &root.join("linked-jobs/foreign.json"), b"bad").is_err());
+        assert_eq!(fs::read(&external).unwrap(), b"retained foreign bytes");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn job_names_refuse_escape_before_any_directory_is_created() {
+        let root = std::env::temp_dir().join(format!("mini-job-path-{}", std::process::id()));
+        let ws = Ws { root:root.clone(), pin:json!({}), host:"/unused".into(), socket:"/unused".into(), config:"/unused".into(), key:"/unused".into(), subject:"0".into() };
+        for name in ["../outside", "/outside", "a/b", ".", "", "a\\b"] {
+            assert!(record_path(&ws, name).is_err());
+            let mut args = Args { command:"job".into(), values:vec![("--name".into(), name.into())] };
+            assert!(arg(&mut args, "name").is_err());
+        }
+        assert!(!root.exists());
+        for name in ["job-one", "job_2", "J3"] { assert!(name_ok(name).is_ok()); }
+    }
 }

@@ -18,6 +18,9 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DurableDataIntent
 set_option autoImplicit false
+set_option profiler true
+set_option profiler.threshold 100
+set_option maxHeartbeats 400000
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : DeclaredResourceController.Deployment}
@@ -46,6 +49,8 @@ def wanted (context : ResourceObservationAdmission.Context deployment durable)
   policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨body.keysCell⟩
   policyRevision := context.authority.snapshot.authState.policyRevision ⟨body.keysCell⟩
   cost := (RoomKeyReleaseCodec.encode body).length
+
+attribute [irreducible] wanted
 
 structure Prepared (context : ResourceObservationAdmission.Context deployment durable)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
@@ -89,11 +94,15 @@ def project (prepared : Prepared context profile federation height body)
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
     ResourceObservationAdmission.resourceSlots body.actor body.keysCell prepared.observed.before.kind logical⟩
 
+attribute [irreducible] project
+
 def step (prepared : Prepared context profile federation height body) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (project prepared) profile.semantics
     (ResourceObservationAdmission.readCandidate (wanted context profile federation height body)
       prepared.observed.before.kind prepared.observed.before.payload (by
         simpa [wanted] using prepared.observed.rootExact))
+
+attribute [irreducible] step
 
 def kindDependencies (_prepared : Prepared context profile federation height body) :
     Option WorldKindLawDependencies.Dependencies :=
@@ -113,22 +122,28 @@ def policyConfig (prepared : Prepared context profile federation height body) :
     context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker body))
     (step prepared) body.keysCell ((kindDependencies prepared).map (·.additional) |>.getD [])
 
+
 def portal (prepared : Prepared context profile federation height body) : Portal :=
   (policyConfig prepared).portal
+
+attribute [irreducible] portal
 
 def authorize (prepared : Prepared context profile federation height body)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Option (Authorized (portal prepared) context.authority.snapshot.authState
-      (wanted context profile federation height body)) := do
-  let config := policyConfig prepared
-  let _ ← lawReadGuards prepared
-  let evidence ← (config.capabilityEvidenceChecked (wanted context profile federation height body)
-    ⟨body.capability⟩ () signature () (fun _ => ())).toOption
-  let law ← config.resolve?
-  ComposedPolicyAdmission.admit config (wanted context profile federation height body) evidence law.witness
-    (.policy ⟨body.keysCell⟩ (wanted context profile federation height body).policyRevision) (by rfl) (by rfl)
+      (wanted context profile federation height body)) := by
+  unfold portal
+  exact do
+   let config := policyConfig prepared
+   let _ ← lawReadGuards prepared
+   let evidence ← (config.capabilityEvidenceChecked (wanted context profile federation height body)
+     ⟨body.capability⟩ () signature () (fun _ => ())).toOption
+   let law ← config.resolve?
+   ComposedPolicyAdmission.admit config (wanted context profile federation height body) evidence law.witness
+     (.policy ⟨body.keysCell⟩ (wanted context profile federation height body).policyRevision) (by unfold wanted; rfl) (by unfold wanted; rfl)
 
-attribute [irreducible] portal
+attribute [irreducible] policyConfig
+
 structure Checked (prepared : Prepared context profile federation height body) (envelope : List UInt8) where
   private mk ::
   signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot

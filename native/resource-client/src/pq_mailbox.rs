@@ -717,6 +717,24 @@ pub(crate) fn live_fetch(
     packet.extend_from_slice(&route);
     Ok(packet)
 }
+// Only private preparation/drain workers use this bounded wait. Clocked
+// emission never acquires this lock and always retains its fixed cover.
+fn live_cap_lock(root: &Path) -> Result<transport::ServiceLock> {
+    let path = root.join("service.lock");
+    let until = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match transport::service_lock(&path) {
+            Ok(lock) => return Ok(lock),
+            Err(error)
+                if error.starts_with("another service owns ")
+                    && std::time::Instant::now() < until =>
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 pub(crate) fn live_save_cap(
     root: &Path,
     epoch: u64,
@@ -732,7 +750,7 @@ pub(crate) fn live_save_cap(
     };
     p.check()?;
     directory(root)?;
-    let _lock = transport::service_lock(&root.join("service.lock"))?;
+    let _lock = live_cap_lock(root)?;
     let mut record = epoch.to_le_bytes().to_vec();
     record.push(p.class() as u8);
     record.extend_from_slice(&id);
@@ -779,7 +797,7 @@ pub(crate) fn live_scan(
     };
     p.check()?;
     directory(root)?;
-    let _lock = transport::service_lock(&root.join("service.lock"))?;
+    let _lock = live_cap_lock(root)?;
     consume_broadcast(root, &p, broadcast)
 }
 fn live_plan(p: &Profile, stage: usize, origin: u64, tick: u64) -> Result<ReleasePlan> {
@@ -1300,6 +1318,26 @@ mod tests {
         (secrets, publics)
     }
     #[test]
+    fn live_cap_contention_waits_without_skipping_retained_cap_or_weakening_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-cap-wait-{}",
+            crate::hex(&random::<16>().unwrap())
+        ));
+        directory(&root).unwrap();
+        let lock = transport::service_lock(&root.join("service.lock")).unwrap();
+        let worker_root = root.clone();
+        let worker =
+            std::thread::spawn(move || live_save_cap(&worker_root, 3, 2, 1024, [1; 16], [2; 32]));
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(!root
+            .join(format!("3-{}.cap", crate::hex(&[1; 16])))
+            .exists());
+        drop(lock);
+        worker.join().unwrap().unwrap();
+        live_save_cap(&root, 3, 2, 1024, [1; 16], [2; 32]).unwrap();
+        assert!(live_save_cap(&root, 3, 2, 1024, [1; 16], [3; 32]).is_err());
+    }
+    #[test]
     fn scheduled_broadcast_cover_is_exact_batch_without_client_receipt_or_native_job() {
         let p = Profile {
             epoch: 3,
@@ -1812,6 +1850,18 @@ mod tests {
             assert!(Instant::now() < until);
             std::thread::yield_now();
         }
+        // Same exact original class/body/access may be offered in another
+        // scheduled application epoch. Native custody returns its cached reply;
+        // the first native listener is already closed, so redispatch would fail.
+        live_save_cap(&client, 4, 2, 4096, id, access).unwrap();
+        let resent = traverse(
+            4,
+            live_offer(4, 2, 4096, &public, id, access, &body).unwrap(),
+        );
+        assert_eq!(
+            live_scan(&client, 4, 2, 4096, &resent).unwrap(),
+            vec![b"\0\x0cexact-native-live-reply".to_vec()]
+        );
         live_save_cap(&client, 3, 2, 4096, id, fresh_cap).unwrap();
         let recovered = traverse(
             3,

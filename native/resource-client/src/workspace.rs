@@ -360,6 +360,38 @@ fn invocation_schema_version(payload: &Value) -> &'static str {
     }
 }
 
+// Client authoring bound; registered native profiles independently admit the
+// complete family statement. This is not a permission or semantic size limit.
+const INVOCATION_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+
+fn invocation_family(request: &Value) -> Result<Option<Value>> {
+    let Some(family) = request.get("family") else { return Ok(None); };
+    let fields = family.as_object().ok_or("invocation family must be an object")?;
+    if fields.len() != 2 || !fields.contains_key("route") || !fields.contains_key("contextBytes") {
+        return Err("invocation family may contain only route and contextBytes".into());
+    }
+    if !matches!(member(family, "route")?,
+        "ordinary" | "objectiveMethod" | "activityDispatch" | "roomRelease" | "roomPublish") {
+        return Err("unknown invocation family route".into());
+    }
+    let context = member(family, "contextBytes")?;
+    if context.len() > 2 * INVOCATION_CONTEXT_MAX_BYTES || context.len() % 2 != 0
+        || !context.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        return Err("invocation family contextBytes must be bounded canonical lowercase hex".into());
+    }
+    Ok(Some(family.clone()))
+}
+
+fn unsigned_invocation_command(subject: &str, nonce: &str, targets: Vec<Value>,
+    run: Option<Value>, family: Option<Value>) -> Value {
+    let mut command = json!({"subject":subject,"nonce":nonce,"targets":targets});
+    if let Some(claim) = run { command["run"] = claim; }
+    // The exact family is part of the command sent to the native author and
+    // signed receiver, never an annotation outside that command.
+    if let Some(statement) = family { command["family"] = statement; }
+    command
+}
+
 pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -422,6 +454,7 @@ pub(crate) fn load_retained(root: &Path) -> Result<RetainedWorkspace> {
     if let Some(identity) = value.get("sshIdentity").and_then(Value::as_str) {
         crate::pin_ssh_identity(Path::new(identity))?;
     }
+    if let Some(pins) = value.get("localConsent") { crate::client_consent::pin_record(pins)?; }
     if workspace_host(&value)?.as_os_str().is_empty() {
         crate::pin_remote_host(member(&value, "hostSha256")?)?;
     }
@@ -697,6 +730,7 @@ fn init_impl(
         "sshIdentity":crate::ssh_identity(),
         "birthContext":retained_context,"namespaceRoot":namespace,
         "enrollment":retained_enrollment});
+    if let Some(pins) = crate::client_consent::configured_record()? { value["localConsent"] = pins; }
     match &commitment {
         crate::key_rotation::Commitment::Mine(next) => {
             value["prerotation"] = json!(true);
@@ -3032,8 +3066,10 @@ fn propose_summary_once(
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
             let claimed = obj.contains_key("run");
-            if obj.len() != 3 + usize::from(claimed) || !obj.contains_key("targets") {
-                return Err("invoke proposal may contain only type, action, targets, run".into());
+            let family = invocation_family(&request)?;
+            if obj.len() != 3 + usize::from(claimed) + usize::from(family.is_some())
+                || !obj.contains_key("targets") {
+                return Err("invoke proposal may contain only type, action, targets, run, family".into());
             }
             // K-RAN: a Nock run claim rides inside the signed command; the Host
             // parses it exactly (programId, sample, output, steps) and re-executes.
@@ -3232,11 +3268,8 @@ fn propose_summary_once(
                 target_rows.push(target_row);
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
-            let mut command = json!({"subject":member(workspace,"subject")?,
-                "nonce":command_nonce,"targets":target_rows});
-            if let Some(claim) = run {
-                command["run"] = claim;
-            }
+            let command = unsigned_invocation_command(member(workspace,"subject")?,
+                &command_nonce, target_rows, run, family);
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
                 "grants":grants})
@@ -6964,6 +6997,42 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invocation_family_is_preserved_in_actual_unsigned_command() {
+        use serde_json::json;
+        let targets = vec![json!({"target":"18446744073709551615","payload":{"type":"read"}})];
+        let run = json!({"programId":"7","sample":"00","output":"01","steps":"9"});
+        for route in ["ordinary", "objectiveMethod", "activityDispatch", "roomRelease", "roomPublish"] {
+            let family = json!({"route":route,"contextBytes":"00abff"});
+            let selected = super::invocation_family(&json!({"family":family})).unwrap();
+            let command = super::unsigned_invocation_command("18446744073709551615", "29",
+                targets.clone(), Some(run.clone()), selected);
+            assert_eq!(command, json!({"subject":"18446744073709551615","nonce":"29",
+                "targets":targets,"run":run,"family":family}));
+        }
+        let command = super::unsigned_invocation_command("3", "31", targets.clone(), None,
+            super::invocation_family(&json!({})).unwrap());
+        assert_eq!(command, json!({"subject":"3","nonce":"31","targets":targets}));
+    }
+
+    #[test]
+    fn invocation_family_refuses_noncanonical_or_unregistered_data() {
+        use serde_json::json;
+        for family in [json!(null), json!({"route":"roomRelease"}),
+            json!({"route":"roomRelease","contextBytes":"00","authority":true}),
+            json!({"route":"roomGrant","contextBytes":"00"}),
+            json!({"route":"roomRelease","contextBytes":"AA"}),
+            json!({"route":"roomRelease","contextBytes":"0"}),
+            json!({"route":"roomRelease","contextBytes":"gg"}),
+            json!({"route":"roomRelease","contextBytes":0}),
+            json!({"route":"roomRelease","contextBytes":"é"})] {
+            assert!(super::invocation_family(&json!({"family":family})).is_err());
+        }
+        assert!(super::invocation_family(&json!({"family":{"route":"ordinary",
+            "contextBytes":"00".repeat(super::INVOCATION_CONTEXT_MAX_BYTES + 1)}})).is_err());
+        assert!(super::invocation_family(&json!({"family":{"route":"ordinary","contextBytes":""}})).is_ok());
+    }
+
     #[test]
     fn append_custody_recovery_keeps_original_and_fences_unknown_call() {
         let root = std::env::temp_dir().join(format!("append-custody-{}-{}",std::process::id(),

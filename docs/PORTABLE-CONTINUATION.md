@@ -236,3 +236,41 @@ The joint Pending custody adapter passed its first scoped Lean and named axiom
 checks against the current qualified receiver cohort. It preserves exact full
 source images, control pin/reservation, historical consensus context and checked
 commit; an actual native pending-receipt capture remains a separate runtime join.
+
+
+## Current home guard for signed Activity dispatch (callback WIP)
+
+`Compiler/PortableHomeWorkerContext` defines a new canonical WorkerCredential:
+an opaque credential identity plus an explicit source-authored native subject
+and public key. A bare currentCredential byte string is never treated as a key.
+The movable-home profile stores the canonical credential envelope in current
+source control; actual source-authorized initial credential birth remains a
+required producer. The exact signed home projection binds the configured
+cell/atom/schema, home, current host, full credential envelope, private generation
+and descriptor, epoch and phase. Both codecs passed scoped Lean and named
+roundtrip axiom checks.
+
+`Kernel/PortableHomeCurrentGuard.admit` is a high guard after ordinary actual
+AcceptedInvocation. It selects only `Config.portableHomeControl`, re-reads the
+entire current source control wrapper, matches the exact projection and admitted
+controller subject/key, and permits initial serving or reconciled destination
+active/released phases. It returns a whole-control physical ReadGuard. The new
+signed Activity context edition binds this projection, and its dispatch consumer
+retains this guard alongside the Activity guard in the same final Fits and
+DataIntent, forbidding writes to guarded cells. A home-governed profile cannot
+omit its projection; nonportable Activity remains a separate profile with no
+portable source pin.
+
+Config source-pinned portable facet/runtime parameter/live+replay registration
+is not yet supplied; the high guard source explicitly requires that field and
+has no caller-pin fallback. The guard and Activity composition are WIP until
+the coherent source cohort checks them. This closes neither worker activation
+nor private successor qualification.
+
+A frozen home also needs exact source-owned maintenance receiving for old
+Activity outcome/cancellation: the original pending identity/context/request
+and authoritative outcome must select the precise reconciliation transition,
+retain all other facet/physical guards and funded maintenance, and preserve home
+custody. A generic Activity exemption from the home freeze would allow fresh
+work and is forbidden. The fresh-dispatch guard alone does not supply this
+maintenance producer.

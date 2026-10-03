@@ -1,11 +1,14 @@
 --- a/Host/Main.lean
 +++ b/Host/Main.lean
-@@ -1,3 +1,4 @@
+@@ -176,6 +176,7 @@
+ import Host.FnSelectiveReleaseFnReceiving
+ import Host.FnSelectiveReleaseFnAck
+ import Host.Json
 +import Host.BendSessionDriverJson
- /-
- Compiled Mini host. The operator selects one config at startup. Binary calls
- and replies use Lean's strict source-owned codecs; this process never handles
-@@ -5641,6 +5642,14 @@
+ import Host.PayClaims
+ import Host.ApplicationCurrentBirthAuthoring
+ import Host.CurrentResourceBirthAuthoring
+@@ -5642,6 +5643,14 @@
        let settings ← loadSettings configPath
        let config := settings.config
        match command, rest with
@@ -22,12 +25,15 @@
            let request ← readCarryJson requestPath
 --- a/native/resource-client/src/main.rs
 +++ b/native/resource-client/src/main.rs
-@@ -1,3 +1,4 @@
+@@ -34,6 +34,7 @@
+ mod append_proof;
+ #[cfg(unix)]
+ mod fleet_sign;
 +mod bend_session;
- use ed25519_dalek::{Signer, SigningKey};
- use serde_json::{json, Value};
- use sha2::Digest;
-@@ -4413,6 +4414,12 @@
+ #[cfg(unix)]
+ mod fn_namespace;
+ #[cfg(unix)]
+@@ -4430,6 +4431,12 @@
  fn main() -> ExitCode {
      #[cfg(unix)]
      let parsed = match env::args_os().nth(1) {

@@ -373,8 +373,14 @@ fn parse_tail(rest: &str) -> Result<Line, String> {
     let mut i = 0;
     while i < words.len() {
         match words[i] {
+            "--discover-json" => {
+                if words.get(i+1) != Some(&"-") { return Err("--discover-json takes '-' for bounded JSON on standard input".into()); }
+                if discovery.replace("@stdin-discovery".to_owned()).is_some() { return Err("duplicate discovery input".into()); }
+                i += 1;
+            }
             "--discover" => {
                 let file=words.get(i+1).ok_or("--discover takes a cursor file")?;
+                if *file == "@stdin-discovery" { return Err("use --discover-json - for stdin".into()); }
                 if discovery.replace((*file).to_owned()).is_some() {return Err("duplicate --discover".into());}
                 i+=1;
             }
@@ -1087,8 +1093,21 @@ fn read_exact_entry(session:&Session,room:&Room,reference:&(String,u64))->Result
 /// Source-only per-stream cursor pages. Retained refs are re-read separately,
 /// so a held old request cannot pin discovery to that old stream prefix.
 fn read_discovery(session:&Session,room:&Room,file:&str,count:usize)->Result<(Feed,Roster,Vec<String>,Value),Done> {
-    let bytes=fs::read(file).map_err(error)?;
-    if bytes.len()>262144 {return Err(error("discovery cursor file exceeds bound"));}
+    let bytes = if file == "@stdin-discovery" {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::io::stdin().take(262145).read_to_end(&mut bytes).map_err(error)?;
+        if bytes.len() > 262144 { return Err(error("discovery cursor JSON exceeds bound")); }
+        bytes
+    } else {
+    let path = if let Some(name) = file.strip_prefix('@') {
+        if name.is_empty() || name.starts_with('.') || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
+            return Err(error("discovery cursor must be a plain request file name"));
+        }
+        session.home.join("requests").join(name)
+    } else { PathBuf::from(file) };
+    crate::shell::session_fs::read(&session.home.join("requests"), &path, 262144).map_err(error)?
+    };
     let request:Value=serde_json::from_slice(&bytes).map_err(error)?;
     if request["type"]!="mini-resident-discovery-v1" {return Err(error("discovery type differs"));}
     let cursors=request["cursors"].as_object().ok_or_else(||error("discovery cursors absent"))?;
@@ -1564,9 +1583,34 @@ fn append_recorded(session: &Session, room: &Room, payload: Value, to: Option<St
     }
 }
 
+/// Shell callers may retain exact operations in their request directory; the
+/// resident controller uses its workspace room-operations directory. This checks
+/// argument scope; fleet still owns durable record binding and exact recovery.
+fn operation_path(session: &Session, path: &Path) -> Result<(), String> {
+    let parent = path.parent().ok_or("operation record has no parent")?;
+    if parent != session.home.join("requests") && parent != session.workspace.join("room-operations") {
+        return Err("operation record must belong to HOME/requests or WORKSPACE/room-operations".into());
+    }
+    let name = path.file_name().and_then(|v| v.to_str()).ok_or("operation record name is not UTF-8")?;
+    if name.is_empty() || name.starts_with('.') || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
+        return Err("operation record must have a plain file name".into());
+    }
+    // An absent leaf is valid for first creation. Existing leaves must be read
+    // through the descriptor anchor, refusing symlinks and special files.
+    match fs::symlink_metadata(path) {
+        Ok(_) => { crate::shell::session_fs::read(parent, path, 1 << 20)?; }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            workspace::private_dir(parent)?;
+        }
+        Err(e) => return Err(e.to_string()),
+    }
+    Ok(())
+}
+
 /// One caller-owned append. No second proposal, fresh challenge or text search
 /// is permitted once its durable operation record exists.
 fn append_operation(session: &Session, path: &Path, stream: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
+    operation_path(session, path).map_err(error)?;
     let reference = workspace::reference(&session.workspace, stream).map_err(error)?;
     let binding = json!({"request":request,"reference":reference,"privateRoom":sealed});
     let (record, fresh) = crate::fleet::operation_record(&session.workspace, path, "workspace", binding).map_err(error)?;
@@ -1623,7 +1667,7 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
                 Text::Inline(t) => t,
                 Text::File(f) => {
                     let p = session.home.join("requests").join(&f);
-                    let t = fs::read_to_string(&p).map_err(|e| error(format!("cannot read {}: {e}", p.display())))?;
+                    let t = String::from_utf8(crate::shell::session_fs::read(&session.home, &p, 1 << 20).map_err(error)?).map_err(error)?;
                     let t = t.trim_end_matches('\n').to_owned();
                     if t.is_empty() {
                         return Err(usage("the text file is empty"));
@@ -2097,7 +2141,7 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
         (true, Some(value)) => Some(match value.strip_prefix('@') {
             Some(file) if !file.is_empty() && !file.contains('/') && !file.starts_with('.') => {
                 let p = session.home.join("requests").join(file);
-                fs::read_to_string(&p).map_err(|e| error(format!("cannot read {}: {e}", p.display())))?.trim().to_owned()
+                String::from_utf8(crate::shell::session_fs::read(&session.home, &p, 1 << 20).map_err(error)?).map_err(error)?.trim().to_owned()
             }
             Some(_) => return Err(usage("@FILE is a plain file name in HOME/requests")),
             None => value.to_owned(),
@@ -2233,7 +2277,7 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
             return Err(usage("@FILE is a plain file name in HOME/requests"));
         }
         let p = session.home.join("requests").join(file);
-        serde_json::from_slice(&fs::read(&p).map_err(|e| error(format!("cannot read {}: {e}", p.display())))?)
+        serde_json::from_slice(&crate::shell::session_fs::read(&session.home, &p, 1 << 20).map_err(error)?)
             .map_err(|e| usage(format!("the invitation is not JSON: {e}")))?
     } else {
         serde_json::from_str(invitation).map_err(|e| usage(format!("the invitation is not JSON: {e}")))?
@@ -2270,6 +2314,28 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operation_scope_preserves_resident_records_and_refuses_foreign_paths() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("mini-chat-scope-{}", std::process::id()));
+        let session = Session { home:root.join("home"), workspace:root.join("workspace"), host:"/unused".into(), config:"/unused".into() };
+        for directory in [session.home.join("requests"), session.workspace.join("room-operations")] {
+            fs::create_dir_all(&directory).unwrap();
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+            let path = directory.join("hr-op-write.json");
+            assert!(operation_path(&session, &path).is_ok());
+            symlink("/etc/passwd", &path).unwrap();
+            assert!(operation_path(&session, &path).is_err());
+        }
+        for path in [root.join("foreign.json"), session.workspace.join("room-operations/../escape.json"), session.home.join("requests/.hidden")] {
+            assert!(operation_path(&session, &path).is_err());
+        }
+        assert!(parse_tail("--discover-json - --json -n 10").is_ok());
+        assert!(parse_tail("--discover @stdin-discovery --json").is_err());
+        assert!(parse_tail("--discover-json /etc/passwd").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn entry(height: u64, author: &str, cell: &str, sequence: u64, payload: &str) -> Entry {
         Entry {

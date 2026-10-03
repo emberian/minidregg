@@ -11,6 +11,7 @@ import Kernel.NativeHostContext
 import Compiler.GenericSimplexSourceAnchor
 import Verify.GenericSimplexOperatorBridge
 import Compiler.BendActivityAuthor
+import Host.CurrentResourceBirthAuthoring
 import Lean
 
 namespace Minidregg.Verify.NativeActivitySourceFixture
@@ -228,6 +229,43 @@ def prepareSource (corePath : System.FilePath) (entry : String) (output : System
   let some _ := BendActivityProgram.prepare source | throw (IO.userError "actual source program admission refused")
   writePrivate output (BendActivityProgram.sourceStream.encode source).toByteArray
 
+/-- Authenticate using the actual current source key before disclosing a
+challenge. This bypasses no source observation permission or native signer. -/
+def challengeCurrent (root : System.FilePath) (helpers : Helpers)
+    (intent signature output : System.FilePath) : IO Unit := do
+  let replicas ← openReplicas root helpers
+  let some replica := replicas[0]? | throw (IO.userError "no source replicas")
+  let result ← NativeHost.challengeLoaded replica.config
+    replica.participant.source.verified.opened
+    (← IO.FS.readBinFile intent).toList (← IO.FS.readBinFile signature).toList
+  match result with
+  | .error refusal => throw (IO.userError s!"current challenge refused: {repr refusal}")
+  | .ok challenge => writePrivate output (NativeObservationCodec.challengeCodec.encode challenge).toByteArray
+
+/-- SAME-prefix authorized planner, useful even before the general Host JSON
+configuration grammar knows this independently pinned Activity deployment. -/
+def prepareCurrent (root : System.FilePath) (helpers : Helpers)
+    (signedObservation output : System.FilePath) : IO Unit := do
+  let replicas ← openReplicas root helpers
+  let some replica := replicas[0]? | throw (IO.userError "no source replicas")
+  let result ← NativeHost.prepareAuthorizedLoaded replica.config
+    replica.participant.source.verified.opened (← IO.FS.readBinFile signedObservation).toList
+  match result with
+  | .error refusal => throw (IO.userError s!"current preparation refused: {repr refusal}")
+  | .ok plan => writePrivate output (NativeHostCodec.signingPlanCodec.encode plan).toByteArray
+
+/-- Existing governed content-birth author, retaining its actual signed factory
+observation and current grant/fee derivation. No custom authority cells are made. -/
+def birthCurrent (root : System.FilePath) (helpers : Helpers)
+    (signedObservation source output : System.FilePath) : IO Unit := do
+  let replicas ← openReplicas root helpers
+  let some replica := replicas[0]? | throw (IO.userError "no source replicas")
+  let json ← IO.ofExcept (Json.parse (← IO.FS.readFile source))
+  let bytes ← IO.ofExcept (← Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
+    replica.config replica.participant.source.verified.opened
+    (← IO.FS.readBinFile signedObservation).toList json)
+  writePrivate output bytes.toByteArray
+
 end Minidregg.Verify.NativeActivitySourceFixture
 
 open Minidregg.Verify.NativeActivitySourceFixture
@@ -236,6 +274,12 @@ def main (args : List String) : IO Unit := do
   match args with
   | ["init", root, store, signature, agreement, alice, bob] =>
       initializeStores root ⟨store,signature,agreement⟩ alice bob
+  | ["challenge", root, store, signature, agreement, intent, intentSignature, output] =>
+      challengeCurrent root ⟨store,signature,agreement⟩ intent intentSignature output
+  | ["prepare", root, store, signature, agreement, observation, output] =>
+      prepareCurrent root ⟨store,signature,agreement⟩ observation output
+  | ["birth", root, store, signature, agreement, observation, source, output] =>
+      birthCurrent root ⟨store,signature,agreement⟩ observation source output
   | ["export-control", root, store, signature, agreement, output] =>
       exportControl root ⟨store,signature,agreement⟩ output
   | ["source", core, entry, output, slots, bits, frames, arguments, ticks] =>

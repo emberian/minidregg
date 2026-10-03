@@ -13,7 +13,7 @@ set_option autoImplicit false
 
 /-- A byte-level gate is useful only after the same native planner produced the
 expected whole plan from the retained request and independently verified source. -/
-structure ExactPlan (expected candidate : List UInt8) where
+structure ExactPlan (expected candidate : List UInt8) : Type where
   private mk ::
   exact : expected = candidate
 
@@ -34,14 +34,14 @@ private def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := 
   unless length ≤ payload.length - 4 do throw (IO.userError "specialized request pair exceeds payload")
   pure ((payload.drop 4).take length, payload.drop (4 + length))
 
-private def admitted {α : Type} (result : Except NativeHost.Refusal α) : IO α :=
+private def admitted {α ε : Type} (result : Except ε α) : IO α :=
   match result with
   | .ok value => pure value
   | .error _ => throw (IO.userError "local authenticated specialized preparation refused")
 
 /-- The exact production functions and production encoders used by Host.Main.
 No source mutation or signature creation occurs here. -/
-def expectedPlanBytes (config : NativeHost.Config) {target : DurableDataIntent.Durable}
+def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (operation : UInt8)
     (request : List UInt8) : IO (List UInt8) := do
   let opened := verified.opened

@@ -5,19 +5,22 @@ import Compiler.ContentControlFrame
 import Compiler.ResourceBirthCodec
 namespace Minidregg.Compiler.BendActivityDispatchContext
 open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Theory.IndexedProgram
 set_option autoImplicit false
 structure Context where
   pin : ContentControlFrame.Pin
   generation : Nat
   pendingOrdinal : Nat
   preparationBytes : List UInt8
+  homeProjectionBytes : Option (List UInt8)
 
 def stream : StreamCodec Context :=
   StreamCodec.xmap (StreamCodec.product ContentControlFrame.pinStream
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat bytesStream)))
-    (fun c => (c.pin,c.generation,c.pendingOrdinal,c.preparationBytes))
-    (fun (p,g,o,b) => ⟨p,g,o,b⟩) (by intro c; cases c; rfl)
-def frame : List UInt8 := "DREGG/BEND/ACTIVITY-DISPATCH-CONTEXT/v1".toUTF8.toList
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream (StreamCodec.option bytesStream)))))
+    (fun c => (c.pin,c.generation,c.pendingOrdinal,c.preparationBytes,c.homeProjectionBytes))
+    (fun (p,g,o,b,h) => ⟨p,g,o,b,h⟩) (by intro c; cases c; rfl)
+def frame : List UInt8 := "DREGG/BEND/ACTIVITY-DISPATCH-CONTEXT/v2".toUTF8.toList
 def rawCodec : LawfulCodec Context where
   encode c := frame ++ stream.encode c
   decode bytes := if bytes.take frame.length = frame then

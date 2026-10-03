@@ -53,6 +53,12 @@ fn get_spec(c: &mut Cursor<'_>) -> Result<RecipientSpec> {
     s.validate()?;
     Ok(s)
 }
+pub const MAX_REFINEMENTS: usize = 8;
+#[derive(Clone)]
+struct RefinedVersion {
+    capsule: Vec<u8>,
+    final_capsule: Option<Vec<u8>>,
+}
 #[derive(Clone)]
 struct Entry {
     party: CommitteeParty,
@@ -65,6 +71,7 @@ struct Entry {
     capsule: Option<Vec<u8>>,
     inner_credential: Option<Vec<u8>>,
     final_capsule: Option<Vec<u8>>,
+    refinements: BTreeMap<Vec<u8>, RefinedVersion>,
 }
 impl Entry {
     fn draft(&self) -> Result<HidingDraft> {
@@ -122,6 +129,7 @@ impl Machine for State {
                         capsule: None,
                         inner_credential: None,
                         final_capsule: None,
+                        refinements: BTreeMap::new(),
                     },
                 );
                 Ok(commitment.to_vec())
@@ -171,6 +179,60 @@ impl Machine for State {
                 entry.final_capsule = Some(final_bytes.clone());
                 Ok(final_bytes)
             }
+            3 => {
+                let key = c.bytes()?;
+                let credential = c.bytes()?;
+                let capsule = c.bytes()?;
+                c.finish()?;
+                let entry = self
+                    .entries
+                    .get_mut(&key)
+                    .ok_or_else(|| bad("unknown refinement draft"))?;
+                let sealed = SealedIngress::decode(&capsule)?;
+                if entry.capsule.is_none()
+                    || credential.is_empty()
+                    || entry.inner_credential.as_ref() == Some(&credential)
+                    || entry.refinements.contains_key(&credential)
+                    || entry.refinements.len() >= MAX_REFINEMENTS
+                    || sealed.party != entry.party
+                    || sealed.sequence != entry.sequence
+                    || sealed.recipient != entry.recipient
+                    || sealed.semantic_commitment != entry.commitment
+                    || !sealed.outer_native_credential.is_empty()
+                {
+                    return Err(bad("refinement bound/duplicate/context"));
+                }
+                entry.refinements.insert(
+                    credential,
+                    RefinedVersion {
+                        capsule: capsule.clone(),
+                        final_capsule: None,
+                    },
+                );
+                Ok(capsule)
+            }
+            4 => {
+                let key = c.bytes()?;
+                let inner = c.bytes()?;
+                let outer = c.bytes()?;
+                c.finish()?;
+                let entry = self
+                    .entries
+                    .get_mut(&key)
+                    .ok_or_else(|| bad("unknown refinement outer"))?;
+                let version = entry
+                    .refinements
+                    .get_mut(&inner)
+                    .ok_or_else(|| bad("unknown refined credential"))?;
+                if outer.is_empty() || version.final_capsule.is_some() {
+                    return Err(bad("refined outer duplicate/empty"));
+                }
+                let mut capsule = SealedIngress::decode(&version.capsule)?;
+                capsule.outer_native_credential = outer;
+                let raw = capsule.encode()?;
+                version.final_capsule = Some(raw.clone());
+                Ok(raw)
+            }
             _ => Err(bad("sealed draft event")),
         }
     }
@@ -182,8 +244,17 @@ pub struct DraftReceipt {
     party: CommitteeParty,
     sequence: u64,
     commitment: [u8; 64],
+    recipient: RecipientSpec,
 }
 impl DraftReceipt {
+    pub fn public_draft(&self) -> recipient_seal::DraftPublic {
+        recipient_seal::DraftPublic {
+            party: self.party.clone(),
+            sequence: self.sequence,
+            recipient: self.recipient.clone(),
+            semantic_commitment: self.commitment,
+        }
+    }
     pub fn party(&self) -> &CommitteeParty {
         &self.party
     }
@@ -193,6 +264,17 @@ impl DraftReceipt {
     pub fn semantic_commitment(&self) -> [u8; 64] {
         self.commitment
     }
+    pub fn inner_native_marker(&self) -> Vec<u8> {
+        recipient_seal::opaque_message_marker(&self.party, self.sequence, &self.commitment)
+    }
+}
+/// Actual append-only local refinement receipt. No current source admission
+/// is inferred: after UNKNOWN, the exact admitted source capsule must be
+/// recovered before dispatch, and every retained version remains available.
+pub struct VersionReceipt {
+    key: Vec<u8>,
+    credential: Vec<u8>,
+    commitment: [u8; 64],
 }
 pub struct Store {
     journal: Journal<State>,
@@ -238,6 +320,7 @@ impl Store {
                 party,
                 sequence,
                 commitment: old.commitment,
+                recipient,
             });
         }
         let draft = HidingDraft::new(party.clone(), sequence, message.clone(), recipient.clone())?;
@@ -255,6 +338,7 @@ impl Store {
             party,
             sequence,
             commitment: actual.commitment,
+            recipient,
         })
     }
     /// Actual caller-provided native INNER credential still needs source
@@ -307,6 +391,118 @@ impl Store {
         bytes(&receipt.key, &mut event);
         bytes(&outer_native_credential, &mut event);
         self.journal.append(&event)
+    }
+    /// Explicit pre-admission credential refinement. It preserves original
+    /// nonce/body/semantic identity and ALL older ciphertexts. Default seal()
+    /// remains idempotent. A caller still needs actual current source authoring
+    /// and must recover the original admitted version after uncertain submission.
+    pub fn refine_inner(
+        &mut self,
+        receipt: &DraftReceipt,
+        credential: Vec<u8>,
+    ) -> Result<VersionReceipt> {
+        let entry = self
+            .journal
+            .state()
+            .entries
+            .get(&receipt.key)
+            .ok_or_else(|| bad("refinement receipt scope"))?;
+        if entry.commitment != receipt.commitment
+            || credential.is_empty()
+            || entry.capsule.is_none()
+            || entry.inner_credential.as_ref() == Some(&credential)
+        {
+            return Err(bad("refinement requires distinct retained credential"));
+        }
+        if !entry.refinements.contains_key(&credential) {
+            if entry.refinements.len() >= MAX_REFINEMENTS {
+                return Err(bad("public refinement lifetime exhausted"));
+            }
+            let raw = entry
+                .draft()?
+                .seal(credential.clone(), &entry.public_key)?
+                .encode()?;
+            let mut event = vec![3];
+            bytes(&receipt.key, &mut event);
+            bytes(&credential, &mut event);
+            bytes(&raw, &mut event);
+            self.journal.append(&event)?;
+        }
+        Ok(VersionReceipt {
+            key: receipt.key.clone(),
+            credential,
+            commitment: receipt.commitment,
+        })
+    }
+    pub fn refined_capsule(&self, receipt: &VersionReceipt) -> Result<Vec<u8>> {
+        let entry = self
+            .journal
+            .state()
+            .entries
+            .get(&receipt.key)
+            .ok_or_else(|| bad("refined receipt scope"))?;
+        if entry.commitment != receipt.commitment {
+            return Err(bad("refined semantic scope"));
+        }
+        let version = entry
+            .refinements
+            .get(&receipt.credential)
+            .ok_or_else(|| bad("refined credential scope"))?;
+        Ok(version
+            .final_capsule
+            .as_ref()
+            .unwrap_or(&version.capsule)
+            .clone())
+    }
+    pub fn attach_refined_outer(
+        &mut self,
+        receipt: &VersionReceipt,
+        credential: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        let entry = self
+            .journal
+            .state()
+            .entries
+            .get(&receipt.key)
+            .ok_or_else(|| bad("refined outer scope"))?;
+        if entry.commitment != receipt.commitment {
+            return Err(bad("refined outer semantic scope"));
+        }
+        let version = entry
+            .refinements
+            .get(&receipt.credential)
+            .ok_or_else(|| bad("refined outer credential scope"))?;
+        if let Some(raw) = &version.final_capsule {
+            return Ok(raw.clone());
+        }
+        let mut event = vec![4];
+        bytes(&receipt.key, &mut event);
+        bytes(&receipt.credential, &mut event);
+        bytes(&credential, &mut event);
+        self.journal.append(&event)
+    }
+    /// Return an EXACT retained version named by actual source readback bytes;
+    /// this equality check does not itself authenticate that source receipt.
+    pub fn retained_capsule(&self, receipt: &DraftReceipt, exact: &[u8]) -> Result<Vec<u8>> {
+        let entry = self
+            .journal
+            .state()
+            .entries
+            .get(&receipt.key)
+            .ok_or_else(|| bad("retained version scope"))?;
+        if entry.commitment != receipt.commitment {
+            return Err(bad("retained version semantic scope"));
+        }
+        let old = entry.final_capsule.as_ref().or(entry.capsule.as_ref());
+        if old.is_some_and(|raw| raw == exact) {
+            return Ok(exact.to_vec());
+        }
+        for version in entry.refinements.values() {
+            if version.final_capsule.as_ref().unwrap_or(&version.capsule) == exact {
+                return Ok(exact.to_vec());
+            }
+        }
+        Err(bad("source selected capsule was never retained"))
     }
     /// Bind every retained ciphertext to the ACTUAL recursive protocol outbox,
     /// in its original order, before constructing a progress witness. Source
@@ -518,6 +714,172 @@ mod tests {
     }
     fn contains(hay: &[u8], needle: &[u8]) -> bool {
         hay.windows(needle.len()).any(|w| w == needle)
+    }
+    #[test]
+    fn explicit_pre_admission_refinement_retains_original_and_every_version_after_restart() {
+        let keys = crypto_transit::generate_keypair().unwrap();
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let spec = spec(&keys.public);
+        let path = path("refinement");
+        let message = vec![42; 32];
+        let (old, new, semantic);
+        {
+            let mut wal = Store::open(&path, b"party-1", 2).unwrap();
+            let draft = wal
+                .prepare(
+                    p.clone(),
+                    7,
+                    message.clone(),
+                    spec.clone(),
+                    keys.public.clone(),
+                )
+                .unwrap();
+            semantic = draft.semantic_commitment();
+            wal.seal(&draft, vec![1; 32]).unwrap();
+            old = wal.attach_outer(&draft, vec![2; 32]).unwrap();
+            let version = wal.refine_inner(&draft, vec![3; 32]).unwrap();
+            new = wal.attach_refined_outer(&version, vec![4; 32]).unwrap();
+            assert_ne!(old, new);
+            let mut original = SealedIngress::decode(&old).unwrap();
+            original.outer_native_credential.clear();
+            assert_eq!(
+                wal.seal(&draft, vec![3; 32]).unwrap(),
+                original.encode().unwrap()
+            );
+        }
+        let mut wal = Store::open(&path, b"party-1", 2).unwrap();
+        let draft = wal
+            .prepare(
+                p.clone(),
+                7,
+                message.clone(),
+                spec.clone(),
+                keys.public.clone(),
+            )
+            .unwrap();
+        assert_eq!(draft.semantic_commitment(), semantic);
+        let version = wal.refine_inner(&draft, vec![3; 32]).unwrap();
+        assert_eq!(
+            wal.attach_refined_outer(&version, vec![99; 32]).unwrap(),
+            new
+        );
+        for (raw, cred) in [(&old, vec![1; 32]), (&new, vec![3; 32])] {
+            assert_eq!(wal.retained_capsule(&draft, raw).unwrap(), *raw);
+            let c = SealedIngress::decode(raw).unwrap();
+            let opened = c.open(&keys.secret, &keys.public, &p, 7, &spec).unwrap();
+            assert_eq!(opened.inner().message, message);
+            assert_eq!(opened.inner().credential, cred);
+            assert_eq!(opened.semantic_commitment(), semantic);
+        }
+        for id in 5..=11 {
+            wal.refine_inner(&draft, vec![id; 32]).unwrap();
+        }
+        assert!(wal.refine_inner(&draft, vec![12; 32]).is_err());
+        assert!(wal.retained_capsule(&draft, &[0; 32]).is_err());
+        let changed = wal.prepare(p, 7, vec![43; 32], spec, keys.public);
+        assert!(changed.is_err());
+    }
+    #[test]
+    fn actual_durable_draft_inner_marker_survives_seal_and_restart_without_plaintext() {
+        let kp = crypto_transit::generate_keypair().unwrap();
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let sp = spec(&kp.public);
+        let private = b"PRIVATE_LOW_ENTROPY_RESULT_00000001".to_vec();
+        let wp = path("inner-marker");
+        let (public, marker, sealed);
+        {
+            let mut wal = Store::open(&wp, b"party-1", 4).unwrap();
+            let r = wal
+                .prepare(p.clone(), 7, private.clone(), sp.clone(), kp.public.clone())
+                .unwrap();
+            public = r.public_draft();
+            marker = r.inner_native_marker();
+            assert_eq!(public.inner_native_marker(), marker);
+            assert_eq!(
+                recipient_seal::DraftPublic::decode(&public.encode().unwrap()).unwrap(),
+                public
+            );
+            assert!(!contains(&public.encode().unwrap(), &private));
+            assert!(!contains(&marker, &private));
+            sealed = wal.seal(&r, vec![1; 32]).unwrap();
+        }
+        let mut wal = Store::open(&wp, b"party-1", 4).unwrap();
+        let r = wal
+            .prepare(p.clone(), 7, private.clone(), sp.clone(), kp.public.clone())
+            .unwrap();
+        assert_eq!(r.public_draft(), public);
+        assert_eq!(wal.seal(&r, vec![2; 32]).unwrap(), sealed);
+        let c = SealedIngress::decode(&sealed).unwrap();
+        assert!(public.matches_capsule(&c));
+        let opened = c.open(&kp.secret, &kp.public, &p, 7, &sp).unwrap();
+        assert_eq!(c.inner_native_marker(), marker);
+        assert_eq!(opened.inner_native_marker(), marker);
+        let mut g = vec![];
+        p.context.generation.put(&mut g);
+        let request = crate::source_endpoint::RequestClaim {
+            candidate_bytes: vec![3],
+            participant: Nat::new(2),
+            full_generation_bytes: g,
+            manifest_root: Nat::new(8),
+            raw_carrier: sealed.clone(),
+        };
+        let inner = crate::source_endpoint::InnerCredentialRequest::from_opened(
+            &request,
+            &opened,
+            Nat::from_be(&[255; 32]),
+            vec![9; 32],
+        )
+        .unwrap();
+        assert_eq!(inner.credential, opened.inner().credential);
+        assert_eq!(
+            crate::source_endpoint::InnerCredentialRequest::decode(&inner.encode().unwrap())
+                .unwrap(),
+            inner
+        );
+        assert!(!contains(&inner.encode().unwrap(), &private));
+        let mut wrong = request.clone();
+        wrong.raw_carrier.push(0);
+        assert!(crate::source_endpoint::InnerCredentialRequest::from_opened(
+            &wrong,
+            &opened,
+            Nat::new(0),
+            vec![9]
+        )
+        .is_err());
+        let mut wrong = request.clone();
+        wrong.full_generation_bytes.push(0);
+        assert!(crate::source_endpoint::InnerCredentialRequest::from_opened(
+            &wrong,
+            &opened,
+            Nat::new(0),
+            vec![9]
+        )
+        .is_err());
+        let mut bytes = inner.encode().unwrap();
+        bytes.push(0);
+        assert!(crate::source_endpoint::InnerCredentialRequest::decode(&bytes).is_err());
+
+        assert!(!contains(&marker, &opened.inner().signing_bytes()));
+        assert!(!contains(&public.encode().unwrap(), opened.hiding_nonce()));
+        for tag in 0..5 {
+            let mut changed = public.clone();
+            match tag {
+                0 => changed.party.party += 1,
+                1 => changed.sequence += 1,
+                2 => changed.semantic_commitment[0] ^= 1,
+                3 => changed.recipient.key_epoch = Nat::new(4),
+                _ => changed.party.context.protocol = Protocol::Dzk,
+            }
+            assert!(!changed.matches_capsule(&c));
+            if tag != 3 {
+                assert_ne!(changed.inner_native_marker(), marker);
+            }
+        }
+        let mut suffix = public.encode().unwrap();
+        suffix.push(0);
+        assert!(recipient_seal::DraftPublic::decode(&suffix).is_err());
+        assert!(SealedIngress::decode(&public.encode().unwrap()).is_err());
+        assert!(recipient_seal::DraftPublic::decode(&sealed).is_err());
     }
     #[test]
     fn real_recipient_capsule_rejects_wrong_key_epoch_party_sequence_and_tamper() {

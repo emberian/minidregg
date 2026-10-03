@@ -76,9 +76,9 @@ refusal after the lifetime bound. No coordinator decrypts state; only the owning
 conformance parent decodes its privately known outputs. This is not durable Mini
 installation/release, fee idempotence or persistent key recovery.
 
-Resident-owner join source (pending native qualification): optional --governed SOURCE_ARTIFACT DRIVER DRIVER_SHA256 NATIVE_SESSION_CONFIG invokes the deployment-pinned current-authority driver before each decode. SOURCE_ARTIFACT is native BendWorldProgramCodec bytes, distinct from constructive compiler JSON. Driver prepares actual source/context IDs before execution; ten declared capacity lanes remain opaque provenance and do not replace actual ordinary storage charge. commit-release verifies current canonical publication, permissions, durable storage and release journal, then returns exact full retained Completion bytes. Failure/uncertainty/different bytes aborts before decrypt. There is no mock receipt or driver. Native context, key registration and repeated nonce/generation progression remain world-owned qualification obligations. Trusted deployment executable paths are outside attacker-controlled input; hostile local OS/executable replacement is outside this adapter trust model.
+Resident-owner join (source-qualified; shared native journey pending): optional --governed SOURCE_ARTIFACT DRIVER DRIVER_SHA256 NATIVE_SESSION_CONFIG invokes the deployment-pinned current-authority driver before each decode. SOURCE_ARTIFACT is native BendWorldProgramCodec bytes, distinct from constructive compiler JSON. Driver prepares actual source/context IDs before execution; ten declared capacity lanes remain opaque provenance and do not replace actual ordinary storage charge. commit-release verifies current canonical publication, permissions, durable storage and release journal, then returns exact full retained Completion bytes. Failure/uncertainty/different bytes aborts before decrypt. There is no mock receipt or driver. Native context, key registration and receipt-backed repeated nonce/generation progression are source-qualified in this consumer; matched shared Host/client deployment and actual journey remain required. Trusted deployment executable paths are outside attacker-controlled input; hostile local OS/executable replacement is outside this adapter trust model.
 
-The confirmed native driver sequence is:
+The source-owned native driver command sequence is:
 1. register-key SOURCE_ARTIFACT OWNER_PUBLIC_MANIFEST SESSION_CONFIG KEY_RECORD
 2. prepare-context SOURCE_ARTIFACT COMPILER_ARTIFACT KEY_RECORD SESSION_CONFIG CONTEXT
 3. commit-release SOURCE_ARTIFACT COMPILER_ARTIFACT KEY_RECORD REQUEST COMPLETION SESSION_CONFIG RELEASED_COMPLETION
@@ -89,7 +89,7 @@ does not prove key relation, ciphertext input domain or short noise. The actual
 native driver remains a separate qualification obligation.
 
 
-Generic natural-expression extension (source authored, not compiled or executed):
+Qualified bounded natural-expression consumer:
 The public-natural-expression.v1 compiler producer uses exact captured source
 Book/entry and a reusable input/literal/add expression grammar, with the same
 signed constructive DAG and independent natural-expression owner oracle.
@@ -131,3 +131,12 @@ unqualified. A depth integer is only structural lineage, never inherited noise.
 The add-only natural profile is fresh-input-only with conditional coefficient
 bound3,276,820 and recurrence Badd=Bleft+Bright+1; doubleSum bound13,107,283.
 Persistent ctct inputs do not acquire that bound from an opaque native receipt.
+
+Actual October3 resumed evidence:
+- check-numeric-physical-01 passed the qualified numeric artifact866e18d8 and PreludeMuxd158cff5, all4096 SIMD slots/source oracle/public ciphertext replay/refusers; mux consumed actual encrypted predecessor at lifetime2 and refused third use.
+- Owner-local unsafe vendor measure_noise strict-margin assertions ran for fresh inputs, output and repeated mux result. No diagnostic values or decrypt endpoint are public; this is sampled implementation conformance, not universal noise/scaler/NTT or classical/PQ security evidence.
+- Manifest natural profile/parser, canonical native Artifact production+actual source/Book/entry/plan/carrier/codec/disclosure/fuel/return-envelope/backend/compiler-byte refusers, and Driver/Cursor/Json all compile in bounded warm checks. Native source publication inspection uses exact Lean codec/digest functions. Nat authored arithmeticEntry doubleSum and native generated entry worldDoubleSum stay distinct.
+- check-native-session.py is authored syntax-checked, unexecuted. It requires matching actual Host and client, source-derived real genesis, actual owner signatures/current content births/source publication/key registration/read/store/return release/readback/retry. Zero monetary tariff/balance and private fresh evidence directory; no fabricated receipts or live assets. A resident two-stage mux retries the latest completed original stage. It is opaque custody plus physical replay; no accepted typed computation or compute tariff reservation.
+- Secret BFV key remains process-resident. Durable ciphertext custody does not imply restart-recoverable secret-key custody. Actual inherited noise/domain proof remains conditional; depth is never freshness.
+
+Local crash-recovery files have a separate bounded 8 MiB capacity because an exact mux attempt retains the request, registered key, canonical candidate and signed storage command. Public ingress remains capped at 2 MB, and the full opaque return envelope remains 512 KiB. The actual retention regression accepts an exact 2.1 MB local record, rejects it at public ingress, and rejects oversized recovery writes before producing final or pending files. Recovery records are not authority; current native admission and original verified receipts still decide.

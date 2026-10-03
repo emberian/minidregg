@@ -1,0 +1,71 @@
+Bend proof construction r33 — 2026-10-03
+
+Actual new results
+
+1. Compiler/BendCommittedUnroll.accepted_run is a general theorem over arbitrary
+satisfying field assignments to ONE shared execution/commitment graph. With
+independently pinned actual inputs, checked structural wire bounds, public
+success fixed to one, and the generated network's validity, it derives every
+unrolled controller tick (AcceptedRun), the embedded commitment graph, and
+commitment validity. It does not assume an honest generated witness.
+
+2. Compiler/BendCommittedPreparation.prepare_exact proves that the actual
+successful prepare constructor returns the generated candidate.
+prepare_payload_aliases proves that this returned candidate's commitment
+payload inputs are exactly the selected execution wires. A caller's arbitrary
+structural certificate is not substituted for the actual producer.
+
+3. Protocol V5 adds a cSHAKE256 digest of the independently supplied descriptor
+bytes to the initial transcript. Domain, exact u64 byte length, and all 32 digest
+bytes are absorbed without reduction into fewer field elements. The public
+capacity and all prior parameters remain bound. The version is explicit:
+mini-bend-ir2-hiding-experimental-p3-82cfad73-artifact-cshake-v5
+
+The constructor for_capacity preserves V4 for prior regressions. The offline
+CLI now uses for_artifact and reports V5. The archived V4 evidence is historical
+V4 evidence; it has not been relabelled as a V5 result.
+
+The actual new artifact-binding test passed in 0.102 seconds. It first verifies
+a proof under a descriptor with altered whitespace using the original
+transcript seed (establishing that the parsed AIRs remain equivalent for this
+proof), then rejects under the independently recomputed altered-artifact seed.
+It also rejects the proof under V4. This is meaningful computational artifact
+binding, NOT an unconditional injective map from all descriptors to a 256-bit
+root, and NOT a proof of source authenticity or Fiat-Shamir soundness.
+
+The actual full-controller/private-salt/shared-final-state commitment test was
+rerun specifically because the protocol changed. It passed under V5 in
+67.837 seconds, including changed initial input, success and digest refusals.
+The graph and fixture are unchanged from r32: 240840 gates, 241147 arithmetic
+columns, 301 public pins. No Lean fixture rerun was needed. The payload remains
+the explicitly diagnostic padded raw-state codec, not the world's Result.
+
+Dependency change: tiny-keccak 2.0.2 with cshake feature is a new direct edge to
+an already pinned package. Cargo.lock changes only that root dependency edge;
+no package version or git revision changed. P3 remains 82cfad73. This compiler
+and native library code remain part of the trust boundary.
+
+Reproduce the new focused native test using the checked tiny IR2 fixture:
+BEND_IR2_FIXTURE=PRIVATE_FIXTURE_DIR cargo nextest run --release --locked \
+  --offline --test artifact_binding \
+  -E 'test(exact_artifact_profile_rejects_semantically_equal_changed_bytes)'
+
+The r32 controller_commitment heavy test and fixture commands now exercise V5.
+Do not run the whole suite to repeat these checks; generated salt, witnesses
+and proof transcripts stay in owned private directories.
+
+Remaining consequential boundaries
+
+Native PCS verification => formal arithmetic acceptance is not proved.
+Full quotient/FRI/Merkle adaptive transcript hiding and real Fiat-Shamir/QROM
+soundness are not proved. Fixed-observation polynomial couplings, capacity
+checks, full-degree challenge conditioning and successful proof tests do not
+supply those missing theorems. No instantiated 128-bit/PQ security claim.
+
+Actual raw controller conformance and complete reachable source coverage
+remain separate producer obligations. The newer Objective language edition
+needs its own semantics/refinement. Canonical frame/Keccak circuits have real
+native conformance tests; a universal byte-level Keccak refinement remains
+open. The actual world Accepted token's independently derived input/Result/
+effects/charge codec and disclosure authorization have not yet replaced the
+diagnostic raw-state statement. Existing reexecution admission is unchanged.

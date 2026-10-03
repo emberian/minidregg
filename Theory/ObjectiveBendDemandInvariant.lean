@@ -848,22 +848,44 @@ def FinalStackInvariant (state : State) : Prop :=
   | start => exact initial_finalStackInvariant _
   | next _ ih => exact stepRaw_finalStackInvariant ih
 
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_lexicalInvariant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_lexicalInvariant' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms stepRaw_lexicalInvariant
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_preservesOrigins' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_preservesOrigins' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms stepRaw_preservesOrigins
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_preservesCached' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_preservesCached' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms stepRaw_preservesCached
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_busyInvariant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_busyInvariant' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms stepRaw_busyInvariant
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_finalStackInvariant' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.stepRaw_finalStackInvariant' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms stepRaw_finalStackInvariant
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.reachable_no_internalRefusal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandInvariant.reachable_no_internalRefusal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms reachable_no_internalRefusal
 

@@ -36,6 +36,7 @@ use std::process::{Command, Stdio};
 pub(crate) mod law;
 mod template;
 mod doc_render;
+pub(crate) mod session_fs;
 
 pub(crate) const EXIT_OK: i32 = 0;
 pub(crate) const EXIT_CLIENT: i32 = 1;
@@ -1047,10 +1048,7 @@ fn json_argument(session: &Session, word: &str, label: &str) -> std::result::Res
     let text = if let Some(file) = word.strip_prefix('@') {
         session_file(file, label)?;
         let path = session.home.join("requests").join(file);
-        let mut bytes = Vec::new();
-        fs::File::open(&path)
-            .and_then(|f| f.take(1 << 20).read_to_end(&mut bytes))
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let bytes = session_fs::read(&session.home, &path, 1 << 20)?;
         String::from_utf8(bytes).map_err(|_| format!("{label} file is not UTF-8"))?
     } else {
         word.to_owned()
@@ -1069,10 +1067,7 @@ fn law_argument(session: &Session, words: &[String]) -> std::result::Result<Valu
         if let Some(file) = word.strip_prefix('@') {
             session_file(file, "law")?;
             let path = session.home.join("requests").join(file);
-            let mut bytes = Vec::new();
-            fs::File::open(&path)
-                .and_then(|f| f.take(1 << 20).read_to_end(&mut bytes))
-                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let bytes = session_fs::read(&session.home, &path, 1 << 20)?;
             let text = String::from_utf8(bytes).map_err(|_| "law file is not UTF-8".to_string())?;
             if text.trim_start().starts_with('{') {
                 return serde_json::from_str(&text).map_err(|e| format!("law file is not JSON: {e}"));

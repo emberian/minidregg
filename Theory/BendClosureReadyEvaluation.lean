@@ -60,7 +60,7 @@ theorem ReadyState.reference {book : Book} (limits : Limits) (library : Library)
           heap _ found (.closure exactRef captured.denotes) cache allocated
         rw [step_reference limits library state pc environment index pointer heap control found allocated]
         exact ReadyState.exact
-          (.unspine (.reference headRow exactRef newCaptured) (.retained retained) .nil rfl .nil)
+          (.unspine (.head (.reference headRow exactRef newCaptured)) (.retained retained) .nil rfl .nil)
           (stack.extends extension) certified (extension 0 .nil empty)
           (by intro result impossible; cases impossible)
 

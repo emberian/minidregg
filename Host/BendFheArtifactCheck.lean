@@ -1,6 +1,7 @@
 /- Real compiler artifact to native canonical producer conformance.
 These runtime refusers exercise actual mapping; they are not a crypto proof. -/
 import Host.BendFheArtifact
+import Kernel.BendSourcePublication
 
 namespace Minidregg.Host.BendFheArtifactCheck
 open Minidregg.Compiler
@@ -23,8 +24,7 @@ def refuse (label : String) (artifact : BendWorldProgramCodec.Artifact)
 def run (args : List String) : IO Unit := do
   let (compilerPath,checker,elaborator,kernel,implementation,base,output) ← match args with
     | [a,b,c,d,e,f,g] => pure (a,b,c,d,e,f,g)
-    | _ => throw <| IO.userError
-        "expected compiler checker elaborator kernel compiler-closure base native-artifact-output"
+    | _ => throw <| IO.userError "expected compiler checker elaborator kernel compiler-closure base native-artifact-output"
   let compiler ← bytes compilerPath
   let tools : ToolBytes := {
     checker := ← bytes checker, elaborator := ← bytes elaborator,
@@ -33,30 +33,34 @@ def run (args : List String) : IO Unit := do
   let encoded := BendWorldProgramCodec.encode artifact
   unless BendWorldProgramCodec.decode encoded == some artifact do
     throw <| IO.userError "canonical Artifact roundtrip failed"
-  refuse "source" { artifact with source :=
-    { artifact.source with modules := artifact.source.modules.map
-      (fun m => if m.name == "CapturedSource" then { m with bytes := m.bytes ++ [10] } else m) } } compiler
-  refuse "surface-method" { artifact with source :=
-    { artifact.source with entryDefinition := "missing.source.method" } } compiler
+  let changedModules := artifact.source.modules.map
+    (fun m => if m.name == "CapturedSource" then { m with bytes := m.bytes ++ [10] } else m)
+  let changedSource := { artifact.source with modules := changedModules }
+  refuse "source" { artifact with source := changedSource } compiler
+  refuse "surface-method" { artifact with source := { artifact.source with entryDefinition := "missing.source.method" } } compiler
   refuse "Book" { artifact with book := artifact.book ++ [10] } compiler
   refuse "entry" { artifact with entry := "missing.entry" } compiler
   refuse "plan" { artifact with plan := digest "WRONG" [] } compiler
   refuse "carrier" { artifact with program := { artifact.program with params := [] } } compiler
-  refuse "semantic-profile" { artifact with profile :=
-    { artifact.profile with arithmetic := "unadmitted-arithmetic" } } compiler
-  refuse "input-codec" { artifact with profile :=
-    { artifact.profile with inputCodec := digest "WRONG" [] } } compiler
-  refuse "output-codec" { artifact with profile :=
-    { artifact.profile with outputCodec := digest "WRONG" [] } } compiler
-  refuse "disclosure" { artifact with profile :=
-    { artifact.profile with disclosure := digest "WRONG" [] } } compiler
-  refuse "return-envelope" { artifact with profile :=
-    { artifact.profile with bounds := artifact.profile.bounds.set 8 1 } } compiler
-  refuse "fuel" { artifact with profile :=
-    { artifact.profile with bounds := artifact.profile.bounds.set 7 0 } } compiler
+  refuse "semantic-profile" { artifact with profile := { artifact.profile with arithmetic := "unadmitted-arithmetic" } } compiler
+  refuse "input-codec" { artifact with profile := { artifact.profile with inputCodec := digest "WRONG" [] } } compiler
+  refuse "output-codec" { artifact with profile := { artifact.profile with outputCodec := digest "WRONG" [] } } compiler
+  refuse "disclosure" { artifact with profile := { artifact.profile with disclosure := digest "WRONG" [] } } compiler
+  refuse "return-envelope" { artifact with profile := { artifact.profile with bounds := artifact.profile.bounds.set 8 1 } } compiler
+  refuse "fuel" { artifact with profile := { artifact.profile with bounds := artifact.profile.bounds.set 7 0 } } compiler
   refuse "backend" { artifact with backend := "unadmitted-backend" } compiler
   refuse "changed-compiler-bytes" artifact (compiler ++ [10])
   IO.FS.writeBinFile output ⟨encoded.toArray⟩
+  let inspection := Lean.Json.mkObj [
+    ("schema", .str "dregg.fhe-bend.source-publication-inspection.v1"),
+    ("artifactId", .str (toString (BendWorldProgramCodec.artifactId artifact).value)),
+    ("semanticId", .str (toString (BendWorldProgramCodec.semanticId artifact).value)),
+    ("programId", .str (toString (BendWorldProgramCodec.executionProgramId artifact).value)),
+    ("planId", .str (toString artifact.plan.value)),
+    ("sourceSchema", .str (toString Minidregg.Kernel.BendSourcePublication.schema.value)),
+    ("surfaceDefinition", .str artifact.source.entryDefinition),
+    ("nativeEntry", .str artifact.entry)]
+  IO.FS.writeFile (output ++ ".json") inspection.compress
   IO.println s!"BEND-FHE-ARTIFACT actual source/DAG binding + canonical producer/refusers PASS ({encoded.length} bytes)"
 
 end Minidregg.Host.BendFheArtifactCheck

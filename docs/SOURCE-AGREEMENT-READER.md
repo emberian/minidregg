@@ -38,9 +38,15 @@ Qualification: all thirteen reader r2 producer modules compile to oleans and C a
 immutable receiver373 plus NativeHost7 cohort. The immutable reader-pass-r2/COHORT.json records
 the exact source/C/olean pins. Native reader linking passed. Actual four-store profile/seed probes, wrong-pin
 refusal, direct-reader mutation refusal and operator current-key checks for both
-enrolled subjects passed. The first actual signed four-store source action remains
-a separate pending check. No deployed independent
-four-node network, private custody completion, or indefinite archive lifetime
-claim follows from this local operator.
+enrolled subjects passed. The first genuine signed ordinary birth installed once
+on all four physical source replicas. Its native submit response was lost at the
+180-second wrapper bound; four fresh reader processes recovered identical native
+confirmed/replayed receipts with acceptedCount 1. An independent native fixture
+reopened and replay-verified the complete canonical source prefixes through that
+original call on all four receivers, with the same receipt bytes. The ordinary
+resident consumer recovered its existing resource reference through lookup. This
+qualifies one real agreed source effect and lost-response recovery. No deployed
+independent four-node network, private custody completion, complete review
+workflow, or indefinite archive lifetime claim follows from this local operator.
 
-The read-only four-process recovery probe is testing/probe-source-agreement-readback.py READER STATUS_JSON ORIGINAL_CALL [--expect confirmed|absent] [--accepted-count N]. It sends only native lookup and outcome-inspection requests, compares all four exact canonical native outcomes, and never proposes or installs a transition. The actual pending-call baseline returned identical typed absent from four independently launched native readers; confirmed/restart completion is a separate runtime check.
+The read-only four-process recovery probe is testing/probe-source-agreement-readback.py READER STATUS_JSON ORIGINAL_CALL [--expect confirmed|absent] [--accepted-count N]. It sends only native lookup and outcome-inspection requests, compares all four exact canonical native outcomes, and never proposes or installs a transition. The actual pending-call baseline returned identical typed absent from four independently launched native readers. After native continuation, the confirmed branch passed on four fresh reader processes with acceptedCount 1 and no mutation requests. The independent native full-prefix readback also passed. The source harness completion barrier is being shortened to return immediately after the same four receipt predicates hold, instead of waiting through the remainder of a historical packet batch; latency improvement still requires a new receiving trace.

@@ -117,14 +117,21 @@ def withKey (s : Session) (h : KeyHandle) : Except String Session := do
     throw "key handle resource/subject differs from operator session"
   pure { s with keyRoot := h.root, keyAtom := ⟨BendKeyRecord.keyId h.registered⟩ }
 
-partial def readLoop (input : IO.FS.Handle) (acc : ByteArray := ByteArray.empty) :
-    IO (List UInt8) := do
-  if acc.size > 2000000 then throw (IO.userError "Bend driver file capacity")
-  let chunk ← input.read (min 4096 (2000001 - acc.size)).toUSize
+/-- Public ingress and local recovery have different physical shapes. A mux
+request retains three ciphertexts plus pk/rk; its crash record also retains the
+exact signed storage command and canonical candidate. This larger bound never
+changes the public config, key, request or result admission bounds. -/
+def ingressCapacity : Nat := 2000000
+def retainedCapacity : Nat := 8388608
+partial def readLoop (limit : Nat) (input : IO.FS.Handle)
+    (acc : ByteArray := ByteArray.empty) : IO (List UInt8) := do
+  if acc.size > limit then throw (IO.userError "Bend driver file capacity")
+  let chunk ← input.read (min 4096 (limit + 1 - acc.size)).toUSize
   if chunk.isEmpty then return acc.toList
-  readLoop input (acc ++ chunk)
-def read (path : String) : IO (List UInt8) := do
-  readLoop (← IO.FS.Handle.mk path .read)
+  readLoop limit input (acc ++ chunk)
+def readAtMost (path : String) (limit : Nat) : IO (List UInt8) := do
+  readLoop limit (← IO.FS.Handle.mk path .read)
+def read (path : String) : IO (List UInt8) := readAtMost path ingressCapacity
 def writeFresh (path : String) (bytes : List UInt8) : IO Unit := do
   let file : System.FilePath := path
   if ← file.pathExists then throw (IO.userError "Bend driver output already exists")
@@ -174,7 +181,8 @@ def retainedExists (path : String) : IO Bool := do
 def readRetained (path : String) : IO (List UInt8) := do
   let file : System.FilePath := path
   let pending : System.FilePath := path ++ ".pending"
-  if ← pending.pathExists then read pending.toString else read path
+  if ← pending.pathExists then readAtMost pending.toString retainedCapacity
+  else readAtMost path retainedCapacity
 
 def selectedSession (config : NativeHost.Config) (selected : Config)
     (initial : Session) (signer : Signer) : IO (Except String Session) := do
@@ -189,11 +197,11 @@ def selectedSession (config : NativeHost.Config) (selected : Config)
 /-- Linux hosted deployment: fsync the exact retained bytes before rename,
 then the containing directory. A sync failure produces no native mutation. -/
 def writeRetained (path : String) (bytes : List UInt8) : IO Unit := do
-  unless bytes.length ≤ 2000000 do throw (IO.userError "retained session journal capacity")
+  unless bytes.length ≤ retainedCapacity do throw (IO.userError "retained session journal capacity")
   let file : System.FilePath := path
   let temporary : System.FilePath := path ++ ".pending"
   if ← temporary.pathExists then
-    unless (← read temporary.toString) == bytes do
+    unless (← readAtMost temporary.toString retainedCapacity) == bytes do
       throw (IO.userError "different pending retention requires original receipt reconciliation")
   else IO.FS.writeBinFile temporary ⟨bytes.toArray⟩
   let syncFile ← IO.Process.output { cmd := "sync", args := #["-f",temporary.toString] }

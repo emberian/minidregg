@@ -26,6 +26,10 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   binding={...binding,captureSha256:sha(captureBytes),sourceRequestSha256:capture.requestSha256,edition:capture.edition,sourceEntry:capture.sourceEntry,
    modules:capture.modules.map((m:any)=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256,imports:m.imports}))};
   if(!Array.isArray(request.arguments)||!Array.isArray(request.projections))throw new Error("arguments/projections arrays required");
+  const argumentEncoding=request.argumentEncoding??"legacy-values-v1";
+  if(!["legacy-values-v1","typed-values-v1"].includes(argumentEncoding))throw new Error("unknown preview argument encoding");
+  const argumentsWire=argumentEncoding==="typed-values-v1"?{schema:"dregg.objective-bend.argument-values.v1",values:request.arguments}:request.arguments;
+  binding.argumentEncoding=argumentEncoding;
   const limits={ticks:count(request.limits?.ticks,"ticks",100000),heap:count(request.limits?.heap,"heap",100000),stack:count(request.limits?.stack,"stack",100000)};
   const typeFuel=count(request.limits?.typeFuel,"typeFuel",16384);
   stage="preview-tooling";const toolingBytes=readFileSync(toolingPath),tooling=JSON.parse(toolingBytes.toString());
@@ -36,7 +40,7 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   mkdirSync(outputDirectory,{recursive:true});if(readdirSync(outputDirectory).length)throw new Error("preview output directory must be empty");
   const retainedCapture=resolve(join(outputDirectory,"capture.json"));writeFileSync(retainedCapture,captureBytes,{flag:"wx"});
   const runner=resolve(join(outputDirectory,"source.lean"));stage="objective-core-elaboration";
-  const lowering=child(tooling.bunPath,[tooling.elaboratorPath,retainedCapture,runner,JSON.stringify(request.arguments),JSON.stringify(request.projections),JSON.stringify(limits)]);
+  const lowering=child(tooling.bunPath,[tooling.elaboratorPath,retainedCapture,runner,JSON.stringify(argumentsWire),JSON.stringify(request.projections),JSON.stringify(limits)]);
   writeFileSync(join(outputDirectory,"lowering.json"),lowering,{flag:"wx"});
   const corePath=runner+".core.json",typedPath=runner+".typed.json";const coreBytes=readFileSync(corePath),typedBytes=readFileSync(typedPath),core=JSON.parse(coreBytes.toString()),typed=JSON.parse(typedBytes.toString());
   binding.coreSha256=sha(coreBytes);binding.sourceEntry=core.sourceEntry;

@@ -46,11 +46,18 @@ def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
         | .durable _ => pure ()
         | _ => throw (IO.userError "native participant ingress was not durable")
         replicas := replicas.set! recipient ⟨replica.config,participant⟩
+        -- A source receipt may become available on this very certificate arrival.
+        -- Return before spending the rest of the bounded historical packet batch;
+        -- unsent protocol obligations remain in the durable engine journals.
+        if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
+          return replicas
         later := rest
     for index in List.range replicas.size do
       let some replica := replicas[index]? | throw (IO.userError "replica index")
       let serviced ← service replica.participant 1 4 1
       replicas := replicas.set! index ⟨replica.config,serviced.1⟩
+      if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
+        return replicas
       later := later ++ serviced.2.1
     drive fuel replicas payload later
 

@@ -176,6 +176,7 @@ import Host.FnSelectiveReleaseSourceAuthoring
 import Host.FnSelectiveReleaseFnReceiving
 import Host.FnSelectiveReleaseFnAck
 import Host.Json
+import Host.BendSessionDriverJson
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
@@ -5642,6 +5643,14 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "bend-session", files =>
+          IO.ofExcept (← BendSessionDriverJson.runFiles config configPath files)
+          pure 0
+      | "bend-session-signing-check", [kind,planPath,outputPath] =>
+          let bytes ← BendSessionDriverJson.read planPath
+          let inspection ← IO.ofExcept (← BendSessionDriver.signingInspection config kind bytes)
+          BendSessionDriverJson.writeFresh outputPath inspection.compress.toUTF8.toList
+          pure 0
       | "carry-plan", [requestPath, outputPath] =>
           let operator ← carryOperator settings
           let request ← readCarryJson requestPath

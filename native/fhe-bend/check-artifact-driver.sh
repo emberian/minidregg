@@ -22,7 +22,7 @@ for task_package in "$task_common"/.lake/packages/*; do export LEAN_PATH="$LEAN_
 export LEAN_NUM_THREADS=2
 cd "$task_source"
 task_lean=/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0/bin/lean
-for task_module in Host/BendOwnerManifestJson Host/BendFheArtifact Host/BendFheArtifactCheck Host/BendSessionDriver Host/BendSessionCursor Host/BendSessionDriverJson; do
+for task_module in Host/BendFheArtifactCheck Host/BendSessionDriver Host/BendSessionCursor Host/BendSessionDriverJson; do
  mkdir -p "$task_output/$(dirname "$task_module")"
  "$task_lean" -j 2 "$task_module.lean" -o "$task_output/$task_module.olean"
  printf 'BEND-FHE ARTIFACT/DRIVER PASS %s\n' "$task_module"

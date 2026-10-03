@@ -217,6 +217,17 @@ mod tests {
         Vec<PathBuf>,
     ) {
         let (completed, anchors) = arithmetic_reference::tests::completed(left, right, instance);
+        stores_from_completed(completed, anchors, instance)
+    }
+    fn stores_from_completed(
+        completed: Vec<crate::field_network_layers::LayerEngine>,
+        anchors: Vec<crate::triple_king::tests::AnchorFixture>,
+        instance: u64,
+    ) -> (
+        Vec<Option<Store>>,
+        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<PathBuf>,
+    ) {
         let paths = (0..4)
             .map(|i| path(&format!("{instance}-{i}")))
             .collect::<Vec<_>>();
@@ -273,6 +284,65 @@ mod tests {
                     .map(|p| (to, p)),
             );
         }
+    }
+    #[test]
+    fn actual_lean_compiler_addition_graph_private_result_and_recipient_recovery() {
+        let bytes = include_bytes!("../fixtures/addition-network-2-plan.bin");
+        let fixture = crate::circuit_batch::Plan::decode(bytes).unwrap();
+        assert_eq!(fixture.encode(), bytes);
+        assert_eq!(fixture.network.input_count, 4);
+        assert_eq!(fixture.network.gates.len(), 11);
+        assert_eq!(fixture.network.outputs, vec![6, 11, 14]);
+        assert_eq!(fixture.public_ticks, 1);
+        assert_eq!(fixture.rows.len(), 4);
+        let network = crate::field_network::with_boolean_inputs(&fixture.network).unwrap();
+        assert_eq!(network.gates.len(), 20);
+        let (completed, anchors) =
+            arithmetic_reference::tests::completed_network(3, 3, 84, network, bytes);
+        let (mut stores, anchors, paths) = stores_from_completed(completed, anchors, 84);
+        let mut q = VecDeque::new();
+        for (i, s) in stores.iter_mut().enumerate() {
+            q.extend(
+                s.as_mut()
+                    .unwrap()
+                    .start()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        assert!(stores
+            .iter()
+            .all(|s| s.as_ref().unwrap().state().result().is_none()));
+        // Explicit reference environment release request. Native current
+        // audience/AppliedReady admission remains independently required.
+        for (i, s) in stores.iter_mut().enumerate() {
+            q.extend(
+                s.as_mut()
+                    .unwrap()
+                    .request_delivery()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        let state = stores[1].as_ref().unwrap().state();
+        let g = state.generation().clone();
+        let context = state.context();
+        assert_eq!(state.result().unwrap().bits(), &[false, true, true]);
+        assert!(stores
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 1)
+            .all(|(_, s)| s.as_ref().unwrap().state().result().is_none()));
+        drop(stores[1].take());
+        let recovered = Store::reopen(&paths[1], &g, context, 1, 1, anchors[1].socket()).unwrap();
+        assert_eq!(
+            recovered.state().result().unwrap().bits(),
+            &[false, true, true]
+        );
     }
     #[test]
     fn actual_shared_addition_private_result_and_pending_then_completed_recovery() {

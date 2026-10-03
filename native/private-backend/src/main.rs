@@ -6,7 +6,11 @@ use std::{
 };
 fn main() {
     if let Err(e) = run() {
-        eprintln!("private-backend: REFUSED {e}");
+        if std::env::args().nth(1).as_deref() == Some("worker") {
+            eprintln!("private-backend: REFUSED native worker");
+        } else {
+            eprintln!("private-backend: REFUSED {e}");
+        }
         std::process::exit(1);
     }
 }
@@ -34,6 +38,13 @@ fn run() -> std::io::Result<()> {
    if frames[0]!=Journal::default().encode()||frames[1]!=request(&id,&g,Purpose::HolderPad)||frames[2]!=journal.encode()||frames[3]!=expected.encode(){return Err(bad("native/Rust canonical bytes differ"));}
    if parse_request(&frames[1])?!=(id,g,Purpose::HolderPad)||Journal::decode(&frames[2])?!=journal||mini_private_backend::allocation_receipt::AllocationReceipt::decode(&frames[3])?!=expected{return Err(bad("native/Rust decoded values differ"));}
    println!("PRIVATE-BACKEND NATIVE/RUST WIRE PASS (four canonical frames, arbitrary Nat digests)");Ok(())
+  }
+  Some("worker") if a.len()==3=>{
+   let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
+   let mut input=vec![];std::io::stdin().take(MAX as u64+1).read_to_end(&mut input)?;
+   let dispatch=mini_private_backend::native_worker::DispatchClaim::decode(&input)?;
+   let pending=mini_private_backend::native_worker::receive(&config,&dispatch)?;
+   std::io::stdout().write_all(&pending)?;Ok(())
   }
   Some("anchor") if a.len()==4=>run_anchor(Path::new(&a[2]),Path::new(&a[3])),
   Some("provision-test") if a.len()==4=>{

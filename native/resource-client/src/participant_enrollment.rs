@@ -208,7 +208,7 @@ fn retained_request(directory: &Path, expected: &Value) -> Result<Value> {
 
 pub(crate) fn transform(
     host: &Path,
-    socket: &Path,
+    _socket: &Path,
     config: &Path,
     operation: u8,
     kind: Option<&str>,
@@ -230,13 +230,18 @@ pub(crate) fn transform(
             .ok_or("enrollment output lacks file name")?
             .to_string_lossy()
     ));
+    let local = crate::client_consent::codec_frame(host, config, operation, &payload)?;
     let frame = if frame_path.exists() {
-        bounded(&frame_path, transport::HOST_MAX_FRAME)?
+        let retained = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
+        if retained != local {
+            return Err("retained enrollment codec frame differs from local native derivation".into());
+        }
+        retained
     } else {
         if output.exists() {
             return Err("enrollment output exists without its retained Host frame".into());
         }
-        let frame = session_invoke(host, socket, config, operation, &payload)?;
+        let frame = local;
         retain_exact(&frame_path, &frame)?;
         frame
     };
@@ -279,8 +284,15 @@ pub(crate) fn staged_invoke(
     payload: &[u8],
 ) -> Result<Vec<u8>> {
     let frame_path = directory.join(format!("{stem}.frame"));
+    let local_codec = matches!(operation, 7 | 8 | 9 | 10 | 11);
     let frame = if frame_path.exists() {
         let retained = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
+        if local_codec {
+            let current = crate::client_consent::codec_frame(host, config, operation, payload)?;
+            if current != retained {
+                return Err("retained enrollment codec frame differs from local native derivation".into());
+            }
+        }
         if operation == 86 || operation == 92 {
             let current =
                 session_invoke(host, socket, config, operation, payload).map_err(|error| {
@@ -295,7 +307,11 @@ pub(crate) fn staged_invoke(
         if directory.join(format!("{stem}.bin")).exists() {
             return Err("enrollment body exists without its retained Host frame".into());
         }
-        session_invoke(host, socket, config, operation, payload)?
+        if local_codec {
+            crate::client_consent::codec_frame(host, config, operation, payload)?
+        } else {
+            session_invoke(host, socket, config, operation, payload)?
+        }
     };
     retained_frame(directory, stem, &frame, operation)
 }
@@ -531,7 +547,8 @@ pub(crate) fn signed_factory_observation(
         &input.directory.join("query.json"),
         &input.directory.join("query.bin"),
     )?;
-    let query_bytes = private_bytes(&input.directory.join("query.bin"), LIMIT)?;
+    let query_bytes = crate::client_consent::intent(input.host, input.config,
+        &input.directory.join("query.bin"), signing)?;
     let observation = input.directory.join("observation");
     match fs::DirBuilder::new().mode(0o700).create(&observation) {
         Ok(()) => (),
@@ -543,6 +560,8 @@ pub(crate) fn signed_factory_observation(
     // Op 4 is authenticated before the Host reads the factory: the intent's bytes
     // and the sponsor's signature over them, in the session's pair framing.
     let intent_signature = signing.sign(&query_bytes).to_bytes();
+    let intent_signature_path = observation.join("intent-signature.bin");
+    retain_exact(&intent_signature_path, &intent_signature)?;
     let length: u32 = query_bytes.len().try_into().map_err(|_| "factory intent too large")?;
     let mut request = length.to_le_bytes().to_vec();
     request.extend_from_slice(&query_bytes);
@@ -564,7 +583,9 @@ pub(crate) fn signed_factory_observation(
         &observation.join("challenge.bin"),
         &observation.join("challenge.json"),
     )?;
-    let headers = challenge_headers(&challenge_json)?;
+    let headers = crate::client_consent::observation(input.host, input.config,
+        &input.directory.join("query.bin"), &intent_signature_path,
+        &observation.join("challenge.bin"), signing)?;
     if headers.is_empty() {
         return Err("factory observation has no signing header".into());
     }
@@ -1032,7 +1053,13 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
     {
         return Err("enrollment Plan does not name this key at the expected home subject".into());
     }
-    let header = decode_hex(field(&plan_view, "possessionHeader")?)?;
+    let candidate = decode_hex(field(&plan_view, "possessionHeader")?)?;
+    let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
+    if field(&command_view, "canonical")? != hex(&command) {
+        return Err("enrollment possession command differs from retained bytes".into());
+    }
+    let header = crate::client_consent::possession(Path::new(""), &directory.join("config.json"),
+        &command, &subject, &signing, &candidate)?;
     let signature = signing.sign(&header).to_bytes();
     create_private(output, &signature)?;
     sync_directory_ancestors(output.parent().ok_or("possession output lacks parent")?)?;
@@ -1512,6 +1539,9 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     if fresh != plan_view {
         return Err("enrollment Plan inspection changed before signing".into());
     }
+    let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
+    crate::client_consent::operator_plan(&pin.host, &pin.config, 86,
+        &pair(&observation, &pin.command)?, &pin.plan)?;
     let sponsor_header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
     let possession_header = decode_hex(field(&plan_view, "possessionHeader")?)?;
     let sponsor = key(&pin.sponsor_key)?;

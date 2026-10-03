@@ -27,6 +27,7 @@ structure Action where
   sourceLimits : BendRunCore.Limits
   response : BendClosureResponse.ABI
   signature : BendActivitySegment.TypePin
+  homeProjectionBytes : Option (List UInt8)
   applicationSignedBytes : List UInt8
   controlSignedBytes : List UInt8
 
@@ -42,12 +43,13 @@ def actionStream : StreamCodec Action :=
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
         (StreamCodec.product limitsStream (StreamCodec.product BendActivity.abiStream
           (StreamCodec.product BendActivitySegment.typePinStream
-            (StreamCodec.product bytesStream bytesStream))))))))
+            (StreamCodec.product (StreamCodec.option bytesStream)
+              (StreamCodec.product bytesStream bytesStream)))))))))
     (fun a => (a.program,a.generation,a.ordinal,a.decodeTicks,a.sourceLimits,a.response,
-      a.signature,a.applicationSignedBytes,a.controlSignedBytes))
-    (fun (p,g,o,d,l,r,s,a,c) => ⟨p,g,o,d,l,r,s,a,c⟩) (by intro a; cases a; rfl)
+      a.signature,a.homeProjectionBytes,a.applicationSignedBytes,a.controlSignedBytes))
+    (fun (p,g,o,d,l,r,s,h,a,c) => ⟨p,g,o,d,l,r,s,h,a,c⟩) (by intro a; cases a; rfl)
 
-def frame : List UInt8 := "DREGG/BEND/ACTIVITY-PENDING/v1".toUTF8.toList
+def frame : List UInt8 := "DREGG/BEND/ACTIVITY-PENDING/v2".toUTF8.toList
 def encode (action : Action) : List UInt8 := frame ++ actionStream.encode action
 def decode (bytes : List UInt8) : Option Action := NockProgramCodec.framedDecode frame actionStream bytes
 
@@ -62,7 +64,8 @@ ordinal is the actual successor phase, while the complete preparation parameters
 remain signed without recursively including either signature. -/
 def applicationContext (pin : ContentControlFrame.Pin) (action : Action) : List UInt8 :=
   BendActivityDispatchContext.encode ⟨pin,action.generation,action.ordinal + 1,
-    actionStream.encode {action with applicationSignedBytes := [], controlSignedBytes := []}⟩
+    actionStream.encode {action with applicationSignedBytes := [], controlSignedBytes := []},
+    action.homeProjectionBytes⟩
 
 def overhead (action : Action) : Charge
   | .turnBytes => (encode action).length
@@ -102,6 +105,7 @@ structure Admitted (config : Config) (opened : Opened config) where
   current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) = some before
   prepared : BendActivitySuspension.Prepared program before action.sourceLimits action.response action.signature
   application : Application config.deployment.domain config.profile.semantics action.applicationSignedBytes
+  familyExact : application.command.family = some ⟨.activityDispatch,applicationContext pin action⟩
   control : BendActivityIngress.Current config opened
   applicationBytes : action.applicationSignedBytes =
     signedBytes config.deployment.domain config.profile.semantics application.signed
@@ -132,35 +136,36 @@ def construct {config : Config} {opened : Opened config}
     (program : BendActivityProgram.Prepared action.program)
     (application : Application config.deployment.domain config.profile.semantics action.applicationSignedBytes)
     (control : BendActivityIngress.Current config opened) : Option (Admitted config opened) := do
-  if application.command.family != some ⟨.activityDispatch,applicationContext pin action⟩ ||
-      control.command.subject != pin.owner || control.command.nonce != nonce action ||
-      control.command.targets.length != 1 ||
-      !control.command.targets.all (fun target => decide (target.kind = .object ∧ target.target = pin.cell.value)) then none else do
-   if controlBytes : action.controlSignedBytes = signedBytes config.deployment.domain config.profile.semantics control.signed then
-    match current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) with
-    | none => none
-    | some before =>
-      if before.checkpoint.generation != action.generation || before.ordinal != action.ordinal then none else do
-       let bytes := encode action
-       let base := control.intent
-       let intent : DataIntent ResourceBirthCodec.rootBytes :=
-         {base with nullifiers := BendActivityControl.claim ResourceBirthCodec.rootBytes pin before :: base.nullifiers, exactCharge := base.exactCharge + overhead action, event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
-       if ready : intent.preflight opened.durable.snapshot = .ok () then
-        if otherFacets : config.otherFacetGate .activity opened.durable.snapshot intent = .ok () then
-         let prepared ← BendActivitySuspension.prepare program before action.sourceLimits action.response action.signature action.decodeTicks
-         let identity := digestStream.encode (transactionId config.deployment.domain config.profile.semantics application.command)
-         let pending ← BendActivitySuspension.pendingCandidate prepared pin.cell identity action.applicationSignedBytes
-         if applicationCommand : pending.command = application.command then
-          if post : ∃ write ∈ intent.writes, write.cellId = pin.cell ∧
-              ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode pending.record) then
-            some ⟨action,pin,pinned,program,before,current,prepared,application,control,
-              application.scope,controlBytes,identity,rfl,pending,applicationCommand,
-              intent,rfl,rfl,rfl,rfl,by simp [intent],post,ready,otherFacets⟩
+  if familyExact : application.command.family = some ⟨.activityDispatch,applicationContext pin action⟩ then
+   if control.command.subject != pin.owner || control.command.nonce != nonce action ||
+       control.command.targets.length != 1 ||
+       !control.command.targets.all (fun target => decide (target.kind = .object ∧ target.target = pin.cell.value)) then none else do
+    if controlBytes : action.controlSignedBytes = signedBytes config.deployment.domain config.profile.semantics control.signed then
+     match current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) with
+     | none => none
+     | some before =>
+       if before.checkpoint.generation != action.generation || before.ordinal != action.ordinal then none else do
+        let bytes := encode action
+        let base := control.intent
+        let intent : DataIntent ResourceBirthCodec.rootBytes :=
+          {base with nullifiers := BendActivityControl.claim ResourceBirthCodec.rootBytes pin before :: base.nullifiers, exactCharge := base.exactCharge + overhead action, event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
+        if ready : intent.preflight opened.durable.snapshot = .ok () then
+         if otherFacets : config.otherFacetGate .activity opened.durable.snapshot intent = .ok () then
+          let prepared ← BendActivitySuspension.prepare program before action.sourceLimits action.response action.signature action.decodeTicks
+          let identity := digestStream.encode (transactionId config.deployment.domain config.profile.semantics application.command)
+          let pending ← BendActivitySuspension.pendingCandidate prepared pin.cell identity action.applicationSignedBytes
+          if applicationCommand : pending.command = application.command then
+           if post : ∃ write ∈ intent.writes, write.cellId = pin.cell ∧
+               ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode pending.record) then
+             some ⟨action,pin,pinned,program,before,current,prepared,application,familyExact,control,
+               application.scope,controlBytes,identity,rfl,pending,applicationCommand,
+               intent,rfl,rfl,rfl,rfl,by simp [intent],post,ready,otherFacets⟩
+           else none
           else none
          else none
         else none
-       else none
-   else none
+    else none
+  else none
 
 /-- Reuses the actual native signer/current-controller admission at this loaded
 prefix. The returned Current is not fabricated from signature-shaped bytes. -/

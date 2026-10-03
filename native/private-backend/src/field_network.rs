@@ -180,6 +180,72 @@ pub fn binding_many(
     }
     Ok(b)
 }
+/// Prepend the explicitly counted Boolean qualification network while
+/// preserving original inputs, gate order and outputs. Source/compiler bytes
+/// remain in the approved binding; the complete combined graph must be burned
+/// before any material getter. This does not qualify the inputs by itself.
+pub fn with_boolean_inputs(network: &Network) -> Result<Network> {
+    let n = network.input_count;
+    if n == 0 || n > 65536 {
+        return Err(bad("Boolean input profile"));
+    }
+    let prefix = n
+        .checked_mul(2)
+        .and_then(|n| n.checked_add(1))
+        .ok_or_else(|| bad("Boolean prefix overflow"))?;
+    let count = (network.gates.len() as u64)
+        .checked_add(prefix)
+        .ok_or_else(|| bad("Boolean graph overflow"))?;
+    if count > 65536 {
+        return Err(bad("qualified graph capacity"));
+    }
+    let shift = |wire: u64| -> Result<u64> {
+        if wire < n {
+            Ok(wire)
+        } else {
+            wire.checked_add(prefix)
+                .ok_or_else(|| bad("Boolean wire overflow"))
+        }
+    };
+    let mut gates = vec![Op::Constant(true)];
+    for i in 0..n {
+        let x = n + gates.len() as u64;
+        gates.push(Op::Xor(i, n));
+        gates.push(Op::And(i, x));
+    }
+    for (i, op) in network.gates.iter().enumerate() {
+        let bound = n + i as u64;
+        let next = match *op {
+            Op::Constant(v) => Op::Constant(v),
+            Op::Xor(a, b) | Op::And(a, b) => {
+                if a >= bound || b >= bound {
+                    return Err(bad("source graph forward reference"));
+                }
+                match op {
+                    Op::Xor(..) => Op::Xor(shift(a)?, shift(b)?),
+                    _ => Op::And(shift(a)?, shift(b)?),
+                }
+            }
+        };
+        gates.push(next);
+    }
+    let outputs = network
+        .outputs
+        .iter()
+        .map(|wire| {
+            if *wire >= n + network.gates.len() as u64 {
+                Err(bad("source graph output range"))
+            } else {
+                shift(*wire)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Network {
+        input_count: n,
+        gates,
+        outputs,
+    })
+}
 pub(crate) fn bit_prefix(network: &Network) -> Result<Vec<usize>> {
     let n = network.input_count as usize;
     if n == 0 || network.gates.first() != Some(&Op::Constant(true)) {

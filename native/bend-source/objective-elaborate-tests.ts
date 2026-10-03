@@ -16,3 +16,18 @@ const inferred=elaborate([moduleFor('edition ObjectiveBend 1\ndef value(x: Nat):
 const proposal=literalAnnotations(inferred);
 if(proposal.schema!=='dregg.objective-bend.typed-core.v2'||proposal.bounds[0].type.member.codomain.tag!=='natural')throw Error('ordinary result hole did not infer actual primitive body');
 console.log('OBJECTIVE ELABORATION DIAGNOSTICS PASS: Bool/String distinction, formerly reserved String acceptance, unknown type refusal');
+
+const identityModule=moduleFor('edition ObjectiveBend 1\ndef identity(x: String) -> String:\n  return x\n');
+const typed=(values:any[])=>({schema:'dregg.objective-bend.argument-values.v1',values});
+const identity=(value:any)=>elaborate([identityModule],0,'identity',typed([value]));
+if(identity({tag:'label',value:'7'}).term.arg.tag!=='label')throw Error('typed String coerced to Nat');
+if(identity({tag:'natural',value:'7'}).term.arg.tag!=='nat')throw Error('typed Nat reclassified');
+if(identity({tag:'boolean',value:true}).term.arg.tag!=='boolean')throw Error('typed Boolean reclassified');
+const nested=identity({tag:'record',fields:[{name:'root',value:{tag:'label',value:'00ab'}}]});
+if(nested.term.arg.fields[0].value.tag!=='label')throw Error('nested String lost');
+for(const bad of [{tag:'natural',value:'07'},{tag:'natural',value:'-1'},{tag:'label',value:'7',extra:true},{tag:'boolean',value:'true'},{tag:'record',fields:[{name:'x',value:{tag:'natural',value:'0'}},{name:'x',value:{tag:'natural',value:'1'}}]}]){
+ let refused=false;try{identity(bad)}catch{refused=true}if(!refused)throw Error('malformed tagged value accepted');
+}
+let extraRefused=false;try{elaborate([identityModule],0,'identity',{...typed([]),extra:true})}catch{extraRefused=true}
+if(!extraRefused)throw Error('ignored argument envelope field');
+console.log('TAGGED ARGUMENT VALUES PASS: exact Nat/Boolean/String/record and malformed-value refusals');

@@ -9,7 +9,8 @@ mkdirSync(outputRoot,{recursive:true});
 for(const item of cohort){
  let out:any;try{out=preview(item.requestPath,join(outputRoot,item.name),toolingPath);}catch(error){out=error;}
  if(item.expectedStatus==="refused"){require(out.status==="refused","source typing refusal differs: "+item.name);continue;}
- require(out.status==="finished"&&out.preview.type.tag===(item.expectedType??"natural")&&out.preview.result.value===item.expected,"actual typed source result differs: "+item.name);
+ require(out.status==="finished"&&out.preview.type.tag===(item.expectedType??"natural"),"actual typed source result type differs: "+item.name);
+ require(item.expectedRecord?out.preview.result.tag==="record":out.preview.result.value===item.expected,"actual typed source result differs: "+item.name);
  require(out.preview.sameDecodedTerm===true&&out.preview.uses.length===0,"checked/executed join differs");
 }
 const original=JSON.parse(readFileSync(cohort[0].requestPath,"utf8"));

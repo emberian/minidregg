@@ -1,7 +1,9 @@
-/- Source/graph correspondence foundations for the new partial lazy edition.
-This module deliberately does not claim an inhabited Representation contract:
-transition preservation, administrative progress and full completeness are
-separate substantive obligations. Finite ground laws below use the real executor. -/
+/- Source/graph correspondence for the new partial lazy edition. All running
+and finished raw transitions preserve the concrete graph relation. Every
+normally finished closed computation, through rawRun or runBounded at any
+limits, has an independent source evaluation to the same ground observation.
+This module does not yet inhabit Representation: administrative progress and
+source-to-machine completeness remain separate substantive obligations. -/
 import Theory.ObjectiveBendDemandInvariant
 namespace Minidregg.Theory.ObjectiveBendDemandAdequacy
 open Minidregg.Theory.ObjectiveBendOpenRecursion
@@ -13,6 +15,60 @@ set_option autoImplicit false
   induction first with
   | refl => exact second
   | next step _ ih => exact .next step (ih second)
+
+ theorem source_value_noStep {term next : Term} (value : Value term) (step : Step term next) : False := by
+  cases value <;> cases step
+
+set_option maxHeartbeats 600000 in
+/-- The independent reference semantics is deterministic for every partial
+constructor. This includes fixed-point unfolding and field shadowing. -/
+ theorem sourceStep_deterministic {term first second : Term}
+    (left : Step term first) (right : Step term second) : first = second := by
+  induction left generalizing second <;> cases right
+  all_goals first
+    | exact False.elim (source_value_noStep (Value.function _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.natural _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.record _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.specification _ _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.prototype _ _) (by assumption))
+    | grind [source_value_noStep]
+
+ theorem source_value_steps_identity {term next : Term} (value : Value term) (steps : Steps term next) : term = next := by
+  cases steps with
+  | refl => rfl
+  | next step _ => exact False.elim (source_value_noStep value step)
+
+ theorem source_evaluates_unique {source first second : Term}
+    (left : Evaluates source first) (right : Evaluates source second) : first = second := by
+  obtain ⟨steps,value⟩ := left
+  obtain ⟨otherSteps,otherValue⟩ := right
+  induction steps generalizing second with
+  | refl => exact source_value_steps_identity value otherSteps
+  | next step rest ih =>
+      cases otherSteps with
+      | refl => exact False.elim (source_value_noStep otherValue step)
+      | next otherStep otherRest =>
+          have aligned := sourceStep_deterministic step otherStep
+          cases aligned
+          exact ih value otherRest otherValue
+
+/-- A genuine source reduction cannot discard a terminating derivation.
+Determinism aligns its first reduction with the independent evaluation trace. -/
+ theorem sourceStep_evaluates_tail {source next value : Term}
+    (step : Step source next) (evaluates : Evaluates source value) : Evaluates next value := by
+  obtain ⟨steps,isValue⟩ := evaluates
+  cases steps with
+  | refl => exact False.elim (source_value_noStep isValue step)
+  | next first rest =>
+      have aligned := sourceStep_deterministic step first
+      cases aligned
+      exact ⟨rest,isValue⟩
+
+ theorem sourceSteps_evaluates_tail {source next value : Term}
+    (steps : Steps source next) (evaluates : Evaluates source value) : Evaluates next value := by
+  induction steps with
+  | refl => exact evaluates
+  | next first rest ih => exact ih (sourceStep_evaluates_tail first evaluates)
 
  theorem scoped_rename_identity {n : Nat} {term : Term} (h : Scoped n term)
     (f : Nat → Nat) (hf : ∀ i, i < n → f i = i) : term.rename f = term := by
@@ -598,6 +654,42 @@ def controlMeaning (meaning : AddressMeaning) : Control → Option Term
   | specification _ _ => exact .specification _ _
   | prototype _ _ => exact .prototype _ _
 
+/-- A dynamic demand focus reads the actual cell phase. The fixed source
+address meaning remains in HeapRealizes and local update provenance; this
+focus exposes already justified unfolding/cache reductions at pointer entry. -/
+def enteredFocus (meaning : AddressMeaning) (heap : Array Cell) : Control → Option Term
+  | .enter address => match heap[address]? with
+      | some (.suspended origin) => some (closeOrigin meaning origin)
+      | some (.cached _ value) => some (valueMeaning meaning value)
+      | some (.evaluating _) | none => none
+  | control => controlMeaning meaning control
+
+ theorem enteredFocus_steps {meaning : AddressMeaning} {heap : Array Cell} {control : Control} {before after : Term}
+    (heapRealizes : HeapRealizes meaning heap) (original : controlMeaning meaning control = some before)
+    (entered : enteredFocus meaning heap control = some after) : Steps before after := by
+  cases control with
+  | enter address =>
+      simp only [controlMeaning,Option.some.injEq] at original
+      subst before
+      cases found : heap[address]? with
+      | none => simp [enteredFocus,found] at entered
+      | some cell =>
+          cases cell with
+          | evaluating _ => simp [enteredFocus,found] at entered
+          | suspended origin =>
+              simp [enteredFocus,found] at entered
+              subst after
+              exact (heapRealizes address _ found).1
+          | cached origin value =>
+              simp [enteredFocus,found] at entered
+              subst after
+              exact (heapRealizes address _ found).2.1
+  | evaluate _ _ | returned _ | complete _ | blackhole _ | refused _ =>
+      have same : some before = some after := original.symm.trans entered
+      have eq := Option.some.inj same
+      subst after
+      exact Steps.refl _
+
  theorem sourceSteps_frame (meaning : AddressMeaning) (frame : Frame)
     {before after : Term} (steps : Steps before after) :
     Steps (frameMeaning meaning frame before) (frameMeaning meaning frame after) := by
@@ -653,6 +745,25 @@ def StackRealizes (meaning : AddressMeaning) (root focus : Term) : List Frame �
       | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
           exact ih realizes (sourceSteps_frame _ _ steps)
 
+ theorem sourceSteps_stack (meaning : AddressMeaning) (stack : List Frame) {before after : Term}
+    (steps : Steps before after) : Steps (stackMeaning meaning stack before) (stackMeaning meaning stack after) := by
+  induction stack generalizing before after with
+  | nil => exact steps
+  | cons frame rest ih => exact ih (sourceSteps_frame meaning frame steps)
+
+/-- Erasing operational update frames is sound AFTER retaining their local
+provenance: each erased boundary contributes its actual demand derivation. -/
+ theorem stackRealizes_erases {meaning : AddressMeaning} {root focus : Term} {stack : List Frame}
+    (realizes : StackRealizes meaning root focus stack) : Steps root (stackMeaning meaning stack focus) := by
+  induction stack generalizing focus with
+  | nil => exact realizes
+  | cons frame rest ih =>
+      cases frame with
+      | update address =>
+          exact sourceSteps_trans (ih realizes.2) (sourceSteps_stack meaning rest realizes.1)
+      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
+          exact ih realizes
+
  theorem heapRealizes_set {meaning : AddressMeaning} {heap : Array Cell}
     {address : Nat} {cell : Cell} (realizes : HeapRealizes meaning heap)
     (valid : CellRealizes meaning address cell) : HeapRealizes meaning (heap.set! address cell) := by
@@ -679,9 +790,10 @@ runtime closures/records as well as scalars. -/
     CellRealizes meaning address (.cached origin value) :=
   ⟨(heapRealizes address _ found).1,stackRealizes.1,valueMeaning_value _ _⟩
 
-/-- This is a concrete heap/continuation relation, not a record of assumed
-simulation fields. Its initialization and finished-ground consequence are
-proved below. Preservation through execution remains an explicit open theorem. -/
+/-- The concrete heap/continuation relation retains source meanings at shared
+addresses and local provenance for every active update. Initialization,
+running/finished transition preservation and ground soundness are proved
+below; no source-evaluator oracle is a field of this relation. -/
 def GraphRepresents (state : State) (source : Term) : Prop :=
   LexicalInvariant state ∧ BusyInvariant state ∧ FinalStackInvariant state ∧ ∃ meaning, MeaningsScoped state.heap.size meaning ∧ HeapRealizes meaning state.heap ∧
     ∃ residual, controlMeaning meaning state.control = some residual ∧
@@ -724,6 +836,35 @@ def GraphRepresents (state : State) (source : Term) : Prop :=
   simp [complete,controlMeaning,valueMeaning] at control
   subst residual
   simpa [empty,StackRealizes] using And.intro steps (Value.boolean value)
+
+/-- Finished closures, records, specifications and prototypes have source
+values through the same concrete heap graph assignment as scalars. The
+existential retains the HeapRealizes proof; it is not an oracle or contextual
+equivalence assertion about arbitrary external consumers. -/
+ theorem graph_complete_value_sound {state : State} {source : Term} {value : RuntimeValue}
+    (represented : GraphRepresents state source) (complete : state.control = .complete value) :
+    ∃ meaning : AddressMeaning, MeaningsScoped state.heap.size meaning ∧ HeapRealizes meaning state.heap ∧
+      Evaluates source (valueMeaning meaning value) := by
+  obtain ⟨_,_,final,meaning,names,heap,focus,control,stack⟩ := represented
+  have empty := final value complete
+  simp [controlMeaning,complete] at control
+  subst focus
+  refine ⟨meaning,names,heap,?_,valueMeaning_value meaning value⟩
+  simpa only [empty,StackRealizes] using stack
+
+/-- The concrete graph assignment justifies both fixed lexical names and the
+phase-sensitive source focus used for demand simulation. All erased update
+boundaries are discharged from their retained local source derivations. -/
+ theorem graph_enteredFocus_source {state : State} {source : Term}
+    (represented : GraphRepresents state source) :
+    ∃ meaning : AddressMeaning, MeaningsScoped state.heap.size meaning ∧ HeapRealizes meaning state.heap ∧
+      ∀ focus, enteredFocus meaning state.heap state.control = some focus →
+        Steps source (stackMeaning meaning state.stack focus) := by
+  obtain ⟨_,_,_,meaning,names,heap,before,original,stack⟩ := represented
+  refine ⟨meaning,names,heap,?_⟩
+  intro focus entered
+  exact sourceSteps_trans (stackRealizes_erases stack)
+    (sourceSteps_stack meaning state.stack (enteredFocus_steps heap original entered))
 
 /-- The source contexts that start a lexical demand without allocating heap
 cells. This enumerates actual syntax and actual machine frames. -/
@@ -1298,6 +1439,105 @@ and all source origins are retained. Fields may contain general Fix. -/
   · simp [stepRaw,returned,head,controlMeaning]
   · simpa [stepRaw,returned,head] using advanced
 
+ theorem graph_condition_successor {state : State} {source zero body : Term} {environment : Environment}
+    {number : Nat} {rest : List Frame} (represented : GraphRepresents state source)
+    (returned : state.control = .returned (.natural (number+1)))
+    (head : state.stack = .condition zero body environment::rest) : GraphRepresents (stepRaw state) source := by
+  obtain ⟨lexical,busy,final,meaning,names,heap,focus,control,stack⟩ := represented
+  have frameValid : FrameValid state.heap.size (.condition zero body environment) :=
+    lexical.2.2 _ (head ▸ List.mem_cons_self ..)
+  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
+    intro frame member
+    apply lexical.2.2 frame
+    rw [head]
+    exact List.mem_cons_of_mem _ member
+  let extended := extendMeaning meaning state.heap.size (.nat number)
+  have same : ∀ address, address < state.heap.size → meaning address = extended address :=
+    extendMeaning_prefix _ _ _
+  have fresh : extended state.heap.size = .nat number := by simp [extended,extendMeaning]
+  have newNames : MeaningsScoped (state.heap.size+1) extended := by
+    intro address allocated
+    by_cases eq : address = state.heap.size
+    · subst address; rw [fresh]; exact .natural _
+    · have old : address < state.heap.size := by omega
+      simpa only [←same address old] using names address old
+  have newCell : CellRealizes extended state.heap.size (.cached ⟨.nat number,[]⟩ (.natural number)) := by
+    simp only [CellRealizes,cellOrigin,closeOrigin,closeTerm,valueMeaning,fresh]
+    exact ⟨Steps.refl _,Steps.refl _,Value.natural _⟩
+  have newHeap := heapRealizes_push (heapRealizes_congr lexical.1 same heap) newCell
+  have reduce : Step
+      (.ifZero (.nat (number+1)) (closeTerm meaning environment zero)
+        (body.substitute (liftSubstitution (environmentSubstitution meaning environment))))
+      (closeTerm extended (state.heap.size::environment) body) := by
+    rw [←closeTerm_beta names frameValid.1 frameValid.2.2 (Scoped.natural number) same fresh]
+    exact Step.successor _ _ _
+  simp [controlMeaning,returned,valueMeaning] at control
+  subst focus
+  have before : StackRealizes meaning source
+      (.ifZero (.nat (number+1)) (closeTerm meaning environment zero)
+        (body.substitute (liftSubstitution (environmentSubstitution meaning environment)))) rest := by
+    simpa only [head,StackRealizes,frameMeaning] using stack
+  have consumers := stackRealizes_congr restValid same before
+  have advanced := stackRealizes_steps consumers (Steps.next reduce (Steps.refl _))
+  refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+    stepRaw_finalStackInvariant final,extended,?_,?_,closeTerm extended (state.heap.size::environment) body,?_,?_⟩
+  · simpa [stepRaw,returned,head] using newNames
+  · simpa [stepRaw,returned,head] using newHeap
+  · simp [stepRaw,returned,head,controlMeaning]
+  · simpa [stepRaw,returned,head] using advanced
+
+ theorem graph_extend_record {state : State} {source : Term} {inherited : List (String × Address)}
+    {fields : List (String × Term)} {environment : Environment} {rest : List Frame}
+    (represented : GraphRepresents state source) (returned : state.control = .returned (.record inherited))
+    (head : state.stack = .extend fields environment::rest) : GraphRepresents (stepRaw state) source := by
+  obtain ⟨lexical,busy,final,meaning,names,heap,focus,control,stack⟩ := represented
+  have validFrame : FrameValid state.heap.size (.extend fields environment) :=
+    lexical.2.2 _ (head ▸ List.mem_cons_self ..)
+  have validInherited : RuntimeValueValid state.heap.size (.record inherited) := by
+    simpa only [returned,ControlValid] using lexical.2.1
+  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
+    intro frame member
+    apply lexical.2.2 frame
+    rw [head]
+    exact List.mem_cons_of_mem _ member
+  obtain ⟨extended,newNames,newHeap,same,fieldsEq⟩ :=
+    allocateFields_realizes lexical.1 names heap validFrame.1 validFrame.2
+  let retained := inherited.filter (fun prior => !(fields.any fun field => field.1 == prior.1))
+  let newValue := RuntimeValue.record ((allocateFields state.heap environment fields).2++retained)
+  have inheritedEq : inherited.map (fun field => (field.1,extended field.2)) =
+      inherited.map (fun field => (field.1,meaning field.2)) := by
+    apply List.map_congr_left
+    intro field member
+    exact Prod.ext rfl (same _ (validInherited field member)).symm
+  have denotes : valueMeaning extended newValue =
+      .record (extendFields (inherited.map fun field => (field.1,meaning field.2))
+        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) := by
+    simp only [newValue,valueMeaning,List.map_append,fieldsEq,extendFields]
+    congr 2
+    have filtered := List.filter_map (f := fun field : String × Address => (field.1,extended field.2))
+      (p := fun prior => !((fields.map fun field => (field.1,closeTerm meaning environment field.2)).any fun field => field.1 == prior.1))
+      (l := inherited)
+    simpa [retained,List.any_map,Function.comp_def,inheritedEq] using filtered.symm
+  simp [controlMeaning,returned] at control
+  subst focus
+  have before : StackRealizes meaning source
+      (.extend (valueMeaning meaning (.record inherited))
+        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) rest := by
+    simpa only [head,StackRealizes,frameMeaning] using stack
+  have consumers := stackRealizes_congr restValid same before
+  have reduce : Step
+      (.extend (valueMeaning meaning (.record inherited))
+        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) (valueMeaning extended newValue) := by
+    rw [denotes]
+    exact Step.extendRecord _ _
+  have advanced := stackRealizes_steps consumers (Steps.next reduce (Steps.refl _))
+  refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+    stepRaw_finalStackInvariant final,extended,?_,?_,valueMeaning extended newValue,?_,?_⟩
+  · simpa [stepRaw,returned,head] using newNames
+  · simpa [stepRaw,returned,head] using newHeap
+  · simp [stepRaw,returned,head,controlMeaning,newValue,retained]
+  · simpa [stepRaw,returned,head] using advanced
+
  theorem closeTerm_weaken {bound : Nat} {meaning extended : AddressMeaning}
     {environment : Environment} {term : Term}
     (captures : EnvironmentValid bound environment) (scope : Scoped environment.length term)
@@ -1467,6 +1707,207 @@ forcing any captured arguments of the returned left value. -/
   · simp [stepRaw,returned,empty,controlMeaning]
   · simpa [stepRaw,returned,empty] using stack
 
+/-- Running and finished controls have a source focus. Faults and blackholes
+are retained operational outcomes and are deliberately not source values. -/
+def ResultControl : Control → Prop
+  | .evaluate _ _ | .enter _ | .returned _ | .complete _ => True
+  | .refused _ | .blackhole _ => False
+
+/-- Actual thunk birth provenance: ordinary captures precede their address;
+the sole same-address capture is the exact body installed by tied Fix. Cached
+RESULT edges may point forward; the permanent SOURCE origin obeys this law. -/
+def OriginBorn (address : Address) (origin : Closure) : Prop :=
+  EnvironmentValid address origin.environment ∨
+    ∃ (spec inherited : Term) (captured : Environment),
+      origin.environment = address::captured ∧ EnvironmentValid address captured ∧
+      origin.term = .app (.app (spec.rename Nat.succ) (.bound 0)) (inherited.rename Nat.succ)
+
+def HeapOriginsBorn (heap : Array Cell) : Prop :=
+  ∀ address cell, heap[address]? = some cell → OriginBorn address (cellOrigin cell)
+
+ theorem heapOriginsBorn_sameSize {before after : Array Cell} (born : HeapOriginsBorn before)
+    (preserved : PreservesOrigins before after) (size : before.size = after.size) : HeapOriginsBorn after := by
+  intro address cell found
+  have allocated : address < before.size := by rw [size]; exact (Array.getElem?_eq_some_iff.mp found).1
+  have oldFound : before[address]? = some before[address] := Array.getElem?_eq_getElem allocated
+  obtain ⟨new,nextFound,originEq⟩ := preserved.2 address _ oldFound
+  have eq : new = cell := Option.some.inj (nextFound.symm.trans found)
+  subst new
+  rw [originEq]
+  exact born address _ oldFound
+
+ theorem heapOriginsBorn_set {heap : Array Cell} {address : Address} {old next : Cell}
+    (born : HeapOriginsBorn heap) (found : heap[address]? = some old)
+    (same : cellOrigin next = cellOrigin old) : HeapOriginsBorn (heap.set! address next) :=
+  heapOriginsBorn_sameSize born (preservesOrigins_set found same) (by simp [Array.set!])
+
+ theorem heapOriginsBorn_push {heap : Array Cell} {cell : Cell} (born : HeapOriginsBorn heap)
+    (fresh : OriginBorn heap.size (cellOrigin cell)) : HeapOriginsBorn (heap.push cell) := by
+  intro address other found
+  by_cases eq : address = heap.size
+  · subst address; simp at found; subst other; exact fresh
+  · apply born address other
+    simpa [Array.getElem?_push,eq] using found
+
+ theorem heapOriginsBorn_suspend {heap : Array Cell} {term : Term} {environment : Environment}
+    (born : HeapOriginsBorn heap) (captures : EnvironmentValid heap.size environment) :
+    HeapOriginsBorn (heap.push (.suspended ⟨term,environment⟩)) :=
+  heapOriginsBorn_push born (Or.inl captures)
+
+ theorem heapOriginsBorn_fix {heap : Array Cell} {spec inherited : Term} {environment : Environment}
+    (born : HeapOriginsBorn heap) (captures : EnvironmentValid heap.size environment) :
+    HeapOriginsBorn (heap.push (.suspended
+      ⟨.app (.app (spec.rename Nat.succ) (.bound 0)) (inherited.rename Nat.succ),heap.size::environment⟩)) :=
+  heapOriginsBorn_push born (Or.inr ⟨spec,inherited,environment,rfl,captures,rfl⟩)
+
+ theorem allocateFields_originsBorn {heap : Array Cell} {environment : Environment} {fields : List (String × Term)}
+    (born : HeapOriginsBorn heap) (captures : EnvironmentValid heap.size environment) :
+    HeapOriginsBorn (allocateFields heap environment fields).1 := by
+  induction fields generalizing heap with
+  | nil => exact born
+  | cons field fields ih =>
+      rw [allocateFields_cons]
+      exact ih (heapOriginsBorn_suspend born captures) (environmentValid_mono captures (by simp))
+
+set_option maxHeartbeats 800000 in
+/-- Birth provenance is preserved by EVERY real transition. It permits tied
+Fix and sharing, while excluding arbitrary fabricated cyclic suspended aliases. -/
+ theorem stepRaw_originsBorn {state : State} (lexical : LexicalInvariant state)
+    (born : HeapOriginsBorn state.heap) : HeapOriginsBorn (stepRaw state).heap := by
+  have headValid : ∀ frame rest, state.stack = frame::rest → FrameValid state.heap.size frame := by
+    intro frame rest eq
+    exact lexical.2.2 frame (eq ▸ List.mem_cons_self)
+  have controlValid := lexical.2.1
+  unfold stepRaw
+  split <;> repeat' first | split
+  all_goals try dsimp only
+  all_goals try (have frameValid := headValid _ _ (by assumption))
+  all_goals simp_all only [ControlValid,ClosureValid,FrameValid]
+  all_goals try (have captures := controlValid.2)
+  all_goals try (have frameCaptures := frameValid.2)
+  all_goals try (have extensionCaptures := frameValid.1)
+  all_goals solve
+    | exact born
+    | apply heapOriginsBorn_set born; assumption; rfl
+    | apply heapOriginsBorn_suspend born; assumption
+    | apply heapOriginsBorn_fix born; assumption
+    | apply allocateFields_originsBorn born; assumption
+    | apply heapOriginsBorn_suspend (heapOriginsBorn_suspend born (by assumption));
+      exact environmentValid_mono (by assumption) (by simp)
+    | apply heapOriginsBorn_push born; left; intro address member; simp [cellOrigin] at member
+
+ theorem initial_originsBorn (source : Term) : HeapOriginsBorn (initial source).heap := by
+  intro address cell found
+  simp [initial] at found
+
+ theorem reachable_originsBorn {source : Term} {state : State} (closed : Scoped 0 source)
+    (reachable : Reachable (initial source) state) : HeapOriginsBorn state.heap := by
+  induction reachable with
+  | start => exact initial_originsBorn source
+  | next path ih => exact stepRaw_originsBorn (reachable_lexicalInvariant closed path) ih
+
+set_option maxHeartbeats 800000 in
+/-- All actual raw transition cases preserve the graph relation when the
+successor is running or finished. No syntactic fragment, evaluator oracle or
+implementation-selected coverage premise is used. Operational invariants for
+fault/blackhole successors are proved independently in DemandInvariant. -/
+ theorem graph_stepRaw {state : State} {source : Term}
+    (represented : GraphRepresents state source) (successful : ResultControl (stepRaw state).control) :
+    GraphRepresents (stepRaw state) source := by
+  cases control : state.control with
+  | complete value => simpa [stepRaw,control] using represented
+  | refused reason | blackhole address =>
+      simp [stepRaw,control,ResultControl] at successful
+  | enter address =>
+      cases found : state.heap[address]? with
+      | none => simp [stepRaw,control,found,ResultControl] at successful
+      | some cell =>
+          cases cell with
+          | suspended origin => exact graph_enter_suspended represented control found
+          | cached origin value => exact graph_enter_cached represented control found
+          | evaluating origin => simp [stepRaw,control,found,ResultControl] at successful
+  | evaluate term environment =>
+      cases term with
+      | bound index =>
+          cases found : environment[index]? with
+          | none => simp [stepRaw,control,found,ResultControl] at successful
+          | some address => exact graph_evaluate_bound represented control found
+      | lam body => exact graph_evaluate_immediate (immediate := .closure body) represented control
+      | nat number => exact graph_evaluate_immediate (immediate := .natural number) represented control
+      | boolean value => exact graph_evaluate_immediate (immediate := .boolean value) represented control
+      | label name => exact graph_evaluate_immediate (immediate := .label name) represented control
+      | app function argument => exact graph_evaluate_context (context := .argument argument) represented control
+      | mix lower upper => exact graph_evaluate_mix represented control
+      | fix spec inherited => exact graph_evaluate_fix represented control
+      | specification descriptor extension => exact graph_evaluate_pair (kind := .specification) represented control
+      | prototype spec target => exact graph_evaluate_pair (kind := .prototype) represented control
+      | record fields => exact graph_evaluate_record represented control
+      | reflect term => exact graph_evaluate_context (context := .reflect) represented control
+      | metadata term => exact graph_evaluate_context (context := .metadata) represented control
+      | project term => exact graph_evaluate_context (context := .project) represented control
+      | get target name => exact graph_evaluate_context (context := .field name) represented control
+      | extend inherited fields => exact graph_evaluate_context (context := .extend fields) represented control
+      | ifZero value zero body => exact graph_evaluate_context (context := .condition zero body) represented control
+      | binary primitive left right => exact graph_evaluate_context (context := .binary primitive right) represented control
+  | returned value =>
+      cases frames : state.stack with
+      | nil => exact graph_complete_return represented control frames
+      | cons frame rest =>
+          cases frame with
+          | update address => exact graph_cache_update represented control frames
+          | argument argument environment =>
+              cases value with
+              | closure body captured => exact graph_closure_call represented control frames
+              | specification descriptor extension => exact graph_specification_call represented control frames
+              | natural _ | boolean _ | label _ | record _ | prototype _ _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | reflect =>
+              cases value with
+              | prototype spec target => exact graph_object_access (access := .reflect) represented control frames
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | metadata =>
+              cases value with
+              | specification descriptor extension => exact graph_object_access (access := .metadata) represented control frames
+              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | project =>
+              cases value with
+              | prototype spec target => exact graph_object_access (access := .project) represented control frames
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | field name =>
+              cases value with
+              | record fields =>
+                  cases found : fields.find? (fun field => field.1 == name) with
+                  | none => simp [stepRaw,control,frames,found,ResultControl] at successful
+                  | some field =>
+                      obtain ⟨key,address⟩ := field
+                      exact graph_field_return represented control frames found
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | extend fields environment =>
+              cases value with
+              | record inherited => exact graph_extend_record represented control frames
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | condition zero body environment =>
+              cases value with
+              | natural number =>
+                  cases number with
+                  | zero => exact graph_condition_zero represented control frames
+                  | succ number => exact graph_condition_successor represented control frames
+              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | binaryLeft primitive right environment => exact graph_binary_left_return represented control frames
+          | binaryRight primitive left =>
+              cases dispatch : (valueTerm left).bind (fun l => (valueTerm value).bind (primitiveResult primitive l)) with
+              | none => simp [stepRaw,control,frames,dispatch,ResultControl] at successful
+              | some result =>
+                  cases scalar : scalarValue result with
+                  | none => simp [stepRaw,control,frames,dispatch,scalar,ResultControl] at successful
+                  | some next => exact graph_primitive_return represented control frames dispatch scalar
+
 /-- A concrete cyclic heap instance: its one address denotes the source Fix;
 the saved origin captures that same address and denotes its independent source
 unfolding. Neither this witness nor the lexical invariant forbids the cycle. -/
@@ -1546,6 +1987,180 @@ def traceLimits : Nat → State → Limits
   induction ticks with
   | zero => rfl
   | succ ticks ih => simpa only [rawRun,absorbs] using ih
+
+ theorem rawRun_resultControl {ticks : Nat} {state : State}
+    (successful : ResultControl (rawRun ticks state).control) : ResultControl state.control := by
+  cases control : state.control with
+  | evaluate _ _ | enter _ | returned _ | complete _ => trivial
+  | refused reason | blackhole address =>
+      have absorbing : stepRaw state = state := by simp [stepRaw,control]
+      simp only [rawRun_absorbs ticks absorbing,control,ResultControl] at successful
+
+/-- A normally terminating trace never traverses an absorbing fault or
+blackhole. This derives the per-step successful classification from the
+actual final control, instead of assuming coverage along the trace. -/
+ theorem rawRun_graph {ticks : Nat} {state : State} {source : Term}
+    (represented : GraphRepresents state source)
+    (successful : ResultControl (rawRun ticks state).control) : GraphRepresents (rawRun ticks state) source := by
+  induction ticks generalizing state with
+  | zero => exact represented
+  | succ ticks ih =>
+      have nextSuccessful : ResultControl (stepRaw state).control := rawRun_resultControl successful
+      exact ih (graph_stepRaw represented nextSuccessful) successful
+
+ theorem rawRun_natural_sound {ticks : Nat} {source : Term} {number : Nat}
+    (closed : Scoped 0 source) (complete : (rawRun ticks (initial source)).control = .complete (.natural number)) :
+    Evaluates source (.nat number) := by
+  apply graph_complete_natural_sound (rawRun_graph (graph_initializes closed) ?_) complete
+  simp only [complete,ResultControl]
+
+ theorem rawRun_boolean_sound {ticks : Nat} {source : Term} {value : Bool}
+    (closed : Scoped 0 source) (complete : (rawRun ticks (initial source)).control = .complete (.boolean value)) :
+    Evaluates source (.boolean value) := by
+  apply graph_complete_boolean_sound (rawRun_graph (graph_initializes closed) ?_) complete
+  simp only [complete,ResultControl]
+
+ theorem rawRun_label_sound {ticks : Nat} {source : Term} {name : String}
+    (closed : Scoped 0 source) (complete : (rawRun ticks (initial source)).control = .complete (.label name)) :
+    Evaluates source (.label name) := by
+  apply graph_complete_label_sound (rawRun_graph (graph_initializes closed) ?_) complete
+  simp only [complete,ResultControl]
+
+ theorem step_finished_control {limits : Limits} {state final : State} {value : RuntimeValue}
+    (finished : step limits state = .finished value final) : final.control = .complete value := by
+  cases control : state.control <;> simp only [step,control] at finished
+  all_goals try (split at finished <;> contradiction)
+  all_goals try contradiction
+  cases finished
+  exact control
+
+ theorem step_ticks_raw {limits : Limits} {state next : State}
+    (stepped : step limits state = .suspended .ticks next) : next = stepRaw state := by
+  cases control : state.control <;> simp only [step,control] at stepped
+  all_goals try contradiction
+  all_goals split at stepped <;> simp_all
+
+ theorem runBounded_finished_control {limits : Limits} {ticks : Nat} {state final : State} {value : RuntimeValue}
+    (finished : runBounded limits ticks state = .finished value final) : final.control = .complete value := by
+  induction ticks generalizing state with
+  | zero =>
+      cases control : state.control <;> simp only [runBounded,control] at finished
+      all_goals try contradiction
+      cases finished
+      exact control
+  | succ ticks ih =>
+      cases stepped : step limits state with
+      | finished value next =>
+          simp only [runBounded,stepped] at finished
+          cases finished
+          exact step_finished_control stepped
+      | suspended reason next =>
+          cases reason with
+          | ticks => exact ih (by simpa only [runBounded,stepped] using finished)
+          | capacity => simp [runBounded,stepped] at finished
+      | divergent address next | refused reason next => simp [runBounded,stepped] at finished
+
+ theorem runBounded_finished_resultControl {limits : Limits} {ticks : Nat} {state final : State} {value : RuntimeValue}
+    (finished : runBounded limits ticks state = .finished value final) : ResultControl state.control := by
+  cases control : state.control with
+  | evaluate _ _ | enter _ | returned _ | complete _ => trivial
+  | blackhole address | refused reason =>
+      cases ticks <;> simp [runBounded,step,control] at finished
+
+/-- The actual finite-resource executor is sound at EVERY bound: a finished
+result supplies its own successful-path classification. Tick/capacity
+suspension and blackholes cannot be laundered into source evaluations. -/
+ theorem runBounded_finished_graph {limits : Limits} {ticks : Nat} {state final : State}
+    {source : Term} {value : RuntimeValue} (represented : GraphRepresents state source)
+    (finished : runBounded limits ticks state = .finished value final) : GraphRepresents final source := by
+  induction ticks generalizing state with
+  | zero =>
+      cases control : state.control <;> simp only [runBounded,control] at finished
+      all_goals try contradiction
+      cases finished
+      exact represented
+  | succ ticks ih =>
+      cases stepped : step limits state with
+      | finished value next =>
+          have eq : next = state := by
+            cases control : state.control <;> simp only [step,control] at stepped
+            all_goals try (split at stepped <;> contradiction)
+            all_goals try contradiction
+            cases stepped; rfl
+          simp only [runBounded,stepped] at finished
+          cases finished
+          simpa only [eq] using represented
+      | suspended reason next =>
+          cases reason with
+          | ticks =>
+              have rest : runBounded limits ticks next = .finished value final := by simpa only [runBounded,stepped] using finished
+              have raw := step_ticks_raw stepped
+              have successful : ResultControl (stepRaw state).control := by
+                simpa only [←raw] using runBounded_finished_resultControl rest
+              exact ih (by simpa only [raw] using graph_stepRaw represented successful) rest
+          | capacity => simp [runBounded,stepped] at finished
+      | divergent address next | refused reason next => simp [runBounded,stepped] at finished
+
+ theorem runBounded_natural_sound {limits : Limits} {ticks : Nat} {source : Term} {number : Nat} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (.natural number) final) :
+    Evaluates source (.nat number) :=
+  graph_complete_natural_sound (runBounded_finished_graph (graph_initializes closed) finished) (runBounded_finished_control finished)
+
+ theorem runBounded_boolean_sound {limits : Limits} {ticks : Nat} {source : Term} {value : Bool} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (.boolean value) final) :
+    Evaluates source (.boolean value) :=
+  graph_complete_boolean_sound (runBounded_finished_graph (graph_initializes closed) finished) (runBounded_finished_control finished)
+
+ theorem runBounded_label_sound {limits : Limits} {ticks : Nat} {source : Term} {name : String} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (.label name) final) :
+    Evaluates source (.label name) :=
+  graph_complete_label_sound (runBounded_finished_graph (graph_initializes closed) finished) (runBounded_finished_control finished)
+
+ theorem runBounded_value_sound {limits : Limits} {ticks : Nat} {source : Term} {value : RuntimeValue} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished value final) :
+    ∃ meaning : AddressMeaning, MeaningsScoped final.heap.size meaning ∧ HeapRealizes meaning final.heap ∧
+      Evaluates source (valueMeaning meaning value) :=
+  graph_complete_value_sound (runBounded_finished_graph (graph_initializes closed) finished) (runBounded_finished_control finished)
+
+def observationTerm : Observation → Term
+  | .natural number => .nat number
+  | .boolean value => .boolean value
+  | .label name => .label name
+
+def observationRuntime : Observation → RuntimeValue
+  | .natural number => .natural number
+  | .boolean value => .boolean value
+  | .label name => .label name
+
+ theorem runBounded_observation_sound {limits : Limits} {ticks : Nat} {source : Term} {result : Observation} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (observationRuntime result) final) :
+    Evaluates source (observationTerm result) := by
+  cases result with
+  | natural _ => exact runBounded_natural_sound closed finished
+  | boolean _ => exact runBounded_boolean_sound closed finished
+  | label _ => exact runBounded_label_sound closed finished
+
+ theorem runBounded_observes_sound {limits : Limits} {ticks : Nat} {source : Term} {result : Observation} {final : State}
+    (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (observationRuntime result) final) :
+    ∃ value, Evaluates source value ∧ Observes value result := by
+  refine ⟨observationTerm result,runBounded_observation_sound closed finished,?_⟩
+  cases result with
+  | natural number => exact Observes.natural number
+  | boolean value => exact Observes.boolean value
+  | label name => exact Observes.label name
+
+/-- Changing resources cannot change a normally returned ground observation.
+This covers every closed partial program and observations of different kinds,
+not only repeated numeric fixture runs. Suspension makes no result claim. -/
+ theorem runBounded_resource_independent {source : Term} {firstLimits secondLimits : Limits}
+    {firstTicks secondTicks : Nat} {first second : Observation} {firstState secondState : State}
+    (closed : Scoped 0 source)
+    (left : runBounded firstLimits firstTicks (initial source) = .finished (observationRuntime first) firstState)
+    (right : runBounded secondLimits secondTicks (initial source) = .finished (observationRuntime second) secondState) :
+    first = second := by
+  have eq := source_evaluates_unique (runBounded_observation_sound closed left) (runBounded_observation_sound closed right)
+  cases first <;> cases second <;> simp [observationTerm] at eq
+  all_goals subst_vars; rfl
 
  theorem runBounded_retains_rawRun {limits : Limits} {ticks : Nat} {state : State}
     (fits : TraceFits limits ticks state) :
@@ -1709,91 +2324,344 @@ the tied address is memoized in place with its retained unfolding origin. -/
         simpa [instantiate,Term.substitute] using inheritedBeta) (.refl _)))
   · exact .natural _
 
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_suspended' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_suspended' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_enter_suspended
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_cache_update' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_cache_update' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_cache_update
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_cached' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_cached' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_enter_cached
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_application' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_application' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_application
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_closure_call
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_fix
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_context' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_context' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_context
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_pair' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_pair' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_pair
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_bound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_bound
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_immediate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_immediate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_immediate
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_object_access
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_specification_call' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_specification_call' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_specification_call
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_primitive_return' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_primitive_return' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_primitive_return
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_realizes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_realizes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms allocateFields_realizes
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_record' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_record' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_record
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_field_return
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_evaluate_mix
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_condition_zero
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_boolean_sound' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_successor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_condition_successor
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_extend_record' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_extend_record
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_stepRaw' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_stepRaw
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_graph' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms rawRun_graph
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_natural_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms rawRun_natural_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_boolean_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms rawRun_boolean_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_label_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms rawRun_label_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_finished_graph' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_finished_graph
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_natural_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_natural_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_boolean_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_boolean_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_label_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_label_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceStep_deterministic' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms sourceStep_deterministic
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_evaluates_unique' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms source_evaluates_unique
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_observation_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_observation_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_resource_independent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_resource_independent
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_evaluates_tail' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms sourceSteps_evaluates_tail
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_originsBorn' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms stepRaw_originsBorn
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_originsBorn' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms reachable_originsBorn
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackRealizes_erases' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms stackRealizes_erases
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_value_sound' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_complete_value_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_value_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_value_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enteredFocus_source' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_enteredFocus_source
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_observes_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms runBounded_observes_sound
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_boolean_sound' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_complete_boolean_sound
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_beta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_beta' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
 #guard_msgs in
 #print axioms closeTerm_beta
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_binary_left_return' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_binary_left_return' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_binary_left_return
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_return' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_return' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms graph_complete_return
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.initial_fix_graph' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.initial_fix_graph' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms initial_fix_graph
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_execution' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_execution' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms adequate_trace_execution
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_completion' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_completion' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms adequate_trace_completion
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_executor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_executor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
 #guard_msgs in
 #print axioms shared_field_executor
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_source' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_source' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms shared_field_source
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_executor' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_executor' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms fixed_constant_executor
-/-- info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_source' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_source' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in
 #print axioms fixed_constant_source
 

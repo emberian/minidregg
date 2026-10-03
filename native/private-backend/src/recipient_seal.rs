@@ -47,6 +47,85 @@ pub fn recipient_key_id(public_key: &[u8]) -> Vec<u8> {
     bytes(public_key, &mut b);
     Sha512::digest(&b).to_vec()
 }
+/// Exact native INNER semantic marker. The closed source producer derives
+/// this from the retained admitted capsule; plaintext SIGN/nonce never crosses
+/// the shared native host boundary. A marker alone is NOT a native credential.
+pub fn opaque_message_marker(
+    party: &CommitteeParty,
+    sequence: u64,
+    semantic: &[u8; 64],
+) -> Vec<u8> {
+    let mut b = b"DREGG.PRIVATE.OPAQUE.MESSAGE\x01".to_vec();
+    bytes(&party.encode(), &mut b);
+    b.extend(sequence.to_le_bytes());
+    b.extend(semantic);
+    b
+}
+/// Public pre-seal authoring projection. This is a claim, never an admitted
+/// source packet. Its hiding commitment comes from the retained endpoint draft.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DraftPublic {
+    pub party: CommitteeParty,
+    pub sequence: u64,
+    pub recipient: RecipientSpec,
+    pub semantic_commitment: [u8; 64],
+}
+impl DraftPublic {
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        self.recipient.validate()?;
+        let mut b = b"DREGG.PRIVATE.SEALED.DRAFT\x01".to_vec();
+        bytes(&self.party.encode(), &mut b);
+        b.extend(self.sequence.to_le_bytes());
+        self.recipient.algorithm.put(&mut b);
+        self.recipient.key_epoch.put(&mut b);
+        bytes(&self.recipient.key_id, &mut b);
+        Nat::new(self.recipient.plaintext_bound as u64).put(&mut b);
+        b.extend(self.semantic_commitment);
+        if b.len() > MAX_SEALED {
+            return Err(bad("public draft capacity"));
+        }
+        Ok(b)
+    }
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        const FRAME: &[u8] = b"DREGG.PRIVATE.SEALED.DRAFT\x01";
+        if b.len() > MAX_SEALED || !b.starts_with(FRAME) {
+            return Err(bad("public draft frame/capacity"));
+        }
+        let mut c = crate::consensus_wire::Cursor::new(&b[FRAME.len()..])?;
+        let party = CommitteeParty::decode(&c.bytes()?)?;
+        let sequence = c.u64()?;
+        let recipient = RecipientSpec {
+            algorithm: cursor_nat(&mut c)?,
+            key_epoch: cursor_nat(&mut c)?,
+            key_id: c.bytes()?,
+            plaintext_bound: usize::try_from(cursor_nat(&mut c)?.value()?)
+                .map_err(|_| bad("draft padding bound"))?,
+        };
+        let semantic_commitment = c.take(64)?.try_into().unwrap();
+        c.finish()?;
+        let out = Self {
+            party,
+            sequence,
+            recipient,
+            semantic_commitment,
+        };
+        if out.encode()? != b {
+            return Err(bad("public draft canonical"));
+        }
+        Ok(out)
+    }
+    pub fn inner_native_marker(&self) -> Vec<u8> {
+        opaque_message_marker(&self.party, self.sequence, &self.semantic_commitment)
+    }
+    /// Public field equality only; the source still verifies both native
+    /// credentials/current admission, and only a recipient decrypts the body.
+    pub fn matches_capsule(&self, c: &SealedIngress) -> bool {
+        self.party == c.party
+            && self.sequence == c.sequence
+            && self.recipient == c.recipient
+            && self.semantic_commitment == c.semantic_commitment
+    }
+}
 pub fn semantic_commitment(hiding_nonce: &[u8; 32], signing: &[u8]) -> [u8; 64] {
     let mut b = b"DREGG.PRIVATE.SEALED.SEMANTIC\x02".to_vec();
     b.extend(hiding_nonce);
@@ -78,6 +157,9 @@ impl SealedIngress {
         Nat::new(self.recipient.plaintext_bound as u64).put(&mut b);
         b.extend(self.semantic_commitment);
         b
+    }
+    pub fn inner_native_marker(&self) -> Vec<u8> {
+        opaque_message_marker(&self.party, self.sequence, &self.semantic_commitment)
     }
     pub fn source_signing_bytes(&self) -> Vec<u8> {
         let mut b = SIGN.to_vec();
@@ -231,6 +313,13 @@ impl DecryptedEnvelope {
     pub fn semantic_commitment(&self) -> [u8; 64] {
         self.semantic_commitment
     }
+    pub fn inner_native_marker(&self) -> Vec<u8> {
+        opaque_message_marker(
+            &self.inner.party,
+            self.inner.sequence,
+            &self.semantic_commitment,
+        )
+    }
     pub fn original_sealed_bytes(&self) -> &[u8] {
         &self.original_sealed_bytes
     }
@@ -305,6 +394,17 @@ impl HidingDraft {
     }
     pub fn semantic_commitment(&self) -> [u8; 64] {
         self.commitment
+    }
+    pub fn inner_native_marker(&self) -> Vec<u8> {
+        opaque_message_marker(&self.party, self.sequence, &self.commitment)
+    }
+    pub fn public_draft(&self) -> DraftPublic {
+        DraftPublic {
+            party: self.party.clone(),
+            sequence: self.sequence,
+            recipient: self.recipient.clone(),
+            semantic_commitment: self.commitment,
+        }
     }
     pub fn party(&self) -> &CommitteeParty {
         &self.party
