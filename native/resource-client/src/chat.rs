@@ -72,7 +72,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
     Verb { name: "unpin", usage: "unpin", operation: "append {\"type\":\"unpin\"} in the current room (the founder's counts)" },
     Verb { name: "react", usage: "react N EMOJI", operation: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
-    Verb { name: "chat", usage: "chat new ROOM [--private] | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
+    Verb { name: "chat", usage: "chat new ROOM [--private] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
 ];
 
 pub(crate) const HELP: &str = "\
@@ -159,6 +159,9 @@ pub(crate) enum Line {
     Unpin,
     React { number: u64, emoji: String },
     New { room: String, private: bool },
+    /// `chat adopt ROOM`: the founder gives a room it already controls (a
+    /// workroom, or any room born with the room schema) the chat roster.
+    Adopt { room: String },
     Invite { room: String, subject: String, name: Option<String>, enc: Option<String>, verbs: Vec<String> },
     /// `room ls [--in ROOM] [--since H] [--import] [--json]`: the cells under
     /// the room the Host's signed `since` view names, with the roster's streams.
@@ -459,6 +462,7 @@ fn parse_chat(rest: &str) -> Result<Line, String> {
     match words.as_slice() {
         ["new", room] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: false }),
         ["new", room, "--private"] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: true }),
+        ["adopt", room] => ref_name(room, "room name").map(|()| Line::Adopt { room: (*room).to_owned() }),
         ["invite", room, subject, more @ ..] if more.len() <= 3 => {
             ref_name(room, "room name")?;
             decimal(subject, "subject")?;
@@ -1688,6 +1692,7 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             tail(session, &room, count, since, follow, as_json, held, entry.as_ref(), discovery.as_deref())
         }
         Line::New { room, private } => chat_new(session, &room, private),
+        Line::Adopt { room } => chat_adopt(session, &room),
         Line::Invite { room, subject, name, enc, verbs } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs),
         Line::Ls { room, since, import, json: as_json } => {
             let room = match room {
@@ -1995,6 +2000,69 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     Ok(())
 }
 
+/// `chat adopt ROOM`: chat in the room people already share, not a second
+/// room beside it. The room keeps its own law and grants; adopting adds what
+/// `chat new` adds after the room's birth: the founder's stream born in the
+/// room under the founder's author law, the founder's own room grant, and the
+/// roster's founder row (field 2) with the founder's stream. Members join
+/// with `chat invite` / `chat join` as in any chat room.
+///
+/// Only the room's controller adopts: the reference must carry its control
+/// capability, and the Host judges the roster write against the room's own
+/// law. A roster whose founder field names someone else refuses; one naming
+/// this founder resumes an interrupted adoption (each step is skipped when
+/// its reference or roster row already exists). The roster rows inherit the
+/// room's write law: in an open workroom a member holding `mutate` under the
+/// room may also add a row, which names only a stream that member's grant
+/// can already write; `tail` still splits current members by the Host's
+/// signed `who` view.
+fn chat_adopt(session: &Session, name: &str) -> Result<(), Done> {
+    if room_path(session, name).exists() {
+        return Err(usage(format!("{name} is already a chat room in this session")));
+    }
+    let me = me(session)?;
+    let room_ref = reference(session, name).map_err(error)?;
+    if room_ref.get("controlCapability").and_then(Value::as_str).is_none() {
+        return Err(usage(format!("only the founder who controls {name} adopts chat into it")));
+    }
+    let ws = workspace_record(session).map_err(error)?;
+    let roster = roster_of(&signed_read(session, &ws, name, "roster", &room_ref, "resource", &[])?);
+    adopt_decision(roster.founder.as_deref(), &me, name)?;
+    let law = author_law(&me);
+    let stream_name = format!("{name}-me");
+    let stream = match reference(session, &stream_name) {
+        Ok(existing) => existing,
+        Err(_) => create_cell(session, &stream_name, "stream", &law, Some(name), None)?,
+    };
+    let stream_target = member(&stream, "target").map_err(error)?.to_owned();
+    let grant_name = format!("{name}-room");
+    if reference(session, &grant_name).is_err() {
+        let grant = room_grant(session, name, &me, &MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>())?;
+        import_from(session, &grant_name, &grant)?;
+    }
+    if roster.founder.is_none() {
+        roster_write(session, name, &[(2, &me), (3, &me), (4, &stream_target)])?;
+    }
+    let room = Room { name: name.to_owned(), grant: grant_name, stream: Some(stream_name) };
+    save_room(session, &room).map_err(error)?;
+    let mut record = get_json(&room_path(session, name)).unwrap_or_default();
+    record["founder"] = json!(me);
+    record["adopted"] = json!(true);
+    put_json(&room_path(session, name), &record).map_err(error)?;
+    set_current(session, name).map_err(error)?;
+    println!("room {name}: chat adopted; your stream {stream_target}; invite members with chat invite {name} SUBJECT");
+    Ok(())
+}
+
+/// Whether this founder may adopt (or resume adopting) chat in a room whose
+/// roster names `founder`.
+fn adopt_decision(founder: Option<&str>, me: &str, name: &str) -> Result<(), Done> {
+    match founder {
+        Some(other) if other != me => Err(usage(format!("{name}'s roster names founder {other}; only that founder adopts or invites"))),
+        _ => Ok(()),
+    }
+}
+
 /// What `chat invite` made: the invitation (the published room grant) and
 /// the invitee's stream cell.
 pub(crate) struct Invited {
@@ -2271,6 +2339,9 @@ mod tests {
         assert!(plan("react 3 two words").unwrap().is_err());
         assert_eq!(plan("chat new commons").unwrap().unwrap(), Line::New { room: "commons".into(), private: false });
         assert_eq!(plan("chat new den --private").unwrap().unwrap(), Line::New { room: "den".into(), private: true });
+        assert_eq!(plan("chat adopt lab").unwrap().unwrap(), Line::Adopt { room: "lab".into() });
+        assert!(plan("chat adopt").unwrap().is_err());
+        assert!(plan("chat adopt lab extra").unwrap().is_err());
         assert_eq!(
             plan("chat invite commons 1234 bob").unwrap().unwrap(),
             Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None, verbs: vec!["observe".into(), "append".into()] }
@@ -2423,5 +2494,15 @@ mod exact_operation_parse_tests {
             other => panic!("wrong command: {other:?}"),
         }
         assert!(plan("say --operation-record relative.json hello").unwrap().is_err());
+    }
+
+    /// Adoption is the founder's alone and resumes only its own roster.
+    #[test]
+    fn chat_adopt_refuses_another_founders_roster_and_resumes_its_own() {
+        assert!(adopt_decision(None, "7", "lab").is_ok());
+        assert!(adopt_decision(Some("7"), "7", "lab").is_ok());
+        let (code, message) = adopt_decision(Some("8"), "7", "lab").unwrap_err();
+        assert_eq!(code, EXIT_USAGE);
+        assert!(message.contains("names founder 8"));
     }
 }

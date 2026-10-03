@@ -13,6 +13,10 @@
 # The room. Its law is open: holding a grant under it is the gate for bearing a cell into it.
 room new $ROOM --law open
 
+# Chat in this same room: your stream and the roster's founder row (members
+# join it with `chat invite $ROOM SUBJECT` / `chat join`; Hermes is summoned here).
+chat adopt $ROOM
+
 # The map. Everyone in the room may read it; only you write it, and it only
 # grows (no line edited, none struck). Its links are the room's map.
 doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0, slot "content/names/unique" == 1 ] ]' --in $ROOM

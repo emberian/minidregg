@@ -184,10 +184,12 @@ mod tests {
             let (label, text) = source(home, builtin.name, Part::Room).unwrap();
             assert_eq!(label, format!("{}/template.shell", builtin.name));
             assert_eq!(text, builtin.room);
-            // Every template births its room first, then an index in it.
+            // Every template births its room first, then (after the chat
+            // roster, where the template adopts one) an index in it.
             let lines = bind(&label, &text, &[("ROOM", "lab"), ("ME", "7")]).unwrap();
             assert_eq!(lines[0].1, "room new lab --law open");
-            assert!(lines[1].1.starts_with("doc new lab/index "), "{}", lines[1].1);
+            let index = if lines[1].1 == "chat adopt lab" { 2 } else { 1 };
+            assert!(lines[index].1.starts_with("doc new lab/index "), "{}", lines[index].1);
             assert!(lines.iter().any(|(_, l)| l.starts_with("create lab/") && l.contains(" stream ")));
         }
         assert!(source(home, "social", Part::Member).is_ok());
@@ -237,7 +239,9 @@ mod plan_tests {
         assert_eq!(label, "workroom/template.shell");
         let text: Vec<&str> = run.iter().map(|(_, l)| l.as_str()).collect();
         assert_eq!(text[0], "room new lab --law open");
-        assert!(text[1].starts_with("doc new lab/index 'any [ not (verb == write), all [ subject == 7,"), "{}", text[1]);
+        // Chat lives in this same room from birth (no second room beside it).
+        assert_eq!(text[1], "chat adopt lab");
+        assert!(text[2].starts_with("doc new lab/index 'any [ not (verb == write), all [ subject == 7,"), "{}", text[2]);
         for born in ["create lab/wall stream open --in lab", "doc new lab/notes draft --in lab",
             "doc new lab/tasks note --in lab", "doc link lab-map-wall lab/index lab/wall", "submit lab-map-wall"] {
             assert!(text.contains(&born), "{born} missing from {text:?}");
