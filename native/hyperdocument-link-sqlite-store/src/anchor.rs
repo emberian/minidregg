@@ -141,13 +141,19 @@ impl Guard {
     ) -> Result<(), StoreError> {
         if self.read()?.as_ref() == Some(head) {
             // A previous process may have died after rename but before the
-            // directory sync. A retry must finish that durability boundary.
+            // directory sync. A retry must finish that durability boundary --
+            // once per process: after this process has synced this exact head
+            // at this path, the boundary is complete and nothing can undo it.
+            if synced(&self.path, head) {
+                return Ok(());
+            }
             OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW)
                 .open(&self.path)?
                 .sync_all()?;
             File::open(self.path.parent().ok_or(StoreError::InvalidPath)?)?.sync_all()?;
+            remember_synced(&self.path, head);
             return Ok(());
         }
         let mut temporary = self.path.as_os_str().to_owned();
@@ -169,6 +175,24 @@ impl Guard {
         fs::rename(&temporary, &self.path)?;
         hook(PublishPhase::AnchorRenamed);
         File::open(self.path.parent().ok_or(StoreError::InvalidPath)?)?.sync_all()?;
+        remember_synced(&self.path, head);
         Ok(())
+    }
+}
+
+/// Anchors this process has published or re-synced (path, head bytes). A
+/// long-lived `serve` reads the anchor on every Host refresh; an unchanged
+/// head needs its fsyncs once, not on every read.
+static SYNCED: std::sync::Mutex<Vec<(PathBuf, Vec<u8>)>> = std::sync::Mutex::new(Vec::new());
+
+fn synced(path: &Path, head: &Head) -> bool {
+    let bytes = head.bytes();
+    SYNCED.lock().is_ok_and(|seen| seen.iter().any(|(p, h)| p == path && *h == bytes))
+}
+
+fn remember_synced(path: &Path, head: &Head) {
+    if let Ok(mut seen) = SYNCED.lock() {
+        seen.retain(|(p, _)| p != path);
+        seen.push((path.to_path_buf(), head.bytes()));
     }
 }

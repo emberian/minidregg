@@ -23,12 +23,26 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-fn usage() -> ! {
-    eprintln!(
-        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store serve"
-    );
-    std::process::exit(2)
+const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store serve";
+
+/// The CLI could not run: usage (exit 2) or a store error.
+enum Failure {
+    Usage,
+    Store(StoreError),
 }
+
+impl From<StoreError> for Failure {
+    fn from(error: StoreError) -> Self {
+        Failure::Store(error)
+    }
+}
+
+impl From<std::io::Error> for Failure {
+    fn from(error: std::io::Error) -> Self {
+        Failure::Store(StoreError::from(error))
+    }
+}
+
 
 fn crash_phase(name: &str) -> Option<(PublishPhase, i32)> {
     match name {
@@ -50,14 +64,13 @@ fn parse_height(value: &std::ffi::OsStr) -> Result<u64, StoreError> {
         .ok_or(StoreError::InvalidPath)
 }
 
-fn run() -> Result<(), StoreError> {
-    let mut arguments: Vec<_> = env::args_os().skip(1).collect();
+fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), Failure> {
     let identity = if arguments
         .first()
         .is_some_and(|arg| arg == "--anchor-identity")
     {
         if arguments.len() < 3 {
-            usage();
+            return Err(Failure::Usage);
         }
         let identity = arguments[1].clone().into_encoded_bytes();
         arguments.drain(..2);
@@ -66,12 +79,12 @@ fn run() -> Result<(), StoreError> {
         Vec::new()
     };
     let Some(command) = arguments.first().and_then(|value| value.to_str()) else {
-        usage()
+        return Err(Failure::Usage);
     };
     match (command, &arguments[1..]) {
         ("read", [root]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
-            io::stdout().write_all(&store.read()?)?;
+            out.extend_from_slice(&store.read()?);
         }
         ("read-to", [root, output]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
@@ -85,14 +98,14 @@ fn run() -> Result<(), StoreError> {
             } else {
                 Some(read_input(Path::new(expected))?)
             };
-            println!(
+            writeln!(out, 
                 "{:?}",
                 store.compare_exchange(expected.as_deref(), &read_input(Path::new(input))?)?
-            );
+            )?;
         }
         ("cas-crash", [root, expected, input, phase]) => {
             let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
-                usage()
+                return Err(Failure::Usage);
             };
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let expected = if expected == "-" {
@@ -110,11 +123,11 @@ fn run() -> Result<(), StoreError> {
         }
         ("publish", [root, input]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
-            println!("{:?}", store.publish(&read_input(Path::new(input))?)?);
+            writeln!(out, "{:?}", store.publish(&read_input(Path::new(input))?)?)?;
         }
         ("publish-crash", [root, input, phase]) => {
             let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
-                usage()
+                return Err(Failure::Usage);
             };
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             let bytes = read_input(Path::new(input))?;
@@ -131,7 +144,7 @@ fn run() -> Result<(), StoreError> {
             let bytes = read_input(Path::new(input))?;
             let ready = Path::new(ready);
             let release = Path::new(release);
-            println!(
+            writeln!(out, 
                 "{:?}",
                 store.publish_with_hook(&bytes, |phase| {
                     if phase == PublishPhase::Inserted {
@@ -142,23 +155,23 @@ fn run() -> Result<(), StoreError> {
                         }
                     }
                 })?
-            );
+            )?;
         }
         ("durable-anchor-enroll", [root]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             store.durable_anchor_enroll()?;
-            println!("Enrolled");
+            writeln!(out, "Enrolled")?;
         }
         ("durable-init", [root, seed]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
-            println!("{:?}", store.durable_init(&read_input(Path::new(seed))?)?);
+            writeln!(out, "{:?}", store.durable_init(&read_input(Path::new(seed))?)?)?;
         }
         ("durable-read", [root, from, with_base, output]) => {
             let from = parse_height(from)?;
             let with_base = match with_base.to_str() {
                 Some("0") => false,
                 Some("1") => true,
-                _ => usage(),
+                _ => return Err(Failure::Usage),
             };
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
             fs::write(
@@ -169,18 +182,18 @@ fn run() -> Result<(), StoreError> {
         ("durable-append", [root, height, record, tag]) => {
             let height = parse_height(height)?;
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
-            println!(
+            writeln!(out, 
                 "{:?}",
                 store.durable_append(
                     height,
                     &read_input(Path::new(record))?,
                     &read_input(Path::new(tag))?
                 )?
-            );
+            )?;
         }
         ("durable-append-crash", [root, height, record, tag, phase]) => {
             let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
-                usage()
+                return Err(Failure::Usage);
             };
             let height = parse_height(height)?;
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
@@ -199,11 +212,37 @@ fn run() -> Result<(), StoreError> {
         }
         ("database-path", [root]) => {
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
-            println!("{}", store.database_path().display());
+            writeln!(out, "{}", store.database_path().display())?;
         }
-        _ => usage(),
+        _ => return Err(Failure::Usage),
     }
     Ok(())
+}
+
+/// One one-shot invocation: exit code, stdout, stderr. `main` writes them;
+/// `serve` frames them. Both run exactly this function.
+fn invoke(arguments: Vec<std::ffi::OsString>) -> (u32, Vec<u8>, Vec<u8>) {
+    let mut out = Vec::new();
+    match run(arguments, &mut out) {
+        Ok(()) => (0, out, Vec::new()),
+        Err(Failure::Usage) => (2, out, format!("{USAGE}\n").into_bytes()),
+        Err(Failure::Store(error)) => {
+            let code = match error {
+                StoreError::Missing => 3,
+                StoreError::Conflict => 4,
+                StoreError::RetiredImage => 5,
+                _ => 1,
+            };
+            (code, out, format!("sqlite-store error: {error}\n").into_bytes())
+        }
+    }
+}
+
+/// Fixture commands that end the process mid-operation (crash phases) or
+/// hold it for another process; they keep their own child under `serve`.
+fn needs_own_process(arguments: &[std::ffi::OsString]) -> bool {
+    let command = if arguments.first().is_some_and(|a| a == "--anchor-identity") { arguments.get(2) } else { arguments.first() };
+    command.is_some_and(|c| matches!(c.to_str(), Some("cas-crash" | "publish-crash" | "durable-append-crash" | "publish-hold")))
 }
 
 fn main() -> ExitCode {
@@ -211,26 +250,18 @@ fn main() -> ExitCode {
     if arguments.len() == 1 && arguments[0] == "serve" {
         return serve();
     }
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("sqlite-store error: {error}");
-            ExitCode::from(match error {
-                StoreError::Missing => 3,
-                StoreError::Conflict => 4,
-                StoreError::RetiredImage => 5,
-                _ => 1,
-            })
-        }
-    }
+    let (code, stdout, stderr) = invoke(arguments);
+    let _ = io::stdout().lock().write_all(&stdout).and_then(|()| io::stdout().lock().flush());
+    let _ = io::stderr().lock().write_all(&stderr);
+    ExitCode::from(code as u8)
 }
 
 /// `serve`: the long-lived form a Lean Host keeps for its whole lifetime
 /// (`Compiler.NativeCoprocess`). Each request frame on stdin is one argv for
-/// this same executable; it runs as its own child process, so its files, its
-/// stdout, its stderr and its exit code are exactly the one-shot invocation's.
-/// The reply frame carries those three. The Host forks this small process
-/// once instead of forking its own large address space for every call.
+/// this same executable, answered by the one-shot invocation's own function
+/// in this process, so its files, stdout, stderr and exit code are exactly
+/// the one-shot invocation's. Crash and hold fixtures alone still run as
+/// their own child, because they end or suspend their process on purpose.
 /// Frames: request `u32 argc, (u32 len, bytes)*`; reply `u32 code,
 /// u64 len, stdout, u64 len, stderr`; integers big-endian. EOF ends it.
 fn serve() -> ExitCode {
@@ -276,24 +307,30 @@ fn serve() -> ExitCode {
         if arguments[0] == "serve" {
             return ExitCode::FAILURE;
         }
-        let Ok(result) = Command::new(&executable)
-            .args(&arguments)
-            .stdin(Stdio::null())
-            .output()
-        else {
-            return ExitCode::FAILURE;
-        };
-        let code: u32 = match (result.status.code(), result.status.signal()) {
-            (Some(code), _) => code as u32,
-            (None, Some(signal)) => 128 + signal as u32,
-            (None, None) => 255,
+        let (code, stdout, stderr) = if needs_own_process(&arguments) {
+            let Ok(result) = Command::new(&executable)
+                .args(&arguments)
+                .stdin(Stdio::null())
+                .output()
+            else {
+                return ExitCode::FAILURE;
+            };
+            let code: u32 = match (result.status.code(), result.status.signal()) {
+                (Some(code), _) => code as u32,
+                (None, Some(signal)) => 128 + signal as u32,
+                (None, None) => 255,
+            };
+            (code, result.stdout, result.stderr)
+        } else {
+            std::panic::catch_unwind(|| invoke(arguments))
+                .unwrap_or_else(|_| (101, Vec::new(), b"sqlite-store error: panicked\n".to_vec()))
         };
         let written = output
             .write_all(&code.to_be_bytes())
-            .and_then(|()| output.write_all(&(result.stdout.len() as u64).to_be_bytes()))
-            .and_then(|()| output.write_all(&result.stdout))
-            .and_then(|()| output.write_all(&(result.stderr.len() as u64).to_be_bytes()))
-            .and_then(|()| output.write_all(&result.stderr))
+            .and_then(|()| output.write_all(&(stdout.len() as u64).to_be_bytes()))
+            .and_then(|()| output.write_all(&stdout))
+            .and_then(|()| output.write_all(&(stderr.len() as u64).to_be_bytes()))
+            .and_then(|()| output.write_all(&stderr))
             .and_then(|()| output.flush());
         if written.is_err() {
             return ExitCode::FAILURE;
