@@ -1,0 +1,60 @@
+{
+  "source_revision": "96a4165",
+  "source_authority": "captain integration",
+  "workbench_revision": "651b535b5171",
+  "scope": "cross-machine consistency; partial first pass",
+  "exclusions": [
+    ".spw/_workbench/**",
+    "proof-only bodies",
+    "runtime custody/keys/configs"
+  ],
+  "commands": [
+    "spw doctor ../..",
+    "spw roots",
+    "spw select .spw/audits/horse-consistency/consistency.spw --selector navigable --summary",
+    "spw graph .spw/audits/horse-consistency --limit 12"
+  ],
+  "tool_states": {
+    "doctor": "observed ok, clean mounted infrastructure",
+    "roots": "observed correct consumer/infrastructure separation",
+    "semantic_review": "actual source read, mixed trace mentally executed",
+    "replan_checks": "authored, integrated run pending"
+  },
+  "coverage": {
+    "native/resource-client/src/replan.rs": {
+      "sha256": "c554d54ffb9a90cacd4bf77eb340408625b310476fc648ccc5fb5e220e44e3de",
+      "read": "full executable definitions",
+      "baseline_sha256": "e97ea3fc86a6404890f51c5b38acb285f9f517dd71a8843f18f159fdef43efeb"
+    },
+    "native/resource-client/src/worker.rs": {
+      "sha256": "659787429407b7078cce76c7f5e944d062d069441434e3e1e23a5e2c79901a79",
+      "read": "full executable definitions"
+    },
+    "native/resource-client/src/checkpoint.rs": {
+      "sha256": "25bf8c207df4d94ac7cb251e5d166766b679a30f9fe388585c8304955614282b",
+      "read": "full executable definitions"
+    },
+    "native/resource-client/src/job.rs": {
+      "sha256": "622b6058d7a85f8eeeb86de1eef38fff8520e6ef34fcdeca7c786ab35c578d09",
+      "read": "full executable definitions, canonical native receiving/lookup and inspection spans"
+    },
+    "native/resource-client/src/selected_exchange.rs": {
+      "sha256": "682eb790e87444159ae84a9e3f7e4478b82e4f258f74ca8b7ba601641e09cbb6",
+      "read": "full executable definitions"
+    },
+    "native/resource-client/src/main.rs": {
+      "sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f",
+      "read": "listed source spans, continuing",
+      "spans": [
+        "205-250",
+        "1160-1315",
+        "1620-1660",
+        "1750-1860",
+        "1850-1955",
+        "1990-2250"
+      ]
+    }
+  },
+  "consumer_revision": "fe60a569b3e1863f08159a66c7c53736fe6295b6",
+  "physical_sink_evidence": "peer horse_exits full anchored SQLite source read; conditional physical custody premise"
+}

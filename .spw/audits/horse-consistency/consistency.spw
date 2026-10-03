@@ -1,0 +1,89 @@
+# Cross-machine consistency: executable transition review
+#>horse_consistency_20261003
+#:audit
+
+^"provenance"{
+  consumer_revision: "fe60a569b3e1863f08159a66c7c53736fe6295b6"
+  semantic_source_revision: "96a4165"
+  semantic_source: "captain authoritative integration source, with per-file hashes in coverage.json"
+  workbench_revision: "651b535b5171"
+  exclusions: [".spw/_workbench/**", "proof-only bodies", "runtime journals", "keys", "private configurations"]
+  evidence: ~"./coverage.json"
+  coverage_rule: "Full executable definitions only where coverage says complete; source spans elsewhere; no overall completion claim."
+}
+
+^"replan"{
+  source: ~"../../../native/resource-client/src/replan.rs"
+  neighbor: ~"../../../native/resource-client/src/main.rs"
+  states: ["attempt", "current-definite-refusal", "unknown-effect", "retired-evidence", "fresh-attempt", "terminal-success"]
+  identity: "An admission refusal belongs to one attempt, not merely the caller thread."
+  fact: "Thread-local HostDecision survives after race classification; old code begins the next attempt without clearing it."
+  counterexample: ["attempt A emits decoded stale-root", "A evidence retires", "attempt B sends its exact call then loses its reply", "B records no HostDecision", "A stale-root is reused", "B evidence retires despite unknown effect"]
+  repair: "Clear previous decision at entry of every attempt. Retain current terminal refusal for diagnostics; clear superseded refusal on success."
+  source_status: "isolated patch c554d54f from base e97ea3; captain intake r1; integrated test pending"
+}
+
+^"accepted_readback"{
+  source: ~"../../../Compiler/DurableReceiverIO.lean"
+  consumer: ~"../../../native/resource-client/src/replan.rs"
+  other_consumer: ~"../../../native/resource-client/src/receipt_continuity.rs"
+  states: ["CAS attempted", "uncertain physical response", "exact stored-entry readback", "confirmed recoveredAfterUncertainResponse"]
+  fact: "Native recoveredAfterUncertainResponse is confirmed after exact durable readback; it is not uncertain."
+  distinct_authority: "Confirmed history does not imply a fresh CAS winner or permission for new physical dispatch."
+  contradiction: "replan holds_accepted omitted this confirmed variant and could retire its evidence."
+  repair: "Recognize the source enum's recovered confirmed variant in evidence-retirement fence."
+  open: "Protected receipt continuity mode and selected exchange confirmation consumers still under review; do not broaden fresh physical dispatch authority."
+}
+
+^"fn_wake"{
+  source: ~"../../../native/resource-client/src/worker.rs"
+  neighbor: ~"../../../native/resource-client/src/drain.rs"
+  states: ["idle", "authenticated GROUP changed", "native drain", "publication or page cap", "before-after GROUP stable", "durable hint", "idle"]
+  authority: "Authenticated GROUP is only a wake hint. Native Host owns semantic admission and cursor decisions."
+  custody: "Process holds socket-parent and state worker locks; host/config/scope/credential pins exact."
+  retry: "Publication or page cap continues, stable idle/short page records GROUP; pending custody forces restart drain."
+  open: "Wake failures within active drain currently terminate the worker, unlike idle wake failures; supervisor receiving not yet read."
+}
+
+^"job_money"{
+  source: ~"../../../native/resource-client/src/job.rs"
+  receiver: ~"../../../Kernel/JobMoneyReceiver.lean"
+  host: ~"../../../Host/Main.lean"
+  states: ["ordered", "funded", "claimed", "answered or truth", "upheld or slashed", "settlement ingress retained", "native closed", "original receipt"]
+  authority: "JobMoneyReceiver reexecutes declared job law and canonical Book batch; physical client signs source-owned plan."
+  identity: "Exact ingress transaction and nullifier bind historical replay; fresh nonce is a different request."
+  fact: "Client settle reuses only earlier attempts containing confirmed JSON, ignoring an ingress whose submit reply was lost."
+  counterexample: ["settle accepted and closes job", "op162 reply lost", "no confirmed JSON retained", "next settle creates fresh nonce", "closed job refuses fresh settlement", "original accepted receipt remains unreachable through normal settle"]
+  repair: "Isolated client recovery first performs native receipt-only op163 on exact retained canonical ingress; only native absent permits exact original resubmission. Fresh planning requires exclusively definitive refusals."
+  source_status: "authored, source packet and joined receiving pending; no second payout inferred because native closed-state and nullifier guards remain."
+}
+
+^"selected_exchange"{
+  source: ~"../../../native/resource-client/src/selected_exchange.rs"
+  neighbor: ~"../../../native/resource-client/src/selected_release.rs"
+  states: ["signed exact current source", "prepared immutable owner packet", "native source acceptance", "fn POST custody", "exact poll packet", "recipient submit or lookup", "receipt", "cursor frontier"]
+  custody: "Packet/article bytes and contract are pinned; recovery uses retained recipient ingress and lookup."
+  semantic_boundary: "fn accepted or already-stored is transport evidence; only native recipient confirmed outcome permits frontier advancement."
+  open: "checked_receipt omits native recovered confirmed variant; full receiving and frontier definitions still being read."
+}
+
+^"neighbor_ownership"{
+  entries: "horse_entries shared index and forward entry/Host map"
+  exits: "horse_exits transport executable pin and backward sinks"
+  bounds: "validation_replay_efficiency numeric retry filenames/allocation and retained-outcome ordering"
+  traffic: "resume_private_construction PQ/cohort source custody, current key rotation repair"
+  world: "bend_world_language current signed source input and atomic source-derived effects; monetary bridge transferred by ACK"
+  language: "Objective Bend is sole Bend language; old BendTT active dependencies must migrate through current compiler/world owners, not be silently preserved."
+}
+
+^"session_physical_prefix"{
+  session: ~"../../../Kernel/NativeHostSession.lean"
+  receiver: ~"../../../Compiler/DurableReceiverIO.lean"
+  sink: ~"../../../native/hyperdocument-link-sqlite-store/src/lib.rs"
+  anchor: ~"../../../native/hyperdocument-link-sqlite-store/src/anchor.rs"
+  shortcut: "extendFrom returns retained loaded state when the observed durable head equals retained height; it does not rescan the earlier physical prefix."
+  physical_contract: "Native SQLite append is INSERT-only under transaction and private external anchor. Anchor binds seed, deployment, height and exact last entry; unchanged anchor rejects same-height replacement with a different last entry."
+  premise: "Earlier-prefix immutability requires honest protected SQLite/storage and the native API. Replacing both Store and anchor or editing earlier entries outside the API violates this premise."
+  disposition: "Conditional deployment contract, not a demonstrated native bug. GenericTransport alone does not prove physical immutable prefix."
+  evidence_owner: "horse_exits read publication lib e95487cc and anchor 2766a108; consistency read session/extendFrom executable definitions."
+}

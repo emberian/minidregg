@@ -1,0 +1,15 @@
+#>mini_runtime_index
+#:index
+^"roots"{
+ @readme: ~"./README.md"
+ @mount: ~"./mount.spw"
+ @workspace: ~"./workspace.spw"
+ @runtime: ~"./maps/runtime.spw"
+ @entrances: ~"./audits/horse-entries/entrances.spw"
+ @source_check: ~"./tools/check-source.py"
+ @coverage: ~"./audits/horse-entries/coverage.spw"
+ @exits: ~"./audits/horse-exits/exits.spw"
+ @consistency: ~"./audits/horse-consistency/consistency.spw"
+ @bounds: ~"./audits/horse-bounds/bounds.spw"
+}
+^"start"{ topology: @runtime executable_entrances: @entrances limits_of_this_audit: @coverage }

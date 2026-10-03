@@ -1,0 +1,14 @@
+#>mini_spw_workspace
+#:workspace
+^"roots"{
+ @index: ~"./index.spw"
+ @mount: ~"./mount.spw"
+ @spw: ~"."
+ @map: ~"./maps/runtime.spw"
+ @entries: ~"./audits/horse-entries/"
+ @exits: ~"./audits/horse-exits/exits.spw"
+ @consistency: ~"./audits/horse-consistency/consistency.spw"
+ @bounds: ~"./audits/horse-bounds/bounds.spw"
+}
+^"settings"{ ~#language: "spw" ~#dialect: "v0.3.0" }
+^"lsp"{ ~#roots: [~"./", ~"./index.spw", ~"./maps/runtime.spw"] }

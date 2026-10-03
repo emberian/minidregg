@@ -1,0 +1,77 @@
+#>mini_runtime_topology
+#:map
+^"scope"{
+ source_revision: "96a4165f81ceee32452b381780970e54b9dce886"
+ kind: "source-read topology, partial coverage"
+ destination: "Objective Bend public language; private computation; traffic privacy/agreement; multiuser SPK/Hermes/docuverse worldhost"
+ authority: "Lean decides semantic admission; Rust holds keys, files, sockets, workers and physical effects"
+ @entrances: ~"../audits/horse-entries/entrances.spw"
+ @coverage: ~"../audits/horse-entries/coverage.spw"
+ @exits: ~"../audits/horse-exits/exits.spw"
+ @consistency: ~"../audits/horse-consistency/consistency.spw"
+ @bounds: ~"../audits/horse-bounds/bounds.spw"
+}
+^"human_paths"{
+ @cli: ~"../../native/resource-client/src/main.rs"
+ @shell: ~"../../native/resource-client/src/shell.rs"
+ @workspace: ~"../../native/resource-client/src/workspace.rs"
+ @web: ~"../../native/resource-client/src/web.rs"
+ @discord: ~"../../native/discord-entrance/src/server.rs"
+ edges: ["CLI -> typed workspace/key/custody modules", "web -> signed workspace reads or serialized durable draft actions", "Discord raw signed interaction -> roster session -> same forced-command shell", "shell -> typed client commands, never arbitrary host semantic implementation"]
+}
+^"host_boundary"{
+ @transport: ~"../../native/resource-client/src/transport.rs"
+ @public_proxy: ~"../../native/resource-client/src/public_proxy.rs"
+ @host: ~"../../Host/Main.lean"
+ @session: ~"../../Kernel/NativeHostSession.lean"
+ edges: ["public ingress -> exact config/image envelope -> filtered operator listener", "private operator listener -> bounded Host queue", "Host queue -> one retained Host stdio process", "Host stdio -> current authority receiver -> exact durable Store CAS/readback", "fresh winner -> point-in-time permit; historical exact retry -> receipt only"]
+ cancellation_cut: "After upstream forwarding or Host exchange, missing reply is uncertain; lookup/recovery must retain exact request identity rather than repeat physical effects"
+}
+^"worldhost"{
+ @spk_entry: ~"../../native/spk-host/src/main.rs"
+ @resident: ~"../../native/spk-host/src/resident_service.rs"
+ @physical: ~"../../native/spk-host/src/hostd.rs"
+ @human_entrance: ~"../../native/spk-host/src/http_entrance.rs"
+ @agent_entrance: ~"../../native/spk-host/src/agent_api_lifetime_server_v3.rs"
+ edges: ["signed SPK -> installed package identity", "fixed custody/config -> BEGIN -> launch claim -> physical unit generation", "START completion -> HTTP/agent listeners", "HTTP/agent request -> current native permit -> physical fd3 call", "restart -> retained journal reconciliation; never fresh launch through uncertain record"]
+ coverage: "Entry dispatch and resident launch preflight read; launch tail, hostd lifecycle and full HTTP/agent receiving definitions remain owner coverage"
+}
+^"objective_execution"{
+ @driver: ~"../../Host/BendSessionDriver.lean"
+ @driver_files: ~"../../Host/BendSessionDriverJson.lean"
+ @signer: ~"../../native/resource-client/src/bend_session.rs"
+ @world_codec: ~"../../Compiler/BendWorldProgramCodec.lean"
+ edges: ["source/key/result current signed observation -> exact source/compiler binding", "checked current signing plan -> local Ed25519 custody", "physical BFV binary -> opaque output -> current native storage -> independent current release", "retained cursor/attempt -> resume exact identity"]
+ state: "Historical TT-backed source route remains present at96a4165; user disabled new TT activation. Host/run explicitly dispatches bend-session/signing-check; signer main special-cases bend-session-sign"
+ migration: "Objective native receiving Artifact/profile remains missing per World owner. Current FheArtifact.produce hardcodes TT semantics/arithmetic/evaluator; Binding.verifySource checks BendTT.Book.get. Composition/compiler/World/FHE own replacement actual activation, not renaming labels"
+ qualification: "Objective typed preview and scenario BoundPlan exist; BoundPlan is not Accepted. Composition exact execution/code artifacts checked against actual Objective DemandMachine.runBounded, while World current receiving Artifact/profile still absent. No Objective native deployment/receiving Artifact claim"
+}
+^"agreement_and_private"{
+ @crypto_boundary: ~"../../native/joint-agreement-crypto/src/main.rs"
+ @source_harness: ~"../../Verify/GenericSimplexSourceHarness.lean"
+ @private_backend: ~"../../native/private-backend/src/main.rs"
+ @private_worker: ~"../../native/private-backend/src/native_worker.rs"
+ @room_privacy: ~"../../native/resource-client/src/private.rs"
+ @traffic: ~"../../native/resource-client/src/scheduled_transport.rs"
+ @mix: ~"../../native/resource-client/src/cohort_tcp.rs"
+ edges: ["agreement source driver -> authenticated recipient/config/epoch/instance/sequence frames -> Rust signing/CAS/TCP bytes", "private-backend worker -> exact dispatch claim -> durable consumable allocation -> pending result", "private room authoring -> key epoch/location-bound authenticated ciphertext -> ordinary native store", "traffic/mix client commands -> scheduled transport/cohort channels"]
+ boundary: "Private room AEAD, MPC backend allocation and agreement are distinct machines; no evidence here that they compose into a complete traffic-private worldhost"
+ coverage: "Private backend entry+closed worker and full pinned source agreement harness read. Operator bridge/new production split remain owner reports; inner MPC/traffic/controller state remains explicit debt"
+}
+^"interpretation"{
+ success_cuts: ["semantic durable admission", "permit delivery", "physical effect completion", "external acknowledgment", "human-visible reply"]
+ law: "These cuts are different. A positive later-looking string cannot substitute for exact durable/current authority evidence"
+ open: ["Read remaining Host operation families fully", "Trace Objective migration imports and compiled artifact pin joins", "Join all horse maps with owner receiving evidence", "Follow all CLI families not yet read into authority and durability boundaries"]
+}
+
+^"shared_cuts"{
+ @entry: ~"../audits/horse-entries/entrances.spw"
+ @exit: ~"../audits/horse-exits/exits.spw"
+ @invariants: ~"../audits/horse-consistency/consistency.spw"
+ durable_admission: "Exact CAS/readback receipt belongs to semantic request identity; recovered-after-uncertain response remains CONFIRMED"
+ physical_authority: "Fresh permit is distinct from historical receipt; exact lookup cannot resend fd3 effect"
+ external_ack: "fn publication marker and protected-object journals precede external release; no automated re-POST after uncertainty"
+ contradiction: "Prior stale refusal may not classify a new lost reply; consistency replan repair delivered captain, receiving pending"
+ private_custody: "Burn anchor precedes correlation row secret; private-output WAL precedes recursive outbox; neither implies public current release"
+ delivery: "Human-visible page/Discord follow-up can fail after semantic or physical success"
+}

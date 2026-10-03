@@ -6,3 +6,4 @@
 .claude/settings.local.json
 # local-gates' cargo target dir (scripts/check-rust-tests.sh, check-journey.sh)
 /target-gates/
+/.spw/_workbench

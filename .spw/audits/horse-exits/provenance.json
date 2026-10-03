@@ -1,0 +1,318 @@
+{
+  "consumer_revision": "fe60a569b3e1863f08159a66c7c53736fe6295b6",
+  "workbench_revision": "651b535b5171e9ed419570f4cd64b53914094433",
+  "source_revision": "96a4165f81ceee32452b381780970e54b9dce886",
+  "scope": "Selected complete executable definitions at concrete sink cuts, not whole-project qualification",
+  "exclusions": [
+    ".spw/_workbench/**",
+    "proof-only bodies",
+    "secrets",
+    "private configs",
+    "transcripts"
+  ],
+  "files": {
+    "Host/Main.lean": {
+      "sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224",
+      "read_spans": [
+        [
+          1139,
+          1458
+        ],
+        [
+          2113,
+          2415
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/main.rs": {
+      "sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f",
+      "read_spans": [
+        [
+          833,
+          973
+        ],
+        [
+          1101,
+          1425
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/transport.rs": {
+      "sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8",
+      "read_spans": [
+        [
+          1204,
+          1650
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/selected_release.rs": {
+      "sha256": "4ce2c31ae5750fa51300daf0ce94e09e6249ee50f553a279859008f9b2b28cac",
+      "read_spans": [
+        [
+          1,
+          294
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/selected_publisher.rs": {
+      "sha256": "ff321032d8511bd949b35c149b4a8a7ab0cfd1a4e6930bb5c919a479ea35f2f6",
+      "read_spans": [
+        [
+          1,
+          544
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/key_rotation.rs": {
+      "sha256": "20ff52cfc83e4da89abd329ba9835670ec1ae3d98d08080f582fafc7b3e2502a",
+      "read_spans": [
+        [
+          256,
+          512
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/key_service.rs": {
+      "sha256": "c0edf4de04b7549538d5b0952bba072093ca929c37108150bdc114d48c265f96",
+      "read_spans": [
+        [
+          350,
+          637
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/current_source.rs": {
+      "sha256": "a5d385686808c66b71bb616d0244beae9f18bee392961f0989f8eb7069f5f0a9",
+      "read_spans": [
+        [
+          1,
+          186
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/protected_object/object_keys.rs": {
+      "sha256": "b6978933c787cd40c551c8bfc428807819662cb2022b7cc59f3b820a178487b3",
+      "read_spans": [
+        [
+          1,
+          384
+        ],
+        [
+          489,
+          540
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/resource-client/src/protected_object/object_epoch_cli.rs": {
+      "sha256": "9e7ff5dd2d0bbfff049ee423d024584c36978bc1dfa652a3c75783ba45a53755",
+      "read_spans": [
+        [
+          1,
+          155
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/private-backend/src/custody.rs": {
+      "sha256": "decb13748c036112a52d7c9693a660a67c895c1d13a50fb3456ced9b46e5ef03",
+      "read_spans": [
+        [
+          1,
+          392
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/private-backend/src/private_output_store.rs": {
+      "sha256": "88035ec2685a51ae12737ab918fa35e4384460905a3393bcf8f9ff98ac721e8d",
+      "read_spans": [
+        [
+          1,
+          185
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/private-backend/src/private_send_store.rs": {
+      "sha256": "0b390b59ece1e6fd329618d0a7b49b7cc12194bc3c90ec0a95cbe0f606a3faf6",
+      "read_spans": [
+        [
+          1,
+          185
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/private-backend/src/transition_journal.rs": {
+      "sha256": "5d17688e9c64dbc844023f26f6cca8dc0cfcb69054bdcd22f2b90eaee0ef7d1c",
+      "read_spans": [
+        [
+          1,
+          159
+        ]
+      ],
+      "basis": "executable definitions read; proof bodies skipped"
+    },
+    "native/grain-runtime/src/custody_gate.rs": {
+      "sha256": "82a27afecfb471977a6351cadc3490bae5c35818698ef9b6159d674fdd889215",
+      "read_spans": [
+        [
+          1,
+          280
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/grain-runtime/src/dispatch_custody.rs": {
+      "sha256": "8d05350aada073d09a1f93b7e6f87836f7ae4e81137d871a40a4541597ba46fd",
+      "read_spans": [
+        [
+          25,
+          165
+        ],
+        [
+          217,
+          320
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/grain-runtime/src/terminal.rs": {
+      "sha256": "928041d7dc706a7971a3a67ccc5328162da672c6113318d63caaae24c6484a23",
+      "read_spans": [
+        [
+          1,
+          263
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/grain-runtime/src/provider.rs": {
+      "sha256": "294adf2ef73ca6aefb8d93131de13084be5ba7bfaa43e9569e666610aa316630",
+      "read_spans": [
+        [
+          985,
+          1265
+        ],
+        [
+          1388,
+          1620
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/grain-runtime/src/main.rs": {
+      "sha256": "9169c6bb630d5034a4b2f4a3e44f26defc626130fcbda4670f1f3b93991107af",
+      "read_spans": [
+        [
+          6131,
+          6463
+        ],
+        [
+          6695,
+          6857
+        ],
+        [
+          9231,
+          9334
+        ],
+        [
+          9781,
+          10062
+        ],
+        [
+          10358,
+          10473
+        ],
+        [
+          13680,
+          13775
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/spk-host/src/agent_api_lifetime_reverse_v3.rs": {
+      "sha256": "4fe543f01646e74222a7577d73d7dccef0e36fb7c83ef65908759dc5b9dce341",
+      "read_spans": [
+        [
+          228,
+          382
+        ],
+        [
+          430,
+          550
+        ]
+      ],
+      "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    }
+  },
+  "commands": [
+    "npm --prefix .spw/_workbench run spw -- doctor ../..",
+    "npm --prefix .spw/_workbench run spw -- select .spw/audits/horse-exits/exits.spw --selector navigable --limit 80 --summary",
+    "cargo nextest run --offline -E test(socket_restart_refuses_replaced_host_under_original_pin)",
+    "npm --prefix .spw/_workbench run spw -- lint --from .spw/audits/horse-exits --json",
+    "npm --prefix .spw/_workbench run spw -- resolve --from .spw/audits/horse-exits --json"
+  ],
+  "qualification": {
+    "restart_helper": "Linux sealed successor exact production definitions: two passed, zero skipped, 0.004s; replacement-between-restarts and in-place+rename in check/exec window; seals deny write/truncate",
+    "full_client": "pending captain composition",
+    "mounted_tools": "invoked and observed doctor/select/lint; initial missing tsx resolved by entries owner",
+    "native_elf_loader": "readelf existing unified Host only system NEEDED, no RPATH/RUNPATH; actual sealed native startup still pending"
+  },
+  "remote_only": {
+    "Compiler/DurableReceiverIO.lean": {
+      "sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4",
+      "read_spans": [
+        [
+          1,
+          248
+        ],
+        [
+          1059,
+          1142
+        ],
+        [
+          1171,
+          1207
+        ]
+      ],
+      "basis": "remote authoritative source"
+    },
+    "native/hyperdocument-link-sqlite-store/src/lib.rs": {
+      "sha256": "e95487cc502f65bc16b911dd2bfa2b5247a2a209ba502af529a2bd92474dc51b",
+      "read_spans": [
+        [
+          690,
+          932
+        ]
+      ],
+      "basis": "publication equals authoritative remote SHA verified"
+    },
+    "native/hyperdocument-link-sqlite-store/src/anchor.rs": {
+      "sha256": "2766a108cc315d50e9b8033a3200235015f1b41c5540d319fc1266078eb67d40",
+      "read_spans": [
+        [
+          1,
+          196
+        ]
+      ],
+      "basis": "authoritative remote executable definitions"
+    }
+  },
+  "patch": {
+    "initial_transport_output": "c7ec7991a46b5528224f95593349139cf2c6d4de0f13c7dda869b7f553a4e24f",
+    "successor_output": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e",
+    "successor_patch_sha256": "869738d2c797965e2a7171b628d71ffb0dd6080cd4d6e15e311d31374472fd30",
+    "status": "source packet delivered; root applying; no deployment claim"
+  }
+}

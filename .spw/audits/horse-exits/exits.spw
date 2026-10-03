@@ -1,0 +1,103 @@
+#>mini_horse_exits
+#:audit
+^"scope"{
+ source_revision: "96a4165f81ceee32452b381780970e54b9dce886"
+ consumer_revision: "fe60a569b3e1863f08159a66c7c53736fe6295b6"
+ workbench_revision: "651b535b5171e9ed419570f4cd64b53914094433"
+ @evidence: ~"./provenance.json"
+ @coverage: ~"./review.md"
+ exclude: ".spw/_workbench/**"
+ status: "bounded source audit; one Linux helper test; composition pending"
+}
+^"durable_receipt_cut"{
+ @receiver: ~"../../../Compiler/DurableReceiverIO.lean"
+ @host: ~"../../../Host/Main.lean"
+ tier: "fact"
+ transition: ["prepare on loaded image", "current source and tail gates", "CAS append", "exact entry readback", "original receipt"]
+ uncertain: "A lost append response is not refusal; exact readback can recover receipt with freshCasWinner false."
+ physical_assumptions: ["SQLite transaction", "native byte transport", "OS fsync", "anchor custody"]
+}
+^"sqlite_anchored_prefix_premise"{
+ @store: ~"../../../native/hyperdocument-link-sqlite-store/src/lib.rs"
+ @anchor: ~"../../../native/hyperdocument-link-sqlite-store/src/anchor.rs"
+ @session: ~"../../../Compiler/DurableReceiverIO.lean"
+ tier: "fact"
+ append: ["sibling anchor flock", "SQLite BEGIN IMMEDIATE", "validate retained genesis and exact anchor entry", "head equals proposed height minus one", "INSERT only", "COMMIT", "anchor file fsync and rename", "parent fsync", "Installed"]
+ read: "Same-height refresh shortcut is protected from a different last-entry Store fork by unchanged independently retained sibling anchor."
+ anchor_coverage: "SHA binds deployment identity, genesis bytes, exact retained height/record/tag; it does not separately rehash every earlier physical entry."
+ premise: "Native INSERT-only Store API, honest SQLite durability, and unchanged anchor custody establish immutable prefix. Generic Transport carries no theorem of that physical property."
+ limit: "Replacing both Store and sibling anchor or editing an earlier entry outside this API is outside this custody premise; no source-cache claim detects it alone."
+}
+^"physical_permit_cut"{
+ tier: "fact"
+ opcodes: [26, 34, 46, 76, 152, 154]
+ transition: ["verified current source", "fresh admitted CAS where effectful", "withFreshTip callback", "write and flush exact frame"]
+ recovery: "Historical and uncertain recovered receipts do not mint another launch/fd3 permit."
+ limit: "Point-in-time tip check is not a lease over later external effects."
+ terminal: "Once reply write begins, serveFrame throws instead of writing a second refusal frame."
+}
+^"selected_fn_publication"{
+ @source: ~"../../../native/resource-client/src/selected_publisher.rs"
+ tier: "fact"
+ transition: ["exact ingress/article retention", "durable submit marker", "source receipt", "exact receipt-only lookup", "durable POST marker", "POST", "retained status"]
+ uncertain: "A preceding POST marker with no exact accepted result holds; no automatic repost."
+ neighbor: "Source publication is authorization at admission, not proof fn delivery completed."
+}
+^"protected_object_emission"{
+ @keys: ~"../../../native/resource-client/src/protected_object/object_keys.rs"
+ @phase: ~"../../../native/resource-client/src/protected_object/object_epoch_cli.rs"
+ tier: "fact"
+ transition: ["fresh authenticated audience anchor supplied by caller", "epoch high-water reconciliation", "encrypted exact wire/package custody", "file fsync", "rename", "parent fsync", "outward bytes"]
+ recovery: "Known operation preserves original wire/context; failed save poisons further emission until reopen."
+ limit: "Local journal does not prove source freshness or protect restoration of source and journal together."
+}
+^"private_output_wal"{
+ @output: ~"../../../native/private-backend/src/private_output_store.rs"
+ @wal: ~"../../../native/private-backend/src/transition_journal.rs"
+ @burn: ~"../../../native/private-backend/src/custody.rs"
+ tier: "fact"
+ transition: ["clone deterministic machine", "event and exact recursive outbox", "frame/checksum", "fsync", "return publication bytes"]
+ recovery: "Only a torn final WAL frame is truncated; complete bad checksums/identity refuse."
+ release: "Correlation burn anchor and snapshot readback precede secret row access."
+ limit: "Backend reference request_delivery requires external fresh native release authority; codec/state alone supplies none."
+}
+^"provider_request_reply_cut"{
+ @gateway: ~"../../../native/grain-runtime/src/provider.rs"
+ @controller: ~"../../../native/grain-runtime/src/main.rs"
+ tier: "fact"
+ transition: ["exact request spool and confirmed source reserve", "lease-linearized curl spawn", "tracked cancellable child", "durable raw response", "controller exact Outcome and native metering quote ACK", "local HTTP write", "Unix worker bridge write ACK", "response replay journal", "settlement"]
+ uncertain: "Cancelled spawned transport and lost upstream response retain uncertainty; received is distinct from locally delivered."
+ replay: "Same prompt/exact body replays retained bytes rather than calling upstream again."
+}
+^"connector_cancel_cut"{
+ @gate: ~"../../../native/grain-runtime/src/custody_gate.rs"
+ @dispatch: ~"../../../native/grain-runtime/src/dispatch_custody.rs"
+ @reverse: ~"../../../native/spk-host/src/agent_api_lifetime_reverse_v3.rs"
+ @terminal: ~"../../../native/grain-runtime/src/terminal.rs"
+ tier: "fact"
+ cancellation: "Only BeforeSpawn certifies no Mini child; after spawn kill/reap never infers native refusal. Shared Host survives client cancellation."
+ dispatch_timeout: "Atomic phase0 to expired proves execution veto; after-start timeout returns uncertain."
+ reverse: "Only exact reserved/marked/settled success frames accepted; receipt-only inspection cannot trigger fd3."
+ terminal: "Prompt completed requires ready state with no retained uncertain/review blockers; untrusted output is escaped."
+ open: "Controller maps dispatch_rpc errors to generic refused even after possible mutation; observed consumers conservatively retain custody, so no safety counterexample established."
+}
+^"finding_restart_identity"{
+ @source: ~"../../../native/resource-client/src/transport.rs"
+ tier: "counterexample"
+ before: "Socket advertises initial Host SHA; crash restart reopened executable pathname without comparing the new image."
+ repair: "Every launch copies to executable memfd, seals WRITE/GROW/SHRINK/SEAL, hashes sealed bytes against original pin, and Linux executes the same held proc fd snapshot."
+ status: "Initial checked-fd source patch integrated; sealed immutable successor delivered to captain, two extracted exact production helper tests PASS."
+ remaining: ["sealed successor full resource-client composition and native ELF startup", "non-Linux pathname hash/exec race"]
+}
+^"finding_rotation_integration"{
+ @source: ~"../../../native/resource-client/src/key_rotation.rs"
+ tier: "counterexample"
+ observed: "Common source still old sequential post-admission daily/next secret installs; published helper alone did not wire recovery."
+ owner: "traffic resume_private_construction"
+ repair_status: "Owner has actual wired consumer and seven receiving checks passing; captain importing full consumer packet."
+ rule: "Repair evidence belongs to tested owner source until common source byte-match is observed."
+}
+^"remaining_review"{
+ status: "not yet read end to end"
+ paths: ["SPK subprocess lifecycle full receiving consumers", "HTTP/web reply generation", "Discord mirror source sinks", "private native203-205 release join", "all fn ACK callbacks", "Bend external effect adapters"]
+}
