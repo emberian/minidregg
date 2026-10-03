@@ -20,6 +20,7 @@ Host.Main installs an executable snapshot in a private directory for the
 stdio lifetime.
 -/
 import Kernel.NativeHost
+import Kernel.NativeObservationOpeningCache
 
 namespace Minidregg.Kernel.NativeHostSession
 
@@ -36,12 +37,15 @@ structure Walked (config : Config) where
 structure Session (config : Config) where
   durable : Durable
   opened : Opened config
+  openingCache : IO.Ref NativeObservationOpeningCache.Cache
   walked : Option (Walked config) := none
 
 def start (config : Config) : IO (Except String (Session config)) := do
   match ← openExisting config with
   | .error detail => return .error detail
-  | .ok opened => return .ok ⟨opened.durable, opened, none⟩
+  | .ok opened =>
+      let cache ← IO.mkRef ([] : NativeObservationOpeningCache.Cache)
+      return .ok ⟨opened.durable, opened, cache, none⟩
 
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do

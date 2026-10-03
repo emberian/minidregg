@@ -1735,10 +1735,11 @@ def dispatchSession (config : NativeHost.Config)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
       let t0 ← IO.monoMsNow
-      let opened ← sessionOpened config state
+      let current ← sessionCurrent config state
+      let opened := current.opened
       ReceiptContinuity.remember config opened.durable
       phaseTrace "op5 refresh" t0
-      match ← NativeHost.queryWireLoaded config opened payload with
+      match ← NativeObservationOpeningCache.queryWireLoaded config opened current.openingCache payload with
       | .ok view => return (5, view)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>
