@@ -87,13 +87,12 @@ def Prepared.fundingAssets (prepared : Prepared deployment physical entries) (ac
   | some funding => if funding.payer = account then [funding.asset] else []
 
 /-- Only coordinates actually consumed by this account's source/destination
-roles enter its native policy view. Read capability narrowing is supplied by
+roles, including funding issuer credits, enter its native policy view. Read capability narrowing is supplied by
 the parent observation admission, separately from this debit scope. -/
 def Prepared.roleAssets (prepared : Prepared deployment physical entries) (account : Nat) :
     List AssetId :=
-  ((prepared.batch.operations.filterMap fun operation =>
-    if operation.posting.source = account ∨ operation.posting.destination = account then
-      some operation.posting.asset else none) ++ prepared.fundingAssets account).eraseDups
+  (prepared.financial.coordinates.filterMap fun coordinate =>
+    if coordinate.1 = account then some coordinate.2 else none).eraseDups
 
 /-- Scope bounds authorize every gross outgoing application debit plus the
 actual funding debit. A later credit never discounts reserved outgoing value. -/

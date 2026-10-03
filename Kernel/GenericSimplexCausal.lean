@@ -1,4 +1,5 @@
 import Kernel.GenericSimplexLocal
+import Mathlib.Tactic.FailIfNoProgress
 
 namespace Minidregg.Kernel.GenericSimplexCausal
 open Minidregg.Kernel.GenericSimplex
@@ -43,7 +44,15 @@ theorem putView_unique (s : State) (v : View) (unique : ViewsUnique s) :
       obtain ⟨old, inside, equal⟩ := List.mem_map.mp member
       have noMatch := List.any_eq_false.mp (Bool.eq_false_iff.mpr missing) old inside
       exact noMatch (by simpa [equal])
-    simpa [List.map_append, absent] using unique
+    rw [List.map_append]
+    apply List.nodup_append.mpr
+    refine ⟨unique, by simp, ?_⟩
+    intro a inside b member
+    have same : b = v.number := by simpa using member
+    subst b
+    intro equal
+    subst a
+    exact absent inside
 
 theorem find_replacement (views : List View) (v : View)
     (existsView : views.any (fun old => old.number == v.number) = true) :
@@ -590,7 +599,8 @@ theorem commit_send_recorded (s : State) (view : Nat) (block : Block)
       have impossible := (recorded view chosen).mpr member
       rw [notSent] at impossible
       contradiction
-    simp [updated, putView, absent]
+    simpa [updated, putView, absent] using
+      (eq_comm : block = chosen ↔ chosen = block)
   · have other : number ≠ updated.number := by simpa only [index] using same
     rw [viewAt_put_other s updated number other]
     simpa [putView, same] using recorded number chosen
@@ -606,6 +616,25 @@ structure CausalInvariant (s : State) : Prop where
   candidateRecorded : CandidateRecorded s
   commitRecorded : CommitRecorded s
   commitLock : StateLock s
+
+@[simp] theorem causal_record (s : State) (current deadline now : Nat)
+    (checked : List Block) (offers : List Bytes) (outbox : List Message)
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
+    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ CausalInvariant s := by
+  constructor <;> intro old <;> rcases old with ⟨unique, votes, once, candidates, commits, locked⟩ <;>
+    exact ⟨unique, votes, once, candidates, commits, locked⟩
+
+
+theorem causal_same_fields (before after : State) (old : CausalInvariant before)
+    (self : after.self = before.self) (views : after.views = before.views)
+    (audit : after.audit = before.audit) : CausalInvariant after := by
+  constructor
+  · simpa [ViewsUnique, views] using old.viewsUnique
+  · simpa [VoteRecorded, viewAt, self, views, audit] using old.voteRecorded
+  · simpa [VoteOnceAudit, self, audit] using old.voteOnce
+  · simpa [CandidateRecorded, viewAt, self, views, audit] using old.candidateRecorded
+  · simpa [CommitRecorded, viewAt, self, views, audit] using old.commitRecorded
+  · simpa [StateLock, views] using old.commitLock
 
 theorem putView_causal (s : State) (v : View) (old : CausalInvariant s)
     (vote : v.voted = (viewAt s v.number).voted)
@@ -690,7 +719,7 @@ theorem doCommit_causal (s : State) (view : Nat) (block : Block)
   have appended := append_commit_causal (putView cleared selected) view block putInvariant
   unfold doCommit
   dsimp only
-  split_ifs <;> first | exact old | exact clearInvariant | exact appended
+  split_ifs <;> first | exact old | exact clearInvariant | exact causal_same_fields _ _ appended rfl rfl rfl
 
 #assert_axioms append_commit_causal
 #assert_axioms doCommit_causal
@@ -707,17 +736,18 @@ theorem sendCandidate_causal (s : State) (view : Nat) (arg : Argument)
   dsimp only
   split
   · exact old
-  · constructor
+  next guard =>
+    constructor
     · exact register_unique _ _ (putView_unique s _ old.viewsUnique)
     · apply broadcast_nonvote_voteRecorded _ view .candidate arg (by decide)
       apply putView_voteRecorded _ _ _ old.voteRecorded
       simp [viewAt_number]
-    · simpa [sendCandidate, *] using once
-    · simpa [sendCandidate, *] using candidate
+    · simpa only [sendCandidate, guard, if_false] using once
+    · simpa only [sendCandidate, guard, if_false] using candidate
     · apply broadcast_other_commitRecorded _ view .candidate arg (by decide)
       apply putView_commitRecorded _ _ _ old.commitRecorded
       simp [viewAt_number]
-    · simpa [sendCandidate, *] using locked
+    · simpa only [sendCandidate, guard, if_false] using locked
 
 #assert_axioms register_unique
 #assert_axioms sendCandidate_causal
@@ -768,11 +798,45 @@ theorem commit_send_causal (s : State) (view : Nat) (block : Block)
 
 #assert_axioms commit_send_causal
 
+theorem putView_passive_causal (s : State) (v : View) (old : CausalInvariant s)
+    (vote : v.voted = (viewAt s v.number).voted)
+    (candidates : v.sentCandidates = (viewAt s v.number).sentCandidates)
+    (commit : v.sentCommit = (viewAt s v.number).sentCommit) :
+    CausalInvariant (putView s v) := by
+  apply putView_causal s v old vote candidates commit
+  intro block sent arg member
+  rw [commit] at sent
+  rw [candidates] at member
+  exact viewAt_locked s v.number old.commitLock block sent arg member
+
+theorem causal_fold {α : Type} (action : State → α → State)
+    (each : ∀ state item, CausalInvariant state → CausalInvariant (action state item))
+    (items : List α) (state : State) (old : CausalInvariant state) :
+    CausalInvariant (items.foldl action state) := by
+  induction items generalizing state with
+  | nil => exact old
+  | cons item rest ih => exact ih (action state item) (each state item old)
+
+
+theorem ingest_causal (c : Config) (s : State) (message : Message)
+    (old : CausalInvariant s) : CausalInvariant (ingest c s message) := by
+  unfold ingest
+  dsimp only
+  split_ifs
+  all_goals first
+    | exact old
+    | exact register_causal s message old
+    | apply putView_passive_causal _ _ old <;> simp [viewAt_number]
+
+#assert_axioms putView_passive_causal
+#assert_axioms causal_fold
+#assert_axioms causal_record
+#assert_axioms ingest_causal
+
 /-- The actual executable empty state before enterView/start pumping. -/
 theorem initial_causal (self now deadline : Nat) (offers : List Bytes)
     (checked : List Block) :
-    CausalInvariant { self := self, now := now, deadline := deadline,
-      offers := offers, checked := checked } := by
+    CausalInvariant { self := self, now := now, deadline := deadline, offers := offers, checked := checked } := by
   constructor
   · simp [ViewsUnique]
   · simp [VoteRecorded, viewAt]
@@ -782,7 +846,134 @@ theorem initial_causal (self now deadline : Nat) (offers : List Bytes)
   · simp [StateLock]
 
 theorem drain_causal (s : State) (invariant : CausalInvariant s) :
-    CausalInvariant (drainOutbox s).2 := invariant
+    CausalInvariant (drainOutbox s).2 :=
+  causal_same_fields s (drainOutbox s).2 invariant rfl rfl rfl
+
+macro "causal_step" : tactic => `(tactic|
+  first
+    | assumption
+    | fail_if_no_progress simp only [causal_record]
+    | with_reducible apply commit_send_causal
+    | with_reducible apply clear_causal
+    | with_reducible apply doCommit_causal
+    | with_reducible apply sendCandidate_causal
+    | with_reducible apply castVote_causal
+    | with_reducible apply broadcast_other_causal
+    | with_reducible apply putView_passive_causal
+    | solve | simp_all [viewAt_number]
+    | split)
+
+macro "causal_chain" : tactic => `(tactic| repeat' causal_step)
+
+set_option maxHeartbeats 500000 in
+ theorem valueRules_causal (c : Config) (s : State) (view : Nat) (block : Block)
+    (old : CausalInvariant s) : CausalInvariant (valueRules c s view block) := by
+  simp only [valueRules, Id.run, bind, pure]
+  causal_chain
+  all_goals simp_all only [Bool.and_eq_true]
+
+set_option maxHeartbeats 500000 in
+ theorem argumentRules_causal (c : Config) (s : State) (view : Nat) (arg : Argument)
+    (old : CausalInvariant s) : CausalInvariant (argumentRules c s view arg) := by
+  simp only [argumentRules, Id.run, bind, pure]
+  causal_chain
+
+theorem progressView_causal (c : Config) (s : State) (view : Nat)
+    (old : CausalInvariant s) : CausalInvariant (progressView c s view) := by
+  simp only [progressView, Id.run, bind, pure]
+  apply causal_fold
+  · intro state arg prior
+    exact argumentRules_causal c state view arg prior
+  · apply causal_fold
+    · intro state block prior
+      exact valueRules_causal c state view block prior
+    · exact old
+
+theorem propose_causal (s : State) (old : CausalInvariant s) :
+    CausalInvariant (propose s) := by
+  unfold propose
+  dsimp only
+  causal_chain
+
+theorem enterView_causal (c : Config) (s : State) (view : Nat)
+    (old : CausalInvariant s) : CausalInvariant (enterView c s view) := by
+  unfold enterView
+  dsimp only
+  split
+  · apply propose_causal
+    causal_chain
+  · causal_chain
+
+theorem progressOuter_causal (c : Config) (s : State) (old : CausalInvariant s) :
+    CausalInvariant (progressOuter c s) := by
+  simp only [progressOuter, Id.run, bind, pure]
+  repeat' first
+    | with_reducible apply enterView_causal
+    | causal_step
+
+theorem pass_causal (c : Config) (s : State) (old : CausalInvariant s) :
+    CausalInvariant (pass c s) := by
+  unfold pass
+  apply progressOuter_causal
+  apply causal_fold
+  · intro state view prior
+    exact progressView_causal c state view prior
+  · exact old
+
+theorem pump_causal (c : Config) (fuel : Nat) (s : State) (old : CausalInvariant s) :
+    CausalInvariant (pump c fuel s) := by
+  induction fuel generalizing s with
+  | zero => simpa only [pump, causal_record] using old
+  | succ fuel ih =>
+    simp only [pump]
+    split
+    · apply pass_causal
+      simpa only [causal_record] using old
+    · apply ih
+      apply pass_causal
+      simpa only [causal_record] using old
+
+theorem step_causal (c : Config) (s : State) (input : Input) (old : CausalInvariant s) :
+    CausalInvariant (step c s input) := by
+  unfold step
+  dsimp only
+  split
+  · causal_chain
+  · apply pump_causal
+    cases input with
+    | delivery message => exact ingest_causal c s message old
+    | deliveryAt now message =>
+      apply ingest_causal
+      causal_chain
+    | checked block => dsimp only; causal_chain
+    | offer payload => dsimp only; causal_chain
+    | poll => exact old
+    | tick now =>
+      dsimp only
+      repeat' first
+        | with_reducible apply pump_causal
+        | causal_step
+
+theorem start_causal (c : Config) (self now : Nat) (offers : List Bytes)
+    (checked : List Block) : CausalInvariant (start c self now offers checked) := by
+  unfold start
+  split
+  · exact causal_same_fields _ _ (initial_causal self now now [] []) rfl rfl rfl
+  · apply pump_causal
+    apply enterView_causal
+    exact initial_causal self now (now + c.timeout) offers checked
+
+#assert_axioms progressView_causal
+#assert_axioms propose_causal
+#assert_axioms enterView_causal
+#assert_axioms progressOuter_causal
+#assert_axioms pass_causal
+#assert_axioms pump_causal
+#assert_axioms step_causal
+#assert_axioms start_causal
+
+#assert_axioms valueRules_causal
+#assert_axioms argumentRules_causal
 
 #assert_axioms putView_unique
 #assert_axioms initial_causal

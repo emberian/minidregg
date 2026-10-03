@@ -1,4 +1,4 @@
-/- Participant-held public acknowledged prefix. This file is owned and retained
+/- Participant-held public acknowledged history. This file is owned and retained
 independently from server archive custody. It is not another source journal or
 an authority/transfer token. Archive-before-signature comes from CheckedACK;
 local durable CAS-before-return makes the participant acknowledgement usable.
@@ -44,7 +44,7 @@ private def cas (config : Config) (expected next : Bytes) : IO Unit := do
         throw (IO.userError "participant private pin mode refused")
     IO.ofExcept (← RetainedArtifactIO.checkedFile helper config.helperSha256)
     let result ← IO.Process.output {cmd := helper.toString,args := #["cas",
-      (config.root / "acknowledged-prefix.bin").toString,
+      (config.root / "acknowledged-history.bin").toString,
       (directory / "expected").toString,(directory / "next").toString]}
     if result.exitCode != 0 || result.stderr != "" || result.stdout != "durable\n" then
       throw (IO.userError "participant pin CAS conflict or uncertain")
@@ -62,16 +62,16 @@ def hold (config : Config) (old : ParticipantPin) (manifest : Manifest)
     (checked : CheckedAcknowledgement old manifest) : IO (Except String (Held config old manifest)) := do
   try
     let owner ← IO.Process.output {cmd := "/usr/bin/id",args := #["-u"]}
-    let mode ← IO.Process.output {cmd := "/usr/bin/stat",args := #["-c","%u:%a:%F",config.root.toString]}
+    let mode ← IO.Process.output {cmd := "/usr/bin/stat",args := #["-c","%u:%a:%f",config.root.toString]}
     if owner.exitCode != 0 || owner.stderr != "" || mode.exitCode != 0 || mode.stderr != "" ||
-        mode.stdout != owner.stdout.trimAscii.toString ++ ":700:directory\n" then
+        mode.stdout != owner.stdout.trimAscii.toString ++ ":700:41c0\n" then
       return .error "participant state directory custody refused"
-    let path := config.root / "acknowledged-prefix.bin"
+    let path := config.root / "acknowledged-history.bin"
     let present := (← IO.FS.readBinFile path).toList
     let expected := frame old
     let next := frame checked.next
     if present != expected && present != next then
-      return .error "participant held prefix differs or already advanced"
+      return .error "participant held history differs or already advanced"
     cas config present next
     if (← IO.FS.readBinFile path).toList != next then
       return .error "participant pin exact readback differs"

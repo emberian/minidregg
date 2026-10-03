@@ -1,0 +1,13 @@
+Scoped Lean dependency scheduler
+
+Run scripts/lean-scoped-dag.py under an existing aggregate resource guardian. It does not invoke lake or download/rebuild unselected dependencies. Supply a frozen CHECK-MANIFEST (imports, source_sha256, affected_topological), warm pin list, toolchain, owned output/C roots, checkpoint, logs root and explicit jobs/threads. Total concurrency is jobs times threads.
+
+The first LEAN_PATH root must be a unified owned output overlay containing exact read-only warm module links. A partial namespace hides later roots. External prerequisite closures must already be qualified and immutable; direct artifact fingerprints here are not a substitute for Lean.readModuleData binary-import closure validation. .ilean alone can omit actual binary imports.
+
+Each node has one writer. A dependent starts only after its producers exit0 and publish all olean companions and C. Failed nodes block descendants; unrelated ready branches continue. Checkpoint reuse requires exact source/transitive-input/toolchain and dependency/output artifact hashes. Every attempt keeps source pins, compiler log, status and old artifacts. Source or input drift refuses publication. Per-run hashing caches only unchanged inode/size/mtime/ctime identities.
+
+Publication copies into a temporary file on each destination filesystem, then atomically replaces that file. It never moves /tank staging directly onto a different /home filesystem. Scheduler dependencies cannot observe a partial artifact set because PASS is published only after the whole set. --recover-run adopts retained staging only from matching exit0 compiles whose publication failed with EXDEV, after matching source/input/dependency pins; no recompilation is required. Staging and its prior status are preserved.
+
+--export-complete writes a fresh read-only copied cohort only after every selected module qualifies. Never hardlink a consumer snapshot to writable producer outputs. This is scoped compilation evidence, not native receiving, proof adequacy or protocol qualification.
+
+Six deterministic fake-compiler regressions cover parallel ready work, dependent sequencing, independent progress after failure, source/transitive invalidation, artifact corruption, and recovery of successful unpublished artifacts without running the compiler again. Run python3 scripts/test_lean_scoped_dag.py.

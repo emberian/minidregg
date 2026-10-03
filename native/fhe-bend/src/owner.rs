@@ -53,10 +53,19 @@ fn main() -> Result<()> {
     let pk = PublicKey::new(&sk, &mut rng);
     let arity = artifact_arity(&plan)?;
     let profile = artifact_profile(&plan)?;
+    let is_natural = profile == minidregg_fhe_bend::natural::PROFILE;
+    let is_mux = !is_natural && arity == 3;
     // Same public4096-slot capacity and same owner/audience. Three private
     // mux inputs enumerate all eight environments in the first eight slots.
     let mut slots = vec![vec![0u64; 4096]; arity];
-    if arity == 1 {
+    if is_natural {
+        let caps = minidregg_fhe_bend::natural::caps(&plan)?;
+        for (input, cap) in caps.iter().enumerate() {
+            for slot in 0..4096 {
+                slots[input][slot] = (slot as u64 + 17 * input as u64) % cap;
+            }
+        }
+    } else if arity == 1 {
         slots[0][1] = 1;
     } else {
         for assignment in 0..8 {
@@ -70,7 +79,7 @@ fn main() -> Result<()> {
         let pt = Plaintext::try_encode(values, Encoding::simd(), &p)?;
         inputs.push(pk.try_encrypt(&pt, &mut rng)?);
     }
-    let rk = if arity == 3 {
+    let rk = if is_mux {
         Some(RelinearizationKey::new(&sk, &mut rng)?)
     } else {
         None
@@ -88,7 +97,9 @@ fn main() -> Result<()> {
         relinearization_key: rk.as_ref().map(|r| hex(&r.to_bytes())),
         inputs: inputs.iter().map(|c| hex(&c.to_bytes())).collect(),
         input_depths: vec![0; arity],
-        input_admission: "owner-generated-canonical-bool-v1".into(),
+        input_admission: if is_natural {
+            "honest-owner-fresh-bounded-natural-v1"
+        } else { "owner-generated-canonical-bool-v1" }.into(),
         context: Context {
             semantic_id: format!("compiler-artifact:{pin}"),
             program_id: format!("compiler-artifact:{pin}"),
@@ -139,7 +150,10 @@ fn main() -> Result<()> {
     let decoded = Vec::<u64>::try_decode(&sk.try_decrypt(&out)?, Encoding::simd())?;
     let mut expected = Vec::new();
     for i in 0..4096 {
-        let value = if arity == 1 {
+        let value = if is_natural {
+            minidregg_fhe_bend::natural::source_value(&plan,
+                &slots.iter().map(|v| v[i]).collect::<Vec<_>>())?
+        } else if arity == 1 {
             u64::from(if slots[0][i] == 0 {
                 plan["onFalse"].as_bool().unwrap()
             } else {
@@ -155,7 +169,7 @@ fn main() -> Result<()> {
         ensure(decoded[i] == value, "owner-private source oracle mismatch")?;
         expected.push(value);
     }
-    if arity == 3 {
+    if is_mux {
         ensure(
             candidate.physical_cost.ct_ct_mul == 1
                 && candidate.physical_cost.relinearizations == 1

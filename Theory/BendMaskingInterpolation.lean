@@ -47,13 +47,14 @@ theorem map_eq_of_equivariant_evaluations (queries : Finset F)
     polynomial.map automorphism.toRingHom = polynomial := by
   apply Polynomial.eq_of_degrees_lt_of_eval_index_eq queries
     Function.injective_id.injOn
-  · simpa only [Polynomial.degree_map_eq_of_injective automorphism.injective] using small
+  · rw [Polynomial.degree_map_eq_of_injective (f := automorphism.toRingHom) automorphism.injective]
+    exact small
   · exact small
   · intro point member
     have mapped := Polynomial.eval_map_apply (p := polynomial) automorphism.toRingHom
       (automorphism.symm point)
     have value := equivariant (automorphism.symm point) (closed point member)
-    simpa only [id_eq, RingEquiv.apply_symm_apply] using mapped.trans value.symm
+    simpa using mapped.trans value.symm
 
 /-- Interpolation of automorphism-equivariant values produces fixed coefficients.
 For Frobenius this supplies descent only after a separate concrete theorem
@@ -71,8 +72,12 @@ theorem interpolate_coeff_fixed (queries : Finset F) (automorphism : F ≃+* F)
     (Lagrange.degree_interpolate_lt values Function.injective_id.injOn) closedInverse
     (by
       intro point member
-      rw [Lagrange.eval_interpolate_at_node values Function.injective_id.injOn (closed point member),
-        Lagrange.eval_interpolate_at_node values Function.injective_id.injOn member]
+      have atPoint : (Lagrange.interpolate queries id values).eval point = values point := by
+        simpa using Lagrange.eval_interpolate_at_node values Function.injective_id.injOn member
+      have atImage : (Lagrange.interpolate queries id values).eval (automorphism point) =
+          values (automorphism point) := by
+        simpa using Lagrange.eval_interpolate_at_node values Function.injective_id.injOn (closed point member)
+      rw [atPoint, atImage]
       exact equivariant point member)
   simpa only [Polynomial.coeff_map] using congrArg (fun p : F[X] => p.coeff index) fixed
 
@@ -111,7 +116,7 @@ theorem observation_shift_fixed (queries : Finset F) (automorphism : F ≃+* F)
     rw [eval_equivariant_of_map_eq automorphism left fixedLeft,
       eval_equivariant_of_map_eq automorphism right fixedRight,
       eval_equivariant_of_map_eq automorphism vanishing fixedVanishing,
-      map_div, map_sub]
+      _root_.map_div₀ automorphism, _root_.map_sub automorphism]
   refine ⟨offset, Lagrange.degree_interpolate_lt values Function.injective_id.injOn,
     fun index => interpolate_coeff_fixed queries automorphism values closed closedInverse
       equivariant index, ?_⟩

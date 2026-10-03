@@ -2,7 +2,7 @@
 Exact portable custody over an existing source history. This module neither
 executes a second world nor authorizes installation, reconfiguration or private
 share export. The current native receiver remains the authority for those acts.
-An acknowledged prefix is independently held by its participant. Archive repair
+An acknowledged history is independently held by its participant. Archive repair
 returns an exact candidate; it does not confer overwrite rights.
 -/
 import Theory.AssertAxioms
@@ -32,7 +32,7 @@ def Prefix.Extends (new old : Prefix) : Prop :=
 instance (new old : Prefix) : Decidable (new.Extends old) := by
   unfold Prefix.Extends; infer_instance
 
-theorem Prefix.extends_refl (prefix : Prefix) : prefix.Extends prefix := by
+theorem Prefix.extends_refl (history : Prefix) : history.Extends history := by
   simp [Prefix.Extends]
 
 theorem Prefix.extends_trans {new middle old : Prefix}
@@ -40,7 +40,13 @@ theorem Prefix.extends_trans {new middle old : Prefix}
   rcases later with ⟨identity, seed, length, records⟩
   rcases earlier with ⟨oldIdentity, oldSeed, oldLength, oldRecords⟩
   refine ⟨identity.trans oldIdentity, seed.trans oldSeed, oldLength.trans length, ?_⟩
-  rw [← oldRecords, ← records, List.take_take, Nat.min_eq_left oldLength]
+  calc
+    new.records.take old.records.length =
+        (new.records.take middle.records.length).take old.records.length := by
+      rw [List.take_take, Nat.min_eq_left oldLength]
+    _ = middle.records.take old.records.length :=
+      congrArg (fun values => values.take old.records.length) records
+    _ = old.records := oldRecords
 
 /-- Physical selector is a canonical, source-selected coordinate, not an arbitrary
 request path. Include immutable snapshot/invocation/generation identity in the
@@ -53,7 +59,7 @@ structure Artifact where
   deriving DecidableEq, Repr
 
 structure Manifest where
-  prefix : Prefix
+  «prefix» : Prefix
   /-- Entire canonical DurableReceiver.Image, not a projection of app counters.
 Contains all cells/modules/currentrefs/notes/nullifiers/charges and accepted events. -/
   image : Bytes
@@ -69,7 +75,7 @@ inventories are opaque and exact. Their owners retain admission semantics. -/
   deriving DecidableEq, Repr
 
 /-- Independent participant-held pin. Changing a source signing key or copying a
-MAC key from the archive cannot rewrite this acknowledged prefix. -/
+MAC key from the archive cannot rewrite this acknowledged history. -/
 structure ParticipantPin where
   participant : SubjectId
   publicKey : Bytes
@@ -126,7 +132,7 @@ theorem acknowledge_nonregression {pin next : ParticipantPin} {ack : Acknowledge
   exact exact.2.2.2.2.1.2.2.1
 
 /-- The old acknowledged endpoint's authenticated system opening and exact
-chain extension remain load-bearing. This is commitment-prefix continuity;
+chain extension remain load-bearing. This is commitment-history continuity;
 source record equality additionally uses hash separation, not a disclosure. -/
 theorem acknowledge_prefix_preserved {pin next : ParticipantPin} {ack : Acknowledgement}
     {extension : Minidregg.Kernel.ReceiptContinuity.Extension}
@@ -169,7 +175,7 @@ def Preserves (required : List Artifact) (manifest : Manifest) : Prop :=
 instance (required : List Artifact) (manifest : Manifest) : Decidable (Preserves required manifest) := by
   unfold Preserves; infer_instance
 
-/-- Restore acceptance retains the participant prefix and every outstanding
+/-- Restore acceptance retains the participant history and every outstanding
 source-selected obligation. It still does not authorize running the snapshot. -/
 def acceptRepair (pin : ParticipantPin) (required : List Artifact)
     (manifest : Manifest) (extension : Minidregg.Kernel.ReceiptContinuity.Extension) : Option Manifest :=
@@ -182,6 +188,7 @@ theorem repair_exact {pin : ParticipantPin} {required : List Artifact}
     (checked : acceptRepair pin required offered extension = some accepted) :
     accepted = offered ∧ Preserves required accepted := by
   unfold acceptRepair at checked
+  dsimp only at checked
   split at checked
   · rename_i valid
     cases checked
@@ -260,7 +267,7 @@ structure ReadySuccessor (request : SuccessorRequest)
   obligationsPreserved : Preserves required request.retained
 
 /-- Uncertain external effects retain their exact request/reply/provider/outbox
-custody. Neither repair nor an acknowledged prefix resolves that uncertainty. -/
+custody. Neither repair nor an acknowledged history resolves that uncertainty. -/
 theorem repair_retains_obligation {pin : ParticipantPin} {required : List Artifact}
     {offered accepted : Manifest} {extension : Minidregg.Kernel.ReceiptContinuity.Extension}
     (checked : acceptRepair pin required offered extension = some accepted)

@@ -158,4 +158,3 @@ theorem sendCandidate_backed {external : Message → Prop} {state : State}
 #assert_axioms register_backed
 #assert_axioms broadcast_backed
 end Minidregg.Kernel.GenericSimplexReceiveProvenance
-EOF'

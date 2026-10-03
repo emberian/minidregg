@@ -27,8 +27,12 @@ queries. Auxiliary lookup/permutation tables are outside this profile. -/
 def ir2Trace : QueryBudget := ⟨4, 2, 19⟩
 
 theorem ir2_trace_required : ir2Trace.required = 27 := by decide
-theorem ir2_32_covers : ir2Trace.Covers 32 := by decide
-theorem ir2_16_insufficient : ¬ ir2Trace.Covers 16 := by decide
+theorem ir2_32_covers : ir2Trace.Covers 32 := by
+  change 27 ≤ 32
+  decide
+theorem ir2_16_insufficient : ¬ ir2Trace.Covers 16 := by
+  change ¬ 27 ≤ 16
+  decide
 
 section LinearCoverage
 variable {F W M O : Type*} [Field F]

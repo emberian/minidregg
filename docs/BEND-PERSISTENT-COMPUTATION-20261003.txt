@@ -269,3 +269,46 @@ the typed event62 admission at its exact source prefix for chronological replay.
 No external dispatch/response event is admitted yet. Next: qualify prerequisites,
 wire typed live/replay receiving, test native initialize/advance/retry/stale CAS,
 then pending yielded Plan→post-durability effect→authorized typed response.
+
+EXACT RESPONSE ORIGIN AND CLOSED YIELD ABI — AUTHORED, UNCOMPILED
+Compiler/BendActivityOrigin and BendActivitySegment retain the precise new source
+origin after an external response: the immutable captured continuation pointer,
+actual injected input pointer and response, plus a selected definition/interface
+in the same admitted Book and complete canonical type text. The dependent result
+type is rederived by source checking. Resumption does not restart the initial Ref.
+The v2 Activity record patch retains that origin and the pending signature; its
+private resumeCandidate returns the actual allocator/resume witness and preserves
+context, generation, prior source count and outcome. Native signed outcome and
+current predecessor consumption remain independently required.
+
+BendActivityYieldSource binds the actual complete heap pair and source count to
+BendRunCore.Checked. BendActivityResponseBinding then checks the exact captured
+continuation type and real resumption readiness for BOTH admitted Bool outcomes;
+its general theorem joins the actual new state to source application/typing.
+Bool is a finite response ABI, not an encoding of arbitrary provider output.
+
+BendActivityPlanAdapter is a closed output codec: it preserves the complete
+Tup Q1 PlanData/continuation source result while lowering only the Plan component.
+The native registry must explicitly select it; no source trace to the first
+component is fabricated. The initial adapter uses the canonical byte Plan ABI.
+A source-owned generated Activity control target must be checked together with
+the application effects before final current native admission; ignoring arbitrary
+extra targets or modifying an already-signed intent is not that join.
+
+The chat client append_proposal extraction exposes its existing unsigned current
+room/stream append and privacy selector; append_recorded reuses it. It performs no
+submission and grants no authority. Combining this target with Activity requires
+one final signed native proposal and current admission of every target. Until
+that constructor is connected, request publication remains an explicit retained
+phase with exact-operation recovery, not an asserted atomic cross-domain action.
+
+FIRST PUBLICATION ROUTE REFINEMENT
+The pending record retains exact separately signed application command bytes,
+not a synthetic application-only IntentRecord and not a final transaction which
+would recursively contain its own pending post. Suspension.pendingCandidate
+parses the original command, checks exact source Plan/application effects and
+excludes the Activity target. Parsing signed bytes is not signature verification:
+current native authorization, funding and actual Appended still gate publication.
+This first route is pending commit followed by publication/reconciliation of that
+same operation; a stale current admission refuses without silently resigning.
+Atomic generated-control normalization is a subsequent independently checked route.

@@ -61,22 +61,28 @@ theorem planFrom_spec_exact (config : NativeHost.Config) (opened : NativeHost.Op
       (NativeHost.logicalHeight config opened.durable) spec)
     (plan : Plan) (success : planFrom config opened spec prepared = .ok plan) :
     plan.spec = spec := by
-  unfold planFrom at success
-  split at success <;> simp_all
+  cases signer : CredentialSignatureAdmission.signingHeader opened.authority.snapshot
+      (marker spec) ⟨.object, prepared.wanted⟩ with
+  | error reason => simp [planFrom, signer, Except.mapError, Except.bind, Except.pure, bind, pure] at success
+  | ok header =>
+    simp [planFrom, signer, Except.mapError, Except.bind, Except.pure, bind, pure] at success
+    exact congrArg Plan.spec success.symm
 
 theorem prepare_spec_exact (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (spec : Spec) (plan : Plan) (success : prepareLoaded config opened spec = .ok plan) :
     plan.spec = spec := by
-  unfold prepareLoaded at success
-  split at success
-  · simp_all
-  · exact planFrom_spec_exact config opened spec _ plan success
+  cases selected : prepare (sourceContext config opened) config.profile config.federation
+      (NativeHost.logicalHeight config opened.durable) spec with
+  | none => simp [prepareLoaded, selected, Except.bind, Except.pure, bind, pure, throw] at success
+  | some prepared =>
+    exact planFrom_spec_exact config opened spec prepared plan
+      (by simpa [prepareLoaded, selected] using success)
 
 theorem plan_roundtrip (plan : Plan) : planCodec.decode (planCodec.encode plan) = some plan :=
   planCodec.decode_encode plan
 theorem plan_canonical {bytes : List UInt8} {plan : Plan}
     (decoded : planCodec.decode bytes = some plan) : planCodec.encode plan = bytes :=
-  ResourceBirthCodec.strictCodec_canonical _ decoded
+  ResourceBirthCodec.strictCodec_canonical (NativeHostCodec.framed "DREGG/BEND/RETURN-RELEASE-PLAN/v1".toUTF8.toList planStream) decoded
 
 theorem prepare_source_refused (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (spec : Spec)
@@ -84,7 +90,8 @@ theorem prepare_source_refused (config : NativeHost.Config) (opened : NativeHost
       (NativeHost.logicalHeight config opened.durable) spec = none) :
     prepareLoaded config opened spec =
       .error "current Bend return source, destination, root or profile refused" := by
-  simp [prepareLoaded, refused]
+  simp only [prepareLoaded, refused]
+  rfl
 
 theorem assemble_canonical (spec : Spec)
     (header : CredentialSignedEnvelopeController.SignedHeader) (signature : List UInt8)
@@ -92,7 +99,8 @@ theorem assemble_canonical (spec : Spec)
     assemble ⟨spec, CredentialSignedEnvelopeController.headerCodec.encode header⟩ signature =
       .ok (ingressCodec.encode
         ⟨spec, CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨header, signature⟩⟩) := by
-  simp [assemble, CredentialSignedEnvelopeController.headerCodec.decode_encode, length]
+  simp [assemble, CredentialSignedEnvelopeController.headerCodec.decode_encode, length, pure, Except.pure]
+  rfl
 
 theorem assembly_ingress_roundtrip (spec : Spec)
     (header : CredentialSignedEnvelopeController.SignedHeader) (signature : List UInt8) :

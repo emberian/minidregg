@@ -39,8 +39,15 @@ impl<C> FullDegreeChallenger<C> { pub fn new(inner: C) -> Self { Self { inner } 
 impl<C, T> CanObserve<T> for FullDegreeChallenger<C> where C: CanObserve<T> {
     fn observe(&mut self, value: T) { self.inner.observe(value); }
 }
-impl<C, T> CanSample<T> for FullDegreeChallenger<C> where C: CanSample<T> {
-    fn sample(&mut self) -> T { self.inner.sample() }
+// Expose only raw base-field sampling. A future direct `sample::<Extension>`
+// call must not silently bypass the conditioned algebra-element protocol.
+// The exact registered extension routes through the same conditioner below;
+// other extension algebras have no raw sampler implementation.
+impl<C> CanSample<F> for FullDegreeChallenger<C> where C: CanSample<F> {
+    fn sample(&mut self) -> F { self.inner.sample() }
+}
+impl<C> CanSample<E> for FullDegreeChallenger<C> where C: FieldChallenger<F> {
+    fn sample(&mut self) -> E { self.sample_algebra_element::<E>() }
 }
 impl<C> CanSampleBits<usize> for FullDegreeChallenger<C> where C: CanSampleBits<usize> {
     fn sample_bits(&mut self, bits: usize) -> usize { self.inner.sample_bits(bits) }
@@ -102,6 +109,18 @@ mod tests {
         assert!(powers_span_extension(a));
         assert_eq!(prover.inner.consumed, 8);
         assert_eq!(verifier.inner.consumed, 8);
+    }
+
+    #[test]
+    fn direct_extension_sample_uses_same_conditioned_draws() {
+        let script = Scripted { values: [7,0,0,0,8,1,0,0].into_iter().map(F::new).collect(), consumed: 0 };
+        let mut direct = FullDegreeChallenger::new(script.clone());
+        let mut algebra = FullDegreeChallenger::new(script);
+        let a: E = direct.sample();
+        let b: E = algebra.sample_algebra_element();
+        assert_eq!(a,b);
+        assert_eq!(direct.inner.consumed,8);
+        assert_eq!(algebra.inner.consumed,8);
     }
 
     #[test]

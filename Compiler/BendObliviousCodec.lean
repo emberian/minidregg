@@ -44,14 +44,14 @@ def controlData : BendClosureMachine.Control → ControlData
 def encodeArgument (width : Nat) (argument : Quan × Nat) : List Bool :=
   bits 2 (BendClosureContinuationCodec.quanCode argument.1) ++ bits width argument.2
 
-def padArguments (shape : Shape) (args : List (Quan × Nat)) : List Bool :=
-  ((args ++ List.replicate (shape.argumentSlots - args.length) (.Q0,0)).take shape.argumentSlots).
-    flatMap (encodeArgument shape.wordBits)
+def padArguments (shape : BendObliviousState.Shape) (args : List (Quan × Nat)) : List Bool :=
+  ((args ++ List.replicate (shape.argumentSlots - args.length) (Quan.Q0,0)).take shape.argumentSlots).flatMap (encodeArgument shape.wordBits)
 
-def encodeControl (shape : Shape) (control : BendClosureMachine.Control) : Option (List Bool) := do
+def encodeControl (shape : BendObliviousState.Shape) (control : BendClosureMachine.Control) : Option (List Bool) := do
   let c := controlData control
   if !([c.a,c.b,c.c,c.d,c.e].all (· < 2^shape.wordBits)) ||
       c.first.length > shape.argumentSlots || c.second.length > shape.argumentSlots ||
+      (c.tag == 10 && c.first.length + c.second.length > shape.argumentSlots) ||
       !((c.first ++ c.second).all (fun arg => arg.2 < 2^shape.wordBits)) then none
   else some (bits 4 c.tag ++ bits 2 (BendClosureContinuationCodec.quanCode c.quantity) ++ bits 5 c.failure ++
     [c.a,c.b,c.c,c.d,c.e,c.first.length,c.second.length].flatMap (bits shape.wordBits) ++
@@ -70,7 +70,7 @@ def encodeFrame (width : Nat) (frame : BendClosureMachine.Frame) : List Bool :=
   let (tag,q,a,b) := frameData frame
   bits 3 tag ++ bits 2 (BendClosureContinuationCodec.quanCode q) ++ bits width a ++ bits width b
 
-def encode (shape : Shape) (state : BendClosureMachine.State) : Option (Array Bool) := do
+def encode (shape : BendObliviousState.Shape) (state : BendClosureMachine.State) : Option (Array Bool) := do
   if !shape.valid || state.heap.rows.size != shape.heapSlots ||
       state.heap.used > shape.heapSlots || state.data.size != shape.heapSlots ||
       !(state.heap.rows.all (fun row => row.fits (2^shape.wordBits))) ||
@@ -84,7 +84,7 @@ def encode (shape : Shape) (state : BendClosureMachine.State) : Option (Array Bo
     let heap := state.heap.rows.toList.flatMap fun row =>
       BendClosurePacking.bits (BendClosurePacking.pack shape.wordBits row)
     let stack := ((state.stack ++ List.replicate (shape.frameSlots - state.stack.length)
-      (.rewrite 0 0)).take shape.frameSlots).flatMap (encodeFrame shape.wordBits)
+      (BendClosureMachine.Frame.rewrite 0 0)).take shape.frameSlots).flatMap (encodeFrame shape.wordBits)
     some ((heap ++ bits (shape.wordBits+1) state.heap.used ++ state.data.toList ++
       stack ++ bits shape.wordBits state.stack.length ++ control ++
       bits shape.sourceCountBits state.sourceSteps).toArray)
@@ -138,7 +138,7 @@ def argument (width : Nat) : Read (Quan × Nat) := do
 def repeatRead {α : Type} (count : Nat) (read : Read α) : Read (List α) :=
   (List.range count).mapM fun _ => read
 
-def control (shape : Shape) : Read BendClosureMachine.Control := do
+def control (shape : BendObliviousState.Shape) : Read BendClosureMachine.Control := do
   let tag ← nat 4
   let q ← quantity
   let failureCode ← nat 5
@@ -166,11 +166,11 @@ def control (shape : Shape) : Read BendClosureMachine.Control := do
     | 7 => pure (.classify a b c d first)
     | 8 => pure (.complete a)
     | 9 => if failureCode ≤ 22 then pure (.refused (BendClosureContinuationCodec.failureOf failureCode)) else failure
-    | 10 => pure (.reverseArguments a b first second)
+    | 10 => if firstLength + secondLength > shape.argumentSlots then failure else pure (.reverseArguments a b first second)
     | 11 => pure (.installArguments a b first)
     | _ => failure
 
-def readState (shape : Shape) : Read BendClosureMachine.State := do
+def readState (shape : BendObliviousState.Shape) : Read BendClosureMachine.State := do
   let rows ← repeatRead shape.heapSlots (row shape.wordBits)
   let used ← nat (shape.wordBits + 1)
   let data ← takeBits shape.heapSlots
@@ -181,7 +181,7 @@ def readState (shape : Shape) : Read BendClosureMachine.State := do
   if used > shape.heapSlots || stackLength > shape.frameSlots then failure
   else pure ⟨⟨rows.toArray,used⟩,data.toArray,frames.take stackLength,control,sourceSteps⟩
 
-def decode (shape : Shape) (input : Array Bool) : Option BendClosureMachine.State := do
+def decode (shape : BendObliviousState.Shape) (input : Array Bool) : Option BendClosureMachine.State := do
   if !shape.valid then none else do
     let (state, rest) ← (readState shape).run input.toList
     if rest.isEmpty then some state else none

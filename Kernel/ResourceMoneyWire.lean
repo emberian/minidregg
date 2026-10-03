@@ -66,6 +66,16 @@ structure Entry where
   consent : Consent
   deriving DecidableEq, Repr
 
+def PositionSource (batch : ApplicationBatch) (entry : Entry) (position : Nat) : Prop :=
+  match batch.operations[position]? with
+  | none => False
+  | some operation => operation.posting.source = entry.account
+
+instance (batch : ApplicationBatch) (entry : Entry) (position : Nat) :
+    Decidable (PositionSource batch entry position) := by
+  unfold PositionSource
+  split <;> infer_instance
+
 /-- Every position is in range and names the containing account's source;
 every operation has exactly one source consent and actual destination member.
 Position uniqueness prevents counting one reserved debit twice. -/
@@ -73,10 +83,8 @@ def Covered (entries : List Entry) (batch : ApplicationBatch) : Prop :=
   (entries.map Entry.account).Nodup ∧
   (∀ entry ∈ entries, entry.consent.positions.Nodup ∧
     ∀ position ∈ entry.consent.positions,
-      match batch.operations[position]? with
-      | none => False
-      | some operation => operation.posting.source = entry.account) ∧
-  (∀ position : Fin batch.operations.length,
+      PositionSource batch entry position) ∧
+  (∀ position ∈ List.finRange batch.operations.length,
     ∃ entry ∈ entries, position.val ∈ entry.consent.positions ∧
       (batch.operations[position]).posting.source = entry.account) ∧
   (∀ operation ∈ batch.operations,

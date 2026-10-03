@@ -103,9 +103,11 @@ not from checking a particular generated object. -/
 theorem prepared_pin_preserved (value : Kernel.WorldKindInstance.Instance)
     (space : PinSpace value.descriptor) (prepared : Kernel.WorldKindInstance.Prepared value) :
     pinAt prepared.post space = pinAt value space := by
-  unfold pinAt
-  rw [Kernel.WorldKindInstance.prepared_preserves_rom prepared
-    ⟨space.space, (0 : Nat)⟩ space.immutable]
+  exact congrArg
+    (fun entry : Option ((layout value.descriptor).Value space.space) =>
+      entry.bind fun bytes => decode (valueBytes space bytes))
+    (Kernel.WorldKindInstance.prepared_preserves_rom prepared
+      ⟨space.space, (0 : Nat)⟩ space.immutable)
 
 def Instance.after (object : Instance)
     (prepared : Kernel.WorldKindInstance.Prepared object.value) : Instance :=

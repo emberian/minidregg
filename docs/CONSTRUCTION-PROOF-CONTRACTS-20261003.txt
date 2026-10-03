@@ -365,3 +365,16 @@ join still needs actual SIMD inverseNTT/centered-q encoder phase and fresh-key n
 correspondence. Vendor Plaintext.to_poly suggests floor(q*m/t), while Lean Noise
 uses floor(q/t)*m; deterministic floor((q mod t)*m/t) bias (r=843789 for inspected
 profile) must be included. This observation is not yet a consumed Rust theorem.
+
+NEW PERSISTENT EFFECT JOINS — SOURCE PUBLISHED, UNCOMPILED
+BendActivitySegment.check/runChecked reconstructs the retained segment origin and
+uses actual InvocationAdmission/BendRunCore; ResponseSource.unique and
+extend_initial consume qualified immutable heap denotation, not metadata.
+BendActivityResponseBinding.prepare/response_typed combines exact completed source
+yield, actual continuation typing, both real response allocations and the qualified
+ResponseTyping theorem. It has no native outcome/dispatch premise hidden as truth.
+BendActivityPlanAdapter.lower preserves the full affine result while selecting its
+Plan; native closed registry/current target projection/funding is still a separate
+construction. Activity v2 resumeCandidate records actual injected pointer and
+source origin, but protected native pending/outcome admission and current receipt
+validation must consume it. Existing pure response success is not native success.

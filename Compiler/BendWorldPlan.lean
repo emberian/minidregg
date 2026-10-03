@@ -63,12 +63,24 @@ def decodeReturn (bytes : List UInt8) : Option ReturnSlot :=
 def returnId (r : ReturnSlot) : Digest :=
   (Sp800185Cshake256.hash "DREGG.BEND.RETURN/v1".toUTF8.toList (encodeReturn r)).digest
 
+/-- Monetary consent fields authorize the batch, while the source program
+produces the complete semantic Book operation sequence. Their full signed legs
+remain in native admission, read/authority guards and the accepted trace. -/
+def moneyEffect (target : Nat) (consent : ResourceMoneyWire.Consent) : Option Effect :=
+  consent.batch.map fun batch => ⟨target, .moneyConsent ⟨some batch, [], none⟩⟩
+
+theorem exact_money_batch (target : Nat) (consent : ResourceMoneyWire.Consent)
+    (batch : ResourceMoneyWire.ApplicationBatch) (present : consent.batch = some batch) :
+    moneyEffect target consent = some ⟨target, .moneyConsent ⟨some batch, [], none⟩⟩ := by
+  simp [moneyEffect, present]
+
 /-- Compute the exact ordered application effects from a native command.
 Observation and validated accounting legs are not arbitrary application writes. -/
 def effectsOf (command : Command) : List Effect :=
   (List.finRange command.targets.length).filterMap fun index =>
     match command.targets[index].payload with
     | .read | .kindRead | .computeFunding _ => none
+    | .moneyConsent consent => moneyEffect index.val consent
     | payload => some ⟨index.val, payload⟩
 
 def matchesCommand (plan : Plan) (command : Command) : Bool :=

@@ -65,6 +65,18 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
   let some first := replicas[0]? | throw (IO.userError "missing first replica")
   require (first.participant.runtime.context.config.parties == 4 &&
     first.participant.runtime.context.config.faults == 1) "source harness requires n4/f1"
+  require ((replicas.toList.map (fun r => r.config.storage.root.toString)).eraseDups.length == 4)
+    "source harness requires four distinct configured source store paths"
+  require ((replicas.toList.map (fun r => r.participant.runtime.native.journal.toString)).eraseDups.length == 4)
+    "source harness requires four distinct agreement journal paths"
+  for index in List.range replicas.size do
+    let some replica := replicas[index]? | throw (IO.userError "replica identity index")
+    let some (journal,state) := Minidregg.Compiler.GenericSimplexIO.restore
+        replica.participant.runtime.context
+        (← (Minidregg.Compiler.GenericSimplexNative.storage replica.participant.runtime.native).read)
+      | throw (IO.userError "replica identity journal refused")
+    require (journal.self == index && state.self == index)
+      "source harness replica array differs from durable signer identity"
   for replica in replicas do
     require (replica.participant.runtime.context == first.participant.runtime.context)
       "replicas use different exact contexts"
@@ -105,4 +117,19 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
   IO.println "PASS source lost-response/restart: four independently reread stores, original signed-ingress receipts, exactly one append"
   IO.println "PASS actual source agreement: four independent configured receivers, real admission/replay, TCP, exact common record, physical source readback receipts"
   return restarted
+/-- Actual resident artifact entry point: call.bin is the existing framed
+SignedCall, not the source event's inner signed-ingress bytes. -/
+def runCall (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) : IO (Array Replica) := do
+  let some first := replicas[0]? | throw (IO.userError "missing first replica")
+  match checkLocalCall first.config callBytes with
+  | .error detail => throw (IO.userError detail)
+  | .ok () => pure ()
+  let ingress ← match sourceIngressOfCall first.config callBytes with
+    | .error detail => throw (IO.userError detail)
+    | .ok ingress => pure ingress
+  let finished ← run fuel replicas ingress
+  for replica in finished do
+    require ((completedCall replica.participant callBytes).isSome)
+      "original retained native call lacks a verified source receipt"
+  return finished
 end Minidregg.Verify.GenericSimplexSourceHarness

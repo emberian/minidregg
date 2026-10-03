@@ -165,7 +165,7 @@ def acknowledgeRetained (archive : NativeConfig) (signature : CredentialSignatur
   match ← CredentialSignatureIO.verify signature pin.publicKey (acknowledgementFrame ack) detached with
   | .ok true =>
     match checked : acknowledge pin ack extension with
-    | none => return .error "portable participant prefix refused"
+    | none => return .error "portable participant history refused"
     | some next => return .ok ⟨next, ack, extension, checked, rfl, rfl⟩
   | .ok false => return .error "portable participant signature refused"
   | .error _ => return .error "portable participant signature verification unavailable"

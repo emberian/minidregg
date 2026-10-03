@@ -8,8 +8,10 @@ use chacha20poly1305::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    fs::{File, OpenOptions},
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -138,6 +140,15 @@ fn pin(root: &Path, p: &Profile, key: &[u8; 32]) -> Result<()> {
 fn read_record(records: &Path, epoch: u64, capacity: usize) -> Result<Option<Vec<u8>>> {
     let record = records.join(format!("epoch-{epoch}.record"));
     if record.exists() {
+        // The immutable file can become visible between hard-link publication
+        // and its directory fsync. Only the post-fsync availability token permits
+        // consumption. Losing that token on crash loses availability, not the
+        // original source journal or authority, and never creates another effect.
+        let ready = records.join(format!("epoch-{epoch}.adopted"));
+        if !ready.exists() {
+            return Ok(None);
+        }
+        read_private(&ready, 0)?;
         let v = read_private(&record, capacity + 5)?;
         if v.len() != capacity + 5 {
             return Err("retained authenticated record shape".into());
@@ -156,40 +167,27 @@ fn read_record(records: &Path, epoch: u64, capacity: usize) -> Result<Option<Vec
     }
     Ok(None)
 }
-fn prepare_wire(
-    root: &Path,
+fn prepare_live_wire(
     source: &Path,
     p: &Profile,
     key: &[u8; 32],
     epoch: u64,
-) -> Result<Vec<u8>> {
-    let path = root.join(format!("epoch-{epoch}.ready-wire"));
-    if path.exists() {
-        let wire = read_private(&path, p.capacity() + 5 + OVERHEAD)?;
-        open(p, key, epoch, &wire)?;
-        return Ok(wire);
+) -> Result<Option<Vec<u8>>> {
+    let Some(body) = read_record(source, epoch, p.capacity())? else {
+        return Ok(None);
+    };
+    if body.len() != p.capacity() {
+        return Err("guarded cohort segment exact shape".into());
     }
     let mut plain = vec![0; p.capacity() + 5];
-    let body = read_record(source, epoch, p.capacity())?;
-    let body = if body.is_none() && p.purpose == 0 {
-        Some(read_private(
-            &source.join(format!("epoch-{epoch}.cover")),
-            p.capacity(),
-        )?)
-    } else {
-        body
-    };
-    if let Some(v) = body {
-        if v.len() != p.capacity() {
-            return Err("guarded cohort segment exact shape".into());
-        }
-        plain[0] = 1;
-        plain[1..5].copy_from_slice(&(v.len() as u32).to_le_bytes());
-        plain[5..].copy_from_slice(&v);
-    }
-    let wire = seal(p, key, epoch, &plain)?;
-    persist(&path, &wire)?;
-    Ok(wire)
+    plain[0] = 1;
+    plain[1..5].copy_from_slice(&(body.len() as u32).to_le_bytes());
+    plain[5..].copy_from_slice(&body);
+    // The original producer journals remain authoritative and durable. This
+    // fresh outer wire is physical preparation, never a source receipt.
+    // Future-only resume cannot retransmit an already released epoch; a crash
+    // before release may reseal the same exact inner body with a fresh nonce.
+    seal(p, key, epoch, &plain).map(Some)
 }
 fn seal(p: &Profile, key: &[u8; 32], epoch: u64, plain: &[u8]) -> Result<Vec<u8>> {
     if plain.len() != p.capacity() + 5 {
@@ -256,8 +254,36 @@ fn open(p: &Profile, key: &[u8; 32], epoch: u64, wire: &[u8]) -> Result<Vec<u8>>
     Ok(plain)
 }
 fn adopt(_root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) -> Result<()> {
-    // Whole exact authenticated record is durable before any consumer sees it.
-    exact(output, &format!("epoch-{epoch}.record"), plain)
+    let record = output.join(format!("epoch-{epoch}.record"));
+    if record.exists() {
+        if read_private(&record, plain.len())? != plain {
+            return Err("changed retained link identity; preserve existing obligation".into());
+        }
+        // Exact readback alone does not attest a prior uncertain directory fsync.
+        File::open(&record)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
+        File::open(output)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
+    } else {
+        persist(&record, plain)?;
+    }
+    // Published AFTER durable adoption. This token is deliberately not another
+    // synced journal/receipt; a lost token is fail-closed until exact re-adoption.
+    let ready = output.join(format!("epoch-{epoch}.adopted"));
+    if ready.exists() {
+        read_private(&ready, 0)?;
+    } else {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(ready)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 fn send(
     mut stream: TcpStream,
@@ -308,21 +334,31 @@ fn send(
         fallback.push(wire);
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    let root = root.to_path_buf();
     let source = source.to_path_buf();
     let profile = p.clone();
     let key = *key;
     thread::spawn(move || {
         for epoch in start..profile.first + profile.epochs {
             let prepared: Result<Vec<u8>> = (|| {
-                let when = profile
-                    .when(epoch)?
-                    .checked_sub(profile.tick / 2)
+                let release = profile.when(epoch)?;
+                let begin = release
+                    .checked_sub(profile.tick)
                     .ok_or("preparation clock exhausted")?;
-                wait(when)?;
-                let wire = prepare_wire(&root, &source, &profile, &key, epoch)?;
-                open(&profile, &key, epoch, &wire)?;
-                Ok(wire)
+                let cutoff = release
+                    .checked_sub(25)
+                    .ok_or("preparation cutoff exhausted")?;
+                wait(begin)?;
+                // Readiness may arrive after a half-tick sample. A fixed public
+                // cutoff bounds preparation while the independent clock always
+                // chooses one prepared wire or its retained durable fallback.
+                while now_ms()? < cutoff {
+                    if let Some(wire) = prepare_live_wire(&source, &profile, &key, epoch)? {
+                        open(&profile, &key, epoch, &wire)?;
+                        return Ok(wire);
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err("no physical output before public cutoff".into())
             })();
             if let Ok(wire) = prepared {
                 if tx.send((epoch, wire)).is_err() {
@@ -434,6 +470,28 @@ fn private_fault(root: &Path, epoch: u64, error: &str) -> Result<()> {
         return Ok(());
     }
     persist(&path, error.as_bytes())
+}
+fn await_inputs(inputs: &[PathBuf], epoch: u64, until: u64) -> Result<Option<Vec<PathBuf>>> {
+    let names = inputs
+        .iter()
+        .map(|v| v.join(format!("epoch-{epoch}.payload")))
+        .collect::<Vec<_>>();
+    loop {
+        if names.iter().all(|v| {
+            let record = v.with_extension("record");
+            if record.exists() {
+                v.with_extension("adopted").exists()
+            } else {
+                v.exists()
+            }
+        }) {
+            return Ok(Some(names));
+        }
+        if now_ms()? >= until {
+            return Ok(None);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 fn worker(
     action: &str,
@@ -614,22 +672,7 @@ fn worker(
                 .checked_sub(p.tick / 2)
                 .ok_or("invalid actor preparation window")?
         };
-        let incoming = loop {
-            let names = inputs
-                .iter()
-                .map(|v| v.join(format!("epoch-{epoch}.payload")))
-                .collect::<Vec<_>>();
-            if names
-                .iter()
-                .all(|v| v.exists() || v.with_extension("record").exists())
-            {
-                break Some(names);
-            }
-            if now_ms()? >= until {
-                break None;
-            }
-            thread::sleep(Duration::from_millis(1));
-        };
+        let incoming = await_inputs(&inputs, epoch, until)?;
         let Some(incoming) = incoming else {
             continue;
         };
@@ -876,29 +919,65 @@ mod tests {
         assert!(open(&p, &key, 0, &altered).is_err());
     }
     #[test]
-    fn immutable_slot_selection_refuses_late_change_and_preserves_exact_readback() {
+    fn durable_epoch_adoption_refuses_changed_record_and_preserves_exact_readback() {
         let root = temp();
         let source = temp();
         let mut p = profile();
         p.purpose = 5;
-        let original = prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap();
-        assert_eq!(open(&p, &[7; 32], 0, &original).unwrap()[0], 0);
+        assert!(prepare_live_wire(&source, &p, &[7; 32], 0)
+            .unwrap()
+            .is_none());
         persist(&source.join("epoch-0.payload"), &vec![9; p.capacity()]).unwrap();
-        assert_eq!(
-            prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap(),
-            original
-        );
-        let good = prepare_wire(&root, &source, &p, &[7; 32], 1).unwrap();
-        assert_eq!(open(&p, &[7; 32], 1, &good).unwrap()[0], 0);
+        let original = prepare_live_wire(&source, &p, &[7; 32], 0)
+            .unwrap()
+            .unwrap();
+        assert!(prepare_live_wire(&source, &p, &[7; 32], 1)
+            .unwrap()
+            .is_none());
         let output = temp();
         let plain = open(&p, &[7; 32], 0, &original).unwrap();
         adopt(&root, &output, &p, 0, &plain).unwrap();
+        adopt(&root, &output, &p, 0, &plain).unwrap();
         let mut changed = plain;
-        changed[0] = 1;
+        *changed.last_mut().unwrap() ^= 1;
         assert!(adopt(&root, &output, &p, 0, &changed).is_err());
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(source).unwrap();
         fs::remove_dir_all(output).unwrap();
+    }
+    #[test]
+    fn visible_unqualified_record_waits_for_exact_durable_adoption() {
+        let root = temp();
+        let p = profile();
+        let mut plain = vec![0; p.capacity() + 5];
+        plain[0] = 1;
+        plain[1..5].copy_from_slice(&(p.capacity() as u32).to_le_bytes());
+        plain[5..].fill(3);
+        persist(&root.join("epoch-0.record"), &plain).unwrap();
+        assert!(read_record(&root, 0, p.capacity()).unwrap().is_none());
+        assert!(await_inputs(&[root.clone()], 0, now_ms().unwrap())
+            .unwrap()
+            .is_none());
+        let (sent, received) = std::sync::mpsc::channel();
+        let observing_root = root.clone();
+        let waiter = thread::spawn(move || {
+            sent.send(await_inputs(&[observing_root], 0, now_ms().unwrap() + 2000).unwrap())
+                .unwrap();
+        });
+        thread::sleep(Duration::from_millis(50));
+        assert!(received.try_recv().is_err());
+        adopt(&root, &root, &p, 0, &plain).unwrap();
+        let names = received
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(names, vec![root.join("epoch-0.payload")]);
+        waiter.join().unwrap();
+        assert_eq!(
+            read_record(&root, 0, p.capacity()).unwrap().unwrap(),
+            vec![3; p.capacity()]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn enrolled_contribution_selects_cover_even_without_ready_real_work() {
@@ -907,15 +986,34 @@ mod tests {
         let p = profile();
         let cover = vec![4; p.capacity()];
         persist(&source.join("epoch-0.cover"), &cover).unwrap();
-        let selected = prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap();
-        let plain = open(&p, &[7; 32], 0, &selected).unwrap();
+        persist(&source.join("epoch-1.cover"), &cover).unwrap();
+        assert!(prepare_live_wire(&source, &p, &[7; 32], 0)
+            .unwrap()
+            .is_none());
+        let mut p = p;
+        p.origin = now_ms().unwrap() + 100;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let observed_p = p.clone();
+        let observed = thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut bytes = vec![0; 2 * (observed_p.capacity() + 5 + OVERHEAD)];
+            s.read_exact(&mut bytes).unwrap();
+            bytes
+        });
+        send(
+            TcpStream::connect(address).unwrap(),
+            &root,
+            &source,
+            &p,
+            &[7; 32],
+            0,
+        )
+        .unwrap();
+        let wire = observed.join().unwrap();
+        let plain = open(&p, &[7; 32], 0, &wire[..p.capacity() + 5 + OVERHEAD]).unwrap();
         assert_eq!(plain[0], 1);
         assert_eq!(&plain[5..], &cover);
-        persist(&source.join("epoch-0.payload"), &vec![9; p.capacity()]).unwrap();
-        assert_eq!(
-            prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap(),
-            selected
-        );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(source).unwrap();
     }
@@ -952,6 +1050,56 @@ mod tests {
             fs::metadata(output.join("epoch-1.record")).unwrap().len()
         );
         for d in [root, source, receiver, output] {
+            fs::remove_dir_all(d).unwrap();
+        }
+    }
+    #[test]
+    fn late_durable_producer_is_selected_without_outer_cache_write() {
+        let root = temp();
+        let source = temp();
+        let mut p = profile();
+        p.purpose = 1;
+        p.origin = now_ms().unwrap() + 100;
+        p.tick = 1000;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let observed_p = p.clone();
+        let observed = thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut bytes = vec![0; 2 * (observed_p.capacity() + 5 + OVERHEAD)];
+            s.read_exact(&mut bytes).unwrap();
+            bytes
+        });
+        let prepared_p = p.clone();
+        let prepared_source = source.clone();
+        let producer = thread::spawn(move || {
+            // After the old half-tick sample, before the fixed public cutoff.
+            wait(prepared_p.when(0).unwrap() - 250).unwrap();
+            persist(
+                &prepared_source.join("epoch-0.payload"),
+                &vec![3; prepared_p.capacity()],
+            )
+            .unwrap();
+        });
+        send(
+            TcpStream::connect(address).unwrap(),
+            &root,
+            &source,
+            &p,
+            &[7; 32],
+            0,
+        )
+        .unwrap();
+        producer.join().unwrap();
+        let bytes = observed.join().unwrap();
+        let size = p.capacity() + 5 + OVERHEAD;
+        let first = open(&p, &[7; 32], 0, &bytes[..size]).unwrap();
+        assert_eq!(first[0], 1);
+        assert_eq!(&first[5..], vec![3; p.capacity()]);
+        assert_eq!(open(&p, &[7; 32], 1, &bytes[size..]).unwrap()[0], 0);
+        assert!(!root.join("epoch-0.ready-wire").exists());
+        assert!(root.join("epoch-0.fallback-wire").exists());
+        for d in [root, source] {
             fs::remove_dir_all(d).unwrap();
         }
     }

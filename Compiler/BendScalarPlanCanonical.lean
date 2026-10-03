@@ -10,13 +10,13 @@ set_option autoImplicit false
 
 theorem rootCodec_canonical {bytes : List UInt8} {root : Minidregg.Theory.TypedAuthorization.Digest}
     (decoded : rootCodec.decode bytes = some root) : rootCodec.encode root = bytes :=
-  ResourceBirthCodec.strictCodec_canonical _ decoded
+  ResourceBirthCodec.strictCodec_canonical Tower256ConcreteBackend.digestStream.toLawful decoded
 
 theorem decodeRef_sound (term : BTerm) (ref : Ref)
     (decoded : decodeRef term = some ref) : term = refTerm ref := by
   fun_cases decodeRef term <;>
     simp_all [decodeRef, refTerm, Option.bind_eq_some_iff] <;>
-    aesop (add safe forward decodeNat_sound decodeBytes_sound)
+    aesop (add safe forward [decodeNat_sound, decodeBytes_sound])
       (add safe forward rootCodec_canonical)
 
 theorem decodeWrite_sound (term : BTerm) (write : Write)
@@ -30,7 +30,8 @@ theorem decodeList_sound {α : Type} (encoder : α → BTerm) (decoder : BTerm �
     (term : BTerm) (values : List α) (decoded : decodeList decoder term = some values) :
     term = listTerm encoder values := by
   fun_induction decodeList decoder term generalizing values <;>
-    simp_all [decodeList, listTerm, Option.bind_eq_some_iff] <;> aesop
+    simp_all [decodeList, listTerm, Option.bind_eq_some_iff] <;>
+    aesop (add safe forward sound) (add simp listTerm)
 
 theorem decodeScalar_sound (term : BTerm) (scalar : Scalar)
     (decoded : decodeScalar term = some scalar) : term = scalarTerm scalar := by
@@ -51,7 +52,7 @@ theorem decodeResult_sound (term : BTerm) (result : PlanResult)
     (decoded : decodeResult term = some result) : term = resultTerm result := by
   fun_cases decodeResult term <;>
     simp_all [decodeResult, resultTerm, Option.map_eq_some_iff] <;>
-    aesop (add safe forward decodeNat_sound decodePlan_sound)
+    aesop (add safe forward [decodeNat_sound, decodePlan_sound])
 
 theorem decodeResult_iff (term : BTerm) (result : PlanResult) :
     decodeResult term = some result ↔ term = resultTerm result :=

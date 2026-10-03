@@ -25,20 +25,33 @@ def find (reference : Reference)
 
 /-- Each resolved partial retains its actual admitted source token. A finite
 source observation can serve several atoms in the same exact immutable image. -/
+abbrev LoadedPartial := Σ reference : Reference,
+  ObjectiveBendReferenceSource.PartialAt (context := context)
+    (profile := profile) (subject := subject) reference
+
+structure Sources (pin : Pin) where
+  partials : List (LoadedPartial (context := context) (profile := profile) (subject := subject))
+  ordered : partials.map Sigma.fst = pin.partials
+  core : ObjectiveBendReferenceSource.CoreAt (context := context)
+    (profile := profile) (subject := subject) pin.core
+
 def loadPartials (pin : Pin)
     (observations : List (BendInvocationInput.Admitted context profile subject)) :
-    Except String (List ObjectiveBendPrototype.Partial) :=
+    Except String (List (LoadedPartial (context := context) (profile := profile) (subject := subject))) :=
   pin.partials.mapM fun reference => do
     let some current := find reference observations | throw "missing current pinned source observation"
     let some loaded := ObjectiveBendReferenceSource.loadPartial reference current
       | throw "unreadable, changed or retired partial source"
-    pure loaded.prototype
+    pure ⟨reference, loaded⟩
 
 structure LoadedStore (store : Minidregg.Theory.Store.Store WorldKindCell.instanceLayout) where
   private mk ::
   object : ObjectiveBendReferenceInstance.Instance
   native : WorldKindCell.instanceAt store = some object.value
   observations : List (BendInvocationInput.Admitted context profile subject)
+  sources : Sources (context := context) (profile := profile) (subject := subject) object.pin
+  partialsExact : object.closure.prototypes = sources.partials.map (fun entry => entry.2.prototype)
+  coreExact : object.core = sources.core.core
 
 /-- Reconstruct exact generated methods from actual reflected partials. The
 helper Book is the pinned checked core with ONLY those exact generated names
@@ -54,7 +67,8 @@ def load (store : Minidregg.Theory.Store.Store WorldKindCell.instanceLayout)
     match pinned : ObjectiveBendReferenceInstance.pinAt value space with
     | none => throw "invalid canonical compact prototype reference pin"
     | some pin =>
-      let partials ← loadPartials pin observations
+      let sourcePartials ← loadPartials pin observations
+      let partials := sourcePartials.map (fun entry => entry.2.prototype)
       let some current := find pin.core observations | throw "missing current pinned core observation"
       let some core := ObjectiveBendReferenceSource.loadCore pin.core current
         | throw "unreadable, changed or retired core source"
@@ -65,7 +79,9 @@ def load (store : Minidregg.Theory.Store.Store WorldKindCell.instanceLayout)
       let closure : ObjectiveBendInstance.Pin := ⟨partials, core.core.book⟩
       let source ← ObjectiveBendInstanceLoader.loadPin helpers closure
       if identities : Matches pin partials core.core then
-        pure ⟨⟨value, space, pin, pinned, closure, source, core.core, rfl, identities⟩,
-          native, observations⟩
+        if ordered : sourcePartials.map Sigma.fst = pin.partials then
+          pure ⟨⟨value, space, pin, pinned, closure, source, core.core, rfl, identities⟩,
+            native, observations, ⟨sourcePartials, ordered, core⟩, rfl, rfl⟩
+        else throw "current source observations differ from ordered pinned references"
       else throw "loaded closure differs from persistent reference identities"
 end Minidregg.Kernel.ObjectiveBendReferenceLoader

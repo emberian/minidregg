@@ -22,6 +22,7 @@ mod resident;
 #[path = "web/world.rs"]
 mod world;
 mod surface;
+mod studio;
 #[path = "web/search.rs"]
 mod search;
 
@@ -243,7 +244,7 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }
     if request.method == "POST" {
         let parts: Vec<_> = segments.iter().map(String::as_str).collect();
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -593,6 +594,8 @@ impl Site {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
                     ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
+                    ["studio","new"] => studio::post(self,None,"new",&body),
+                    ["studio",id,action @ ("manifest" | "snapshot" | "compose" | "fork")] => studio::post(self,Some(id),action,&body),
                     ["new-document",id] => create::post(self,id,&body,"create"),
                     ["new-document",id,op] => create::post(self,id,&body,op),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
@@ -617,6 +620,14 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
+            ["studio"] => studio::index(self),
+            ["studio","new"] => studio::new(self),
+            ["studio",id] => studio::package(self,id),
+            ["studio",id,"module",index] => studio::module(self,id,index,false),
+            ["studio",id,"module",index,"fresh"] => studio::module(self,id,index,true),
+            ["studio",id,"draft",submission] => studio::submitted(self,id,submission),
+            ["studio",id,"snapshot",snapshot] => studio::captured(self,id,snapshot),
+            ["studio",id,"history",revision] => studio::history(self,id,revision),
             ["new-document"] => create::open(self,None,None),
             ["new-document",id] => create::open(self,Some(id),None),
             ["room",name,"new-document"] => create::open(self,None,Some(name)),
@@ -726,7 +737,7 @@ impl Site {
                  read under your key; what you see is what your grants cover.</p>\n<table data-refs=\"{}\">\
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
-            ) + &format!("<p><a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self),
+            ) + &format!("<p><a href=\"{base}/studio\">Source studio</a> | <a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self),
         }
     }
 

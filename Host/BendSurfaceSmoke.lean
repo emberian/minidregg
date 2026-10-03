@@ -31,8 +31,8 @@ private def checkFace (core : BendCoreAdmission.Checked) (entry : String)
       expected.artifact expected.exportName observations
     | throw (IO.userError ("Surface execution/decoding refused " ++ entry))
   unless result.surface = expected do throw (IO.userError ("Surface result differs " ++ entry))
-  unless Minidregg.Host.BendSurfaceJson.evaluated result =
-      Minidregg.Host.BendSurfaceJson.surface expected do
+  unless (Minidregg.Host.BendSurfaceJson.evaluated result).compress =
+      (Minidregg.Host.BendSurfaceJson.surface expected).compress do
     throw (IO.userError "typed JSON projection differs")
   IO.println ("SURFACE SOURCE CHECK PASS " ++ entry ++ " steps=" ++ toString result.count)
   IO.println (Minidregg.Host.BendSurfaceJson.evaluated result).compress
@@ -53,6 +53,11 @@ private def refuseMalformed : IO Unit := do
   let forward := { sourceFace with nodes := [⟨4, 0, "Forward", [0]⟩], root := 0 }
   unless bounded forward 2 = false do throw (IO.userError "forward/cycle node admitted")
   IO.println "SURFACE MALFORMED CHECK PASS byte/UTF8/NUL/backwards"
+
+#assert_axioms Minidregg.Compiler.BendSurfaceLowering.lower_exact
+#assert_axioms Minidregg.Compiler.BendSurfaceLowering.abi_definition_exact
+#assert_axioms Minidregg.Compiler.BendSurfaceLowering.evaluated_source_exact
+#assert_axioms Minidregg.Compiler.BendSurfaceLowering.evaluated_origin_exact
 
 end Minidregg.Host.BendSurfaceSmoke
 

@@ -1235,7 +1235,7 @@ structure PreparedBend (command : Command) where
   claimExact : command.bend = some claim
   artifact : BendWorldProgramCodec.Artifact
   observations : List BendNativeInput.Observation
-  source : BendNativeRun.Checked artifact claim observations
+  source : BendNativeRun.ContextChecked artifact claim ⟨command.subject,command.nonce⟩ observations
   workFits : source.source.sourceCount ≤ claim.capacity.proofWork
 
 /-- The complete source result is retained internally for the pinned typed
@@ -1265,7 +1265,7 @@ def checkCommandBend {F : Type} [Field F] [DecidableEq F] {durable : Durable}
     let some artifact := BendArtifactSource.lookup store ⟨claim.sourceAtom⟩ | throw .bendExecution
     let some observations := bendObservations context command claim.sourceIndex compute
       | throw .bendExecution
-    let source ← (BendNativeRun.check artifact claim observations).mapError (fun _ => Reject.bendExecution)
+    let source ← (BendNativeRun.checkContext artifact claim ⟨command.subject,command.nonce⟩ observations).mapError (fun _ => Reject.bendExecution)
     if work : source.source.sourceCount ≤ claim.capacity.proofWork then
       pure (some ⟨claim,selected,artifact,observations,source,work⟩)
     else throw .bendExecution

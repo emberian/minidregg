@@ -117,7 +117,8 @@ theorem lower_exact {term : BTerm} {value : Surface} (h : lower term = some valu
   cases decoded : decodeSurface term with
   | none => simp [decoded] at h
   | some actual =>
-      simp only [decoded, Option.bind_some] at h
+      simp only [decoded] at h
+      change (if sourceTerm actual = term then some actual else none) = some value at h
       split at h
       · rename_i reconstruction
         cases Option.some.inj h

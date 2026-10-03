@@ -50,6 +50,26 @@ append receiver:
 4. Lost replies reload the actual source and reverify historical admission.
    Completion polling returns the source's verified receipt for the exact record.
 
+The client artifact boundary is the existing canonical
+`NativeHostCodec.SignedCall` in `call.bin`. `proposeCall` and the fixture's
+`runCall` decode that exact frame; an invocation retains its existing signed
+command and receives only the deployment's fixed domain/profile encoding.
+Birth, install and capability calls retain their original inner ingress bytes.
+The adapter performs no signing and does not grant admission. New invocations
+retain the existing local synchronous step bound; historical replay and receipt
+lookup use the original admission rather than applying today's local bound.
+Internal refusal details are operator diagnostics. A shared Host submit hook
+must preserve the existing public disclosure policy when mapping those results.
+
+The four-store harness checks distinct configured source and agreement paths
+and restores each journal to check its signer index. Its fixture must actually
+create those independent stores under one exact consensus-profile genesis.
+Changing a previous consensus-free world's configuration does not create that
+genesis. After a completed append, the harness discards volatile participant
+state, reloads all four stores, replays original admission and locates the exact
+retained signed ingress receipt with only one new source record. This is a
+software reopen within the driver, not an OS process-kill claim.
+
 An inert empty protocol block changes BFT ancestry but not source history.
 Validation may reuse equality of filtered source histories; certificate checks
 and the BFT safe-parent rule still use the exact unfiltered block.

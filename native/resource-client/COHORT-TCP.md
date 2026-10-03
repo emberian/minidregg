@@ -123,3 +123,51 @@ for every epoch, two exact historical native lookups behind a byte-transparent
 no second dispatch. These latest source changes are uncompiled at this shipment;
 actual sustained receiving remains pending. No source-private raw ingress is enabled:
 its native current-enrollment/funded ordered endpoint is separately being constructed.
+
+
+The grouped-admission/pipeline source compiled: nine focused tests PASS9/9
+(779 skipped,0.852s), covering6 cohort tests, original active exact-set guard,
+new live journal crash/replay/refusal fences, and actual async multihop
+continuation/fetch. Owned release PASS under8G/jobs2/offline/locked independent
+target. Frozen cohort5f32fe/PQ5014081e; scheduledc2b6/async8220 unchanged.
+First contribution is at origin+1 tick; first broadcast at origin+11 ticks with
+processing-slots2, so contribution-to-broadcast latency is10 ticks. Sustained
+receiving is running and remains unqualified; proof/measurement claims above
+are intentionally separated. The exact-set check reuses its authenticated
+peeled packets before the durable claim, removing a duplicate ML-KEM pass.
+
+
+## Outer preparation and durable input publication repair
+
+The64epoch all-cover experiment observed ALL768 fixed TCP records, lateness
+0.08..1.73ms. However only33/64 useful broadcasts completed; registrar/relay
+output counts were64/49/44/39. No native work ran. This refutes useful sustained
+service for that source despite successful physical cadence. Some prepared inner
+outputs existed well before wire generation while the redundant outer-cache
+fsync blocked publication; other outputs arrived after premature half-tick sampling.
+
+The next source keeps durable valid cover inventory and original relay/native/cap
+journals, but seals real outer wires into bounded memory. A readiness producer
+can provide an exact inner body until the fixed public25ms cutoff. The independent
+emitter selects one prepared wire or fallback at each original public deadline.
+No encrypted real-wire cache is a source receipt, and none is now persisted.
+A pre-emission crash may reseal with a fresh outer nonce; future-only resume
+cannot retransmit released epochs. Public processing slack is still2 ticks.
+
+Durable record adoption additionally publishes an empty availability token only
+AFTER record fsync succeeds: hard-link visibility alone does not prove directory
+durability. Tokens are not journal receipts; a crash-lost token stays fail-closed
+until exact re-adoption. Eight focused cohort tests are authored, including late
+producer selection past the old half-tick sample and visible-unqualified input
+refusal. This latest source is uncompiled at publication. Full sustained receiving,
+native/recovery consumer and independently hosted privacy qualification remain active.
+
+
+The in-memory preparation source passed8/8 focused checks and owned release.
+Actual renewed all-cover receiving then caught a newly joined consumer bug:
+its wait condition woke on the visible record before its post-fsync token, so
+it immediately treated input as unavailable. Fixed physical records still all
+emitted; useful pipeline qualification failed. The worker now waits for the
+adoption token, and the existing unqualified-record test exercises the actual
+waiter until real adoption. The narrow consumer repair is source WIP pending
+one targeted check/release and renewed64epoch paired receiving.

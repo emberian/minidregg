@@ -53,7 +53,9 @@ private def capsule (value : Json) : Except String CarriedSegmentIO.SourceCapsul
     configuration := ← path "configuration"
     profile := ← path "profile"
     signatureVerifier := ← path "signatureVerifier"
-    storage := { binary := ← path "storageBinary", root := ← path "storageRoot",
+    storage := {
+      binary := ← path "storageBinary"
+      root := ← path "storageRoot"
       key := ← path "checkpointKey" }
     identity := ⟨← digest (← field identity "domain"), ← digest (← field identity "semantics"),
       ← digest (← field identity "expectedSeed")⟩
@@ -114,8 +116,8 @@ def portableProbe (configuration : System.FilePath) (mode : String) : IO Unit :=
   match mode with
   | "capture" =>
     let inputs ← IO.ofExcept (artifactInputs (← IO.ofExcept (field value "artifacts")))
-    let artifacts ← inputs.mapM fun input => IO.ofExcept
-      (← PortableContinuationArchiveIO.captureArtifact archive input.1 input.2)
+    let artifacts ← inputs.mapM fun input => do
+      IO.ofExcept (← PortableContinuationArchiveIO.captureArtifact archive input.1 input.2)
     let generation ← IO.ofExcept (natural (← IO.ofExcept (field value "generation")))
     let predecessorText ← IO.ofExcept (stringField value "predecessorHex")
     let predecessor ← IO.ofExcept (unhex predecessorText)
@@ -139,7 +141,7 @@ def portableProbe (configuration : System.FilePath) (mode : String) : IO Unit :=
     let extension ← IO.ofExcept (Minidregg.Host.ReceiptContinuity.parseExtension extensionJson)
     let proposed : Acknowledgement := ⟨pin.participant,pin.publicKey,manifest.prefix.identity,manifest.point⟩
     if (acknowledge pin proposed extension).isNone then
-      throw (IO.userError "portable repair conflicts with independently held participant prefix")
+      throw (IO.userError "portable repair conflicts with independently held participant history")
     let inventoryPath ← IO.ofExcept (stringField value "manifestInventory")
     let inventoryPin ← IO.ofExcept (stringField value "manifestInventorySha256")
     IO.ofExcept (← RetainedArtifactIO.checkedFile inventoryPath inventoryPin)
@@ -151,6 +153,12 @@ def portableProbe (configuration : System.FilePath) (mode : String) : IO Unit :=
 def main (args : List String) : IO UInt32 := do
   try
     match args with
-    | [configuration, mode] => portableProbe configuration mode; return 0
-    | _ => IO.eprintln "usage: portable-continuation-probe OPERATOR_CONFIG capture|check-restored"; return 2
-  catch error => IO.eprintln s!"portable custody candidate refused: {error}"; return 1
+    | [configuration, mode] =>
+      portableProbe configuration mode
+      return (0 : UInt32)
+    | _ =>
+      IO.eprintln "usage: portable-continuation-probe OPERATOR_CONFIG capture|check-restored"
+      return (2 : UInt32)
+  catch error =>
+    IO.eprintln s!"portable custody candidate refused: {error}"
+    return (1 : UInt32)

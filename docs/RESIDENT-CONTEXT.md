@@ -13,7 +13,7 @@ uses actual document order. The client obtains the signed read and opens
 private values only with existing participant authority.
 
 `mini-context-summary-v1` is ordinary authored JSON containing text and support
-references with exact source/root pins. Each new inference checks those
+references with exact source/root/observe-capability pins. Each new inference checks those
 references with current signed reads. Revocation, rebinding, or source change
 invalidates the summary's inference text. Its historical bytes remain data.
 
@@ -75,8 +75,8 @@ and native payload preimages. An earlier editor seen cache does not retarget
 this explicit path. All selected support roots join normal preparation and
 native landing guards; current laws and participant grants still decide.
 Ordinary `mini_doc_append` retains its separate single-document contract.
-The new action is authored WIP at this shipment and awaits scoped Rust/native
-receiving checks.
+The new action passed the focused Rust helper/catalog checks below; native
+receiving remains pending.
 
 ## Observation custody pins
 
@@ -91,8 +91,47 @@ pins. The ordinary preparer compares this at the exact resolved signed-read
 reference and retains that capability in its native admission plan. These
 identifiers are current-authority dependencies, not caller credentials or
 proof that authored prose is true. Current native grant/policy checks remain
-necessary at submission. This repair is WIP pending scoped Rust/native checks.
+necessary at submission. The focused Rust checks passed; actual native
+receiving remains pending.
 
 The receiving journey now explicitly submits every named append/edit proposal;
 those shell commands prepare only. Birth/move retain their existing native
 boundaries. Preparing a proposal is never reported as installing its effects.
+
+
+## Separate selection and prepared agreement handoff
+
+A later explicit reviewed operation may reselect authenticated current sources.
+It records its own immutable support and native attempt; this does not replace
+the already-started provider request's original context or dispatch identity.
+Current native checks authenticate the selected resources and authority. They
+do not establish which prose an external model used or whether it is true.
+
+The receiving journey's `--handoff-prepared` mode calls ordinary native
+prepare-only after current review authoring. It retains the original signed
+call, plan, Config, attempt, request and support bytes, checks the effective
+Host/Config identity, and stops at PREPARED-NOT-LANDED. The handoff JSON locates
+those actual retained artifacts; it is not itself signed ingress. Additional
+`--support-document` references are read under current participant authority
+without mutating them.
+
+A four-replica receiver must share the exact prepared source admission prefix
+and Config. Every setup transition must use its real agreement route before
+dependent reads. Authoring on one store then copying its accepted history does
+not exercise that route. Landing, lost-response restart and independent
+readbacks belong to the actual receiving run, not source syntax checks.
+
+
+## Current focused Rust qualification (2026-10-03)
+
+The updated resident helper and room catalog passed six filtered nextest cases.
+The updated client review lowering passed three cases, including source/base
+and observe-capability rebinding refusal and support/write guards in one native
+command. Exact operation input replacement and symlink refusal are exercised.
+An initial client staging closure omitted a sibling source file; adding its
+unchanged source allowed the client-only retry to pass. No semantic source
+repair or repeat of the passing grain cases was needed.
+
+These nine cases compile the current Rust delta; they do not execute a matched
+Host, initialize the agreement fixture, sign a review call, land its effects,
+or establish provider recovery. Those receiving boundaries remain pending.

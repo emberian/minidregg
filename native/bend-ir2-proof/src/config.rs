@@ -27,7 +27,7 @@ type InnerChallenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
 type Challenger = crate::full_degree_challenger::FullDegreeChallenger<InnerChallenger>;
 type Pcs = HidingFriPcs<BabyBear, Radix2DitParallel<BabyBear>, Mmcs, ChallengeMmcs, ProofRng>;
 pub type Config = StarkConfig<Pcs, Extension, Challenger>;
-pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-full-degree-trace-budget-v3";
+pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-full-degree-trace-budget-v4";
 
 fn fresh_checked(capacity: crate::masking_budget::TraceCapacity) -> Result<Config, getrandom::Error> {
     let permutation = default_babybear_poseidon2_16();

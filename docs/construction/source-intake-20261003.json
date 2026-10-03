@@ -2,24 +2,6 @@
   "policy": "Source-first publication includes WIP and uncompiled source. Qualification is distinct from native admission, deployment and complete protocol qualification.",
   "files": [
     {
-      "path": "Compiler/PortableContinuationManifestCodec.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "5b9f1e31342754f011cab61285bb7574b3b03e81dad0340ac7924d86ac3953a7",
-      "qualification": "authored; four Lean modules queued UNCOMPILED; doc distinguishes physical component evidence from protocol joins"
-    },
-    {
-      "path": "Kernel/PortableContinuationManifest.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "0c1fec7fb736bf429b970fb80105178eebb8523ed06458862c581578d29cb5d1",
-      "qualification": "authored; four Lean modules queued UNCOMPILED; doc distinguishes physical component evidence from protocol joins"
-    },
-    {
-      "path": "Host/PortableContinuationInspection.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "5b4dc5523e29f9464951beb846dddf86649b6df0aec1fcd1415d675f67186b40",
-      "qualification": "authored; four Lean modules queued UNCOMPILED; doc distinguishes physical component evidence from protocol joins"
-    },
-    {
       "path": "native/portable-archive/Cargo.toml",
       "owner": "bread_systems_archaeology",
       "sha256": "7ab58ae192e16600f61b6355f310837a3853e4078235be4f73bd5dc33361da8f",
@@ -48,18 +30,6 @@
       "owner": "bread_systems_archaeology",
       "sha256": "3db801a8c5767d03284716b7f19678e062d821fd4d1b3fac7ac2aee5005a0ff8",
       "qualification": "native exact r1 release nextest 5/5 + release helper build PASS"
-    },
-    {
-      "path": "Compiler/ContentControlFrame.lean",
-      "owner": "graded_execution_architecture",
-      "sha256": "92a38ebb90b68fe46c98f3a6308570e6e4c7e649cc543b6e9ff2f2122206868e",
-      "qualification": "AUTHORED WIP UNCOMPILED/UNRUN"
-    },
-    {
-      "path": "Kernel/BendActivity.lean",
-      "owner": "graded_execution_architecture",
-      "sha256": "c2539b30b1cdadd29ce0b5df574361078ca5e28f8b78e762611241a384caf497",
-      "qualification": "AUTHORED WIP UNCOMPILED/UNRUN"
     },
     {
       "path": "Theory/BendClosureCodeRefinement.lean",
@@ -98,18 +68,6 @@
       "qualification": "compiled scoped release; literal/core mux repeated/Prelude physical conformance PASS; governed driver interface compiled, native receiving run not qualified"
     },
     {
-      "path": "native/fhe-bend/README.md",
-      "owner": "homomorphic_bend_construction",
-      "sha256": "afdfe5bef3b959c55797765cad1a0a908c5c3a2f27b7d030ef2388a320289a96",
-      "qualification": "compiled scoped release; literal/core mux repeated/Prelude physical conformance PASS; governed driver interface compiled, native receiving run not qualified"
-    },
-    {
-      "path": "native/fhe-bend/scripts/build-scoped.sh",
-      "owner": "homomorphic_bend_construction",
-      "sha256": "9268e6f0bbdb72ea451116010ad9f90998f8cda819912e2622c82ed871f5a5bd",
-      "qualification": "compiled scoped release; literal/core mux repeated/Prelude physical conformance PASS; governed driver interface compiled, native receiving run not qualified"
-    },
-    {
       "path": "native/fhe-bend/scripts/check-governed.sh",
       "owner": "homomorphic_bend_construction",
       "sha256": "0fa02ac3577ef5e003e8cb63ebe47e418daf913d22f1cd995c51a2d441f72053",
@@ -131,12 +89,6 @@
       "path": "native/fhe-bend/src/main.rs",
       "owner": "homomorphic_bend_construction",
       "sha256": "00261728ac5c7fad634a99533bd3b377864cffe791942cfb517d432f24015e8d",
-      "qualification": "compiled scoped release; literal/core mux repeated/Prelude physical conformance PASS; governed driver interface compiled, native receiving run not qualified"
-    },
-    {
-      "path": "native/fhe-bend/src/owner.rs",
-      "owner": "homomorphic_bend_construction",
-      "sha256": "d770670251dd7591966f26103a44b293467b9832ded3dd39e01ba826998cdaf9",
       "qualification": "compiled scoped release; literal/core mux repeated/Prelude physical conformance PASS; governed driver interface compiled, native receiving run not qualified"
     },
     {
@@ -554,12 +506,6 @@
       "qualification": "5 scoped native tests and release compilation PASS; public route unregistered"
     },
     {
-      "path": "world/Workshop/WorldSurface.bend",
-      "owner": "docuverse_deos_construction",
-      "sha256": "6ec6da27172065f14b1e755d1bf23b08fb193b6e291c0e8c55bdde43f4bbbd51",
-      "qualification": "shared source types upstream sealed parsing/emission consumer checked; native output lowering pending"
-    },
-    {
       "path": "docs/OBJECTIVE-BEND-SURFACE.md",
       "owner": "docuverse_deos_construction",
       "sha256": "8591c4e0c0d97e147915ba08972f4540c0ef3a724488c31aebad6536eff8cce9",
@@ -576,12 +522,6 @@
       "owner": "takeover_service",
       "sha256": "92cb44791bbced2964f4d86a61cbb64654bc89d9bd410303b8fee1b161fe31d3",
       "qualification": "six focused checks PASS; actual constructor launcher+held alias receiving PASS"
-    },
-    {
-      "path": "Kernel/ResourceBirthPolicyController.lean",
-      "owner": "joint_reserve_birth_authority",
-      "sha256": "57a07a816cfd921ff65571b60615ac2677e78335f6944f9fd995f04af465fcbe",
-      "qualification": "authored-uncompiled; controller/native-source reviewed by member OO; native qualification pending"
     },
     {
       "path": "Kernel/ResourceBirthReceiver.lean",
@@ -1046,12 +986,6 @@
       "qualification": "PASS coherent v2 producer batch; checks explicitly compiled-trust audited; full controller simulation pending"
     },
     {
-      "path": "Theory/BendLiveMachine.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "f7b994796365f09eb24b860997369aa33f6e578140ed051127b5c1ac35600c88",
-      "qualification": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
-    },
-    {
       "path": "Theory/BendTTSource.lean",
       "owner": "astra_consensus_composition",
       "sha256": "7b221b208344c69cef7962bdab264d0abf9528637ff55e2cf69787da4f753e38",
@@ -1145,12 +1079,6 @@
       "path": "Compiler/BendPrivateCapacity.lean",
       "owner": "bend_world_language",
       "sha256": "83b1f1c428635e8a46eb79a6bde80b671840971edd2bcd35f57575d2c8823e49",
-      "qualification": "SCOPED_LEAN_PASS"
-    },
-    {
-      "path": "Compiler/BendWorldProgramCodec.lean",
-      "owner": "bend_world_language",
-      "sha256": "13cdffa3b9ac3fffd2de468e61e99afeb349098f011cb534b30c3a428e58b7d7",
       "qualification": "SCOPED_LEAN_PASS"
     },
     {
@@ -1520,6 +1448,12 @@
       "qualification": "PASS joined release and 17 distinct scoped Rust checks; source only"
     },
     {
+      "path": "native/resource-client/src/pq_mailbox.rs",
+      "owner": "resume_private_construction",
+      "sha256": "5014081e5d4106e35d102168b2db1269d3027b293b674a991f28043518d429bc",
+      "qualification": "SOURCE AUTHORED/reviewed; Rustfmt or Python parse PASS; compile/runtime pending"
+    },
+    {
       "path": "docs/ASYNC-NATIVE-CUSTODY.md",
       "owner": "native_performance_construction",
       "sha256": "4a18f0ac5a45c49f6d008eae69ec402330fd551c4a0b9df73b715e788908b886",
@@ -1554,12 +1488,6 @@
       "owner": "objective_bend_linker",
       "sha256": "a00bbe06f5b0006951d7574afaff9c57e5536a1d6cab0c1b9534109508d8903d",
       "qualification": "docs wording repaired: prepare imports through normal bounded-build policy; no unbounded lake build guidance"
-    },
-    {
-      "path": "docs/OBJECTIVE-BEND.md",
-      "owner": "mini_objective_bend_documentation",
-      "sha256": "f23783d825d4745ef44c3b1d96af747e12468d3487d3628031a5382a5d9b8260",
-      "qualification": "Documentation; exact source path/command repair for public Workshop capsule; no build/runtime claim"
     },
     {
       "path": "docs/DEVELOPING.md",
@@ -1856,12 +1784,6 @@
       "qualification": "AUTHORED_UNCOMPILED"
     },
     {
-      "path": "Compiler/BendTraceEvaluation.lean",
-      "owner": "bend_semantics_audit",
-      "sha256": "aea127609490dd69b2bf330df06327afe413b3d611e82d4c9c34b850c821b4c5",
-      "qualification": "AUTHORED UNCOMPILED WIP; actual shared network fold arbitrary-witness correspondence"
-    },
-    {
       "path": "examples/objective-bend-workshop/ClosureConsumer.lean",
       "owner": "objective_bend_linker",
       "sha256": "ca8922e07cad53c74a68f0da1c9d6826bf605d0af1ce7e6b398088000fc889ba",
@@ -1899,15 +1821,23 @@
     },
     {
       "path": "Kernel/ResourceMoneyOperationDomain.lean",
-      "owner": "native_performance_construction-money",
+      "owner": "native_performance_construction",
       "sha256": "b2a9d5fccbca00ee674832f14b15b8de1de51d345976b2ef1c50bc20179c6195",
-      "qualification": "WIP AUTHORED UNCOMPILED; 2module warm check queued afterstation"
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "17330a016a19e61f1bea583ff2cc233eb0e8227b490bebdb5108e9dc91ae1a0f",
+      "publicationStatus": "Candidate awaits reviewed merge"
     },
     {
       "path": "Assurance/ResourceMoneyOperationDomainAudit.lean",
-      "owner": "native_performance_construction-money",
+      "owner": "native_performance_construction",
       "sha256": "3f8bae70297829f4ad95fdb2b72cf8ed476ce6c6667ee351bf4a6c3d272271fa",
-      "qualification": "WIP AUTHORED UNCOMPILED; 2module warm check queued afterstation"
+      "qualification": "WIP source repaired after actual Persvati type feedback; second narrow check pending"
+    },
+    {
+      "path": "docs/RESOURCE-MONEY-OPERATIONS.md",
+      "owner": "native_performance_construction",
+      "sha256": "d1f1794c04be2c9c0d4be071019f58b9c7f147afdb3bd543fd62230f7b70df1f",
+      "qualification": "WIP UNCOMPILED; foundation r5 actual PASS"
     },
     {
       "path": "native/private-backend/src/acss_id_store.rs",
@@ -1964,18 +1894,6 @@
       "qualification": "AUTHORED; source/core/native check pending; source-first publication."
     },
     {
-      "path": "Kernel/GenericSimplexReceiverSafety.lean",
-      "owner": "astra_adversarial_architecture",
-      "sha256": "69ba970e19109f4782daf6422580494322878b41cd8db938ff23ce9b449efc24",
-      "qualification": "AUTHORED UNCOMPILED; no actual LocalFaithful closure claim"
-    },
-    {
-      "path": "README.md",
-      "owner": "mini_objective_bend_documentation",
-      "sha256": "9abd4832b6c786e3de0e5a483c1d43c5e5684c94447e33bed2b2cbadc39d7f0f",
-      "qualification": "Docs-only final reconciliation. Exact links/anchors/driver args/core hash checked against published cohort; no compile or runtime claim."
-    },
-    {
       "path": "scripts/bend-logic/check-nat-prelude.sh",
       "owner": "bend_logic_compilation",
       "sha256": "afb7a848aea29756934e3b95fd467e4529c7c5778d8c26c97f6cac2b818eb1b9",
@@ -1997,12 +1915,6 @@
       "path": "native/private-backend/src/custody.rs",
       "owner": "private_backend_construction",
       "sha256": "2737847dc105ba6ae10efaeed6bec967554bf51ee96897231bcb0ed11e42c5ca",
-      "qualification": "authored UNCOMPILED fixedpublicPlan batch reserve before any secretread; new2 focusedtests queued; materialcustody not checkedtriples/MPC/nativeSourceYES"
-    },
-    {
-      "path": "native/private-backend/src/lib.rs",
-      "owner": "private_backend_construction",
-      "sha256": "542dccf5d64c0535714511790c7f02b8bfbcc6a4f249efbf540024f895c1507f",
       "qualification": "authored UNCOMPILED fixedpublicPlan batch reserve before any secretread; new2 focusedtests queued; materialcustody not checkedtriples/MPC/nativeSourceYES"
     },
     {
@@ -2036,22 +1948,12 @@
       "qualification": "COMPILED narrow r3; event+axiom gates PASS; integrated native selective test pending fixture correction"
     },
     {
-      "path": "Compiler/PortableContinuationArchiveIO.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "269ddb850855729525ca5fa4fad9ab8f1f094117b76837202fc382c4b948f807",
-      "qualification": "WIP UNCOMPILED; original four Lean modules await assigned captain chain; native helper remains exact r1 five-pass binary"
-    },
-    {
-      "path": "Compiler/PortableJointCustodyIO.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "4b54c1f448bf4861f002960fa94b105c2193817a7b0da914b067dbd621589697",
-      "qualification": "WIP UNCOMPILED; original four Lean modules await assigned captain chain; native helper remains exact r1 five-pass binary"
-    },
-    {
       "path": "Host/PrivateCircuitPlanFixture.lean",
-      "owner": "astra_consensus_composition",
+      "owner": "runtime_lieutenant",
       "sha256": "03384efab5bc026e016b42a280f9e8c7acc149058be5ef0406474253b9ccf8db",
-      "qualification": "AUTHORED_UNCOMPILED"
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "cfedda8812718b53be439a631b794f0a74abe66b3a29007e9ea20e9394271f8e",
+      "publicationStatus": "Candidate awaits reviewed merge"
     },
     {
       "path": "docs/construction/private-circuit-plan-fixture-20261003.json",
@@ -2064,12 +1966,6 @@
       "owner": "astra_consensus_frontier",
       "sha256": "70ca92083f50089cc8388fbe58329b99c24c639759e4623271e63753ed633415",
       "qualification": "PASS module+axiom gates in proof owner current tranche; exact approved frozen copy"
-    },
-    {
-      "path": "Kernel/NativeHostReplay.lean",
-      "owner": "joint_receiver_construction",
-      "sha256": "9c85703b9932ee9e04f0028b6c4c491fa8fdc8a68862a97803d055d0abf4acca",
-      "qualification": "AUTHORED_UNCOMPILED_WIP"
     },
     {
       "path": "Kernel/JointReceiver.lean",
@@ -2108,12 +2004,6 @@
       "qualification": "SOURCE REPAIR AFTER FAILED SCOPED CHECK; UNQUALIFIED/UNCOMPILED"
     },
     {
-      "path": "Kernel/ObjectiveBendInstanceLoader.lean",
-      "owner": "member_oo_construction",
-      "sha256": "4a503f84a8cc849668d8ec686dfba9314d15361e4bfbc9c733954737d04f762b",
-      "qualification": "SOURCE REPAIR AFTER FAILED SCOPED CHECK; UNQUALIFIED/UNCOMPILED"
-    },
-    {
       "path": "Compiler/WorkshopCardReturn.lean",
       "owner": "dreggnet_collective_fiction",
       "sha256": "72e4f496feb6c15152204cef0714816cdfe2116f84e167346a9fc3cb72148840",
@@ -2124,12 +2014,6 @@
       "owner": "dreggnet_collective_fiction",
       "sha256": "fba8e1b6286c62ef0abeac99402444d46070c1b2f662d7c5b9d4ede7df254b76",
       "qualification": "AUTHORED_UNCOMPILED; source-first before receiving check"
-    },
-    {
-      "path": "examples/objective-bend-workshop/check-card-return.sh",
-      "owner": "dreggnet_collective_fiction",
-      "sha256": "6df069d352a1719b6b9a4011a117a4fe7bd9d4271bb68bdc5c5593368000ff6f",
-      "qualification": "BASH_SYNTAX_PASS; portable harness UNRUN"
     },
     {
       "path": "Compiler/BendActivityProgram.lean",
@@ -2180,12 +2064,6 @@
       "qualification": "AUTHORED_UNCOMPILED"
     },
     {
-      "path": "Compiler/BendWorldPlan.lean",
-      "owner": "bend_world_language",
-      "sha256": "adaf28905cc53c331737cfb37d78c00296a26b6e44104a893934e77fd7e3a3f5",
-      "qualification": "SCOPED_LEAN_PASS producer02/04"
-    },
-    {
       "path": "Compiler/BendKeyRecord.lean",
       "owner": "bend_world_language",
       "sha256": "b0b47dd1c339eec07d47228691df80cc0a14c90a568776cdf32b6e6a20033bac",
@@ -2216,30 +2094,6 @@
       "qualification": "AUTHORED_UNCOMPILED"
     },
     {
-      "path": "Compiler/BendRunCore.lean",
-      "owner": "bend_world_language",
-      "sha256": "18ec1043a67d2fe2361c5e5dd62b844a94f88d07030d54037e2e61bd1080535a",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "path": "Compiler/BendExecutionClaim.lean",
-      "owner": "bend_world_language",
-      "sha256": "b75547c842e6f7705497bbc53a91644a603d7d0212f952d2bf154a270cb19e23",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "path": "Kernel/BendArtifactSource.lean",
-      "owner": "bend_world_language",
-      "sha256": "d4279d27bf725b4643375775ad6aeccefd83a06de4c985008d114ee5da91937f",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "path": "Kernel/BendInvocationInput.lean",
-      "owner": "bend_world_language",
-      "sha256": "4dcd237329f33efa4f6fb1449b691c22c87bd48c29c51e95baf1bca264ef0cef",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
       "path": "native/private-backend/src/authenticated_ingress.rs",
       "owner": "private_backend_construction",
       "sha256": "566d9515cf0d41aaa54fe8b3fb270d161d0aba2087ff2702bf860766c51d82cd",
@@ -2250,12 +2104,6 @@
       "owner": "graded_execution_architecture",
       "sha256": "e09741627773a793131f749c0ab937e711161a8cfec55fa8189eaa04bf2a2f7e",
       "qualification": "AUTHORED WIP; binds original signed nonce to entire action and tariff inputs"
-    },
-    {
-      "path": "Compiler/PortableParticipantPinIO.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "91c1cbcf28252c16c5f8ebd8702568ce1f470df1d2a3648f0be85e508f00d07b",
-      "qualification": "WIP UNCOMPILED; native exact r1 helper already qualified; source consumers queued separately"
     },
     {
       "path": "Theory/BendClosureReadiness.lean",
@@ -2282,24 +2130,6 @@
       "qualification": "AUTHORED UNCOMPILED WIP"
     },
     {
-      "path": "native/private-backend/CONSTRUCTION.txt",
-      "owner": "private_backend_construction",
-      "sha256": "3a553d0d1fbc3670fa118d7211e4d8944470d8dc272798284096f3ea6e59e60b",
-      "qualification": "reusable public source status corrected: actualauth4/ACSS4 +new7 focused releasePASS; nativefundedendpoint/checkedtriples/fullMPC remain unjoined"
-    },
-    {
-      "path": "Host/PortableContinuationProbe.lean",
-      "owner": "bread_systems_archaeology",
-      "sha256": "5042b63e8eadfd0d73ca57f93dd83453bf6dd2d462a91f7cb3abc1d92f7134a3",
-      "qualification": "WIP UNCOMPILED; actual independently held participant frame+checked continuity mandatory in quarantined restore probe"
-    },
-    {
-      "path": "docs/PORTABLE-CONTINUATION.md",
-      "owner": "bread_systems_archaeology",
-      "sha256": "e320ec850a65a5769f299f934e6fcaa9d71a9e26f2a05bb73cf51fcea1767092",
-      "qualification": "WIP UNCOMPILED; actual independently held participant frame+checked continuity mandatory in quarantined restore probe"
-    },
-    {
       "path": "scripts/spk-platform/connector-authority.py",
       "owner": "takeover_service",
       "sha256": "daa37be3eb2c949657ee081d332da0afae23647a4dafcccfa0e57a4d413ed16b",
@@ -2316,24 +2146,6 @@
       "owner": "mini_objective_bend_documentation",
       "sha256": "9b37957f0dc9148501f2baea186250bf4183ce71631de7063d799c2c85227375",
       "qualification": "Docs-only source publication and product-frontier index. No new execution/qualification claim."
-    },
-    {
-      "path": "native/private-backend/src/acss_id.rs",
-      "owner": "private_backend_construction",
-      "sha256": "6e92224f5f837ab7e8a853e6774bd315b3a6b58812c718edf9e2f66ed31222a3",
-      "qualification": "protocolcodeunchanged fromactual5ACSSchecksPASS; additional7partyf2 compresseddegree2proof+twolocalabort/twofaultrecovery trace authored notrun"
-    },
-    {
-      "path": "docs/BEND-PERSISTENT-COMPUTATION-20261003.txt",
-      "owner": "graded_execution_architecture",
-      "sha256": "278a3240e361acfb42b4f774b63ea8f28c77e4b3f8168e8364ef17f49624ccb5",
-      "qualification": "PUBLIC DOC CLEANUP; qualified pure restart distinguished from WIP native receiving"
-    },
-    {
-      "path": "docs/CONSTRUCTION-PROOF-CONTRACTS-20261003.txt",
-      "owner": "graded_execution_architecture",
-      "sha256": "c15158b306852e654b7d3c706ea5672bf41015edcf790d4c072a1c6301d1a638",
-      "qualification": "PUBLIC DOC CLEANUP; qualified pure restart distinguished from WIP native receiving"
     },
     {
       "path": "native/bend-ir2-proof/src/main.rs",
@@ -2360,18 +2172,6 @@
       "qualification": "AUTHORED_UNCOMPILED_REPAIR"
     },
     {
-      "path": "Kernel/GenericSimplexReceiveProvenance.lean",
-      "owner": "astra_adversarial_architecture",
-      "sha256": "b31f234bc3f946853392277f81d7db7dcf7416beb61d0deebb525ac6d3eab2e5",
-      "qualification": "AUTHORED UNCOMPILED actual stored-message provenance; not LocalFaithful closure"
-    },
-    {
-      "path": "Kernel/GenericSimplexReceiveStructure.lean",
-      "owner": "astra_adversarial_architecture",
-      "sha256": "36a866f9079e80aa3efcbbab30ef63fc32d51a272814d164be8b4215d0c3dfef",
-      "qualification": "AUTHORED UNCOMPILED actual stored-message provenance; not LocalFaithful closure"
-    },
-    {
       "path": "Kernel/BendActivityBootstrap.lean",
       "owner": "graded_execution_architecture",
       "sha256": "8fca68e6c4428b9302fcfc8579336c452cae8a832c58911dcf43a6d831c6aa55",
@@ -2384,34 +2184,10 @@
       "qualification": "AUTHORED WIP UNCOMPILED; general own-facet transport acceptance retains all other facets; receiver exact record/predecessor theorem"
     },
     {
-      "path": "Compiler/BendObliviousAdministrative.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "82ad6c1493e4fee0b1ec186ccc4c52ada5c9943468a5fa5e178647d71df0bfbd",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousState.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "b69638a32bd29836e23dcc437b8bba9732d50d8b37ac466f89e74e0dd39b029c",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/ObliviousWords.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "6cd9c460bb0e7390792e729527e3e35622dc3d62059263f5a34ca3ccbdc976fa",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
       "path": "docs/construction/bend-fixed-controller-r1-20261003.json",
       "owner": "astra_consensus_composition",
       "sha256": "b2d4e99e7eaae96a99275af2be6569e41bf5fa6d3318984fcd88b0ddc314d70e",
       "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Kernel/ObjectiveBendCallContext.lean",
-      "owner": "member_oo_construction",
-      "sha256": "1ab1b2c18feb58e445252a0b2eb03c179b363cc31e7cc9c8c8afe4cb5ddc59db",
-      "qualification": "AUTHORED WIP UNCOMPILED; compact actual governed-content source loading, native receiving not claimed"
     },
     {
       "path": "Compiler/BendClosureContinuationCodec.lean",
@@ -2438,12 +2214,6 @@
       "qualification": "PASS scoped Lean+axiom accounting; Host separately executed save/resume cuts7/3/12"
     },
     {
-      "path": "Kernel/GenericSimplexGlobalReceive.lean",
-      "owner": "astra_adversarial_architecture",
-      "sha256": "4a40b281bd009d6ef556eb90d85ab25107fa953bb78450372354e97e75d0f27d",
-      "qualification": "AUTHORED UNCOMPILED actual Reachable\u2192stored-message global send provenance; receive dependencies uncompiled"
-    },
-    {
       "path": "native/resource-client/src/context_projection.rs",
       "owner": "bread_programmable_archaeology",
       "sha256": "523533b6deffead8d9e11f19daccf4e4828968e042a7b600c8c96c89c353b513",
@@ -2453,12 +2223,6 @@
       "path": "native/grain-runtime/src/resident_context.rs",
       "owner": "bread_programmable_archaeology",
       "sha256": "49f4ae16a2a20a0fb7c71361b950d193e95b203a71906679fe4abc02642f4c4f",
-      "qualification": "Authored current-authority/native-boundary repair WIP; scoped Rust/native receiving unrun"
-    },
-    {
-      "path": "docs/RESIDENT-CONTEXT.md",
-      "owner": "bread_programmable_archaeology",
-      "sha256": "fd2544869888d9fecde3d55234a8a0f2c61a0b97587ffa98a90bc1ae72e57dce",
       "qualification": "Authored current-authority/native-boundary repair WIP; scoped Rust/native receiving unrun"
     },
     {
@@ -2498,15 +2262,21 @@
       "qualification": "Four Python regressions PASS; read-only actual receiver457 source/373 scheduled/84 warm/76 external preflight PASS; not Lean/native qualification"
     },
     {
+      "path": "Kernel/ResourceMoneyWire.lean",
+      "owner": "native_performance_construction",
+      "sha256": "5625a89203e06b7aca1f077665566ab192ad0b7f6ae02c7f945af95d4e27a5ad",
+      "qualification": "Wire actual PASS; audit qualifier-name fix after actual feedback pending audit-only check"
+    },
+    {
+      "path": "Kernel/ResourceMoneyReceiver.lean",
+      "owner": "native_performance_construction",
+      "sha256": "be5e715db83bce82ecd08c7ba522ea92d60219db91b7462326ab9ff3ea269900",
+      "qualification": "WIP UNCOMPILED; next3-leaf frozen source"
+    },
+    {
       "path": "Theory/BendClosureReturnSteps.lean",
       "owner": "bend_controller_simulation",
       "sha256": "fb886e46bab36744d467737a3adcb78aeca7e0a4c90f0b8767ce420818b4e555",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "path": "Host/BendReturnReleaseAuthoring.lean",
-      "owner": "bend_bread_archaeology",
-      "sha256": "93e2105b1fb10a42c4264d47430972b62b241a67839ec4cf9cc6938863af061c",
       "qualification": "AUTHORED_UNCOMPILED"
     },
     {
@@ -2522,27 +2292,9 @@
       "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
     },
     {
-      "path": "Theory/BendMaskingDimension.lean",
-      "owner": "bend_semantics_audit",
-      "sha256": "303858b1ebe58854b741c8c0275b5d430065db2ef275de8772a789ba17d6af2f",
-      "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
-    },
-    {
-      "path": "native/bend-ir2-proof/src/config.rs",
-      "owner": "bend_semantics_audit",
-      "sha256": "d93ffcd5290141452eab53f0d7fafaadaf87ac8fd286b40a9784a5eb277b2976",
-      "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
-    },
-    {
       "path": "native/bend-ir2-proof/src/masking_budget.rs",
       "owner": "bend_semantics_audit",
       "sha256": "e93a4961e190d11222957dd7c1cdd18b0162f814c94f5fd8454556b276932134",
-      "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
-    },
-    {
-      "path": "native/bend-ir2-proof/src/full_degree_challenger.rs",
-      "owner": "bend_semantics_audit",
-      "sha256": "12082e2b27203f9f810f363e1bf0b4d649a5c52dd29563b060c64eb5e6081eaf",
       "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
     },
     {
@@ -2552,21 +2304,9 @@
       "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
     },
     {
-      "path": "native/bend-ir2-proof/README.md",
-      "owner": "bend_semantics_audit",
-      "sha256": "1e99510c829163326903af56c5e1695bc446f6a5260453d62c7a57fa61b087a5",
-      "qualification": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
-    },
-    {
       "path": "Assurance/BendObliviousAdministrativeChecks.lean",
       "owner": "astra_consensus_composition",
       "sha256": "9999a0bbfe32932f8cc4341ee4b718322ce0e4844d91acb9c65c8e6e603f7235",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousCodec.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "8bf2785d479c07faf6c364b9eed033276c766623f27fea4ef7350f3cb7eb88d6",
       "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
     },
     {
@@ -2576,52 +2316,16 @@
       "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
     },
     {
-      "path": "Kernel/ObjectiveBendReferenceSource.lean",
-      "owner": "member_oo_construction",
-      "sha256": "c69696024b9dde50b9f56dcdfef5093bb319a6e398be08128e9059ee014173ae",
-      "qualification": "AUTHORED WIP UNCOMPILED; core source independent of backend metadata"
-    },
-    {
-      "path": "Kernel/ObjectiveBendReferenceLoader.lean",
-      "owner": "member_oo_construction",
-      "sha256": "ca4fc2c5c9ea987feb9970af67ae6f15ab872337e37c1de62e9c118fd6742e01",
-      "qualification": "AUTHORED WIP UNCOMPILED; core source independent of backend metadata"
-    },
-    {
-      "path": "Compiler/DurableReceiverIO.lean",
-      "owner": "joint_receiver_construction",
-      "sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4",
-      "qualification": "SOURCE_REPAIR_RECHECK_RUNNING"
-    },
-    {
       "path": "Host/BendActivityFixture.lean",
       "owner": "graded_execution_architecture",
       "sha256": "e139f353ba64759a790b1bb68fec35266f716c5879d888b8e983a1a0e1953e74",
       "qualification": "AUTHORED WIP UNCOMPILED/UNRUN; real pin/current-image -> sourcechecked native command exporter and original signed source sealing"
     },
     {
-      "path": "Compiler/BendScalarPlanCanonical.lean",
-      "owner": "bend_bread_archaeology",
-      "sha256": "8e29f27d54ad76fc37926a9040318c74ff8fab5b237845c806243a57a3710036",
-      "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
       "path": "Theory/BendClosureRetainedReady.lean",
       "owner": "bend_controller_simulation",
       "sha256": "6244ee3398527eb684cba2e585eb00ef4b91ad006a308976b01c053df9b431e1",
       "qualification": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "path": "Compiler/ObjectiveBendInstance.lean",
-      "owner": "member_oo_construction",
-      "sha256": "d73760f97eca366609f1501b69ffa21b0cdee32576bd1dd2ef578dd38a10053b",
-      "qualification": "SOURCE REPAIR AFTER ACTUAL SCOPED FAILURE; NOT RECHECKED"
-    },
-    {
-      "path": "Compiler/ObjectiveBendReferenceInstance.lean",
-      "owner": "member_oo_construction",
-      "sha256": "defa314c550a89d4a1a7cd3d7c0c08b1a303d2d87662c3ccd615232f09823e99",
-      "qualification": "SOURCE REPAIR AFTER ACTUAL SCOPED FAILURE; NOT RECHECKED"
     },
     {
       "path": "native/private-backend/src/sh2t_id.rs",
@@ -2678,24 +2382,6 @@
       "qualification": "PASS actual TCP/MLDSA/selective Byzantine COMMIT/restart + streaming archive CAS, aux4G/2threads"
     },
     {
-      "path": "Compiler/GenericSimplexParticipant.lean",
-      "owner": "astra_consensus_frontier",
-      "sha256": "d2f9c9cd20dbbb01fda7d1827bf499754eb8c3d506c98d84206374b4f1c5fe10",
-      "qualification": "AUTHORED UNCOMPILED source consumer/fixture; receiver foundation pending"
-    },
-    {
-      "path": "Verify/GenericSimplexSourceHarness.lean",
-      "owner": "astra_consensus_frontier",
-      "sha256": "91f2e9bd9256033bf001a48e0268dc7eaea305229f7b65db95174b866f65fdee",
-      "qualification": "AUTHORED UNCOMPILED source consumer/fixture; receiver foundation pending"
-    },
-    {
-      "path": "docs/GENERIC-SIMPLEX-NATIVE.md",
-      "owner": "astra_consensus_frontier",
-      "sha256": "f3084b15b51c9c4d3e649608a591c6181f7cb0680c56ecfcfd659dce07149fbb",
-      "qualification": "Technical documentation updated to actual narrow PASS/WIP boundary"
-    },
-    {
       "path": "examples/objective-bend-station/WorldCatalog.bend",
       "owner": "dreggcloud_product_archaeology",
       "sha256": "f48a4ef6652bb8784458c76947601d28f0523546a088c94d01da584a48ee3801",
@@ -2726,70 +2412,10 @@
       "qualification": "WIP-source-only-unchecked-uncompiled-unexecuted"
     },
     {
-      "path": "native/fhe-bend/src/lib.rs",
-      "owner": "homomorphic_bend_construction",
-      "sha256": "5aafdb3415c49dfea1953084171e3e450da9d3ae7287c12b48cfb900125540ba",
-      "qualification": "latest replacement source authored UNCOMPILED; adds qualified Prelude mux schema/profile only to SAME graph interpreter and matching manifest profile"
-    },
-    {
-      "path": "Compiler/BendObliviousAccess.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "823ed81e830963065290b8cdffe25040621794569fdf8b5bb06e3ae4bd376ca5",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousController.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "2ca8387e48c6f3ae21793c808a00a1e091ed5650a9bd969be1f0bcddbc4f1ad8",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousLookup.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "4e9199ba505f7753fc935207e540109094a9ebab3bb4667b6989d09fc4aa267f",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousProgram.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "deb0f4c1b4c01ffa1ed104e82d67a992f644072453c13f86dc5e49300b041fc4",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendObliviousUnspine.lean",
-      "owner": "astra_consensus_composition",
-      "sha256": "3fa76e2af070b41b72aaede33d73153b96184211b1aadd7a24e2ee9f3a39b073",
-      "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
       "path": "docs/construction/bend-fixed-controller-r3-20261003.json",
       "owner": "astra_consensus_composition",
       "sha256": "be4542241b3206eb2025b77624fd70f33e8b45a27ca2f0688fbd40027282559a",
       "qualification": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
-    },
-    {
-      "path": "Compiler/BendWorldSurface.lean",
-      "owner": "docuverse_deos_construction",
-      "sha256": "b3ba7212f136227366ccc2b3952b6df736169a30255ad39f599b8afd52e2035d",
-      "qualification": "scoped Lean PASS check-r2; generic projection laws only, no native route"
-    },
-    {
-      "path": "Compiler/BendSurfaceLowering.lean",
-      "owner": "docuverse_deos_construction",
-      "sha256": "e082a7e98cfcdcf6317b2101b0b30cd11249bc480c668d4fd3947d7c47f7a8ef",
-      "qualification": "WIP namespace repair authored; bounded check pending; no native route/installed output claimed"
-    },
-    {
-      "path": "Host/BendSurfaceJson.lean",
-      "owner": "docuverse_deos_construction",
-      "sha256": "ea1140ab32584fb5323ec6ceccadb14fcb1be7a49a1cd4209fbf81dc06f493c6",
-      "qualification": "WIP namespace repair authored; bounded check pending; no native route/installed output claimed"
-    },
-    {
-      "path": "Host/BendSurfaceSmoke.lean",
-      "owner": "docuverse_deos_construction",
-      "sha256": "e4ded9ad6e6415517e2b609e4f8479ebf720f623fbe81497d161ed5745ceb725",
-      "qualification": "WIP namespace repair authored; bounded check pending; no native route/installed output claimed"
     },
     {
       "path": "Host/BendOwnerManifestCheck.lean",
@@ -2804,34 +2430,10 @@
       "qualification": "parser scoped lean + named SHAwidth assert_axioms PASS; exact b54070d4 source; no authority/crypto claim"
     },
     {
-      "path": "Kernel/GenericSimplexCausal.lean",
-      "owner": "joint_reserve_birth_authority",
-      "sha256": "4ea53d6e4f9a12434ee06bae7fa41d18a31c07d7d20dfbd62abfc5d251acfebc",
-      "qualification": "r3 kernel PASS; r4-8 new full primitive/emission bundles drafted uncompiled; composite start/step closure pending"
-    },
-    {
       "path": "testing/journeys/resident-context-review.py",
       "owner": "bread_programmable_archaeology",
       "sha256": "e0cc6ff564a0570345b1a24f1fa0f8b0b82cec5c306c8f7b2dc934ae6a24fb0b",
       "qualification": "Python AST PASS; actual signed prepared ingress/native receiving NOT RUN"
-    },
-    {
-      "path": "native/resource-client/src/cohort_tcp.rs",
-      "owner": "resume_private_construction",
-      "sha256": "5f32fe135015d4bf978057012b40d2f9a4a3bb1027496a3e5c6c53cf314ec10b",
-      "qualification": "SOURCE AUTHORED/reviewed; Rustfmt or Python parse PASS; compile/runtime pending"
-    },
-    {
-      "path": "native/resource-client/COHORT-TCP.md",
-      "owner": "resume_private_construction",
-      "sha256": "6a2c5c8afc8ee8e7c5f6b2a16808ca9b66ed9377a2d951fec62aa0e8003c64fa",
-      "qualification": "SOURCE AUTHORED/reviewed; Rustfmt or Python parse PASS; compile/runtime pending"
-    },
-    {
-      "path": "native/resource-client/scripts/cohort-native-tcp.py",
-      "owner": "resume_private_construction",
-      "sha256": "2680973e13bc30c5a40eb3d84c185fd64676b451b1441747060408f56c951ae8",
-      "qualification": "SOURCE AUTHORED/reviewed; Rustfmt or Python parse PASS; compile/runtime pending"
     },
     {
       "path": "Verify/NativeJointSourceFixture.lean",
@@ -2840,27 +2442,9 @@
       "qualification": "AUTHORED_UNCOMPILED; no initialized stores or signed ingress execution claimed"
     },
     {
-      "path": "Compiler/ObjectiveBendReference.lean",
-      "owner": "member_oo_construction",
-      "sha256": "c153e03b6a4a65129df828271a4ffda2eed0e60469b638a6983fd35d6efff601",
-      "qualification": "AUTHORED WIP UNCOMPILED; explicit Digest namespace repair from actual carrier failure"
-    },
-    {
       "path": "docs/BEND-RESIDENT-SERVICE-COMMONS.md",
       "owner": "bigdregg_product_architecture",
       "sha256": "9a0e7595eae4bc3449ce0d51a19934a0ea0329577979c20a92cc7d4c23a31c8a",
-      "qualification": "AUTHORED; source check pending latest exact Run request binding/view revision; core/native pending."
-    },
-    {
-      "path": "scripts/check-collective-source.ts",
-      "owner": "bigdregg_product_architecture",
-      "sha256": "05f666ffa5394a1d61303bf9e6481af5c598fe8d41ad2f473cc19f4ef0fd9464",
-      "qualification": "AUTHORED; source check pending latest exact Run request binding/view revision; core/native pending."
-    },
-    {
-      "path": "world/Workshop/ResidentServiceCommons.bend",
-      "owner": "bigdregg_product_architecture",
-      "sha256": "39cc4dbdc8767c3a9dc2899e2bcdc1a562522fcdcdd72ba79f84f820d1219d36",
       "qualification": "AUTHORED; source check pending latest exact Run request binding/view revision; core/native pending."
     },
     {
@@ -2868,12 +2452,6 @@
       "owner": "bigdregg_product_architecture",
       "sha256": "2d4a804299922cdf5a38b48b21fe66bdd754431f0627069433b4e73f3fe10cee",
       "qualification": "AUTHORED; source check pending latest exact Run request binding/view revision; core/native pending."
-    },
-    {
-      "path": "Theory/BendClosureSupportedRun.lean",
-      "owner": "bend_controller_simulation",
-      "sha256": "3c08dd2c43ba6be00d9bf3a8064f0a605151a30b3d3c8f31369a70817e0876f7",
-      "qualification": "AUTHORED_UNCOMPILED"
     },
     {
       "path": "Compiler/BendActivityYieldSource.lean",
@@ -2888,142 +2466,1261 @@
       "qualification": "AUTHORED WIP UNCOMPILED; persistent effect producer proof seam"
     },
     {
+      "path": "scripts/check-collective-source.ts",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "f52cede49c4be3f9f192910d5964e13a2f4c8cce59a2dde520926b04f27cb08e",
+      "qualification": "AUTHORED; source/core/native qualification pending latest finite-status handler + scenario source."
+    },
+    {
+      "path": "world/Workshop/ResidentServiceCommons.bend",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "f0cbb9a35d3a2ee672e74f5c47bfe960a21a5aafa6a3eb8ca0965bdf6f2f2546",
+      "qualification": "AUTHORED; source/core/native qualification pending latest finite-status handler + scenario source."
+    },
+    {
+      "path": "native/resource-client/scripts/cohort-native-tcp.py",
+      "owner": "resume_private_construction",
+      "sha256": "456c375d7a0a601e59612b12133bd235eebf42021b2e3e6b58baa7aabcb0d18d",
+      "qualification": "nine focused Rust tests + owned release PASS; reusable runtime receiving source authored; actual sustained runtime running"
+    },
+    {
+      "path": "native/resource-client/scripts/check-traffic-pipeline.sh",
+      "owner": "resume_private_construction",
+      "sha256": "a1e1b9b901b726c1d2cbeefb15efe3c5b30c97cc8f31b416539a1a23e1d7ed60",
+      "qualification": "nine focused Rust tests + owned release PASS; reusable runtime receiving source authored; actual sustained runtime running"
+    },
+    {
+      "path": "scripts/spk-platform/same-store-app.py",
+      "owner": "takeover_service",
+      "sha256": "89ffc14a72875fbc570b50defce2011f99a89975fbab31553b2cfd69650190df",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "59bbf4960268210d95d1c69a7fce46dd22f9acb39d515594a94d2c636157658c",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "scripts/spk-platform/app-document-provision.py",
+      "owner": "takeover_service",
+      "sha256": "01bc82caf3ecbc296997093058c259ac319c7a92d87df95ec5aca8faf70dd539",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "f088cdf9f80f8f45a1778cd3e23250e851bbf17d1aeac8fcca49911a2da41730",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "scripts/spk-platform/tests/test_ticket_preflight.py",
+      "owner": "takeover_service",
+      "sha256": "b1227d1ad2dd7a025251bad39828d58d29a555f8d0566e5d4724865a01487e33",
+      "qualification": "3 narrow regression checks PASS; native receiving pending fee helper API"
+    },
+    {
+      "path": "Kernel/GenericSimplexReceiverSafety.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "d865778ae570adf5c11d7a4e6f39f756a72167582c03083d587c3c67b3ed695b",
+      "qualification": "UNCOMPILED; removes literal trailing heredoc token from previously published WIP"
+    },
+    {
+      "path": "native/private-backend/src/acss_id.rs",
+      "owner": "private_backend_construction",
+      "sha256": "b2546496ac99dcb767991ae3e9d60f38fbb1c27acb66cb47a6d89d704494b054",
+      "qualification": "source delta helper visibility/lib wiring; prior checks remain historical, new King module not compiled"
+    },
+    {
+      "path": "world/Workshop/ServiceCommonsDemonstration.bend",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "6644f64926ad34ce0824e063b85a0090826ebdc9fbde9ef55f71c8a51a831c82",
+      "qualification": "sealed source + safe BendTT emission PASS public-driver8b; actual Book/native receiving pending"
+    },
+    {
+      "path": "examples/objective-bend-station/CommonsNativeMethods.bend",
+      "owner": "dreggcloud_product_archaeology",
+      "sha256": "d5eb36a397ce1c132fd2b248d9cabe7aa76ef3467bc80728d7846cda05c531aa",
+      "qualification": "WIP-authored-unchecked-uncompiled-unexecuted"
+    },
+    {
+      "path": "examples/objective-bend-station/CoauthoredRules.bend",
+      "owner": "dreggcloud_product_archaeology",
+      "sha256": "fe291c363b49b6333ef9d05135864f79cb6428ed20e07677200f33d2dbdfe096",
+      "qualification": "WIP-authored-unchecked-uncompiled-unexecuted"
+    },
+    {
+      "path": "world/Workshop/WorldCoauthoring.bend",
+      "owner": "dreggnet_collective_fiction",
+      "sha256": "d5621c99046f0e5eb5e21663bde30893fce37024ed52effc3cb7d52cb16f30c7",
+      "qualification": "AUTHORED WIP UNCHECKED; source-first no new build"
+    },
+    {
+      "path": "world/Workshop/CoauthoringInstitution.bend",
+      "owner": "dreggnet_collective_fiction",
+      "sha256": "916f6a27b258b2a9cd9c46979d8755c5f15e269b0d07f0ce7c47b4c1467ecd56",
+      "qualification": "AUTHORED WIP UNCHECKED; source-first no new build"
+    },
+    {
+      "path": "world/Workshop/CoauthoringFaces.bend",
+      "owner": "dreggnet_collective_fiction",
+      "sha256": "d0f965edace0113c22eb5b37b4ee6a4860ec9c7a4a0a69595daf3a103924e055",
+      "qualification": "AUTHORED WIP UNCHECKED; source-first no new build"
+    },
+    {
+      "path": "world/Workshop/COAUTHORING.md",
+      "owner": "dreggnet_collective_fiction",
+      "sha256": "d64bd77488354937e975c57d3db5847ec403dcc15ecdfc43ff69ff1a490d3f22",
+      "qualification": "AUTHORED WIP UNCHECKED; source-first no new build"
+    },
+    {
+      "path": "Compiler/BendWorldProgramCodec.lean",
+      "owner": "bend_world_language",
+      "sha256": "1a22c68aa7a1e7f7d5e721a501722ade1b2189fd97e9196609be2d0f3d3c00da",
+      "qualification": "AUTHORED_UNCOMPILED_DELTA"
+    },
+    {
+      "path": "Compiler/BendRunCore.lean",
+      "owner": "bend_world_language",
+      "sha256": "18ec1043a67d2fe2361c5e5dd62b844a94f88d07030d54037e2e61bd1080535a",
+      "qualification": "AUTHORED_UNCOMPILED_DELTA"
+    },
+    {
+      "path": "Compiler/BendExecutionClaim.lean",
+      "owner": "bend_world_language",
+      "sha256": "b75547c842e6f7705497bbc53a91644a603d7d0212f952d2bf154a270cb19e23",
+      "qualification": "AUTHORED_UNCOMPILED_DELTA"
+    },
+    {
+      "path": "Kernel/BendArtifactSource.lean",
+      "owner": "bend_world_language",
+      "sha256": "d4279d27bf725b4643375775ad6aeccefd83a06de4c985008d114ee5da91937f",
+      "qualification": "AUTHORED_UNCOMPILED_DELTA"
+    },
+    {
+      "path": "Theory/BendClosureRefusalPrefix.lean",
+      "owner": "bend_controller_simulation",
+      "sha256": "46e59cdb771186836d1b3a2922ed9c65184f960ef8e393965420a864210ed801",
+      "qualification": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Compiler/BendObliviousCodec.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "afd82a782198b8a606586d74515e6154e29e29fe44e6372f663ed0bf1fbf6064",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "examples/objective-bend-workshop/check-card-return.sh",
+      "owner": "dreggnet_collective_fiction",
+      "sha256": "4a30f0715e4f1aac952686503fec44efd2d4a1ef198453ff8f6e5ad61442365a",
+      "qualification": "AUTHORED setup repair UNRUN; readonly local warm symlinkoverlay no dependency rebuild"
+    },
+    {
+      "path": "Compiler/BendActivityPlanAdapter.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "de8563d187115d8762ed1d40b0ca85bf59a6e240ce2be9ee481f5c3700035188",
+      "qualification": "AUTHORED WIP UNCOMPILED; native closed Activity result ABI and concrete typed response producer"
+    },
+    {
+      "path": "Compiler/BendActivityResponseBinding.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "df972bc0886194a0ba3ead9487ad0c146ece13c63e338e6696de849ebe9f9f6a",
+      "qualification": "AUTHORED WIP UNCOMPILED; native closed Activity result ABI and concrete typed response producer"
+    },
+    {
+      "path": "native/fhe-bend/src/natural.rs",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "12c5a48c608ad90dc3c0975c543488197d3a345c5f8bb127af69e60732d4ed50",
+      "qualification": "WIP source-only uncompiled reusable natural add graph extension"
+    },
+    {
+      "path": "native/fhe-bend/src/lib.rs",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "149014067a9d188a7e345c75616951e853b230d8a524084f7508500379253d2e",
+      "qualification": "WIP source-only uncompiled reusable natural add graph extension"
+    },
+    {
+      "path": "native/fhe-bend/src/owner.rs",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "cd9b55a36f2bb60090c36d29e441cbc06a9a9b73d4d4d8d4b0e05a29afc0d79e",
+      "qualification": "WIP source-only uncompiled reusable natural add graph extension"
+    },
+    {
+      "path": "native/fhe-bend/scripts/build-scoped.sh",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "f074a1f954a1717d8a0d8da94a4c21625549234db8f7ff97a9dcfb13e5931f68",
+      "qualification": "WIP source-only uncompiled reusable natural add graph extension"
+    },
+    {
+      "path": "native/fhe-bend/README.md",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "568c2cdfb3f9664b2bccbefbef0503991caba80113f8200c928204ac48cb6493",
+      "qualification": "WIP source-only uncompiled reusable natural add graph extension"
+    },
+    {
+      "path": "docs/RESIDENT-CONTEXT.md",
+      "owner": "bread_programmable_archaeology",
+      "sha256": "80da77bf2177eb45af03be61ca83cfaf8e9b2082e0f4931cd1756e6599953179",
+      "qualification": "Current focused Rust9/9 PASS; actual native receiving NOT RUN"
+    },
+    {
+      "path": "Compiler/BendActivityOrigin.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "2693c890c9c43e3880a274fdab3e180eb4fb09fa2a7fb3403b49c927020c19c9",
+      "qualification": "AUTHORED WIP UNCOMPILED; origin codec factored below source admission"
+    },
+    {
+      "path": "Compiler/BendActivitySegment.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "c76ea3eabdf267af7327998beeed0de9f26badae85fa50c4d052882903316924",
+      "qualification": "AUTHORED WIP UNCOMPILED; origin codec factored below source admission"
+    },
+    {
+      "path": "native/resource-client/scripts/check-traffic-emission-memory.sh",
+      "owner": "resume_private_construction",
+      "sha256": "5bb27f3bcbd1ba8945f5461f409f3d50585219ff6428e7a5e40265166ff9bedc",
+      "qualification": "AUTHORED/rustfmt PASS; eight focused cohort tests + release pending; actual sustained receiving unqualified"
+    },
+    {
+      "path": "docs/CONSTRUCTION-PROOF-CONTRACTS-20261003.txt",
+      "owner": "graded_execution_architecture",
+      "sha256": "c20ff37b0546658ae6f20c21068224f0c454b9cb7bf70e5f9a480c5f283c716e",
+      "qualification": "Documentation: explicit authored/uncompiled effect joins; qualified restart unchanged"
+    },
+    {
+      "path": "native/spk-host/src/spawn_gate.rs",
+      "owner": "takeover_service",
+      "sha256": "0ccbf4ce3921c3f004d8f9a42634ffe63e56843667c9787f6542efdcad2561b4",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "987fb51ea9e712f1c4cc1acd5d3ec0d2317fdf76008b8bc0d836c40554b24f35",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "native/spk-host/src/resident_launch.rs",
+      "owner": "takeover_service",
+      "sha256": "dfe8a75af6aa24c0d820927d90ff24a6e1758bc880f6ec8cfbba334ec6f61450",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "fb3282a99e0475f52d4d14e450547d92943d92ae93653d453eca1cba6b745910",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "docs/RESOURCE-MONEY-JSON.md",
+      "owner": "native_performance_construction",
+      "sha256": "423d61abe1dc8aae787b63c9e4a539bef6d7f5eff94d1bcb29d66ff389424c7a",
+      "qualification": "WIP UNCOMPILED native authoring/inspection integration"
+    },
+    {
+      "path": "Compiler/BendActivityScalarPlanAdapter.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "f74a12a803909ada2f959b423749708a37f14bb4020716a3f6bf2cdf1460f66d",
+      "qualification": "AUTHORED WIP UNCOMPILED; explicitly selected affine scalar output ABI"
+    },
+    {
+      "path": "Host/BendNaturalEmit.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "34003b97fe16923e2c00bcd85a6716ff9889c8f13b629a77491d34f2bcc923c2",
+      "qualification": "AUTHORED UNCOMPILED WIP; actual parser capture and artifact not run"
+    },
+    {
+      "path": "tests/bend-source-representation/NaturalExpressionSource.bend",
+      "owner": "bend_logic_compilation",
+      "sha256": "6ac769fad3cf62f0fec7cae03f91559b92c65a27e841bc6c744c10f0ba0b0b4e",
+      "qualification": "AUTHORED UNCOMPILED WIP; actual parser capture and artifact not run"
+    },
+    {
+      "path": "scripts/bend-logic/capture-natural-expression.ts",
+      "owner": "bend_logic_compilation",
+      "sha256": "561771383b5a96f683c1e897e5a47fed70f3fb22f8f8b35596c39d3bcf641d1e",
+      "qualification": "AUTHORED UNCOMPILED WIP; actual parser capture and artifact not run"
+    },
+    {
+      "path": "native/spk-host/src/grain_profile_upgrade.rs",
+      "owner": "takeover_service",
+      "sha256": "7498b7d2e4e2a8d459926342cb1f81e78f5e6d27d343c3f54fab0641d7c3d2b9",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "1e715a0624d546f2e7218e4ec8adf580ec16f38b16e28871c70b9db97fe8d2e6",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "scripts/spk-platform/sandbox-launcher-stage.py",
+      "owner": "takeover_service",
+      "sha256": "715192c99e2829c9e69598d59fb18033b881f7a51746a9c2b2b38c524fe89d9c",
+      "qualification": "Python4PASS plus actual scoped sameUID/GID clear-groups NoNewPrivileges allcapabilities-dropped namespace/true PASS; Rust migration authored uncompiled"
+    },
+    {
+      "path": "scripts/spk-platform/tests/test_sandbox_launcher_stage.py",
+      "owner": "takeover_service",
+      "sha256": "65f90ddc45554580dc2c7b7497f512d0424a239956fdc1249e62fb94d8bf9630",
+      "qualification": "Python4PASS plus actual scoped sameUID/GID clear-groups NoNewPrivileges allcapabilities-dropped namespace/true PASS; Rust migration authored uncompiled"
+    },
+    {
+      "path": "docs/OBJECTIVE-BEND.md",
+      "owner": "mini_objective_bend_documentation",
+      "sha256": "fc0b74e3c1e38ae827e2dd74a09b92c68a5dfd0e37356f5c489a74d97159b1b2",
+      "qualification": "User-requested coherent rewrite 1945\u21921498 words; public links/anchors/source snippets checked; current world/controller facts confirmed by owners; no new build or runtime qualification."
+    },
+    {
+      "path": "Compiler/GenericSimplexParticipant.lean",
+      "owner": "astra_consensus_frontier",
+      "sha256": "2f6b4784432632c6a2dccf283ebe9eed691cec52595dc5b482cdcfb5e29e5be8",
+      "qualification": "AUTHORED UNCOMPILED: source consumer; actual codec preservation theorems pending coherent leaf check"
+    },
+    {
+      "path": "Compiler/ObliviousWords.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "6cd9c460bb0e7390792e729527e3e35622dc3d62059263f5a34ca3ccbdc976fa",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousState.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "b69638a32bd29836e23dcc437b8bba9732d50d8b37ac466f89e74e0dd39b029c",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousAdministrative.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "82ad6c1493e4fee0b1ec186ccc4c52ada5c9943468a5fa5e178647d71df0bfbd",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousAccess.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "823ed81e830963065290b8cdffe25040621794569fdf8b5bb06e3ae4bd376ca5",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousProgram.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "deb0f4c1b4c01ffa1ed104e82d67a992f644072453c13f86dc5e49300b041fc4",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousLookup.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "4e9199ba505f7753fc935207e540109094a9ebab3bb4667b6989d09fc4aa267f",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousUnspine.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "3fa76e2af070b41b72aaede33d73153b96184211b1aadd7a24e2ee9f3a39b073",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousMutation.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "0392996ce6c6b336987b8a200cd9cdce5ac40b8595fbbed11064c929d8eb33a0",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousEvaluate.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "64c7588c78090f93c3e05d393e9233b4e157b811e15ef6d776392c171633354e",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousReturn.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "e61cb409a2a6156c966319142603e7a6255f74cf8feaede23a8316785af6266a",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousApply.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "832bfee1e94271525c63e763ac849f0119397fd4e9a46dd4ae7e78571f3a587a",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousWalk.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "eb62cfbd9c4da7be46f4379c73b123b79cc9a460e79730a8d163fc5d055b60be",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousController.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "792ecfd85ca57a21b89dbf9de8ccbfc6fefdfd801bad5b93caff9192d774d119",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Compiler/BendObliviousExecution.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "3413ddbb0a367f726c49c77326fb4be6e5abcfc69a11ca0e68ca070359bf5dbe",
+      "qualification": "authored-uncompiled actual source compiler\u2192network raw-pipeline consumer"
+    },
+    {
+      "path": "Assurance/BendObliviousFixtures.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "6bb29552b434fa492a9d1bbe88756269e70a18b807539627fe20af9de75f889e",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Assurance/BendObliviousControllerChecks.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "fdbcb295c11fd8b920131745cf974ca36d225ad1e90869b84735d258858fe735",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "Assurance/BendObliviousExecutionChecks.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "cf1702e6cce517f07aca649eeaa23372dab9bcb97bb6935ad9a07c589b730057",
+      "qualification": "authored-uncompiled actual source compiler\u2192network raw-pipeline consumer"
+    },
+    {
+      "path": "Host/BendObliviousProbe.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "0bec4fe76b3503e5752be549177ec370c44f8f4ff67f350ab3cc6b619a628ef9",
+      "qualification": "qualified compiler/runtime checkpoint; finite 64case conformance, not general simulation"
+    },
+    {
+      "path": "docs/construction/bend-fixed-controller.md",
+      "owner": "astra_consensus_composition",
+      "sha256": "e6c7153acaa037a6cf42b2210ae205fa2a1ee8f6b28057821318e451d6f0e2e3",
+      "qualification": "documentation of actual qualification and residuals"
+    },
+    {
+      "path": "native/private-backend/src/triple_king.rs",
+      "owner": "private_backend_construction",
+      "sha256": "1425538cbd564ad6ecaadf7e277aedeb3668061d22d3de8afbf4eb9af73f723e",
+      "qualification": "r13 4/4+r14 malicious/fault2/2 prior PASS; new coherent-nonzero Sh2t\u2192dispute plus actual accusation-proof retention UNCOMPILED"
+    },
+    {
+      "path": "native/private-backend/src/source_endpoint.rs",
+      "owner": "private_backend_construction",
+      "sha256": "14198c53b02c6379743e39aed664020be1ad43663b14419e012c1ac9b8051e3e",
+      "qualification": "new native REQUEST/OUTCOME CLAIM codec, full Nat/generation/semantic matching and complete transport frame bounds; UNCOMPILED; no current source authority/WAL/Qualified constructor"
+    },
+    {
+      "path": "native/private-backend/src/lib.rs",
+      "owner": "private_backend_construction",
+      "sha256": "5a62183319d36df852be66c097cae2a2c3f6095a1b690ae1258a2cdef9538ebd",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "400f769e51d1d6ec6db597091fdabd3fe0bc16ba148860a361fd256f1d58b432",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "Compiler/BendActivitySuspension.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "8c97013256277c7ae8c1aabdd8ed5105f4dccdaf26a19b7d37e572702c56a786",
+      "qualification": "AUTHORED WIP UNCOMPILED; exact separately signed application command binding"
+    },
+    {
+      "path": "native/resource-client/src/cohort_tcp.rs",
+      "owner": "resume_private_construction",
+      "sha256": "a918d2dddec65459c8c270aa66b7c8e901eea18faead7de9fad029d4e49e90c2",
+      "qualification": "AUTHORED/rustfmt PASS; narrow actual consumer repair; focused check/release pending"
+    },
+    {
+      "path": "native/resource-client/COHORT-TCP.md",
+      "owner": "resume_private_construction",
+      "sha256": "260e7e202826f93df61892f6786aa07b2cc327289b44fc5e133d172c9fd84d11",
+      "qualification": "AUTHORED/rustfmt PASS; narrow actual consumer repair; focused check/release pending"
+    },
+    {
+      "path": "native/resource-client/scripts/check-traffic-adoption-consumer.sh",
+      "owner": "resume_private_construction",
+      "sha256": "665092d43c57976ab1c666d790b6ebf7ce719ce2acb038cc0247fc7d2a3cd072",
+      "qualification": "AUTHORED/rustfmt PASS; narrow actual consumer repair; focused check/release pending"
+    },
+    {
+      "path": "Kernel/GenericSimplexCausal.lean",
+      "owner": "joint_reserve_birth_authority",
+      "sha256": "2d535c7435a73cc87a9a1ef159c7ade8f0af0f20fe29b9e2a3784472bc78e119",
+      "qualification": "Persvati r13 full primitive+composite+start/step/pump+kernelaxiom PASS; strict quorum cause/global safety native join separate"
+    },
+    {
+      "path": "Assurance/BendObliviousSourceJoin.lean",
+      "owner": "bend_controller_simulation",
+      "sha256": "3d2bfa926117154119251bc1e654797dc00753d105612581e971e1fbad50c3dc",
+      "qualification": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Kernel/GenericSimplexReceiveProvenance.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "322c13481a770b34b0e4734bdd28678a7fb0875ee67044804e7da3a8eeff4307",
+      "qualification": "Kernel compile and all named axiom gates PASS Persvati receive-r2 2026-10-03T11:34:19Z"
+    },
+    {
+      "path": "Kernel/GenericSimplexReceiveStructure.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "36a866f9079e80aa3efcbbab30ef63fc32d51a272814d164be8b4215d0c3dfef",
+      "qualification": "Kernel compile and all named axiom gates PASS Persvati receive-r2 2026-10-03T11:34:19Z"
+    },
+    {
+      "path": "Kernel/GenericSimplexGlobalReceive.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "522a86d007b1cc556dc3b56928bc26f21f0abd14856e8ae2d594535101af1209",
+      "qualification": "Kernel compile and all named axiom gates PASS Persvati receive-r2 2026-10-03T11:34:19Z"
+    },
+    {
+      "path": "Assurance/ResourceMoneyReceiverAudit.lean",
+      "owner": "native_performance_construction",
+      "sha256": "5c0ebe6f0ee4885bd97667aca61950d86dc88abb58808a147826228f242a997b",
+      "qualification": "Wire actual PASS; audit qualifier-name fix after actual feedback pending audit-only check"
+    },
+    {
+      "path": "Compiler/JointBackendPartyCodec.lean",
+      "owner": "joint_receiver_construction",
+      "sha256": "4e18d9602ca64c77d7661301e3f839a1c11dfde216ae9ef7d1327a951a210536",
+      "qualification": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Kernel/JointBackendPartyAdmission.lean",
+      "owner": "joint_receiver_construction",
+      "sha256": "55c234482d9ffd083652ba82812318238272fe1389fa61dacf5704d6d629900e",
+      "qualification": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Kernel/JointBackendPartyReceiver.lean",
+      "owner": "joint_receiver_construction",
+      "sha256": "8c1da6e7e4eed0b6d6d02eaed210add0ad56111054a2696da06a046b15d3f681",
+      "qualification": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Compiler/BendScalarPlanCanonical.lean",
+      "owner": "bend_bread_archaeology",
+      "sha256": "d5fedb224a8d9531e4308e729dc21b27a7406547b8874ddce6c2ff633d18cd73",
+      "qualification": "PASS check-leaves-04.log boundedleaf4 allaxiomgates standard3"
+    },
+    {
+      "path": "Host/BendReturnReleaseAuthoring.lean",
+      "owner": "bend_bread_archaeology",
+      "sha256": "93b0d3d56a45a51417f26fbedebab8ee7d0ca6528baff9abebd6bc5924966268",
+      "qualification": "PASS check-leaves-04.log boundedleaf4 allaxiomgates standard3"
+    },
+    {
+      "path": "Verify/GenericSimplexSourceHarness.lean",
+      "owner": "astra_consensus_frontier",
+      "sha256": "05a116d2c1d3483ea8b825caccd65e264adebe86a20b630a2151c1297f6f0d02",
+      "qualification": "AUTHORED UNCOMPILED source fixture"
+    },
+    {
+      "path": "docs/GENERIC-SIMPLEX-NATIVE.md",
+      "owner": "astra_consensus_frontier",
+      "sha256": "84f9ef03ab38c1b85b15728ea7413cede5dc3c7f7a7d410e07590fc4d077a032",
+      "qualification": "Source-facing integration contract; distinguishes native R3 PASS from unqualified source fixture"
+    },
+    {
+      "path": "examples/objective-bend-world/WorldPlanMoney.bend",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "c1dd51eb4b4566521b978f8360dcd2378ad408717536ddb2ffdd95733e3aca32",
+      "qualification": "authored source-first; parser/core/native checks pending"
+    },
+    {
+      "path": "Compiler/BendNativeInput.lean",
+      "owner": "bend_world_language",
+      "sha256": "82beff8844ac9bb902c46041c9050d81d0afd16fa73c0647033c42ab560d8036",
+      "qualification": "AUTHORED_UNCOMPILED_V2_DELTA"
+    },
+    {
+      "path": "Kernel/BendNativeRun.lean",
+      "owner": "bend_world_language",
+      "sha256": "8f6611d25fe86f12a9af8ade3a35cf1436a8b59597d547dd3e9692bcf1eda818",
+      "qualification": "AUTHORED_UNCOMPILED_V2_DELTA"
+    },
+    {
+      "path": "Kernel/BendPreparedOutput.lean",
+      "owner": "bend_world_language",
+      "sha256": "d0a462fbbf4f65833c1902e68978395fd1e8b4b079efc2d49f83ae254f854d9a",
+      "qualification": "AUTHORED_UNCOMPILED_V2_DELTA"
+    },
+    {
+      "path": "Kernel/BendInvocationInput.lean",
+      "owner": "bend_world_language",
+      "sha256": "4dcd237329f33efa4f6fb1449b691c22c87bd48c29c51e95baf1bca264ef0cef",
+      "qualification": "ACTUAL_PASS_INPUT1"
+    },
+    {
+      "path": "check-native-core.sh",
+      "owner": "bend_world_language",
+      "sha256": "e02199bc41e3f683a18ae93752b874dbdd6de407b75b653a4ff5acec7af7a3f3",
+      "qualification": "AUTHORED_UNCOMPILED_V2_DELTA"
+    },
+    {
+      "path": "check-invocation-input.sh",
+      "owner": "bend_world_language",
+      "sha256": "ca26f9aa4ec937acc52a98ce36a983c8a1be1345bb7a7bbbbba56a6238fe57b5",
+      "qualification": "AUTHORED_UNCOMPILED_V2_DELTA"
+    },
+    {
+      "path": "Kernel/BendKeyRegistration.lean",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "591bd0de10b141bccbe4cae5c7cc78ddabe9995bf7599bc0a37d673328167b58",
+      "qualification": "WIP source-only uncompiled actual native key/session/current release + strict full file-command ingress"
+    },
+    {
+      "path": "Host/BendSessionDriverJson.lean",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "5dc4ab506c06a564460b0951af11837eccae8bcec302c9b89b0ff89b88cabae0",
+      "qualification": "WIP source-only uncompiled actual native key/session/current release + strict full file-command ingress"
+    },
+    {
+      "path": "native/resource-client/src/bend_session.rs",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "546e4d1568d03398a0bb923332fcf9561d7baa0dcca21ed986e2f55548b0bd05",
+      "qualification": "WIP source-only uncompiled actual native key/session/current release + strict full file-command ingress"
+    },
+    {
+      "path": "Theory/BendMaskingDimension.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "ca49f1b70b186f319ea44dde97d861e23eab8310b697b9206615841a9b32c2fd",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "Compiler/ObliviousBuilderSemantics.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "5e9fb4d0a0b420a6d810ccd469c366cf9f9827189d8be4272712476fc59e0277",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "Compiler/BendTraceEvaluation.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "a055e71f47f032a3f0c69407410e885e6c99fe243b82de58d1a186574e3f7cca",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
       "path": "Theory/BendMaskingInterpolation.lean",
       "owner": "bend_semantics_audit",
-      "sha256": "1d9d412ce1b690ccea5a3c7482d2c735175dbcae72489e605e9379b12ca898a2",
-      "qualification": "AUTHORED UNCOMPILED interpolation; native v3 job09 actual PASS documented separately"
+      "sha256": "66fcdc99c939ca7f864999c1ddf6edc7f5a8ea83595fa282803df008c9c2ed59",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "native/bend-ir2-proof/src/full_degree_challenger.rs",
+      "owner": "bend_semantics_audit",
+      "sha256": "a709aff4289d132606398ae295cc77ca04173e5d14e107f91b16ab87056162d9",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "native/bend-ir2-proof/src/config.rs",
+      "owner": "bend_semantics_audit",
+      "sha256": "0c30c12f64264cb021d95ec897a61305e09a229b8f60a6fbfaf6bf4942a57c72",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "native/bend-ir2-proof/README.md",
+      "owner": "bend_semantics_audit",
+      "sha256": "5eca5242b1e3213adf7a66610af76e51a80fa762f7a9fec547bd238f015c15e1",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
     },
     {
       "path": "docs/BEND-GENERAL-ZKVM-PATH-20261003.txt",
       "owner": "bend_semantics_audit",
-      "sha256": "2b30a27049969ae2a2facfab1805a23ad29327744ab68aa5546f348822013afc",
-      "qualification": "AUTHORED UNCOMPILED interpolation; native v3 job09 actual PASS documented separately"
+      "sha256": "f9b413b2bb2ee59b6f75f6693e912d429950e1333acad88ac9ecb5bad4b3ae1b",
+      "qualification": "ACTUAL PASS named generic axiom gates / native v4 narrow check and selected real proofs; docs distinguish open joins"
+    },
+    {
+      "path": "Kernel/GenericSimplexGlobalCausal.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "533dddaa1156eb400d848a6888bf228125528b295951a5aff0d0d21523cacf23",
+      "qualification": "Kernel compile and named axiom gates PASS Persvati global-causal-r2 2026-10-03T11:41:49Z"
+    },
+    {
+      "path": "Compiler/ContentControlFrame.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "45bfba21e31da8f18f3c9416eff4540b88f09e1318421f3036c651d0a93e7e25",
+      "qualification": "SOURCE REPAIR UNCHECKED: explicit Kernel.DurableDataIntent import only"
+    },
+    {
+      "path": "Compiler/ObjectiveBendInstance.lean",
+      "owner": "member_oo_construction",
+      "sha256": "f45e507c486781b5c30bb15b86485af68d2a47d579f8ead12564362e9c4c86f7",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Compiler/ObjectiveBendReference.lean",
+      "owner": "member_oo_construction",
+      "sha256": "c153e03b6a4a65129df828271a4ffda2eed0e60469b638a6983fd35d6efff601",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Compiler/ObjectiveBendReferenceInstance.lean",
+      "owner": "member_oo_construction",
+      "sha256": "573291be9a770c63a873956ce86a182f22fbd467e7863f40f3c9fbd2a97fe482",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Kernel/ObjectiveBendInstanceLoader.lean",
+      "owner": "member_oo_construction",
+      "sha256": "4a503f84a8cc849668d8ec686dfba9314d15361e4bfbc9c733954737d04f762b",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Kernel/ObjectiveBendReferenceSource.lean",
+      "owner": "member_oo_construction",
+      "sha256": "f12d48abc7b109a664b0c23f5a7e68f4e3271deebd7409f9463ce28aaa1fd01a",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Kernel/ObjectiveBendReferenceLoader.lean",
+      "owner": "member_oo_construction",
+      "sha256": "69c972e1b3af09246d6da68c0930189de3f01165924f4f6ad2e2ed385215dcdf",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Kernel/ObjectiveBendCallContext.lean",
+      "owner": "member_oo_construction",
+      "sha256": "990a2feeed955f655e6d3b220f8d368c8be6897f349ef437148b3578e656d5fa",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Host/ObjectiveBendPublicationAuthor.lean",
+      "owner": "member_oo_construction",
+      "sha256": "613fff29f28bce923c68c0a7876e6e17368779ebedf737b9cd94801caef2ce3a",
+      "qualification": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+    },
+    {
+      "path": "Kernel/BendActivityPendingAdmission.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "4878a1b9613e70ee7b73d1e68b7a014b0b4caeaaf93e6f188fa3b2f3b8655193",
+      "qualification": "AUTHORED UNCOMPILED: event64 actual current native pending admission+durable receiver; no app dispatch yet"
+    },
+    {
+      "path": "docs/BEND-PERSISTENT-COMPUTATION-20261003.txt",
+      "owner": "graded_execution_architecture",
+      "sha256": "3eaaa8636103cd0bbea05e11899f6913c0d3bfa3c3e4e10369c6eeff5b49f19f",
+      "qualification": "AUTHORED UNCOMPILED: event64 actual current native pending admission+durable receiver; no app dispatch yet"
+    },
+    {
+      "path": "Kernel/GenericSimplexPreparedHistory.lean",
+      "owner": "joint_reserve_birth_authority",
+      "sha256": "bf8b4f3bba1384d8aa67511e59746ad77ceca101f9ea392a16ebb69ddce11a1f",
+      "qualification": "Persvati exactwarm leaf3 historyr4 full actual start/step/isSafe extraction PASS + kernel assertions; global trace mapping consumer separate"
+    },
+    {
+      "path": "world/Workshop/WorldSurface.bend",
+      "owner": "docuverse_deos_construction",
+      "sha256": "5b720041d653793ef6a0cb162067417f200570b16bebcba55ab49be07e147855",
+      "qualification": "WIP source ABI v2 repair; no new emission/Lean qualification/native receiving yet"
+    },
+    {
+      "path": "README.md",
+      "owner": "mini_objective_bend_documentation",
+      "sha256": "a2f2328ab753e8004447c695d17d9e2cb261eb9e7f371b004fd2fec12f5e2c37",
+      "qualification": "User-requested full README rewrite; links/anchors and source command forms checked; build help executed; no new build/runtime claims."
+    },
+    {
+      "path": "Compiler/BendProofKeccak.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "c0af4ab93c3354bb4cfca01b43f2a2747f6c7986822fd280f83195a8c356ea47",
+      "qualification": "ACTUAL PASS generator;3 explicit #assert_compiled conformance facts11:45:02, not general refinement"
+    },
+    {
+      "path": "Compiler/BendProofKeccakChecks.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "b78df4215eff026a432a9823368b9bc492e7c37a9023f04b595e5e47f5773d45",
+      "qualification": "ACTUAL PASS generator;3 explicit #assert_compiled conformance facts11:45:02, not general refinement"
+    },
+    {
+      "path": "Compiler/BendClosureCompileIndexed.lean",
+      "owner": "bend_representation_efficiency",
+      "sha256": "b3cac4b743cd33e55bcbe5343a015c662c60264f8694b20de5d390e291c5cafd",
+      "qualification": "Scoped Lean standard-three axiom gates and actual --run execution/translation checks PASS; native Host and full optimized controller receiving remain separate"
+    },
+    {
+      "path": "Theory/BendBookIndex.lean",
+      "owner": "bend_representation_efficiency",
+      "sha256": "602e0c8420a55bbf419ef3ff010d2c2924a07d9a935d94c7e5d6d8b7c75fc6b8",
+      "qualification": "Scoped Lean standard-three axiom gates and actual --run execution/translation checks PASS; native Host and full optimized controller receiving remain separate"
+    },
+    {
+      "path": "docs/BEND-REPRESENTATION-EFFICIENCY.md",
+      "owner": "bend_representation_efficiency",
+      "sha256": "f9f2b959c3ed1899404210cc86cf59a828fc2d41673a146e6e83d27036285cf7",
+      "qualification": "Scoped Lean standard-three axiom gates and actual --run execution/translation checks PASS; native Host and full optimized controller receiving remain separate"
+    },
+    {
+      "path": "tests/bend-representation-efficiency/BendBookIndexBenchmark.lean",
+      "owner": "bend_representation_efficiency",
+      "sha256": "ebbf1b7bca137d762ee8de3c5ecb810cb05b80b8eedb5305bc2b3683376d1e1b",
+      "qualification": "Scoped Lean standard-three axiom gates and actual --run execution/translation checks PASS; native Host and full optimized controller receiving remain separate"
+    },
+    {
+      "path": "tests/bend-representation-efficiency/BendClosureCompileIndexedBenchmark.lean",
+      "owner": "bend_representation_efficiency",
+      "sha256": "d5998ede94d4a74873c2354dc1c3f7afff71186bae9ddb562bc15210fecf9925",
+      "qualification": "Scoped Lean standard-three axiom gates and actual --run execution/translation checks PASS; native Host and full optimized controller receiving remain separate"
+    },
+    {
+      "path": "native/private-backend/CONSTRUCTION.txt",
+      "owner": "private_backend_construction",
+      "sha256": "0bac14ce3670324dfee6484720f4f17655e1773eeca187479f94ce58d305f1e4",
+      "qualification": "reusable current construction/evidence/precise missing producer record; r13 4/4 r14 2/2 r15 4/4 actual scoped PASS; shared-clear mailbox and clear PROGRESS expose share bodies, v2 repair open"
+    },
+    {
+      "path": "Host/BendSessionDriver.lean",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "ac064a679ada1123a00080a4e54a31aeef63b4a6257444040d6ed91105e294b3",
+      "qualification": "WIP uncompiled source-only receipt/current-read session continuation; persistence and compiler binding joins pending"
+    },
+    {
+      "path": "Host/BendSessionCursor.lean",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "8d049bd8448cd31ace11a286850020bdedd74fbc26a3e27b25dd01dd861da878",
+      "qualification": "WIP uncompiled source-only receipt/current-read session continuation; persistence and compiler binding joins pending"
+    },
+    {
+      "path": "native/fhe-bend/BEND-SESSION-INTEGRATION.md",
+      "owner": "homomorphic_bend_construction",
+      "sha256": "1443f17bb1fbcd732afc0f51192fa2cfd3c78efc98426f6a67ffb392f2f77fd3",
+      "qualification": "WIP uncompiled source-only receipt/current-read session continuation; persistence and compiler binding joins pending"
+    },
+    {
+      "path": "Compiler/BendScalarPlanBytesAdapter.lean",
+      "owner": "bend_bread_archaeology",
+      "sha256": "e41f1c77c5e0f57662159d6525af49e56106e2c8e8823cb00330bb58526d2fab",
+      "qualification": "PASS check-bytes-02.log allstandard3axiomgates"
+    },
+    {
+      "path": "examples/objective-bend-world/WorldPlanScalarBytes.bend",
+      "owner": "bend_bread_archaeology",
+      "sha256": "cebefc4e4ee5f081a3a1198a3dfdc260f969c6720cae8871a0e04e5e2d3c8036",
+      "qualification": "PASS sealedsource+safeemission actualBook money-driver10d/sealed-bend-nGOUuy"
+    },
+    {
+      "path": "Compiler/ObliviousMuxSemantics.lean",
+      "owner": "bend_semantics_audit",
+      "sha256": "e8fae2ad342db4d5411517ef233b5072d49fa00dd66013eed10fce12277cd0fa",
+      "qualification": "AUTHORED UNCOMPILED5 generic mux run/value/preservation laws"
+    },
+    {
+      "path": "Compiler/BendWorldSurface.lean",
+      "owner": "docuverse_deos_construction",
+      "sha256": "b3ba7212f136227366ccc2b3952b6df736169a30255ad39f599b8afd52e2035d",
+      "qualification": "scoped Lean PASS check-r2; generic projection laws only, no native route"
+    },
+    {
+      "path": "Compiler/BendSurfaceLowering.lean",
+      "owner": "docuverse_deos_construction",
+      "sha256": "5488c90dc90cb76e0c82baba71dcd8c11c69b280479395428aed0d1b25c9bbe5",
+      "qualification": "scoped Lean PASS check-r2 independentleaf2; no native route"
+    },
+    {
+      "path": "Host/BendSurfaceJson.lean",
+      "owner": "docuverse_deos_construction",
+      "sha256": "ea1140ab32584fb5323ec6ceccadb14fcb1be7a49a1cd4209fbf81dc06f493c6",
+      "qualification": "scoped Lean PASS check-r2 independentleaf2; no native route"
+    },
+    {
+      "path": "Host/BendSurfaceSmoke.lean",
+      "owner": "docuverse_deos_construction",
+      "sha256": "ab21b7ef7f75604c09a04b2dfbd29067ae0b9e267739ae619ed273a7f93dc861",
+      "qualification": "WIP actual helperBook source smoke/axiom gates pending"
+    },
+    {
+      "path": "Compiler/PortableContinuationArchiveIO.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "d00d805d1fb2f84a774c785010bbf8c05e50f59b645a465c3516b3b0f7c11efd",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Compiler/PortableContinuationManifestCodec.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "2af6300e9a430644f2f0148aab7d97b43cb31cbb0892af129f17dca6ad40f343",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Compiler/PortableHomeSourceCutIO.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "82313e89b77b2537c3fe8c55bef5c85f0343b0a364dfc07ed5b1af9fca8e174f",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Compiler/PortableHomeTransferCodec.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "3dc5e42b3d0efb1889f99afc11340f962a6d67abeec2109b52edc424aaa626ad",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Compiler/PortableHomeTransferFrame.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "c850bfa8aca62468a94a25caf1388ee7ef47d5573115bc1cb948efd5a69ed1f5",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Compiler/PortableJointCustodyIO.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "4b54c1f448bf4861f002960fa94b105c2193817a7b0da914b067dbd621589697",
+      "qualification": "WIP UNCOMPILED current revision"
+    },
+    {
+      "path": "Compiler/PortableParticipantPinIO.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "5a779bfd8968e3a096004fc80e64802e15ad88fa416462ba039af3efa2efe0ed",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Host/PortableContinuationInspection.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "78814135fe8f1ef96213954071a3e2d96eb452c832fca8a7d31e3ba4eac045b3",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Host/PortableContinuationProbe.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "b92c45e7e03bd748048bd3ac7db96848ca98e3e7726172e413e40f3a4f802f4c",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Kernel/PortableContinuationManifest.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "5d9b53805535ad7d8be12d45350a55e1eff80010da779ed659117fd73664c1bc",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Kernel/PortableHomeTransfer.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "67720013d4ad2b2e3f70f1e25a351d54d691b896be841cc29120fe8e93b995dd",
+      "qualification": "PASS scoped Lean; applicable named axiom gates"
+    },
+    {
+      "path": "Kernel/PortableHomeTransferAdmission.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "6abcf512506adc5dae4d9d730deefb38362b598eedc0cd4540658409e5a5fda8",
+      "qualification": "WIP UNCOMPILED current revision"
+    },
+    {
+      "path": "Kernel/PortableHomeTransferReceiver.lean",
+      "owner": "bread_systems_archaeology",
+      "sha256": "fa7bc6710ad170883d7a7e19b523f9e69e64271357a458537fdb855ca5fd3366",
+      "qualification": "WIP UNCOMPILED current revision"
+    },
+    {
+      "path": "docs/PORTABLE-CONTINUATION.md",
+      "owner": "bread_systems_archaeology",
+      "sha256": "2b7d1cbd82a0a5fd65943e452026fe9d42a085994a578779876aa3cf9ad9bc4c",
+      "qualification": "WIP UNCOMPILED current revision"
+    },
+    {
+      "path": "scripts/lean-scoped-dag.py",
+      "owner": "astra_multimodel_room",
+      "sha256": "a1c20030678256cad496f1244d10766b08edf7774ab7a69c209beb4fb63d22fa",
+      "qualification": "Six infrastructure regressions PASS; actual guarded receiver r3 running; compilation cohort not yet complete"
+    },
+    {
+      "path": "scripts/test_lean_scoped_dag.py",
+      "owner": "astra_multimodel_room",
+      "sha256": "88e1ebe5f71d5a3008aaed8b6e34a1fc196621071a6a810d87b80829832a834f",
+      "qualification": "Six infrastructure regressions PASS; actual guarded receiver r3 running; compilation cohort not yet complete"
+    },
+    {
+      "path": "docs/LEAN-SCOPED-DAG.txt",
+      "owner": "astra_multimodel_room",
+      "sha256": "80e2d40b177bd5cf455e14e007cea38867fe7961f296eb6b256bcdbe9f428756",
+      "qualification": "Six infrastructure regressions PASS; actual guarded receiver r3 running; compilation cohort not yet complete"
+    },
+    {
+      "path": "Kernel/ResourceMoneySampleTable.lean",
+      "owner": "native_performance_construction",
+      "sha256": "36b979c97b26b9f44f53788a0c28032a873321897fb6d6d7a403a2b900b4fe8d",
+      "qualification": "PASS exact new-only4Gi2threads Persvati11:48:55Z, six general axiom gates; native consumer still open"
+    },
+    {
+      "path": "Theory/BendClosureSupportedRun.lean",
+      "owner": "bend_controller_simulation",
+      "sha256": "1c15d721ec4bc0b4fcd4198c226dc3a4f8db16e217c7a6a7828f9a051efae647",
+      "qualification": "AUTHORED_UNCOMPILED_REPAIR"
+    },
+    {
+      "path": "Compiler/BendNaturalRefinement.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "843f79480de5f7aefab5d18312e53dce98c753fc68d5194ffb0f191252147c8f",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "Compiler/BendNaturalWorldSource.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "69a138e318d235d4ef19377d0f85843b81a6e142a4d0b652a1a93e6c151b3b93",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "Compiler/BendNaturalCircuit.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "3efa609b34131d0793e6aa16976eb7fe1fd94fdb7e2d90a6020fffd5f0283cef",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "Compiler/BendNaturalMethod.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "205a0a377265081116a46887e66bc0160f2074705ed6b8f9a2de3afcf40ff658",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "Compiler/BendNaturalCompiler.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "b08a08f60c60033adcf4c9bc9dd7b77fabd1eabd3c39a042f59b38cba2fad5b4",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "Compiler/BendNaturalSource.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "30d2b71e2b45c5e18c171bce5edbc2b8a77a52b9d1f77e408058f73693d0dc42",
+      "qualification": "AUTHORED UNCOMPILED WIP; first Expr syntax/unfolding repairs. Fixture actual pinned safe_emit captured, Mini Book.check pending"
+    },
+    {
+      "path": "scripts/check-bend-natural-expression.sh",
+      "owner": "bend_logic_compilation",
+      "sha256": "93de88560c0f8480eaff4f35819001d4718356ea165bb1a4e5d3efed641c0bf8",
+      "qualification": "actual parser capture or owned scoped recipe"
+    },
+    {
+      "path": "scripts/capture-bend-natural-expression.ts",
+      "owner": "bend_logic_compilation",
+      "sha256": "baf2e025052cbd3352c6ae9a74c46a07dc7300083ec21bc20d1b45a2dde3f82e",
+      "qualification": "actual parser capture or owned scoped recipe"
+    },
+    {
+      "path": "tests/bend-source-representation/NaturalExpressionSource.bendtt",
+      "owner": "bend_logic_compilation",
+      "sha256": "8dc29dffaffc939d748d230e044d99d331bb8dfee355e861824d32b70e05d033",
+      "qualification": "actual parser capture or owned scoped recipe"
+    },
+    {
+      "path": "native/resource-client/src/workspace/studio.rs",
+      "owner": "docuverse_deos_construction",
+      "sha256": "cbbe7c9192cf590c30afed7e8663b5ff720c4870fd569e84fdc08ee2e19eac58",
+      "qualification": "WIP; Rust formatting/parser PASS only, no typecheck/native receiving"
+    },
+    {
+      "path": "native/resource-client/src/web/studio.rs",
+      "owner": "docuverse_deos_construction",
+      "sha256": "a82825d3628b96aceda569a7de3ee9bb695ebcdc860f6ae24cac2dd6dd3426d0",
+      "qualification": "WIP; Rust formatting/parser PASS only, no typecheck/native receiving"
+    },
+    {
+      "path": "docs/STUDIO-SOURCE-WORKSPACE.md",
+      "owner": "docuverse_deos_construction",
+      "sha256": "3571f504b8f82148c3825aaa73e654198c215b5a9db56205aa689f96de89559f",
+      "qualification": "WIP; Rust formatting/parser PASS only, no typecheck/native receiving"
+    },
+    {
+      "path": "Kernel/ResourceBirthPolicyController.lean",
+      "owner": "joint_reserve_birth_authority",
+      "sha256": "81c19713a4ccd77abd1c77fecec49152c239237ff49fef55311a322214f24216",
+      "qualification": "Actual DAG residual errors source repair; next checkpoint qualification"
+    },
+    {
+      "path": "native/spk-host/src/grain_export.rs",
+      "owner": "runtime_lieutenant",
+      "sha256": "4be90a48e3dd601e740d81877dd315d24de578c4396196b1ecd85554f721f3ed",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "afe77d67a72b38a87f39ca5d3c2d56cf678dd84f54bfc4ceedd9e54d2f7cf88b",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "native/spk-host/src/hostd.rs",
+      "owner": "runtime_lieutenant",
+      "sha256": "d26686bd12bbd6801d45a339948b752b5ef0ccda4dbc67c07af4eb7b5028db8a",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "eab5d114c60997489fb247de2fc6a42f0590be5bb5067cc67fdf4689dcefc3e1",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "native/spk-host/src/grain.rs",
+      "owner": "runtime_lieutenant",
+      "sha256": "73140029cfc30399959b44066b349003a1e293190dc15ee1b16bf4265cb30474",
+      "qualification": "Current shared source preserved; latest candidate requires hunk integration.",
+      "candidateSha256": "7781bb4d66d35e3248c759c7b60c5f4de1899282c5d6cc0c917bd52715ddc9e6",
+      "publicationStatus": "Candidate awaits reviewed merge"
+    },
+    {
+      "path": "Kernel/GenericSimplexReceiveScope.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "4331bb920644c156c7a6beb71534f9fa9aa6cde1e478f6ea99820f523e51ea3d",
+      "qualification": "Kernel compile+all named axiom gates PASS Persvati scope-r3/r4 2026-10-03T11:51:21Z"
+    },
+    {
+      "path": "Kernel/GenericSimplexScopeStructure.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "be3723817923e730cf652288f92ecb46b4445a50b6ed1ecdaf18457adb5b04fc",
+      "qualification": "Kernel compile+all named axiom gates PASS Persvati scope-r3/r4 2026-10-03T11:51:21Z"
+    },
+    {
+      "path": "Kernel/GenericSimplexGlobalSupport.lean",
+      "owner": "astra_adversarial_architecture",
+      "sha256": "af6eb31ba6c3005c2c53cb0dcdc4400faa2668865e555136a8426a015a000f7e",
+      "qualification": "Kernel compile+all named axiom gates PASS Persvati scope-r3/r4 2026-10-03T11:51:21Z"
+    },
+    {
+      "path": "Compiler/BendMoneyPlanAdapter.lean",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "7b40a5a4931862e455a7b1ec6be5539bcbc3c403cc73b4c35491335b2cc0e217",
+      "qualification": "authored Lean correspondence; compilation pending"
+    },
+    {
+      "path": "world/Workshop/CanonicalSettlementPlan.bend",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "f03aa3ee1db0433a36337333af190477072a200b50ff4b2fcc560be06430996d",
+      "qualification": "sealed source + safe BendTT emission PASS money-driver11b; actual Book/native receiving pending"
+    },
+    {
+      "path": "world/Workshop/CanonicalSettlementPlanDemonstration.bend",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "ed0d24e5d9d5703a6eb2e2be82888325295bf856f30ab5d29d5f9e22876f4719",
+      "qualification": "sealed source + safe BendTT emission PASS money-driver11b; actual Book/native receiving pending"
+    },
+    {
+      "path": "scripts/check-collective-money-source.ts",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "3fa8cdf525530962e8f4a8d14797cddfd12864bb95b832966deedf52194d8dde",
+      "qualification": "sealed source + safe BendTT emission PASS money-driver11b; actual Book/native receiving pending"
+    },
+    {
+      "path": "docs/BEND-CANONICAL-SETTLEMENT-PLAN.md",
+      "owner": "bigdregg_product_architecture",
+      "sha256": "eee28c21048d5d99cc1249d8bbc0bf096c3d335a459ce4c3b702fb657e8365d8",
+      "qualification": "sealed source + safe BendTT emission PASS money-driver11b; actual Book/native receiving pending"
+    },
+    {
+      "path": "Compiler/BendNaturalExpression.lean",
+      "owner": "bend_logic_compilation",
+      "sha256": "77b28987d68b2cf6c0e2a9d7abb3ce357d8e77405c6a4e1324ff6e71ddba20fd",
+      "qualification": "AUTHORED UNCOMPILED WIP explicit F flatten shape repair, bounded first4 pending"
+    },
+    {
+      "path": "Kernel/GenericSimplexEmissionSupport.lean",
+      "owner": "joint_reserve_birth_authority",
+      "sha256": "8a2b4dc319cc826b4d4d7333e20f6afd8ca7723b76988f139e87936e5b8800d7",
+      "qualification": "Authored finite evidence extraction actualcount+Backed+Scoped; indexed emission predicates; full continuation construction pending"
+    },
+    {
+      "path": "Kernel/BendActivity.lean",
+      "owner": "graded_execution_architecture",
+      "sha256": "c2539b30b1cdadd29ce0b5df574361078ca5e28f8b78e762611241a384caf497",
+      "qualification": "AUTHORED WIP UNCOMPILED/UNRUN",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
+    },
+    {
+      "path": "Theory/BendLiveMachine.lean",
+      "owner": "astra_consensus_composition",
+      "sha256": "f7b994796365f09eb24b860997369aa33f6e578140ed051127b5c1ac35600c88",
+      "qualification": "previous PASS or exact vendor provenance; existing integration may already contain identical source",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
+    },
+    {
+      "path": "Kernel/NativeHostReplay.lean",
+      "owner": "joint_receiver_construction",
+      "sha256": "9c85703b9932ee9e04f0028b6c4c491fa8fdc8a68862a97803d055d0abf4acca",
+      "qualification": "AUTHORED_UNCOMPILED_WIP",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
+    },
+    {
+      "path": "Compiler/BendWorldPlan.lean",
+      "owner": "bend_world_language",
+      "sha256": "adaf28905cc53c331737cfb37d78c00296a26b6e44104a893934e77fd7e3a3f5",
+      "qualification": "SCOPED_LEAN_PASS producer02/04",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
+    },
+    {
+      "path": "Compiler/DurableReceiverIO.lean",
+      "owner": "joint_receiver_construction",
+      "sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4",
+      "qualification": "SOURCE_REPAIR_RECHECK_RUNNING",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Host/Main.lean",
       "owner": "captain reconciled authored shared hunks",
-      "sha256": "6374dd8fd98ce9b2205834bcbfd4d299c1e9443f42761a0843c2fa81ac6b3afa",
-      "qualification": "WIP source integration; native cohort qualification pending"
+      "sha256": "4363f6f0cc57bdc94e1902873956333b0ecb40deab4fd85a05b5ada649a6239f",
+      "qualification": "WIP source integration; native cohort qualification pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Kernel/NativeHostContext.lean",
       "owner": "captain reconciled authored shared hunks",
       "sha256": "57a6e80b59f99f967229f98cdaf5949863f013a72153e2a7f17dc3ba9263d599",
-      "qualification": "WIP source integration; native cohort qualification pending"
+      "qualification": "WIP source integration; native cohort qualification pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/grain-runtime/src/resource_tools.rs",
       "owner": "captain reconciled authored shared hunks",
       "sha256": "0fd15762ebe6d2a3ae379f05da07ea02a7631ebcc94c90ce6481cf9a91ec5000",
-      "qualification": "WIP source integration; native cohort qualification pending"
+      "qualification": "WIP source integration; native cohort qualification pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/resource-client/src/workspace.rs",
       "owner": "captain reconciled authored shared hunks",
       "sha256": "f418fcf09f055df3e4bd63669f46225928adea158ac4f82decfdd5016b61521d",
-      "qualification": "WIP source integration; native cohort qualification pending"
+      "qualification": "WIP source integration; native cohort qualification pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/resource-client/src/proxy.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "67c373fe59f22bcb4ce1189f0dde9f09dfc4d16ac0e84b149ae0d35bbaef6b05",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/resource-client/src/web.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "5da1b06d0d7f520eff8112b57c64f9a3f60c2bf4b00f0c0c8f6733ce36d1e6ef",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/resource-client/src/web_admission.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "f5ac24514d674ca9aecae99da46eed54ffd9830b20a496f4bf57b3b50961384c",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "native/resource-client/src/main.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "968b358de82ecc276358b7b229f0d1d372e9cddd560f54c011525502fe4f30ac",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "docs/NATIVE-MULTIUSER-CAPACITY.md",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "81b1e6e0f32ca3c56908c879938703c254a729d35ea4c281dded414d3b43ae8a",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
-    },
-    {
-      "path": "native/resource-client/src/pq_mailbox.rs",
-      "owner": "multiuser capacity / traffic reviewed shared hunks",
-      "sha256": "5014081e5d4106e35d102168b2db1269d3027b293b674a991f28043518d429bc",
-      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Kernel/ResourceTransaction.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "5a69f8ad16179770cabf1c34ce312f6773ed79cee40e3dfedca1c3708f8d087d",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Kernel/DeclaredResourceController.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "4e27b66f019cae628b5501acb8c499ff5fa205cc6f80b6338d4c9515e6fd620d",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
-    },
-    {
-      "path": "Kernel/ResourceMoneyWire.lean",
-      "owner": "world and money shared native cohort reviewed by integration captain",
-      "sha256": "f3ae691b6323e8ab6169613ea3b7f678f33a3b922901980166da74b9bfd5c4f1",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
-    },
-    {
-      "path": "Kernel/ResourceMoneyReceiver.lean",
-      "owner": "world and money shared native cohort reviewed by integration captain",
-      "sha256": "804bacb617e3b2cec0f501b7051848ede303b5d1c4e7f6dc37d4e6c09d8053e2",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
-    },
-    {
-      "path": "Assurance/ResourceMoneyReceiverAudit.lean",
-      "owner": "world and money shared native cohort reviewed by integration captain",
-      "sha256": "eb9c41fcc81972ac55e94e6206bfe7fb9c5a97ee4d14d0b9813ebc22de7fed80",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
-    },
-    {
-      "path": "docs/RESOURCE-MONEY-OPERATIONS.md",
-      "owner": "world and money shared native cohort reviewed by integration captain",
-      "sha256": "d1f1794c04be2c9c0d4be071019f58b9c7f147afdb3bd543fd62230f7b70df1f",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Host/Json.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "5bfb6c005c335e75cf5bc641e0394f588695e05b70c0e80206cad316e31ecbbe",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Host/FnInboxView.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "97218f84074322fe39b8cacb2f56781d46388f3a13edebfed8141fb82a415999",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Host/InspectRender.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "8a6dc1c66f7bdbe91bf13001e87f77cb71ffd9e151f84dd0096c4b378990a3ea",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Host/GrainOriginSource.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "9819ae9295d2ed80ad21ffcb5ef7ec003476a04facf58e0c8ef5ed2fa550f931",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     },
     {
       "path": "Kernel/NativeObservationController.lean",
       "owner": "world and money shared native cohort reviewed by integration captain",
       "sha256": "94dedd18f93493fc3a9b58e612487facc13dd986935526c26d532ad41e7c237f",
-      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
+      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
     }
   ]
 }

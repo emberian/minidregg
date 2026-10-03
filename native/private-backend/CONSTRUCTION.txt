@@ -1,93 +1,115 @@
-Private backend construction (source packet, 2026-10-03)
+Private backend construction — 2026-10-03
 
-This additive standalone Rust crate implements crash-durable physical correlation
-allocation, repaired V2 asynchronous key sharing, coin-free IndexGather/ICG/VABA/ACS,
-strict transport codecs, and recipient-private delivery. It is a precursor to
-malicious private computation. No implementation here makes Qualified=True.
+This additive standalone crate contains actual reference asynchronous protocols,
+physical one-use material custody, and deterministic crash WALs. It does not
+construct Native Qualified, privateRecovery or terminal source YES by declaration.
 
-The latest delivery tranche passed eight focused release nextest tests; previous
-tranches passed ten ACS and fourteen repaired key-sharing/gather checks. Physical
-subprocess crash cuts previously checked anchor-before-release, local snapshot
-rollback, restart, one-use rows and substituted-row refusal. Reference GF128
-arithmetic is variable-time. Security profile is static cumulative f<n/3, private
-authenticated reliable channels, honest crash storage and SHA256 classical ROM.
-It does not inherit a PQ/QROM or full malicious AMPC theorem.
+Executed composition now includes:
+- Actual recipient PrivSend using two independent GF128 key sharings and gated
+  requests; eight focused delivery/receipt checks passed.
+- Repaired immutable accepted-share ASKS; coin-free IndexGather/ICG, IndexVABA
+  and ACS. Earlier fourteen sharing/gather and ten ACS checks passed.
+- Actual dZK private polynomial proofs feeding bivariate ACSS-Id. A malicious
+  ciphertext row yields rejection and opened dealer proof; honest retained
+  holders recover exact secrets after the dealer disappears. Composite ACSS WAL
+  records full input/seed/recursive outbox. New n7/f2 compressed proof test
+  recovers [42,91,17] with two locally rejected honest holders and two faults.
+- Actual Sh2t-Id from the coupled constructor: salted commitment matrix, private
+  verified degree-2f reconstruction, accusation and WAL. Nine checks passed.
+- TripleKing consumes these actual states, extracts random sharings, checks
+  multiplication through robust degree-f reconstruction and two real reliable
+  agreements. Actual shares reconstruct coherent a,b,c with c=a*b.
+  Six focused King checks passed in distinct narrow tranches: true product,
+  delayed local challenge broadcast despite early agreement, full preparation
+  burn/retry refusal, consistently changed malicious-king output refusal,
+  a bad initial point localized through actual private Sh2t zero reconstruction,
+  and a coherently shared nonzero “zero” dealer localized by an honest king.
+  A dispute pair is the king's authenticated claim that at least one member is
+  faulty, not evidence both are corrupt. Accusation guilt requires the actual
+  verified opening retained in VerifiedLocalization.
+- Native REQUEST/OUTCOME Rust claim codec: three new checks preserve full
+  arbitrary-width naturals and refuse crossed packet/progress/generation,
+  noncanonical suffixes and complete physical-frame overflow.
 
-Compiler/PrivateBackendBoundary and Compiler/PrivateAllocationReceipt compiled.
-Four Compiler/PrivateBackendBoundaryFixture frames matched Rust exact bytes:
-empty journal, request, allocated journal, physical receipt. Native natural
-digests remain arbitrary width. The bounded original-prefix source projection
-compiled but its independent fifth interoperability fixture is still pending.
-Raw receipt decoding does not verify a protected anchor or source authority.
-A source promise additionally requires actual qualified successor recovery.
+Qualification limits remain concrete. Arithmetic is variable-time GF(2^128),
+static cumulative f<n/3, authenticated independent confidential reliable party
+channels, SHA256 classical ROM and honest crash disks. No complete simulator,
+QROM/PQ AMPC theorem, generic authenticated Boolean evaluator, complete
+accusation availability/fault-elimination ACS/GOD construction, holder-private
+output or successor resharing is supplied by these component checks.
 
-authenticated_ingress.rs four focused release tests PASS. Its later actual inner
-protocol/generation binding and bounded progress ABI also passed two changed tests. It has one canonical enrolled-party envelope
-and private WAL receiver: sender comes from current source manifest selection
-and existing native credential admission, never shuffled mix-slot identity.
-SourcePartyAuthority is an explicit external native receiver join, not a caller
-permission flag. Test HMAC credentials are synthetic fixtures only.
-DREGG.PRIVATE.AUTH packet capacity is 131072; separately approved
-DREGG.PRIVATE.INGRESS carrier is at most 131100. Public traffic uses P262144.
-Ordinary Host public_envelope/exchange_unix does not dispatch this new route.
-The source-native admission owner must implement current enrolled subject,
-capability, purpose-specific request/header verification on one actual snapshot.
+Transport confidentiality is an OPEN deployment join. The current shared
+mailbox/clear native controller would see every clear share body. Outer mix
+encryption and inner authentication do not realize independent private channels.
+PROGRESS/v1 repeats the full AUTH.SIGN preimage and can expose the body on return.
+The clear v1 native route must be pinned explicitly to a trusted-controller
+profile; confidential v2 refuses until real recipient-only sealing is joined.
+The repair uses separately held recipient encryption keys, distinct algorithm,
+key epoch/binding from signing keys, opaque admitted source dispatch, and
+digest-only progress bound to the original semantic commitment. Private outbox
+bodies also need recipient sealing. Old decryption keys are retained for actual
+committed obligations; key rotation cannot reinterpret or erase old material.
 
-Exact duplicates return the saved protocol outbox without reapplication.
-Fresh randomized credentials may authenticate the same semantic packet;
-conflicting sequence/body or stale current authority is refused.
-Replay markers, protocol transition and outbox persist in one WAL record.
-WAL checksum is for honest crash integrity, not malicious disk authenticity.
-Future-view WouldBlock requires reliable retention/retry, not silent dropping.
-Full 16MiB WAL/outbox frames are local, never transport payloads.
+Packet identity uses one canonical CommitteeParty/Generation/epoch/session/
+party/recipient/role/key-purpose record and sequence/body. A mix slot never
+becomes protocol sender authority. The source-native owner selects actual
+current enrollment and derives the existing purpose-specific native request
+header on one source snapshot. Source event63 Applied authorizes the retained
+logical dispatch; decoded request/receipt/progress never mint this token.
+Committed liabilities are verified at their original admitted prefix rather
+than reinterpreted by a later key rotation. Native source-host effect dispatch
+and independent party encryption keys are still actual producer joins.
 
-circuit_batch.rs now reserves/fsyncs all exact fixed public tick/gate rows before
-ANY secret read/release, including ticks after private halt/refusal. Partial
-prefix failure burns allocated rows; wrong material shape after complete reserve
-burns the complete plan and returns no material. Its two narrow tests PASS.
-Native Plan interoperability fixture remains pending; the core is material
-custody, not checked triples or source authority.
-Coherent AVSS/ACSS-Id, real distributed proof/triple checking, authenticated Boolean
-wires and holder-private output remain necessary. Native descriptor, source
-maintenance budgets, protected anchor and canonical common qualified generation
-evidence must join before terminal source YES. A replica-local anchor receipt
-cannot become replicated custody evidence by encoding it.
+AUTH capacity131072; raw INGRESS131100; public packet P262144. FINAL complete
+native request, including all config/purpose/op wrappers, must be <=262078;
+final native reply <=262070. Individual recursive outboxes are separately
+bounded carriers. The 16MiB WAL/outbox stays local and private.
 
-Printed/code adapter corrections are explicit: VABA key availability means
-completed sharing, not external validity; vote proposal values must be backed by
-validated prevote values, not membership among broadcaster IDs. Source tests
-close specific failure traces but do not prove the paper theorem for all schedules.
+Physical custody reserves stable pool/row IDs before release, fsyncs exact local
+state, verifies actual anchor readback, rejects rollback/substitution/retry and
+fails closed on uncertain persistence. Unix test authority demonstrates crash
+ordering, not a separately protected malicious-storage rollback authority.
+Compiler/PrivateBackendBoundary and PrivateAllocationReceipt compiled; four
+actual native fixture frames matched Rust exactly with arbitrary-width Nat
+digests. The fifth bounded source projection and circuit-plan fixture remain
+interop joins; raw codec roundtrips are not native fixture qualification.
 
-Primary constructions:
+circuit_batch reserves the WHOLE fixed tick-major AND-row plan before first
+material release even on private halt/refusal. Partial prefixes remain spent.
+Preparation reserve_new similarly burns each stable ACSS seed set and Sh2t
+generation/group identity before accepted share extraction. IDs omit consumer
+attempt and purpose relabeling; returned basis binds the exact consumer
+Generation. Changing that generation or restarting fresh cannot reuse seeds.
+A completed exact durable batch receipt is required for legitimate recovery;
+a partial spent retry needs newly admitted source recovery/new material.
+
+Source sequencing is PENDING funded reserve with no YES, actual source readback,
+actual physical custody, then a separate terminal source record only with
+canonical common qualified generation evidence and actual privateRecovery.
+Local anchor/path/MAC receipts cannot be copied into replicated IntentRecord as
+common custody qualification. Recovery/controller obligations need separately
+retained source funds; material tombstones do not authorize refunds.
+
+Actual successor recovery/rekey is UNCONSTRUCTED. Source-current enrollment can
+fence old credentials from new-generation dispatch, but cannot erase old shares
+or plaintext. Portability must preserve full old/new descriptors/generations,
+recursive WAL/outbox/spent anchor/liabilities and cumulative exposure. Archive,
+phase, code checkpoint and ACK do not mint new private execution authority.
+
+Printed/code repairs are explicit: availability in IndexVABA means completed
+sharing, not external validity; prevote VALUE membership is distinct from
+broadcaster-ID membership. These source corrections do not automatically
+inherit all paper theorem statements. The pinned raw binary_ba b22a6a... is not
+imported: raw first-threshold interpolation, zero-based evaluation mismatch and
+silent finite coin stock do not qualify malicious common coin/BA.
+
+Primary construction references:
 https://eprint.iacr.org/2024/677.pdf
 https://eprint.iacr.org/2024/1666.pdf
-The stock raw binary_ba implementation at b22a6a631effec1c6a875d4d52113f295bdc37b5
-is not imported: unauthenticated first-threshold interpolation, zero-based points
-vs one-based producer shares, and silent finite-stock stopping prevent qualification.
 
-Use scoped cargo nextest --offline --locked --release -j2 with the designated
-resource wrapper and isolated target. Do not run all historical tests repeatedly.
-The host-specific check-boundary.sh needs pinned Lean4.30 and existing warm source
-dependencies; it must not trigger a dependency rebuild. No keys, actual journals,
-private report/transcript, caches, artifacts or build outputs belong to this packet.
-
-Actual ACSS-Id joins now run: real bivariate private rows + dZK column proof,
-immutable acceptance before RA, complaint/f+1 request-gated view opening and
-robust authenticated public reconstruction. Four baseline checks PASS. The new
-malformed-dealer trace alters one ciphertext row, gets local typed rejection,
-identifies Dealer0 via actual opened proof, then reconstructs exact [42,91] at
-all honest parties after Dealer0 disappears, including the locally aborted
-holder. acss_id_store stores full dealer seed/polynomials/recursive outbox
-before publication and replays exact rows/proofs; two store tests PASS.
-New seven focused tests PASS, sixty unchanged skipped; no broad old rerun.
-
-Bounded PROGRESS ABI binds full enrolled semantic signing preimage and exact
-private WAL outbox digest/byte count. It has no terminal Qualified result. Raw
-decoding is a claim. The source-native current enrollment/funded Pending and
-Appended endpoint must bind actual worker readback to its own ordered receipt.
-Individual outbox messages need actual native enrolled sender credentials before
-opaque transport; whole private WAL/outbox is never a public carrier.
-
-Next real distributed construction is Sh2t-Id, owned by the coupled proof lane,
-then checked TripleKingDN/dispute/authenticated AND/input bitness and evaluator
-private output. The completed dZK/ACSS traces do not substitute for that work.
+Run only new/changed focused cargo nextest --release --offline --locked with
+isolated warm target and designated resource guardian. Latest actual evidence:
+Persvati King r13:4/4 (three King + one ACSSf2), r14:2/2 malicious/fault,
+r15:4/4 (one nonzero-source fault + three native claim codecs).
+No unchanged broad suite rerun was used. Native source/secret channel/crypto
+qualification is separate from compilation and individual adversarial schedules.

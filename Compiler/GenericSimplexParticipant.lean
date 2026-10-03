@@ -1,5 +1,6 @@
 import Compiler.GenericSimplexController
 import Kernel.JointOrderedSourceReceiver
+import Theory.AssertAxioms
 
 namespace Minidregg.Compiler.GenericSimplexParticipant
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -74,6 +75,22 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
       Minidregg.Compiler.GenericSimplexPending.discover state p.pending},result)
   | _ => return (p,result)
 
+/-- The resident client retains NativeHostCodec.SignedCall in call.bin.
+Historical source records retain the inner signed ingress; ordinary invocation
+adds only this deployment's fixed domain/profile using the existing native
+codec. This is decoding, not admission: propose still calls deriveVerified. -/
+def sourceIngressOfCall (config : SourceConfig) (callBytes : Bytes) : Except String Bytes := do
+  let some call := Minidregg.Compiler.NativeHostCodec.callCodec.decode callBytes
+    | throw "unsupported or noncanonical native signed call"
+  unless Minidregg.Compiler.NativeHostCodec.callCodec.encode call == callBytes do
+    throw "noncanonical native signed call"
+  match call with
+  | .invoke signed =>
+    pure (Minidregg.Kernel.DeclaredResourceController.signedBytes
+      config.deployment.domain config.profile.semantics signed)
+  | .birth bytes | .install bytes | .delegate bytes | .revoke bytes | .renounce bytes =>
+    pure bytes
+
 /-- Ordinary ingress is admitted at the actual verified source tip to obtain
 the exact complete record proposal. It is only queued, never physically appended
 here. The historical validator independently validates any later chosen parent. -/
@@ -93,6 +110,33 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
     | .conflict => return (p,.error "engine journal changed; retry admission")
     | .uncertain => return (p,.error "engine append uncertain; recover journal before retry")
 
+/-- Preserve the existing live submit-only synchronous execution bound.
+Historical replay and recovery deliberately do not apply today's local bound to
+an older admitted call. This is not a substitute for source admission. -/
+def checkLocalCall (config : SourceConfig) (callBytes : Bytes) : Except String Unit := do
+  let some call := Minidregg.Compiler.NativeHostCodec.callCodec.decode callBytes
+    | throw "unsupported or noncanonical native signed call"
+  match call with
+  | .invoke signed =>
+    let some command := Minidregg.Kernel.DeclaredResourceController.commandCodec.decode signed.commandBytes
+      | throw "noncanonical invocation command"
+    -- Same live-submit criterion as NativeHost.overSyncBudget. Keep the
+    -- historical receiver independent of the full command-line Host closure.
+    if let some claim := command.run then
+      if config.nockFSync < claim.steps then
+        throw s!"overSyncBudget: run claim of {claim.steps} Lean steps exceeds the operator's synchronous budget nockFSync {config.nockFSync}"
+    pure ()
+  | _ => pure ()
+
+def proposeCall {config : SourceConfig} (p : Participant config) (callBytes : Bytes) :
+    IO (Participant config × Except String Bytes) := do
+  match checkLocalCall config callBytes with
+  | .error detail => return (p,.error detail)
+  | .ok () => pure ()
+  match sourceIngressOfCall config callBytes with
+  | .error detail => return (p,.error detail)
+  | .ok ingress => propose p ingress
+
 /-- Ordinary propose/await consumer: return only the receipt recomputed by the
 native verified source history for the exact complete proposal bytes. A protocol
 commit, send, pending offer or local transport acknowledgement yields nothing. -/
@@ -110,6 +154,11 @@ def completedIngress {config : SourceConfig} (p : Participant config) (signedIng
   let index ← p.source.verified.opened.durable.image.accepted.zipIdx.findSome?
     (fun (record,index) => if record.event.canonicalBytes == signedIngress then some index else none)
   p.source.verified.receipts[index]?
+
+def completedCall {config : SourceConfig} (p : Participant config) (callBytes : Bytes) :
+    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
+  let ingress ← (sourceIngressOfCall config callBytes).toOption
+  completedIngress p ingress
 
 /-- One flat fanout slot. Skipping self also consumes a slot, keeping service
 finite independently of committee size. -/
@@ -220,4 +269,18 @@ def service {config : SourceConfig} (p : Participant config)
   let (p,certificates,status) ← certificateSlice p
   return (p,packets ++ certificates,checks,status)
 
+theorem invocation_call_preserves_signed (config : SourceConfig)
+    (signed : Minidregg.Kernel.DeclaredResourceController.SignedCommand) :
+    sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode (.invoke signed)) =
+      .ok (Minidregg.Kernel.DeclaredResourceController.signedBytes
+        config.deployment.domain config.profile.semantics signed) := by
+  simp [sourceIngressOfCall]
+
+theorem birth_call_preserves_ingress (config : SourceConfig) (bytes : Bytes) :
+    sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode (.birth bytes)) =
+      .ok bytes := by
+  simp [sourceIngressOfCall]
+
+#assert_axioms invocation_call_preserves_signed
+#assert_axioms birth_call_preserves_ingress
 end Minidregg.Compiler.GenericSimplexParticipant

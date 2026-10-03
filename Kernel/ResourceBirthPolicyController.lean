@@ -595,7 +595,14 @@ theorem ordinary_reserve_disjoint {template : CanonicalRuntimeProfile.FactoryTem
     (reserve : ReserveTemplateBound template authority height descriptor) :
     ¬ TemplateBound template authority height descriptor := by
   intro ordinary
-  have npos : 0 < descriptor.births.length := List.length_pos.mpr present
+  have nonzero : descriptor.births.length ≠ 0 := by
+    intro zero
+    have empty : descriptor.births = [] := by
+      cases members : descriptor.births with
+      | nil => rfl
+      | cons item rest => simp [members] at zero
+    exact present empty
+  have npos : 0 < descriptor.births.length := Nat.pos_of_ne_zero nonzero
   have two := ordinary.2.2.2
   have three := reserve.2.2.2
   omega
@@ -1296,7 +1303,7 @@ def branchIdentity
 
 structure Pending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (height : Height) : Prop where
+    (height : Height) : Type where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   method : FactoryMethod
   templateBound : MethodTemplateBound method profile.template (oldAuthority prepared) height descriptor
@@ -1306,13 +1313,15 @@ structure Pending
 
 def preparePending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (PLift (Pending prepared height)) := do
+    (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (Pending prepared height) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  let templateBound : PLift (MethodTemplateBound method profile.template
-      (oldAuthority prepared) height descriptor) ← match method with
-    | .ordinary => checkTemplate prepared height
-    | .reserve => require (ReserveTemplateBound profile.template
+  let templateCheck : Except Reject (PLift (MethodTemplateBound method profile.template
+      (oldAuthority prepared) height descriptor)) := by
+    cases method with
+    | ordinary => exact checkTemplate prepared height
+    | reserve => exact require (ReserveTemplateBound profile.template
         (oldAuthority prepared) height descriptor) .grantTemplate
+  let templateBound ← templateCheck
   let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
     descriptor) .roomLineage
   letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
@@ -1322,7 +1331,7 @@ def preparePending
       (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
   if cells : Function.Injective (layout prepared).cellId then
     if requests : Function.Injective (branchIdentity prepared height) then
-      .ok ⟨⟨checked.down, method, templateBound.down, bornLineage.down, cells, requests⟩⟩
+      .ok ⟨checked.down, method, templateBound.down, bornLineage.down, cells, requests⟩
     else .error .ambiguousRequests
   else .error .duplicateCell
 
@@ -1795,16 +1804,13 @@ theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedI
 theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
   unfold decodeIngress at decoded
-  cases parsed : reserveIngressCodec.decode bytes with
-  | none =>
-      simp only [parsed] at decoded
-      exact decodeOrdinaryIngress_canonical decoded
-  | some raw =>
-      simp only [parsed] at decoded
-      split at decoded
-      · contradiction
-      · cases Option.some.inj decoded
-        exact strictCodec_canonical reserveIngressRawCodec parsed
+  split at decoded
+  · exact decodeOrdinaryIngress_canonical decoded
+  next raw parsed =>
+    split at decoded
+    · contradiction
+    · cases Option.some.inj decoded
+      exact strictCodec_canonical reserveIngressRawCodec parsed
 
 def CredentialBundle.forBranch (bundle : CredentialBundle) : Branch descriptor → Option BranchCredential
   | .factory => some bundle.factory
@@ -1925,7 +1931,7 @@ source descriptor plus its exact birth incidence. It is not an ordinary write
 request or a capability minted from the nominated owner identity. -/
 def ownerConsentRequest
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (height : Height) (position : Fin descriptor.births.length) : SomeRequest :=
+    (height : Height) (position : Fin descriptor.births.length) : PackedEffectRequest :=
   let item := descriptor.births.get position
   ⟨item.resourceKind, {
     domain := pins.domain
@@ -2017,7 +2023,10 @@ theorem OwnerConsent.current_owner_key
       (descriptor.births.get position).owner = some consent.receipt.prepared.controller.key := by
   have current := CredentialSignatureAdmission.checked_key_from_same_snapshot
     prepared.authority.snapshot consent.receipt
-  rw [consent.request_exact.1] at current
+  have subjectExact : consent.receipt.request.2.subject =
+      (descriptor.births.get position).owner :=
+    congrArg (fun wanted : PackedEffectRequest => wanted.2.subject) consent.request_exact.1
+  rw [subjectExact] at current
   exact current
 
 theorem OwnerConsent.current_owner_key_live
@@ -2058,16 +2067,16 @@ def admitDecodedNative [DecidableEq F]
       match preparePending prepared height ingress.method with
       | .error reason => return .error reason
       | .ok pending =>
-          match require (pending.down.method = ingress.method) .credentialShape with
+          match require (pending.method = ingress.method) .credentialShape with
           | .error reason => return .error reason
           | .ok methodExact =>
               match ← verifyOwnerConsentsNative prepared height native ingress.ownerConsentEnvelopes with
               | .error reason => return .error reason
               | .ok owners =>
-                  match ← pending.down.admitBundleNative native ingress.ingress.credentials with
+                  match ← pending.admitBundleNative native ingress.ingress.credentials with
                   | .error reason => return .error reason
                   | .ok branches =>
-                      return .ok ⟨ingress, prepared, pending.down, methodExact.down, owners, branches⟩
+                      return .ok ⟨ingress, prepared, pending, methodExact.down, owners, branches⟩
 
 def admitNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)

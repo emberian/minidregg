@@ -3,6 +3,7 @@ Payload interpretation is separate from native lifecycle/kind/schema framing.
 No raw physical post is admitted merely because this helper can construct it.
 -/
 import Compiler.CanonicalCellRegistry
+import Kernel.DurableDataIntent
 import Kernel.ContentResource
 
 namespace Minidregg.Compiler.ContentControlFrame

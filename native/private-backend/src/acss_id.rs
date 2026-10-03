@@ -734,7 +734,7 @@ fn interpolate_at(points: &[(u16, Vec<Field>)], at: Field, count: usize) -> Resu
     }
     Ok(out)
 }
-fn polynomial(points: &[(u16, Vec<Field>)], count: usize) -> Result<Vec<Vec<Field>>> {
+pub(crate) fn polynomial(points: &[(u16, Vec<Field>)], count: usize) -> Result<Vec<Vec<Field>>> {
     let mut out = vec![vec![Field(0); points.len()]; count];
     for (i, (holder, values)) in points.iter().enumerate() {
         if values.len() != count {
@@ -765,7 +765,7 @@ fn polynomial(points: &[(u16, Vec<Field>)], count: usize) -> Result<Vec<Vec<Fiel
     }
     Ok(out)
 }
-fn correct_polynomials(
+pub(crate) fn correct_polynomials(
     points: &BTreeMap<u16, Vec<Field>>,
     degree: usize,
     required: usize,

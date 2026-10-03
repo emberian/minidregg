@@ -63,10 +63,10 @@ theorem actual_consent_stream_roundtrip (value : Consent) :
 #assert_axioms incoming_credit_does_not_discount_consent
 #assert_axioms actual_operation_stream_roundtrip
 #assert_axioms actual_consent_stream_roundtrip
-#assert_axioms ResourceMoneyReceiver.Prepared.conserves
-#assert_axioms ResourceMoneyReceiver.Prepared.exact_original_root
-#assert_axioms ResourceMoneyReceiver.Prepared.one_batch
-#assert_axioms ResourceMoneyReceiver.Prepared.no_duplicate_accounts
+#assert_axioms Minidregg.Kernel.ResourceMoneyReceiver.Prepared.conserves
+#assert_axioms Minidregg.Kernel.ResourceMoneyReceiver.Prepared.exact_original_root
+#assert_axioms Minidregg.Kernel.ResourceMoneyReceiver.Prepared.one_batch
+#assert_axioms Minidregg.Kernel.ResourceMoneyReceiver.Prepared.no_duplicate_accounts
 
 /-- Production payment verbs cannot authorize issuer-backed mint or burn. -/
 theorem transfer_does_not_authorize_mint :

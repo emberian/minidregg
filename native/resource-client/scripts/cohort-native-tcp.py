@@ -171,7 +171,8 @@ def scenario(name,real):
         latencies=[v['relative_ms']-(v['epoch']+v['phase']*G+1)*T for v in public]
         (d/'public-run-summary.json').write_text(json.dumps({
             'tick_ms':T,'processing_slots':G,'epochs':N,'epoch_buffer_lengths':N/G,
-            'contribution_to_broadcast_schedule_ms':(5*G+1)*T,
+            'contribution_to_broadcast_schedule_ms':5*G*T,
+            'origin_to_first_broadcast_ms':(5*G+1)*T,
             'records_observed':len(public),'records_expected':12*N,
             'min_wire_lateness_ms':min(latencies) if latencies else None,
             'max_wire_lateness_ms':max(latencies) if latencies else None,

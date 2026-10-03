@@ -136,8 +136,8 @@ def reserve(+request: Request, +offer: Offer, +sponsorship: Sponsorship, +now: N
         Sponsorship{sponsorIdentity, sponsorProvider, policy, maxAmount, approved}:
       +amount = Math.mul(rate, units)
       reserve_choice(request, offer, sponsorship, amount,
-        Bool.and(identity_eq(identity, offerIdentity), Bool.and(identity_eq(identity, sponsorIdentity),
-          Bool.and(Bytes.eq(provider, sponsorProvider), Bool.and(approved,
+        Bool.and(approved, Bool.and(identity_eq(identity, offerIdentity),
+          Bool.and(identity_eq(identity, sponsorIdentity), Bool.and(Bytes.eq(provider, sponsorProvider),
             Bool.and(Math.lt(0n, units), Bool.and(Math.le(units, capacity),
               Bool.and(Math.le(now, expires), Bool.and(Math.le(expires, deadline),
                 Bool.and(Math.le(amount, budget), Bool.and(Math.le(amount, maxAmount),
@@ -366,3 +366,41 @@ def finished_cannot_pay_twice(reservation, run, completion, prior, review, home,
   {==}
 
 
+# Callable finite-Bool Activity continuation entry. Completion data comes from
+# the separately admitted result slot bound to the pending operation. A true
+# status only retains completion; it cannot bypass the recipient's review/pay.
+def resume_after_status(state: State, completion: Completion, success: Bool) -> Transition:
+  match success:
+    case False{}:
+      uncertain(state)
+    case True{}:
+      deliver(state, completion)
+
+law failed_status_retains_uncertainty:
+  for +reservation: Reservation
+  for +run: Run
+  for completion: Completion
+  {resume_after_status(Running{reservation, run}, completion, False{}) ==
+    Proposed{Running{reservation, run}, Uncertain{reservation, run}, [AwaitExisting{run}]} : Transition}
+
+def failed_status_retains_uncertainty(reservation, run, completion):
+  {==}
+
+law sponsor_denial_never_reserves:
+  for request: Request
+  for offer: Offer
+  for identity: Identity
+  for provider: List<&2, Nat>
+  for policy: Pin
+  for maxAmount: Nat
+  for now: Nat
+  {reserve(request, offer, Sponsorship{identity, provider, policy, maxAmount, False{}}, now) ==
+    Refused{Vacant{}} : Transition}
+
+def sponsor_denial_never_reserves(request, offer, identity, provider, policy, maxAmount, now):
+  match request offer:
+    case Request{requestIdentity, residentHome, room, consumer, recipient, audience, keyEpoch,
+        acceptor, criterion, deadline, units, budget,
+        Payment{book, root, payer, escrow, providerAccount, asset, available}}
+        Offer{offerIdentity, offerProvider, providerHome, capacity, rate, expires, claim}:
+      {==}

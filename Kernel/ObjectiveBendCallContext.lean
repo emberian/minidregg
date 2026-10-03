@@ -80,6 +80,17 @@ structure Binding (prepared : PreparedInvocation deployment profile ambient dura
   not become read authority and cannot supply captured source state. -/
   selfEnvelope : List UInt8
   selfObserve : ReadLeg prepared (firstIndex prepared) selfEnvelope
+  sources : ObjectiveBendReferenceLoader.Sources (context := readContext prepared)
+    (profile := profile) (subject := command.subject) object.pin
+  sourcePartialsExact : object.closure.prototypes =
+    sources.partials.map (fun entry => entry.2.prototype)
+  sourceCoreExact : object.core = sources.core.core
+  /-- Current world-instance physical observation has no per-field outer
+  projection. A narrowed read cannot authorize loading its complete behavior
+  pin from the internal store. This is the existing carrier scope, not an
+  implicit conversion of write rights into self/source read rights. -/
+  selfFieldsExact : ResourceObservationAdmission.readerFields (readContext prepared)
+    command.targets[firstIndex prepared].kind (readCapability (firstIndex prepared)) = none
 
 /-- Each input is backed by its actual signed current read admission. -/
 structure Observation (prepared : PreparedInvocation deployment profile ambient durable command) where
@@ -98,31 +109,35 @@ def bind (prepared : PreparedInvocation deployment profile ambient durable comma
     (envelope : List UInt8) (read : ReadLeg prepared (firstIndex prepared) envelope)
     (observations : List (Observation prepared)) :
     Except String (Binding prepared request) := do
-  let admitted ← observations.mapM fun observation =>
-    match BendInvocationInput.admitObservation command.subject observation.admitted.selected
-        observation.admitted.checked with
-    | none => .error "source observation belongs to another subject"
-    | some current => .ok current
-  match world : command.targets[firstIndex prepared].payload with
-  | .world actions =>
-    match actual : worldStore command.targets[firstIndex prepared]
-        (prepared.targets (firstIndex prepared)).pre.logical with
-    | none => throw "self is not native world carrier"
-    | some store =>
-      let loaded ← ObjectiveBendReferenceLoader.load store admitted
-      let object := loaded.object
-      if exactSelf : request.self = command.targets[firstIndex prepared].target then
-        if exactRoot : request.selfRoot = (prepared.targets (firstIndex prepared)).pre.root then
-          if exactPrototype : request.prototype = object.source.construction.root.id then
-            if exactNonce : command.nonce = (requestId command.subject request).value then
-              pure ⟨object, actions, world,
-                by rw [actual]; exact loaded.native,
-                exactSelf, exactRoot, exactPrototype, exactNonce, envelope, read⟩
-            else throw "OO request differs from signed command nonce"
-          else throw "OO request differs from pinned prototype"
-        else throw "OO request differs from authenticated self root"
-      else throw "OO request differs from native self participant"
-  | _ => throw "OO self participant has wrong native payload role"
+  if fields : ResourceObservationAdmission.readerFields (readContext prepared)
+      command.targets[firstIndex prepared].kind (readCapability (firstIndex prepared)) = none then
+    let admitted ← observations.mapM fun observation =>
+      match BendInvocationInput.admitObservation command.subject observation.admitted.selected
+          observation.admitted.checked with
+      | none => .error "source observation belongs to another subject"
+      | some current => .ok current
+    match world : command.targets[firstIndex prepared].payload with
+    | .world actions =>
+      match actual : worldStore command.targets[firstIndex prepared]
+          (prepared.targets (firstIndex prepared)).pre.logical with
+      | none => throw "self is not native world carrier"
+      | some store =>
+        let loaded ← ObjectiveBendReferenceLoader.load store admitted
+        let object := loaded.object
+        if exactSelf : request.self = command.targets[firstIndex prepared].target then
+          if exactRoot : request.selfRoot = (prepared.targets (firstIndex prepared)).pre.root then
+            if exactPrototype : request.prototype = object.source.construction.root.id then
+              if exactNonce : command.nonce = (requestId command.subject request).value then
+                pure ⟨object, actions, world,
+                  by rw [actual]; exact loaded.native,
+                  exactSelf, exactRoot, exactPrototype, exactNonce, envelope, read,
+                  loaded.sources, loaded.partialsExact, loaded.coreExact, fields⟩
+              else throw "OO request differs from signed command nonce"
+            else throw "OO request differs from pinned prototype"
+          else throw "OO request differs from authenticated self root"
+        else throw "OO request differs from native self participant"
+    | _ => throw "OO self participant has wrong native payload role"
+  else throw "narrowed self observation cannot load the full native behavior pin"
 
 /-- The generic source input contains only observations produced by actual
 current read tokens. The selected method's artifact identity is joined by the
@@ -169,6 +184,15 @@ def Demand.coreEntry {prepared : PreparedInvocation deployment profile ambient d
     {request : Request} {binding : Binding prepared request} (demand : Demand prepared request binding) : String :=
   ObjectiveBendElaboration.coreName demand.selected
 
+def Demand.coreBytes {prepared : PreparedInvocation deployment profile ambient durable command}
+    {request : Request} {binding : Binding prepared request} (_demand : Demand prepared request binding) :
+    List UInt8 := binding.object.source.construction.core.bytes
+
+theorem pinned_core_exact {prepared : PreparedInvocation deployment profile ambient durable command}
+    {request : Request} {binding : Binding prepared request} (demand : Demand prepared request binding) :
+    binding.object.core.book = demand.coreBytes :=
+  binding.object.coreExact.trans binding.object.source.coreExact
+
 def Demand.super {prepared : PreparedInvocation deployment profile ambient durable command}
     {request : Request} {binding : Binding prepared request} (demand : Demand prepared request binding)
     (interface : Interface) (selected : Selected)
@@ -196,6 +220,7 @@ theorem selected_entry_exact {prepared : PreparedInvocation deployment profile a
       demand.cursor demand.required = some (.Ref demand.coreEntry) :=
   ObjectiveBendElaboration.reference_exact _ _ _ _ demand.resolved
 
+#assert_axioms pinned_core_exact
 #assert_axioms same_instance_on_demand
 #assert_axioms selected_entry_exact
 end Minidregg.Kernel.ObjectiveBendCallContext

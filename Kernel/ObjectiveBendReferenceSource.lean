@@ -55,7 +55,7 @@ structure Source (reference : Reference) where
 what this source decoder receives. A capability excluding body leaves no atoms
 and therefore cannot load a source program/prototype. -/
 def loadSource (reference : Reference)
-    (current : BendInvocationInput.Admitted context profile subject) : Option (Source reference) := do
+    (current : BendInvocationInput.Admitted context profile subject) : Option (Source (context := context) (profile := profile) (subject := subject) reference) := do
   if resource : current.value.resource = reference.resource then
     if root : current.value.root = reference.root then
       if current.value.physicalKind != CanonicalCellRegistry.Kind.content.tag.toNat then none else do
@@ -76,14 +76,14 @@ structure CoreAt (reference : Reference) where
   exact : lookupCore source.store reference.content = some core
 
 def loadPartial (reference : Reference)
-    (current : BendInvocationInput.Admitted context profile subject) : Option (PartialAt reference) := do
+    (current : BendInvocationInput.Admitted context profile subject) : Option (PartialAt (context := context) (profile := profile) (subject := subject) reference) := do
   let source ← loadSource reference current
   match exact : lookupPartial source.store reference.content with
   | none => none
   | some prototype => some ⟨source, prototype, exact⟩
 
 def loadCore (reference : Reference)
-    (current : BendInvocationInput.Admitted context profile subject) : Option (CoreAt reference) := do
+    (current : BendInvocationInput.Admitted context profile subject) : Option (CoreAt (context := context) (profile := profile) (subject := subject) reference) := do
   let source ← loadSource reference current
   match exact : lookupCore source.store reference.content with
   | none => none
@@ -98,13 +98,12 @@ structure Publication where
   prototype : ObjectiveBendPrototype.Partial
 
 def command (publication : Publication) : Command :=
-  { subject := publication.subject, nonce := publication.nonce
-    targets := [{ kind := .object, target := publication.resource
-      capability := publication.capability, schemaVersion := ContentResource.commandVersion
-      expectedTargetRoot := publication.expectedRoot
-      payload := .content ⟨[.createAtom ⟨partialDigest publication.prototype⟩
-        (.inlineObject partialSchema) (ObjectiveBendPrototype.encode publication.prototype)]⟩ }]
-    run := none }
+  ⟨publication.subject, publication.nonce,
+    [⟨.object, publication.resource, publication.capability, ContentResource.commandVersion,
+      publication.expectedRoot,
+      .content ⟨[.createAtom ⟨partialDigest publication.prototype⟩
+        (.inlineObject partialSchema) (ObjectiveBendPrototype.encode publication.prototype)]⟩,
+      none, none, none⟩], none⟩
 
 /-- This is ordinary actual native receiving. Neither closure compilation nor
 a successful publish grants installation/birth authority or claims execution. -/
@@ -131,13 +130,12 @@ structure CorePublication where
   core : Core
 
 def coreCommand (publication : CorePublication) : Command :=
-  { subject := publication.subject, nonce := publication.nonce
-    targets := [{ kind := .object, target := publication.resource
-      capability := publication.capability, schemaVersion := ContentResource.commandVersion
-      expectedTargetRoot := publication.expectedRoot
-      payload := .content ⟨[.createAtom ⟨coreIdentity publication.core⟩
-        (.inlineObject coreSchema) (encodeCore publication.core)]⟩ }]
-    run := none }
+  ⟨publication.subject, publication.nonce,
+    [⟨.object, publication.resource, publication.capability, ContentResource.commandVersion,
+      publication.expectedRoot,
+      .content ⟨[.createAtom ⟨coreIdentity publication.core⟩
+        (.inlineObject coreSchema) (encodeCore publication.core)]⟩,
+      none, none, none⟩], none⟩
 
 def receiveCoreLoaded (selectedDeployment : Deployment)
     (selectedProfile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)

@@ -24,8 +24,8 @@ def pointStream : StreamCodec Minidregg.Kernel.ReceiptContinuity.Point :=
 def prefixStream : StreamCodec Prefix :=
   StreamCodec.xmap (StreamCodec.product identityStream
     (StreamCodec.product bytesStream (StreamCodec.list bytesStream)))
-    (fun prefix => (prefix.identity, prefix.seed, prefix.records))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩) (by intro prefix; cases prefix; rfl)
+    (fun history => (history.identity, history.seed, history.records))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩) (by intro history; cases history; rfl)
 
 def artifactStream : StreamCodec Artifact :=
   StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
@@ -133,6 +133,7 @@ def successorCandidate (request : SuccessorRequest) : Bytes :=
 theorem successorCore_injective : Function.Injective successorStream.encode := by
   intro left right same
   have decoded := congrArg (fun bytes => successorStream.decodePrefix (bytes ++ [])) same
+  dsimp only at decoded
   rw [successorStream.decodePrefix_encode, successorStream.decodePrefix_encode] at decoded
   exact congrArg Prod.fst (Option.some.inj decoded)
 

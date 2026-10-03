@@ -18,6 +18,15 @@ structure Audited (config : NativeHost.Config) where
   source : NativeHostSession.Walked config
   exactImage : manifest.image = DurableReceiverCodec.encode source.target.image
 
+/-- Preserve actual genesis-walk provenance while deriving one full custody image.
+This accepts a verified native walk, never an arbitrary source image. -/
+def fromWalked (config : NativeHost.Config) (source : NativeHostSession.Walked config)
+    (generation : Nat) (predecessor : Bytes) (artifacts : List Artifact) : Audited config :=
+  let identity : Identity := ⟨config.deployment.domain,config.profile.semantics,config.expectedSeed⟩
+  let manifest := PortableContinuationManifestCodec.fromImage identity source.target.image
+    generation predecessor artifacts
+  ⟨manifest,source,rfl⟩
+
 /-- Inventories are supplied by the existing pause/custody/obligation owners.
 Their completeness must be source-derived before activation; this API makes
 no completeness claim for an arbitrary list of physical inventory blobs. -/

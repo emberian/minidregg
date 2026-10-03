@@ -1,3 +1,6 @@
+# Source Surface ABI v2. IDs use canonical native bytes, not unary source Nat.
+# Instance bytes decode one StreamCodec.nat value with full consumption and exact
+# reencoding. Node/slot/counter values remain bounded source Nat.
 # Objective Bend source interface for the generic admitted-observation surface.
 # The required native bridge encodes these typed values through BendWorldSurface.lean.
 # Its admission must check byte/digest bounds, backwards node indices, admitted slots,
@@ -7,7 +10,7 @@ import Base
 
 type Intent is Data:
   Intent{artifact: List<&2, Nat>, exportName: List<&2, Nat>,
-    program: List<&2, Nat>, instance: Nat, expectedRoot: List<&2, Nat>,
+    program: List<&2, Nat>, instance: List<&2, Nat>, expectedRoot: List<&2, Nat>,
     arguments: List<&2, Nat>}
 
 # tag 0 = authored prose; 1 = admitted value; 2 = admitted doc/object mount;

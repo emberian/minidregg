@@ -87,3 +87,27 @@ passes the exact retained bytes and never invents that codec. Registration
 attributes public material to an authorized native owner and current law. It
 does not prove key relation, ciphertext input domain or short noise. The actual
 native driver remains a separate qualification obligation.
+
+
+Generic natural-expression extension (source authored, not compiled or executed):
+The public-natural-expression.v1 compiler producer uses exact captured source
+Book/entry and a reusable input/literal/add expression grammar, with the same
+signed constructive DAG and independent natural-expression owner oracle.
+Inputs are scalar SIMD natural values, caps exclusive; outputMax is inclusive.
+The consumer permits at most 16 inputs and 64 ordered addition gates, no
+ciphertext multiplication or nontrivial plaintext multiplication, no relinearization
+key, and fresh input depth zero. Natural intermediate maxima must be below t.
+Source charge policy/reservation remain compiler/native semantic fields; physical
+Cost counts do not stand for source evaluation charges.
+
+ConditionalLinearEnvelope is an explicit conditional abstract phase bound,
+not ciphertext input validity, a noise certificate, or a Rust refinement theorem.
+Fresh public-key encryption CBD variance10 support gives coefficient error
+bound 2*4096*20*20+20 = 3,276,820; actual floor(q*m/t) lifting adds at most one
+defect per ciphertext/ciphertext or ciphertext/plaintext addition. Every wire
+derives its own bound and final 2*t*(B+1)<q margin. Scalar slot range and inverse
+NTT polynomial coefficient range differ. Actual NTT/RNS/rounding correspondence
+and same-opening/range evidence for externally supplied ciphertexts remain
+separate proof obligations. Declared depth zero cannot prove fresh encryption,
+and this profile cannot reset inherited ciphertext provenance. Public parameters
+are additionally checked for variance10. No generic emitted artifact is fabricated.

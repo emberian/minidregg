@@ -37,7 +37,7 @@ theorem evaluateWires_forced (network : Network) (inputs : Array Bool)
     simpa only [List.all_eq_true] using validParts.1
   unfold Network.evaluateWires
   apply Array.foldl_induction
-    (motive := fun count wires => wires.size = network.inputCount + count ∧
+    (motive := fun count (wires : Array Bool) => wires.size = network.inputCount + count ∧
       ∀ i < network.inputCount + count, wires[i]?.getD false = witness i)
   · exact ⟨by simpa using shape, by simpa using pinned⟩
   · intro index wires invariant
@@ -60,9 +60,33 @@ theorem evaluateWires_forced (network : Network) (inputs : Array Bool)
     · intro i hi
       by_cases last : i = wires.size
       · simp only [Array.getElem?_push, last, if_pos, Option.getD_some]
-        rw [equation, ← invariant.1, ← last]
+        simpa only [invariant.1] using equation
       · have earlier : i < network.inputCount + index.val := by omega
         simpa only [Array.getElem?_push, last, if_false] using invariant.2 i earlier
 
+/-- The actual public network evaluator returns exactly the satisfying graph's
+selected outputs. No caller-provided output equality is assumed. -/
+theorem evaluate_forced (network : Network) (inputs : Array Bool)
+    (valid : network.valid = true) (shape : inputs.size = network.inputCount)
+    (witness : Nat → Bool) (graph : BooleanGraph network witness)
+    (pinned : ∀ i < network.inputCount, inputs[i]?.getD false = witness i) :
+    network.evaluate inputs = some (network.outputs.map witness) := by
+  have wireValues := (evaluateWires_forced network inputs valid shape witness graph pinned).2
+  have outputValid :
+      network.outputs.all (· < network.inputCount + network.gates.size) = true :=
+by
+    have parts := valid
+    simp only [Network.valid, Bool.and_eq_true] at parts
+    exact parts.2
+  have bounds : ∀ wire ∈ network.outputs,
+      wire < network.inputCount + network.gates.size := by
+    simpa only [Array.all_eq_true_iff_forall_mem, decide_eq_true_eq] using outputValid
+  have mapped :
+      network.outputs.map (fun wire => (network.evaluateWires inputs)[wire]?.getD false) =
+      network.outputs.map witness :=
+    Array.map_congr_left (fun wire member => wireValues wire (bounds wire member))
+  simpa [Network.evaluate, shape, valid] using congrArg some mapped
+
 #assert_axioms evaluateWires_forced
+#assert_axioms evaluate_forced
 end Minidregg.Compiler.BendTraceEvaluation

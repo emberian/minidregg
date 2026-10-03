@@ -63,4 +63,3 @@ theorem ordered_next_payload_at_index {context : GenericSimplexCodec.Context}
 #assert_axioms ordered_next_payload_unique
 #assert_axioms ordered_next_payload_at_index
 end Minidregg.Kernel.GenericSimplexReceiverSafety
-EOF'

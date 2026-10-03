@@ -104,6 +104,11 @@ def semanticId (a : Artifact) : Digest :=
 Adding source inspection must never silently reidentify historical programs. -/
 def executionProgramId (a : Artifact) : Digest := NockProgramCodec.programId a.program
 
+/-- Source-native code identity. Unlike the historical compatibility program
+record, this identity binds the actual checked Book/entry and semantic codecs.
+It cannot be reused with a different Bend body by reusing a Nock record. -/
+def bendProgramId (a : Artifact) : Digest := semanticId a
+
 /-- Structural validation only. Exact source parsing, Book.check, backend
 refinement and receiving authority are independent checks, not manifest flags. -/
 def wellFormed (a : Artifact) : Bool :=

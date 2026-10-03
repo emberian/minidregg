@@ -82,7 +82,7 @@ theorem actual_reachable_globalBacked {c : Config} {faulty : Finset Nat}
   induction reachable with
   | initial => exact initial_globalBacked c faulty initialTime
   | next prior party input allowed ih =>
-    exact advance_globalBacked (actual_reachable_projected prior) ih party input allowed
+    exact advance_globalBacked (reachable_projected (structuralAuditLaws c) prior) ih party input allowed
 
 #assert_axioms initial_globalBacked
 #assert_axioms advance_globalBacked

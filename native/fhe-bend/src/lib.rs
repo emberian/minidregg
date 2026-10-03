@@ -1,5 +1,6 @@
 //! Physical public-program BFV transformer. This produces completion candidates,
 //! never current-authority tokens, input-validity proofs, or release permission.
+pub mod natural;
 use fhe::bfv::{
     BfvParameters, Ciphertext, Encoding, Multiplicator, Plaintext, PublicKey, RelinearizationKey,
 };
@@ -61,7 +62,8 @@ pub fn params() -> Result<Arc<BfvParameters>> {
         .nth(2)
         .ok_or("missing pinned parameters")?;
     ensure(
-        p.degree() == 4096 && p.plaintext() == T && p.moduli() == Q,
+        p.degree() == 4096 && p.plaintext() == T && p.moduli() == Q
+            && fhe::proto::bfv::Parameters::decode(p.to_bytes().as_slice())?.variance == 10,
         "parameter drift",
     )?;
     Ok(p)
@@ -193,6 +195,8 @@ pub struct Completion {
     pub output: String,
     pub output_sha256: String,
     pub physical_cost: Cost,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_linear_envelope: Option<natural::ConditionalEnvelope>,
 }
 pub fn canonical<TS: serde::Serialize>(value: &TS) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(value)?)
@@ -227,6 +231,7 @@ pub fn artifact_arity(a: &Value) -> Result<usize> {
     match string(a, "schema")? {
         "dregg.bend.literal-enum-case.v1" | "dregg.bend.prelude-bool-case.v1" => Ok(1),
         "dregg.bend.dynamic-enum-mux.v1" | "dregg.bend.prelude-bool-mux.v1" => Ok(3),
+        natural::SCHEMA => Ok(natural::caps(a)?.len()),
         _ => Err("unsupported source compiler schema".into()),
     }
 }
@@ -236,6 +241,7 @@ pub fn artifact_profile(a: &Value) -> Result<&'static str> {
         "dregg.bend.prelude-bool-case.v1" => Ok(PRELUDE_PROFILE),
         "dregg.bend.dynamic-enum-mux.v1" => Ok(MUX_PROFILE),
         "dregg.bend.prelude-bool-mux.v1" => Ok(PRELUDE_MUX_PROFILE),
+        natural::SCHEMA => Ok(natural::PROFILE),
         _ => Err("unsupported source compiler schema".into()),
     }
 }
@@ -280,6 +286,10 @@ pub fn validate_artifact(bytes: &[u8], expected: &str) -> Result<Value> {
             && nat(&a, "compilerVersion")? == 1,
         "unsupported compiler/source",
     )?;
+    if string(&a, "schema")? == natural::SCHEMA {
+        natural::validate(&a)?;
+        return Ok(a);
+    }
     let arity = artifact_arity(&a)?;
     if string(&a, "schema")? == "dregg.bend.prelude-bool-case.v1"
         || string(&a, "schema")? == "dregg.bend.prelude-bool-mux.v1"
@@ -422,6 +432,9 @@ fn operation(
 }
 pub fn evaluate(artifact_bytes: &[u8], expected: &str, request: &Request) -> Result<Completion> {
     let a = validate_artifact(artifact_bytes, expected)?;
+    if string(&a, "schema")? == natural::SCHEMA {
+        return natural::evaluate(&a, expected, request);
+    }
     let arity = artifact_arity(&a)?;
     let profile = artifact_profile(&a)?;
     ensure(
@@ -526,6 +539,7 @@ pub fn evaluate(artifact_bytes: &[u8], expected: &str, request: &Request) -> Res
         output: hex(&bytes),
         output_sha256: digest(&bytes),
         physical_cost: cost,
+        conditional_linear_envelope: None,
     })
 }
 pub fn check(
