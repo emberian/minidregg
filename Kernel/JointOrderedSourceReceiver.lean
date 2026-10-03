@@ -79,7 +79,7 @@ def Applied.verified {config : Config} {target : Durable}
 theorem applied_exact_source_record {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
     applied.readback.appended.entry.record =
-      DurableReceiverIO.recordFrame.encode
+      DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent applied.readback.derived.intent) :=
   applied.readback.appended.entryExact
 

@@ -2,7 +2,7 @@
 from the actual captured custom method and checked full definition. The world
 wrapper is compiler-generated, source-proved, and admitted by actual Book.check.
 No numeric graph fixture or independent scalar formula replaces the compiler. -/
-import Compiler.BendNaturalRefinement
+import Compiler.BendNaturalArtifact
 import Compiler.BendLogicSerialize
 import Compiler.BendLogicBFVPlain
 
@@ -14,15 +14,6 @@ open Lean (Json toJson)
 
 def arithmeticEntry : String := "SourceNat.doubleSum"
 def entryName : String := "SourceNat.worldDoubleSum"
-def modelJson {n : Nat} : Expr n → Json
-  | .input i => Json.mkObj [("input", toJson i.val)]
-  | .literal value => Json.mkObj [("literal", toJson value)]
-  | .add left right => Json.mkObj [("add", Json.arr #[modelJson left, modelJson right])]
-
-def bookText (book : Minidregg.Theory.BendTT.Book) : String :=
-  String.intercalate "\n\n" (book.map fun d => d.k ++ " : " ++ d.T.show 0 ++
-    " = " ++ d.v.show 0) ++ "\n"
-
 def candidate (expr : Expr 2) (a b output : Nat) : Nat → BabyBear :=
   let values : Fin 3 → Nat := numbers (fun i => if i.val = 0 then b else a) output
   let initial : Nat → BabyBear := fun index =>
@@ -38,41 +29,9 @@ def candidate (expr : Expr 2) (a b output : Nat) : Nat → BabyBear :=
 
 def artifact (book : Minidregg.Theory.BendTT.Book) (surfaceSource : String)
     (plan : Plan 2) : Json :=
-  let expr := plan.expression
-  let relation := descriptor (F := BabyBear) 8 10 (by decide) expr
-  let tree := expr.air (F := BabyBear) (fun i => i.succ : Fin 2 → Fin 3)
-  let signedTree := expr.air (F := Rat) (fun i => i.succ : Fin 2 → Fin 3)
-  let flat := flatten tree 0
-  let integral := flatten signedTree 0
-  Json.mkObj
-    [("schema", toJson "dregg.bend.public-natural-expression.v1"),
-     ("kernelPin", toJson "947db722640c86247849343657bf2f7ef01cb7f1"),
-     ("entry", toJson entryName), ("arithmeticEntry", toJson arithmeticEntry),
-     ("source", toJson ((worldBody expr).show 0)),
-     ("sourceType", toJson worldType.show 0), ("bookSource", toJson (bookText book)),
-     ("surfaceSource", toJson surfaceSource),
-     ("frontendCorrespondence", toJson "captured-safe-emit-structure-v1"),
-     ("wrapperCorrespondence", toJson "proved-native-affine-byte-list-extractor-v1"),
-     ("compilerVersion", toJson (1 : Nat)),
-     ("signedConstantPolicy", toJson "bounded-natural-polynomial-v1"),
-     ("tagEncoding", toJson "bend-prelude-nat-scalar-v1"),
-     ("inputWires", toJson ([1,2] : List Nat)),
-     ("inputOrder", toJson (["b","a"] : List String)),
-     ("inputCaps", toJson ([plan.inputCap,plan.inputCap] : List Nat)),
-     ("outputWire", toJson (0 : Nat)), ("outputMax", toJson plan.outputMax),
-     ("expression", modelJson expr),
-     ("sourceChargePolicy", toJson "bend-live-eval-natural-expression-v1"),
-     ("chargeReservation", toJson plan.reservation),
-     ("sourceBudget", toJson plan.sourceBudget),
-     ("relation", descriptorToJson relation),
-     ("constructiveIntegerOutput", Json.mkObj
-       [("nVars", toJson (3 : Nat)), ("nWires", toJson (3 + integral.next)),
-        ("gates", Json.arr ((integral.gates.map (emitGate Fin.val 3)).map signedGate).toArray),
-        ("output", signedWire (emitWire Fin.val 3 integral.out))]),
-     ("constructiveOutput", Json.mkObj
-       [("nVars", toJson (3 : Nat)), ("nWires", toJson (3 + flat.next)),
-        ("gates", Json.arr ((flat.gates.map (emitGate Fin.val 3)).map dgateToJson).toArray),
-        ("output", dwireToJson (emitWire Fin.val 3 flat.out))])]
+  if fits : plan.inputBits ≤ plan.outputBits then
+    BendNaturalArtifact.artifact entryName arithmeticEntry ["b","a"] book surfaceSource plan fits
+  else Json.mkObj [("error", toJson "invalid compiler width profile")]
 
 def run : IO Unit := do
   let surface ← IO.FS.readFile "tests/bend-source-representation/NaturalExpressionSource.bend"
@@ -85,10 +44,11 @@ def run : IO Unit := do
   let some plan := compile (n := 2) (p := 2013265921) original arithmeticEntry 128 8 10 1024 1032193
     | throw <| IO.userError "actual custom method source/profile specialization refused"
   let expr := plan.expression
-  let book := worldDefinition entryName expr :: BendSourceRepresentation.listArmsDef ::
-    BendSourceRepresentation.listDef :: original
-  unless Minidregg.Theory.BendTT.Book.check book == .ok () do
-    throw <| IO.userError "actual generated affine native source wrapper Book refused"
+  let book := original ++ [BendSourceRepresentation.listArmsDef,
+    BendSourceRepresentation.listDef, worldDefinition entryName expr]
+  match Minidregg.Theory.BendTT.Book.check book with
+  | .error why => throw <| IO.userError ("actual generated affine native source wrapper Book refused: " ++ why)
+  | .ok () => pure ()
   unless decide (Minidregg.Theory.BendTT.Book.get book entryName = some (worldDefinition entryName expr)) do
     throw <| IO.userError "actual selected generated world method differs"
   unless BendLogicNatAdd.bookBinding book do

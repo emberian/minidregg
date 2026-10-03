@@ -17,9 +17,11 @@ def units : Nat → BTerm → BTerm
   | n + 1, body => unitArm (units n body)
 
 def extractList : Nat → Nat → BTerm → BTerm
-  | 0, pending, body => .Prj (.Mat "Nil" (units (pending + 1) body) .Efq)
-  | n + 1, pending, body => .Prj (.Mat "Con"
-      (.Prj (.Lam .Q2 (.Prj (extractList n (pending + 1) body)))) .Efq)
+  | 0, pending, body => .Prj (.Mat "Nil" (units (pending + 1) body)
+      (.Mat "Con" (.Prj (.Lam .Q1 (.Prj (.Lam .Q1
+        (units (pending + 1) (natTerm 0)))))) .Efq))
+  | n + 1, pending, body => .Prj (.Mat "Nil" (units (pending + 1) (natTerm 0))
+      (.Mat "Con" (.Prj (.Lam .Q2 (.Prj (extractList n (pending + 1) body)))) .Efq))
 
 def worldBody {n : Nat} (expr : Expr n) : BTerm :=
   .Prj (.Lam .Q1 (.Lam .Q1
@@ -57,9 +59,10 @@ theorem extract_walk (book : Book) (values : List Nat) (pending : Nat)
     simpa [unitArgs, List.replicate_succ] using walked
   | cons head values ih =>
     apply Walk.prj rfl
+    apply Walk.miss rfl (by decide)
     apply Walk.hit rfl
     apply Walk.prj rfl
-    apply Walk.lam rfl (fun _ => natTerm_data head)
+    apply Walk.lam (p := .Q2) (q := Quan.fld .Q1 .Q1) rfl (fun _ => natTerm_data head)
     apply Walk.prj rfl
     have tailWalk := ih (pending + 1) (natTerm head :: env)
       (by simpa [List.reverse_cons, List.map_append, List.append_assoc] using rest)
@@ -107,10 +110,12 @@ theorem world_entry_step {n : Nat} (book : Book) (entry : String) (expr : Expr n
       (((List.ofFn inputs).reverse.reverse.map natTerm) ++
         [natListTerm observations, natListTerm (List.ofFn inputs).reverse]) []
       (some (expr.source (fun i => natTerm (inputs i)))) := by
-    simpa [substitution] using
-      (Walk.done (bk := book) (e := (List.ofFn inputs).map natTerm ++
+    have done := Walk.done (bk := book) (e := (List.ofFn inputs).map natTerm ++
         [natListTerm observations, natListTerm (List.ofFn inputs).reverse])
-        (xs := []) (source_leaf expr))
+        (xs := []) (source_leaf expr)
+    simp only [Term.spine] at done
+    rw [substitution] at done
+    simpa only [List.reverse_reverse] using done
   have walked := extract_walk book (List.ofFn inputs).reverse 0
     (expr.source (fun i => .Var i.val))
     [natListTerm observations, natListTerm (List.ofFn inputs).reverse] []

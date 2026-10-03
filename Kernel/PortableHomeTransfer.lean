@@ -71,7 +71,7 @@ structure Plan where
 
 inductive Phase where
   | serving | prepared | quiesced | successorCustodied | oldHostFenced
-  | destinationActive | released | aborted | recoveryRequired
+  | destinationActive | released | aborted | recoveryRequired | activationPending
   deriving DecidableEq, Repr
 
 structure State where
@@ -96,6 +96,8 @@ structure State where
   maintenanceReserve : Minidregg.Theory.ResourceCost.Charge
   /-- Exact current source home membership. Never supplied by an export request. -/
   governedCells : List Nat
+  /-- Persisted source-selected external activation identity before dispatch. -/
+  activationRequest : Bytes
 
 /-- Same full identity, preparation, request and provider custody. Only a
 current-source authoritative reconciliation may change status. -/
@@ -120,6 +122,9 @@ structure Receivers where
   DestinationAcknowledged : Plan → CutReference → Bytes → Prop
   AuthoritativeOutcome : Plan → Liability → Bytes → Prop
   RecoveryClassified : State → Bytes → Prop
+  OldHostResumed : Plan → Bytes → Prop
+  DestinationRecovered : Plan → Bytes → Bytes → Prop
+  ActivationCurrentPermit : State → Plan → Bytes → Prop
 
 /-- Preparation freezes ONE exact successor, consent, history, old/full private
 identity and destination. A different plan requires a fresh source transition. -/
@@ -136,16 +141,35 @@ def Binds (state : State) (plan : Plan) : Prop :=
   (∀ liability ∈ state.liabilities, liability.providerCustody ∈ plan.required) ∧
   plan.liabilities = state.liabilities
 
+def Settled (liability : Liability) : Prop :=
+  match liability.status with
+  | .reconciled _ => True
+  | _ => False
+instance (liability : Liability) : Decidable (Settled liability) := by
+  unfold Settled; split <;> infer_instance
+
+def AllSettled (liabilities : List Liability) : Prop := ∀ call ∈ liabilities, Settled call
+instance (liabilities : List Liability) : Decidable (AllSettled liabilities) := by
+  unfold AllSettled; infer_instance
+
+/-- A released home may transfer again without discarding historical outcomes.
+Old uncertain calls must be reconciled first; a released phase alone cannot
+reset pending identities or bootstrap a fresh destination/holder generation. -/
+def CanPrepare (state : State) : Prop :=
+  state.phase = .serving ∨ (state.phase = .released ∧ AllSettled state.liabilities)
+instance (state : State) : Decidable (CanPrepare state) := by
+  unfold CanPrepare; infer_instance
+
 /-- Exact source phase transitions. Source admission and physical CAS are
 constructed in the separate receiver. Every transition increments epoch;
 copying/replaying a phase receipt cannot acquire the next source epoch. -/
 inductive Step (receivers : Receivers) : State → State → Prop where
-  | prepare (old : State) (plan : Plan) (ready : old.phase = .serving)
+  | prepare (old : State) (plan : Plan) (ready : CanPrepare old)
       (binding : Binds old plan) (consent : receivers.CurrentConsent old plan) :
       Step receivers old { old with
         epoch := old.epoch + 1, phase := .prepared,
         plan := some plan, cut := none, successorCustody := [], oldFence := [],
-        destinationReceipt := [], liabilities := plan.liabilities}
+        destinationReceipt := [], liabilities := plan.liabilities,activationRequest := []}
   | cut (old : State) (plan : Plan) (manifest : CutReference)
       (phase : old.phase = .prepared) (selected : old.plan = some plan)
       (quiesced : receivers.QuiescedCut plan manifest)
@@ -166,8 +190,16 @@ inductive Step (receivers : Receivers) : State → State → Prop where
       (actual : receivers.OldHostFenced plan receipt) :
       Step receivers old { old with
         epoch := old.epoch + 1, phase := .oldHostFenced, oldFence := receipt}
-  | activate (old : State) (plan : Plan) (receipt : Bytes)
+  | beginActivation (old : State) (plan : Plan) (request : Bytes)
+      (nonempty : request ≠ [])
       (phase : old.phase = .oldHostFenced) (selected : old.plan = some plan)
+      (retry : old.activationRequest = [] ∨ old.activationRequest = request)
+      (permit : receivers.ActivationCurrentPermit old plan request) :
+      Step receivers old { old with
+        epoch := old.epoch + 1, phase := .activationPending,activationRequest := request }
+  | activate (old : State) (plan : Plan) (receipt : Bytes)
+      (phase : old.phase = .activationPending) (selected : old.plan = some plan)
+      (fenced : receivers.OldHostFenced plan old.oldFence)
       (actual : receivers.DestinationActivated plan old.oldFence receipt) :
       Step receivers old { old with
         epoch := old.epoch + 1, phase := .destinationActive,
@@ -185,10 +217,39 @@ inductive Step (receivers : Receivers) : State → State → Prop where
       (classification : receivers.RecoveryClassified old []) :
       Step receivers old { old with
         epoch := old.epoch + 1, phase := .aborted}
+  | resumeOld (old : State) (plan : Plan) (receipt : Bytes)
+      (phase : old.phase = .aborted) (selected : old.plan = some plan)
+      (host : old.currentHost = plan.oldHostInstance)
+      (generation : old.privateGeneration = plan.oldPrivateGeneration)
+      (descriptor : old.privateDescriptor = plan.oldPrivateDescriptor)
+      (settled : AllSettled old.liabilities)
+      (actual : receivers.OldHostResumed plan receipt) :
+      Step receivers old { old with
+        epoch := old.epoch + 1, phase := .serving }
   | quarantine (old : State) (reason : Bytes)
       (classification : receivers.RecoveryClassified old reason) :
       Step receivers old { old with
         epoch := old.epoch + 1, phase := .recoveryRequired}
+  | recoverFenced (old : State) (plan : Plan) (manifest : CutReference)
+      (phase : old.phase = .recoveryRequired) (selected : old.plan = some plan)
+      (cut : old.cut = some manifest) (host : old.currentHost = plan.oldHostInstance)
+      (generation : old.privateGeneration = plan.oldPrivateGeneration)
+      (descriptor : old.privateDescriptor = plan.oldPrivateDescriptor)
+      (custodied : receivers.SuccessorPrivateCustody plan manifest old.successorCustody)
+      (fenced : receivers.OldHostFenced plan old.oldFence)
+      (classified : receivers.RecoveryClassified old old.oldFence) :
+      Step receivers old { old with
+        epoch := old.epoch + 1, phase := .oldHostFenced }
+  | recoverActive (old : State) (plan : Plan)
+      (phase : old.phase = .recoveryRequired) (selected : old.plan = some plan)
+      (host : old.currentHost = plan.destination)
+      (credential : old.currentCredential = plan.destinationCredential)
+      (generation : old.privateGeneration = plan.successorPrivateGeneration)
+      (descriptor : old.privateDescriptor = plan.successorPrivateDescriptor)
+      (actual : receivers.DestinationRecovered plan old.oldFence old.destinationReceipt)
+      (classified : receivers.RecoveryClassified old old.destinationReceipt) :
+      Step receivers old { old with
+        epoch := old.epoch + 1, phase := .destinationActive }
   | reconcile (old : State) (plan : Plan) (liability : Liability) (outcome : Bytes)
       (selected : old.plan = some plan) (member : liability ∈ old.liabilities)
       (unsettled : liability.status = .retained ∨ liability.status = .dispatchedUncertain)
@@ -202,7 +263,7 @@ inductive Step (receivers : Receivers) : State → State → Prop where
 classification for every old call. A checkpoint Ready flag cannot supply this. -/
 def FreshWork (state : State) : Prop :=
   (state.phase = .destinationActive ∨ state.phase = .released) ∧
-  ∀ liability ∈ state.liabilities, ∃ outcome, liability.status = .reconciled outcome
+  AllSettled state.liabilities
 
 theorem step_epoch {receivers : Receivers} {old next : State}
     (step : Step receivers old next) : next.epoch = old.epoch + 1 := by
@@ -229,6 +290,28 @@ theorem step_calls {receivers : Receivers} {old next : State}
       split <;> exact ⟨rfl,rfl,rfl,rfl⟩
   | _ => intro call present; exact ⟨call,present,rfl,rfl,rfl,rfl⟩
 
+/-- Authoritatively reconciled old outcomes survive abort, recovery, activation
+and later consented transfers byte-for-byte. No retry can reset a settled call
+or substitute another outcome by reusing its original dispatch identity. -/
+theorem settled_outcomes_retained {receivers : Receivers} {old next : State}
+    (step : Step receivers old next) (call : Liability)
+    (present : call ∈ old.liabilities) (settled : Settled call) :
+    call ∈ next.liabilities := by
+  cases step with
+  | prepare plan _ binding _ =>
+      rcases binding with ⟨_,_,_,_,_,_,_,_,_,_,_,_,_,calls⟩
+      rw [calls]
+      exact present
+  | reconcile plan liability outcome selected member unsettled actual =>
+      have different : call ≠ liability := by
+        intro same
+        rw [same] at settled
+        rcases unsettled with retained | uncertain
+        · simp [Settled,retained] at settled
+        · simp [Settled,uncertain] at settled
+      exact List.mem_map.mpr ⟨call,present,if_neg different⟩
+  | _ => exact present
+
 theorem step_governed_cells {receivers : Receivers} {old next : State}
     (step : Step receivers old next) : next.governedCells = old.governedCells := by
   cases step <;> rfl
@@ -238,14 +321,53 @@ actual old-host fencing evidence. This does not prove a malicious host erased
 old shares or that two independently forked Stores share source authority. -/
 theorem activates_only_after_fence {receivers : Receivers} {old next : State}
     (step : Step receivers old next) (activated : old.currentHost ≠ next.currentHost) :
-    old.phase = .oldHostFenced ∧ ∃ plan, old.plan = some plan ∧ next.currentHost = plan.destination := by
+    old.phase = .activationPending ∧ ∃ plan, old.plan = some plan ∧
+      next.currentHost = plan.destination ∧ receivers.OldHostFenced plan old.oldFence := by
   cases step with
-  | activate plan receipt phase selected actual => exact ⟨phase,plan,selected,rfl⟩
+  | activate plan receipt phase selected fenced actual => exact ⟨phase,plan,selected,rfl,fenced⟩
   | _ => exact False.elim (activated rfl)
 
+/-- One exact current source phase selects one successor. Physical duplication
+of an old Store is not included in this premise; the agreed source/CAS consumer
+must keep that common current authority and cannot infer it from archive ACK. -/
+theorem one_successor {receivers : Receivers} {old left right : State}
+    (leftStep : Step receivers old left) (rightStep : Step receivers old right)
+    (leftChanged : old.currentHost ≠ left.currentHost)
+    (rightChanged : old.currentHost ≠ right.currentHost) : left.currentHost = right.currentHost := by
+  rcases activates_only_after_fence leftStep leftChanged with ⟨_,lp,ls,lh,_⟩
+  rcases activates_only_after_fence rightStep rightChanged with ⟨_,rp,rs,rh,_⟩
+  have same : lp = rp := Option.some.inj (ls.symm.trans rs)
+  exact lh.trans ((congrArg Plan.destination same).trans rh.symm)
+
+theorem generation_changes_only_after_fence {receivers : Receivers} {old next : State}
+    (step : Step receivers old next) (changed : old.privateGeneration ≠ next.privateGeneration) :
+    old.phase = .activationPending ∧
+      ∃ plan, old.plan = some plan ∧ receivers.OldHostFenced plan old.oldFence := by
+  cases step with
+  | activate plan receipt phase selected fenced actual => exact ⟨phase,plan,selected,fenced⟩
+  | _ => exact False.elim (changed rfl)
+
+/-- A lost destination reply cannot choose a fresh activation identity during
+recovery. Only another ordinary consented preparation after completed release
+may clear the old attempt; all intermediate phases and retries retain it. -/
+theorem activation_attempt_retained {receivers : Receivers} {old next : State}
+    (step : Step receivers old next) (present : old.activationRequest ≠ [])
+    (notPreparing : ¬ CanPrepare old) : next.activationRequest = old.activationRequest := by
+  cases step with
+  | prepare plan ready binding consent => exact False.elim (notPreparing ready)
+  | beginActivation plan request nonempty phase selected retry permit =>
+      rcases retry with empty | same
+      · exact False.elim (present empty)
+      · exact same.symm
+  | _ => rfl
+
+#assert_axioms activation_attempt_retained
+#assert_axioms one_successor
+#assert_axioms generation_changes_only_after_fence
 #assert_axioms step_epoch
 #assert_axioms step_home
 #assert_axioms step_governed_cells
 #assert_axioms step_calls
+#assert_axioms settled_outcomes_retained
 #assert_axioms activates_only_after_fence
 end Minidregg.Kernel.PortableHomeTransfer

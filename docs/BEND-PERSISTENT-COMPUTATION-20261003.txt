@@ -312,3 +312,68 @@ current native authorization, funding and actual Appended still gate publication
 This first route is pending commit followed by publication/reconciliation of that
 same operation; a stale current admission refuses without silently resigning.
 Atomic generated-control normalization is a subsequent independently checked route.
+
+GUARDED PUBLICATION AND TYPED OUTCOME — SOURCE AUTHORED, NOT YET QUALIFIED
+Kernel/BendActivityPendingAdmission admits the exact pending phase through the
+current signed native controller and independent source/heap/response checks.
+Kernel/BendActivityDispatch reconstructs that admission at its original verified
+prefix, matches its entire retained native record, and rechecks the original
+application under current authority. Its actual installed read guards include the
+physical Activity LifecycleRoot. The real BendPreparedOutput usage admission is
+rerun with the full augmented guards; a missing fixed-capacity certificate refuses.
+The original operation identity/signature is retained. Moving the pending phase
+makes a stale dispatch through this typed route fail native preflight. Ordinary exact-charge
+profiles need an explicit signed phase tariff, not an uncharged added guard.
+
+Kernel/BendActivityOutcome accepts true only from the original-height dispatch
+admission matched against the entire actual publication record. It accepts false
+only as a current owner-authorized cancellation while the original operation is
+absent; the receiving source gate checks absence again. A missing reply alone
+never chooses false. Both paths use the same current pending phase, consume its
+predecessor nullifier, and install the actual response allocator's successor with
+its exact source origin and dependent result signature. Receipt references are
+bounded journal coordinates, not recursively embedded historical transactions.
+
+Kernel/BendActivityRecovery supplies the actual verified historical prefixes to
+these private constructors and uses the existing native receiving/readback/retry
+protocol. It introduces no service journal. The chronological event64 replay join,
+source qualification, and real signed native lifecycle exercise remain required.
+A publication receipt says that the request was published; it does not certify
+provider completion, recipient acceptance, escrow payout, private worker recovery,
+or indefinite progress. Those later transitions consume their own authenticated
+observations, current authority and funding. The first route deliberately retains
+pending then publishes; its pending admission does not reserve the app's future
+budget and does not claim an atomic multi-target request/control transaction.
+
+TYPED-ONLY APPLICATION ROUTE — REQUIRED BEFORE ACTIVATION
+The retained application signature must not be usable through ordinary event3
+or another wrapper such as joint reservation. Otherwise a worker can bypass the
+extra pending-root guard, and cancellation is unsafe. Compiler/BendActivityNonce
+reserves a signed nonce interval only for an explicitly selected new source
+profile. Its classifier and Kernel/BendActivityRoute ordinary gate are authored;
+the central default/typed admission split remains a required receiving join.
+Old profiles retain their nonce semantics. No effect64 activation is claimed.
+
+Kernel/BendActivityRoutePermit is below the native controller: its private token
+checks the actual protected pending record, exact stored signed application and
+physical LifecycleRoot. The typed controller must require the source-profile pin
+and this permit, retain the exact guard in usage/funding and installed intent,
+and every ordinary current-admission wrapper must reject the reserved namespace.
+A marker or an event tag alone grants no authority.
+
+Pending publication now stores an inert exact signed Application proposal and
+checks its scope/command/source Plan binding. Its own control is currently
+source-authorized. Application signature/current law/funding admission occurs at
+dispatch once the pending permit exists; preparation does not create an early
+AcceptedInvocation which could escape through another receiving route. This also
+avoids repeating speculative application admission before its actual phase.
+
+COMMON SIGNED STATEMENT DECISION
+The reserved nonce implementation is an inactive transition prototype, not the
+chosen language or permanent receiving contract. The selected direction is one
+explicit versioned signed invocation family binding route, domain, semantics and
+complete statement bytes. This binding must enter the actual authorization
+request/signing bytes; an unsigned outer envelope is insufficient. Old profile
+replay remains distinct. The pending permit will consume that exact statement
+and explicit dispatch route. The central signature and route exclusion join is
+still unqualified, so the new effect route remains disabled.

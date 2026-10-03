@@ -35,10 +35,7 @@ fn unhex(s: &str) -> Result<Vec<u8>> {
     {
         return Err("handoff hex invalid".into());
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| "handoff hex invalid".into()))
-        .collect()
+    crate::decode_hex(s)
 }
 fn digest(b: &[u8]) -> String {
     hex(&Sha256::digest(b))

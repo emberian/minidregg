@@ -1,0 +1,16 @@
+edition ObjectiveBend 1
+
+extension AddOne(self: Nat, super: Nat) -> Nat:
+  super + 1
+
+extension AddSelf(self: Nat, super: Nat) -> Nat:
+  super + self
+
+def combined(seed: Nat) -> Nat:
+  fix(compose(AddOne, AddSelf), seed)
+
+def addCaptured(delta: Nat) -> Extension<Nat>:
+  extension(self: Nat, super: Nat) -> Nat: super + delta
+
+def reuseCaptured(seed: Nat) -> Nat:
+  fix(compose(addCaptured(2n), addCaptured(3n)), seed)

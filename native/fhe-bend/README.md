@@ -111,3 +111,23 @@ and same-opening/range evidence for externally supplied ciphertexts remain
 separate proof obligations. Declared depth zero cannot prove fresh encryption,
 and this profile cannot reset inherited ciphertext provenance. Public parameters
 are additionally checked for variance10. No generic emitted artifact is fabricated.
+
+Fable review6 reconciliation (2026-10-03): prior run-literal-03, run-mux-02
+and run-prelude-01 exercised real BFV across4096 slots, deterministic independent
+ciphertext replay, same-key encrypted predecessor depth2 and hostile/refusal
+cases. These are executed owner conformance tests, not Rust #[test] functions.
+They did not call measure_noise. Latest owner source now checks vendor
+measure_noise at fresh ciphertexts and depth1/depth2 outputs only in offline
+honest-owner conformance; measured values remain local and never authorize
+native input/release. This new diagnostic is authored but not executed yet.
+The vendor metric depends on its own decrypt/lift and is variable-time;
+source-oracle checks remain separate, and neither is a general crypto proof.
+
+n4096/Q109/variance10 is an exact pinned parameter identity. Upstream's
+default_parameters_128 name/docstring does not establish an independently
+estimated classical or quantum security level. No estimator output is currently
+qualified for this preserved vendor/profile. Security/PQ estimation remains
+unqualified. A depth integer is only structural lineage, never inherited noise.
+The add-only natural profile is fresh-input-only with conditional coefficient
+bound3,276,820 and recurrence Badd=Bleft+Bright+1; doubleSum bound13,107,283.
+Persistent ctct inputs do not acquire that bound from an opaque native receipt.

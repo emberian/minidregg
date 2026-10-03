@@ -59,6 +59,20 @@ theorem decode_listTerm {α : Type} (encode : α → BTerm) (decode : BTerm → 
   | nil => rfl
   | cons value rest ih => simp [listTerm, constructor, fieldsTerm, decodeList, inverse, ih]
 
+def sourceAbiVersion : String := "DREGG/BEND/SOURCE-SURFACE/v2"
+
+def scalarTerm (value : Nat) : BTerm :=
+  BendSourceRepresentation.bytesTerm (StreamCodec.nat.encode value)
+def decodeScalar (term : BTerm) : Option Nat := do
+  let bytes ← BendSourceRepresentation.decodeBytes term
+  let (value, rest) ← StreamCodec.nat.decodePrefix bytes
+  if rest.isEmpty && decide (StreamCodec.nat.encode value = bytes) then some value else none
+
+theorem decode_scalarTerm (value : Nat) : decodeScalar (scalarTerm value) = some value := by
+  have decoded := StreamCodec.nat.decodePrefix_encode value []
+  simp only [List.append_nil] at decoded
+  simp [decodeScalar, scalarTerm, BendSourceRepresentation.decode_bytesTerm, decoded]
+
 def digestTerm (value : Digest) : BTerm :=
   BendSourceRepresentation.bytesTerm (digestStream.encode value)
 def stringTerm (value : String) : BTerm :=
@@ -79,7 +93,7 @@ theorem decode_digestTerm (value : Digest) : decodeDigest (digestTerm value) = s
 
 def intentTerm (value : Intent) : BTerm := constructor "WorldSurface.Intent"
   [digestTerm value.artifact, stringTerm value.exportName, digestTerm value.program,
-   BendSourceRepresentation.natTerm value.«instance», digestTerm value.expectedRoot,
+   scalarTerm value.«instance», digestTerm value.expectedRoot,
    BendSourceRepresentation.bytesTerm value.arguments]
 def nodeTerm (value : Node) : BTerm := constructor "WorldSurface.Node"
   [BendSourceRepresentation.natTerm value.tag, BendSourceRepresentation.natTerm value.slot,
@@ -92,7 +106,7 @@ def decodeIntent (term : BTerm) : Option Intent := do
   let [artifact, exportName, program, instanceTerm, expectedRoot, arguments] ←
     decodeConstructor "WorldSurface.Intent" term | none
   pure ⟨← decodeDigest artifact, ← decodeString exportName, ← decodeDigest program,
-    ← BendSourceRepresentation.decodeNat instanceTerm, ← decodeDigest expectedRoot,
+    ← decodeScalar instanceTerm, ← decodeDigest expectedRoot,
     ← BendSourceRepresentation.decodeBytes arguments⟩
 def decodeNode (term : BTerm) : Option Node := do
   let [tag, slot, label, children] ← decodeConstructor "WorldSurface.Node" term | none
@@ -143,8 +157,8 @@ def bounded (value : Surface) (observationCount : Nat) : Bool :=
     decimalBound intent.expectedRoot.value && !intent.exportName.isEmpty &&
     decide (intent.exportName.toUTF8.size ≤ 16384 ∧ intent.arguments.length ≤ 8192))
 
-/- ABI text is generated below from the actual sealed source emission. -/
-def requiredDeclarations : String := "Nat.arms : ∀x0 : <Zero, Succ> -> *2 =\n  λ{.Zero: <()>; λ{.Succ: Σx0 : Nat -> <()>; λ{}}}\n\nNat : *2 =\n  Σx0 : <Zero, Succ> -> (Nat.arms x0)\n\nList.q2.arms : ∀-x0 : *2 -> ∀x1 : <Nil, Con> -> *2 =\n  λ-x0 => λ{.Nil: <()>; λ{.Con: Σx1 : x0 -> Σx2 : (List.q2 -x0) -> <()>; λ{}}}\n\nList.q2 : ∀-x0 : *2 -> *2 =\n  λ-x0 => Σx1 : <Nil, Con> -> (List.q2.arms -x0 x1)\n\nWorldSurface.Intent.arms : ∀x0 : <WorldSurface.Intent> -> *2 =\n  λ{.WorldSurface.Intent: Σx0 : (List.q2 -Nat) -> Σx1 : (List.q2 -Nat) -> Σx2 : (List.q2 -Nat) -> Σx3 : Nat -> Σx4 : (List.q2 -Nat) -> Σx5 : (List.q2 -Nat) -> <()>; λ{}}\n\nWorldSurface.Intent : *2 =\n  Σx0 : <WorldSurface.Intent> -> (WorldSurface.Intent.arms x0)\n\nWorldSurface.Node.arms : ∀x0 : <WorldSurface.Node> -> *2 =\n  λ{.WorldSurface.Node: Σx0 : Nat -> Σx1 : Nat -> Σx2 : (List.q2 -Nat) -> Σx3 : (List.q2 -Nat) -> <()>; λ{}}\n\nWorldSurface.Node : *2 =\n  Σx0 : <WorldSurface.Node> -> (WorldSurface.Node.arms x0)\n\nWorldSurface.Surface.arms : ∀x0 : <WorldSurface.Surface> -> *2 =\n  λ{.WorldSurface.Surface: Σx0 : (List.q2 -Nat) -> Σx1 : (List.q2 -Nat) -> Σx2 : (List.q2 -WorldSurface.Node) -> Σx3 : Nat -> Σx4 : (List.q2 -WorldSurface.Intent) -> <()>; λ{}}\n\nWorldSurface.Surface : *2 =\n  Σx0 : <WorldSurface.Surface> -> (WorldSurface.Surface.arms x0)\n"
+/- Exact declarations extracted from actual sealed v2 WorldSurface emission. -/
+def requiredDeclarations : String := "Nat.arms : ∀x0 : <Zero, Succ> -> *2 =\n  λ{.Zero: <()>; λ{.Succ: Σx0 : Nat -> <()>; λ{}}}\n\nNat : *2 =\n  Σx0 : <Zero, Succ> -> (Nat.arms x0)\n\nList.q2.arms : ∀-x0 : *2 -> ∀x1 : <Nil, Con> -> *2 =\n  λ-x0 => λ{.Nil: <()>; λ{.Con: Σx1 : x0 -> Σx2 : (List.q2 -x0) -> <()>; λ{}}}\n\nList.q2 : ∀-x0 : *2 -> *2 =\n  λ-x0 => Σx1 : <Nil, Con> -> (List.q2.arms -x0 x1)\n\nWorldSurface.Intent.arms : ∀x0 : <WorldSurface.Intent> -> *2 =\n  λ{.WorldSurface.Intent: Σx0 : (List.q2 -Nat) -> Σx1 : (List.q2 -Nat) -> Σx2 : (List.q2 -Nat) -> Σx3 : (List.q2 -Nat) -> Σx4 : (List.q2 -Nat) -> Σx5 : (List.q2 -Nat) -> <()>; λ{}}\n\nWorldSurface.Intent : *2 =\n  Σx0 : <WorldSurface.Intent> -> (WorldSurface.Intent.arms x0)\n\nWorldSurface.Node.arms : ∀x0 : <WorldSurface.Node> -> *2 =\n  λ{.WorldSurface.Node: Σx0 : Nat -> Σx1 : Nat -> Σx2 : (List.q2 -Nat) -> Σx3 : (List.q2 -Nat) -> <()>; λ{}}\n\nWorldSurface.Node : *2 =\n  Σx0 : <WorldSurface.Node> -> (WorldSurface.Node.arms x0)\n\nWorldSurface.Surface.arms : ∀x0 : <WorldSurface.Surface> -> *2 =\n  λ{.WorldSurface.Surface: Σx0 : (List.q2 -Nat) -> Σx1 : (List.q2 -Nat) -> Σx2 : (List.q2 -WorldSurface.Node) -> Σx3 : Nat -> Σx4 : (List.q2 -WorldSurface.Intent) -> <()>; λ{}}\n\nWorldSurface.Surface : *2 =\n  Σx0 : <WorldSurface.Surface> -> (WorldSurface.Surface.arms x0)\n"
 
 def abiMatches (core : BendCoreAdmission.Checked) : Bool :=
   match Book.parse requiredDeclarations with

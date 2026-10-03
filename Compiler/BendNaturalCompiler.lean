@@ -61,13 +61,10 @@ theorem compile_exact {n p : Nat} {book : Book} {entry : String} {fuel : Nat}
       cases parsed : recover (n := n) fuel body with
       | none => simp [found, opened, parsed] at accepted
       | some expression =>
-        simp only [found, opened, parsed, Option.bind_some] at accepted
-        split at accepted
-        · rename_i admitted
-          have identity := Option.some.inj accepted
-          subst plan
-          simpa only [Bool.and_eq_true] using admitted
-        · contradiction
+        simp [found, opened, parsed] at accepted
+        obtain ⟨admitted, identity⟩ := accepted
+        subst plan
+        exact admitted
 
 theorem profile_exact {n p : Nat} {plan : Plan n}
     (accepted : profileAccepted (p := p) plan = true) :

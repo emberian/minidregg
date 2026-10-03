@@ -7,6 +7,7 @@ native Payload import and cannot authorize an effect or invent a funding token.
 import Compiler.BendCoreAdmission
 import Compiler.BendInvocationAdmission
 import Theory.BendLiveMachine
+import Theory.BendExecutionTrace
 import Compiler.BendSourceByteCodec
 
 namespace Minidregg.Compiler.BendRunCore
@@ -77,6 +78,14 @@ theorem actual_invocation_type {core : BendCoreAdmission.Checked} {initial outpu
 theorem source_bound {core : BendCoreAdmission.Checked} {initial outputType : BendTT.Term}
     {limits : Limits} (checked : Checked core initial outputType limits) :
     checked.sourceCount ≤ limits.sourceSteps := checked.countBound
+
+/-- The actual checked result has the admitted output type, by the general
+source preservation theorem over the retained full Eval trace. -/
+theorem result_typed {core : BendCoreAdmission.Checked} {initial outputType : BendTT.Term}
+    {limits : Limits} (checked : Checked core initial outputType limits) :
+    Typed core.book [] checked.result outputType :=
+  BendExecutionTrace.typed (book_check core.book core.checked).1
+    (book_check core.book core.checked).2.1 checked.admission.typed checked.trace
 
 /-- Byte-return profiles decode the whole exact typed source value. Structured
 Plan/Surface/Card profiles instead use their independently bound source-shape

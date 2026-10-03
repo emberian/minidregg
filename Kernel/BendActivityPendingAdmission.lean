@@ -1,11 +1,12 @@
-/- Source event64, first retained application publication phase. Both original
-application and controller operations undergo actual current native admission.
+/- Source event64, first retained application publication phase. The controller operation undergoes actual current native admission; the exact
+application remains an inert signed proposal until guarded dispatch admission.
 The complete source segment is independently checked against the retained heap;
 the exact pending successor consumes the Activity predecessor. This admits only
 the pending record, not the later application write or an external provider call.
 -/
 import Kernel.BendActivityIngress
 import Compiler.BendActivitySuspension
+import Compiler.BendActivityNonce
 
 namespace Minidregg.Kernel.BendActivityPendingAdmission
 open Minidregg.Theory
@@ -56,6 +57,20 @@ def nonce (action : Action) : Nat :=
   (Sp800185Cshake256.hash "DREGG/BEND/ACTIVITY-PENDING-ACTION/v1".toUTF8.toList
     (actionStream.encode {action with controlSignedBytes := []})).digest.value
 
+/-- This signature namespace is reserved by the explicit Activity receiving
+edition. Both signatures are excluded to avoid self-referential command bytes;
+the exact source pin, phase, bounds and response ABI remain signed. Ordinary
+entry points must reject it even through alternate native wrappers. -/
+def applicationNonce (pin : ContentControlFrame.Pin) (action : Action) : Nat :=
+  BendActivityNonce.make
+    (Sp800185Cshake256.hash "DREGG/BEND/ACTIVITY-APPLICATION-ACTION/v1".toUTF8.toList
+      (ContentControlFrame.pinStream.encode pin ++ actionStream.encode
+        {action with applicationSignedBytes := [], controlSignedBytes := []})).digest.value
+
+theorem applicationNonce_marked (pin : ContentControlFrame.Pin) (action : Action) :
+    BendActivityNonce.marked (applicationNonce pin action) = true :=
+  BendActivityNonce.make_marked _
+
 def overhead (action : Action) : Charge
   | .turnBytes => (encode action).length
   | .proofWork => action.program.checkerTicks + action.sourceLimits.checkerTicks +
@@ -63,6 +78,26 @@ def overhead (action : Action) : Charge
   | .memoryTouches => action.program.slots * (action.decodeTicks + 2)
   | .incidences | .storageBytes | .feeDebit | .networkBytes | .witnessBytes |
       .sideEffectCount | .leaseByteBlocks => 0
+
+/-- An inert exact signed proposal. Signature/current application authority is
+checked only at dispatch, once its pending-phase permit exists. This object has
+no AcceptedInvocation, no DataIntent and no permission to publish anything. -/
+structure Application (domain semantics : Digest) (bytes : List UInt8) where
+  private mk ::
+  command : Command
+  signed : SignedCommand
+  scope : bytes = signedBytes domain semantics signed
+  decoded : commandCodec.decode signed.commandBytes = some command
+
+def parseApplication (domain semantics : Digest) (bytes : List UInt8) :
+    Option (Application domain semantics bytes) := do
+  let some (actualDomain,actualSemantics,signed) := decodeSignedBytes bytes | none
+  if actualDomain != domain || actualSemantics != semantics then none else do
+    if scope : bytes = signedBytes domain semantics signed then
+      match decoded : commandCodec.decode signed.commandBytes with
+      | none => none
+      | some command => some ⟨command,signed,scope,decoded⟩
+    else none
 
 structure Admitted (config : Config) (opened : Opened config) where
   private mk ::
@@ -73,7 +108,7 @@ structure Admitted (config : Config) (opened : Opened config) where
   before : BendActivity.Record
   current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) = some before
   prepared : BendActivitySuspension.Prepared program before action.sourceLimits action.response action.signature
-  application : BendActivityIngress.Current config opened
+  application : Application config.deployment.domain config.profile.semantics action.applicationSignedBytes
   control : BendActivityIngress.Current config opened
   applicationBytes : action.applicationSignedBytes =
     signedBytes config.deployment.domain config.profile.semantics application.signed
@@ -84,8 +119,6 @@ structure Admitted (config : Config) (opened : Opened config) where
     (transactionId config.deployment.domain config.profile.semantics application.command)
   pending : BendActivitySuspension.PendingCandidate prepared pin.cell identity action.applicationSignedBytes
   applicationCommand : pending.command = application.command
-  appGate : config.sourceGate none opened.durable.snapshot application.intent = .ok ()
-  applicationReady : application.intent.preflight opened.durable.snapshot = .ok ()
   intent : DataIntent ResourceBirthCodec.rootBytes
   writesExact : intent.writes = control.intent.writes
   guardsExact : intent.readGuards = control.intent.readGuards
@@ -97,49 +130,44 @@ structure Admitted (config : Config) (opened : Opened config) where
   ready : intent.preflight opened.durable.snapshot = .ok ()
   otherFacets : config.otherFacetGate .activity opened.durable.snapshot intent = .ok ()
 
-/-- Actual current authorization precedes this constructor. The application is
-not installed here, so its later current admission can still refuse; no promise
-of budget availability or external success is manufactured by preparation. -/
+/-- Only the controller transition is authorized and installed here. The
+source Plan must match the inert exact application proposal; its current law,
+signature, full usage and funding are checked at guarded publication, not guessed
+in advance. No application budget reservation is manufactured by preparation. -/
 def construct {config : Config} {opened : Opened config}
     (action : Action) (pin : ContentControlFrame.Pin) (pinned : config.activityControl = some pin)
     (program : BendActivityProgram.Prepared action.program)
-    (application control : BendActivityIngress.Current config opened) : Option (Admitted config opened) := do
-  if control.command.subject != pin.owner || control.command.nonce != nonce action ||
+    (application : Application config.deployment.domain config.profile.semantics action.applicationSignedBytes)
+    (control : BendActivityIngress.Current config opened) : Option (Admitted config opened) := do
+  if application.command.nonce != applicationNonce pin action ||
+      control.command.subject != pin.owner || control.command.nonce != nonce action ||
       control.command.targets.length != 1 ||
       !control.command.targets.all (fun target => decide (target.kind = .object ∧ target.target = pin.cell.value)) then none else do
-    if applicationBytes : action.applicationSignedBytes = signedBytes config.deployment.domain config.profile.semantics application.signed then
-     if controlBytes : action.controlSignedBytes = signedBytes config.deployment.domain config.profile.semantics control.signed then
-      if appGate : config.sourceGate none opened.durable.snapshot application.intent = .ok () then
-       if applicationReady : application.intent.preflight opened.durable.snapshot = .ok () then
-        match current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) with
-        | none => none
-        | some before =>
-         if before.checkpoint.generation != action.generation || before.ordinal != action.ordinal then none else do
-          let bytes := encode action
-          let base := control.intent
-          let intent : DataIntent ResourceBirthCodec.rootBytes :=
-            {base with nullifiers := BendActivityControl.claim ResourceBirthCodec.rootBytes pin before :: base.nullifiers,
-              exactCharge := base.exactCharge + overhead action,
-              event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
-          if ready : intent.preflight opened.durable.snapshot = .ok () then
-           if otherFacets : config.otherFacetGate .activity opened.durable.snapshot intent = .ok () then
-            let prepared ← BendActivitySuspension.prepare program before action.sourceLimits action.response action.signature action.decodeTicks
-            let identity := digestStream.encode (transactionId config.deployment.domain config.profile.semantics application.command)
-            let pending ← BendActivitySuspension.pendingCandidate prepared pin.cell identity action.applicationSignedBytes
-            if applicationCommand : pending.command = application.command then
-             if post : ∃ write ∈ intent.writes, write.cellId = pin.cell ∧
-                 ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode pending.record) then
-              some ⟨action,pin,pinned,program,before,current,prepared,application,control,
-                applicationBytes,controlBytes,identity,rfl,pending,applicationCommand,appGate,applicationReady,
-                intent,rfl,rfl,rfl,rfl,by simp [intent],post,ready,otherFacets⟩
-             else none
-            else none
-           else none
+   if controlBytes : action.controlSignedBytes = signedBytes config.deployment.domain config.profile.semantics control.signed then
+    match current : BendActivityControl.readRecord pin (opened.durable.snapshot.canonicalBytes pin.cell) with
+    | none => none
+    | some before =>
+      if before.checkpoint.generation != action.generation || before.ordinal != action.ordinal then none else do
+       let bytes := encode action
+       let base := control.intent
+       let intent : DataIntent ResourceBirthCodec.rootBytes :=
+         {base with nullifiers := BendActivityControl.claim ResourceBirthCodec.rootBytes pin before :: base.nullifiers, exactCharge := base.exactCharge + overhead action, event := ⟨64,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
+       if ready : intent.preflight opened.durable.snapshot = .ok () then
+        if otherFacets : config.otherFacetGate .activity opened.durable.snapshot intent = .ok () then
+         let prepared ← BendActivitySuspension.prepare program before action.sourceLimits action.response action.signature action.decodeTicks
+         let identity := digestStream.encode (transactionId config.deployment.domain config.profile.semantics application.command)
+         let pending ← BendActivitySuspension.pendingCandidate prepared pin.cell identity action.applicationSignedBytes
+         if applicationCommand : pending.command = application.command then
+          if post : ∃ write ∈ intent.writes, write.cellId = pin.cell ∧
+              ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode pending.record) then
+            some ⟨action,pin,pinned,program,before,current,prepared,application,control,
+              application.scope,controlBytes,identity,rfl,pending,applicationCommand,
+              intent,rfl,rfl,rfl,rfl,by simp [intent],post,ready,otherFacets⟩
           else none
+         else none
+        else none
        else none
-      else none
-     else none
-    else none
+   else none
 
 /-- Reuses the actual native signer/current-controller admission at this loaded
 prefix. The returned Current is not fabricated from signature-shaped bytes. -/
@@ -170,7 +198,8 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8)
   if pinned : config.activityControl = some pin then
     let .ok control ← readCurrent config opened action.controlSignedBytes | return .error "pending control authority refused"
     if control.command.subject != pin.owner || control.command.nonce != nonce action then return .error "pending signed action mismatch"
-    let .ok application ← readCurrent config opened action.applicationSignedBytes | return .error "pending application authority refused"
+    let some application := parseApplication config.deployment.domain config.profile.semantics action.applicationSignedBytes
+      | return .error "pending application proposal malformed"
     let some program := BendActivityProgram.prepare action.program | return .error "pending source publication refused"
     let some admitted := construct action pin pinned program application control | return .error "pending source/phase/funding refused"
     return .ok admitted
@@ -228,6 +257,8 @@ def receive (config : Config) (opened : Opened config) (bytes : List UInt8) : IO
           | .exact _ receipt => return .appended admitted receipt
           | .ordinary result => return .ordinary result
 
+#assert_axioms parseApplication
+#assert_axioms applicationNonce_marked
 #assert_axioms transport_other_facets
 #assert_axioms receive
 #assert_axioms construct

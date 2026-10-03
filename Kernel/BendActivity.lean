@@ -92,8 +92,7 @@ def advance (limits : Limits) (library : Library) (ticks : Nat) (before : Record
     Option Record :=
   match before.pending with
   | some _ => none
-  | none => some {before with ordinal := before.ordinal + 1,
-      checkpoint := {before.checkpoint with state := run limits library ticks before.checkpoint.state}}
+  | none => some {before with ordinal := before.ordinal + 1, checkpoint := {before.checkpoint with state := run limits library ticks before.checkpoint.state}}
 
 theorem advance_actual_run {limits : Limits} {library : Library} {ticks : Nat}
     {before after : Record} (accepted : advance limits library ticks before = some after) :
@@ -117,10 +116,7 @@ def resumeProposal (limits : Limits) (library : Library) (before : Record)
     match BendClosureResponse.resume limits library.program pending.response before.checkpoint.state bit with
     | .error _ => none
     | .ok resumed =>
-      some {before with ordinal := before.ordinal + 1, segment := before.segment + 1,
-        priorSourceSteps := before.priorSourceSteps + before.checkpoint.state.sourceSteps,
-        checkpoint := {before.checkpoint with state := resumed.state},
-        pending := none, lastOutcome := some outcome}
+      some {before with ordinal := before.ordinal + 1, segment := before.segment + 1, priorSourceSteps := before.priorSourceSteps + before.checkpoint.state.sourceSteps, checkpoint := {before.checkpoint with state := resumed.state}, pending := none, lastOutcome := some outcome}
 
 /-- Every pure tick successor strictly consumes its predecessor ordinal. This
 arithmetic fact supports, but does not replace, the native compare-and-swap. -/

@@ -464,6 +464,11 @@ fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
+        // Failed START recovery stays on the owner-private socket. This checks
+        // framing only; Lean authenticates the original claim, custodian report
+        // and current signed management law before any durable reconciliation.
+        [206 | 207, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
         // Read-only signed stream authority checks remain operator-private.
@@ -1707,6 +1712,26 @@ pub(crate) fn effective_uid() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_start_recovery_is_private_and_requires_complete_frames() {
+        for operation in [206u8, 207] {
+            let valid = [operation, 1, 0, 0, 0, b'P', b'S'];
+            assert!(super::allowed_operator_operation(&valid));
+            assert!(!super::allowed_operation(&valid, false));
+            assert!(!super::allowed_operator_operation(&[operation]));
+            assert!(!super::allowed_operator_operation(&[operation, 1, 0, 0, 0, b'P']));
+        }
+        for operation in [208u8, 209] {
+            let valid = [operation, b'I'];
+            assert!(super::allowed_operator_operation(&valid));
+            assert!(!super::allowed_operation(&valid, false));
+            assert!(!super::allowed_operator_operation(&[operation]));
+            let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
+            oversized[0] = operation;
+            assert!(!super::allowed_operator_operation(&oversized));
+        }
+    }
+
     use super::*;
     use std::thread;
 

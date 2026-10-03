@@ -54,6 +54,10 @@ def captured (path : String) : IO Unit := do
   IO.println s!"CAPTURED-CODE {path}: definitions={book.length} original_rows={original.program.code.size} indexed_rows={optimized.program.code.size} names={optimized.program.names.size}"
 
 def main (args : List String) : IO Unit := do
+  if !args.isEmpty then
+    for path in args do captured path
+    IO.println "BEND INDEXED CAPTURED COMPILATION PASS"
+    return
   for source in constructors do
     let _ ← validate [] source
   let duplicatedNames : Book :=

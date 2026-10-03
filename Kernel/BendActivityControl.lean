@@ -191,9 +191,9 @@ theorem installed_claim_refuses_new_admission {rootBytes : List UInt8 → Digest
     (sameClaim : claim rootBytes pin checked.before ∈ later.nullifiers) :
     later.preflight (DataSnapshot.install snapshot intent) ≠ .ok () := by
   apply DataIntent.consumed_nullifier_refused _ later _ sameClaim
-  change (DurableCommitProtocol.install snapshot.model intent.erase).consumed
+  change (DurableCommitProtocol.Snapshot.install snapshot.model intent.erase).consumed
     (claim rootBytes pin checked.before) = true
-  exact DurableCommitProtocol.install_consumes snapshot.model intent.erase _ checked.carries
+  exact DurableCommitProtocol.Snapshot.install_consumes snapshot.model intent.erase _ checked.carries
 
 #assert_axioms checked_birth_actual
 #assert_axioms checked_advance_actual

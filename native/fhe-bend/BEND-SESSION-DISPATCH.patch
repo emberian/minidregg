@@ -1,0 +1,42 @@
+--- a/Host/Main.lean
++++ b/Host/Main.lean
+@@ -1,3 +1,4 @@
++import Host.BendSessionDriverJson
+ /-
+ Compiled Mini host. The operator selects one config at startup. Binary calls
+ and replies use Lean's strict source-owned codecs; this process never handles
+@@ -5641,6 +5642,14 @@
+       let settings ← loadSettings configPath
+       let config := settings.config
+       match command, rest with
++      | "bend-session", files =>
++          IO.ofExcept (← BendSessionDriverJson.runFiles config configPath files)
++          pure 0
++      | "bend-session-signing-check", [kind,planPath,outputPath] =>
++          let bytes ← BendSessionDriverJson.read planPath
++          let inspection ← IO.ofExcept (← BendSessionDriver.signingInspection config kind bytes)
++          BendSessionDriverJson.writeFresh outputPath inspection.compress.toUTF8.toList
++          pure 0
+       | "carry-plan", [requestPath, outputPath] =>
+           let operator ← carryOperator settings
+           let request ← readCarryJson requestPath
+--- a/native/resource-client/src/main.rs
++++ b/native/resource-client/src/main.rs
+@@ -1,3 +1,4 @@
++mod bend_session;
+ use ed25519_dalek::{Signer, SigningKey};
+ use serde_json::{json, Value};
+ use sha2::Digest;
+@@ -4413,6 +4414,12 @@
+ fn main() -> ExitCode {
+     #[cfg(unix)]
+     let parsed = match env::args_os().nth(1) {
++        Some(command) if command == OsStr::new("bend-session-sign") => {
++            env::args_os().skip(2)
++                .map(|value| value.into_string().map_err(|_| "Bend session arguments must be UTF-8".to_owned()))
++                .collect::<Result<Vec<_>>>()
++                .and_then(|arguments| bend_session::run(&arguments))
++        }
+         Some(command) if command == OsStr::new("fleet-sign") => {
+             fleet_sign::run(env::args_os().skip(2).collect())
+         }

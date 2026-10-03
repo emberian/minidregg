@@ -2,12 +2,14 @@
 All observations, writes and release receipts come from BendSessionDriver's
 actual current native receiver path. Raw JSON IDs are not authority tokens. -/
 import Host.BendSessionDriver
+import Host.BendSessionCursor
 
 namespace Minidregg.Host.BendSessionDriverJson
 open Lean
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Kernel
@@ -41,6 +43,7 @@ structure Config where
   custody : Custody
   nativeConfigPath : String
   physicalSnapshotRoot : String
+  cursorPath : String
 
 def parseConfig (raw : String) : Except String Config := do
   unless raw.toUTF8.size ≤ 2000000 do throw "native session config capacity"
@@ -50,7 +53,7 @@ def parseConfig (raw : String) : Except String Config := do
     "releaseCapability","audience","generation","purpose","returnName","predecessor","capacity",
     "compilerSHA256","physicalBinary","physicalBinarySHA256","physicalTransformerSHA256",
     "custodyClient","custodyClientSHA256","nativeHost","nativeHostSHA256","nativeConfigPath",
-    "authoritySeedPath","privateRoot","physicalSnapshotRoot"]
+    "authoritySeedPath","privateRoot","physicalSnapshotRoot","cursorPath"]
   unless (← string j "schema") == "dregg.fhe-bend.native-session.v1" do
     throw "unsupported native session schema"
   let capacity ← natList j "capacity"
@@ -78,7 +81,7 @@ def parseConfig (raw : String) : Except String Config := do
     nativeHost := ← string j "nativeHost", nativeHostSHA256 := ← sha j "nativeHostSHA256"
     nativeConfigPath := nativeConfigPath, authoritySeedPath := ← string j "authoritySeedPath"
     privateRoot := ← string j "privateRoot" }
-  pure ⟨session,custody,nativeConfigPath,← string j "physicalSnapshotRoot"⟩
+  pure ⟨session,custody,nativeConfigPath,← string j "physicalSnapshotRoot",← string j "cursorPath"⟩
 
 structure KeyHandle where
   resource : Nat
@@ -126,7 +129,7 @@ def writeFresh (path : String) (bytes : List UInt8) : IO Unit := do
   let file : System.FilePath := path
   if ← file.pathExists then throw (IO.userError "Bend driver output already exists")
   IO.FS.writeBinFile file ⟨bytes.toArray⟩
-def load (path : String) : IO Config :=
+def load (path : String) : IO Config := do
   IO.ofExcept (parseConfig (String.fromUTF8! ⟨(← read path).toArray⟩))
 
 /-- Readback after actual registration selects current stored canonical bytes.
@@ -138,7 +141,7 @@ def keyHandleCurrent (config : NativeHost.Config) (s : Session)
   let .present packed := opened.directory.directory.slots s.keyResource
     | return .error "key readback resource absent"
   match packed with
-  | ⟨.content materialized⟩ =>
+  | ⟨.content, materialized⟩ =>
       let some selected := BendKeyRegistration.lookup materialized.logical ⟨BendKeyRecord.keyId registered⟩
         | return .error "key canonical atom absent on readback"
       if BendKeyRecord.encode selected == BendKeyRecord.encode registered then
@@ -152,7 +155,7 @@ def resultRootCurrent (config : NativeHost.Config) (s : Session)
   let .present packed := opened.directory.directory.slots s.resultResource
     | return .error "result readback resource absent"
   match packed with
-  | ⟨.content materialized⟩ =>
+  | ⟨.content, materialized⟩ =>
       let some selected := BendOpaqueResultReceiver.lookup materialized.logical
           ⟨BendInvocation.resultId candidate⟩
         | return .error "result exact atom absent on readback"
@@ -160,6 +163,122 @@ def resultRootCurrent (config : NativeHost.Config) (s : Session)
         return .ok materialized.root
       else return .error "result exact readback payload differs"
   | _ => return .error "result readback resource kind differs"
+
+/-- An interruption after syncing a staging file but before rename retains
+that exact original attempt too. Its decoder/actual native gate still decide;
+existence of either local file is never journal admission. -/
+def retainedExists (path : String) : IO Bool := do
+  let file : System.FilePath := path
+  let pending : System.FilePath := path ++ ".pending"
+  return (← file.pathExists) || (← pending.pathExists)
+def readRetained (path : String) : IO (List UInt8) := do
+  let file : System.FilePath := path
+  let pending : System.FilePath := path ++ ".pending"
+  if ← pending.pathExists then read pending.toString else read path
+
+def selectedSession (config : NativeHost.Config) (selected : Config)
+    (initial : Session) (signer : Signer) : IO (Except String Session) := do
+  let path : System.FilePath := selected.cursorPath
+  unless ← retainedExists selected.cursorPath do return .ok initial
+  let some cursor := BendSessionCursor.codec.decode (← readRetained selected.cursorPath)
+    | return .error "noncanonical retained native session cursor"
+  let .ok admitted ← BendSessionCursor.admit config initial signer cursor
+    | return .error "retained predecessor current read/history admission refused"
+  return .ok (BendSessionCursor.nextSession initial admitted)
+
+/-- Linux hosted deployment: fsync the exact retained bytes before rename,
+then the containing directory. A sync failure produces no native mutation. -/
+def writeRetained (path : String) (bytes : List UInt8) : IO Unit := do
+  unless bytes.length ≤ 2000000 do throw (IO.userError "retained session journal capacity")
+  let file : System.FilePath := path
+  let temporary : System.FilePath := path ++ ".pending"
+  if ← temporary.pathExists then
+    unless (← read temporary.toString) == bytes do
+      throw (IO.userError "different pending retention requires original receipt reconciliation")
+  else IO.FS.writeBinFile temporary ⟨bytes.toArray⟩
+  let syncFile ← IO.Process.output { cmd := "sync", args := #["-f",temporary.toString] }
+  unless syncFile.exitCode == 0 do throw (IO.userError "retained file sync refused")
+  IO.FS.rename temporary file
+  let parent := file.parent.getD "."
+  let syncDirectory ← IO.Process.output { cmd := "sync", args := #["-f",parent.toString] }
+  unless syncDirectory.exitCode == 0 do throw (IO.userError "retained directory sync refused")
+
+def retainCursor (selected : Config) (stored : Stored) (released : Released) : IO Unit := do
+  let cursor ← IO.ofExcept (BendSessionCursor.retain stored released)
+  writeRetained selected.cursorPath (BendSessionCursor.codec.encode cursor)
+
+def attemptPath (selected : Config) : String := selected.cursorPath ++ ".attempt"
+
+def writeReleased (path : String) (bytes : List UInt8) : IO Unit := do
+  let file : System.FilePath := path
+  if ← file.pathExists then
+    unless (← read path) == bytes do throw (IO.userError "existing released bytes differ")
+  else writeFresh path bytes
+
+/-- This branch precedes cursor advancement. Reconcile the ORIGINAL signed
+storage and release identities, rather than minting a new invocation on retry. -/
+def recoverAttempt (config : NativeHost.Config) (selected : Config) (initial : Session)
+    (signer : Signer) (source compiler key request completion : List UInt8) :
+    IO (Except String (Option Released)) := do
+  let path : System.FilePath := attemptPath selected
+  unless ← retainedExists (attemptPath selected) do return .ok none
+  let some attempt := BendSessionCursor.attemptCodec.decode (← readRetained path.toString)
+    | return .error "noncanonical original session attempt"
+  if attempt.publication.candidate.result.bytes != completion then
+    let cursorPath : System.FilePath := selected.cursorPath
+    unless ← retainedExists selected.cursorPath do
+      return .error "incomplete prior attempt must reconcile before another invocation"
+    let some cursor := BendSessionCursor.codec.decode (← readRetained selected.cursorPath)
+      | return .error "noncanonical prior cursor"
+    unless BendInvocation.encode cursor.publication.candidate ==
+        BendInvocation.encode attempt.publication.candidate do
+      return .error "retained attempt has no completed matching predecessor"
+    return .ok none
+  unless attempt.source == source && attempt.compiler == compiler &&
+      attempt.key == key && attempt.request == request &&
+      attempt.publication.subject == initial.subject &&
+      attempt.publication.sourceResource == initial.sourceResource &&
+      attempt.publication.sourceAtom == initial.sourceAtom &&
+      attempt.publication.resultResource == initial.resultResource &&
+      attempt.publication.nonce ≥ 2 do
+    return .error "retry differs from exact retained original source/key/request"
+  let candidate := attempt.publication.candidate
+  let session : Session := { initial with
+    nonce := attempt.publication.nonce - 2
+    generation := candidate.result.generation
+    predecessor := candidate.execution.predecessor
+    sourceRoot := attempt.publication.sourceRoot
+    resultRoot := attempt.publication.resultRoot }
+  unless candidate.definition.artifact == session.sourceAtom.digest &&
+      candidate.result.keyEpoch == session.keyAtom.digest &&
+      candidate.result.recipient == session.subject &&
+      candidate.result.audience == session.audience do
+    return .error "retained original candidate is outside this source/key/audience"
+  if let some ingress := attempt.release then
+    unless ingress.spec.subject == session.subject &&
+        ingress.spec.nonce == session.nonce + 3 &&
+        ingress.spec.source.resource == session.resultResource &&
+        ingress.spec.destination.recipient == session.subject &&
+        ingress.spec.destination.keyEpoch == session.keyAtom.digest &&
+        ingress.spec.destination.audience == session.audience &&
+        ingress.spec.destination.generation == session.generation &&
+        ingress.spec.destination.purpose == session.purpose &&
+        ingress.spec.capability == session.releaseCapability do
+      return .error "retry release destination/current purpose differs"
+  let .ok stored ← resumeStorage config attempt.publication attempt.signed
+    | return .error "original storage receipt remains refused/uncertain"
+  let .ok released ← (match attempt.release with
+    | some ingress => resumeRelease config candidate ingress
+    | none => do
+      let .ok root ← resultRootCurrent config session candidate
+        | return .error "original stored result current readback unavailable"
+      releaseExact config session signer root candidate (fun ingress => do
+        writeRetained (attemptPath selected)
+          (BendSessionCursor.attemptCodec.encode {attempt with release := some ingress})
+        return .ok ()))
+    | return .error "original current release remains refused/uncertain"
+  retainCursor selected stored released
+  return .ok (some released)
 
 /-- Called by existing source-matched Host.Main using its Settings.config.
 The operator config path is the SAME one passed to custody's native Host.
@@ -170,25 +289,46 @@ def runFiles (config : NativeHost.Config) (nativeConfigPath : String)
   | ["register-key",sourcePath,materialPath,sessionPath,keyPath] =>
       let selected ← load sessionPath
       unless selected.nativeConfigPath == nativeConfigPath do return .error "native operator config path differs"
-      let some source := BendWorldProgramCodec.decode (← read sourcePath)
+      let sourceBytes ← read sourcePath
+      let some source := BendWorldProgramCodec.decode sourceBytes
         | return .error "noncanonical source artifact"
       let material ← IO.ofExcept (BendOwnerManifestJson.parse
         (String.fromUTF8! ⟨(← read materialPath).toArray⟩))
       let .ok signer ← clientSigner selected.custody | return .error "native custody signer unavailable"
-      let .ok (registered,receipt) ← registerKey config selected.session signer source material
-        | return .error "native key registration refused/uncertain"
+      let attemptFile : System.FilePath := keyPath ++ ".attempt"
+      let .ok (registered,receipt) ← (if ← retainedExists attemptFile.toString then do
+        let some original := BendSessionCursor.keyAttemptCodec.decode (← readRetained attemptFile.toString)
+          | return .error "noncanonical original key registration"
+        let expected : BendKeyRecord.Registered :=
+          ⟨selected.session.subject,BendWorldProgramCodec.artifactId source,
+            BendInvocation.methodId source,material⟩
+        unless original.source == sourceBytes &&
+            BendKeyRecord.encode original.publication.registered == BendKeyRecord.encode expected &&
+            original.publication.subject == selected.session.subject &&
+            original.publication.nonce == selected.session.nonce &&
+            original.publication.sourceResource == selected.session.sourceResource &&
+            original.publication.sourceAtom == selected.session.sourceAtom &&
+            original.publication.keyResource == selected.session.keyResource do
+          return .error "retry differs from original authored key registration"
+        resumeKey config original.publication original.signed
+      else registerKey config selected.session signer source material (fun publication signed => do
+        writeRetained attemptFile.toString
+          (BendSessionCursor.keyAttemptCodec.encode ⟨publication,signed,sourceBytes⟩)
+        return .ok ()))
+        | return .error "native original key registration refused/uncertain"
       let .ok handle ← keyHandleCurrent config selected.session registered receipt
         | return .error "native key registration readback refused"
-      writeFresh keyPath (keyJson handle).compress.toUTF8.toList
+      writeReleased keyPath (keyJson handle).compress.toUTF8.toList
       return .ok ()
   | ["prepare-context",sourcePath,compilerPath,keyPath,sessionPath,contextPath] =>
       let selected ← load sessionPath
       unless selected.nativeConfigPath == nativeConfigPath do return .error "native operator config path differs"
       let handle ← IO.ofExcept (parseKey (String.fromUTF8! ⟨(← read keyPath).toArray⟩))
-      let session ← IO.ofExcept (withKey selected.session handle)
+      let initial ← IO.ofExcept (withKey selected.session handle)
+      let .ok signer ← clientSigner selected.custody | return .error "native custody signer unavailable"
+      let session ← IO.ofExcept (← selectedSession config selected initial signer)
       let .ok pin ← fileSHA256 compilerPath | return .error "compiler pin unavailable"
       unless pin == session.compilerSHA256 do return .error "compiler differs from independently admitted deployment pin"
-      let .ok signer ← clientSigner selected.custody | return .error "native custody signer unavailable"
       let .ok prepared ← prepareContext config session signer (← read sourcePath)
           (BendKeyRecord.encode handle.registered)
         | return .error "current source/key/result preparation refused"
@@ -198,22 +338,46 @@ def runFiles (config : NativeHost.Config) (nativeConfigPath : String)
       let selected ← load sessionPath
       unless selected.nativeConfigPath == nativeConfigPath do return .error "native operator config path differs"
       let handle ← IO.ofExcept (parseKey (String.fromUTF8! ⟨(← read keyPath).toArray⟩))
-      let session ← IO.ofExcept (withKey selected.session handle)
-      let sourceBytes ← read sourcePath
-      let keyBytes := BendKeyRecord.encode handle.registered
+      let initial ← IO.ofExcept (withKey selected.session handle)
       let .ok signer ← clientSigner selected.custody | return .error "native custody signer unavailable"
+      let sourceBytes ← read sourcePath
+      let compilerBytes ← read compilerPath
+      let keyBytes := BendKeyRecord.encode handle.registered
+      let requestBytes ← read requestPath
+      let completionBytes ← read completionPath
+      let .ok recovered ← recoverAttempt config selected initial signer
+          sourceBytes compilerBytes keyBytes requestBytes completionBytes
+        | return .error "original receipt reconciliation refused/uncertain"
+      if let some released := recovered then
+        writeReleased releasedPath released.bytes
+        return .ok ()
+      let session ← IO.ofExcept (← selectedSession config selected initial signer)
       let .ok prepared ← prepareContext config session signer sourceBytes keyBytes
         | return .error "current commit context unavailable"
       let .ok physical ← checkPhysical session prepared selected.physicalSnapshotRoot
-          (← read compilerPath) (← read requestPath) (← read completionPath)
+          compilerBytes requestBytes completionBytes
         | return .error "independent pinned ciphertext replay/context binding refused"
-      let .ok (candidate,_storageReceipt) ← commitChecked config session signer sourceBytes keyBytes prepared physical
+      let retained ← IO.mkRef (none : Option BendSessionCursor.Attempt)
+      let .ok stored ← commitChecked config session signer sourceBytes keyBytes prepared physical
+          (fun publication signed => do
+            let attempt : BendSessionCursor.Attempt :=
+              ⟨publication,signed,sourceBytes,compilerBytes,keyBytes,requestBytes,none⟩
+            writeRetained (attemptPath selected) (BendSessionCursor.attemptCodec.encode attempt)
+            retained.set (some attempt)
+            return .ok ())
         | return .error "current opaque result custody refused/uncertain"
+      let candidate := stored.publication.candidate
       let .ok resultRoot ← resultRootCurrent config session candidate
         | return .error "current opaque result readback unavailable"
-      let .ok (_releaseReceipt,exactBytes) ← releaseExact config session signer resultRoot candidate
+      let some attempt ← retained.get | return .error "original stored command retention absent"
+      let .ok released ← releaseExact config session signer resultRoot candidate
+          (fun ingress => do
+            writeRetained (attemptPath selected)
+              (BendSessionCursor.attemptCodec.encode {attempt with release := some ingress})
+            return .ok ())
         | return .error "current exact return release refused/uncertain"
-      writeFresh releasedPath exactBytes
+      retainCursor selected stored released
+      writeReleased releasedPath released.bytes
       return .ok ()
   | _ => return .error "expected register-key / prepare-context / commit-release exact file arguments"
 

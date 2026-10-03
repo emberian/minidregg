@@ -39,6 +39,7 @@ import Kernel.ApplicationLifecycleCompletionCore
 import Kernel.ApplicationLifecycleBeginV3Admission
 import Kernel.ApplicationLifecycleClaimV3Core
 import Kernel.ApplicationLifecycleCompletionV2Core
+import Kernel.ApplicationFailedStartRecoveryCore
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
@@ -460,6 +461,23 @@ def CompletionAt.intent {config : Config} {opened : Opened config}
     (admitted : CompletionAt config opened ingress) : DataIntent rootBytes :=
   ApplicationLifecycleCompletionCore.intent admitted.conditional
 
+/-- Failed START reconciliation is tied to a claim retained by this same
+chronological native walk, rather than a decoded receipt from an arbitrary prefix. -/
+structure FailedStartRecoveryAt (config : Config) (opened : Opened config)
+    (ingress : ApplicationFailedStartRecoveryIngress.Ingress) where
+  private mk ::
+  prior : PriorClaimV3 config
+  conditional : ApplicationFailedStartRecoveryAdmission.Candidate config opened ingress
+  indexExact : prior.index = conditional.historical.index
+  ingressExact : prior.ingress = ingress.source.originalClaim
+  recordExact : prior.record = conditional.historical.selected.record
+  present : opened.durable.image.accepted[prior.index]? = some prior.record
+
+def FailedStartRecoveryAt.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (admitted : FailedStartRecoveryAt config opened ingress) : DataIntent rootBytes :=
+  ApplicationFailedStartRecoveryCore.intent admitted.conditional
+
 inductive CompletionV2Running (config : Config) (opened : Opened config)
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) : Type where
   | other (notStop : ingress.source.originalBegin.base.source.kind ≠ .stop)
@@ -867,6 +885,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | applicationLifecycleClaimV3 {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
       (admitted : ClaimAtV3 config opened ingress) :
       NativeAdmission config opened admitted.intent
+  | applicationFailedStartRecovery
+      {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+      (admitted : FailedStartRecoveryAt config opened ingress) :
+      NativeAdmission config opened admitted.intent
   | applicationLifecycleCompletionV2
       {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
       (admitted : CompletionAtV2 config opened ingress) :
@@ -1124,6 +1146,18 @@ def ClaimAtV3.toDerived {config : Config} {opened : Opened config}
 theorem ClaimAtV3.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
     (admitted : ClaimAtV3 config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
+
+def FailedStartRecoveryAt.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (admitted : FailedStartRecoveryAt config opened ingress) : Derived config opened :=
+  { intent := admitted.intent
+    admission := .applicationFailedStartRecovery admitted
+    issue := none, begin := none, beginV2 := none, claimV2 := none }
+
+theorem FailedStartRecoveryAt.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (admitted : FailedStartRecoveryAt config opened ingress) :
     admitted.toDerived.intent = admitted.intent := rfl
 
 def CompletionAtV2.toDerived {config : Config} {opened : Opened config}
@@ -1600,6 +1634,30 @@ private def admitCompletionAt (config : Config) (opened : Opened config)
     else return .error "completion original claim ingress differs from admitted history"
   else return .error "completion original claim index differs from admitted history"
 
+private def admitFailedStartRecoveryAt (config : Config) (opened : Opened config)
+    (claims : List (PriorClaimV3 config))
+    (ingress : ApplicationFailedStartRecoveryIngress.Ingress) :
+    IO (Except String (FailedStartRecoveryAt config opened ingress)) := do
+  let conditional ← match ← ApplicationFailedStartRecoveryAdmission.prepareConditional
+      config opened ingress with
+    | .error detail => return .error detail
+    | .ok candidate => pure candidate
+  let some prior := claims.find? (fun prior => prior.index == conditional.historical.index)
+    | return .error "failed START original claim absent from admitted history"
+  if indexExact : prior.index = conditional.historical.index then
+    if ingressExact : prior.ingress = ingress.source.originalClaim then
+      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
+          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
+        have recordExact : prior.record = conditional.historical.selected.record :=
+          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+        have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+          rw [indexExact, recordExact]
+          exact conditional.historical.selected.atIndex
+        return .ok ⟨prior, conditional, indexExact, ingressExact, recordExact, present⟩
+      else return .error "failed START original claim full record differs"
+    else return .error "failed START original claim ingress differs"
+  else return .error "failed START original claim index differs"
+
 private def admitCompletionV2At (config : Config) (opened : Opened config)
     (claims : List (PriorClaimV3 config))
     (running : List (PriorRunningV3 config))
@@ -1889,6 +1947,10 @@ private def derive (config : Config) (opened : Opened config)
     | .error _ => return .error "historical selected source publication admission refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := ApplicationFailedStartRecoveryIngress.codec.decode bytes then
+    match ← admitFailedStartRecoveryAt config opened claimsV3 ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
   if let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes then
     match ← admitCompletionV2At config opened claimsV3 runningV3 ingress with
     | .error detail => return .error detail
@@ -2723,6 +2785,12 @@ def admitClaimV3Verified {config : Config} {target : Durable}
     (ingress : ApplicationLifecycleClaimV3Ingress.Ingress) :
     IO (Except String (ClaimAtV3 config old.opened ingress)) :=
   admitClaimV3At config old.opened old.beginsV3 ingress
+
+def admitFailedStartRecoveryVerified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationFailedStartRecoveryIngress.Ingress) :
+    IO (Except String (FailedStartRecoveryAt config old.opened ingress)) :=
+  admitFailedStartRecoveryAt config old.opened old.claimsV3 ingress
 
 def admitCompletionV2Verified {config : Config} {target : Durable}
     (old : Verified config target)

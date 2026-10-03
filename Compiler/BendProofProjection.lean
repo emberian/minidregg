@@ -115,8 +115,9 @@ def expectedContext (policy : Policy) (artifact : BendWorldProgramCodec.Artifact
     result.execution.tariff, result.execution.capacity⟩
 
 /-- Pure producer. `inputBytes` must be the exact admitted canonical input
-encoding, supplied by Kernel.BendInvocationInput; accepting arbitrary bytes
-here does not mint its checked provenance. No private trace count is exposed. -/
+encoding derived from the actual BendNativeRun.Checked observation vector
+and source arguments; accepting arbitrary bytes here does not mint its checked
+provenance. No private trace count is exposed. -/
 def project (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
     (result : BendInvocation.Result) (inputBytes : List UInt8) (coins : Coins) : Public :=
   let context := expectedContext policy artifact result

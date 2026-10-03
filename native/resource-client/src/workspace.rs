@@ -253,6 +253,12 @@ fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<(
     File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
 }
 
+/// Immutable exact retries and expected-prior durable replacements. The
+/// existing per-record CAS lock closes interruption after rename and fsync.
+pub(crate) fn publish_retained_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+    atomic_json(path, value, expected)
+}
+
 pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     bounded_json_limit(path, MAX_RECORD)
 }

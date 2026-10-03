@@ -1,0 +1,16 @@
+edition ObjectiveBend 1
+
+record Pair:
+  costly: Nat
+  twice: Nat
+
+def work(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case 1n+pred: work(pred) + work(pred)
+
+extension Fields(self: Pair, super: Pair) -> Pair:
+  {costly: work(8n), twice: self.costly + self.costly}
+
+def result() -> Nat:
+  fix(Fields, {costly: 0n, twice: 0n}).twice

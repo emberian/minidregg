@@ -1,0 +1,23 @@
+edition ObjectiveBend 1
+
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+
+spec BaseReview for Review:
+  def review(value: Nat) -> Nat:
+    value + 1
+
+spec TwiceReview for Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+  law twice_distinct(value: Nat): self.twice(value) == self.review(self.review(value))
+
+spec AugmentedReview for Review:
+  requires review(value: Nat) -> Nat
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1
+
+def reviewTarget(inherited: Review) -> Review:
+  fix(compose(BaseReview, TwiceReview, AugmentedReview), inherited)

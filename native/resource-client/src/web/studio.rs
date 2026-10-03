@@ -50,6 +50,11 @@ fn render(site: &Site, value: &Value, message: &str) -> Page {
     body.push_str("</ol></section>");
     body.push_str(&composition_controls(site, value, &manifest));
     body.push_str(&format!("<details><summary>Edit package composition</summary><form method=post action=\"{base}/manifest\"><input type=hidden name=revision value=\"{}\"><label>Ordered modules, imports and entry<textarea name=manifest required maxlength=65536 rows=18>{}</textarea></label><button>Save composition draft</button></form></details><section><h2>Preview and publish</h2><p>Save your module edits before capturing source. Each capture opens the saved documents with your current access and keeps their exact revisions.</p><form method=post action=\"{base}/snapshot\"><button>Capture saved source for preview</button></form><p data-preview-state=unavailable>Compiler preview is unavailable. Your source documents and composition draft remain editable.</p><button disabled>Publish source</button> <button disabled>Instantiate prototype</button> <button disabled>Evolve instance</button><p>These actions become available with a prepared native operation and its exact source preview.</p></section>",escape(value["revision"].as_str().unwrap_or("")),escape(&serde_json::to_string_pretty(&value["manifest"]).unwrap_or_default())));
+    let prototype = value
+        .get("prototype")
+        .cloned()
+        .unwrap_or_else(studio::empty_declaration);
+    body.push_str(&format!("<section><h2>Prototype requirements and provisions</h2><p>Declare ordered parent identities, required final-self or prior-super selectors, and source entries provided by this module. Reflection and linking will check these declarations against your captured source.</p><form method=post action=\"{base}/prototype\"><input type=hidden name=revision value=\"{}\"><label>Partial declaration<textarea name=declaration required rows=18 maxlength=65536>{}</textarea></label><button>Save prototype declaration</button></form><p>Publication and construction remain unavailable until the actual emitted Book and canonical Partial preview are produced.</p></section>",escape(value["revision"].as_str().unwrap_or("")),escape(&serde_json::to_string_pretty(&prototype).unwrap_or_default())));
     if let Some(editors) = value["editors"].as_array() {
         if !editors.is_empty() {
             body.push_str("<section><h2>Retained source drafts</h2><ul>");
@@ -143,7 +148,7 @@ pub(super) fn history(site: &Site, id: &str, revision: &str) -> Page {
                     )
                 })
                 .unwrap_or_default();
-            Page {status:200,title:"Composition history".into(),stamp:Stamp::None,body:format!("<p>Composition revision {}. These references do not reopen historical document text.</p><pre>{}</pre><p>{previous} | <a href=\"{}/studio/{}\">Current package</a></p><form method=post action=\"{}/studio/{}/fork\"><input type=hidden name=revision value=\"{}\"><label>Fork title<input name=title required></label><button>Fork this composition revision</button></form>",escape(revision),escape(&serde_json::to_string_pretty(&value["manifest"]).unwrap_or_default()),site.base(),escape(id),site.base(),escape(id),escape(revision))}
+            Page {status:200,title:"Composition history".into(),stamp:Stamp::None,body:format!("<p>Composition revision {}. These references do not reopen historical document text.</p><pre>{}</pre><p>{previous} | <a href=\"{}/studio/{}\">Current package</a></p><form method=post action=\"{}/studio/{}/fork\"><input type=hidden name=revision value=\"{}\"><label>Fork title<input name=title required></label><button>Fork this composition revision</button></form>",escape(revision),escape(&serde_json::to_string_pretty(&json!({"manifest":value["manifest"],"prototype":value["prototype"]})).unwrap_or_default()),site.base(),escape(id),site.base(),escape(id),escape(revision))}
         }
     }
 }
@@ -285,19 +290,20 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
         }
         return match studio::snapshot(&site.root,&site.workspace,id){Ok(_)=>match studio::load(&site.root,&site.workspace,id){Ok(v)=>render(site,&v,"Saved source captured. Compiler preview is unavailable; this has not published or installed code."),Err(e)=>failure_page("Source capture",&e)},Err(e)=>failure_page("Source capture",&e)};
     }
-    if action != "manifest"
-        || fields.len() != 2
-        || !fields.contains_key("revision")
-        || !fields.contains_key("manifest")
-    {
+    let input_key = match action {
+        "manifest" => "manifest",
+        "prototype" => "declaration",
+        _ => return simple(400, "Source workspace", "unknown authoring operation"),
+    };
+    if fields.len() != 2 || !fields.contains_key("revision") || !fields.contains_key(input_key) {
         return simple(
             400,
             "Source workspace",
-            "expected revision and composition manifest",
+            "expected composition revision and authored draft",
         );
     }
     let revision = fields.remove("revision").unwrap();
-    let raw = fields.remove("manifest").unwrap();
+    let raw = fields.remove(input_key).unwrap();
     let submission =
         match studio::retain_submission(&site.root, &site.workspace, id, &revision, &raw) {
             Ok(s) => s,
@@ -306,7 +312,11 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
     let result = serde_json::from_str::<Value>(&raw)
         .map_err(|e| format!("Invalid manifest: {e}"))
         .and_then(|manifest| {
-            studio::save_manifest(&site.root, &site.workspace, id, &revision, &manifest)
+            if action == "prototype" {
+                studio::save_declaration(&site.root, &site.workspace, id, &revision, &manifest)
+            } else {
+                studio::save_manifest(&site.root, &site.workspace, id, &revision, &manifest)
+            }
         });
     match result {
         Ok(v) => render(

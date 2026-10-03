@@ -260,4 +260,72 @@ mod tests {
         assert!(n.admitted.is_empty());
         assert!(n.vaba.external_valid().is_empty());
     }
+    #[test]
+    fn equivocating_selector_and_duplicate_faulty_echo_do_not_split_acs() {
+        let mut ns: Vec<_> = (0..4).map(|i| Acs::new(i, 4, 1, &g()).unwrap()).collect();
+        let mut q = VecDeque::new();
+        for n in &mut ns[1..] {
+            for j in [0, 1, 2, 3] {
+                q.extend(n.validate(j).unwrap().into_iter().map(|p| (n.me, p)));
+            }
+            q.extend(
+                n.dealer(0, &coeff(n.me, 0))
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (n.me, p)),
+            );
+        }
+        for to in 1..4 {
+            let s: Set = (0..4).filter(|i| *i != (to - 1) as u16).collect();
+            for phase in [
+                PhaseMessage::Init(set_bytes(&s)),
+                PhaseMessage::Echo(set_bytes(&s)),
+                PhaseMessage::Ready(set_bytes(&s)),
+            ] {
+                for _ in 0..3 {
+                    q.push_back((
+                        0,
+                        Send {
+                            to,
+                            message: Message {
+                                context: ns[to as usize].context,
+                                body: Body::Selector(0, phase.clone()),
+                            },
+                        },
+                    ));
+                }
+            }
+        }
+        let mut steps = 0;
+        while let Some((from, p)) = q.pop_back() {
+            steps += 1;
+            assert!(steps < 200000);
+            if p.to == 0 {
+                continue;
+            }
+            let to = p.to;
+            match ns[to as usize].receive(from, p.message.clone()) {
+                Ok(out) => {
+                    q.extend(out.into_iter().map(|p| (to, p)));
+                    for v in ns[to as usize].entropy_needed() {
+                        q.extend(
+                            ns[to as usize]
+                                .dealer(v, &coeff(to, v))
+                                .unwrap()
+                                .into_iter()
+                                .map(|p| (to, p)),
+                        );
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => q.push_front((from, p)),
+                Err(e) => panic!("{e}"),
+            }
+        }
+        let expected = ns[1].output.clone().expect("actual ACS termination");
+        assert_eq!(expected.len(), 3);
+        for n in &ns[1..] {
+            assert_eq!(n.output.as_ref(), Some(&expected));
+            assert!(n.selectors[0].output.is_none());
+        }
+    }
 }

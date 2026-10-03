@@ -54,9 +54,42 @@ storage command/event/receipt, exact release ingress/event/receipt, matching
 opaque result key/artifact/audience, and current signed native predecessor read.
 A private admitted cursor derives next nonce from accepted predecessor identity
 and increments actual predecessor generation. It does not upgrade honest input
-domain/noise assumptions. Canonical persisted cursor codec and driver retention/
-uncertain reconciliation integration remain to be authored; no repeated native
+domain/noise assumptions. Canonical persisted cursor codec and driver retention are authored.
+Write-ahead original-command/ingress retention and uncertainty reconciliation
+remain to be completed; no repeated native
 run is qualified. Compiler.BendArtifactBinding producer is now owned by compiler
 lane: actual Book/entry/body/expression/DAG/profile and planId must be derived
 from source, not a chosen external artifact SHA. Driver binding consumption
 awaits that concrete API and source profile domain agreement.
+
+Latest source: distinct stage nonces N/N+1/N+2/N+3; actual current prepare
+precedes initial and successor ciphertext encryption. No native run is qualified.
+Receiving and release-authoring producers passed; consumer four-module qualification
+is now allocated. Source/compiler artifact binding and shared replay/Host cohort
+remain required. Cursor retention does not yet cover process interruption between
+accepted storage, release and local cursor write.
+
+Current receiving source delta: Linux sync -f write-ahead exact signed native
+key registration/storage and canonical release ingress before native mutation;
+retained source/compiler/key/request bytes; retry before advancing cursor uses
+original signed commands and ingress. Exact native gate confirms original
+journal receipt or refuses. A different attempt cannot bypass unfinished
+predecessor reconciliation. Released bytes output is idempotent only if equal.
+All new retry source is uncompiled. Driver4 earlier closure passed, but no
+governed execution/recovery test yet. Host profile output bound must equal
+524288 and completion bytes fit it; sourceTerm data bound remains separate.
+Snapshot directories are fresh per physical replay and resident keys stay
+within owner process. Shared Host/client/replay integration remains pending.
+
+Predecessor receiving source now obtains exact prior Result through the actual
+admitted current content read; source/key/audience/generation must match.
+Physical input bytes equal to predecessor output retain exact cumulative depth
+and parameter/transformer/key identity. Initial declared inherited depth and
+untracked inherited inputs refuse. Fresh-only Nat rejects reused predecessor
+ciphertexts even when their structural depth is zero. This does not certify
+noise, same-opening, bitness or source computation; ordinary opaque custody
+cannot establish those premises. New source remains uncompiled.
+
+Exact named Host/Main + resource-client dispatch patch is staged as
+BEND-SESSION-DISPATCH.patch against readonly common hashes; captain merges it
+with matched next ReturnRelease replay/profile. No shared writes by this owner.

@@ -7,8 +7,11 @@ settled field from 0 to 1, and construct independent recipient return slots.
 They do not accept a client-supplied transfer list.
 
 The separate `UniformProRata` / `CanonicalUniformSettlement` DrEX rule remains
-a different authored program. This wrapper does not relabel that rule as the
-single-seller auction.
+a different authored program. The separate DrEXSettlementPlan.settle wrapper invokes that exact rule and
+uses the same transfer resolver and native adapter. Its return payload prefixes
+a side byte (Bid=0, Ask=1) before reservation/units/price/payment/unspent; its
+source profile and schema remain distinct. The source demonstration computes
+price 2 and retains collected debits before pool distributions.
 
 ## Authenticated input
 
@@ -44,7 +47,14 @@ equal that prepared batch exactly, including operation order. All full account
 consents, position coverage, funding, current signatures, capabilities and laws
 remain in the native command and receiver. The Plan contains only the agreed
 application projection: a single money consent with the derived batch and no
-auxiliary positions/funding fields, then the ordered room scalar transition.
+auxiliary positions/funding fields, and the ordered room scalar transition. Carrier placement follows its actual
+command index; a funded carrier may be last. This does not reorder the source
+scalar phase list or permit an additional batch.
+
+The BookRef root is the original durable physical root supplied by the money
+token. Ordinary source scalar Ref roots are logical payload roots; their read
+guards are derived from the same loaded lifecycle image and use its physical
+root. These digest roles are not interchangeable.
 
 Scalar binding reuses `BendScalarPlanBytesAdapter` and the existing current-cell
 prefix guards. No account balance is a scalar object write. Returns equal the

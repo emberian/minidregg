@@ -123,6 +123,79 @@ impl Manifest {
                 "imports":m.imports.iter().map(|i| json!({"alias":i.alias,"module":i.module.to_string()})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
 }
+/// Authored fields of ObjectiveBendPartialAuthor.partial-input.v1. Package and
+/// partialCorePath are supplied later by the actual captured source producer.
+/// This validates the bounded shape; reflection/linking determine its meaning.
+pub(crate) fn declaration(value: &Value) -> Result<Value> {
+    exact(
+        value,
+        &["directParents", "ancestorOrder", "required", "provided"],
+    )?;
+    for key in ["directParents", "ancestorOrder"] {
+        let ids = value[key]
+            .as_array()
+            .ok_or("prototype parents must be ordered arrays")?;
+        if ids.len() > 256 {
+            return Err("prototype parent bound exceeded".into());
+        }
+        for id in ids {
+            let text = id
+                .as_str()
+                .ok_or("prototype identity must be a decimal string")?;
+            field_decimal(text, "prototype identity")?;
+            if text.len() > 80 {
+                return Err("prototype identity exceeds its bound".into());
+            }
+        }
+    }
+    for key in ["required", "provided"] {
+        let entries = value[key]
+            .as_array()
+            .ok_or("prototype entries must be arrays")?;
+        if entries.len() > 256 {
+            return Err("prototype entry bound exceeded".into());
+        }
+        for entry in entries {
+            if key == "required" {
+                exact(entry, &["scope", "selector", "typeEntry"])?;
+                if !matches!(member(entry, "scope")?, "finalSelf" | "priorSuper") {
+                    return Err("unknown prototype requirement scope".into());
+                }
+                label(entry, "selector", false)?;
+                label(entry, "typeEntry", false)?;
+            } else {
+                exact(entry, &["selector", "entry", "captures"])?;
+                label(entry, "selector", false)?;
+                label(entry, "entry", false)?;
+                let captures = entry["captures"]
+                    .as_array()
+                    .ok_or("prototype captures must be source entry names")?;
+                if captures.len() > 256 {
+                    return Err("prototype capture bound exceeded".into());
+                }
+                for capture in captures {
+                    let text = capture
+                        .as_str()
+                        .ok_or("prototype capture must name a source entry")?;
+                    if text.is_empty() || text.len() > 16384 || text.contains('\0') {
+                        return Err("invalid source capture entry".into());
+                    }
+                }
+            }
+        }
+    }
+    if serde_json::to_vec_pretty(value)
+        .map_err(|e| e.to_string())?
+        .len()
+        > MAX_MANIFEST
+    {
+        return Err("prototype declaration exceeds its bound".into());
+    }
+    Ok(value.clone())
+}
+pub(crate) fn empty_declaration() -> Value {
+    json!({"directParents":[],"ancestorOrder":[],"required":[],"provided":[]})
+}
 fn token() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -164,6 +237,9 @@ pub(crate) fn load(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
         return Err("source workspace does not belong to this member".into());
     }
     Manifest::parse(&value["manifest"])?;
+    if let Some(prototype) = value.get("prototype") {
+        declaration(prototype)?;
+    }
     Ok(value)
 }
 pub(crate) fn create(
@@ -185,7 +261,7 @@ pub(crate) fn create(
     let dir = directory(root, &id)?;
     make_private_dir(&dir)?;
     let value = json!({"type":TYPE,"id":id,"subject":member(workspace,"subject")?,"title":title,
-        "revision":"0","manifest":manifest.json(),"editors":[],"snapshots":[]});
+        "revision":"0","manifest":manifest.json(),"prototype":empty_declaration(),"editors":[],"snapshots":[]});
     save_state(&dir.join("draft.json"), &value, None)?;
     Ok(value)
 }
@@ -201,25 +277,50 @@ pub(crate) fn save_manifest(
         return Err("this package composition changed; your submitted manifest is retained in this page, copy or reconcile it with the current workspace".into());
     }
     let manifest = Manifest::parse(manifest)?;
+    let mut value = old.clone();
+    value["manifest"] = manifest.json();
+    save_composition(root, id, revision, &old, value)
+}
+fn save_composition(
+    root: &Path,
+    id: &str,
+    revision: &str,
+    old: &Value,
+    mut value: Value,
+) -> Result<Value> {
     let generation = revision
         .parse::<u64>()
         .map_err(|_| "invalid source workspace revision")?
         .checked_add(1)
         .ok_or("source workspace revision exhausted")?;
-    let mut value = old.clone();
-    value["manifest"] = manifest.json();
     value["revision"] = json!(generation.to_string());
     let dir = directory(root, id)?;
-    let history = dir.join(format!("manifest-{generation}.json"));
+    let history = dir.join(format!("composition-{generation}.json"));
+    let prior = json!({"manifest":old["manifest"],"prototype":old.get("prototype").cloned().unwrap_or_else(empty_declaration)});
     if history.exists() {
-        if bounded_json_limit(&history, MAX_MANIFEST as u64)? != old["manifest"] {
+        if bounded_json_limit(&history, MAX_PROJECT as u64)? != prior {
             return Err("composition history differs; retain and reconcile this draft".into());
         }
     } else {
-        atomic_json(&history, &old["manifest"], None)?;
+        atomic_json(&history, &prior, None)?;
     }
-    save_state(&dir.join("draft.json"), &value, Some(&old))?;
+    save_state(&dir.join("draft.json"), &value, Some(old))?;
     Ok(value)
+}
+pub(crate) fn save_declaration(
+    root: &Path,
+    workspace: &Value,
+    id: &str,
+    revision: &str,
+    prototype: &Value,
+) -> Result<Value> {
+    let old = load(root, workspace, id)?;
+    if member(&old, "revision")? != revision {
+        return Err("composition changed; your authored declaration remains retained".into());
+    }
+    let mut value = old.clone();
+    value["prototype"] = declaration(prototype)?;
+    save_composition(root, id, revision, &old, value)
 }
 /// Apply a bounded composition operation to the member's selected revision.
 /// Source document identities are retained; changing imports creates no rights.
@@ -302,16 +403,22 @@ pub(crate) fn manifest_version(
     if selected > generation {
         return Err("composition revision is absent".into());
     }
-    let manifest = if selected == generation {
-        current["manifest"].clone()
+    let composition = if selected == generation {
+        json!({"manifest":current["manifest"],"prototype":current.get("prototype").cloned().unwrap_or_else(empty_declaration)})
     } else {
-        bounded_json_limit(
-            &directory(root, id)?.join(format!("manifest-{}.json", selected + 1)),
-            MAX_MANIFEST as u64,
-        )?
+        let directory = directory(root, id)?;
+        let path = directory.join(format!("composition-{}.json", selected + 1));
+        if path.exists() {
+            bounded_json_limit(&path, MAX_PROJECT as u64)?
+        } else {
+            json!({"manifest":bounded_json_limit(&directory.join(format!("manifest-{}.json",selected+1)),MAX_MANIFEST as u64)?,"prototype":empty_declaration()})
+        }
     };
-    Manifest::parse(&manifest)?;
-    Ok(json!({"package":id,"revision":revision,"title":current["title"],"manifest":manifest}))
+    Manifest::parse(&composition["manifest"])?;
+    declaration(&composition["prototype"])?;
+    Ok(
+        json!({"package":id,"revision":revision,"title":current["title"],"manifest":composition["manifest"],"prototype":composition["prototype"]}),
+    )
 }
 /// Fork only the composition. Both workspaces continue to address ordinary
 /// documents; every source opening and edit uses current document authority.
@@ -326,6 +433,7 @@ pub(crate) fn fork(
     let created = create(root, workspace, title, &selected["manifest"])?;
     let mut value = created.clone();
     value["forkOf"] = json!({"package":id,"revision":revision});
+    value["prototype"] = selected["prototype"].clone();
     save_state(
         &directory(root, member(&value, "id")?)?.join("draft.json"),
         &value,
@@ -462,7 +570,7 @@ pub(crate) fn snapshot(root: &Path, workspace: &Value, id: &str) -> Result<Value
             .map_err(|_| "source is not UTF8; keep this module in the byte editor")?;
         opened.push((bytes,json!({"name":module.name,"reference":module.reference,"cellRoot":read.view["cell"]["root"],"height":challenge["height"],"authorityRoot":challenge["authorityRoot"],"readAttempt":read.attempt,"referenceBinding":reference(root,&module.reference)?})));
     }
-    if load(root, workspace, id)?["manifest"] != old["manifest"] {
+    if load(root, workspace, id)?["revision"] != old["revision"] {
         return Err("package composition changed during source capture".into());
     }
     let snapshot_id = token()?;
@@ -482,7 +590,7 @@ pub(crate) fn snapshot(root: &Path, workspace: &Value, id: &str) -> Result<Value
         &dir.join("package-input.json"),
         &serde_json::to_vec(&input).map_err(|e| e.to_string())?,
     )?;
-    let capture = json!({"type":"mini-studio-source-capture-v1","id":snapshot_id,"package":id,"subject":member(workspace,"subject")?,"revision":old["revision"],"entryModule":manifest.entry_module.to_string(),"entryDefinition":manifest.entry_definition,"sources":sources,"coordinate":coordinate,"producer":"unavailable","publication":"unavailable"});
+    let capture = json!({"type":"mini-studio-source-capture-v1","id":snapshot_id,"package":id,"subject":member(workspace,"subject")?,"revision":old["revision"],"entryModule":manifest.entry_module.to_string(),"entryDefinition":manifest.entry_definition,"prototype":old.get("prototype").cloned().unwrap_or_else(empty_declaration),"sources":sources,"coordinate":coordinate,"producer":"unavailable","publication":"unavailable"});
     atomic_json(&dir.join("capture.json"), &capture, None)?;
     let mut value = old.clone();
     value["snapshots"]

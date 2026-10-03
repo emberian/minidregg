@@ -21,13 +21,7 @@ fn unhex(value: &str, width: usize) -> Result<Vec<u8>> {
     {
         return Err("invalid authentication encoding".into());
     }
-    (0..value.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&value[i..i + 2], 16)
-                .map_err(|_| "invalid authentication encoding".into())
-        })
-        .collect()
+    crate::decode_hex(value)
 }
 fn ready(fd: i32, events: i16, end: Instant) -> Result<()> {
     loop {

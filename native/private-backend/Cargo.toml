@@ -7,4 +7,8 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 sha2 = "=0.10.9"
 libc = "=0.2.189"
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["non-fips"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+ring = "=0.17.14"
+
 [workspace]

@@ -36,7 +36,9 @@ theorem source_leaf {n : Nat} (expr : Expr n) :
   cases expr with
   | input i => rfl
   | literal value => cases value <;> rfl
-  | add left right => cases right.source (fun i => .Var i.val) <;> rfl
+  | add left right =>
+    simp only [Expr.source]
+    cases right.source (fun i => .Var i.val) <;> rfl
 
 private theorem env_lookup (values : List Nat) (i : Fin values.length) :
     Env.sub (values.map natTerm) i.val = natTerm values[i] := by
@@ -88,7 +90,10 @@ theorem entry_step {n : Nat} (book : Book) (entry : String) (expr : Expr n)
     congr 1
     funext i
     exact env_ofFn inputs i
-  simpa [definition, lower, List.map_reverse, substitution] using walked
+  simp only [List.length_map, List.length_reverse, List.length_ofFn, List.map_reverse,
+    List.reverse_reverse, List.append_nil] at walked
+  rw [substitution] at walked
+  simpa only [definition, lower, List.map_reverse] using walked
 
 /-- The complete actual selected method trace includes its one Eval.call.
 No native gate census is used as a semantic meter. -/

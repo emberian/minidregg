@@ -138,8 +138,9 @@ source image plus declared physical inventories and restores a new private
 quarantine file through the native helper. Reopening independently pins the
 retained inventory and re-audits the exact whole source cut. Existing files
 refuse overwrite. It does not claim physical inventory completeness or activate
-a worker. These new Lean paths are uncompiled pending the captain's assigned
-check; the existing native helper remains the exact five-pass r1 binary.
+a worker. The source-capsule probe and inspection paths passed scoped Lean
+checks; the probe has not yet run on a complete operator capsule. The native
+helper remains the exact five-pass r1 binary.
 
 `Compiler/PortableJointCustodyIO.lean` consumes the actual opaque joint Pending
 receipt: current source reservation, exact physical append/readback and checked
@@ -164,17 +165,19 @@ and exact readback. Stale/forked or newer local pins refuse; a lost-reply retry
 uses same-bytes CAS/fsync rather than treating equality alone as durability.
 Bootstrap identity/key/first endpoint are independently authenticated and never
 learned from a restored manifest. This is a public client anchor, not a second
-source journal or authority plane. The producer and consumer remain uncompiled
-WIP until their exact assigned native/source check joins.
+source journal or authority plane. The archive ACK and participant-held pin paths passed scoped Lean checks.
+Their complete operator-capsule/native participant scenario is not yet run.
 
 Actual Bend custody join at 10:31UTC captured the qualified 329-byte cut-7
 checkpoint (SHA256 `2075ce3b1638d89dcc4b2577d1e1aeb39307e36ea184228e94b5b4b0feaf87be`),
 checked bounded retrieval and byte-exact restore, then repaired an independently
 empty receiving archive and restored the same checkpoint. Existing output and
 forged chunk refused; original producer bytes stayed intact. This confirms the
-physical continuation artifact join. Running the source continuation consumer
-on repaired bytes is tracked separately; no Activity or successor activation
-is implied. Private runtime evidence remains outside the public source packet.
+physical continuation artifact join. A later separate process resumed the
+repaired cut-7 checkpoint through the existing qualified Bend probe and passed
+exact state/result/context/generation/canonical/capacity checks. This is an
+actual archive-repair-to-computation continuation; no Activity or successor
+activation is implied. Private runtime evidence remains outside the public source packet.
 
 
 The source-capsule probe's `check-restored` now additionally reads the actual
@@ -193,4 +196,43 @@ Current source control selects governed home cells and required physical invento
 
 Plan consent binds owner/renter, independently held acknowledged history, source/control, exact old/new private generation descriptors, one destination credential, original request/prepared context/provider custody and every retained liability. Preparation preserves exact liability status; reconciliation selects one exact liability, never all similarly named calls. Fresh work requires current destination phase and authoritative reconciliation of all old uncertainty. Source epoch/key revocation cannot erase previously learned shares/plaintext or retract old external dispatches. Actual private backend must provide qualified malicious resharing/privateRecovery into the new holder descriptor before activation. SPK STOP/completion and sandbox/config custody must join as real producers; pause-for-capture is insufficient.
 
-Actual native agreement consumer has now passed with the pinned archive helper as storageBinary, including real TCP/MLDSA, lost durable CAS reply/readback/restart/stale retry and selective COMMIT witness recovery. Whole-memory Lean replay and eventual logical network ancestry bounds remain open. Core portable4 Lean and axiom gates passed after parser/proof repairs on Persvati; new governed and participant/probe consumers are not yet qualified.
+Actual native agreement consumer has now passed with the pinned archive helper as storageBinary, including real TCP/MLDSA, lost durable CAS reply/readback/restart/stale retry and selective COMMIT witness recovery. Whole-memory Lean replay and eventual logical network ancestry bounds remain open. Core portable4 Lean and axiom gates passed after parser/proof repairs on Persvati; governed phase/control/codec/frame and actual dual-consent admission passed
+scoped Lean checks. The final transfer receiver awaits a coherent current native
+cohort; live/replay registration, actual participant/capsule runtime use and
+physical/private stage qualification remain unfinished.
+
+The current source law also permits a later transfer after release only with all old uncertainty settled, and permits old-host resumption only before fencing with the original host/private generation/descriptor plus an actual resumption producer and settled liabilities. Named general laws constrain epoch progression, retained request custody, governed cell membership, one successor of one current source phase, and generation changes only after fencing. SourceCutIO.Advanced reconstructs both retained cuts and checks the exact canonical accepted-record prefix and old obligation retention; height alone is insufficient. The native source consumer requires the actual captured cut and independently persisted authenticated participant ACK. ACK creation pins and snapshots the configured signature verifier. Native live/replay facet registration and physical/private stage producers remain required.
+
+## One continuing home across a governed move
+
+This is the receiving scenario to construct and run, not an achieved migration claim. A shared multiuser home contains its signed documents, modules/current references/notes/audiences, resident work, service/SPK registrations and private computation custody. Workshop is one consumer of this home, not its inventory definition.
+
+1. Members edit source documents through ordinary current authority. A resident prepares an Activity projection and dispatches one ordinary request. Its original `mini-context-bundle-v1`, operation identity, request/call/attempt and provider custody stay immutable after dispatch. Lose the provider reply at this point. Retain the existing controller providerHold/residentCompletion/residentDelivery and native resident_requests artifacts; do not regenerate inputs from later documents.
+2. Current owner and renter select one destination and old/new exact private descriptors/generations. Native `PortableHomeSourceCutIO.capture` re-admits the entire source through `NativeHostSession.startWalked`, reads full current control and captures all source-selected inventories plus the exact control wrapper. Missing obligations refuse. Archive readback precedes `acknowledgeRetained`; its pinned Ed25519 verifier and independently provisioned participant key authenticate only the public endpoint. `PortableParticipantPinIO.hold` durably CASes the independent participant pin before returning `Held`.
+3. Both ordinary current `DeclaredResourceController.AcceptedInvocation`s bind the same exact control write/proposal. `PortableHomeTransferAdmission.prepare` checks actual admitted subject/key, predecessor/control root, epoch, complete charge/guards/nullifiers and retained calls. `PortableHomeTransferReceiver.applyPrepared` additionally requires opaque captured custody and Held ACK, reopens/rechecks them and uses the existing actual source CAS. An agreed world must supply current-context `GenericSimplexIO.VerifiedCommit` over the whole canonical source prefix. Event65 is the reserved source facet; live/replay registration and source-governed control bootstrap must precede this runtime use.
+4. Preparation freezes ordinary writes to current source-selected home cells and retains maintenance funding. The actual Activity/worker dispatch gate must also stop new work; this write gate alone does not stop an external process. The service manager must quiesce the exact instance and capture a same-cut complete inventory, including packages/volumes/controller roots and sandbox launcher/config/AppArmor/receipts. `SourceCutIO.Advanced` freshly reads both immutable cuts and checks exact accepted-record prefix plus all old obligations; increased height is insufficient. It still does not construct process quiescence.
+5. The private backend constructs qualified successor custody with a new approved holder roster/threshold, exact full generation/descriptor, preserved recursive WAL/outbox, pool/row spent anchors and old liabilities. This requires actual malicious private recovery/resharing/new pads. Archiving old shares or relabeling a descriptor does not qualify it; historical cumulative corruption and learned plaintext remain relevant. This producer is currently unconstructed.
+6. Current source revokes old credentials for future generation operations and the native SPK lifecycle STOP/completion plus retained generation journal fences the exact old host/instance. Pause-for-backup is insufficient. Old uncertain dispatch obligations retain their original generation and reconciliation authority; a new source epoch cannot retract an old external call. Permanent native fencing and destination sealed custody producers are still required.
+7. Destination activation consumes the actual current source permit, qualified new custody and old-host fencing. Repair/restore leaves bytes quarantined until then. For Bend, restore the exact canonical machine state/code/context/bounds/generation using the qualified continuation codec, then resume only under a current source Activity permit; generic process RAM capture is not implied.
+8. The destination reconciles the SAME original uncertain provider call against authoritative outcome custody. A retry cannot become a fresh operation or silently use new prepared documents. If no authoritative outcome/idempotency reconciliation exists, keep it held and refuse fresh work. When its outcome is recorded, preserve that exact request/context identity and update only authoritative status.
+9. The destination independently acknowledges the retained endpoint before old custody release. Fresh work requires current destination phase plus every old call settled. Only then prepare a new Activity against current signed source documents/authority; carry old generation/pool/outbox history as required obligations. A later consented transfer may start from released state only after all uncertainty is settled.
+
+Crash classification is part of the source protocol. An uncertain source append requires exact current source readback, not a guessed success. Before fencing, abort and old-host resumption require the original host/private generation/descriptor, real resumption permission and all old calls settled. After fencing, recovery may return only to the same selected fenced successor with qualified retained custody and rechecked native fence. After activation, recovery must name the same destination/current credential/new generation and recheck its retained activation receipt; it cannot reactivate the old host. Neither recovery branch drops pending requests or mints new private material from a phase flag. Actual replay/producer joins must qualify these conditional phase laws before deployment.
+
+Destination start has a durable source `activationPending` phase and nonempty exact activationRequest before external dispatch. Current source CAS/epoch selects this attempt, then actual native destination completion may commit destinationActive. Lost reply/recovery retains the same request identity; it cannot mint a new START under a fresh label. Worker fresh-work permission remains disabled while activation is pending. Actual native dispatcher must consume this source-issued current permit and preserve the existing SPK claim/operation journal; this law does not itself launch a process.
+
+
+## Shared inspection boundary
+
+`Compiler/ReceiptContinuityIO` holds the existing public hash-only continuity
+producer and parser. `Compiler/PortableContinuationInspection` holds the whole
+source genesis-walk capture and repair inspection. Host modules export the prior
+APIs for their CLI consumers; CarriedSegmentIO and PortableHomeSourceCutIO use
+the lower libraries directly. These seven extraction paths passed scoped Lean
+checks without changing source admission or phase laws. A current native
+receiving cohort is still required for the final transfer receiver.
+
+The joint Pending custody adapter passed its first scoped Lean and named axiom
+checks against the current qualified receiver cohort. It preserves exact full
+source images, control pin/reservation, historical consensus context and checked
+commit; an actual native pending-receipt capture remains a separate runtime join.

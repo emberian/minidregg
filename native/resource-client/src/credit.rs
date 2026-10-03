@@ -352,10 +352,16 @@ fn window_note(root: &Path, name: &str) -> PathBuf {
 /// is still a guest reference.
 fn window(root: &Path, name: &str) -> Result<Option<(String, String)>> {
     let note = window_note(root, name);
-    if !note.exists() {
+    let reference = workspace::reference(root, name)?;
+    if !note.exists() && reference.get("creditWindow").is_none() {
         return Ok(None);
     }
-    let value = workspace::bounded_json(&note)?;
+    let value = match reference.get("creditWindow") {
+        // The successor carries its own note in the same atomic reference
+        // switch, so a crash before publishing the display note is recoverable.
+        Some(value) if value.get("capability") == reference.get("operationCapability") => value.clone(),
+        _ => workspace::bounded_json(&note)?,
+    };
     Ok(Some((
         workspace::member(&value, "capability")?.to_owned(),
         workspace::member(&value, "notAfter")?.to_owned(),
@@ -443,32 +449,49 @@ fn adopt_window(root: &Path, ws: &Value, name: &str, room: &Room, inbox: &Path) 
         bytes.push(b'\n');
         workspace::private_file(&file(&guest), &bytes)?;
     }
-    let replaced = root.join("credit").join("replaced");
-    fs::create_dir_all(&replaced).map_err(|error| error.to_string())?;
-    let replaced = replaced.join(format!("{}-{}.json", workspace::ref_file(name), workspace::random_nonce()?));
-    fs::rename(file(name), &replaced).map_err(|error| error.to_string())?;
+    let previous = workspace::reference(root, name)?;
     let value = workspace::bounded_json(&source)?;
-    workspace::import(
-        root,
-        ImportInput {
-            name,
-            kind: "object",
-            target: &room.target,
-            observe: &capability,
-            operation: Some(&capability),
-            control: None,
-            provenance: Some(&source),
-            room: (value.get("room") == Some(&json!(true))).then_some("member"),
-        },
-    )?;
-    let note = window_note(root, name);
-    if note.exists() {
-        fs::remove_file(&note).map_err(|error| error.to_string())?;
-    }
-    write_json(&note, &json!({"type":"minidregg-room-window-note-v1","room":room.target,
+    // Import a complete successor under a distinct retained alias. The current
+    // room reference remains available if reading/importing the source fails.
+    let staged = format!("credit-successor-{}", workspace::random_nonce()?);
+    workspace::import(root, ImportInput {
+        name: &staged, kind: "object", target: &room.target,
+        observe: &capability, operation: Some(&capability), control: None,
+        provenance: Some(&source),
+        room: (value.get("room") == Some(&json!(true))).then_some("member"),
+    })?;
+    let mut successor = workspace::reference(root, &staged)?;
+    successor["name"] = json!(name);
+    let note_value = json!({"type":"minidregg-room-window-note-v1","room":room.target,
         "capability":capability,"notAfter":after,"adoptedAtHeight":room.height.to_string(),
-        "source":source}))?;
+        "source":source});
+    successor["creditWindow"] = note_value.clone();
+    switch_window(root, name, &previous, &successor, &note_value, || Ok(()))?;
     Ok(Some((capability, after)))
+}
+
+/// Durable exact-prior switch. Interruption leaves a complete old or new
+/// reference; the new reference carries the display note for recovery.
+fn switch_window(root: &Path, name: &str, previous: &Value, successor: &Value,
+    note: &Value, after_switch: impl FnOnce() -> Result<()>) -> Result<()> {
+    let replaced = root.join("credit").join("replaced");
+    for directory in [root.join("credit"), replaced.clone(), root.join("credit").join("windows")] {
+        if !directory.exists() { workspace::make_private_dir(&directory)?; }
+        workspace::private_dir(&directory)?;
+    }
+    let archive = replaced.join(format!("{}-{}.json", workspace::ref_file(name), workspace::random_nonce()?));
+    workspace::private_file(&archive, &serde_json::to_vec(previous).map_err(|e| e.to_string())?)?;
+    let current = root.join("refs").join(format!("{}.json", workspace::ref_file(name)));
+    workspace::publish_retained_json(&current, successor, Some(previous))?;
+    after_switch()?;
+    let path = window_note(root, name);
+    let prior = if path.exists() { Some(workspace::bounded_json(&path)?) } else { None };
+    workspace::publish_retained_json(&path, note, prior.as_ref())
+}
+
+fn renewal_end(height: u128, interval: &str) -> Result<String> {
+    height.checked_add(number(interval, "renewal interval")?)
+        .map(|value| value.to_string()).ok_or_else(|| "renewal height overflow".into())
 }
 
 // ---------------------------------------------------------------- renew (the delegation)
@@ -809,7 +832,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let operation = args.optional("operation-record").map(path);
             args.finish()?;
             let current = room(&root, &ws, &name)?;
-            let price = current.get("hermes/turn").unwrap_or("0").to_owned();
+            let price = current.need("hermes/turn")?.to_owned();
+            number(&price, "hermes/turn")?;
             if price == "0" {
                 if let Some(path) = &operation {
                     let reference = workspace::reference(&root, &account)?;
@@ -876,8 +900,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let current = room(&root, &ws, &name)?;
             let not_after = match (until, for_heights) {
                 (Some(until), None) => until,
-                (None, Some(heights)) => (current.height + number(&heights, "--for")?).to_string(),
-                (None, None) => (current.height + number(current.need("period")?, "period")?).to_string(),
+                (None, Some(heights)) => renewal_end(current.height, &heights)?,
+                (None, None) => renewal_end(current.height, current.need("period")?)?,
                 _ => return Err("renew takes --not-after H or --for N, not both".into()),
             };
             let id = id.unwrap_or_else(|| format!("renew-{subject}-{not_after}"));
@@ -984,6 +1008,38 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renewal_overflow_refuses() {
+        assert!(renewal_end(u128::MAX, "1").is_err());
+        assert!(renewal_end(1, &u128::MAX.to_string()).is_err());
+        assert_eq!(renewal_end(10, "3").unwrap(), "13");
+    }
+
+    #[test]
+    fn interrupted_window_switch_retains_reference_and_recovers_note() {
+        let root = std::env::temp_dir().join(format!("credit-switch-{}", workspace::random_nonce().unwrap()));
+        workspace::make_private_dir(&root).unwrap();
+        workspace::make_private_dir(&root.join("refs")).unwrap();
+        let previous = json!({"type":"minidregg-participant-reference-v1","name":"lab","kind":"object",
+            "target":"80","observeCapability":"91","operationCapability":"91","controlCapability":null});
+        let note = json!({"capability":"92","notAfter":"100"});
+        let mut successor = previous.clone();
+        successor["observeCapability"]=json!("92");successor["operationCapability"]=json!("92");
+        successor["creditWindow"]=note.clone();
+        let path = root.join("refs/lab.json");
+        workspace::private_file(&path,&serde_json::to_vec(&previous).unwrap()).unwrap();
+        assert!(switch_window(&root,"lab",&previous,&successor,&note,||Err("interrupted".into())).is_err());
+        assert_eq!(workspace::reference(&root,"lab").unwrap(),successor);
+        assert!(!window_note(&root,"lab").exists());
+        assert_eq!(window(&root,"lab").unwrap(),Some(("92".into(),"100".into())));
+        // An exact retry finishes note publication; a stale replacement refuses.
+        switch_window(&root,"lab",&previous,&successor,&note,||Ok(())).unwrap();
+        let mut stale=successor.clone();stale["operationCapability"]=json!("93");
+        assert!(switch_window(&root,"lab",&previous,&stale,&note,||Ok(())).is_err());
+        assert_eq!(workspace::reference(&root,"lab").unwrap(),successor);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn tariff_fields_are_distinct_keys() {

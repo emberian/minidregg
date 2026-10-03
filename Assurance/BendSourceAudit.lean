@@ -4,13 +4,6 @@ import Theory.AssertAxioms
 
 open Minidregg.Theory.BendTT
 
-#print axioms Minidregg.Theory.BendTT.book_check
-#print axioms Minidregg.Theory.BendTT.confluent
-#print axioms Minidregg.Theory.BendTT.sr
-#print axioms Minidregg.Theory.BendTT.progress
-#print axioms Minidregg.Theory.BendTT.halts
-#print axioms Minidregg.Theory.BendTT.empty
-#print axioms Minidregg.Theory.BendTT.consistent
 
 #assert_axioms Minidregg.Theory.BendTT.book_check
 #assert_axioms Minidregg.Theory.BendTT.confluent

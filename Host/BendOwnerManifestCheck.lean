@@ -36,6 +36,11 @@ def run (args : List String) : IO Unit := do
   refuses (minimal.replace "{" "{\"schema\":\"duplicate\",")
   refuses (minimal.replace "{" "{\"schem\\u0061\":\"duplicate\",")
   refuses (String.ofList (List.replicate (maxSourceBytes + 1) ' '))
+  let naturalFields := replaceField "profile" (.str naturalProfile)
+  let natural ← IO.ofExcept (parse (Json.mkObj naturalFields).compress)
+  unless natural.profile == naturalProfile && natural.relinearizationKey.isNone do
+    throw <| IO.userError "natural fresh-only profile material changed"
+  refuses ((Json.mkObj (naturalFields ++ [("relinearization_key", .str "01")])).compress)
   let muxFields := replaceField "profile" (.str muxProfile) ++ [("relinearization_key", .str "01")]
   let mux ← IO.ofExcept (parse (Json.mkObj muxFields).compress)
   unless mux.relinearizationKey = some [1] do

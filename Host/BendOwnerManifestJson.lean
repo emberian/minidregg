@@ -24,6 +24,9 @@ def muxProfile : String :=
 def preludeMuxProfile : String :=
   "bfv-fhe011-degree4096-t1032193-public-prelude-bool-mux-plan-depth1-lifetime2-v1"
 
+def naturalProfile : String :=
+  "bfv-fhe011-degree4096-t1032193-public-natural-add-fresh-depth0-v1"
+
 def lowercaseHex (source : String) : Bool :=
   source.toUTF8.data.all fun byte =>
     decide ((48 ≤ byte.toNat ∧ byte.toNat ≤ 57) ∨
@@ -61,7 +64,7 @@ private def parseValue (value : Json) : Except String PublicMaterial := do
   let object ← value.getObj?.mapError (fun _ => "public material must be an object")
   let profile ← stringField value "profile"
   let needsRelinearization ←
-    if profile = literalProfile ∨ profile = preludeProfile then pure false
+    if profile = literalProfile ∨ profile = preludeProfile ∨ profile = naturalProfile then pure false
     else if profile = muxProfile ∨ profile = preludeMuxProfile then pure true
     else throw "unsupported physical public-material profile"
   let expected := ["schema", "profile", "parameters_sha256", "transformer_sha256",
@@ -83,7 +86,7 @@ private def parseValue (value : Json) : Except String PublicMaterial := do
 
 /-- Capacity is checked before either raw parser sees text; duplicate decoded
 keys are refused by Host.Json, including escaped aliases. Optional relin is
-omitted for the two depth0 literal profiles and mandatory for dynamic mux. -/
+omitted for the depth0 literal/fresh-natural profiles and mandatory for dynamic mux. -/
 def parse (source : String) : Except String PublicMaterial := do
   unless source.toUTF8.size ≤ maxSourceBytes do
     throw "owner public-material JSON exceeds public capacity"

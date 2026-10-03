@@ -419,10 +419,7 @@ pub(crate) fn hex(b: &[u8]) -> String {
 }
 
 pub(crate) fn unhex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
-        return None;
-    }
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
+    crate::decode_hex(s).ok()
 }
 
 pub(crate) fn xof(customization: &[u8], parts: &[&[u8]], out: &mut [u8]) {
@@ -1480,4 +1477,14 @@ mod tests {
         assert_eq!(&m[19..23], &2u32.to_be_bytes());
         assert_eq!(&m[23..], &[4, 5]);
     }
+}
+
+#[test]
+fn unhex_rejects_malformed_unicode_without_panicking() {
+    for invalid in ["0é0", "😀", "a", "zz"] {
+        assert_eq!(unhex(invalid), None);
+    }
+    let bytes: Vec<u8> = (0..=255).collect();
+    assert_eq!(unhex(&hex(&bytes)), Some(bytes));
+    assert_eq!(unhex("aAFF"), Some(vec![170, 255]));
 }

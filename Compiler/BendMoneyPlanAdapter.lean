@@ -156,16 +156,32 @@ def batch (source : NativePlan) : ResourceMoneyWire.ApplicationBatch :=
   ⟨source.book.root, source.operations.map Transfer.operation⟩
 def moneyEffect (index : Nat) (source : NativePlan) : BendWorldPlan.Effect :=
   ⟨index, .moneyConsent ⟨some (batch source), [], none⟩⟩
-def entriesOf (command : Command) : List ResourceMoneyWire.Entry :=
-  command.targets.filterMap fun target =>
-    match target.payload with
-    | .moneyConsent consent => some ⟨target.target, consent⟩
-    | _ => none
+abbrev entriesOf := moneyEntries
 def carriers (command : Command) : List (Fin command.targets.length) :=
   (List.finRange command.targets.length).filter fun index =>
     match command.targets[index].payload with
     | .moneyConsent consent => consent.batch.isSome
     | _ => false
+
+/-- The batch and object phases are one atomic application. Carrier location is
+native layout, not a source identity or authority: funded carrier may be last.
+Scalar effect order is preserved; exact command comparison still rejects every
+missing, extra or reordered application effect. -/
+def insertMoney (index : Nat) (source : NativePlan) :
+    List BendWorldPlan.Effect → List BendWorldPlan.Effect
+  | [] => [moneyEffect index source]
+  | effect :: rest =>
+    if effect.target < index then effect :: insertMoney index source rest
+    else moneyEffect index source :: effect :: rest
+
+theorem insertMoney_length (index : Nat) (source : NativePlan)
+    (effects : List BendWorldPlan.Effect) :
+    (insertMoney index source effects).length = effects.length + 1 := by
+  induction effects with
+  | nil => rfl
+  | cons effect rest ih =>
+    simp only [insertMoney]
+    split <;> simp_all
 
 /-- Same durable snapshot for financial preparation and scalar phase binding.
 The full native account-position/funding consent remains in command and money;
@@ -187,8 +203,10 @@ structure BoundPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootB
   effectsDistinct : (source.effects.map fun effect => effect.ref.resourceID).Nodup
   scalarEffects : List BendWorldPlan.Effect
   ordered : BendScalarPlanAdapter.Ordered deployment loaded command source.effects scalarEffects
-  effectsExact : plan.effects = moneyEffect carrier.val source :: scalarEffects
-  readsExact : plan.reads = (source.book :: source.reads).map BendScalarPlanAdapter.readGuard
+  effectsExact : plan.effects = insertMoney carrier.val source scalarEffects
+  scalarReads : List Minidregg.Kernel.DurableDataIntent.ReadGuard
+  orderedReads : BendScalarPlanAdapter.OrderedReads loaded source.reads scalarReads
+  readsExact : plan.reads = money.readGuards ++ scalarReads
   returnsExact : plan.returns = source.returns
   nativeExact : BendWorldPlan.matchesCommand plan command = true
 
@@ -206,12 +224,14 @@ def bindPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
           if commandDistinct : (command.targets.map Target.target).Nodup then
             if effectsDistinct : (source.effects.map fun effect => effect.ref.resourceID).Nodup then
               let scalars ← BendScalarPlanAdapter.bindOrdered deployment loaded command source.effects
+              let reads ← BendScalarPlanAdapter.bindReads loaded source.reads
               let plan : BendWorldPlan.Plan :=
-                ⟨moneyEffect carrier.val source :: scalars.1, source.returns,
-                  (source.book :: source.reads).map BendScalarPlanAdapter.readGuard⟩
+                ⟨insertMoney carrier.val source scalars.1, source.returns,
+                  money.readGuards ++ reads.1⟩
               if nativeExact : BendWorldPlan.matchesCommand plan command = true then
                 some ⟨plan, carrier, carrierUnique, entriesExact, bookExact, batchExact,
-                  commandDistinct, effectsDistinct, scalars.1, scalars.2, rfl, rfl, rfl, nativeExact⟩
+                  commandDistinct, effectsDistinct, scalars.1, scalars.2, rfl,
+                  reads.1, reads.2, rfl, rfl, nativeExact⟩
               else none
             else none
           else none
@@ -277,10 +297,11 @@ theorem no_missing_phase_effects {durable : DurableReceiverIO.Loaded ResourceBir
     {source : NativePlan} (bound : BoundPlan deployment loaded command entries money source) :
     bound.plan.effects.length = source.effects.length + 1 := by
   rw [bound.effectsExact]
-  simp only [List.length_cons, BendScalarPlanAdapter.ordered_length bound.ordered]
+  rw [insertMoney_length, BendScalarPlanAdapter.ordered_length bound.ordered]
 
 #assert_axioms decode_identityTerm
 #assert_axioms decode_transferTerm
+#assert_axioms insertMoney_length
 #assert_axioms operations_exact
 #assert_axioms returns_exact
 #assert_axioms no_missing_phase_effects

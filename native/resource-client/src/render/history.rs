@@ -9,9 +9,7 @@ use serde_json::Value;
 
 /// A line's payload as text (lossy); a payload that is not hex says so.
 fn payload_text(hex: &str) -> String {
-    let bytes: Option<Vec<u8>> = (hex.len() % 2 == 0)
-        .then(|| (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok()).collect())
-        .flatten();
+    let bytes = crate::decode_hex(hex).ok();
     match bytes {
         Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         None => format!("<payload {hex}>"),
@@ -150,4 +148,13 @@ pub fn diff_html(diff: &Value) -> String {
         f = escape(diff["from"]["height"].as_str().unwrap_or("?")),
         t = escape(diff["to"]["height"].as_str().unwrap_or("?")),
     )
+}
+
+#[test]
+fn payload_text_malformed_unicode_retains_diagnostic() {
+    for invalid in ["0é0", "😀", "a", "zz"] {
+        assert_eq!(payload_text(invalid), format!("<payload {invalid}>"));
+    }
+    assert_eq!(payload_text("4869"), "Hi");
+    assert_eq!(payload_text("ff"), "\u{fffd}");
 }

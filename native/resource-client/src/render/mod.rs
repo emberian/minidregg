@@ -167,14 +167,7 @@ pub fn decos(names: &BTreeMap<String, String>, marks: &Value, depth: usize) -> V
 }
 
 fn decode_hex(value: &str) -> Vec<u8> {
-    if value.len() % 2 != 0 {
-        return Vec::new();
-    }
-    (0..value.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&value[i..i + 2], 16))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap_or_default()
+    crate::decode_hex(value).unwrap_or_default()
 }
 
 /// `12 B`, `3 KB`, `2 MB`: an embed's size, to the unit a reader thinks in.
@@ -552,3 +545,11 @@ pub fn line_numbers(document: &Value) -> BTreeMap<String, usize> {
 
 #[cfg(test)]
 mod tests;
+
+#[test]
+fn decode_hex_malformed_payload_retains_empty_fallback() {
+    for invalid in ["0é0", "😀", "a", "zz"] {
+        assert!(decode_hex(invalid).is_empty());
+    }
+    assert_eq!(decode_hex("4869"), b"Hi");
+}

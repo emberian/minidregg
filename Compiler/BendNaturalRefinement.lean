@@ -55,7 +55,7 @@ theorem source_descriptor_complete {n p : Nat} [Fact p.Prime]
     Trace book (1 + expr.sourceCount inputs) (worldInvocation entry inputs observations)
       (natTerm (expr.value inputs)) ∧
     ∃ wv : Nat → ZMod p,
-      (∀ i, wv (wire (Sum.inl i)) = (numbers inputs (expr.value inputs) i : ZMod p)) ∧
+      (∀ i, wv (wire (k := maxBits) (Sum.inl i)) = (numbers inputs (expr.value inputs) i : ZMod p)) ∧
       descriptorHolds (descriptor inputBits maxBits fits expr) wv :=
   ⟨world_entry_trace book entry expr installed natAdd inputs observations,
     descriptor_complete inputBits maxBits fits expr outputFits inputs bounded⟩

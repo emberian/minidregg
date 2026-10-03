@@ -10,4 +10,6 @@ Publication copies into a temporary file on each destination filesystem, then at
 
 --export-complete writes a fresh read-only copied cohort only after every selected module qualifies. Never hardlink a consumer snapshot to writable producer outputs. This is scoped compilation evidence, not native receiving, proof adequacy or protocol qualification.
 
-Six deterministic fake-compiler regressions cover parallel ready work, dependent sequencing, independent progress after failure, source/transitive invalidation, artifact corruption, and recovery of successful unpublished artifacts without running the compiler again. Run python3 scripts/test_lean_scoped_dag.py.
+Seven deterministic fake-compiler regressions cover parallel ready work, dependent sequencing, independent progress after failure, source/transitive invalidation, artifact corruption, and recovery of successful unpublished artifacts without running the compiler again. Run python3 scripts/test_lean_scoped_dag.py.
+
+--hold-failures-from explicitly retains unchanged prior source failures, with source/input/dependency pins and original diagnostic pointers. It never holds ENVFAULT/TIMEOUT and never counts a retained failure as PASS. Source or dependency changes force a real check; independent ready branches continue.

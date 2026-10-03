@@ -41,7 +41,9 @@ Object.assign(dependencies,{
  CanonicalSettlementPlan:[base,math,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],["Shared","./SharedBookSettlement.bend","SharedBookSettlement"],["World","./WorldPlanMoney.bend","WorldPlanMoney"],["Scalar","./WorldPlanScalarBytes.bend","WorldPlanScalarBytes"]]
 });
 dependencies.CanonicalSettlementPlanDemonstration=[base,["Plan","./CanonicalSettlementPlan.bend","CanonicalSettlementPlan"],["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],seller,["World","./WorldPlanMoney.bend","WorldPlanMoney"],["Scalar","./WorldPlanScalarBytes.bend","WorldPlanScalarBytes"]];
-const entries:Record<string,string>={WorldPlanScalarBytes:"planned",WorldPlanMoney:"prepare",CanonicalSettlementPlan:"settle_shared",CanonicalSettlementPlanDemonstration:"context"};
+dependencies.DrEXSettlementPlan=[base,["Plan","./CanonicalSettlementPlan.bend","CanonicalSettlementPlan"],["DrEX","./CanonicalUniformSettlement.bend","CanonicalUniformSettlement"],["Uniform","./UniformProRata.bend","UniformProRata"],["World","./WorldPlanMoney.bend","WorldPlanMoney"],["Scalar","./WorldPlanScalarBytes.bend","WorldPlanScalarBytes"]];
+dependencies.DrEXSettlementPlanDemonstration=[base,["Plan","./DrEXSettlementPlan.bend","DrEXSettlementPlan"],["Bridge","./CanonicalSettlementPlan.bend","CanonicalSettlementPlan"],["DrEX","./CanonicalUniformSettlement.bend","CanonicalUniformSettlement"],["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],["Uniform","./UniformProRata.bend","UniformProRata"],["World","./WorldPlanMoney.bend","WorldPlanMoney"],["Scalar","./WorldPlanScalarBytes.bend","WorldPlanScalarBytes"]];
+const entries:Record<string,string>={WorldPlanScalarBytes:"planned",WorldPlanMoney:"prepare",CanonicalSettlementPlan:"settle_shared",CanonicalSettlementPlanDemonstration:"context",DrEXSettlementPlan:"settle",DrEXSettlementPlanDemonstration:"context"};
 const results=[];
 for(const [name,entryDefinition] of Object.entries(entries)){
  const modules:any[]=[];

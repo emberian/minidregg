@@ -280,7 +280,7 @@ impl PreparedBasis {
 }
 /// Local rollback-service implementation tests crash ordering, not an
 /// independently protected malicious-storage anchor or native funded authority.
-fn burn_preparation(
+pub(crate) fn burn_preparation(
     ids: &[Correlation],
     g: &Generation,
     binding: &[u8],
@@ -362,12 +362,25 @@ pub struct Send {
 }
 #[derive(Clone)]
 pub struct CheckedTriples {
+    generation: Generation,
+    n: usize,
+    f: usize,
+    count: usize,
     context: [u8; 32],
     basis_bytes: Vec<u8>,
     holder: u16,
     triples: Vec<(Field, Field, Field)>,
 }
 impl CheckedTriples {
+    pub fn generation(&self) -> &Generation {
+        &self.generation
+    }
+    pub fn roster(&self) -> (usize, usize) {
+        (self.n, self.f)
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
     pub fn context(&self) -> [u8; 32] {
         self.context
     }
@@ -796,6 +809,10 @@ impl TripleKing {
                     .map(|i| (self.basis.random.a[i], self.basis.random.b[i], c[i]))
                     .collect();
                 self.output = Some(CheckedTriples {
+                    generation: self.basis.consumer_generation.clone(),
+                    n: self.basis.n,
+                    f: self.basis.f,
+                    count: self.basis.count,
                     context: self.context,
                     basis_bytes: self.basis.bytes.clone(),
                     holder: me,
@@ -1059,7 +1076,7 @@ fn one(p: &PhaseMessage) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         collections::VecDeque,
@@ -1093,7 +1110,7 @@ mod tests {
         fs::create_dir(&p).unwrap();
         p
     }
-    struct AnchorFixture {
+    pub(crate) struct AnchorFixture {
         sock: std::path::PathBuf,
         stop: Arc<AtomicBool>,
         task: Option<thread::JoinHandle<Journal>>,
@@ -1156,14 +1173,19 @@ mod tests {
         prepared_with_zero_fault(None)
     }
     fn prepared_with_zero_fault(fault: Option<u16>) -> Vec<Vec<PreparedSource>> {
+        prepared_count(1, fault)
+    }
+    fn prepared_count(count: usize, fault: Option<u16>) -> Vec<Vec<PreparedSource>> {
         let mut holders = vec![vec![]; 4];
         for dealer in 0..3u16 {
             let ag = generation(100 + dealer as u64);
             let og = generation(200 + dealer as u64);
             let mut aa = (0..4)
-                .map(|i| AcssId::new(i, dealer, 4, 1, &ag, acss_seed_count(1, 1).unwrap()).unwrap())
+                .map(|i| {
+                    AcssId::new(i, dealer, 4, 1, &ag, acss_seed_count(count, 1).unwrap()).unwrap()
+                })
                 .collect::<Vec<_>>();
-            let polys = (0..8)
+            let polys = (0..acss_seed_count(count, 1).unwrap())
                 .map(|i| {
                     vec![
                         Field(0x10000 + dealer as u128 * 157 + i as u128 * 31),
@@ -1191,9 +1213,9 @@ mod tests {
                 );
             }
             let mut oo = (0..4)
-                .map(|i| Sh2tId::new(i, dealer, 4, 1, &og, per_group(1, 1).unwrap()).unwrap())
+                .map(|i| Sh2tId::new(i, dealer, 4, 1, &og, per_group(count, 1).unwrap()).unwrap())
                 .collect::<Vec<_>>();
-            let zeros = (0..32)
+            let zeros = (0..16 * per_group(count, 1).unwrap())
                 .map(|i| {
                     vec![
                         Field(if fault == Some(dealer) { 9 } else { 0 }),
@@ -1538,5 +1560,41 @@ mod tests {
             &r.join("burn2")
         )
         .is_err());
+    }
+    pub(crate) fn checked_for_consumer(count: usize) -> Vec<CheckedTriples> {
+        let material = prepared_count(count, None);
+        let mut anchors = vec![];
+        let mut nodes = vec![];
+        for (i, sources) in material.iter().enumerate() {
+            let r = root(&format!("consumer-{i}"));
+            let a = AnchorFixture::new(&r);
+            let basis = PreparedBasis::reserve_new(
+                &generation(300),
+                0,
+                count,
+                0,
+                sources.clone(),
+                &a.sock,
+                &r.join("burn"),
+            )
+            .unwrap();
+            nodes.push(TripleKing::new(&generation(300), basis).unwrap());
+            anchors.push(a);
+        }
+        let mut q = start(&mut nodes);
+        drive(&mut nodes, &mut q, None);
+        nodes
+            .into_iter()
+            .map(|n| n.output.expect("actual checked King construction"))
+            .collect()
+    }
+
+    pub(crate) fn evaluator_anchor(
+        label: &str,
+    ) -> (AnchorFixture, std::path::PathBuf, std::path::PathBuf) {
+        let r = root(label);
+        let a = AnchorFixture::new(&r);
+        let sock = a.sock.clone();
+        (a, sock, r)
     }
 }

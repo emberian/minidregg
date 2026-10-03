@@ -99,7 +99,7 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
   match ← Minidregg.Kernel.NativeHostReplay.deriveVerified p.source.verified signedIngress with
   | .error detail => return (p,.error detail)
   | .ok derived =>
-    let payload := Minidregg.Compiler.DurableReceiverIO.recordFrame.encode
+    let payload := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode
       (Minidregg.Kernel.DurableReceiver.IntentRecord.ofIntent derived.intent)
     let prior ← (storage p.runtime.native).read
     match ← persist (storage p.runtime.native) p.runtime.context prior (.offer payload) with
@@ -225,9 +225,9 @@ def applyNext {config : SourceConfig} (p : Participant config)
   let records := applicationHistory certificate.block
   let index := p.source.verified.opened.durable.image.accepted.length
   let some bytes := records[index]? | return (p,"source already caught up")
-  let some record := Minidregg.Compiler.DurableReceiverIO.recordFrame.decode bytes
+  let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode bytes
     | return (p,"certificate payload is not a source record")
-  if Minidregg.Compiler.DurableReceiverIO.recordFrame.encode record != bytes then
+  if Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode record != bytes then
     return (p,"noncanonical source record")
   match ← Minidregg.Kernel.JointOrderedSourceReceiver.apply
       p.source.verified p.runtime.context certificate record.event.canonicalBytes with
@@ -275,11 +275,13 @@ theorem invocation_call_preserves_signed (config : SourceConfig)
       .ok (Minidregg.Kernel.DeclaredResourceController.signedBytes
         config.deployment.domain config.profile.semantics signed) := by
   simp [sourceIngressOfCall]
+  rfl
 
 theorem birth_call_preserves_ingress (config : SourceConfig) (bytes : Bytes) :
     sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode (.birth bytes)) =
       .ok bytes := by
   simp [sourceIngressOfCall]
+  rfl
 
 #assert_axioms invocation_call_preserves_signed
 #assert_axioms birth_call_preserves_ingress

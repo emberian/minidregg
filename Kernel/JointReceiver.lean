@@ -21,9 +21,9 @@ set_option autoImplicit false
 
 /-- Canonical common source bytes omit replica-specific MAC/tag/checkpoint data. -/
 def sourcePrefix (durable : Durable) : List (List UInt8) :=
-  durable.image.accepted.map (fun r => DurableReceiverIO.recordFrame.encode r)
+  durable.image.accepted.map (fun r => DurableCheckpointCodec.recordFrame.encode r)
 def sourcePayload (intent : DataIntent ResourceBirthCodec.rootBytes) : List UInt8 :=
-  DurableReceiverIO.recordFrame.encode (IntentRecord.ofIntent intent)
+  DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent)
 
 /-- Source-private application capability. The caller cannot decode one from
 bytes or replace expected context with the roster advertised by a packet. -/

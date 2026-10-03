@@ -66,20 +66,27 @@ private def initializeCheck {config : Config} {opened : Opened config} {command 
 
 /-- These private tokens retain actual CURRENT native permission and the exact
 phase-specific source operation. Raw accepted-record bytes cannot mint them. -/
-inductive CurrentPermission (config : Config) (opened : Opened config) :
-    DataIntent ResourceBirthCodec.rootBytes → Type
+inductive CurrentPermission (config : Config) (opened : Opened config) where
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
       opened.pins opened.durable (logicalHeight config opened.durable)) :
-      CurrentPermission config opened (ResourceBirthReceiver.intent accepted)
+      CurrentPermission config opened
   | initialize {command : Command} {signed : SignedCommand}
       {prepared : PreparedInvocation config.deployment config.profile
         ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable command}
       (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) :
-      CurrentPermission config opened (accepted.dataIntent shape)
+      CurrentPermission config opened
+
+/-- The actual intent is projected from current admission; the token does not
+carry a caller-selected post. Keeping the sum unindexed avoids normalizing the
+entire accepted native transaction while elaborating each constructor. -/
+def CurrentPermission.intent {config : Config} {opened : Opened config} :
+    CurrentPermission config opened → DataIntent ResourceBirthCodec.rootBytes
+  | .birth accepted => ResourceBirthReceiver.intent accepted
+  | .initialize shape accepted => accepted.dataIntent shape
 
 private def CurrentPermission.eligible {config : Config} {opened : Opened config}
-    {intent : DataIntent ResourceBirthCodec.rootBytes} (pin : JointControlFrame.Pin) :
-    CurrentPermission config opened intent → Bool
+    (pin : JointControlFrame.Pin) :
+    CurrentPermission config opened → Bool
   | .birth accepted => birthCheck pin accepted
   | .initialize shape accepted => initializeCheck pin shape accepted
 
@@ -88,7 +95,8 @@ structure Admission (config : Config) (opened : Opened config)
   private mk ::
   pin : JointControlFrame.Pin
   pinned : config.jointControl = some pin
-  current : CurrentPermission config opened intent
+  current : CurrentPermission config opened
+  intentExact : current.intent = intent
   eligible : CurrentPermission.eligible pin current = true
 
 /-- A bare ordinary birth cannot promise recovery. Only the separately
@@ -106,7 +114,7 @@ def admitInitialize {config : Config} {opened : Opened config} {command : Comman
   let some pin := config.jointControl | none
   if pinned : config.jointControl = some pin then
     if eligible : initializeCheck pin shape accepted = true then
-      some ⟨pin,pinned,.initialize shape accepted,eligible⟩ else none
+      some ⟨pin,pinned,.initialize shape accepted,rfl,eligible⟩ else none
   else none
 
 /-- A typed initialization exception selects ONE complete current admitted
@@ -120,6 +128,6 @@ def transport {config : Config} {opened : Opened config} {intent : DataIntent Re
           DurableReceiverCodec.intentStream.encode (DurableReceiver.IntentRecord.ofIntent intent) ∧
           (match config.jointControl with
            | none => false
-           | some pin => snapshot.canonicalBytes pin.cell == opened.durable.snapshot.canonicalBytes pin.cell) then
+           | some pin => snapshot.canonicalBytes pin.cell == opened.durable.snapshot.canonicalBytes pin.cell) = true then
         .ok () else .error (.durable .transactionConflict) }
 end Minidregg.Kernel.JointControlBootstrap

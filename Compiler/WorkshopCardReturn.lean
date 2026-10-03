@@ -32,29 +32,29 @@ structure Card where
   review : Recommendation
   deriving DecidableEq, Repr
 
-def pair (a b : Term) : Term := .Tup .Q1 a b
-def unit : Term := .Lab "()"
-def candidateTerm (c : Candidate) : Term :=
+def pair (a b : BendTT.Term) : BendTT.Term := .Tup .Q1 a b
+def unit : BendTT.Term := .Lab "()"
+def candidateTerm (c : Candidate) : BendTT.Term :=
   pair (.Lab "CatalogReview.Candidate")
     (pair (bytesTerm c.source) (pair (bytesTerm c.program) (pair (natTerm c.revision) unit)))
-def recommendationTerm (r : Recommendation) : Term :=
+def recommendationTerm (r : Recommendation) : BendTT.Term :=
   pair (.Lab "CatalogReview.Recommendation")
     (pair (candidateTerm r.candidate) (pair (bytesTerm r.policy) (pair (boolTerm r.ready) unit)))
-def cardTerm (c : Card) : Term :=
+def cardTerm (c : Card) : BendTT.Term :=
   pair (.Lab "ReusableWorkshop.Card")
     (pair (candidateTerm c.candidate) (pair (bytesTerm c.label) (pair (recommendationTerm c.review) unit)))
 
-def decodeCandidate : Term → Option Candidate
+def decodeCandidate : BendTT.Term → Option Candidate
   | .Tup .Q1 (.Lab "CatalogReview.Candidate")
       (.Tup .Q1 source (.Tup .Q1 program (.Tup .Q1 revision (.Lab "()")))) => do
         pure ⟨← decodeBytes source, ← decodeBytes program, ← decodeNat revision⟩
   | _ => none
-def decodeRecommendation : Term → Option Recommendation
+def decodeRecommendation : BendTT.Term → Option Recommendation
   | .Tup .Q1 (.Lab "CatalogReview.Recommendation")
       (.Tup .Q1 candidate (.Tup .Q1 policy (.Tup .Q1 ready (.Lab "()")))) => do
         pure ⟨← decodeCandidate candidate, ← decodeBytes policy, ← decodeBool ready⟩
   | _ => none
-def decodeRaw : Term → Option Card
+def decodeRaw : BendTT.Term → Option Card
   | .Tup .Q1 (.Lab "ReusableWorkshop.Card")
       (.Tup .Q1 candidate (.Tup .Q1 label (.Tup .Q1 review (.Lab "()")))) => do
         pure ⟨← decodeCandidate candidate, ← decodeBytes label, ← decodeRecommendation review⟩
@@ -62,23 +62,24 @@ def decodeRaw : Term → Option Card
 
 /-- Exact reconstruction is checked at ingress. No byte truncation, ignored
 fields, wrong constructor labels/quantities, annotations or dangling tails. -/
-def decode (result : Term) : Option Card := do
+def decode (result : BendTT.Term) : Option Card := do
   let card ← decodeRaw result
   if cardTerm card = result then some card else none
 
-theorem decode_exact {result : Term} {card : Card} (h : decode result = some card) :
+theorem decode_exact {result : BendTT.Term} {card : Card} (h : decode result = some card) :
     cardTerm card = result := by
   unfold decode at h
   cases raw : decodeRaw result with
   | none => simp [raw] at h
   | some found =>
-    simp only [raw, Option.bind_some] at h
-    split at h
-    · rename_i hExact
+    rw [raw] at h
+    change (if cardTerm found = result then some found else none) = some card at h
+    by_cases hExact : cardTerm found = result
+    · simp only [hExact, if_true] at h
       have same := Option.some.inj h
       subst card
       exact hExact
-    · cases h
+    · simp [hExact] at h
 
 theorem decode_candidate_roundtrip (c : Candidate) : decodeCandidate (candidateTerm c) = some c := by
   cases c
@@ -141,15 +142,15 @@ def returnSlot (core : BendCoreAdmission.Checked) (custody : Custody) (card : Ca
 /-- A malformed or policy-changing override cannot be silently materialized
 as the requested recommendation. The expected values require current input
 admission outside this pure structural gate. A ready verdict is not adoption. -/
-def matches (card : Card) (candidate : Candidate) (policy : List UInt8) : Bool :=
+def bindingMatches (card : Card) (candidate : Candidate) (policy : List UInt8) : Bool :=
   decide (card.candidate = candidate ∧ card.review.candidate = candidate ∧ card.review.policy = policy)
-theorem matches_exact {card : Card} {candidate : Candidate} {policy : List UInt8}
-    (h : matches card candidate policy = true) :
+theorem binding_exact {card : Card} {candidate : Candidate} {policy : List UInt8}
+    (h : bindingMatches card candidate policy = true) :
     card.candidate = candidate ∧ card.review.candidate = candidate ∧ card.review.policy = policy := by
-  simpa only [matches, decide_eq_true_eq] using h
+  simpa only [bindingMatches, decide_eq_true_eq] using h
 
-structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term) where
-  result : Term
+structure Evaluated (core : BendCoreAdmission.Checked) (initial : BendTT.Term) where
+  result : BendTT.Term
   count : Nat
   trace : BendLiveMachine.Trace core.book count initial result
   value : Value core.book result
@@ -157,7 +158,7 @@ structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term) where
   decoded : decode result = some card
 
 def execute (core : BendCoreAdmission.Checked) (classificationTicks steps : Nat)
-    (initial : Term) : Option (Evaluated core initial) :=
+    (initial : BendTT.Term) : Option (Evaluated core initial) :=
   match BendLiveMachine.executeChecked core.book classificationTicks steps initial with
   | .refused _ _ _ _ => none
   | .complete result count trace value =>
@@ -173,20 +174,20 @@ structure Invocation (core : BendCoreAdmission.Checked) (candidate : Candidate) 
   interfaceExact : method.definition.T =
     .All .Q2 (.Ref "CatalogReview.Candidate") (.Ref "ReusableWorkshop.Card")
 def Invocation.initial {core : BendCoreAdmission.Checked} {candidate : Candidate}
-    (call : Invocation core candidate) : Term :=
+    (call : Invocation core candidate) : BendTT.Term :=
   .App .Q2 (.Ref call.method.name) (candidateTerm candidate)
 
 structure Materialized (core : BendCoreAdmission.Checked) (candidate : Candidate)
     (call : Invocation core candidate) (policy : List UInt8) (custody : Custody) where
   evaluated : Evaluated core call.initial
-  binding : matches evaluated.card candidate policy = true
+  binding : bindingMatches evaluated.card candidate policy = true
   slot : BendWorldPlan.ReturnSlot
   exact : slot = returnSlot core custody evaluated.card
 
 def materialize {core : BendCoreAdmission.Checked} {candidate : Candidate}
     (call : Invocation core candidate) (evaluated : Evaluated core call.initial)
     (policy : List UInt8) (custody : Custody) : Option (Materialized core candidate call policy custody) :=
-  if binding : matches evaluated.card candidate policy = true then
+  if binding : bindingMatches evaluated.card candidate policy = true then
     some ⟨evaluated, binding, returnSlot core custody evaluated.card, rfl⟩
   else none
 
@@ -205,7 +206,7 @@ theorem materialized_source_exact {core : BendCoreAdmission.Checked}
 #assert_axioms decode_roundtrip
 #assert_axioms payload_roundtrip
 #assert_axioms payload_canonical
-#assert_axioms matches_exact
+#assert_axioms binding_exact
 #assert_axioms materialized_payload_exact
 #assert_axioms materialized_source_exact
 end Minidregg.Compiler.WorkshopCardReturn

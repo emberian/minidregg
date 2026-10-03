@@ -40,7 +40,7 @@ candidate, manifest root, participant, Generation and signed backend preimage
 remain present. A newly randomized valid credential replays the same work. -/
 def semanticBytes (pin : EndpointPin) (request : JointBackendPartyCodec.Request)
     (row : Enrollment) (packet : PacketClaim) : List UInt8 :=
-  "DREGG.JOINT.PRIVATE.SOURCE.DISPATCH".toUTF8.toList ++ [1] ++
+  "DREGG.JOINT.PRIVATE.SOURCE.INVOKE".toUTF8.toList ++ [1] ++
   endpointPinStream.encode pin ++
   enrollmentStream.encode row ++ bytesStream.encode request.candidateBytes ++
   StreamCodec.nat.encode request.participant ++ bytesStream.encode request.fullGenerationBytes ++
@@ -60,7 +60,7 @@ def wanted (config : Config) (opened : Opened config) (pin : EndpointPin)
   subject := row.party.subject
   subjectKeyEpoch := opened.authority.snapshot.authState.subjectKeyEpoch row.party.subject
   target := ⟨pin.manifest.cell.value⟩
-  verb := .delegateObject
+  verb := .invokeObject
   argsDigest := (Sp800185Cshake256.hash "DREGG.JOINT.PRIVATE.ARGS".toUTF8.toList
     (semanticBytes pin request row packet)).digest
   effectsDigest := (Sp800185Cshake256.hash "DREGG.JOINT.PRIVATE.EFFECTS".toUTF8.toList
@@ -99,6 +99,7 @@ def matchesPending (config : Config) (request : JointBackendPartyCodec.Request)
 structure Prepared (config : Config) (opened : Opened config) (pin : EndpointPin)
     (request : JointBackendPartyCodec.Request) where
   private mk ::
+  privacyProfile : pin.privacy = .trustedControllerClear
   endpointExact : config.privatePartyEndpoint.map endpointPinStream.encode = some (endpointPinStream.encode pin)
   row : Enrollment
   packet : PacketClaim
@@ -135,59 +136,61 @@ installation promise; the independent native request below still must pass
 capability revocation, current-key and complete predicate admission. -/
 def prepare (config : Config) (opened : Opened config) (pin : EndpointPin)
     (request : JointBackendPartyCodec.Request) : Except String (Prepared config opened pin request) :=
-  if configured : config.privatePartyEndpoint.map endpointPinStream.encode = some (endpointPinStream.encode pin) then
-    match packetExact : decodeCarrier request.rawCarrier with
-    | none => .error "invalid private carrier"
-    | some packet =>
-    match manifestExact : selectedManifest pin opened with
-    | none => .error "no current enrolled manifest"
-    | some entries =>
-    match entries.find? (fun row => partyWire row.party == packet.recordBytes) with
-    | none => .error "party is not currently enrolled"
-    | some row =>
-    if rowMember : row ∈ entries then
-      if recordExact : packet.recordBytes = partyWire row.party then
-        if routeExact : row.party.protocol = pin.protocol ∧ row.party.recipient = pin.recipient ∧
-            row.party.recipientRole = pin.recipientRole then
-          if identityExact : row.candidateBytes = request.candidateBytes ∧ row.participant = request.participant then
-            if bounded : row.party.bounded = true then
-              match configuredControl : config.jointControl with
-              | none => .error "joint control disabled"
-              | some cp =>
-              match controlExact : JointControlFrame.readControl cp
-                  (opened.durable.snapshot.canonicalBytes cp.cell) with
-              | none => .error "no current joint control"
-              | some control =>
-              match foundHeld : control.reservations.find? (matchesPending config request row) with
-              | none => .error "exact source PENDING reservation missing"
-              | some held =>
-                if pending : matchesPending config request row held = true then
-                  match keyCurrent : CredentialAuthorityState.currentSigningKey
-                      opened.authority.snapshot.logical row.party.subject with
-                  | none => .error "no current party key"
-                  | some key =>
-                  if keyExact : key.keyEpoch = row.party.keyEpoch ∧ key.publicKey = row.party.keyBinding then
-                    match ResourceTargetAdmission.observe config.deployment opened.directory.directory
-                        .object pin.manifest.cell.value request.manifestRoot with
-                    | none => .error "stale manifest root"
-                    | some observed =>
-                    match clockExact : ClockCellDomain.load config.deployment opened.durable.snapshot with
-                    | none => .error "clock unavailable"
-                    | some clock =>
-                    match dependenciesExact : WorldKindLawDependencies.loadTarget config.deployment
-                        opened.directory.directory pin.manifest.cell.value with
-                    | none => .error "complete law dependencies unavailable"
-                    | some deps => .ok ⟨configured,row,packet,packetExact,entries,manifestExact,rowMember,recordExact,
-                      routeExact,identityExact,bounded,cp,configuredControl,control,controlExact,
-                      held,List.mem_of_find?_eq_some foundHeld,pending,key,keyCurrent,keyExact,observed,clock,clockExact,deps,dependenciesExact⟩
-                  else .error "enrolled key moved"
-                else .error "reservation identity changed"
-            else .error "unbounded party context"
-          else .error "wrong candidate or participant"
-        else .error "wrong designated worker route"
-      else .error "noncanonical party record"
-    else .error "manifest selection failed"
-  else .error "private-party endpoint is not source configured"
+  if clear : pin.privacy = .trustedControllerClear then
+    if configured : config.privatePartyEndpoint.map endpointPinStream.encode = some (endpointPinStream.encode pin) then
+      match packetExact : decodeCarrier request.rawCarrier with
+      | none => .error "invalid private carrier"
+      | some packet =>
+      match manifestExact : selectedManifest pin opened with
+      | none => .error "no current enrolled manifest"
+      | some entries =>
+      match entries.find? (fun row => partyWire row.party == packet.recordBytes) with
+      | none => .error "party is not currently enrolled"
+      | some row =>
+      if rowMember : row ∈ entries then
+        if recordExact : packet.recordBytes = partyWire row.party then
+          if routeExact : row.party.protocol = pin.protocol ∧ row.party.recipient = pin.recipient ∧
+              row.party.recipientRole = pin.recipientRole then
+            if identityExact : row.candidateBytes = request.candidateBytes ∧ row.participant = request.participant then
+              if bounded : row.party.bounded = true then
+                match configuredControl : config.jointControl with
+                | none => .error "joint control disabled"
+                | some cp =>
+                match controlExact : JointControlFrame.readControl cp
+                    (opened.durable.snapshot.canonicalBytes cp.cell) with
+                | none => .error "no current joint control"
+                | some control =>
+                match foundHeld : control.reservations.find? (matchesPending config request row) with
+                | none => .error "exact source PENDING reservation missing"
+                | some held =>
+                  if pending : matchesPending config request row held = true then
+                    match keyCurrent : CredentialAuthorityState.currentSigningKey
+                        opened.authority.snapshot.logical row.party.subject with
+                    | none => .error "no current party key"
+                    | some key =>
+                    if keyExact : key.keyEpoch = row.party.keyEpoch ∧ key.publicKey = row.party.keyBinding then
+                      match ResourceTargetAdmission.observe config.deployment opened.directory.directory
+                          .object pin.manifest.cell.value request.manifestRoot with
+                      | none => .error "stale manifest root"
+                      | some observed =>
+                      match clockExact : ClockCellDomain.load config.deployment opened.durable.snapshot with
+                      | none => .error "clock unavailable"
+                      | some clock =>
+                      match dependenciesExact : WorldKindLawDependencies.loadTarget config.deployment
+                          opened.directory.directory pin.manifest.cell.value with
+                      | none => .error "complete law dependencies unavailable"
+                      | some deps => .ok ⟨clear,configured,row,packet,packetExact,entries,manifestExact,rowMember,recordExact,
+                        routeExact,identityExact,bounded,cp,configuredControl,control,controlExact,
+                        held,List.mem_of_find?_eq_some foundHeld,pending,key,keyCurrent,keyExact,observed,clock,clockExact,deps,dependenciesExact⟩
+                    else .error "enrolled key moved"
+                  else .error "reservation identity changed"
+              else .error "unbounded party context"
+            else .error "wrong candidate or participant"
+          else .error "wrong designated worker route"
+        else .error "noncanonical party record"
+      else .error "manifest selection failed"
+    else .error "private-party endpoint is not source configured"
+  else .error "recipient-sealed private profile awaits actual decrypt/verification join"
 
 variable {pin : EndpointPin} {request : JointBackendPartyCodec.Request}
 def Prepared.wanted (p : Prepared config opened pin request) : Request .object :=
@@ -195,7 +198,10 @@ def Prepared.wanted (p : Prepared config opened pin request) : Request .object :
 
 def project (p : Prepared config opened pin request)
     (logical : Store.Store (CanonicalCellRegistry.layout p.observed.before.kind)) : Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots opened.directory.directory pin.manifest.cell.value ++
+  ⟨[("private/protocol/invoke/version",1),
+    ("private/protocol/tag",Int.ofNat p.row.party.protocol),
+    ("private/protocol/recipient",Int.ofNat p.row.party.recipient)] ++
+    WorldKindLawDependencies.targetSelectorSlots opened.directory.directory pin.manifest.cell.value ++
     (ResourceObservationAdmission.projectWith p.clock.clock p.wanted
       (semanticBytes pin request p.row p.packet) p.observed.before.kind [] logical ).slots⟩
 
@@ -222,7 +228,7 @@ def authorize (p : Prepared config opened pin request)
     Option (Authorized (portal p) opened.authority.snapshot.authState p.wanted) := do
   let _ ← lawReadGuards p
   let c := policyConfig p
-  let evidence ← (c.capabilityEvidenceChecked p.wanted p.row.delegateCapability () signature () (fun _ => ())).toOption
+  let evidence ← (c.capabilityEvidenceChecked p.wanted p.row.invocationCapability () signature () (fun _ => ())).toOption
   let law ← c.resolve?
   ComposedPolicyAdmission.admit c p.wanted evidence law.witness
     (.policy p.wanted.policyId p.wanted.policyRevision) (by rfl) (by rfl)

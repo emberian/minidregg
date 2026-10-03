@@ -130,6 +130,7 @@ import Kernel.ApplicationLifecycleV2Lookup
 import Kernel.ApplicationLifecycleV3Lookup
 import Kernel.ApplicationLifecycleCompletionReceiver
 import Kernel.ApplicationLifecycleCompletionV2Receiver
+import Host.ApplicationFailedStartEndpoint
 import Kernel.ApplicationLifecycleCompletionLookup
 import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchReady
@@ -179,6 +180,7 @@ import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
 import Kernel.NativeHostReserveBirth
+import Host.NativeReserveBirthAuthoring
 import Host.FnInboxView
 import Host.GrainOriginCommand
 import Host.ProviderUsage
@@ -1270,6 +1272,22 @@ def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
 /-- A completion records the custodian's signed physical report only after
 current source/history admission and exact CAS readback. It does not itself
 launch or kill a process. -/
+def applicationFailedStartRecoverySubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionWalked config state
+  let outcome : NativeHostCodec.Outcome ← match ← ApplicationFailedStartEndpoint.submit config session.verified payload with
+    | .confirmed confirmed => do
+        sessionSetWalked state confirmed.old confirmed.readback
+        pure (.confirmed confirmed.confirmation confirmed.receipt)
+    | .rejected detail => pure (.refused .operationRejected
+        "failed-start-recovery".toUTF8.toList detail.toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable _ => pure (.unavailable "recovery service unavailable".toUTF8.toList)
+    | .uncertain _ => pure (.uncertain "recovery outcome uncertain; use exact ingress lookup".toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
+  return NativeHost.publicSubmissionOutcome outcome
+
 def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
@@ -5702,6 +5720,27 @@ def run (arguments : List String) : IO UInt32 := do
           let bytes ← readBoundedBytes input 4096
           writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimIngressJson config bytes))
           pure 0
+      | "author", ["application-failed-start-report", input, output] =>
+          let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
+          let source ← IO.ofExcept (Lean.Json.parse text)
+          writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorReport source))
+          pure 0
+      | "author", ["application-failed-start-signed-report", input, output] =>
+          let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
+          let source ← IO.ofExcept (Lean.Json.parse text)
+          writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorSignedReport source))
+          pure 0
+      | "author", ["application-failed-start-recovery-request", input, output] =>
+          let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
+          let source ← IO.ofExcept (Lean.Json.parse text)
+          writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorRequest source))
+          pure 0
       | "author", [kind, input, output] =>
           let source ← if kind == "application-route-bound-dispatch" ||
               kind == "application-route-admission-request" ||
@@ -5724,6 +5763,18 @@ def run (arguments : List String) : IO UInt32 := do
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (authorHost config (← IO.ofExcept settings.providerRoutes) kind source)
           writeBytes output bytes
+          pure 0
+      | "inspect", ["application-failed-start-report", input, output] =>
+          let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.inspectReport bytes))
+          pure 0
+      | "inspect", ["application-failed-start-recovery-plan", input, output] =>
+          let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryInspection.inspectPlan bytes))
+          pure 0
+      | "inspect", ["application-failed-start-recovery-request", input, output] =>
+          let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryInspection.inspectRequest bytes))
           pure 0
       | "inspect", [kind, input, output] =>
           let bytes ← if kind == "application-route-admission-attestation" ||
@@ -6628,7 +6679,7 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "reserve birth request exceeds host frame bound")
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept (←
-                              NativeHostReserveBirth.authorWireLoaded pinnedConfig opened payload)
+                              Minidregg.Host.NativeReserveBirthAuthoring.authorWireLoaded pinnedConfig opened payload)
                             unless plan.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "reserve birth plan exceeds host frame bound")
                             return ((201 : UInt8), plan)
@@ -6911,6 +6962,35 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch completion ingress exceeds host frame bound")
                             return ((71 : UInt8), ingress)
+                        | 206 =>
+                            let some management := settings.lifecycleManagement
+                              | return ((255 : UInt8), failure .operationRejected "failed-start-recovery"
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, payload) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+                            let session ← sessionWalked pinnedConfig state
+                            let plan ← IO.ofExcept <| (← ApplicationFailedStartEndpoint.prepare
+                              pinnedConfig session.verified (selector.completionPin management) payload)
+                            let bytes := ApplicationFailedStartRecoveryAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "failed START recovery plan exceeds host frame bound")
+                            return ((206 : UInt8), bytes)
+                        | 207 =>
+                            let (planBytes, signatureBytes) ← splitPair payload
+                            let some plan := ApplicationFailedStartRecoveryAuthoring.planCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical failed START recovery plan")
+                            let signatures ← decodeSignatures signatureBytes
+                            let ingress ← IO.ofExcept <| ApplicationFailedStartEndpoint.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "failed START recovery ingress exceeds host frame bound")
+                            return ((207 : UInt8), ingress)
+                        | 208 =>
+                            return ((208 : UInt8), outcomeCodec.encode
+                              (← applicationFailedStartRecoverySubmitSession pinnedConfig state payload))
+                        | 209 =>
+                            let session ← sessionWalked pinnedConfig state
+                            return ((209 : UInt8), outcomeCodec.encode
+                              (NativeHost.publicSubmissionOutcome (ApplicationFailedStartEndpoint.lookup session.verified payload)))
                         | 74 =>
                             let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -7180,7 +7260,7 @@ def run (arguments : List String) : IO UInt32 := do
           withPinnedSignature config fun pinnedConfig => do
             let request ← readBoundedBytes input maxFrame
             let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
-            let plan ← IO.ofExcept (← NativeHostReserveBirth.authorWireLoaded pinnedConfig opened request)
+            let plan ← IO.ofExcept (← Minidregg.Host.NativeReserveBirthAuthoring.authorWireLoaded pinnedConfig opened request)
             unless plan.length ≤ maxFrame do
               throw (IO.userError "reserve birth plan exceeds host frame bound")
             writeBytes output plan

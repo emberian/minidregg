@@ -57,7 +57,7 @@ def partyWire (p : Party) : List UInt8 :=
 
 structure Enrollment where
   party : Party
-  delegateCapability : CapabilityId
+  invocationCapability : CapabilityId
   candidateBytes : List UInt8
   participant : Nat
   descriptorBytes : List UInt8
@@ -71,26 +71,39 @@ def enrollmentStream : StreamCodec Enrollment :=
   StreamCodec.xmap (StreamCodec.product partySourceStream
     (StreamCodec.product capabilityIdStream
     (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat bytesStream))))
-    (fun e => (e.party,e.delegateCapability,e.candidateBytes,e.participant,e.descriptorBytes))
+    (fun e => (e.party,e.invocationCapability,e.candidateBytes,e.participant,e.descriptorBytes))
     (fun (p,c,b,i,d) => ⟨p,c,b,i,d⟩) (by intro e; cases e; rfl)
 def manifestStream : StreamCodec (List Enrollment) := StreamCodec.list enrollmentStream
 
 /-- Source-pinned endpoint contract; paths and process handles remain local,
 but worker semantics, route and complete ten-lane capacity are source semantics. -/
+inductive EndpointPrivacy
+  | trustedControllerClear
+  | recipientSealed
+  deriving DecidableEq
+
+def privacyStream : StreamCodec EndpointPrivacy :=
+  StreamCodec.xmap StreamCodec.bool
+    (fun p => match p with | .trustedControllerClear => false | .recipientSealed => true)
+    (fun b => if b then .recipientSealed else .trustedControllerClear)
+    (by intro p; cases p <;> rfl)
+
 structure EndpointPin where
   manifest : ContentControlFrame.Pin
   protocol : Nat
   recipient : Nat
   recipientRole : List UInt8
   workerProfile : Digest
+  privacy : EndpointPrivacy
   dispatchCapacity : Minidregg.Theory.ResourceCost.Charge
 
 def endpointPinStream : StreamCodec EndpointPin :=
   StreamCodec.xmap (StreamCodec.product ContentControlFrame.pinStream
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product bytesStream (StreamCodec.product digestStream DurableReceiverCodec.chargeStream)))))
-    (fun p => (p.manifest,p.protocol,p.recipient,p.recipientRole,p.workerProfile,p.dispatchCapacity))
-    (fun (m,p,r,role,w,c) => ⟨m,p,r,role,w,c⟩) (by intro p; cases p; rfl)
+    (StreamCodec.product bytesStream (StreamCodec.product digestStream
+      (StreamCodec.product privacyStream DurableReceiverCodec.chargeStream))))))
+    (fun p => (p.manifest,p.protocol,p.recipient,p.recipientRole,p.workerProfile,p.privacy,p.dispatchCapacity))
+    (fun (m,p,r,role,w,privacy,c) => ⟨m,p,r,role,w,privacy,c⟩) (by intro p; cases p; rfl)
 
 structure PacketClaim where
   recordBytes : List UInt8
@@ -146,10 +159,10 @@ def decodeRequest (bytes : List UInt8) : Option Request := do
 structure ProgressClaim where
   requestBytes : List UInt8
   descriptorBytes : List UInt8
-  deriving DecidableEq
   sourceRecordBytes : List UInt8
   sourceReceiptBytes : List UInt8
   backendProgressBytes : List UInt8
+  deriving DecidableEq
 def progressStream : StreamCodec ProgressClaim :=
   StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product bytesStream
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))

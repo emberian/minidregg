@@ -41,8 +41,8 @@ Qualification is deliberately layered:
 
 - The source closure machine, source compiler, and packed input loader have
   independent qualified checkpoints.
-- Fixed controller modules and finite actual-DAG/actual-machine conformance are
-  being checked incrementally. The probe reports exact mismatches and the
+- Fixed controller modules and 64 finite actual-DAG/actual-machine conformance
+  cases have passed. The probe reports exact mismatches and the
   emitted graph census; examples do not prove all-program equivalence.
 - General builder preservation, graph forcing, codec conformance, source
   reachability and controller simulation must compose into the general theorem.
@@ -71,5 +71,43 @@ Raw output state is deliberately not canonical source reencoding: inactive
 union fields and unused padding may retain prior bits. Multi-tick execution
 feeds these raw bits directly forward. The correct refinement relation is
 successful decoding plus the reachable packed-state invariant, not equality to
-the canonical encoder output. A separate admitted-source fixed-network consumer
-is being qualified to exercise this full physical pipeline.
+the canonical encoder output. The admitted-source fixed-network consumer now passes both transparent and
+opaque identity source programs through 40 raw ticks, decoding the expected
+source value without using a clear machine result as the circuit output oracle.
+
+
+## Source, input, and indexed compilation joins
+
+`BendObliviousExecution.Prepared` binds the existing checked-source `Compiled`
+certificate to the actual reconstructed controller. `ofCompiled` also accepts
+the certified indexed producer, retaining the exact source relation while
+sharing equal immutable ROM instructions. On the same repeated-source example
+and public profile (64 heap rows, 16 frames, 8 arguments, 8 pointer bits,
+16 counter bits), ROM rows fall from 63 to 6 and AND gates from 212,149 to
+161,020 (24.1%). Total gates fall from 517,424 to 416,205; AND depth stays 43.
+These are emitted-circuit counts, not measured private execution throughput.
+
+`BendObliviousInput` provides a reusable fixed public schema for primitive Data,
+pairs and private-bit choices. Both choice arms are allocated in every run;
+the secret bit selects only the returned pointer. The initializer uses the
+actual transactional allocator, computes the Data cache, binds the parameter,
+and enters the fixed public template. Both canonical Boolean inputs pass the
+initializer followed by 16 raw controller ticks and produce the corresponding
+source value with the same six occupied heap rows. This is finite executable
+evidence. The general initializer denotation, recursively captured readiness,
+and malicious sharing/bitness qualification remain separate obligations.
+
+The private completion contract must cover initializer, all public controller
+ticks and the final acceptance/release circuit. Reserving preprocessing only
+for the controller would omit real secret operations. Either a single unrolled
+network or a fully specified staged plan must reserve every correlation before
+any stage releases material. A runtime failure never refunds or regenerates
+spent correlations. Raw handled bits and exact source counts remain private
+unless an explicit source-authorized disclosure contract releases them.
+
+General proof work now consumes the actual shared builders: scalar emitted mux
+selection/preservation, wire extension, and finite-word codec modulo/range laws
+have passed axiom gates. Vector/whole-state selection, full raw-state decoder
+conformance and source coverage must still close before claiming all-program
+fixed-controller equivalence. The checked central source-run and raw-pipeline
+composition theorems make these remaining premises explicit.

@@ -111,15 +111,7 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn unhex(text: &str) -> Result<Vec<u8>> {
-    if text.len() % 2 != 0 {
-        return Err("job: odd hex".into());
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|_| "job: invalid hex".to_string()))
-        .collect()
-}
+fn unhex(text: &str) -> Result<Vec<u8>> { crate::decode_hex(text).map_err(|e| format!("job: {e}")) }
 
 fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];

@@ -15,7 +15,9 @@ type ReturnSlot is Data:
     keyEpoch: List<&2, Nat>, audience: List<&2, Nat>,
     generation: Nat, payload: List<&2, Nat>}
 
-# One computed batch, followed by its ordered ordinary object transitions.
+# One computed batch and its ordered ordinary object transitions.
+# The native adapter places the unique carrier by actual target index, so a
+# funded carrier may legally be last without changing the source computation.
 # Independent returns are committed by the same admitted invocation.
 type NativePlan is Data:
   NativePlan{book: Scalar.Ref, operations: List<&2, Transfer>,

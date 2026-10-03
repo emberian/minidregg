@@ -1,7 +1,9 @@
 /-
-# Theory.LawComposition -- reusable restrictions over a resolved dependency DAG
+# Pred.LawComposition -- reusable restrictions over a resolved dependency DAG
 
-The pure restriction engine shared by admission. The receiving source must
+The candidate predicate restriction engine shared by admission.
+The declaration namespace is retained for source compatibility; this module
+lives in Pred because it uses the candidate predicate AST. The receiving source must
 construct GraphInput from one authenticated snapshot, checking every source
 address, reference resolution and selector projection. This module does not
 turn a supplied graph into policy authority. In particular, PolicyRecord's

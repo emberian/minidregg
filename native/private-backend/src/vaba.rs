@@ -677,4 +677,106 @@ mod tests {
         n.progress().unwrap();
         assert!(!n.views[&0].cover.ig_valid.contains(&2));
     }
+    #[test]
+    fn real_view_change_reorders_future_frames_and_faulty_equivocation_without_split() {
+        let mut ns = nodes();
+        let mut q = VecDeque::new();
+        let mut final_held = VecDeque::new();
+        for n in &mut ns[1..] {
+            for j in [0, 1, 2] {
+                q.extend(n.validate(j).unwrap().into_iter().map(|p| (n.me, p)));
+            }
+            q.extend(
+                n.dealer(0, &coeff(n.me, 0))
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (n.me, p)),
+            );
+        }
+        // One static Byzantine broadcaster equivocates on prevote AND vote Init.
+        // Reliable-broadcast authenticated sender bookkeeping must not count
+        // repeated/equivocating sender0 traffic as multiple honest supports.
+        for to in 1..4 {
+            let pre = Proposal {
+                value: (to - 1) as u16,
+                keys: Set::from([1, 2]),
+                justification: Votes::new(),
+            };
+            for body in [
+                Body::Pre(0, PhaseMessage::Init(proposal_bytes(&pre))),
+                Body::Vote(0, PhaseMessage::Init(vote_bytes((to - 1) as u16))),
+            ] {
+                q.push_back((
+                    0,
+                    Send {
+                        to: to as u16,
+                        message: Message {
+                            context: ns[to].context,
+                            view: 0,
+                            body,
+                        },
+                    },
+                ));
+            }
+        }
+        let mut future_retries = 0;
+        let mut view_one_traffic = 0;
+        let mut steps = 0;
+        while let Some((from, packet)) = q.pop_back() {
+            steps += 1;
+            assert!(steps < 200000, "view change stalled");
+            if packet.to == 0 {
+                continue;
+            }
+            if matches!(packet.message.body, Body::Final(_)) {
+                final_held.push_back((from, packet));
+                continue;
+            }
+            if packet.message.view == 1 {
+                view_one_traffic += 1;
+            }
+            let to = packet.to;
+            match ns[to as usize].receive(from, packet.message.clone()) {
+                Ok(out) => {
+                    // Deliberately put newly entered-view packets ahead of old
+                    // evidence. Recipients not there yet return WouldBlock;
+                    // the reliable driver retains them and later retries.
+                    q.extend(out.into_iter().map(|p| (to, p)));
+                    for v in ns[to as usize].entropy_needed() {
+                        q.extend(
+                            ns[to as usize]
+                                .dealer(v, &coeff(to, v))
+                                .unwrap()
+                                .into_iter()
+                                .map(|p| (to, p)),
+                        );
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    future_retries += 1;
+                    q.push_front((from, packet));
+                }
+                Err(e) => panic!("valid authenticated schedule: {e}"),
+            }
+        }
+        assert!(
+            view_one_traffic > 0,
+            "must actually execute newly entered view traffic"
+        );
+        for n in &ns[1..] {
+            assert_eq!(n.current, 1);
+            assert!(n.output.is_none(), "held final RA cannot decide early");
+            assert!(!n.views[&0].pre[0].output.is_some());
+            assert!(!n.views[&0].votes[0].output.is_some());
+            assert_ne!(n.views[&0].asks[1].instance, n.views[&1].asks[1].instance);
+            assert!(n.views[&1].started);
+        }
+        // At least one actual future packet must have been retained: this is
+        // driver backpressure, not speculative caller-created view allocation.
+        assert!(future_retries > 0);
+        drain(&mut ns, &mut final_held, 0);
+        for n in &ns[1..] {
+            assert_eq!(n.output, Some(0));
+        }
+    }
 }

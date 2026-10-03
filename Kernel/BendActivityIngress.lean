@@ -21,7 +21,7 @@ set_option maxHeartbeats 800000
 
 structure Source where
   program : BendActivityProgram.Source
-  initialize : Bool
+  «initialize» : Bool
   generation : Nat
   ordinal : Nat
   ticks : Nat
@@ -83,7 +83,7 @@ inductive PhaseEvidence (config : Config) (opened : Opened config)
     (pin : ContentControlFrame.Pin) (source : Source)
     (program : BendActivityProgram.Prepared source.program)
     (intent : DataIntent ResourceBirthCodec.rootBytes) : Type
-  | initialize (checked : BendActivityControl.CheckedInitialize pin
+  | «initialize» (checked : BendActivityControl.CheckedInitialize pin
       (BendActivityProgram.binding source.program) source.generation program.limits
       program.compiled.library program.compiled.entry opened.durable.snapshot intent)
   | advance (checked : BendActivityControl.CheckedAdvance pin program.limits
@@ -119,8 +119,7 @@ def construct {config : Config} {opened : Opened config}
         claims := BendActivityControl.claim ResourceBirthCodec.rootBytes pin before :: claims
       let bytes := encode source
       let intent : DataIntent ResourceBirthCodec.rootBytes :=
-        {base with nullifiers := claims, exactCharge := base.exactCharge + overhead source,
-          event := ⟨62,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
+        {base with nullifiers := claims, exactCharge := base.exactCharge + overhead source, event := ⟨62,config.deployment.domain,ResourceBirthCodec.rootBytes bytes,bytes⟩}
       if ready : intent.preflight opened.durable.snapshot = .ok () then
         if source.initialize then
           if source.ordinal != 0 || source.ticks != 0 then none else do

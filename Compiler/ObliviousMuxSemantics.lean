@@ -17,13 +17,14 @@ theorem emitMux_run (network : Network) (selector yes no : Nat) :
       (next + 2, { network with gates :=
         ((network.gates.push (.xor yes no)).push (.and selector next)).push (.xor no (next + 1)) }) := by
   simp [emitMux, emit, Array.size_push, Nat.add_assoc]
+  rfl
 
 theorem push_preserves (network : Network) (inputs : Array Bool) (op : Op)
     (index : Nat) (earlier : index < (network.evaluateWires inputs).size) :
     (({ network with gates := network.gates.push op }).evaluateWires inputs)[index]? =
       (network.evaluateWires inputs)[index]? := by
   rw [evaluateWires_push]
-  exact Array.getElem?_push_lt earlier
+  simp only [gateStep, Array.getElem?_push, Nat.ne_of_lt earlier, if_false]
 
 /-- The actual emitted mux returns the selected OLD wire. All three source
 wire addresses are required to precede the emitted gates. -/
@@ -46,10 +47,15 @@ theorem emitMux_value (network : Network) (inputs : Array Bool)
   have differentNext : next ≠ next + 1 := by omega
   rw [emitMux_run]
   dsimp only
-  simp only [evaluateWires_push, gateStep, Array.size_push, Array.getElem?_push,
-    size, Nat.add_assoc, selectorDifferent, yesDifferent, noDifferent,
-    noDifferentNext, differentNext, if_false, if_true, Option.getD_some]
-  exact mux_boolean _ _ _
+  simp only [Network.evaluateWires, Array.foldl_push]
+  change (gateStep (gateStep (gateStep (network.evaluateWires inputs) (.xor yes no))
+    (.and selector next)) (.xor no (next + 1)))[next + 2]?.getD false = _
+  simpa only [gateStep, Array.getElem?_push, Array.size_push, size, Nat.add_assoc, selectorDifferent,
+    yesDifferent, noDifferent, noDifferentNext, differentNext, if_false, if_true,
+    Option.getD_some, ↓reduceIte] using
+    (mux_boolean ((network.evaluateWires inputs)[selector]?.getD false)
+      ((network.evaluateWires inputs)[yes]?.getD false)
+      ((network.evaluateWires inputs)[no]?.getD false))
 
 /-- No previously existing wire is modified by the emitted mux. -/
 theorem emitMux_preserves (network : Network) (inputs : Array Bool)

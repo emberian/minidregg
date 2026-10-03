@@ -220,7 +220,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   canonicalBytes := ingress.bytes
 
 theorem event_retains_descriptor (domain : Digest) (ingress : DecodedIngress) :
-    (event domain ingress).canonicalBytes = ingressCodec.encode ingress.ingress ∧
+    (event domain ingress).canonicalBytes = ingress.bytes ∧
       ingress.ingress.descriptorBytes =
         CanonicalCellRegistry.sourceEncoding.codec.encode ingress.descriptor :=
   ⟨rfl, ingress.descriptorCanonical.symm⟩

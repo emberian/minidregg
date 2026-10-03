@@ -1,0 +1,12 @@
+edition ObjectiveBend 1
+import ./ReviewBase.obend as Prior
+spec Twice for Prior.Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+  law repeated(value: Nat): self.twice(value) == self.review(self.review(value))
+spec Augmented for Prior.Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1
+def review(inherited: Prior.Review) -> Prior.Review:
+  fix(compose(Prior.Base, Twice, Augmented), inherited)

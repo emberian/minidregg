@@ -1,4 +1,5 @@
-import Kernel.GenericSimplexCertificateSafety
+import Kernel.GenericSimplexEngineSafety
+import Kernel.GenericSimplexLawfulBEq
 import Kernel.JointReceiver
 
 namespace Minidregg.Kernel.GenericSimplexReceiverSafety
@@ -7,6 +8,7 @@ open Minidregg.Kernel.GenericSimplexCertificateSafety
 open Minidregg.Compiler
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableReceiver
+open Minidregg.Kernel.NativeHost
 set_option autoImplicit false
 
 /-- Counts are extracted from the actual opaque verifier result. The remaining
@@ -59,6 +61,62 @@ theorem ordered_next_payload_at_index {context : GenericSimplexCodec.Context}
       some (JointReceiver.sourcePayload intent) :=
   covered_next_at_exact_index ordered.sourceOrdered
 
+/-- The real exporter guard implies the real retained COMMIT send. This proves
+its executable audit check, not cryptographic unforgeability of external bytes. -/
+theorem exportable_has_durable_send (state : Minidregg.Kernel.GenericSimplex.State)
+    (view : Nat) (block : Minidregg.Kernel.GenericSimplex.Block)
+    (admitted : GenericSimplexCodec.exportable state view block = true) :
+    (.send ⟨state.self, view, .commit, some block⟩ : Minidregg.Kernel.GenericSimplex.AuditEvent)
+      ∈ state.audit := by
+  simp only [GenericSimplexCodec.exportable, Bool.and_eq_true] at admitted
+  simpa using admitted.2
+
+open Minidregg.Kernel.GeneralSimplexReachability
+open Minidregg.Kernel.GenericSimplexEngineSafety
+/-- Export eligibility at an actual reachable replica yields an actual global
+SEND witness, via the retained local audit and its proved owner projection. -/
+theorem reachable_exportable_sent {faulty : Finset Nat}
+    {c : Minidregg.Kernel.GenericSimplex.Config}
+    {checked : Network → Nat → Minidregg.Kernel.GenericSimplex.Block → Prop}
+    {initialTime : Nat} {net : Network} (reachable : Reachable c faulty checked initialTime net)
+    (party view : Nat) (block : Minidregg.Kernel.GenericSimplex.Block)
+    (enrolled : party < c.parties) (honest : party ∉ faulty)
+    (admitted : GenericSimplexCodec.exportable (net.localState party) view block = true) :
+    ∃ time, Sent (auditTrace net) time party view .commit (some block) := by
+  have projected := Minidregg.Kernel.GenericSimplexAuditProjection.reachable_projected
+    (Minidregg.Kernel.GenericSimplexStructure.structuralAuditLaws c) reachable
+  have globalSend := Minidregg.Kernel.GenericSimplexGlobalReceive.local_audit_in_global
+    projected enrolled honest (exportable_has_durable_send _ view block admitted)
+  rw [projected.identity party enrolled honest] at globalSend
+  obtain ⟨index, atIndex⟩ := List.mem_iff_getElem?.mp globalSend
+  exact ⟨index, by simp only [Sent, auditTrace, atIndex, Option.getD_some]⟩
+
+/-- Actual executable reachability supplies the consensus contract. The only
+signature-specific premise is the origin of the verifier's actual honest signers.
+The full opaque descendant certificates and receiver prefix checks are consumed. -/
+theorem actual_ordered_next_payload_unique {faulty : Finset Nat}
+    {context : GenericSimplexCodec.Context} {loaded : Durable}
+    {checked : Network → Nat → Minidregg.Kernel.GenericSimplex.Block → Prop}
+    {initialTime : Nat} {net : Network}
+    {leftIntent rightIntent : DataIntent ResourceBirthCodec.rootBytes}
+    (reachable : Reachable context.config faulty checked initialTime net)
+    (size : context.config.parties = 3 * context.config.faults + 1)
+    (faultBound : faulty.card ≤ context.config.faults)
+    (left : JointReceiver.Ordered context loaded leftIntent)
+    (right : JointReceiver.Ordered context loaded rightIntent)
+    (leftOrigin : ∀ party ∈ left.commitment.signerIds, party ∉ faulty →
+      ∃ time, Sent (auditTrace net) time party left.commitment.view .commit (some left.commitment.block))
+    (rightOrigin : ∀ party ∈ right.commitment.signerIds, party ∉ faulty →
+      ∃ time, Sent (auditTrace net) time party right.commitment.view .commit (some right.commitment.block)) :
+    JointReceiver.sourcePayload leftIntent = JointReceiver.sourcePayload rightIntent :=
+  actual_certified_next_record_unique reachable size faultBound
+    (verifiedCommit_attributed left.commitment size leftOrigin)
+    (verifiedCommit_attributed right.commitment size rightOrigin)
+    left.sourceOrdered right.sourceOrdered
+
+#assert_axioms reachable_exportable_sent
+#assert_axioms exportable_has_durable_send
+#assert_axioms actual_ordered_next_payload_unique
 #assert_axioms verifiedCommit_attributed
 #assert_axioms ordered_next_payload_unique
 #assert_axioms ordered_next_payload_at_index

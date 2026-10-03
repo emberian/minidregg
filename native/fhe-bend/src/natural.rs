@@ -98,6 +98,13 @@ pub fn validate(a: &ValueJson) -> Result<ConditionalEnvelope> {
         && string(a,"sourceChargePolicy")? == "bend-live-eval-natural-expression-v1"
         && nat(a,"chargeReservation")? > 0, "natural checked source/representation/charge binding")?;
     let caps = caps(a)?;
+    ensure(nat(a,"plaintextModulus")? == T, "natural plaintext modulus declaration differs")?;
+    let input_bits = nat(a,"inputBits")?;
+    let output_bits = nat(a,"outputBits")?;
+    ensure(input_bits > 0 && input_bits <= 20 && output_bits > 0 && output_bits <= 20,
+        "natural scalar codec bit width outside profile")?;
+    ensure(caps.iter().all(|cap| *cap <= (1u64 << input_bits)),
+        "input cap exceeds declared scalar codec")?;
     let arity = caps.len();
     ensure(a["inputWires"] == serde_json::json!((1..=arity).collect::<Vec<_>>())
         && nat(a,"outputWire")? == 0
@@ -105,7 +112,8 @@ pub fn validate(a: &ValueJson) -> Result<ConditionalEnvelope> {
         && nat(field(a,"relation")?,"p")? == 2_013_265_921, "natural interface/relation")?;
     let max_inputs: Vec<u64> = caps.iter().map(|c|c-1).collect();
     let source_max = expression(field(a,"expression")?, &max_inputs, &mut (2*MAX_GATES+1))?;
-    ensure(nat(a,"outputMax")? == source_max, "source interval declaration differs")?;
+    ensure(nat(a,"outputMax")? == source_max && source_max < (1u64 << output_bits),
+        "source interval/scalar output declaration differs")?;
     let graph = field(a,"constructiveIntegerOutput")?;
     let modular = field(a,"constructiveOutput")?;
     let gates = field(graph,"gates")?.as_array().ok_or("natural gates")?;

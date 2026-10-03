@@ -10,7 +10,7 @@ import Kernel.CarriedSegment
 import Kernel.NativeHostContext
 import Compiler.RetainedArtifactIO
 import Compiler.CredentialSignatureIO
-import Host.ReceiptContinuity
+import Compiler.ReceiptContinuityIO
 import Lean
 
 namespace Minidregg.Compiler.CarriedSegmentIO
@@ -139,8 +139,8 @@ structure Authorized (config : NativeHost.Config) where
 
 def authorizePrepared (config : NativeHost.Config) (prepared : Prepared config)
     (trustedOperator : List UInt8) (signature : List UInt8) : IO (Except String (Authorized config)) := do
-  let old := Minidregg.Host.ReceiptContinuity.current prepared.source.durable
-  let next := Minidregg.Host.ReceiptContinuity.current prepared.target.durable
+  let old := Minidregg.Compiler.ReceiptContinuityIO.current prepared.source.durable
+  let next := Minidregg.Compiler.ReceiptContinuityIO.current prepared.target.durable
   let edge : EdgeSeal := ⟨prepared.body, pointOf prepared.target.durable,
     old.siblings, next.siblings, signature⟩
   if let .error detail := checkPublic prepared.source.capsule.identity trustedOperator edge then

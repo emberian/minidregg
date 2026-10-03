@@ -20,8 +20,7 @@ def crossTCP (binary : System.FilePath) (packet : Bytes) : IO Bytes :=
     let sent := dir / "sent"
     let received := dir / "received"
     writePrivate sent packet.toByteArray
-    let result ← IO.Process.output {cmd := binary.toString,
-      args := #["tcp-hop",sent.toString,received.toString]}
+    let result ← IO.Process.output {cmd := binary.toString,args := #["tcp-hop",sent.toString,received.toString]}
     if result.exitCode != 0 || !result.stderr.isEmpty then
       throw (IO.userError ("actual TCP exchange failed: " ++ result.stderr))
     return (← IO.FS.readBinFile received).toList
@@ -50,9 +49,9 @@ def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
         later := rest
     for index in List.range replicas.size do
       let some replica := replicas[index]? | throw (IO.userError "replica index")
-      let (participant,outgoing,_,_) ← service replica.participant 1 4 1
-      replicas := replicas.set! index ⟨replica.config,participant⟩
-      later := later ++ outgoing
+      let serviced ← service replica.participant 1 4 1
+      replicas := replicas.set! index ⟨replica.config,serviced.1⟩
+      later := later ++ serviced.2.1
     drive fuel replicas payload later
 
 /-- First real source consumer accepts initialized, source-verified replicas and

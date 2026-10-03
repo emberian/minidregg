@@ -23,8 +23,8 @@ def sourceRecords (block : Block) : Block := block.filter (fun bytes => !bytes.i
 private def decodeRecords : Block → Option (List IntentRecord)
   | [] => some []
   | bytes :: rest => do
-      let record ← DurableReceiverIO.recordFrame.decode bytes
-      if DurableReceiverIO.recordFrame.encode record != bytes then none else
+      let record ← DurableCheckpointCodec.recordFrame.decode bytes
+      if DurableCheckpointCodec.recordFrame.encode record != bytes then none else
       let tail ← decodeRecords rest
       some (record :: tail)
 
@@ -32,15 +32,15 @@ private def decodeRecords : Block → Option (List IntentRecord)
 been freshly admitted at their actual original source prefixes, under the fixed
 native verifier and deployment source configuration. Signature validity for an
 engine proposal is not a constructor of this capability. -/
-structure Validated (config : Config) (expected : Context) (block : Block) where
+structure Validated (config : NativeHost.Config) (expected : Context) (block : Block) where
   private mk ::
   contextPinned : config.jointConsensus = some expected
   target : Durable
   anchorExact : expected.instanceBytes = anchorBytes config.genesisHeight target.image.seed
-  recordsExact : target.image.accepted.map DurableReceiverIO.recordFrame.encode = sourceRecords block
+  recordsExact : target.image.accepted.map DurableCheckpointCodec.recordFrame.encode = sourceRecords block
   checked : NativeHostReplay.Verified config target
 
-inductive Result (config : Config) (expected : Context) (block : Block) where
+inductive Result (config : NativeHost.Config) (expected : Context) (block : Block) where
   | accepted (validated : Validated config expected block)
   | rejected (detail : String)
   /-- Native helper/dependency availability and source refusal are deliberately
@@ -53,7 +53,7 @@ by that deployment. Neither roster, verifier callback, nor seed is taken from
 a network proposal. Exact context+anchor checks precede native source replay.
 The full-history profile supports genesis replay; checkpoint epoch migration is
 not silently interpreted as a new genesis. -/
-def validate (config : Config) (origin : Opened config) (expected : Context) (block : Block) :
+def validate (config : NativeHost.Config) (origin : Opened config) (expected : Context) (block : Block) :
     IO (Result config expected block) := do
   let seed := origin.durable.image.seed
   if contextPinned : config.jointConsensus = some expected then
@@ -68,7 +68,7 @@ def validate (config : Config) (origin : Opened config) (expected : Context) (bl
       | .error detail => return .rejected detail
       | .ok target =>
           have imageExact := DurableReceiverIO.loadImage_image built
-          if recordsExact : target.image.accepted.map DurableReceiverIO.recordFrame.encode = sourceRecords block then
+          if recordsExact : target.image.accepted.map DurableCheckpointCodec.recordFrame.encode = sourceRecords block then
             match ← NativeHostReplay.verifyLoaded config target with
             | .error failure => return .retry failure
             | .ok checked =>
@@ -82,21 +82,21 @@ def validate (config : Config) (origin : Opened config) (expected : Context) (bl
 /-- The engine prefix granted by native validation is exactly the source
 history admitted by the real replay walk. It is not merely physically valid
 raw journal bytes. -/
-theorem validated_source_records {config : Config} {expected : Context} {block : Block}
+theorem validated_source_records {config : NativeHost.Config} {expected : Context} {block : Block}
     (v : Validated config expected block) :
-    v.checked.opened.durable.image.accepted.map DurableReceiverIO.recordFrame.encode = sourceRecords block := by
+    v.checked.opened.durable.image.accepted.map DurableCheckpointCodec.recordFrame.encode = sourceRecords block := by
   rw [v.checked.exactImage]
   exact v.recordsExact
 
 /-- Inert engine slots do not change any source clock, authority, record or
 charge. Only exact filtered-source equality transports this admission token;
 raw BFT ancestry and certificate safety remain distinct engine obligations. -/
-def Validated.stutter {config : Config} {expected : Context} {before after : Block}
+def Validated.stutter {config : NativeHost.Config} {expected : Context} {before after : Block}
     (v : Validated config expected before) (same : sourceRecords before = sourceRecords after) :
     Validated config expected after :=
   ⟨v.contextPinned,v.target,v.anchorExact,v.recordsExact.trans same,v.checked⟩
 
-theorem validated_stutter_source_image {config : Config} {expected : Context}
+theorem validated_stutter_source_image {config : NativeHost.Config} {expected : Context}
     {before after : Block} (v : Validated config expected before)
     (same : sourceRecords before = sourceRecords after) :
     (v.stutter same).target.image = v.target.image := rfl

@@ -5,7 +5,8 @@ source-history validation cache, transferable COMMIT witness implementation and
 streaming storage adapter compile. The four-logical-node native harness passes
 with actual TCP, ML-DSA, selective Byzantine COMMIT delivery, durable certificate
 recovery after restart, lost CAS replies and the streaming CAS helper. The source
-participant and actual workdesk fixture are not yet qualified together.
+participant and four-store driver compile against the frozen 373-module receiver
+cohort. The actual workdesk fixture has not run.
 
 The model is a fixed committee of n = 3f + 1 with at most f cumulatively Byzantine
 members, authenticated reliable delivery and partial synchrony. The configured
@@ -99,3 +100,46 @@ guard and receive-provenance extraction into the global consensus proof; source
 funding and private recovery joins; and justified checkpoint/reconfiguration
 liability retention. VerifiedCommit verifies real signatures at an IO boundary;
 it is not itself a proof of cryptographic unforgeability or executable refinement.
+
+
+## Ordinary operator bridge
+
+`Verify.GenericSimplexOperatorBridge.submit` accepts the original native
+SignedCall and actual opened replicas. If any native verified source already
+contains that ingress, it drives the other participants to the exact retained
+record using recovered certificates. It does not propose the mutation again.
+It returns a confirmation only after all four have the same exact source prefix
+through that call and exact receipt. Later agreed records may have reached only
+some participants without blocking lookup of the earlier completed call. An exception during possible progress produces a uniform uncertain
+outcome and refreshes actual sources; it is never reported as a rollback.
+
+`testing/generic-simplex-operator.py` speaks the existing four-byte little-endian
+length plus opcode/payload protocol. The owner supplies
+`MINI_AGREEMENT_BRIDGE_CONFIG`, whose JSON has:
+
+- `readerCommand`: explicit argv for the matching native Host on source store 0.
+- `submitCommand`: explicit argv prefix for the real fixture's `submit-call`;
+  the bridge appends original-call path, native-outcome path, and service fuel.
+- `clientArguments`: exact client launch argv accepted by this wrapper.
+- `attempts`: existing owner-private directory for retained exact signed calls.
+- `fuel` and `timeoutSeconds`: finite positive operator service bounds.
+
+Only opcode 2 takes the agreement route. Opcodes 0, 1, 3 through 11 use the
+matching Host's existing read, lookup, preparation and authoring handlers. Every
+other opcode fails closed; it cannot fall through to another mutation family.
+The matched Host must use the actual same consensus-profile genesis and source
+store. This wrapper does not authorize changing an existing world's profile.
+
+The bridge retains and fsyncs the original call before invoking the native
+consumer. It takes response bytes only from that consumer's bounded private
+outcome file. A process timeout closes the client connection and retains the call;
+there is no automatic second semantic dispatch. Exact lookup/retry uses the
+existing source receipt and agreement evidence.
+
+Current qualification: seven Python framing/file/process-boundary checks pass,
+including an actual child timeout with no redispatch. The initial Lean operator bridge
+compiled against the passing source consumer and frozen receiver cohort. Its
+subsequent exact-prefix completion refinement awaits its scoped check. The
+matched Host/client integration and real source fixture have not run.
+This local four-participant driver does not claim four independent processes or
+failure domains. Operator service fuel is not a source-funded recovery grant.

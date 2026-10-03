@@ -130,7 +130,10 @@ fn exact(root: &Path, name: &str, body: &[u8]) -> Result<()> {
     }
 }
 fn pin(root: &Path, p: &Profile, key: &[u8; 32]) -> Result<()> {
-    let mut b = p.identity();
+    // Explicit protocol pin: old no-handshake retained links cannot silently
+    // become enrolled links under the same custody profile.
+    let mut b = b"Mini/cohort-startup:MCA1/v1".to_vec();
+    b.extend_from_slice(&p.identity());
     b.extend_from_slice(&Sha256::digest(key));
     exact(root, "profile", &b)
 }
@@ -385,6 +388,123 @@ fn send(
     }
     Ok(())
 }
+// Fresh receiver challenges prevent replayed static enrollment proofs from
+// taking the one resident link. Handshake timeout/deadline is public; adversarial
+// saturation or withholding remains a declared network availability fault.
+fn enrollment_context(p: &Profile, start: u64, challenge: &[u8], ack: bool) -> Vec<u8> {
+    let mut context = b"Mini/cohort-enrollment/v1".to_vec();
+    context.push(if ack { 1 } else { 0 });
+    context.extend_from_slice(&p.identity());
+    context.extend_from_slice(&start.to_le_bytes());
+    context.extend_from_slice(challenge);
+    context
+}
+fn enrollment_tag(
+    p: &Profile,
+    key: &[u8; 32],
+    start: u64,
+    challenge: &[u8],
+    ack: bool,
+) -> [u8; 32] {
+    ring::hmac::sign(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key),
+        &enrollment_context(p, start, challenge, ack),
+    )
+    .as_ref()
+    .try_into()
+    .unwrap()
+}
+fn verify_enrollment(
+    p: &Profile,
+    key: &[u8; 32],
+    start: u64,
+    challenge: &[u8],
+    ack: bool,
+    tag: &[u8],
+) -> bool {
+    ring::hmac::verify(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key),
+        &enrollment_context(p, start, challenge, ack),
+        tag,
+    )
+    .is_ok()
+}
+fn enroll_sender(stream: &mut TcpStream, p: &Profile, key: &[u8; 32], start: u64) -> Result<()> {
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1000)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(1000)))
+        .map_err(|e| e.to_string())?;
+    let mut challenge = [0; 36];
+    stream
+        .read_exact(&mut challenge)
+        .map_err(|e| e.to_string())?;
+    if &challenge[..4] != b"MCA1" {
+        return Err("enrollment challenge framing refused".into());
+    }
+    stream
+        .write_all(&enrollment_tag(p, key, start, &challenge, false))
+        .map_err(|e| e.to_string())?;
+    let mut ack = [0; 32];
+    stream.read_exact(&mut ack).map_err(|e| e.to_string())?;
+    if !verify_enrollment(p, key, start, &challenge, true, &ack) {
+        return Err("enrollment receiver authentication refused".into());
+    }
+    Ok(())
+}
+fn accept_enrolled(
+    listener: &TcpListener,
+    p: &Profile,
+    key: &[u8; 32],
+    start: u64,
+) -> Result<TcpStream> {
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let until = p.when(start)?;
+    loop {
+        if now_ms()? >= until {
+            return Err("public enrolled connection deadline exhausted".into());
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let remaining = until.saturating_sub(now_ms()?);
+                if remaining == 0 {
+                    continue;
+                }
+                let timeout = Duration::from_millis(remaining.min(100));
+                stream
+                    .set_read_timeout(Some(timeout))
+                    .map_err(|e| e.to_string())?;
+                stream
+                    .set_write_timeout(Some(timeout))
+                    .map_err(|e| e.to_string())?;
+                let mut challenge = [0; 36];
+                challenge[..4].copy_from_slice(b"MCA1");
+                challenge[4..].copy_from_slice(&random::<32>()?);
+                let mut proof = [0; 32];
+                let verified = stream
+                    .write_all(&challenge)
+                    .and_then(|_| stream.read_exact(&mut proof))
+                    .is_ok()
+                    && verify_enrollment(p, key, start, &challenge, false, &proof);
+                if !verified {
+                    continue;
+                }
+                if stream
+                    .write_all(&enrollment_tag(p, key, start, &challenge, true))
+                    .is_err()
+                {
+                    continue;
+                }
+                return Ok(stream);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1))
+            }
+            Err(e) => return Err(format!("public listener fault: {e}")),
+        }
+    }
+}
 fn receive(
     mut stream: TcpStream,
     root: &Path,
@@ -470,6 +590,26 @@ fn private_fault(root: &Path, epoch: u64, error: &str) -> Result<()> {
         return Ok(());
     }
     persist(&path, error.as_bytes())
+}
+// The source helper has already fsynced its immutable canonical output before
+// returning these exact bytes. This alias is readiness only: no second journal,
+// receipt or durability claim. Crash loss is repaired from the source cache only
+// for future epochs; released epochs remain fenced by the public profile.
+fn publish_cached_output(cache: &Path, ready: &Path, exact: &[u8]) -> Result<()> {
+    if read_private(cache, exact.len())? != exact {
+        return Err("source output cache exact readback refused".into());
+    }
+    match std::fs::hard_link(cache, ready) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if read_private(ready, exact.len())? == exact {
+                Ok(())
+            } else {
+                Err("changed non-authoritative readiness alias refused".into())
+            }
+        }
+        Err(e) => Err(format!("source cache readiness alias unavailable: {e}")),
+    }
 }
 fn await_inputs(inputs: &[PathBuf], epoch: u64, until: u64) -> Result<Option<Vec<PathBuf>>> {
     let names = inputs
@@ -760,7 +900,18 @@ fn worker(
             }
         })();
         match result {
-            Ok(v) => persist(&ready, &v)?,
+            Ok(v) => {
+                let cached = match action {
+                    "relay" => Some(root.join(format!("live-epoch-{epoch}-stage-{hop}.output"))),
+                    "mailbox" => Some(root.join(format!("epoch-{epoch}-stage-3.output"))),
+                    _ => None,
+                };
+                if let Some(cache) = cached {
+                    publish_cached_output(&cache, &ready, &v)?;
+                } else {
+                    persist(&ready, &v)?;
+                }
+            }
             Err(e) => private_fault(root, epoch, &e)?,
         }
     }
@@ -838,30 +989,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     }
     match action.as_str() {
         "send" => {
-            let stream = TcpStream::connect(&endpoint).map_err(|e| e.to_string())?;
+            let mut stream = TcpStream::connect(&endpoint).map_err(|e| e.to_string())?;
+            enroll_sender(&mut stream, &p, &key, start)?;
             send(stream, &state, &files, &p, &key, start)
         }
         "receive" => {
             let listener = TcpListener::bind(&endpoint).map_err(|e| e.to_string())?;
-            listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-            let remaining = p
-                .when(start)?
-                .checked_sub(now_ms()?)
-                .ok_or("missed enrolled connection deadline")?;
-            let until = Instant::now()
-                .checked_add(Duration::from_millis(remaining))
-                .ok_or("cohort monotonic lifetime exhausted")?;
-            loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break receive(stream, &state, &files, &p, &key, start),
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < until =>
-                    {
-                        thread::sleep(Duration::from_millis(1))
-                    }
-                    Err(e) => break Err(format!("public enrolled connection fault: {e}")),
-                }
-            }
+            let stream = accept_enrolled(&listener, &p, &key, start)?;
+            receive(stream, &state, &files, &p, &key, start)
         }
         _ => Err("mix-live action key|send|receive|cover|registrar|relay|mailbox|scan".into()),
     }
@@ -869,6 +1004,74 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unauthenticated_garbage_and_replayed_startup_cannot_consume_enrolled_link() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut p = profile();
+        p.origin = now_ms().unwrap() + 3000;
+        let key = [39; 32];
+        let server_p = p.clone();
+        let server = thread::spawn(move || {
+            let mut accepted = accept_enrolled(&listener, &server_p, &key, 0).unwrap();
+            let mut marker = [0];
+            accepted.read_exact(&mut marker).unwrap();
+            assert_eq!(marker, [91]);
+        });
+        let mut first = TcpStream::connect(address).unwrap();
+        let mut old_challenge = [0; 36];
+        first.read_exact(&mut old_challenge).unwrap();
+        let captured = enrollment_tag(&p, &key, 0, &old_challenge, false);
+        first.write_all(&[0; 32]).unwrap();
+        drop(first);
+        let mut replay = TcpStream::connect(address).unwrap();
+        let mut fresh_challenge = [0; 36];
+        replay.read_exact(&mut fresh_challenge).unwrap();
+        assert_ne!(fresh_challenge, old_challenge);
+        replay.write_all(&captured).unwrap();
+        drop(replay);
+        let mut valid = TcpStream::connect(address).unwrap();
+        enroll_sender(&mut valid, &p, &key, 0).unwrap();
+        valid.write_all(&[91]).unwrap();
+        server.join().unwrap();
+        let tag = enrollment_tag(&p, &key, 0, &old_challenge, false);
+        assert!(!verify_enrollment(&p, &key, 1, &old_challenge, false, &tag));
+        assert!(!verify_enrollment(&p, &key, 0, &old_challenge, true, &tag));
+    }
+    #[test]
+    fn cached_readiness_alias_preserves_exact_source_inode_and_refuses_conflicts() {
+        use std::os::unix::fs::MetadataExt;
+        let root = std::env::temp_dir().join(format!(
+            "mini-cache-alias-{}",
+            crate::hex(&random::<16>().unwrap())
+        ));
+        directory(&root).unwrap();
+        let cache = root.join("source.output");
+        let ready = root.join("ready.payload");
+        persist(&cache, b"exact durable output").unwrap();
+        publish_cached_output(&cache, &ready, b"exact durable output").unwrap();
+        assert_eq!(
+            std::fs::metadata(&cache).unwrap().ino(),
+            std::fs::metadata(&ready).unwrap().ino()
+        );
+        publish_cached_output(&cache, &ready, b"exact durable output").unwrap();
+        assert!(publish_cached_output(&cache, &ready, b"changed output").is_err());
+        let conflict = root.join("conflict.payload");
+        persist(&conflict, b"changed output").unwrap();
+        assert!(publish_cached_output(&cache, &conflict, b"exact durable output").is_err());
+        let absent = root.join("absent.payload");
+        assert!(publish_cached_output(
+            &root.join("missing.output"),
+            &absent,
+            b"exact durable output"
+        )
+        .is_err());
+        assert!(!absent.exists());
+        // Removing the disposable alias does not erase source responsibility.
+        std::fs::remove_file(&ready).unwrap();
+        assert_eq!(read_private(&cache, 64).unwrap(), b"exact durable output");
+        publish_cached_output(&cache, &ready, b"exact durable output").unwrap();
+    }
     use super::*;
     use std::fs;
     fn profile() -> Profile {

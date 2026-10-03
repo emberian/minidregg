@@ -266,7 +266,7 @@ struct AuthenticatedMachine<M: Machine> {
     inner: M,
     context: Context,
     n: usize,
-    capacity: usize,
+    capacity_per_party: usize,
     accepted: BTreeMap<(u16, u64), ReplayEntry>,
 }
 impl<M: Machine> Machine for AuthenticatedMachine<M> {
@@ -284,8 +284,16 @@ impl<M: Machine> Machine for AuthenticatedMachine<M> {
             }
             return Ok(old.outbox.clone());
         }
-        if self.accepted.len() >= self.capacity {
-            return Err(bad("funded ingress replay capacity exhausted"));
+        // A sender-selected sequence may consume only that party's funded quota.
+        // Retain old IDs: deleting them would allow a replay to reapply effects.
+        if self
+            .accepted
+            .keys()
+            .filter(|(sender, _)| *sender == envelope.party.party)
+            .count()
+            >= self.capacity_per_party
+        {
+            return Err(bad("funded ingress party replay capacity exhausted"));
         }
         let mut e = vec![2];
         e.extend(envelope.party.party.to_le_bytes());
@@ -471,6 +479,10 @@ pub struct Receiver<M: IngressMachine> {
     journal: Journal<AuthenticatedMachine<M>>,
 }
 impl<M: IngressMachine> Receiver<M> {
+    /// `capacity` is the fixed reserved quota PER party, total n*capacity.
+    /// Source funding must admit this full public bound before opening the worker.
+    /// This supports a finite generation lifetime, not indefinitely many packets.
+    /// Old IDs are retained; extending lifetime needs new source-admitted context.
     pub fn open(
         path: &Path,
         context: Context,
@@ -478,11 +490,12 @@ impl<M: IngressMachine> Receiver<M> {
         capacity: usize,
         inner: M,
     ) -> Result<Self> {
-        if n == 0 || n > 16 || context.recipient as usize >= n || capacity == 0 {
+        if n == 0 || n > 16 || context.recipient as usize >= n || capacity == 0 || capacity > 65536
+        {
             return Err(bad("receiver funded bounds"));
         }
         inner.validate_ingress_context(&context, n)?;
-        let mut identity = b"DREGG.PRIVATE.AUTH.RECEIVER\x01".to_vec();
+        let mut identity = b"DREGG.PRIVATE.AUTH.RECEIVER\x02".to_vec();
         identity.push(context.protocol as u8);
         context.generation.put(&mut identity);
         context.authority_epoch.put(&mut identity);
@@ -495,7 +508,7 @@ impl<M: IngressMachine> Receiver<M> {
             inner,
             context,
             n,
-            capacity,
+            capacity_per_party: capacity,
             accepted: BTreeMap::new(),
         };
         Ok(Self {
@@ -764,7 +777,7 @@ mod tests {
     impl Machine for Counter {
         fn apply(&mut self, b: &[u8]) -> Result<Vec<u8>> {
             let mut c = Cursor::new(b)?;
-            if c.byte()? != 2 || c.u16()? != 1 {
+            if c.byte()? != 2 || c.u16()? >= 4 {
                 return Err(bad("counter authenticated sender"));
             }
             let message = c.bytes()?;
@@ -869,5 +882,80 @@ mod tests {
             )
             .is_err());
         assert_eq!(r.state().value, 2);
+    }
+    #[test]
+    fn byzantine_sender_quota_cannot_starve_honest_party_after_restart() {
+        let faulty = fixture(Protocol::Acs);
+        let mut honest = fixture(Protocol::Acs);
+        honest.party.party = 0;
+        honest.party.subject = b"independent-honest-subject".to_vec();
+        honest.key = [29; 32];
+        let p = path();
+        let original;
+        {
+            let mut r =
+                Receiver::open(&p, faulty.party.context.clone(), 4, 2, Counter { value: 0 })
+                    .unwrap();
+            for seq in [u64::MAX, 100000] {
+                r.receive(
+                    &faulty,
+                    &packet(&faulty, seq, 0u64.to_le_bytes().to_vec())
+                        .encode()
+                        .unwrap(),
+                )
+                .unwrap();
+            }
+            for seq in 0..4 {
+                assert!(r
+                    .receive(
+                        &faulty,
+                        &packet(&faulty, seq, 0u64.to_le_bytes().to_vec())
+                            .encode()
+                            .unwrap()
+                    )
+                    .is_err());
+            }
+            original = r
+                .receive(
+                    &honest,
+                    &packet(&honest, 9, 7u64.to_le_bytes().to_vec())
+                        .encode()
+                        .unwrap(),
+                )
+                .unwrap()
+                .outbox;
+            assert_eq!(r.state().value, 7);
+        }
+        let mut r =
+            Receiver::open(&p, faulty.party.context.clone(), 4, 2, Counter { value: 0 }).unwrap();
+        let len = fs::metadata(&p).unwrap().len();
+        assert_eq!(
+            r.receive(
+                &honest,
+                &packet(&honest, 9, 7u64.to_le_bytes().to_vec())
+                    .encode()
+                    .unwrap()
+            )
+            .unwrap()
+            .outbox,
+            original
+        );
+        assert_eq!(fs::metadata(&p).unwrap().len(), len);
+        r.receive(
+            &honest,
+            &packet(&honest, 1, 11u64.to_le_bytes().to_vec())
+                .encode()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(r.state().value, 18);
+        assert!(r
+            .receive(
+                &honest,
+                &packet(&honest, 2, 1u64.to_le_bytes().to_vec())
+                    .encode()
+                    .unwrap()
+            )
+            .is_err());
     }
 }

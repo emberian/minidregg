@@ -112,13 +112,17 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
   let exact := (candidateStream codec).encode plan.candidate
   let effect := accepted.ordinary.dataIntent accepted.shape
   if candidateExact : promise.declaration.candidateBytes = exact then
-    if projectionExact : p.intent = IntentRecord.ofIntent effect then
+    if projectionExactBytes : DurableReceiverCodec.intentStream.encode p.intent =
+        DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent effect) then
+      have projectionExact : p.intent = IntentRecord.ofIntent effect :=
+        ResourceBirthCodec.lawful_encode_injective DurableReceiverCodec.intentStream.toLawful projectionExactBytes
       if sourceDomain : p.domain = deployment.domain then
         if promise.declaration.epoch != epoch || p.epoch != epoch ||
             promise.declaration.generation != p.generation then none else
         if (p.footprint.contains pin.cell) then none else
-        let before ← JointControlFrame.readControl pin (durable.snapshot.canonicalBytes pin.cell)
-        if beforeExact : JointControlFrame.readControl pin (durable.snapshot.canonicalBytes pin.cell) = some before then
+        match beforeExact : JointControlFrame.readControl pin (durable.snapshot.canonicalBytes pin.cell) with
+        | none => none
+        | some before =>
           if !(before.wellFormed deployment.domain pin.cell) then none else
           if before.reservations.any (fun r => r.domain == p.domain &&
               (r.lineage == plan.candidate.lineage || r.candidateBytes == exact)) then none else
@@ -128,7 +132,9 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
           let extra := control.readGuards.filter (fun g =>
             !(decide (g.cellId ∈ effect.writes.map DataWrite.cellId)))
           let installation : DataIntent ResourceBirthCodec.rootBytes :=
-            { effect with readGuards := effect.readGuards ++ extra, guardsReadOnly := by
+            { effect with
+              readGuards := effect.readGuards ++ extra
+              guardsReadOnly := by
                 intro g hg
                 rcases List.mem_append.mp hg with ordinary | added
                 · exact effect.guardsReadOnly g ordinary
@@ -144,45 +150,52 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
               before.repairOutbox ++ promise.declaration.repairEnvelopes,
               before.maintenanceReserve + promise.declaration.maintenance⟩
           if !(after.wellFormed deployment.domain pin.cell) then none else
-          let [write] := control.writes | none
-          if write.cellId != pin.cell then none else
-          let some actualPost := JointControlFrame.readControl pin write.canonicalPostBytes | none
-          if postExactBytes : controlStream.encode actualPost = controlStream.encode after then
-            have postExact : actualPost = after :=
-              ResourceBirthCodec.lawful_encode_injective controlStream.toLawful postExactBytes
-            let guards := control.readGuards ++ dependencies installation
-            if disjoint : ∀ g ∈ guards, g.cellId ∉ control.writes.map DataWrite.cellId then
-              let source : ReserveSource := ⟨exact,i.val,promise,signedBytes deployment.domain profile.semantics controlSigned⟩
-              let bytes := reserveSourceBytes source
-              let charge := reserveCharge bytes control effect guards
-              let intent : DataIntent ResourceBirthCodec.rootBytes :=
-                { control with readGuards := guards, exactCharge := charge,
-                  nullifiers := control.nullifiers ++
-                    [invocationNullifier deployment.domain
-                      (JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration).value],
-                  event := ⟨60,deployment.domain,
-                    JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration,bytes⟩,
-                  guardsReadOnly := disjoint }
-              if funded : Charge.fundedCheck
-                  (heldCharge held.domain after.reservations + after.maintenanceReserve + intent.exactCharge)
-                  durable.snapshot.model.available = true then
-                if intent.preflight durable.snapshot != .ok () then none else
-                if effect.preflight durable.snapshot != .ok () then none else
-                let controlPost : ∃ w ∈ intent.writes, w.cellId = pin.cell ∧
-                    JointControlFrame.readControl pin w.canonicalPostBytes = some after := by
-                  refine ⟨write,?_,?_,?_⟩
-                  · change write ∈ control.writes
-                    simp_all
-                  · simp_all
-                  · simp_all [postExact]
-                some ⟨intent,effect,installation,rfl,rfl,rfl,rfl,rfl,held,pin,before,after,source,accepted.sourceExact,
-                  rfl,by intro g hg; exact List.mem_append_right _ hg,
-                  beforeExact,controlPost,funded,
-                  ⟨command,selected,prepared,accepted,rfl⟩⟩
-              else none
+          match writesExact : control.writes with
+          | [write] =>
+            if cellExact : write.cellId = pin.cell then
+              match readPostExact : JointControlFrame.readControl pin write.canonicalPostBytes with
+              | none => none
+              | some actualPost =>
+                if postExactBytes : controlStream.encode actualPost = controlStream.encode after then
+                  have postExact : actualPost = after :=
+                    ResourceBirthCodec.lawful_encode_injective controlStream.toLawful postExactBytes
+                  let guards := control.readGuards ++ dependencies installation
+                  if disjoint : ∀ g ∈ guards, g.cellId ∉ control.writes.map DataWrite.cellId then
+                    let source : ReserveSource := ⟨exact,i.val,promise,signedBytes deployment.domain profile.semantics controlSigned⟩
+                    let bytes := reserveSourceBytes source
+                    let charge := reserveCharge bytes control effect guards
+                    let intent : DataIntent ResourceBirthCodec.rootBytes :=
+                      { control with
+                        readGuards := guards
+                        exactCharge := charge
+                        nullifiers := control.nullifiers ++
+                          [invocationNullifier deployment.domain
+                            (JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration).value]
+                        event := ⟨60,deployment.domain,
+                          JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration,bytes⟩
+                        guardsReadOnly := disjoint }
+                    if funded : Charge.fundedCheck
+                        (heldCharge held.domain after.reservations + after.maintenanceReserve + intent.exactCharge)
+                        durable.snapshot.model.available = true then
+                      if intent.preflight durable.snapshot != .ok () then none else
+                      if effect.preflight durable.snapshot != .ok () then none else
+                      let controlPost : ∃ w ∈ intent.writes, w.cellId = pin.cell ∧
+                          JointControlFrame.readControl pin w.canonicalPostBytes = some after := by
+                        refine ⟨write,?_,?_,?_⟩
+                        · change write ∈ control.writes
+                          rw [writesExact]
+                          exact List.mem_singleton_self write
+                        · exact cellExact
+                        · rw [readPostExact,postExact]
+                      some ⟨intent,effect,installation,rfl,rfl,rfl,rfl,rfl,held,pin,before,after,source,accepted.sourceExact,
+                        rfl,by intro g hg; exact List.mem_append_right _ hg,
+                        beforeExact,controlPost,funded,
+                        ⟨command,selected,prepared,accepted,rfl⟩⟩
+                    else none
+                  else none
+                else none
             else none
-          else none
-        else none
+          | _ => none
       else none
     else none
   else none

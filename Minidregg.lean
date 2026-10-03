@@ -1,8 +1,9 @@
 /-
 # Minidregg — root module.
 
-Imports every per-directory root so the default `lake build` target covers the
-whole tree. The carve is ATLAS.md §7; the import boundary between the
+Imports the stable per-directory roots. The explicit Bend/Simplex qualification
+targets and opt-in authored research target are described in
+docs/LEAN-QUALIFICATION.md. A declared target is not a compiler PASS. The carve is ATLAS.md §7; the import boundary between the
 candidate-independent `Theory`/`Selvage` libs and everything else is mechanically
 enforced by `scripts/check-import-boundary.sh`.
 -/
@@ -41,3 +42,9 @@ import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.Job  -- COMPUTE C1: the job lifecycle as one Pred law (deploy/shell/templates/job/law.job); both poles per edge, no_double_settle, bond_slashed_iff_mismatch, settle_requires_match_or_timeout, caller_cannot_forge_truth
 import Kernel.SealedMarket  -- SEALED-MARKET: the sealed-bid market law (the template is its rendering) and its guarantees
+
+-- Previously orphaned general carry claims and their regression gates.
+import Theory.CheckedCarry
+import Compiler.LegacyStoreCarryChecks
+import Compiler.CarryConfigurationChecks
+import Verify.JointDecisionRecovery

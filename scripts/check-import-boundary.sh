@@ -6,10 +6,10 @@
 # checked on every tracked .lean file (direct imports; Theory and Selvage are
 # closed under their rows, so their transitive closure is checked too):
 #
-#   Theory    Mathlib Theory                     the metatheory never knows the candidate
+#   Theory    Mathlib Lean Std Init Theory                     the metatheory never knows the candidate
 #   Selvage   Mathlib Theory Selvage             the proof system knows only the metatheory
 #   Pred      Mathlib Theory Pred Compiler
-#   Kernel    Mathlib Theory Pred Compiler Kernel
+#   Kernel    Mathlib Lean Std Init Theory Pred Compiler Kernel
 #   Compiler  Mathlib Lean Std Init Theory Pred Kernel Selvage Assurance Compiler
 #   Assurance Mathlib Theory Pred Kernel Compiler Selvage Assurance
 #   Effects   Mathlib Kernel Compiler Effects
@@ -26,6 +26,8 @@
 # Host also imports Pred for the served law satisfiability query and Mathlib for
 # capability-tree deduplication proofs (rooms convergence, 2026-10-02). These do
 # not change the sink boundary: no core library imports Host.
+# Lean/Std/Init are the language and standard library, not candidate code.
+# Candidate-dependent restriction algebra is in Pred/LawComposition.lean.
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u
@@ -33,10 +35,10 @@ cd "$(dirname "$0")/.." || exit 1
 python3 - <<'PY'
 import re, subprocess, sys
 ALLOWED = {
-    "Theory":    {"Mathlib", "Theory"},
+    "Theory":    {"Mathlib", "Lean", "Std", "Init", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
     "Pred":      {"Mathlib", "Theory", "Pred", "Compiler"},
-    "Kernel":    {"Mathlib", "Theory", "Pred", "Compiler", "Kernel"},
+    "Kernel":    {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Compiler", "Kernel"},
     "Compiler":  {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Kernel", "Selvage", "Assurance", "Compiler"},
     "Assurance": {"Mathlib", "Theory", "Pred", "Kernel", "Compiler", "Selvage", "Assurance"},
     "Effects":   {"Mathlib", "Kernel", "Compiler", "Effects"},

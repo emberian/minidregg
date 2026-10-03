@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+
+record FunctionContext:
+  bias: Nat
+
+extension Wrap(self: FunctionContext, super: Nat -> Nat) -> Nat -> Nat:
+  fn(x: Nat) -> Nat: super(x) + self.bias

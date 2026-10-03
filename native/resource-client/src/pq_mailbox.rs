@@ -1,8 +1,9 @@
 //! Restricted PQ batch cascade + full-broadcast replies. NOT Outfox protocol
 //! equivalence or a completed active/longitudinal anonymity theorem.
+use crate::crypto_transit::{self, SealedRef};
 use crate::scheduled_transport::{self as native, directory, persist, random, read_private};
 use crate::{transport, Args, Result};
-use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768};
+use aws_lc_rs::kem::{DecapsulationKey, ML_KEM_768};
 use chacha20poly1305::{
     aead::{Aead, Payload},
     KeyInit, XChaCha20Poly1305, XNonce,
@@ -52,71 +53,31 @@ impl Profile {
         self.payload + (LAYERS - hop) * OVERHEAD
     }
 }
-fn derive(secret: &[u8], aad: &[u8]) -> [u8; 32] {
-    hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, secret), aad)
-        .as_ref()
-        .try_into()
-        .unwrap()
-}
 fn wrap(p: &Profile, hop: usize, key: &[u8], body: &[u8]) -> Result<Vec<u8>> {
     if body.len() != p.size(hop + 1) {
         return Err("PQ layer body shape mismatch".into());
     }
-    let public = EncapsulationKey::new(&ML_KEM_768, key)
-        .map_err(|_| "invalid pinned ML-KEM768 public key")?;
-    let (kem, shared) = public
-        .encapsulate()
-        .map_err(|_| "ML-KEM encapsulation failed")?;
-    let aad = p.aad(hop);
-    let derived = derive(shared.as_ref(), &aad);
-    let nonce = random::<24>()?;
-    let cipher = XChaCha20Poly1305::new_from_slice(&derived)
-        .map_err(|_| "PQ layer key length")?
-        .encrypt(
-            XNonce::from_slice(&nonce),
-            Payload {
-                msg: body,
-                aad: &aad,
-            },
-        )
-        .map_err(|_| "PQ layer seal")?;
-    let mut commitment_context = aad.clone();
-    commitment_context.extend_from_slice(&Sha256::digest(&cipher));
-    let commitment = derive(&derived, &commitment_context);
-    let mut out = kem.as_ref().to_vec();
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&commitment);
-    out.extend_from_slice(&cipher);
+    let sealed = crypto_transit::seal_raw_context(key, &p.aad(hop), body)?;
+    let mut out = sealed.kem_ciphertext.to_vec();
+    out.extend_from_slice(&sealed.nonce);
+    out.extend_from_slice(&sealed.commitment);
+    out.extend_from_slice(&sealed.ciphertext);
     Ok(out)
 }
 fn peel(p: &Profile, hop: usize, key: &DecapsulationKey, packet: &[u8]) -> Result<Vec<u8>> {
     if hop >= LAYERS || packet.len() != p.size(hop) {
         return Err("PQ layer packet shape mismatch".into());
     }
-    let shared = key
-        .decapsulate(Ciphertext::from(&packet[..1088]))
-        .map_err(|_| "ML-KEM decapsulation failed")?;
-    let aad = p.aad(hop);
-    let derived = derive(shared.as_ref(), &aad);
-    let cipher = &packet[1144..];
-    let mut commitment_context = aad.clone();
-    commitment_context.extend_from_slice(&Sha256::digest(cipher));
-    hmac::verify(
-        &hmac::Key::new(hmac::HMAC_SHA256, &derived),
-        &commitment_context,
-        &packet[1112..1144],
+    crypto_transit::open_raw_context(
+        key,
+        &p.aad(hop),
+        SealedRef {
+            kem_ciphertext: &packet[..1088],
+            nonce: &packet[1088..1112],
+            commitment: &packet[1112..1144],
+            ciphertext: &packet[1144..],
+        },
     )
-    .map_err(|_| "PQ layer key/cipher commitment refused")?;
-    XChaCha20Poly1305::new_from_slice(&derived)
-        .map_err(|_| "PQ layer key length")?
-        .decrypt(
-            XNonce::from_slice(&packet[1088..1112]),
-            Payload {
-                msg: cipher,
-                aad: &aad,
-            },
-        )
-        .map_err(|_| "PQ layer authentication/tag refused".into())
 }
 fn shuffle<T>(values: &mut [T]) -> Result<()> {
     for i in (1..values.len()).rev() {
@@ -983,10 +944,10 @@ pub(crate) fn live_mailbox(
     }
     let (admitted, input) = segment.split_at(n);
     let key = read_key(keypath)?;
-    verify_transition(&p, 3, &key, input, admitted, auth)?;
-    let cores = unbatch(&p, 3, input)?
+    let peeled = prepare_transition(&p, 3, &key, input, admitted, auth)?;
+    let cores = peeled
         .iter()
-        .map(|v| peel(&p, 3, &key, v).and_then(|v| parse_live_core(&p, &v)))
+        .map(|v| parse_live_core(&p, v))
         .collect::<Result<Vec<_>>>()?;
     bind_epoch_profile(root, &p, 4, admitted, &live_plan(&p, 4, origin, tick)?)?;
     if let Some(v) = claim(root, &p, 3, input)? {
@@ -1275,6 +1236,27 @@ mod tests {
             })
             .collect();
         (secrets, publics)
+    }
+    #[test]
+    fn shared_crypto_preserves_maximum_profile_through_all_layers() {
+        let p = Profile {
+            epoch: 1,
+            width: 2,
+            payload: 262144,
+        };
+        p.check().unwrap();
+        let (secret, public) = keys();
+        let original = vec![19; p.payload];
+        let mut packet = original.clone();
+        for hop in (0..LAYERS).rev() {
+            packet = wrap(&p, hop, &public[hop], &packet).unwrap();
+            assert_eq!(packet.len(), p.size(hop));
+        }
+        for hop in 0..LAYERS {
+            packet = peel(&p, hop, &secret[hop], &packet).unwrap();
+            assert_eq!(packet.len(), p.size(hop + 1));
+        }
+        assert_eq!(packet, original);
     }
     #[test]
     fn live_relay_grouped_admission_exact_replay_crash_and_conflict_fences() {

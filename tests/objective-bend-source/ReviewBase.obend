@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1

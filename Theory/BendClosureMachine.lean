@@ -508,5 +508,35 @@ theorem run_add (limits : Limits) (library : Library) (first second : Nat) (stat
 #assert_axioms run_add
 #assert_axioms complete_absorbing
 #assert_axioms refused_absorbing
+/- Stable public proof views keep the original private constants and every
+operational definition intact. Existing compiled consumers remain compatible. -/
+def boundedArgsFn (limits : Limits) (args : List (Quan × Nat)) : Work Unit :=
+  boundedArgs limits args
+
+def definitionFn (library : Library) (name : Nat) : Work Nat :=
+  definition library name
+
+def labelNameFn (library : Library) (name : Nat) : Work String :=
+  labelName library name
+
+def labelOfFn (library : Library) (pointer : Nat) : Work String :=
+  labelOf library pointer
+
+theorem boundedArgs_eq (limits : Limits) (args : List (Quan × Nat)) :
+    boundedArgs limits args = boundedArgsFn limits args := rfl
+
+theorem definition_eq (library : Library) (name : Nat) :
+    definition library name = definitionFn library name := rfl
+
+theorem labelName_eq (library : Library) (name : Nat) :
+    labelName library name = labelNameFn library name := rfl
+
+theorem labelOf_eq (library : Library) (pointer : Nat) :
+    labelOf library pointer = labelOfFn library pointer := rfl
+
+#assert_axioms boundedArgs_eq
+#assert_axioms definition_eq
+#assert_axioms labelName_eq
+#assert_axioms labelOf_eq
 end Minidregg.Theory.BendClosureMachine
 

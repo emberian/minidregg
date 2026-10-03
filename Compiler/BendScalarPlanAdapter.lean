@@ -9,6 +9,7 @@ source, authority, field closure, policy, funding, and complete replay binding.
 import Compiler.BendPlanLowering
 import Compiler.BendSourceListTyped
 import Compiler.CredentialAuthorityDomainReceiver
+import Kernel.PhysicalResourceReadGuard
 
 -- Exact emitted labels below captured from sealed-source Book
 -- codex-station-world-20261003/evidence/sealed-bend-4JAMbl/book.bendtt
@@ -213,9 +214,6 @@ theorem sourcePatch_native (ref : Ref) (writes : List Write) :
 
 def effect (index : Nat) (scalar : Scalar) : BendWorldPlan.Effect :=
   ⟨index, .scalar (scalar.writes.map (action scalar.ref))⟩
-def readGuard (ref : Ref) : Minidregg.Kernel.DurableDataIntent.ReadGuard :=
-  ⟨⟨ref.resourceID⟩, ref.root⟩
-
 /-- Actual command order determines indices. Identity is never the index. -/
 def indexOf (command : Command) (resourceID : Nat) : Option (Fin command.targets.length) :=
   (List.finRange command.targets.length).find? fun i =>
@@ -292,6 +290,68 @@ def bindOrdered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
       let tail ← bindOrdered deployment loaded command rest
       pure ⟨effect bound.index.val scalar :: tail.1, .cons bound tail.2⟩
 
+/-- Source handles quote the logical schema root. Durable CAS read guards
+quote the physical lifecycle envelope root. Both come from the SAME current
+loaded cell; treating either digest as the other is a receiving bug. -/
+structure BoundRead {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (ref : Ref) where
+  private mk ::
+  packed : PackedCell CanonicalCellRegistry.registry
+  present : loaded.directory.slots ref.resourceID = .present packed
+  logicalRoot : packed.payloadRoot = ref.root
+  physicalCurrent : ResourceBirthCodec.physicalRoot (.live packed) =
+    durable.snapshot.model.roots ⟨ref.resourceID⟩
+
+def BoundRead.guard {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {ref : Ref}
+    (bound : BoundRead loaded ref) : Minidregg.Kernel.DurableDataIntent.ReadGuard :=
+  ⟨⟨ref.resourceID⟩, ResourceBirthCodec.physicalRoot (.live bound.packed)⟩
+
+def bindRead {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (ref : Ref) :
+    Option (BoundRead loaded ref) :=
+  match present : loaded.directory.slots ref.resourceID with
+  | .absent => none
+  | .present packed =>
+    if logicalRoot : packed.payloadRoot = ref.root then
+      some ⟨packed, present, logicalRoot,
+        Minidregg.Kernel.PhysicalResourceReadGuard.current loaded ref.resourceID packed present⟩
+    else none
+
+inductive OrderedReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) :
+    List Ref → List Minidregg.Kernel.DurableDataIntent.ReadGuard → Type where
+  | nil : OrderedReads loaded [] []
+  | cons {ref : Ref} {rest : List Ref}
+      {guards : List Minidregg.Kernel.DurableDataIntent.ReadGuard}
+      (bound : BoundRead loaded ref) (tail : OrderedReads loaded rest guards) :
+      OrderedReads loaded (ref :: rest) (bound.guard :: guards)
+
+def bindReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (refs : List Ref) :
+    Option (Sigma fun guards => OrderedReads loaded refs guards) :=
+  match refs with
+  | [] => some ⟨[], .nil⟩
+  | ref :: rest => do
+    let bound ← bindRead loaded ref
+    let tail ← bindReads loaded rest
+    pure ⟨bound.guard :: tail.1, .cons bound tail.2⟩
+
+theorem BoundRead.guard_current {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {ref : Ref}
+    (bound : BoundRead loaded ref) :
+    bound.guard.expectedRoot = durable.snapshot.model.roots bound.guard.cellId :=
+  bound.physicalCurrent
+
+theorem ordered_reads_complete {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {refs : List Ref}
+    {guards : List Minidregg.Kernel.DurableDataIntent.ReadGuard}
+    (ordered : OrderedReads loaded refs guards) :
+    List.Forall₂ (fun ref guard => ∃ bound : BoundRead loaded ref, guard = bound.guard) refs guards := by
+  induction ordered with
+  | nil => exact .nil
+  | cons bound tail ih => exact .cons ⟨bound, rfl⟩ ih
+
 structure BoundPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
@@ -301,7 +361,7 @@ structure BoundPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootB
   commandDistinct : (command.targets.map Target.target).Nodup
   effectsDistinct : (source.effects.map (fun s => s.ref.resourceID)).Nodup
   ordered : Ordered deployment loaded command source.effects plan.effects
-  readsExact : plan.reads = source.reads.map readGuard
+  orderedReads : OrderedReads loaded source.reads plan.reads
   returnsExact : plan.returns = []
   nativeExact : BendWorldPlan.matchesCommand plan command = true
 
@@ -312,9 +372,10 @@ def bindPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
   if commandDistinct : (command.targets.map Target.target).Nodup then
     if effectsDistinct : (source.effects.map (fun s => s.ref.resourceID)).Nodup then
       let effects ← bindOrdered deployment loaded command source.effects
-      let plan : BendWorldPlan.Plan := ⟨effects.1, [], source.reads.map readGuard⟩
+      let reads ← bindReads loaded source.reads
+      let plan : BendWorldPlan.Plan := ⟨effects.1, [], reads.1⟩
       if nativeExact : BendWorldPlan.matchesCommand plan command = true then
-        pure ⟨plan, commandDistinct, effectsDistinct, effects.2, rfl, rfl, nativeExact⟩
+        pure ⟨plan, commandDistinct, effectsDistinct, effects.2, reads.2, rfl, nativeExact⟩
       else none
     else none
   else none
@@ -498,6 +559,8 @@ theorem completed_source_exact_native {durable : DurableReceiverIO.Loaded Resour
     {command : Command} (result : BoundResult core initial deployment loaded command) :
     result.bound.plan.effects = BendWorldPlan.effectsOf command := exact_native_effects result.bound
 
+#assert_axioms BoundRead.guard_current
+#assert_axioms ordered_reads_complete
 #assert_axioms completed_refusal_inert
 #assert_axioms completed_source_exact_native
 #assert_axioms aliased_command_refused

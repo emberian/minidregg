@@ -32,22 +32,32 @@ inductive CapturedReady (book : Book) (program : Program) (heap : Heap) : Nat �
       CapturedReady book program heap pointer (source :: values)
 end
 
-mutual
 theorem RetainedReady.denotes {book : Book} {program : Program} {heap : Heap}
     {pointer : Nat} {source : Term} (ready : RetainedReady book program heap pointer source) :
     Denotes program heap pointer source := by
-  cases ready with
-  | closure row code captured => exact .closure row code captured.denotes
-  | pair row first second value => exact .pair row first.denotes second.denotes
-  | application row function argument value => exact .application row function.denotes argument.denotes
+  apply @RetainedReady.rec book program heap
+    (fun pointer source _ => Denotes program heap pointer source)
+    (fun pointer values _ => EnvironmentDenotes program heap pointer values)
+    ?_ ?_ ?_ ?_ ?_ pointer source ready
+  · intros; exact Denotes.closure (by assumption) (by assumption) (by assumption)
+  · intros; exact Denotes.pair (by assumption) (by assumption) (by assumption)
+  · intros; exact Denotes.application (by assumption) (by assumption) (by assumption)
+  · intros; exact EnvironmentDenotes.nil (by assumption)
+  · intros; exact EnvironmentDenotes.cons (by assumption) (by assumption) (by assumption)
 
 theorem CapturedReady.denotes {book : Book} {program : Program} {heap : Heap}
     {pointer : Nat} {values : Env} (ready : CapturedReady book program heap pointer values) :
     EnvironmentDenotes program heap pointer values := by
-  cases ready with
-  | nil row => exact .nil row
-  | cons row head tail => exact .cons row head.denotes tail.denotes
-end
+  apply @CapturedReady.rec book program heap
+    (fun pointer source _ => Denotes program heap pointer source)
+    (fun pointer values _ => EnvironmentDenotes program heap pointer values)
+    ?_ ?_ ?_ ?_ ?_ pointer values ready
+  · intros; exact Denotes.closure (by assumption) (by assumption) (by assumption)
+  · intros; exact Denotes.pair (by assumption) (by assumption) (by assumption)
+  · intros; exact Denotes.application (by assumption) (by assumption) (by assumption)
+  · intros; exact EnvironmentDenotes.nil (by assumption)
+  · intros; exact EnvironmentDenotes.cons (by assumption) (by assumption) (by assumption)
+
 
 theorem RetainedReady.ready {book : Book} {program : Program} {heap : Heap}
     {pointer : Nat} {source : Term} (ready : RetainedReady book program heap pointer source) :

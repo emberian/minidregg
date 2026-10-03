@@ -24,7 +24,7 @@ def preparedState (before : State) (plan : Plan) : State :=
   { before with
     epoch := before.epoch + 1, phase := .prepared,plan := some plan,
     cut := none,successorCustody := [],oldFence := [],destinationReceipt := [],
-    liabilities := plan.liabilities}
+    liabilities := plan.liabilities,activationRequest := []}
 
 structure Prepared {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -47,11 +47,13 @@ structure Prepared {F : Type} [Field F] [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.owner.subject ∧
+    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey ∧
     ownerSigned = signedBytes deployment.domain profile.semantics signed
   renterPermission : ∃ (command : Command) (signed : SignedCommand)
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed),
     (accepted.dataIntent shape).subject = some plan.renter.subject ∧
+    (accepted.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey ∧
     renterSigned = signedBytes deployment.domain profile.semantics signed
 
 variable {F : Type} [Field F] [DecidableEq F]
@@ -72,7 +74,7 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
   match beforeExact : PortableHomeTransferFrame.readState pin (durable.snapshot.canonicalBytes pin.cell) with
   | none => none
   | some before =>
-    if before.phase != .serving then none else
+    if !(decide (CanPrepare before)) then none else
     if binding : Binds before plan then
       if sourceExact : plan.source.point = PortableContinuationManifestCodec.pointOf plan.source.identity durable.image then
         if controlExact : plan.sourceControlRoot = durable.snapshot.model.roots pin.cell then
@@ -80,34 +82,37 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
           let renterIntent := renter.dataIntent renterShape
           if ownerSubject : ownerIntent.subject = some plan.owner.subject then
             if renterSubject : renterIntent.subject = some plan.renter.subject then
-              let [write] := ownerIntent.writes | none
-              if write.cellId != pin.cell then none else
-              if renterIntent.writes != ownerIntent.writes then none else
-              let after := preparedState before plan
-              let some actualAfter := PortableHomeTransferFrame.readState pin write.canonicalPostBytes | none
-              if PortableHomeTransferCodec.stateStream.encode actualAfter !=
-                  PortableHomeTransferCodec.stateStream.encode after then none else
-              let guards := ownerIntent.readGuards ++ renterIntent.readGuards
-              if readonly : ∀ guard ∈ guards, guard.cellId ∉ ownerIntent.writes.map DataWrite.cellId then
-                let ownerBytes := signedBytes deployment.domain profile.semantics ownerSigned
-                let renterBytes := signedBytes deployment.domain profile.semantics renterSigned
-                let envelope := (StreamCodec.list bytesStream).encode
-                  [PortableHomeTransferCodec.proposalBytes plan,ownerBytes,renterBytes]
-                let intent : DataIntent ResourceBirthCodec.rootBytes :=
-                  { ownerIntent with
-                    readGuards := guards,
-                    nullifiers := ownerIntent.nullifiers ++ renterIntent.nullifiers,
-                    exactCharge := ownerIntent.exactCharge + renterIntent.exactCharge +
-                      (fun lane => if lane = .turnBytes then envelope.length else 0),
-                    event := {ownerIntent.event with codecVersion := 65,canonicalBytes := envelope},
-                    guardsReadOnly := readonly}
-                if !Minidregg.Theory.ResourceCost.Charge.fundedCheck
-                    (before.maintenanceReserve + intent.exactCharge) durable.snapshot.model.available then none else
-                if intent.preflight durable.snapshot != .ok () then none else
-                some ⟨pin,before,plan,after,intent,ownerBytes,renterBytes,binding,beforeExact,
-                  sourceExact,controlExact,rfl,
-                  ⟨ownerCommand,ownerSigned,ownerPrepared,ownerShape,owner,ownerSubject,rfl⟩,
-                  ⟨renterCommand,renterSigned,renterPrepared,renterShape,renter,renterSubject,rfl⟩⟩
+              if ownerKey : (owner.checked none).receipt.prepared.controller.key.publicKey = plan.owner.publicKey then
+                if renterKey : (renter.checked none).receipt.prepared.controller.key.publicKey = plan.renter.publicKey then
+                  let [write] := ownerIntent.writes | none
+                  if write.cellId != pin.cell then none else
+                  if renterIntent.writes != ownerIntent.writes then none else
+                  let after := preparedState before plan
+                  let some actualAfter := PortableHomeTransferFrame.readState pin write.canonicalPostBytes | none
+                  if PortableHomeTransferCodec.stateStream.encode actualAfter !=
+                      PortableHomeTransferCodec.stateStream.encode after then none else
+                  let guards := ownerIntent.readGuards ++ renterIntent.readGuards
+                  if readonly : ∀ guard ∈ guards, guard.cellId ∉ ownerIntent.writes.map DataWrite.cellId then
+                    let ownerBytes := signedBytes deployment.domain profile.semantics ownerSigned
+                    let renterBytes := signedBytes deployment.domain profile.semantics renterSigned
+                    let envelope := PortableHomeTransferCodec.encodeEnvelope ⟨plan,ownerBytes,renterBytes⟩
+                    let intent : DataIntent ResourceBirthCodec.rootBytes :=
+                      { ownerIntent with
+                        readGuards := guards,
+                        nullifiers := ownerIntent.nullifiers ++ renterIntent.nullifiers,
+                        exactCharge := ownerIntent.exactCharge + renterIntent.exactCharge +
+                          (fun lane => if lane = .turnBytes then envelope.length else 0),
+                        event := {ownerIntent.event with codecVersion := 65,canonicalBytes := envelope},
+                        guardsReadOnly := readonly}
+                    if !Minidregg.Theory.ResourceCost.Charge.fundedCheck
+                        (before.maintenanceReserve + intent.exactCharge) durable.snapshot.model.available then none else
+                    if intent.preflight durable.snapshot != .ok () then none else
+                    some ⟨pin,before,plan,after,intent,ownerBytes,renterBytes,binding,beforeExact,
+                      sourceExact,controlExact,rfl,
+                      ⟨ownerCommand,ownerSigned,ownerPrepared,ownerShape,owner,ownerSubject,ownerKey,rfl⟩,
+                      ⟨renterCommand,renterSigned,renterPrepared,renterShape,renter,renterSubject,renterKey,rfl⟩⟩
+                  else none
+                else none
               else none
             else none
           else none

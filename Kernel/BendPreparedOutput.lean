@@ -4,6 +4,7 @@ Current laws/signatures, whole physical writes, retained audience dependencies,
 and fixed-capacity admission remain one controller acceptance. -/
 import Compiler.BendPlanLowering
 import Compiler.BendScalarPlanAdapter
+import Compiler.BendScalarPlanBytesAdapter
 import Compiler.BendSourceListTyped
 
 namespace Minidregg.Kernel.BendPreparedOutput
@@ -22,6 +23,10 @@ def bytesCodec : Digest :=
 def scalarCodec : Digest :=
   (Sp800185Cshake256.hash "DREGG.BEND.OUTPUT-CODEC/v1".toUTF8.toList
     "WorldPlanScalar.PlanResult;exact-fourteen-source-definitions;native-prefix-guards/v1".toUTF8.toList).digest
+
+def scalarBytesCodec : Digest :=
+  (Sp800185Cshake256.hash "DREGG.BEND.OUTPUT-CODEC/v2".toUTF8.toList
+    "WorldPlanScalarBytes.PlanResult;exact-fourteen-source-definitions;canonical-binary-native-identities;native-prefix-guards".toUTF8.toList).digest
 
 /-- Full independent return records use a distinct ordinary content schema.
 No assertion that clear bytes are encrypted is made by this carrier. -/
@@ -71,7 +76,14 @@ structure Checked {F : Type} [Field F]
       ∃ bound : Sigma fun native => BendScalarPlanAdapter.BoundPlan deployment
           prepared.directory command native,
         BendScalarPlanAdapter.lowerResult deployment prepared.directory command
-          source.source.source.result = some bound ∧ bound.2.plan = plan)
+          source.source.source.result = some bound ∧ bound.2.plan = plan) ∨
+    (source.claim.outputCodec = scalarBytesCodec ∧
+      Nonempty (BendScalarPlanBytesAdapter.ABIBinding source.source.core.book) ∧
+      BendTT.Term.inst source.source.outputBody source.source.input = .Ref "WorldPlanScalarBytes.PlanResult" ∧
+      ∃ native : BendScalarPlanAdapter.NativePlan,
+        BendScalarPlanBytesAdapter.decodeResult source.source.source.result = some (.planned native) ∧
+        ∃ bound : BendScalarPlanAdapter.BoundPlan deployment prepared.directory command native,
+          bound.plan = plan)
 
 /-- Decoder selection comes from the signed claim and checked immutable profile;
 there is no caller-selected fallback after a decoder refuses. -/
@@ -106,7 +118,22 @@ def check {F : Type} [Field F]
           if exact : BendWorldPlan.matchesCommand bound.2.plan command = true then
             if stored : bound.2.plan.returns.all (storesReturn command) = true then
               pure ⟨bound.2.plan,family,exact,stored,
-                Or.inr ⟨codec,⟨abi⟩,resultType,bound,decoded,rfl⟩⟩
+                Or.inr (Or.inl ⟨codec,⟨abi⟩,resultType,bound,decoded,rfl⟩)⟩
+            else none
+          else none
+      else none
+    else if codec : source.claim.outputCodec = scalarBytesCodec then
+      let some abi := BendScalarPlanBytesAdapter.bindABI source.source.core | none
+      if resultType : BendTT.Term.inst source.source.outputBody source.source.input =
+          .Ref "WorldPlanScalarBytes.PlanResult" then
+        match decoded : BendScalarPlanBytesAdapter.decodeResult source.source.source.result with
+        | none | some (.refused _) => none
+        | some (.planned native) => do
+          let some bound := BendScalarPlanAdapter.bindPlan deployment prepared.directory command native | none
+          if exact : BendWorldPlan.matchesCommand bound.plan command = true then
+            if stored : bound.plan.returns.all (storesReturn command) = true then
+              pure ⟨bound.plan,family,exact,stored,
+                Or.inr (Or.inr ⟨codec,⟨abi⟩,resultType,native,decoded,bound,rfl⟩)⟩
             else none
           else none
       else none

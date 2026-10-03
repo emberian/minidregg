@@ -31,7 +31,7 @@ def observe (book : Book) (entry outputType : Term) : Option Term := do
     let final ← BendObliviousCodec.decode shape result.bits
     match final.control with
     | .complete pointer =>
-      let value ← decode prepared.compiled.library.program final.heap 100 pointer
+      let value ← BendClosureArena.decode prepared.compiled.library.program final.heap 100 pointer
       pure value.term
     | _ => none
 

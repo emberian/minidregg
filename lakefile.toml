@@ -28,8 +28,8 @@ name = "uwueave"
 git = "https://github.com/emberian/lean-uwueave.git"
 rev = "48d7fb4b4d54066c69bc24ff3589983347ebe5e8"
 
-# Root library: imports every per-directory root below, so `lake build` (default
-# target `Minidregg`) covers the whole tree.
+# Stable root library. Additional qualification roots and opt-in source-first
+# research coverage are declared below; see docs/LEAN-QUALIFICATION.md.
 [[lean_lib]]
 name = "Minidregg"
 
@@ -115,3 +115,22 @@ root = "Host.CshakeBench"
 [[lean_exe]]
 name = "minidregg-carry-verifier"
 root = "Host.CarryVerifierMain"
+
+# Explicit synthetic controller diagnostic; not part of the native Host.
+[[lean_exe]]
+name = "bend-controller-probe"
+root = "Verify.BendObliviousProbe"
+
+# Explicit qualification roots. Compilation does not imply native deployment.
+[[lean_lib]]
+name = "Verify"
+
+[[lean_lib]]
+name = "BendQualification"
+
+[[lean_lib]]
+name = "SimplexQualification"
+
+# Source-first research is an explicit opt-in build.
+[[lean_lib]]
+name = "ResearchWip"

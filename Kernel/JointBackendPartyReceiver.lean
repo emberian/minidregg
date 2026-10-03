@@ -24,13 +24,33 @@ def transactionId {config : Config} {opened : Opened config} {pin : EndpointPin}
     {request : JointBackendPartyCodec.Request} (p : Prepared config opened pin request) : Digest :=
   ⟨marker pin request p.row p.packet⟩
 
+/-- The spent sequence key excludes the body, credential randomness and
+rotating signing key. A conflicting message at the same logical party slot
+cannot become a second funded source dispatch before the worker sees it. -/
+def sequenceKeyBytes (domain : Digest) (pin : EndpointPin)
+    (request : JointBackendPartyCodec.Request) (row : Enrollment) (packet : PacketClaim) : List UInt8 :=
+  "DREGG.JOINT.PRIVATE.SOURCE.SEQUENCE".toUTF8.toList ++ [1] ++
+  digestStream.encode domain ++ ContentControlFrame.pinStream.encode pin.manifest ++
+  StreamCodec.nat.encode row.party.protocol ++
+  bytesStream.encode request.fullGenerationBytes ++ bytesStream.encode row.party.session ++
+  StreamCodec.nat.encode row.party.party ++ StreamCodec.nat.encode row.party.recipient ++
+  bytesStream.encode row.party.recipientRole ++ packet.sequenceBytes
+
 def nullifier {config : Config} {opened : Opened config} {pin : EndpointPin}
     {request : JointBackendPartyCodec.Request} (p : Prepared config opened pin request) : StableNullifier where
   codecVersion := 63
   domain := config.deployment.domain
-  nullifierId := transactionId p
-  canonicalBytes := "DREGG.JOINT.PRIVATE.SOURCE.NULLIFIER".toUTF8.toList ++ [1] ++
-    semanticBytes pin request p.row p.packet
+  nullifierId := (Sp800185Cshake256.hash "DREGG.JOINT.PRIVATE.SEQUENCE.NULLIFIER".toUTF8.toList
+    (sequenceKeyBytes config.deployment.domain pin request p.row p.packet)).digest
+  canonicalBytes := sequenceKeyBytes config.deployment.domain pin request p.row p.packet
+
+/-- Same generation, party and sequence remain spent under another message or
+credential; the signed semantic request still binds the exact selected body. -/
+theorem sequence_key_body_independent (domain : Digest) (pin : EndpointPin)
+    (request : JointBackendPartyCodec.Request) (row : Enrollment) (packet : PacketClaim)
+    (message credential : List UInt8) :
+    sequenceKeyBytes domain pin request row {packet with message,credential} =
+      sequenceKeyBytes domain pin request row packet := rfl
 
 def event {config : Config} {opened : Opened config} {pin : EndpointPin}
     {request : JointBackendPartyCodec.Request} (p : Prepared config opened pin request) : StableEvent where
@@ -156,9 +176,19 @@ def Applied.sourceRecordBytes {config : Config} {opened : Opened config} {pin : 
     {expected : Context} (applied : Applied config opened pin request admitted expected) : List UInt8 :=
   applied.appended.entry.record
 
+/-- Source receipt bytes are a portable CLAIM. Actual worker authority remains
+this private Applied token or a retained-prefix native verification token. -/
+def Applied.sourceReceiptBytes {config : Config} {opened : Opened config} {pin : EndpointPin}
+    {request : JointBackendPartyCodec.Request} {admitted : Admitted config opened pin request}
+    {expected : Context} (applied : Applied config opened pin request admitted expected) : List UInt8 :=
+  NativeHostCodec.receiptStream.encode
+    ⟨admitted.intent.transactionId,admitted.intent.event.eventId,
+      applied.appended.next.image.accepted.length,applied.appended.next.worldRoot⟩
+
 theorem applied_dispatch_and_debit_same_record {config : Config} {opened : Opened config} {pin : EndpointPin}
     {request : JointBackendPartyCodec.Request} {admitted : Admitted config opened pin request}
     {expected : Context} (applied : Applied config opened pin request admitted expected) :
     applied.appended.next.image = opened.durable.image.append admitted.intent := applied.appended.image
 #assert_axioms applied_dispatch_and_debit_same_record
+#assert_axioms sequence_key_body_independent
 end Minidregg.Kernel.JointBackendPartyReceiver

@@ -3,7 +3,7 @@ Current exports are resolved by the shared law resolver. This module supplies
 neither a predicate evaluator nor caller-selected parents.
 -/
 import Compiler.CanonicalCellRegistry
-import Theory.LawComposition
+import Pred.LawComposition
 
 namespace Minidregg.Compiler.WorldKindLawDependencies
 

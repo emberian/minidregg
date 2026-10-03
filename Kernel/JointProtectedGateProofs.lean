@@ -13,7 +13,7 @@ theorem invalid_layout_refuses {rootBytes : List UInt8 → TypedAuthorization.Di
     (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
     (invalid : config.controlLayoutValid = false) :
     config.sourceGate own snapshot intent = .error (.durable .transactionConflict) := by
-  simp [Config.sourceGate,invalid]
+  simp [Config.sourceGate,invalid]; rfl
 
 theorem joint_exception_retains_activity {rootBytes : List UInt8 → TypedAuthorization.Digest}
     (config : Config) (pin : ContentControlFrame.Pin)
@@ -22,7 +22,10 @@ theorem joint_exception_retains_activity {rootBytes : List UInt8 → TypedAuthor
     (admitted : config.otherFacetGate .joint snapshot intent = .ok ()) :
     BendActivityControl.ordinaryGate pin snapshot intent = .ok () := by
   cases layout : config.controlLayoutValid with
-  | false => simp [Config.otherFacetGate,Config.sourceGate,layout] at admitted
+  | false =>
+      change config.sourceGate (some .joint) snapshot intent = .ok () at admitted
+      rw [invalid_layout_refuses config (some .joint) snapshot intent layout] at admitted
+      cases admitted
   | true =>
       cases joint : config.jointControl <;>
         simpa [Config.otherFacetGate,Config.sourceGate,layout,joint,pinned] using admitted
@@ -34,12 +37,17 @@ theorem activity_exception_retains_joint {rootBytes : List UInt8 → TypedAuthor
     (admitted : config.otherFacetGate .activity snapshot intent = .ok ()) :
     JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent = .ok () := by
   cases layout : config.controlLayoutValid with
-  | false => simp [Config.otherFacetGate,Config.sourceGate,layout] at admitted
+  | false =>
+      change config.sourceGate (some .activity) snapshot intent = .ok () at admitted
+      rw [invalid_layout_refuses config (some .activity) snapshot intent layout] at admitted
+      cases admitted
   | true =>
       cases jointGate : JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent with
       | error reason =>
-          simp [Config.otherFacetGate,Config.sourceGate,layout,pinned,jointGate] at admitted
-      | ok value => cases value; exact jointGate
+          simp [Config.otherFacetGate,Config.sourceGate,layout,pinned,jointGate,Except.bind] at admitted
+          change (Except.error (.durable .transactionConflict) : Except RejectReason Unit) = .ok () at admitted
+          cases admitted
+      | ok value => cases value; rfl
 
 #assert_axioms invalid_layout_refuses
 #assert_axioms joint_exception_retains_activity

@@ -1,38 +1,46 @@
 #!/usr/bin/env python3
-"""Write only this crate's manifest against an existing isolated Bread snapshot.
-Does not copy, edit, download or build the dependency. Captain allocates builds.
+"""Verify the exact tested dependency slice and attach it to the portable manifest.
+
+Does not rewrite a manifest, download code, mutate Bread, or build anything.
+The exact external source slice is still required; dependencies.lock.json pins
+its contents rather than pretending an arbitrary Bread checkout is equivalent.
 """
+import hashlib
 import json
 import pathlib
 import sys
 
-root = pathlib.Path(sys.argv[1]).resolve(strict=True)
-crate = pathlib.Path(__file__).resolve().parent
-for relative in ('circuit/Cargo.toml', 'vendor/plonky3-fri-82cfad73/Cargo.toml',
-                 'vendor/plonky3-challenger-82cfad73/Cargo.toml'):
-    if not (root / relative).is_file():
-        raise SystemExit(f'missing pinned source: {root / relative}')
-q = lambda p: json.dumps(str(p))
-manifest = '''[package]
-name = "bend-ir2-proof"
-version = "0.1.0"
-edition = "2024"
-publish = false
 
-[workspace]
+def verify(root, pins):
+    for relative, expected in pins.items():
+        source = root / relative
+        if not source.is_file():
+            raise ValueError(f"missing pinned source: {relative}")
+        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        if actual != expected:
+            raise ValueError(f"changed pinned source: {relative}: {actual}")
 
-[dependencies]
-bend-proof-entropy = { path = "../bend-proof-entropy" }
-getrandom = "=0.3.4"
-postcard = { version = "1", features = ["alloc"] }
-'''
-manifest += 'dregg-circuit = { path = ' + q(root / 'circuit') + ' }\n'
-for name in ('p3-baby-bear', 'p3-batch-stark', 'p3-challenger', 'p3-commit', 'p3-dft', 'p3-field',
-             'p3-fri', 'p3-merkle-tree', 'p3-symmetric', 'p3-uni-stark'):
-    manifest += name + ' = { git = "https://github.com/Plonky3/Plonky3", rev = "82cfad73cd734d37a0d51953094f970c531817ec" }\n'
-manifest += '\n[patch."https://github.com/Plonky3/Plonky3"]\n'
-for name in ('p3-fri', 'p3-challenger'):
-    directory = 'plonky3-fri-82cfad73' if name == 'p3-fri' else 'plonky3-challenger-82cfad73'
-    manifest += name + ' = { path = ' + q(root / 'vendor' / directory) + ' }\n'
-(crate / 'Cargo.toml').write_text(manifest)
-print(f'Wrote {crate / "Cargo.toml"}; no build launched')
+
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: provision.py EXACT_TESTED_BREAD_SOURCE")
+    root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+    crate = pathlib.Path(__file__).resolve().parent
+    pins = json.loads((crate / "dependencies.lock.json").read_text())["files"]
+    try:
+        verify(root, pins)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    destination = crate.parent / "bend-proof-deps" / "bread"
+    if destination.exists() or destination.is_symlink():
+        if not destination.is_symlink() or destination.resolve() != root:
+            raise SystemExit(f"refusing to replace existing dependency path: {destination}")
+    else:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(root, target_is_directory=True)
+    print(f"Verified {len(pins)} pinned source files; attached {destination}")
+    print("Manifest and lockfile unchanged; no build launched")
+
+
+if __name__ == "__main__":
+    main()

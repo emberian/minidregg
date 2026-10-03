@@ -102,7 +102,7 @@ theorem constraints_integer_sound {n p : Nat} [Fact p.Prime]
       (rangeBits fits i.succ) (ranged i.succ)
     simpa [inputValues, rowWidth] using rangeBound
   have naturalBound := value_le expr (inputValues asg) (fun _ => 2 ^ inputBits - 1)
-    (fun i => by have := inputBound i; omega)
+    (fun i => by change inputValues asg i ≤ 2 ^ inputBits - 1; have := inputBound i; omega)
   have finalBound : expr.value (inputValues asg) < p :=
     lt_of_lt_of_le (lt_of_le_of_lt naturalBound outputFits) fieldFits
   have castCorrect := air_correct expr (fun i => Sum.inl i.succ) asg (inputValues asg)
@@ -149,10 +149,10 @@ theorem descriptor_complete {n p : Nat} [Fact p.Prime]
     (outputFits : expr.upper (fun _ => 2 ^ inputBits - 1) < 2 ^ maxBits)
     (inputs : Fin n → Nat) (bounded : ∀ i, inputs i < 2 ^ inputBits) :
     ∃ wv : Nat → ZMod p,
-      (∀ i, wv (wire (Sum.inl i)) = (numbers inputs (expr.value inputs) i : ZMod p)) ∧
+      (∀ i, wv (wire (k := maxBits) (Sum.inl i)) = (numbers inputs (expr.value inputs) i : ZMod p)) ∧
       descriptorHolds (descriptor inputBits maxBits fits expr) wv := by
   have resultBound := lt_of_le_of_lt
-    (value_le expr inputs (fun _ => 2 ^ inputBits - 1) (fun i => by have := bounded i; omega)) outputFits
+    (value_le expr inputs (fun _ => 2 ^ inputBits - 1) (fun i => by change inputs i ≤ 2 ^ inputBits - 1; have := bounded i; omega)) outputFits
   have allBounded : ∀ i, numbers inputs (expr.value inputs) i <
       2 ^ rowWidth inputBits maxBits i := by
     intro i

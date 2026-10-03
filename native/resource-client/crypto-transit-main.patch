@@ -1,0 +1,8 @@
+--- a/native/resource-client/src/main.rs
++++ b/native/resource-client/src/main.rs
+@@
+ #[cfg(unix)]
++#[path = "../../crypto_transit.rs"]
++mod crypto_transit;
++#[cfg(unix)]
+ mod pq_mailbox;

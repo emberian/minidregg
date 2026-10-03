@@ -20,9 +20,9 @@ def receiveCase (core : BendCoreAdmission.Checked) (entryName : String)
       | some evaluated => pure evaluated
     let expected : Card := ⟨candidate, label, ⟨candidate, [4], revision == 1⟩⟩
     if evaluated.card != expected then throw (IO.userError "whole decoded Card changed")
-    if matches evaluated.card candidate [4] != true then throw (IO.userError "actual candidate/policy binding refused")
-    if matches evaluated.card candidate [5] != false then throw (IO.userError "changed policy silently admitted")
-    if matches evaluated.card ⟨[1], [2], revision+1⟩ [4] != false then
+    if bindingMatches evaluated.card candidate [4] != true then throw (IO.userError "actual candidate/policy binding refused")
+    if bindingMatches evaluated.card candidate [5] != false then throw (IO.userError "changed policy silently admitted")
+    if bindingMatches evaluated.card ⟨[1], [2], revision+1⟩ [4] != false then
       throw (IO.userError "changed Candidate silently admitted")
     if decodePayload (encode evaluated.card) != some expected then
       throw (IO.userError "canonical complete Card payload changed")

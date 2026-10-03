@@ -1993,6 +1993,50 @@
       "owner": "resource-reserve-birth",
       "purpose": "independent source and owner consent assembly",
       "receiver": "fnDispatch"
+    },
+    {
+      "code": 206,
+      "symbol": "APPLICATION_FAILED_START_RECOVERY_PREPARE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-recovery",
+      "purpose": "Prepare current-law recovery management signing plan",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 207,
+      "symbol": "APPLICATION_FAILED_START_RECOVERY_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-recovery",
+      "purpose": "Assemble exact source-owned recovery ingress",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 208,
+      "symbol": "APPLICATION_FAILED_START_RECOVERY_SUBMIT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-recovery",
+      "purpose": "Submit governed failed START reconciliation once",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 209,
+      "symbol": "APPLICATION_FAILED_START_RECOVERY_LOOKUP",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk-recovery",
+      "purpose": "Lookup same recovery ingress exact retained receipt only",
+      "receiver": "fnDispatch"
     }
   ],
   "response_markers": [

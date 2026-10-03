@@ -60,6 +60,7 @@ private def phaseTag : Phase → Nat
   | .released => 6
   | .aborted => 7
   | .recoveryRequired => 8
+  | .activationPending => 9
 private def tagPhase : Nat → Phase
   | 0 => .serving
   | 1 => .prepared
@@ -69,14 +70,15 @@ private def tagPhase : Nat → Phase
   | 5 => .destinationActive
   | 6 => .released
   | 7 => .aborted
+  | 9 => .activationPending
   | _ => .recoveryRequired
 def phaseStream : StreamCodec Phase :=
   StreamCodec.xmap StreamCodec.nat phaseTag tagPhase (by intro phase; cases phase <;> rfl)
 
 def stateStream : StreamCodec State :=
-  StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product principalStream (StreamCodec.product principalStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product phaseStream (StreamCodec.product (StreamCodec.option planStream) (StreamCodec.product (StreamCodec.option cutReferenceStream) (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list liabilityStream) (StreamCodec.product (StreamCodec.list artifactStream) (StreamCodec.product DurableReceiverCodec.chargeStream (StreamCodec.list StreamCodec.nat))))))))))))))))))
-    (fun value => (value.home, value.owner, value.renter, value.currentHost, value.currentCredential, value.privateGeneration, value.privateDescriptor, value.epoch, value.phase, value.plan, value.cut, value.successorCustody, value.oldFence, value.destinationReceipt, value.liabilities, value.required, value.maintenanceReserve, value.governedCells))
-    (fun (home, owner, renter, currentHost, currentCredential, privateGeneration, privateDescriptor, epoch, phase, plan, cut, successorCustody, oldFence, destinationReceipt, liabilities, required, maintenanceReserve, governedCells) => ⟨home, owner, renter, currentHost, currentCredential, privateGeneration, privateDescriptor, epoch, phase, plan, cut, successorCustody, oldFence, destinationReceipt, liabilities, required, maintenanceReserve, governedCells⟩) (by intro value; cases value; rfl)
+  StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product principalStream (StreamCodec.product principalStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product phaseStream (StreamCodec.product (StreamCodec.option planStream) (StreamCodec.product (StreamCodec.option cutReferenceStream) (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list liabilityStream) (StreamCodec.product (StreamCodec.list artifactStream) (StreamCodec.product DurableReceiverCodec.chargeStream (StreamCodec.product (StreamCodec.list StreamCodec.nat) bytesStream))))))))))))))))))
+    (fun value => (value.home, value.owner, value.renter, value.currentHost, value.currentCredential, value.privateGeneration, value.privateDescriptor, value.epoch, value.phase, value.plan, value.cut, value.successorCustody, value.oldFence, value.destinationReceipt, value.liabilities, value.required, value.maintenanceReserve, value.governedCells, value.activationRequest))
+    (fun (home, owner, renter, currentHost, currentCredential, privateGeneration, privateDescriptor, epoch, phase, plan, cut, successorCustody, oldFence, destinationReceipt, liabilities, required, maintenanceReserve, governedCells, activationRequest) => ⟨home, owner, renter, currentHost, currentCredential, privateGeneration, privateDescriptor, epoch, phase, plan, cut, successorCustody, oldFence, destinationReceipt, liabilities, required, maintenanceReserve, governedCells, activationRequest⟩) (by intro value; cases value; rfl)
 
 def frame : Bytes := "DREGG.PORTABLE.HOME-CONTROL/v1".toUTF8.toList
 def encode (state : State) : Bytes := frame ++ stateStream.encode state
@@ -89,10 +91,50 @@ def decode (bytes : Bytes) : Option State := do
   change stateStream.toLawful.decode (stateStream.encode state) = some state at roundtrip
   simp [decode,encode,List.drop_left,roundtrip]
 
-/-- Exact source statement signed by both independently current-admitted
-owner/renter ordinary invocations. Evidence signatures are not semantic identity. -/
-def proposalBytes (plan : Plan) : Bytes :=
-  "DREGG.PORTABLE.HOME-TRANSFER-PROPOSAL/v1".toUTF8.toList ++ planStream.encode plan
+/-- Exact source statement signed by both current-admitted invocations. -/
+def proposalFrame : Bytes := "DREGG.PORTABLE.HOME-TRANSFER-PROPOSAL/v1".toUTF8.toList
+def proposalBytes (plan : Plan) : Bytes := proposalFrame ++ planStream.encode plan
 
+def decodeProposal (bytes : Bytes) : Option Plan := do
+  let plan ← planStream.toLawful.decode (bytes.drop proposalFrame.length)
+  if proposalBytes plan = bytes then some plan else none
+
+@[simp] theorem decodeProposal_encode (plan : Plan) :
+    decodeProposal (proposalBytes plan) = some plan := by
+  have roundtrip := planStream.toLawful.decode_encode plan
+  change planStream.toLawful.decode (planStream.encode plan) = some plan at roundtrip
+  simp [decodeProposal,proposalBytes,roundtrip]
+
+structure Envelope where
+  plan : Plan
+  ownerSigned : Bytes
+  renterSigned : Bytes
+  deriving DecidableEq
+
+/-- Event65 exact canonical list retains both original ordinary signed commands.
+The live/replay parser still has to re-admit them at the exact historical source
+and rederive the precise same control post, charges, guards and nullifiers. -/
+def encodeEnvelope (envelope : Envelope) : Bytes :=
+  (StreamCodec.list bytesStream).encode
+    [proposalBytes envelope.plan,envelope.ownerSigned,envelope.renterSigned]
+
+def decodeEnvelope (bytes : Bytes) : Option Envelope := do
+  let [proposal,owner,renter] ← (StreamCodec.list bytesStream).toLawful.decode bytes | none
+  let plan ← decodeProposal proposal
+  let envelope : Envelope := ⟨plan,owner,renter⟩
+  if encodeEnvelope envelope = bytes then some envelope else none
+
+@[simp] theorem decodeEnvelope_encode (envelope : Envelope) :
+    decodeEnvelope (encodeEnvelope envelope) = some envelope := by
+  have roundtrip := (StreamCodec.list bytesStream).toLawful.decode_encode
+    [proposalBytes envelope.plan,envelope.ownerSigned,envelope.renterSigned]
+  change (StreamCodec.list bytesStream).toLawful.decode (encodeEnvelope envelope) =
+    some [proposalBytes envelope.plan,envelope.ownerSigned,envelope.renterSigned] at roundtrip
+  cases envelope
+  dsimp [encodeEnvelope] at roundtrip
+  simp [decodeEnvelope,roundtrip,encodeEnvelope]
+
+#assert_axioms decodeProposal_encode
+#assert_axioms decodeEnvelope_encode
 #assert_axioms decode_encode
 end Minidregg.Compiler.PortableHomeTransferCodec

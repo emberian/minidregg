@@ -78,6 +78,9 @@ mod channel;
 #[cfg(unix)]
 mod scheduled_transport;
 #[cfg(unix)]
+#[path = "../../crypto_transit.rs"]
+mod crypto_transit;
+#[cfg(unix)]
 mod pq_mailbox;
 #[cfg(unix)]
 mod cohort_tcp;
@@ -1531,19 +1534,17 @@ fn inspect_public(
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2) {
-        return Err("host emitted odd-length header hex".to_owned());
+    if !value.len().is_multiple_of(2) { return Err("hex must have even length".into()); }
+    fn nibble(byte: u8) -> Result<u8> {
+        match byte {
+            b'0'..=b'9' => Ok(byte - b'0'),
+            b'a'..=b'f' => Ok(byte - b'a' + 10),
+            b'A'..=b'F' => Ok(byte - b'A' + 10),
+            _ => Err("invalid ASCII hex".into()),
+        }
     }
-    value
-        .as_bytes()
-        .chunks(2)
-        .map(|pair| {
-            std::str::from_utf8(pair)
-                .ok()
-                .and_then(|text| u8::from_str_radix(text, 16).ok())
-                .ok_or_else(|| "host emitted non-hex header".to_owned())
-        })
-        .collect()
+    value.as_bytes().chunks_exact(2)
+        .map(|pair| Ok((nibble(pair[0])? << 4) | nibble(pair[1])?)).collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -4961,5 +4962,17 @@ mod concurrent_request_scratch_tests {
         barrier.wait();
         assert!(take_host_decision().is_none());
         for worker in workers { worker.join().unwrap(); }
+    }
+}
+
+#[cfg(test)]
+mod ascii_hex_regression {
+    #[test]
+    fn refuses_non_ascii_without_panicking() {
+        for value in ["aéa", "é", "💥", "+a", "00éé", "a"] {
+            assert!(super::decode_hex(value).is_err(), "{value:?}");
+        }
+        assert_eq!(super::decode_hex("00AaFF").unwrap(), [0, 170, 255]);
+        assert!(super::decode_hex("").unwrap().is_empty());
     }
 }

@@ -8,6 +8,9 @@ import Theory.BendClosureBeta
 import Theory.BendClosureValueSteps
 import Theory.BendClosureReturnSteps
 import Theory.BendClosureSpineSteps
+import Theory.BendClosureCallSteps
+import Theory.BendClosureWalkLeaf
+import Theory.BendClosureCallLookup
 import Theory.BendExecutionTrace
 
 namespace Minidregg.Theory.BendClosureSimulation
@@ -184,6 +187,74 @@ inductive Handled (book : Book) (limits : Limits) (library : Library) : State �
       (stack : StackDenotes book library.program state.heap state.stack contexts) :
       Handled book limits library state (plug contexts (Env.sub values index))
 
+  | walkClassify   
+    (state : State) (pc environment original function argument index : Nat) (q : Quan)
+    (args : List (Quan × Nat)) (f origin : Term) (values : Env) (arguments : List Arg)
+    (contexts : List (Context book))
+    (control : state.control = .walk pc environment original args)
+    (found : library.program.code[pc]? = some (.app q function argument))
+    (variableCode : library.program.code[argument]? = some (.var index))
+    (functionExact : CodeDenotes library.program function f)
+    (captured : EnvironmentDenotes library.program state.heap environment values)
+    (originalExact : Denotes library.program state.heap original origin)
+    (argsExact : ArgumentsDenote library.program state.heap args arguments)
+    (walkPrefix : WalkPrefix book origin (.App q f (.Var index)) values arguments)
+    (stack : StackDenotes book library.program state.heap state.stack contexts) :
+      Handled book limits library state (plug contexts origin)
+  | classifyApplication   
+    (state : State) (pc environment original cursor function argument : Nat) (q : Quan)
+    (args : List (Quan × Nat)) (source f x origin : Term) (values : Env) (arguments : List Arg)
+    (contexts : List (Context book))
+    (control : state.control = .classify pc environment original cursor args)
+    (found : library.program.code[cursor]? = some (.app q function argument))
+    (sourceExact : CodeDenotes library.program pc source)
+    (functionExact : CodeDenotes library.program function f)
+    (argumentExact : CodeDenotes library.program argument x)
+    (classification : Term.node source = Term.takes (Term.unspine (.App q f x) []).1)
+    (captured : EnvironmentDenotes library.program state.heap environment values)
+    (originalExact : Denotes library.program state.heap original origin)
+    (argsExact : ArgumentsDenote library.program state.heap args arguments)
+    (walkPrefix : WalkPrefix book origin source values arguments)
+    (stack : StackDenotes book library.program state.heap state.stack contexts) :
+      Handled book limits library state (plug contexts origin)
+
+  | walkLeaf   
+    (state : State) (pc environment original : Nat) (args : List (Quan × Nat))
+    (instruction : Code) (source origin : Term) (values : Env) (arguments : List Arg)
+    (contexts : List (Context book))
+    (control : state.control = .walk pc environment original args)
+    (found : library.program.code[pc]? = some instruction)
+    (leaf : directLeaf instruction = true)
+    (sourceExact : CodeDenotes library.program pc source)
+    (captured : EnvironmentDenotes library.program state.heap environment values)
+    (originalExact : Denotes library.program state.heap original origin)
+    (argsExact : ArgumentsDenote library.program state.heap args arguments)
+    (walkPrefix : WalkPrefix book origin source values arguments)
+    (stack : StackDenotes book library.program state.heap state.stack contexts)
+    (argumentsRoom : args.length ≤ limits.arguments)
+    (framesRoom : state.stack.length + args.length ≤ limits.frames) :
+      Handled book limits library state (plug contexts origin)
+
+  | unspineReference   
+    (state : State) (pointer original pc environment index body : Nat)
+    (args : List (Quan × Nat)) (name : String) (origin : Term) (arguments : List Arg)
+    (contexts : List (Context book))
+    (correspondence : library.SourceCorrespondence book)
+    (control : state.control = .unspine pointer original args)
+    (pointerRow : state.heap.get? pointer = some (.closure pc environment))
+    (instruction : library.program.code[pc]? = some (.ref index))
+    (named : library.program.names[index]? = some name)
+    (found : library.lookupName name = some body)
+    (headExact : Denotes library.program state.heap pointer (.Ref name))
+    (originalExact : Denotes library.program state.heap original origin)
+    (argsExact : ArgumentsDenote library.program state.heap args arguments)
+    (originalSource : origin = Term.spine (.Ref name) arguments)
+    (values : Values book arguments)
+    (empty : state.heap.get? 0 = some .nil)
+    (stack : StackDenotes book library.program state.heap state.stack contexts)
+    (room : args.length ≤ limits.arguments) :
+      Handled book limits library state (plug contexts origin)
+
 /-- One physical tick either leaves the represented source unchanged or
 performs exactly one upstream Eval. The diagnostic source count follows it. -/
 theorem Handled.refines {book : Book} {limits : Limits} {library : Library}
@@ -192,6 +263,21 @@ theorem Handled.refines {book : Book} {limits : Limits} {library : Library}
       ((nextSource = source ∧ (step limits library state).sourceSteps = state.sourceSteps) ∨
        (Eval book source nextSource ∧ (step limits library state).sourceSteps = state.sourceSteps + 1)) := by
   cases handled with
+  | @unspineReference pointer original pc environment index body args name origin arguments contexts correspondence control pointerRow instruction named found headExact originalExact argsExact originalSource values empty stack room =>
+    have result := unspine_reference_source limits library state pointer original pc environment index body args name origin arguments contexts correspondence control pointerRow instruction named found headExact originalExact argsExact originalSource values empty stack room
+    exact ⟨plug contexts origin, result.2.1, Or.inl ⟨rfl, result.2.2⟩⟩
+
+  | @walkLeaf pc environment original args instruction source origin values arguments contexts control found leaf sourceExact captured originalExact argsExact walkPrefix stack argumentsRoom framesRoom =>
+    have result := walk_leaf_source limits library state pc environment original args instruction source origin values arguments contexts control found leaf sourceExact captured originalExact argsExact walkPrefix stack argumentsRoom framesRoom
+    exact ⟨plug contexts (Term.spine (Term.sub (Env.sub values) source) arguments), result.2.1, Or.inr ⟨result.2.2.1, result.2.2.2⟩⟩
+
+  | @walkClassify pc environment original function argument index q args f origin values arguments contexts control found variableCode functionExact captured originalExact argsExact walkPrefix stack =>
+    have result := walk_classify_stutter limits library state pc environment original function argument index q args f origin values arguments contexts control found variableCode functionExact captured originalExact argsExact walkPrefix stack
+    exact ⟨plug contexts origin, result.2.1, Or.inl ⟨rfl, result.2.2⟩⟩
+  | @classifyApplication pc environment original cursor function argument q args source f x origin values arguments contexts control found sourceExact functionExact argumentExact classification captured originalExact argsExact walkPrefix stack =>
+    have result := classify_application_stutter limits library state pc environment original cursor function argument q args source f x origin values arguments contexts control found sourceExact functionExact argumentExact classification captured originalExact argsExact walkPrefix stack
+    exact ⟨plug contexts origin, result.2.1, Or.inl ⟨rfl, result.2.2⟩⟩
+
   | annotation pc environment value type source sourceType values contexts control found codeExact typeExact captured stack =>
     have transition := step_annotation limits library state pc environment value type control found
     refine ⟨plug contexts (Term.sub (Env.sub values) source), ?_, Or.inr ⟨?_, ?_⟩⟩
@@ -376,6 +462,24 @@ theorem covered_run_admissible {book : Book} {limits : Limits} {library : Librar
   exact ⟨count, result, trace, exact, BendExecutionTrace.typed wellTyped closedBook typed trace,
     closedResult, liveResult, counter⟩
 
+/-- Admission through the actual pinned Book.check supplies the semantic
+Book premises, including closed bodies, for the actual covered run. -/
+theorem covered_run_checked {book : Book} {limits : Limits} {library : Library}
+    (ticks : Nat) (state : State) (source type : Term)
+    (represented : StateDenotes book library.program state source)
+    (coverage : Covered book limits library ticks state)
+    (checked : Book.check book = .ok ())
+    (typed : Typed book [] source type) (closed : Term.Closed source)
+    (live : Term.Live book source) :
+    ∃ count result, BendLiveMachine.Trace book count source result ∧
+      StateDenotes book library.program (run limits library ticks state) result ∧
+      Typed book [] result type ∧ Term.Closed result ∧ Term.Live book result ∧
+      (run limits library ticks state).sourceSteps = state.sourceSteps + count := by
+  obtain ⟨wellTyped, liveBook⟩ := BendTT.book_check book checked
+  exact covered_run_admissible ticks state source type represented coverage
+    wellTyped liveBook.1 liveBook typed closed live
+
+#assert_axioms covered_run_checked
 #assert_axioms covered_run_admissible
 #assert_axioms SourceInvariant.initial
 #assert_axioms SourceInvariant.run

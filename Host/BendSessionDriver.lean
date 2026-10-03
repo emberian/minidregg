@@ -66,9 +66,10 @@ structure Prepared where
   keyRoot : Digest
   resultRoot : Digest
   sourceTrace : WorldMethodTrace.Trace
+  predecessor : Option BendInvocation.Result
 
-def readCommand (s : Session) : Command :=
-  { subject := s.subject, nonce := s.nonce
+def readCommand (s : Session) : DeclaredResourceController.Command :=
+  { subject := s.subject, nonce := s.nonce + 1
     targets := [
       { kind := .object, target := s.sourceResource, capability := s.sourceCapability
         schemaVersion := ContentResource.commandVersion
@@ -114,7 +115,7 @@ def contextJson (s : Session) (p : Prepared) : Json :=
     ("canonical_charge", .arr (s.capacity.map (fun n => toJson n)).toArray)]
 
 def signCommand (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (signer : Signer) (command : Command) : IO (Except String SignedCommand) := do
+    (signer : Signer) (command : DeclaredResourceController.Command) : IO (Except String SignedCommand) := do
   let .ok plan := NativeHost.prepareLoaded config opened
       (.invoke (commandCodec.encode command))
     | return .error "current native signing preparation refused"
@@ -156,6 +157,21 @@ def prepareContext (config : NativeHost.Config) (s : Session) (signer : Signer)
             registered.method == BendInvocation.methodId loaded.artifact &&
             registered.material.transformerSHA256 == s.physicalTransformerSHA256 do
           return .error "source/key/session exact material binding differs"
+        let inherited : Except String (Option BendInvocation.Result) := do
+          if s.predecessor.value == 0 then return none
+          let target := command.targets[resultIndex]
+          let some store := target.contentStore? (prepared.targets resultIndex).pre
+            | throw "current predecessor resource is not content"
+          let some previous := BendOpaqueResultReceiver.lookup store ⟨s.predecessor⟩
+            | throw "exact current predecessor atom unavailable"
+          unless previous.definition.artifact == s.sourceAtom.digest &&
+              previous.result.keyEpoch == s.keyAtom.digest &&
+              previous.result.recipient == s.subject &&
+              previous.result.audience == s.audience &&
+              previous.result.generation + 1 == s.generation do
+            throw "predecessor source/key/audience/generation differs"
+          return some previous
+        let .ok predecessor := inherited | return .error "current predecessor admission refused"
         return .ok {
           source := loaded.artifact, registered := registered
           definition := definition loaded.artifact
@@ -164,12 +180,13 @@ def prepareContext (config : NativeHost.Config) (s : Session) (signer : Signer)
           sourceRoot := command.targets[sourceIndex].expectedTargetRoot
           keyRoot := command.targets[keyIndex].expectedTargetRoot
           resultRoot := command.targets[resultIndex].expectedTargetRoot
-          sourceTrace := loaded.trace }
+          sourceTrace := loaded.trace, predecessor := predecessor }
       else return .error "native source/key/result read layout refused")
     (fun _ => pure (.error "current source/key observation admission refused"))
 
 def registerKey (config : NativeHost.Config) (s : Session) (signer : Signer)
-    (source : BendWorldProgramCodec.Artifact) (material : BendKeyRecord.PublicMaterial) :
+    (source : BendWorldProgramCodec.Artifact) (material : BendKeyRecord.PublicMaterial)
+    (retain : BendKeyRegistration.Publication → SignedCommand → IO (Except String Unit)) :
     IO (Except String (BendKeyRecord.Registered × NativeHostCodec.Receipt)) := do
   let registered : BendKeyRecord.Registered :=
     ⟨s.subject, BendWorldProgramCodec.artifactId source, BendInvocation.methodId source, material⟩
@@ -181,6 +198,8 @@ def registerKey (config : NativeHost.Config) (s : Session) (signer : Signer)
   let command := BendKeyRegistration.command publication
   let .ok signed ← signCommand config opened signer command
     | return .error "key registration current signing refused"
+  let .ok () ← retain publication signed
+    | return .error "original key registration retention refused"
   let received ← BendKeyRegistration.receiveLoaded config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
     config.signature config.transport opened.durable publication signed
@@ -188,6 +207,31 @@ def registerKey (config : NativeHost.Config) (s : Session) (signer : Signer)
   | .stored receipt => return .ok (registered, receipt)
   | .refused detail | .uncertain detail => return .error detail
   | .released _ _ => return .error "unexpected release during key registration"
+
+def resumeKey (config : NativeHost.Config)
+    (publication : BendKeyRegistration.Publication) (signed : SignedCommand) :
+    IO (Except String (BendKeyRecord.Registered × NativeHostCodec.Receipt)) := do
+  let command := BendKeyRegistration.command publication
+  unless signed.commandBytes == commandCodec.encode command do
+    return .error "retained key registration command differs"
+  let .ok opened ← NativeHost.openExisting config
+    | return .error "retained key registration image unavailable"
+  let received ← BendKeyRegistration.receiveLoaded config.deployment config.profile
+    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    config.signature config.transport opened.durable publication signed
+  match ← BendReceiving.sealStorage config command signed received with
+  | .stored receipt => return .ok (publication.registered,receipt)
+  | .refused detail | .uncertain detail => return .error detail
+  | .released _ _ => return .error "unexpected retained key response"
+
+structure Stored where
+  publication : BendOpaqueResultReceiver.Publication
+  signed : SignedCommand
+  receipt : NativeHostCodec.Receipt
+structure Released where
+  receipt : NativeHostCodec.Receipt
+  bytes : List UInt8
+  ingress : BendReturnRelease.Ingress
 
 def exactOpaqueResult (s : Session) (p : Prepared)
     (inputIds : List Digest) (completionBytes : List UInt8) : BendInvocation.Result :=
@@ -212,8 +256,9 @@ completion bytes. Receiver authenticates native signatures/laws/ordinary charge.
 The result is opaque; no accepted computation/effect/range/noise certificate. -/
 private def commitOpaque (config : NativeHost.Config) (s : Session) (signer : Signer)
     (sourceBytes keyBytes : List UInt8) (previous : Prepared)
-    (inputIds : List Digest) (completionBytes : List UInt8) :
-    IO (Except String (BendInvocation.Result × NativeHostCodec.Receipt)) := do
+    (inputIds : List Digest) (completionBytes : List UInt8)
+    (retain : BendOpaqueResultReceiver.Publication → SignedCommand → IO (Except String Unit)) :
+    IO (Except String Stored) := do
   let .ok current ← prepareContext config s signer sourceBytes keyBytes
     | return .error "current source/key/result commit recheck refused"
   unless current.definition == previous.definition && current.invocation == previous.invocation &&
@@ -224,14 +269,16 @@ private def commitOpaque (config : NativeHost.Config) (s : Session) (signer : Si
     return .error "prepared native source/key/result context changed"
   let candidate := exactOpaqueResult s current inputIds completionBytes
   let publication : BendOpaqueResultReceiver.Publication :=
-    ⟨s.subject, s.nonce + 1, s.sourceResource, s.sourceCapability, current.sourceRoot,
+    ⟨s.subject, s.nonce + 2, s.sourceResource, s.sourceCapability, current.sourceRoot,
       s.sourceAtom, s.resultResource, s.resultCapability, current.resultRoot, candidate⟩
   let .ok opened ← NativeHost.openExisting config
     | return .error "opaque result native image unavailable"
   let .ok signed ← signCommand config opened signer (BendOpaqueResultReceiver.command publication)
     | return .error "opaque result current signing refused"
+  let .ok () ← retain publication signed
+    | return .error "original opaque storage retention refused"
   match ← BendReceiving.storeOpaque config publication signed with
-  | .stored receipt => return .ok (candidate, receipt)
+  | .stored receipt => return .ok ⟨publication,signed,receipt⟩
   | .refused detail | .uncertain detail => return .error detail
   | .released _ _ => return .error "unexpected release during result custody"
 
@@ -262,9 +309,16 @@ def checkPhysical (s : Session) (p : Prepared) (snapshot : String)
     | return .error "physical checker executable unavailable"
   unless binarySHA == s.physicalBinarySHA256 do
     return .error "physical checker differs from deployment pin"
-  let root : System.FilePath := snapshot
-  if ← root.pathExists then return .error "physical snapshot directory already exists"
-  IO.FS.createDirAll root
+  unless completionBytes.length ≤ 524288 && p.source.profile.bounds[8]? == some 524288 do
+    return .error "opaque BFV full wire-return envelope/profile differs"
+  IO.FS.createDirAll snapshot
+  let allocated ← IO.Process.output {
+    cmd := "mktemp", args := #["-d", "-p", snapshot, "bend-replay.XXXXXXXXXX"] }
+  if allocated.exitCode != 0 || !allocated.stderr.isEmpty then
+    return .error "physical snapshot allocation refused"
+  let root : System.FilePath := allocated.stdout.trimAscii.toString
+  unless root.toString.startsWith (snapshot ++ "/bend-replay.") do
+    return .error "physical snapshot path differs"
   let compilerPath := root / "compiler.json"
   let requestPath := root / "request.json"
   let completionPath := root / "completion.json"
@@ -296,6 +350,30 @@ def checkPhysical (s : Session) (p : Prepared) (snapshot : String)
         unless (← Minidregg.Host.Json.decodeHex "relinearization_key"
             (← request.getObjVal? "relinearization_key")) == key do
           throw "physical request relinearization key differs"
+    -- These are authenticated predecessor BYTE/depth identities, not a
+    -- phase-noise certificate. Honest fresh inputs remain an explicit premise.
+    let inputs ← (← request.getObjVal? "inputs").getArr?
+    let depths ← (← request.getObjVal? "input_depths").getArr?
+    unless inputs.size == depths.size do throw "lineage input/depth arity"
+    match p.predecessor with
+    | none =>
+        unless depths.toList.all (fun value => value.getNat? == .ok 0) do
+          throw "initial invocation cannot declare inherited ciphertext depth"
+    | some predecessor =>
+        let prior ← Minidregg.Host.Json.parse
+          (String.fromUTF8! ⟨predecessor.result.bytes.toArray⟩)
+        let priorOutput ← prior.getObjVal? "output"
+        let priorDepth ← (← (← prior.getObjVal? "cost").getObjVal? "depth").getNat?
+        unless (← (← prior.getObjVal? "key_epoch").getStr?) == material.epochSHA256 &&
+            (← (← prior.getObjVal? "parameters_sha256").getStr?) == material.parametersSHA256 &&
+            (← (← prior.getObjVal? "transformer_sha256").getStr?) == material.transformerSHA256 do
+          throw "predecessor physical key/parameters/transformer differs"
+        for (input,depth) in inputs.toList.zip depths.toList do
+          let d ← depth.getNat?
+          if input == priorOutput then
+            unless material.profile.endsWith "lifetime2-v1" && d == priorDepth do
+              throw "inherited ciphertext cannot reset depth/fresh-noise premise"
+          else unless d == 0 do throw "untracked inherited ciphertext"
     pure request
   let .ok request := parsed | return .error "physical request registration/context binding refused"
   let output ← IO.Process.output {
@@ -320,21 +398,23 @@ def checkPhysical (s : Session) (p : Prepared) (snapshot : String)
 
 def commitChecked (config : NativeHost.Config) (s : Session) (signer : Signer)
     (sourceBytes keyBytes : List UInt8) (previous : Prepared)
-    (checked : CheckedPhysical) :
-    IO (Except String (BendInvocation.Result × NativeHostCodec.Receipt)) :=
+    (checked : CheckedPhysical)
+    (retain : BendOpaqueResultReceiver.Publication → SignedCommand → IO (Except String Unit)) :
+    IO (Except String Stored) :=
   if checked.contextBytes == (contextJson s previous).compress.toUTF8.toList &&
       checked.keyId == BendKeyRecord.keyId previous.registered then
-    commitOpaque config s signer sourceBytes keyBytes previous checked.inputs checked.bytes
+    commitOpaque config s signer sourceBytes keyBytes previous checked.inputs checked.bytes retain
   else pure (.error "physical check belongs to a different native context/key")
 
 /-- Durable result release returns the exact retained bytes or no bytes.
 Storage receipt/root from a prior image is not a future release authorization. -/
 def releaseExact (config : NativeHost.Config) (s : Session) (signer : Signer)
-    (currentResultRoot : Digest) (candidate : BendInvocation.Result) :
-    IO (Except String (NativeHostCodec.Receipt × List UInt8)) := do
+    (currentResultRoot : Digest) (candidate : BendInvocation.Result)
+    (retain : BendReturnRelease.Ingress → IO (Except String Unit)) :
+    IO (Except String Released) := do
   let spec : BendReturnRelease.Spec := {
     domain := config.deployment.domain, semantics := config.profile.semantics
-    subject := s.subject, nonce := s.nonce + 2
+    subject := s.subject, nonce := s.nonce + 3
     source := ⟨s.resultResource, currentResultRoot, BendInvocation.resultId candidate⟩
     destination := ⟨s.subject, candidate.result.keyEpoch, s.audience, s.generation, s.purpose⟩
     capability := s.releaseCapability }
@@ -346,12 +426,40 @@ def releaseExact (config : NativeHost.Config) (s : Session) (signer : Signer)
     | return .error "current release signature custody refused"
   let .ok ingress := BendReturnReleaseAuthoring.assemble plan signature
     | return .error "current release canonical signature assembly refused"
+  let some canonicalIngress := BendReturnRelease.ingressCodec.decode ingress
+    | return .error "assembled current release ingress refused canonical decode"
+  let .ok () ← retain canonicalIngress
+    | return .error "original release ingress retention refused"
   match ← BendReceiving.release config ingress with
   | .released receipt bytes =>
-      if bytes == candidate.result.bytes then return .ok (receipt, bytes)
+      if bytes == candidate.result.bytes then return .ok ⟨receipt,bytes,canonicalIngress⟩
       else return .error "durably released bytes differ from retained completion"
   | .refused detail | .uncertain detail => return .error detail
   | .stored _ => return .error "unexpected storage response during release"
+
+/-- Replay the exact retained storage command. The native receiver either
+confirms its original journal receipt, admits that same signed command under
+current rules, or refuses; it never signs a replacement transaction. -/
+def resumeStorage (config : NativeHost.Config)
+    (publication : BendOpaqueResultReceiver.Publication) (signed : SignedCommand) :
+    IO (Except String Stored) := do
+  unless signed.commandBytes == commandCodec.encode (BendOpaqueResultReceiver.command publication) do
+    return .error "retained opaque command differs"
+  match ← BendReceiving.storeOpaque config publication signed with
+  | .stored receipt => return .ok ⟨publication,signed,receipt⟩
+  | .refused detail | .uncertain detail => return .error detail
+  | .released _ _ => return .error "unexpected retained storage response"
+
+def resumeRelease (config : NativeHost.Config) (candidate : BendInvocation.Result)
+    (ingress : BendReturnRelease.Ingress) : IO (Except String Released) := do
+  unless ingress.spec.source.result == BendInvocation.resultId candidate do
+    return .error "retained release selects different exact result"
+  match ← BendReceiving.release config (BendReturnRelease.ingressCodec.encode ingress) with
+  | .released receipt bytes =>
+      if bytes == candidate.result.bytes then return .ok ⟨receipt,bytes,ingress⟩
+      else return .error "retained release bytes differ"
+  | .refused detail | .uncertain detail => return .error detail
+  | .stored _ => return .error "unexpected retained release response"
 
 /-- Source-owned custody inspection re-prepares the COMPLETE canonical plan
 on the current image. Structural plan decoding is never permission to sign. -/
@@ -420,7 +528,8 @@ def clientSigner (custody : Custody) : IO (Except String Signer) := do
     if ← planPath.pathExists then
       return (.error "Bend custody plan snapshot already exists" : Except String (List UInt8))
     IO.FS.writeBinFile planPath ⟨bytes.toArray⟩
-    let output ← IO.Process.output { cmd := custody.client
+    let output ← IO.Process.output {
+      cmd := custody.client
       args := #["bend-session-sign", kind, "--host", custody.nativeHost,
         "--config", custody.nativeConfigPath, "--plan", planPath.toString,
         "--key", custody.authoritySeedPath, "--dir", runPath.toString] }

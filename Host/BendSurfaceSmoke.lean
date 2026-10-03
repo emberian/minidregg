@@ -15,7 +15,7 @@ set_option autoImplicit false
 
 private def application (entry : String) (arguments : List BTerm) : BTerm :=
   arguments.foldl (fun function argument => .App .Q1 function argument) (.Ref entry)
-private def nativeIntent (name : String) : Intent := ⟨⟨42⟩, name, ⟨2⟩, 3, ⟨4⟩, [0]⟩
+private def nativeIntent (name : String) : Intent := ⟨⟨42⟩, name, ⟨2⟩, 4611686018427387911, ⟨4⟩, [0]⟩
 
 private def sourceFace : Surface := ⟨⟨42⟩, "source",
   [⟨2, 0, "Source", []⟩, ⟨1, 1, "Activity", []⟩, ⟨4, 0, "Workshop", [0, 1]⟩], 2, []⟩
@@ -52,8 +52,15 @@ private def refuseMalformed : IO Unit := do
     throw (IO.userError "NUL export admitted")
   let forward := { sourceFace with nodes := [⟨4, 0, "Forward", [0]⟩], root := 0 }
   unless bounded forward 2 = false do throw (IO.userError "forward/cycle node admitted")
+  unless decodeScalar (scalarTerm 4611686018427387911) = some 4611686018427387911 do
+    throw (IO.userError "native-width instance scalar differs")
+  unless decodeScalar (BendSourceRepresentation.bytesTerm [0, 255]) = none do
+    throw (IO.userError "noncanonical native instance scalar admitted")
+  unless decodeScalar (BendSourceRepresentation.bytesTerm [1, 255, 2]) = none do
+    throw (IO.userError "trailing native instance bytes admitted")
   IO.println "SURFACE MALFORMED CHECK PASS byte/UTF8/NUL/backwards"
 
+#assert_axioms Minidregg.Compiler.BendSurfaceLowering.decode_scalarTerm
 #assert_axioms Minidregg.Compiler.BendSurfaceLowering.lower_exact
 #assert_axioms Minidregg.Compiler.BendSurfaceLowering.abi_definition_exact
 #assert_axioms Minidregg.Compiler.BendSurfaceLowering.evaluated_source_exact

@@ -339,17 +339,7 @@ fn leaf(salt: &[u8], entry: &[u8]) -> [u8; 32] {
     cshake(b"", LEAF, &preimage)
 }
 
-fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if value.len() % 2 != 0 {
-        return Err("hex must have an even length".to_owned());
-    }
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16).map_err(|_| "invalid hex".to_owned())
-        })
-        .collect()
-}
+fn decode_hex(value: &str) -> Result<Vec<u8>> { crate::decode_hex(value) }
 
 /// One `StreamCodec.nat` prefix: base-255 digits up to the terminator 255.
 fn nat_prefix(bytes: &[u8]) -> Result<(Nat, &[u8])> {

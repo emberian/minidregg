@@ -171,13 +171,7 @@ pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     if !strict_hex(value) {
         return Err("noncanonical reserve hex".into());
     }
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16)
-                .map_err(|error| format!("invalid reserve hex: {error}"))
-        })
-        .collect()
+    crate::decode_hex(value)
 }
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {

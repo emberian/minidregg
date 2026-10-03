@@ -1,0 +1,22 @@
+edition ObjectiveBend 1
+
+record Parity:
+  even(n: Nat) -> Bool
+  odd(n: Nat) -> Bool
+
+spec Even for Parity:
+  requires odd(n: Nat) -> Bool
+  def even(n: Nat) -> Bool:
+    match n:
+      case 0n: true
+      case 1n+pred: self.odd(pred)
+
+spec Odd for Parity:
+  requires even(n: Nat) -> Bool
+  def odd(n: Nat) -> Bool:
+    match n:
+      case 0n: false
+      case 1n+pred: self.even(pred)
+
+def parity(inherited: Parity) -> Parity:
+  fix(compose(Even, Odd), inherited)

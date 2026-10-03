@@ -41,7 +41,7 @@ mkdir -p "$logdir"
 # lake-build builds EVERY lean_lib and lean_exe the lakefile declares (the umbrella,
 # AxiomCensus, any other root library, the executables), read from the lakefile so a
 # new root library cannot be left out of the gate.
-lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
+lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
 GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
@@ -51,7 +51,7 @@ only=${LOCAL_GATES_ONLY:-}
 
 g_host-operations() { python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py; }
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
-g_lake-build()    { echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
+g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_drift() {

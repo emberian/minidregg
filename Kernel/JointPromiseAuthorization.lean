@@ -13,6 +13,7 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.CredentialAuthorityDomain
 open Minidregg.Compiler.CredentialAuthorityDomainReceiver
+open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DeclaredResourceController
@@ -37,11 +38,7 @@ structure Declaration where
 
 def declarationStream : StreamCodec Declaration :=
   StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-      (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product (StreamCodec.list CredentialAuthorityEntryCodec.capabilityIdStream)
-            (StreamCodec.product DurableReceiverCodec.chargeStream (StreamCodec.list bytesStream))))))))
+    (StreamCodec.product (bytesStream) (StreamCodec.product (bytesStream) (StreamCodec.product (bytesStream) (StreamCodec.product (StreamCodec.nat) (StreamCodec.product (StreamCodec.nat) (StreamCodec.product (StreamCodec.nat) (StreamCodec.product (StreamCodec.list CredentialAuthorityEntryCodec.capabilityIdStream) (StreamCodec.product (DurableReceiverCodec.chargeStream) (StreamCodec.list bytesStream)))))))))
     (fun d => (d.candidateBytes,d.selectedSignedBytes,d.sourceImageBytes,d.epoch,
       d.generation,d.nonce,d.capabilities,d.maintenance,d.repairEnvelopes))
     (fun (c,s,i,e,g,n,cs,m,r) => ⟨c,s,i,e,g,n,cs,m,r⟩) (by intro d; cases d; rfl)
@@ -55,9 +52,12 @@ def commitment (domain semantics : Digest) (d : Declaration) : Digest :=
 
 def wanted (domain semantics : Digest) (d : Declaration) (ordinary : PackedEffectRequest) :
     PackedEffectRequest :=
-  ⟨ordinary.1, { ordinary.2 with verb := reserveVerb ordinary.1,
-    argsDigest := commitment domain semantics d,
-    effectsDigest := commitment domain semantics d, nonce := d.nonce }⟩
+  ⟨ordinary.1,
+    { ordinary.2 with
+      verb := reserveVerb ordinary.1
+      argsDigest := commitment domain semantics d
+      effectsDigest := commitment domain semantics d
+      nonce := d.nonce }⟩
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -135,6 +135,14 @@ def config (prepared : PreparedInvocation deployment profile ambient durable com
     (step prepared d original incidence) (incidenceTarget command incidence).target
     ((kindDependencies prepared incidence).map (·.additional) |>.getD [])
 
+/-- Named portal boundary keeps dependent admission evidence from repeatedly
+normalizing the full physical law configuration. It is exactly that current
+source configuration, without a new authority constructor. -/
+def portal (prepared : PreparedInvocation deployment profile ambient durable command)
+    (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
+    (incidence : Incidence command) : Portal :=
+  (config prepared d original incidence).portal
+
 def request (prepared : PreparedInvocation deployment profile ambient durable command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) := (tuple prepared d original).request incidence |>.2
@@ -150,7 +158,7 @@ def authorize (prepared : PreparedInvocation deployment profile ambient durable 
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command)
     (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
-    Except Reject (Authorized (config prepared d original incidence).portal
+    Except Reject (Authorized (portal prepared d original incidence)
       prepared.authority.snapshot.authState (request prepared d original incidence)) := do
   let wanted := request prepared d original incidence
   let lawConfig := config prepared d original incidence
@@ -178,12 +186,14 @@ def Signed.envelope (signed : Signed) : Incidence command → List UInt8
   | none => signed.authorityEnvelope
   | some i => signed.targetEnvelopes[i.val]?.getD []
 
+attribute [irreducible] portal
+
 structure CheckedLeg (prepared : PreparedInvocation deployment profile ambient durable command)
     (d : Declaration) (original : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : Incidence command) (envelope : List UInt8) where
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = envelope
-  authority : Authorized (config prepared d original incidence).portal
+  authority : Authorized (portal prepared d original incidence)
     prepared.authority.snapshot.authState (request prepared d original incidence)
   admitted : authorize prepared d original incidence receipt = .ok authority
   fields : fieldsCheck authority.evidence.capabilityValue (legFootprint prepared incidence) = .ok ()

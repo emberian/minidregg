@@ -5,6 +5,7 @@ Physical inventory completeness is supplied by the existing service manager;
 this probe does not mint a source transfer or worker activation permit.
 -/
 import Compiler.CarriedSegmentIO
+import Compiler.ReceiptContinuityIO
 import Compiler.PortableContinuationArchiveIO
 
 open Lean
@@ -138,7 +139,7 @@ def portableProbe (configuration : System.FilePath) (mode : String) : IO Unit :=
     let pin ← heldPin participant identity
     let extensionPath ← IO.ofExcept (stringField participant "extension")
     let extensionJson ← IO.ofExcept (Json.parse (← IO.FS.readFile extensionPath))
-    let extension ← IO.ofExcept (Minidregg.Host.ReceiptContinuity.parseExtension extensionJson)
+    let extension ← IO.ofExcept (Minidregg.Compiler.ReceiptContinuityIO.parseExtension extensionJson)
     let proposed : Acknowledgement := ⟨pin.participant,pin.publicKey,manifest.prefix.identity,manifest.point⟩
     if (acknowledge pin proposed extension).isNone then
       throw (IO.userError "portable repair conflicts with independently held participant history")

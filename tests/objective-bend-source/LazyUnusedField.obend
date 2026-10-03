@@ -1,0 +1,11 @@
+edition ObjectiveBend 1
+
+record Pair:
+  good: Nat
+  bad: Nat
+
+extension Fields(self: Pair, super: Pair) -> Pair:
+  {good: 7n, bad: self.bad}
+
+def result() -> Nat:
+  fix(Fields, {good: 0n, bad: 0n}).good

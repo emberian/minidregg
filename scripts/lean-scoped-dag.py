@@ -289,6 +289,23 @@ class Runner:
                 os.replace(old, retired / old.name)
         return {str(p): sha(p) for p in destinations.values()}
 
+    def hold_unchanged_failures(self, prior):
+        """Explicitly retain exact prior source failures while independent work runs."""
+        held = {}
+        for module in self.order:
+            path = prior / 'modules' / module / 'status.json'
+            if self.states[module] != 'PENDING' or not path.is_file():
+                continue
+            result = json.loads(path.read_text())
+            if (result.get('state') == 'FAIL' and (result.get('producerExit') or 0) > 0
+                    and result.get('inputFingerprint') == self.fingerprints[module]
+                    and result.get('sourceSha256') == self.source_pins[module]
+                    and result.get('dependencyArtifacts') == self.dependency_artifacts(module)):
+                self.states[module] = 'FAIL'
+                held[module] = str(path)
+        save(self.run / 'held-unchanged-failures.json', held)
+        print('LEAN DAG RETAINED SOURCE FAILURES ' + str(len(held)), flush=True)
+
     def recover(self, prior):
         """Adopt only known successful compiles whose publication failed with EXDEV."""
         recovered = []
@@ -362,6 +379,8 @@ class Runner:
         self.preflight()
         if getattr(self.args, 'recover_run', None):
             self.recover(self.args.recover_run)
+        if getattr(self.args, 'hold_failures_from', None):
+            self.hold_unchanged_failures(self.args.hold_failures_from)
         if self.args.plan_only:
             print(json.dumps({'verdict': 'PLAN', 'states': self.states, 'run': str(self.run)}))
             return 0
@@ -409,6 +428,7 @@ def main():
     p.add_argument('--module-timeout', type=int, default=300)
     p.add_argument('--plan-only', action='store_true')
     p.add_argument('--recover-run', type=Path)
+    p.add_argument('--hold-failures-from', type=Path, help='Retain exact unchanged source failures; does not hold ENVFAULT or TIMEOUT')
     p.add_argument('--export-complete', type=Path,
                    help='New immutable copy cohort, emitted only after every scheduled module passes')
     args = p.parse_args()

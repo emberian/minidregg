@@ -23,10 +23,10 @@ abbrev Consent (config : Config) (opened : Opened config) :=
   Prepared config.deployment config.profile
     ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable
 
-private def history (opened : Opened config) : List (List UInt8) :=
-  opened.durable.image.accepted.map DurableReceiverIO.recordFrame.encode
-private def payload (consent : Consent config opened) : List UInt8 :=
-  DurableReceiverIO.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent consent.intent)
+private def history {config : Config} (opened : Opened config) : List (List UInt8) :=
+  opened.durable.image.accepted.map DurableCheckpointCodec.recordFrame.encode
+private def payload {config : Config} {opened : Opened config} (consent : Consent config opened) : List UInt8 :=
+  DurableCheckpointCodec.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent consent.intent)
 
 structure Ordered (config : Config) (opened : Opened config) (consent : Consent config opened) where
   private mk ::

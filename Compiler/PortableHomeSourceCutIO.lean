@@ -2,14 +2,14 @@
 are captured through existing archive mechanics, not a second source journal.
 This token does not establish physical process quiescence, STOP, rekey or activate.
 -/
-import Host.PortableContinuationInspection
+import Compiler.PortableContinuationInspection
 import Compiler.PortableHomeTransferFrame
 namespace Minidregg.Compiler.PortableHomeSourceCutIO
 open Minidregg.Kernel
 open Minidregg.Compiler
 open Minidregg.Kernel.PortableContinuationManifest
 open Minidregg.Kernel.PortableHomeTransfer
-open Minidregg.Host.PortableContinuationInspection
+open Minidregg.Compiler.PortableContinuationInspection
 set_option autoImplicit false
 
 structure Captured (config : NativeHost.Config) (archive : PortableContinuationArchiveIO.NativeConfig)
@@ -57,7 +57,7 @@ def capture (config : NativeHost.Config) (archive : PortableContinuationArchiveI
               match ← PortableContinuationArchiveIO.retain archive manifest with
               | .error detail => return .error detail
               | .ok readback =>
-                let audited := Minidregg.Host.PortableContinuationInspection.fromWalked
+                let audited := Minidregg.Compiler.PortableContinuationInspection.fromWalked
                   config source generation predecessor (control :: artifacts)
                 return .ok ⟨audited,before,bytes,rfl,stateExact,control,closed,
                   List.mem_cons_self,readback⟩
@@ -81,5 +81,40 @@ theorem source_obligation_retained {config : NativeHost.Config}
     (cut : Captured config archive pin) (artifact : Artifact) (owed : artifact ∈ cut.before.required) :
     artifact ∈ (reference cut).required := cut.required artifact owed
 
+/-- Actual two-cut chronology over the canonical whole accepted source journal.
+A greater height or equal public root cannot substitute for this exact prefix.
+This capability still needs the native physical quiescence producer to become
+QuiescedCut; it is not itself a process STOP or activation fence. -/
+structure Advanced {config : NativeHost.Config} {archive : PortableContinuationArchiveIO.NativeConfig}
+    {pin : PortableHomeTransferFrame.Pin}
+    (old next : Captured config archive pin) : Type where
+  private mk ::
+  chronology : next.audited.manifest.prefix.Extends old.audited.manifest.prefix
+  retained : Preserves old.before.required next.audited.manifest
+
+def advance {config : NativeHost.Config} {archive : PortableContinuationArchiveIO.NativeConfig}
+    {pin : PortableHomeTransferFrame.Pin} (old next : Captured config archive pin) :
+    IO (Except String (Advanced old next)) := do
+  match ← PortableContinuationArchiveIO.reopen archive old.audited.manifest
+      old.readback.inventory old.readback.exactInventory with
+  | .error detail => return .error detail
+  | .ok _ => pure ()
+  match ← PortableContinuationArchiveIO.reopen archive next.audited.manifest
+      next.readback.inventory next.readback.exactInventory with
+  | .error detail => return .error detail
+  | .ok _ => pure ()
+  if chronology : next.audited.manifest.prefix.Extends old.audited.manifest.prefix then
+    if retained : Preserves old.before.required next.audited.manifest then
+      return .ok ⟨chronology,retained⟩
+    else return .error "portable later source cut lost old obligations"
+  else return .error "portable later source cut conflicts with exact old prefix"
+
+theorem advanced_nonregression {config : NativeHost.Config}
+    {archive : PortableContinuationArchiveIO.NativeConfig} {pin : PortableHomeTransferFrame.Pin}
+    {old next : Captured config archive pin} (advanced : Advanced old next) :
+    old.audited.manifest.prefix.records.length ≤ next.audited.manifest.prefix.records.length :=
+  advanced.chronology.2.2.1
+
+#assert_axioms advanced_nonregression
 #assert_axioms source_obligation_retained
 end Minidregg.Compiler.PortableHomeSourceCutIO

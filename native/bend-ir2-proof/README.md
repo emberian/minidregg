@@ -17,3 +17,25 @@ Experimental v3 adds a profile-owned challenger wrapper. It samples the actual d
 CLI: `prove descriptor.json public.csv trace.csv proof.bin`, or `verify descriptor.json public.csv proof.bin`. It accepts only the declared local-row grammar. Existing reexecution admission remains in force. Public proof inputs must eventually come from the independently authorized projection and real constrained commitments; neither source metadata nor an opaque proof buffer establishes computation.
 
 The experimental v4 profile seals raw challenge sampling to BabyBear and the exact registered degree-four extension. Direct extension sampling uses the same bounded conditioner as `sample_algebra_element`; other raw algebra samplers are absent. The version remains part of the transcript prefix. The new direct-draw parity test and paired minimum/normal-capacity proof regression pass; this is not a full-transcript ZK qualification.
+
+### Reproducing the experimental backend
+
+`Cargo.toml` is now portable and `Cargo.lock` is the exact tested lock (SHA256
+43c1a9e1484ddd9645a5215a85aaad10cc5d651efe97532a2aa7245c2dd9d926).
+The external Bread source slice is still an explicit prerequisite. It is NOT
+interchangeable with an arbitrary current Bread checkout: `dependencies.lock.json`
+pins every Rust/manifest source file in the tested three-crate slice and the two
+vendor patches. Its root manifest narrows only workspace membership; package,
+dependency, lint and profile declarations remain the tested ones.
+
+Run `python3 provision.py /path/to/exact/source` to verify all pins and create the
+owned `../bend-proof-deps/bread` symlink used by the portable manifest. Existing
+unrelated files/symlinks are never replaced. The script neither rewrites the
+manifest nor launches a build. Run Cargo with `--locked` on an allocated build
+host. A source distribution for this exact external slice is still required for
+a fresh user who has only this repository; the manifest/lock repair does not
+claim that missing distribution already exists.
+
+The v4 conditioned extension challenge distribution remains experimental. The
+finite rank, draw-order and same-public/different-private tests do not prove the
+whole Fiat–Shamir protocol sound or its full transcript zero knowledge.

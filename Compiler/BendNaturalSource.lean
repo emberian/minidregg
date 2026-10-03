@@ -23,10 +23,13 @@ private theorem natAdd_ref_value (book : Book)
 private theorem natAdd_partial_value (book : Book)
     (binding : Book.get book "Nat.add" = some natAddDef) (a : Nat) :
     Value book (.App .Q1 (.Ref "Nat.add") (natTerm a)) := by
+  change Value book ((Term.Ref "Nat.add").spine [(.Q1, natTerm a)])
   cases a with
-  | zero => exact .call binding (.cons (fun _ => natTerm_value book 0) .nil)
+  | zero =>
+    exact .call binding (.cons (fun _ => natTerm_value book 0) .nil)
       (.prj rfl (.hit rfl (.hit rfl (.need rfl))))
-  | succ a => exact .call binding (.cons (fun _ => natTerm_value book (a + 1)) .nil)
+  | succ a =>
+    exact .call binding (.cons (fun _ => natTerm_value book (a + 1)) .nil)
       (.prj rfl (.miss rfl (by decide) (.hit rfl
         (.prj rfl (.lam rfl (by intro h; cases h) (.hit rfl (.need rfl)))))))
 
@@ -51,7 +54,8 @@ theorem natAdd_trace (book : Book)
         (.prj rfl (.miss rfl (by decide) (.hit rfl
           (.prj rfl (.lam rfl (by intro h; cases h)
             (.hit rfl (.lam rfl (by intro h; cases h) (.done rfl))))))))
-    simpa [natTerm, succTerm, Nat.succ_add] using Trace.step first lifted
+    rw [show a + 1 + b = (a + b) + 1 by omega]
+    exact Trace.step first lifted
 
 /-- All accepted supported-source compositions follow exactly their declared
 charge, including nested argument evaluation. This is a theorem over arbitrary

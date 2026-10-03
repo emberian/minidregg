@@ -19,6 +19,11 @@ def evaluatorId : Digest :=
   (Sp800185Cshake256.hash "DREGG.BEND.CHECKED-SOURCE-EVALUATOR/v1".toUTF8.toList
     "exact-pinned-book;actual-typed-closed-live-input;Eval-Walk-reference;capacity-refusal;complete-typed-output;no-ambient-IO;no-private-fallback".toUTF8.toList).digest
 
+/-- Source mathematics and evaluation are independent of physical BFV/JS/C arithmetic.
+Only a separately checked refinement may realize this exact source family. -/
+def sourceSemantics : String := "bendtt-eval-walk-947db722-v1"
+def sourceArithmetic : String := "bendtt-structural-nat-exact-v1"
+
 def chargeId : Digest :=
   (Sp800185Cshake256.hash "DREGG.BEND.CHARGE/v1".toUTF8.toList
     (BendPrivateCapacity.contract ++ "reference-source-work;exact-complete-native-write-and-dependency-usage".toUTF8.toList)).digest
@@ -49,7 +54,7 @@ structure Checked (artifact : BendWorldProgramCodec.Artifact)
 
 inductive Refusal where
   | artifactIdentity | methodIdentity | evaluator | inputCodec | outputCodec | core | entry | interface
-  | charge | bounds | source (reason : BendRunCore.Refusal)
+  | charge | semantics | arithmetic | bounds | source (reason : BendRunCore.Refusal)
   deriving DecidableEq, Repr
 
 /-- Bounds are selected from the accepted artifact profile, never supplied as a
@@ -62,6 +67,8 @@ def check (artifact : BendWorldProgramCodec.Artifact) (claim : BendExecutionClai
   if claim.method != methodId artifact then throw .methodIdentity
   if artifact.profile.evaluator != evaluatorId then throw .evaluator
   if artifact.profile.charge != chargeId then throw .charge
+  if artifact.profile.semantics != sourceSemantics then throw .semantics
+  if artifact.profile.arithmetic != sourceArithmetic then throw .arithmetic
   if claim.argumentCodec != artifact.profile.inputCodec ||
       claim.argumentCodec != BendNativeInput.codecId then throw .inputCodec
   if claim.outputCodec != artifact.profile.outputCodec then throw .outputCodec
@@ -111,6 +118,8 @@ def checkContext (artifact : BendWorldProgramCodec.Artifact) (claim : BendExecut
   if claim.method != methodId artifact then throw .methodIdentity
   if artifact.profile.evaluator != evaluatorId then throw .evaluator
   if artifact.profile.charge != chargeId then throw .charge
+  if artifact.profile.semantics != sourceSemantics then throw .semantics
+  if artifact.profile.arithmetic != sourceArithmetic then throw .arithmetic
   if claim.argumentCodec != artifact.profile.inputCodec ||
       claim.argumentCodec != BendNativeInput.codecV2 then throw .inputCodec
   if claim.outputCodec != artifact.profile.outputCodec then throw .outputCodec

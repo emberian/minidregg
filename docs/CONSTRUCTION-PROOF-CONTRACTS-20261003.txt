@@ -347,7 +347,9 @@ Eval edge. Assurance.BendContinuationSourceJoin preserves preexisting source/cac
 invariants through exact restoration; it does not establish arbitrary checkpoint
 reachability. Host separate-process save/resume cuts7/3/12 PASS.
 The executable restart consumer is scripts/check-bend-continuation-restart.sh. Actual portable native chunk repair
-of the cut7 file now PASS; producer execution on repaired file queued.
+of the cut7 file and actual separate-process producer execution on the repaired
+329-byte checkpoint now PASS: exact state/result/context/generation/canonical/capacity.
+This is real repair-to-resume conformance, not current worker activation.
 
 Actual new native join is authored WIP, not checked construction yet:
 BendActivityProgram.prepare -> checked canonical Book/entry + actual ClosureCompile
@@ -378,3 +380,52 @@ Plan; native closed registry/current target projection/funding is still a separa
 construction. Activity v2 resumeCandidate records actual injected pointer and
 source origin, but protected native pending/outcome admission and current receipt
 validation must consume it. Existing pure response success is not native success.
+
+ACTIVE RECEIVING PROOF MAP UPDATE
+Qualified baseline functions now include BendActivityProgram.prepare and exact
+source entry/typing projections, BendActivity actual successor proof, and
+BendActivityControl.installed_claim_refuses_new_admission over the actual native
+installer/preflight. ActivityIngress baseline is qualified. This does not by
+itself qualify native current-key receiving or every chronological replay join.
+Compiler/Host.BendActivityAuthor are new unqualified actual source/current-control
+proposal producers for the native start/advance fixture; they emit real start/run
+content payloads and the existing signed action nonce, never fabricated receipts.
+
+New effect source implementation functions remain UNQUALIFIED:
+- PendingAdmission.construct: actual current controller admission, source-checked
+  complete yield/Plan, response readiness, exact inert signed application proposal,
+  exact generated pending post and predecessor claim. Application authorization is
+  deferred until actual dispatch; pending is not a reservation or dispatch permit.
+- Dispatch.construct: actual original-prefix pending provenance, original current
+  application, physical pending-root guard and complete guarded usage admission.
+  stale_phase_refused applies to that actual installed intent and later snapshots.
+- Outcome.construct: either original-prefix dispatch plus entire recorded native
+  publication, or current owner cancellation with original operation still absent;
+  actual finite response/resume successor, native phase CAS and consumed claim.
+  cancellationGate_recorded and installed_outcome_refuses_new_admission name the
+  actual native journal/gate/installer obligations, not a detached local model.
+- Recovery.recover/recoverResolution: actual verified selected historical prefixes,
+  re-admission at original source heights, full-record comparison. Chronological
+  event64 replay must retain equivalent source evidence without an import cycle.
+- OutcomeTyping.resumed_state/resumed_source_typed: authored exact whole-state
+  equality to the retained Ready.response plus actual StateDenotes, dependent result
+  type and new segment count zero. No host response is asserted as upstream Eval.
+
+REFUTED OVERCLAIM AND REQUIRED SHARED REPAIR
+The typed Dispatch pending-root guard alone does NOT stop an ordinary event3 or
+alternate wrapper from using the same original application signature without that
+guard. The new effect route remains disabled. The selected repair is one explicit
+versioned NativeInvocationStatement binding route/domain/semantics/full context/
+complete unsigned body into ACTUAL per-leg authorization requests, operation
+identity and replay. The old profile keeps its old signing semantics. The nonce
+namespace source is an inactive transition prototype, not the selected contract.
+
+NativeInvocationStatement encode/decode/injectivity/route separation are authored,
+not yet qualified; even qualification proves canonical bytes, not signature
+unforgeability or correct native controller routing. BendActivityRoutePermit.admit
+is below Controller and checks the actual protected pending/signed bytes/dispatch
+route/physical root. The typed controller must derive both its statement and signed
+ingress from the actual invocation, require the source-profile-selected pin, retain
+its guard in actual funding/usage/intent, and deny typed statements through EVERY
+ordinary admission wrapper. No public bypass flag is an acceptable producer.
+The central signer/default-versus-typed admission repair is still outstanding.

@@ -1,0 +1,20 @@
+edition ObjectiveBend 1
+
+record X:
+  x: Nat
+record XY:
+  x: Nat
+  y: Nat
+record XYZ:
+  x: Nat
+  y: Nat
+  z: Nat
+
+extension AddY(self: XYZ, super: X) -> XY:
+  extend(super, {y: 2n * self.x})
+
+extension AddZ(self: XYZ, super: XY) -> XYZ:
+  extend(super, {z: self.y})
+
+def target(seed: X) -> XYZ:
+  fix(compose(AddY, AddZ), seed)

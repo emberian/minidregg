@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+
+def keep(first: Nat, ignored: Nat) -> Nat:
+  first
+
+def result() -> Nat:
+  keep(7n, fix(extension(self: Nat, super: Nat) -> Nat: self, 0n))

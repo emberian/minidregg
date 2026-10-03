@@ -40,7 +40,7 @@ def atom (pin : Pin) (bytes : List UInt8) : Option AtomRecord := do
 
 def readControl (pin : Pin) (bytes : List UInt8) : Option Control := do
   let actual ← atom pin bytes
-  JointControlCell.decode actual.payload
+  Minidregg.Kernel.JointControlCell.decode actual.payload
 
 /-- The source-authored content method has one guarded semantic edit. Its whole
 physical post is later checked against this decoded control transition. -/
@@ -69,6 +69,6 @@ def replace (pin : Pin) (bytes : List UInt8) (operation : OperationId)
 schema/document/atom identity, tombstones and noncanonical control payloads. -/
 def ordinaryGate {rootBytes : List UInt8 → Digest} (domain : Digest) (pin : Pin)
     (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes) :
-    Except JointControlCell.Reject Unit :=
-  JointControlCell.ordinaryGate (readControl pin) domain pin.cell snapshot intent
+    Except Minidregg.Kernel.JointControlCell.Reject Unit :=
+  Minidregg.Kernel.JointControlCell.ordinaryGate (readControl pin) domain pin.cell snapshot intent
 end Minidregg.Compiler.JointControlFrame

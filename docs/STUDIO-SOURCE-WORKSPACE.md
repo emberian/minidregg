@@ -33,3 +33,11 @@ Every submitted operation is retained before validation or revision comparison.
 Earlier composition revisions are inspectable and can be forked into a separate
 workspace. Forks retain ordinary document references; they do not copy private
 source or confer access. Existing source editor drafts remain retained.
+
+Prototype declarations retain the exact authored fields of the producer
+`dregg.objective-bend.partial-input.v1`: ordered directParents and ancestorOrder,
+required scope/selector/typeEntry and provided selector/entry/captures. They are
+versioned with package composition, retained in history and forks, and captured
+with saved source. The actual Package and canonical emitted partialCorePath must
+come from the real producer before assembling a Partial request. This draft
+shape is not a checked Partial or a publication/instantiation grant.

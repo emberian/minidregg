@@ -20,13 +20,22 @@ structure Prepared (book : Book) (publicTemplate : Term) (shape : Shape) where
   compiled : BendClosureCompile.Compiled book publicTemplate
   network : Network
   exact : BendObliviousController.network shape compiled.library = some network
+  valid : network.valid = true
+
+/-- Optimized producers may supply the SAME translation-validated Compiled
+certificate; the exact network is always reconstructed from that library. -/
+def ofCompiled {book : Book} {publicTemplate : Term} (shape : Shape)
+    (compiled : BendClosureCompile.Compiled book publicTemplate) :
+    Option (Prepared book publicTemplate shape) :=
+  match exact : BendObliviousController.network shape compiled.library with
+  | none => none
+  | some network =>
+    if valid : network.valid = true then some ⟨compiled,network,exact,valid⟩ else none
 
 def prepare (book : Book) (publicTemplate : Term) (shape : Shape) :
     Option (Prepared book publicTemplate shape) := do
   let compiled ← BendClosureCompile.compile book publicTemplate
-  match exact : BendObliviousController.network shape compiled.library with
-  | none => none
-  | some network => pure ⟨compiled,network,exact⟩
+  ofCompiled shape compiled
 
 structure ReferenceResult where
   bits : Array Bool
@@ -40,14 +49,19 @@ whole fixed network. Option failure here is malformed public graph/shape.
 Semantic typed-input and coherent-sharing admission are separate prerequisites. -/
 def runReference (network : Network) (publicTicks : Nat) (input : Array Bool) :
     Option ReferenceResult := do
-  let mut state := input
-  let mut physical := #[]
-  for _ in List.range publicTicks do
-    let output ← network.evaluate state
-    let accepted ← output[0]?
-    state := output.extract 1 output.size
-    physical := physical.push accepted
-  pure ⟨state,physical⟩
+  /- Validate invariant PUBLIC graph/ABI once, not once per private tick. -/
+  if input.size != network.inputCount || !network.valid ||
+      network.outputs.size != network.inputCount + 1 then none
+  else do
+    let mut state := input
+    let mut physical := #[]
+    for _ in List.range publicTicks do
+      let wires := network.evaluateWires state
+      let output := network.outputs.map fun wire => wires[wire]?.getD false
+      let accepted ← output[0]?
+      state := output.extract 1 output.size
+      physical := physical.push accepted
+    pure ⟨state,physical⟩
 
 /-- Every successfully prepared program retains the ACTUAL compiler relation;
 no caller-supplied digest or arbitrary network can replace its public source. -/

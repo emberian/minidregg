@@ -95,17 +95,7 @@ fn aead(key: &[u8; KEY]) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new(key.into())
 }
 
-pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if value.len() % 2 != 0 {
-        return Err("hex must have an even length".into());
-    }
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16).map_err(|_| "invalid hex".to_string())
-        })
-        .collect()
-}
+pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> { crate::decode_hex(value) }
 
 fn fixed<const N: usize>(bytes: &[u8], label: &str) -> Result<[u8; N]> {
     bytes

@@ -23,7 +23,7 @@ import Compiler.PredCompile
 import Compiler.Tower256ConcreteBackend
 import Compiler.Sp800185Cshake256
 import Theory.PolicyInstall
-import Theory.LawComposition
+import Pred.LawComposition
 import Theory.ObjectAudience
 import Theory.TypedAuthorization
 import Kernel.MultiCellHyperedge

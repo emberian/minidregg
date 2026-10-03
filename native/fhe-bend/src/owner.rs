@@ -35,6 +35,21 @@ fn invoke(
         "isolated public child refused",
     )
 }
+// Offline honest-owner conformance only. measure_noise is variable-time and
+// uses sk plus the library's own decode/lift; it is neither an input-validity
+// oracle nor an independent NTT/RNS correctness theorem. Nothing records the
+// value publicly, and governed receiving never uses this diagnostic predicate.
+fn offline_noise_margin(sk: &SecretKey, ct: &fhe::bfv::Ciphertext) -> Result<()> {
+    // SAFETY: resident owner-created conformance ciphertexts only, no external
+    // query/decryption endpoint. The measured integer stays process-local.
+    let bits = unsafe { sk.measure_noise(ct)? };
+    let bound = 1u128.checked_shl(u32::try_from(bits)?).ok_or("local noise overflow")?;
+    let q = minidregg_fhe_bend::Q.iter().map(|x| *x as u128).product::<u128>();
+    let margin = bound.checked_add(1).and_then(|n|
+        n.checked_mul(2 * minidregg_fhe_bend::T as u128)).ok_or("local margin overflow")?;
+    ensure(margin < q, "offline sampled centered-phase noise exhausts strict margin")
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     ensure(args.len() == 5 || args.len() == 10, "usage: fhe-bend-owner COMPILER_ARTIFACT PIN FHE_BEND_BINARY NEW_PUBLIC_RUN_DIR [--governed SOURCE_ARTIFACT DRIVER DRIVER_SHA256 NATIVE_SESSION_CONFIG]")?;
@@ -74,11 +89,6 @@ fn main() -> Result<()> {
             }
         }
     }
-    let mut inputs = Vec::new();
-    for values in &slots {
-        let pt = Plaintext::try_encode(values, Encoding::simd(), &p)?;
-        inputs.push(pk.try_encrypt(&pt, &mut rng)?);
-    }
     let rk = if is_mux {
         Some(RelinearizationKey::new(&sk, &mut rng)?)
     } else {
@@ -95,7 +105,7 @@ fn main() -> Result<()> {
         public_key: hex(&pk.to_bytes()),
         key_epoch,
         relinearization_key: rk.as_ref().map(|r| hex(&r.to_bytes())),
-        inputs: inputs.iter().map(|c| hex(&c.to_bytes())).collect(),
+        inputs: Vec::new(),
         input_depths: vec![0; arity],
         input_admission: if is_natural {
             "honest-owner-fresh-bounded-natural-v1"
@@ -104,7 +114,7 @@ fn main() -> Result<()> {
             semantic_id: format!("compiler-artifact:{pin}"),
             program_id: format!("compiler-artifact:{pin}"),
             method_id: "source-conformance-only".into(),
-            invocation: digest(&inputs.iter().flat_map(|c| c.to_bytes()).collect::<Vec<_>>()),
+            invocation: "pending-local-conformance-inputs".into(),
             predecessor: "none-conformance".into(),
             authority_snapshot: "not-a-governed-invocation".into(),
             tariff_id: "no-platform-charge-conformance".into(),
@@ -125,6 +135,20 @@ fn main() -> Result<()> {
     if let Some(driver) = &mut release_driver {
         driver.register(&material_bytes, &dir)?;
         request.context = driver.prepare(&raw, &dir, 0)?;
+    }
+    // Current native source/key/predecessor reservation precedes private input
+    // encryption. The authored native invocation ID is independent of ct coins.
+    let mut inputs = Vec::new();
+    for values in &slots {
+        let pt = Plaintext::try_encode(values, Encoding::simd(), &p)?;
+        inputs.push(pk.try_encrypt(&pt, &mut rng)?);
+    }
+    if release_driver.is_none() {
+        for input in &inputs { offline_noise_margin(&sk, input)?; }
+    }
+    request.inputs = inputs.iter().map(|c| hex(&c.to_bytes())).collect();
+    if release_driver.is_none() {
+        request.context.invocation = digest(&inputs.iter().flat_map(|c| c.to_bytes()).collect::<Vec<_>>());
     }
     let request_path = dir.join("request.json");
     let completion_path = dir.join("completion.json");
@@ -147,6 +171,7 @@ fn main() -> Result<()> {
         driver.release(&raw, &canonical(&request)?, &candidate_bytes, &dir, 0)?;
     }
     let out = ciphertext(&unhex(&candidate.output)?, &p)?;
+    if release_driver.is_none() { offline_noise_margin(&sk, &out)?; }
     let decoded = Vec::<u64>::try_decode(&sk.try_decrypt(&out)?, Encoding::simd())?;
     let mut expected = Vec::new();
     for i in 0..4096 {
@@ -180,6 +205,9 @@ fn main() -> Result<()> {
         // the false arm is the previous encrypted result, with a freshly
         // encrypted private selector. This remains physical conformance;
         // platform state/fee/release authority is not minted by this harness.
+        let successor_context = if let Some(driver) = &release_driver {
+            Some(driver.prepare(&raw, &dir, 1)?)
+        } else { None };
         let selector: Vec<u64> = slots[0].iter().map(|b| 1 - b).collect();
         let selector_pt = Plaintext::try_encode(&selector, Encoding::simd(), &p)?;
         let selector_ct = pk.try_encrypt(&selector_pt, &mut rng)?;
@@ -192,8 +220,8 @@ fn main() -> Result<()> {
         next.input_depths[2] = candidate.physical_cost.depth;
         next.context.predecessor = candidate.output_sha256.clone();
         next.context.invocation = digest(&canonical(&next.inputs)?);
-        if let Some(driver) = &release_driver {
-            next.context = driver.prepare(&raw, &dir, 1)?;
+        if let Some(context) = successor_context {
+            next.context = context;
         }
         let next_request = dir.join("next-request.json");
         let next_completion = dir.join("next-completion.json");
@@ -214,6 +242,7 @@ fn main() -> Result<()> {
             driver.release(&raw, &canonical(&next)?, &next_candidate_bytes, &dir, 1)?;
         }
         let next_ct = ciphertext(&unhex(&next_candidate.output)?, &p)?;
+        if release_driver.is_none() { offline_noise_margin(&sk, &next_ct)?; }
         let actual = Vec::<u64>::try_decode(&sk.try_decrypt(&next_ct)?, Encoding::simd())?;
         for i in 0..4096 {
             ensure(

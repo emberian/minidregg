@@ -1,6 +1,6 @@
 /- Explicit reservation-capable factory authoring and signing method.
    The ordinary resource-birth authoring and assembly entrypoints stay unchanged. -/
-import Host.CurrentResourceBirthAuthoring
+import Kernel.NativeHost
 
 namespace Minidregg.Kernel.NativeHostReserveBirth
 
@@ -108,30 +108,6 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       (CredentialSignedEnvelopeController.headerCodec.encode header))
   pure ⟨plan, owners⟩
 
-/-- Authenticated current-image authoring is a separate explicit method. No
-JSON permission flag enters ordinary birth authoring. Capability identities are
-names only; target, verbs, holder, ancestry and issuer template are source-derived. -/
-def authorAndPrepareLoadedAuthorized (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (signedObservationBytes : List UInt8)
-    (json : Lean.Json) (reserveCapabilityIds : List CapabilityId) :
-    IO (Except String SigningPlan) := do
-  match ← Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
-      config opened signedObservationBytes json with
-  | .error reason => return .error reason
-  | .ok ordinaryIntentBytes =>
-      let some intent := NativeObservationCodec.intentCodec.decode ordinaryIntentBytes
-        | return .error "noncanonical ordinary birth intent"
-      let .prepare (.birth ordinaryBytes sourceCapabilities) := intent.purpose
-        | return .error "ordinary resource birth source required"
-      let some ordinary := CanonicalCellRegistry.sourceEncoding.codec.decode ordinaryBytes
-        | return .error "noncanonical ordinary birth source"
-      match withReserveGrants config.profile.template opened.authority.snapshot.authState
-          (NativeHost.logicalHeight config opened.durable) config.tariff ordinary reserveCapabilityIds with
-      | .error reason => return .error reason
-      | .ok descriptor =>
-          return prepareLoaded config opened
-            (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor) sourceCapabilities
-
 /-- Owner and creator/debit signers are independent. Assembly issues no rights;
 the existing native birth receiver rechecks all signatures on its own image. -/
 def assemble (plan : SigningPlan)
@@ -165,19 +141,6 @@ def assembleRequestStream : StreamCodec AssembleRequest :=
 
 def assembleRequestCodec : LawfulCodec AssembleRequest := NativeHostCodec.framed
   ("DREGG/RESOURCE-RESERVE-BIRTH/ASSEMBLE-REQUEST".toUTF8.toList ++ [1]) assembleRequestStream
-
-/-- Native wire adapter, exposing only the authenticated explicit source method. -/
-def authorWireLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (bytes : List UInt8) : IO (Except String (List UInt8)) := do
-  let some request := authorRequestCodec.decode bytes
-    | return .error "noncanonical reserve birth author request"
-  let some source := String.fromUTF8? request.sourceBytes.toByteArray
-    | return .error "reserve birth source is not UTF-8"
-  match Minidregg.Host.Json.parse source with
-  | .error reason => return .error reason
-  | .ok json =>
-      return (← authorAndPrepareLoadedAuthorized config opened request.signedObservationBytes
-        json request.reserveCapabilityIds).map signingPlanCodec.encode
 
 def assembleWire (bytes : List UInt8) : Except String (List UInt8) := do
   let some request := assembleRequestCodec.decode bytes

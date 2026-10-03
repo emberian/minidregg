@@ -106,7 +106,9 @@ theorem circuit_run_decoded (shape : BendObliviousState.Shape) (limits : Limits)
           simpa only [circuitRun, nextStep, Option.bind_some] using reached
         simpa only [run] using
           conformance (tick + 1) (Nat.succ_lt_succ less) bits originalReached currentDecoded)
-    exact ⟨output, by simp only [circuitRun, nextStep, Option.bind_some, rest], finalDecoded⟩
+    refine ⟨output, ?_, finalDecoded⟩
+    rw [circuitRun, nextStep]
+    exact rest
 
 /-- Source receiving for the actual raw physical pipeline. The literal
 decode/step equation is restricted to raw states reached by that same pipeline.

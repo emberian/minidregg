@@ -85,3 +85,58 @@ Use qualified warm dependencies and the project's bounded compiler controls.
 The compiler benchmark accepts additional captured `.bendtt` paths as arguments.
 Native Host integration and full optimized controller execution remain separate
 receiving qualifications, owned by their corresponding runtime consumers.
+
+## Concrete receiver and edition retention
+
+The composition consumer `BendObliviousExecutionIndexed.prepare` now consumes
+this producer through the existing `ofCompiled` constructor and reconstructs
+the actual full controller from that certified library. Its independent check
+passed on the same public repeated-depth-5 source and H64/F16/A8/wordBits8
+capacity profile: ROM rows 63→6, Boolean gates 517,424→416,205 and AND gates
+212,149→161,020 (24.1% fewer). AND depth remains 43. This is actual component
+receiving evidence; it does not establish malicious MPC or native Host latency.
+
+`BendIndexedExecutionContext` uses the existing exact-table/bounds canonical
+context codec, prefixing the explicit compiler edition in the native binding.
+General laws prove exact context equality from equal encoded bytes, legacy
+context inequality even when tables happen to match, historical checkpoint
+refusal under the new expected context, and exact serialized pause/resume.
+Old checkpoints remain intact for their explicit historical receiver; there is
+no pointer relocation into a different ROM. Controller `ofCompiled` separately
+retains equality to the actual reconstructed network. Its network/edition and
+public capacities must remain in the backend's admitted exact circuit binding.
+
+`BendIndexedActivityProgram` supplies a new explicitly versioned Source record:
+original public Source plus compilerEdition. The canonical signed-source binding
+is injective over BOTH fields. Preparation refuses unsupported editions and
+performs original core/entry/invocation/capacity admission, while consuming the
+already-proved checker result through compileChecked. The produced certificate
+is the original activity Prepared type plus the explicit edition witness.
+Its expected continuation bytes include that signed-source binding, the compiler
+frame, exact tables and exact limits. It supplies no current authority/funding
+or native action registration. Baseline Source/prepare remain supported.
+
+The unchanged baseline BendActivityProgram producer was first-qualified
+independently of the larger queued native receiver foundation; its source hash
+is `d224fa9c32cbcb39bf6eea0563f0a6ba8600584be7315087955097604e6ea770`.
+The indexed producer and context general axiom gates passed. An actual admitted
+typed pair program executes through BOTH clear closure machines: ROM rows 64→7,
+identical exact decoded source result, and unchanged canonical sourceSteps=1.
+The matching indexed checkpoint restores exact state; an old compiler context
+and changed generation both refuse. This is a focused execution/refusal/resume
+join, not native lifecycle deployment.
+
+Current canonical persisted workshop Books were checked independently and
+produce the same measured row counts above. Their bytes have source hashes
+`b534270021c36e7ec0fdd5647bdc1c145eadeaf859c39e70cbd8024213b6a6b2`
+(complete) and
+`71f5a97c9cd28fe0b812014d062c35673c53593269bb3d44def2d313ee781209`
+(alternate). Each actual Book passed Book.check and full ordered-definition/
+entry translation validation. These canonical byte identities are separate
+from the earlier captured formatting/source hashes.
+
+Native activation of the new signed profile is an explicit receiving task;
+there is no automatic reinterpretation of an existing source/profile or a
+fallback from indexed refusal to baseline execution. Baseline receiver defaults
+remain unchanged. General compiler completeness and general closure-machine
+simulation keep their existing, separately owned obligations.

@@ -4,6 +4,7 @@ The wire is canonical native bytes; the source receives two Data byte lists,
 (authored arguments, current admitted observation vector), as an affine pair.
 No host map, file lookup, foreign IO or ambient authority is available. -/
 import Compiler.BendRunCore
+import Compiler.TypedAuthorizationRequestCodec
 
 namespace Minidregg.Compiler.BendNativeInput
 open Minidregg.Compiler.Tower256ConcreteBackend

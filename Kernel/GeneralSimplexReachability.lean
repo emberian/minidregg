@@ -174,10 +174,11 @@ inductive Reachable (c : Config) (faulty : Finset Nat)
       (allowed : AllowedInput c faulty sourceChecked net party input) :
       Reachable c faulty sourceChecked initialTime (advance c faulty net party input)
 
-/-- This is a demanded refinement RESULT, not an axiom and not a certificate gate.
-Its constructor must be produced inductively from Reachable using the local
-extraction lemmas; that construction remains owned by GenericSimplexLocal.
-Until it exists, actual engine prefix safety is NOT claimed proved. -/
+/-- Executable observation refinement, constructed from actual Reachable by
+GenericSimplexObservationSafety.actual_audit_refinement. Local fidelity is
+proved from real start/step and retained audit causes; committed and delivered
+observations are joined through the actual output-history invariant.
+Cryptographic signature origin and liveness remain separate obligations. -/
 structure AuditRefinement (c : Config) (faulty : Finset Nat) (net : Network) where
   faithful : LocalFaithful (auditTrace net) (Finset.range c.parties) faulty c.faults
   commits : ∀ party view block, party < c.parties → party ∉ faulty →

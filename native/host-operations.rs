@@ -346,3 +346,11 @@ pub const APPLICATION_DISPATCH_AUTHENTICATED_PLAN: u8 = 194;
 pub const RESERVE_RESOURCE_BIRTH_PLAN: u8 = 201;
 // active; public,operator; owner: resource-reserve-birth
 pub const RESERVE_RESOURCE_BIRTH_ASSEMBLE: u8 = 202;
+// active; operator; owner: spk-recovery
+pub const APPLICATION_FAILED_START_RECOVERY_PREPARE: u8 = 206;
+// active; operator; owner: spk-recovery
+pub const APPLICATION_FAILED_START_RECOVERY_ASSEMBLE: u8 = 207;
+// active; operator; owner: spk-recovery
+pub const APPLICATION_FAILED_START_RECOVERY_SUBMIT: u8 = 208;
+// active; operator; owner: spk-recovery
+pub const APPLICATION_FAILED_START_RECOVERY_LOOKUP: u8 = 209;

@@ -10,7 +10,7 @@ set -euo pipefail
 repo_root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$repo_root"
 python3 - <<'PY'
-import re, subprocess, sys
+import re, subprocess, sys, json
 libs = re.findall(r'^\[\[lean_lib\]\]\s*\nname\s*=\s*"([^"]+)"',
                   open("lakefile.toml").read(), re.M)
 files = subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0")
@@ -25,7 +25,8 @@ def imports(path):
     return [m for m in re.findall(r"^import\s+(\S+)", open(path, encoding="utf-8").read(), re.M)]
 exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
                        open("lakefile.toml").read(), re.M)
-seen, stack = set(), ["Minidregg", "AxiomCensus", "Deployed", "AxiomCensusResearch"] + exe_roots
+surfaces = json.load(open("protocol/lean-build-surfaces.json"))
+seen, stack = set(), libs + exe_roots + surfaces["programRoots"]
 while stack:
     m = stack.pop()
     if m in seen or m not in mods:
@@ -36,7 +37,7 @@ if "Minidregg" not in seen:
     sys.exit("build-closure: Minidregg.lean is missing")
 unrooted = sorted(set(mods) - seen)
 for m in unrooted:
-    print(f"build-closure: {mods[m]} is imported by nothing reachable from Minidregg")
-print(f"build-closure: {len(seen)} of {len(mods)} library modules rooted")
+    print(f"build-closure: {mods[m]} has no declared stable, qualification, research, or program target")
+print(f"build-closure: {len(seen)} of {len(mods)} library modules have declared compile coverage (ResearchWip/programs are opt-in, not asserted compiled)")
 sys.exit(1 if unrooted else 0)
 PY

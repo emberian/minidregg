@@ -44,13 +44,14 @@ def ordinaryGate {rootBytes : List UInt8 → Digest} (pin : Pin)
     Except Kernel.DurableDataIntent.RejectReason Unit := do
   let some state := readState pin (snapshot.canonicalBytes pin.cell)
     | throw (.durable .transactionConflict)
+  if !Minidregg.Theory.ResourceCost.Charge.fundedCheck
+      (state.maintenanceReserve + intent.exactCharge) snapshot.model.available then
+    throw (.durable .transactionConflict)
   if intent.writes.any (fun write => write.cellId == pin.cell) then
     throw (.durable .transactionConflict)
   else
     let touchesHome := intent.writes.any (fun write => write.cellId.value ∈ state.governedCells)
-    let reconciled := state.liabilities.all fun call => match call.status with
-      | .reconciled _ => true
-      | _ => false
+    let reconciled := decide (AllSettled state.liabilities)
     let serving := state.phase == .serving ||
       ((state.phase == .destinationActive || state.phase == .released) && reconciled)
     if touchesHome && !serving then throw (.durable .transactionConflict) else pure ()

@@ -38,7 +38,14 @@ QROM/PQ AMPC theorem, generic authenticated Boolean evaluator, complete
 accusation availability/fault-elimination ACS/GOD construction, holder-private
 output or successor resharing is supplied by these component checks.
 
-Transport confidentiality is an OPEN deployment join. The current shared
+Recipient-only channel source now implements the actual shared ML-KEM-768 /
+XChaCha suite, fixed source-selected padding, private random hiding commitment,
+original recipient key epoch retention, and exact cached ciphertext before offer.
+Sealed outbox construction checks every actual recursive message/destination in
+order; PROGRESS/v2 exposes only a hiding semantic commitment and sealed-outbox
+commitment, never the clear SIGN preimage. Recipient decryption is not source
+authority. Public committee/context, packet count and padding class are explicit
+component-profile leakage. The native deployment join remains OPEN. The current shared
 mailbox/clear native controller would see every clear share body. Outer mix
 encryption and inner authentication do not realize independent private channels.
 PROGRESS/v1 repeats the full AUTH.SIGN preimage and can expose the body on return.
@@ -58,7 +65,8 @@ header on one source snapshot. Source event63 Applied authorizes the retained
 logical dispatch; decoded request/receipt/progress never mint this token.
 Committed liabilities are verified at their original admitted prefix rather
 than reinterpreted by a later key rotation. Native source-host effect dispatch
-and independent party encryption keys are still actual producer joins.
+are still actual producer joins. Endpoint keypair generation/persistence is now
+authored; its public record still needs real source enrollment.
 
 AUTH capacity131072; raw INGRESS131100; public packet P262144. FINAL complete
 native request, including all config/purpose/op wrappers, must be <=262078;
@@ -113,3 +121,44 @@ Persvati King r13:4/4 (three King + one ACSSf2), r14:2/2 malicious/fault,
 r15:4/4 (one nonzero-source fault + three native claim codecs).
 No unchanged broad suite rerun was used. Native source/secret channel/crypto
 qualification is separate from compilation and individual adversarial schedules.
+
+Fable review repairs (2026-10-03, current source):
+- Receiver WAL identity v2 pins capacity PER logical party. Old replay IDs are
+  retained, so one Byzantine sender cannot spend an honest sender's slots.
+  The actual quota/restart refuter passed in r18. This supports a finite funded
+  generation lifetime, not sustained infinite liveness. Exhausting one's own
+  quota refuses; more work needs a newly source-admitted context. No unauthenticated
+  window/pruning/retirement permission is invented.
+- Incomplete final WAL length/record and partial initial header recover to the
+  valid prior prefix, fsync the truncation/creation and replay completed outboxes.
+  Complete bad checksums, mismatched identities and replay faults still refuse.
+  This assumes honest crash-prefix persistence, not arbitrary disk corruption.
+  Fsync-before-publication is unchanged. Every-byte append cuts and partial-header
+  tests passed in r19 after the provider repair.
+- New VABA test actually enters view1, retains/retries future-view traffic, holds
+  final agreement, and injects one sender's equivocal prevote/vote. ACS test injects
+  selector equivocation and repeated faulty supports. These tests executed in r19 and passed; they do not establish all-schedule safety or transfer the
+  printed VABA theorem to the repaired availability/value predicates.
+
+The first r18 capsule run compiled new locked library dependencies and ran ten
+selected checks. Three passed: native Plan fixture, sender quota isolation, and
+fresh real seals/public bounds. Two failed, five did not run due fail-fast.
+The actual defect is AWS-LC's documented lack of public-key export from a raw
+restored decapsulation representation. The shared provider repair retains both
+serialized generated keys, checks actual KEM encapsulate/decapsulate pairing, and
+checks the original retained public key against source enrollment. It does not
+parse undocumented secret layout or skip public-key binding. Replacement and
+capsule/WAL/VABA consumers passed the next bounded r19 run:9/9,88 skipped,
+0.896s tests, at12:59:39 UTC. The provider keypair persistence check, recipient
+refusers, actual private-share bidirectional component capture and outbox binding,
+key/cipher retry/rotation/torn outer-tail, every-byte append/header recovery,
+real VABA view1/future retries/equivocation, and ACS selector equivocation passed.
+This is component evidence; native source v2 gateway/205 authority is still open.
+
+No uniform 128-bit soundness is advertised for dZK's GF128 reference field.
+The Appendix B finite-field accounting term is proportional to
+Q*n*2^n*(N+2*tau)/2^128 before hash/PRG/channel costs. At the largest supported
+n=16,N=128,tau<=4 this loses about27 bits before Q (about101 bits left in this
+term). This is accounting, not a complete simulator/refinement/security proof.
+The new ML-KEM capsule does not change the coupled protocol's classical ROM,
+variable-time arithmetic, cumulative static corruption or QROM boundaries.

@@ -18,6 +18,12 @@ structure NativeConfig where
   /-- Independently provisioned private archive directory, not selected by request. -/
   root : System.FilePath
 
+/-- Independently provisioned native verifier pin, matched to the source
+operator capsule. A mutable executable path is not signature verification. -/
+structure SignatureConfig where
+  binary : System.FilePath
+  binarySha256 : String
+
 /-- No caller can mint this from a hash string, successful send, or ACK Boolean. -/
 structure Readback (config : NativeConfig) (manifest : Manifest) where
   private mk ::
@@ -142,6 +148,21 @@ def exportQuarantined (config : NativeConfig) (manifest : Manifest)
     return .ok ()
   catch _ => return .error "portable quarantine export uncertain or refused"
 
+private def verifyPinned (config : SignatureConfig) (key frame detached : Bytes) :
+    IO (Except CredentialSignatureIO.Error Bool) := do
+  try
+    IO.FS.withTempDir fun directory => do
+      let snapshot := directory / "credential-verifier"
+      IO.FS.withFile config.binary .read fun handle => do
+        IO.FS.writeBinFile snapshot (← readBounded handle (64*1024*1024))
+      let mode ← IO.Process.output {cmd := "/usr/bin/chmod",args := #["0500",snapshot.toString]}
+      if mode.exitCode != 0 || mode.stderr != "" then
+        return .error (.unavailable "portable verifier snapshot mode refused")
+      match ← RetainedArtifactIO.checkedFile snapshot config.binarySha256 with
+      | .error detail => return .error (.unavailable detail)
+      | .ok () => CredentialSignatureIO.verify ⟨snapshot⟩ key frame detached
+  catch _ => return .error (.unavailable "portable pinned verifier unavailable")
+
 /-- Participant verification is only an independently pinned public commitment.
 The archive token makes the durability-before-ACK order structural in this API.
 It does not carry any source-authorized overwrite or transfer token. -/
@@ -154,7 +175,7 @@ structure CheckedAcknowledgement (pin : ParticipantPin) (manifest : Manifest) wh
   manifestIdentity : acknowledgement.identity = manifest.prefix.identity
   manifestPoint : acknowledgement.point = manifest.point
 
-def acknowledgeRetained (archive : NativeConfig) (signature : CredentialSignatureIO.NativeConfig)
+def acknowledgeRetained (archive : NativeConfig) (signature : SignatureConfig)
     (pin : ParticipantPin) (manifest : Manifest) (readback : Readback archive manifest)
     (extension : Minidregg.Kernel.ReceiptContinuity.Extension) (detached : Bytes) :
     IO (Except String (CheckedAcknowledgement pin manifest)) := do
@@ -162,7 +183,7 @@ def acknowledgeRetained (archive : NativeConfig) (signature : CredentialSignatur
   | .error detail => return .error detail
   | .ok _ => pure ()
   let ack : Acknowledgement := ⟨pin.participant, pin.publicKey, manifest.prefix.identity, manifest.point⟩
-  match ← CredentialSignatureIO.verify signature pin.publicKey (acknowledgementFrame ack) detached with
+  match ← verifyPinned signature pin.publicKey (acknowledgementFrame ack) detached with
   | .ok true =>
     match checked : acknowledge pin ack extension with
     | none => return .error "portable participant history refused"

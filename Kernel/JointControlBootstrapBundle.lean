@@ -52,7 +52,8 @@ def birthIntent {config : Config} {opened : Opened config}
       opened.pins opened.durable (logicalHeight config opened.durable)) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ordinary := ResourceBirthReceiver.intent accepted
-  { ordinary with exactCharge := ordinary.exactCharge + overhead source,
+  { ordinary with
+    exactCharge := ordinary.exactCharge + overhead source
     event := ⟨61,config.deployment.domain,
       (Sp800185Cshake256.hash frame (sourceBytes source)).digest,sourceBytes source⟩ }
 
@@ -85,7 +86,9 @@ structure Initialization (config : Config) (predicted : Opened config) where
     ⟨config.federation,logicalHeight config predicted.durable⟩ predicted.durable command
   shape : PhysicalShape prepared
   accepted : AcceptedInvocation prepared signed
-  bootstrap : JointControlBootstrap.Admission config predicted (accepted.dataIntent shape)
+  intent : DataIntent ResourceBirthCodec.rootBytes
+  intentExact : intent = accepted.dataIntent shape
+  bootstrap : JointControlBootstrap.Admission config predicted intent
 
 /-- A bare source prefix is admitted only together with a CURRENT lawful,
 funded, exact initializer, retained verbatim in the first source record. -/
@@ -156,7 +159,7 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
                           rw [durableExact]
                           exact DurableReceiverIO.loadImage_image built
                         return .ok ⟨pin,pinned,birth,creatorOwner,intent,rfl,birthPreflight,
-                          predicted,predictedExact,⟨signed,command,prepared,shape,accepted,bootstrap⟩,
+                          predicted,predictedExact,⟨signed,command,prepared,shape,accepted,accepted.dataIntent shape,rfl,bootstrap⟩,
                           initializerExact,initializerFunded⟩
                       else return .error "bootstrap second source record is not funded"
                   else return .error "bootstrap initializer physical shape refused"
@@ -177,10 +180,15 @@ def transport {config : Config} {opened : Opened config} {source : Source}
             opened.durable.snapshot.canonicalBytes accepted.pin.cell then .ok ()
       else .error (.durable .transactionConflict) }
 
-theorem retained_initializer_current_permission {config : Config} {opened : Opened config}
+def retained_initializer_current_permission {config : Config} {opened : Opened config}
     {source : Source} (accepted : Accepted config opened source) :
     AcceptedInvocation accepted.initialization.prepared accepted.initialization.signed :=
   accepted.initialization.accepted
+
+theorem retained_initializer_has_current_permission {config : Config} {opened : Opened config}
+    {source : Source} (accepted : Accepted config opened source) :
+    Nonempty (AcceptedInvocation accepted.initialization.prepared accepted.initialization.signed) :=
+  ⟨accepted.initialization.accepted⟩
 
 theorem bare_phase_has_exact_funded_next {config : Config} {opened : Opened config}
     {source : Source} (accepted : Accepted config opened source) :
@@ -193,6 +201,7 @@ theorem predicted_source_is_exact_first_record {config : Config} {opened : Opene
   accepted.predictedExact
 
 #assert_axioms retained_initializer_current_permission
+#assert_axioms retained_initializer_has_current_permission
 #assert_axioms bare_phase_has_exact_funded_next
 #assert_axioms predicted_source_is_exact_first_record
 end Minidregg.Kernel.JointControlBootstrapBundle

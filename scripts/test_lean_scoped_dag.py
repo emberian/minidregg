@@ -41,7 +41,7 @@ class DagTests(unittest.TestCase):
     def write(self, name, spec):
         (self.src / (name.replace('.', '/') + '.lean')).write_text(json.dumps(spec))
 
-    def run_dag(self, jobs=2, recover=None):
+    def run_dag(self, jobs=2, recover=None, hold=None):
         manifest = {'imports': self.graph, 'affected_topological': list(self.graph),
                     'source_sha256': {n: hashlib.sha256((self.src / (n.replace('.', '/') + '.lean')).read_bytes()).hexdigest() for n in self.graph}}
         (self.root / 'manifest.json').write_text(json.dumps(manifest))
@@ -53,6 +53,8 @@ class DagTests(unittest.TestCase):
                 '--jobs', str(jobs), '--threads', '1', '--module-timeout', '5']
         if recover:
             args += ['--recover-run', str(recover)]
+        if hold:
+            args += ['--hold-failures-from', str(hold)]
         result = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         run = max((self.root / 'runs').iterdir(), key=lambda x: x.stat().st_mtime_ns)
         summary = json.loads((run / 'summary.json').read_text())
@@ -115,6 +117,19 @@ class DagTests(unittest.TestCase):
         self.assertEqual(states['Test.C'], 'REUSED')
         self.assertEqual((self.src / 'events.jsonl').read_text(), before)
         self.assertTrue((self.out / 'Test/C.olean').exists())
+
+    def test_explicit_unchanged_failure_holds_only_until_source_changes(self):
+        self.write('Test.A', {'fail': True})
+        self.run_dag()
+        prior = max((self.root / 'runs').iterdir(), key=lambda x: x.stat().st_mtime_ns)
+        before = (self.src / 'events.jsonl').read_text()
+        result, states = self.run_dag(hold=prior)
+        self.assertEqual(states, {'Test.A':'FAIL', 'Test.B':'BLOCKED', 'Test.C':'REUSED'})
+        self.assertEqual((self.src / 'events.jsonl').read_text(), before)
+        self.write('Test.A', {})
+        result, states = self.run_dag(hold=prior)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(states['Test.A'], 'PASS')
 
 
 if __name__ == '__main__':
