@@ -4,6 +4,7 @@ history verification imports this module; ordinary host APIs import the verifier
 There is one profile, one world-root commitment, and one validation path.
 -/
 import Compiler.NativeHostCodec
+import Compiler.GenericSimplexSourceAnchor
 import Compiler.GrainResourceBirthController
 
 import Compiler.JointControlFrame
@@ -303,6 +304,13 @@ def validatePartsWith (config : Config) (durable : Durable)
     check (decide (key.length = 32)) "physical completion custodian key must be 32 bytes"
   check (decide config.deployment.Valid) "invalid deployment role identities"
   check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
+  if let some expected := config.jointConsensus then
+    check expected.wellFormed "consensus committee is not well formed"
+    check (expected.scope == Tower256ConcreteBackend.digestStream.encode config.deployment.domain)
+      "consensus scope differs from native deployment"
+    check (expected.instanceBytes ==
+      GenericSimplexSourceAnchor.anchorBytes config.genesisHeight durable.image.seed)
+      "consensus source anchor differs from exact Store genesis"
   check (durable.logStart == config.logStart durable.image.seed) "log chain not rooted at this deployment's genesis"
   let directory ← need "noncanonical native directory" directory?
   let authority ← need "complete deployment authority unavailable"

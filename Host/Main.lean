@@ -87,6 +87,7 @@ The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
+import Compiler.GenericSimplexSourceAnchor
 import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
@@ -311,6 +312,29 @@ structure GrainBirthTariffSettings where
   base : Nat
   perBirth : Nat
   deriving FromJson, ToJson
+
+/-- Optional exact consensus membership/epoch/source-origin pin. The JSON value
+is canonical lowercase hex of contextStream, never a committee supplied by an
+incoming proposal. Malformed explicit pins refuse instead of becoming none. -/
+structure JointConsensusSettings where
+  context : Minidregg.Compiler.GenericSimplexCodec.Context
+
+instance : FromJson JointConsensusSettings where
+  fromJson? json := do
+    let value ← json.getStr?
+    let bytes ← Minidregg.Host.Json.decodeHex "jointConsensus" json
+    unless Minidregg.Host.Json.encodeHex bytes == value do
+      throw "jointConsensus must use canonical lowercase hex"
+    let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
+      | throw "jointConsensus is not a canonical Context"
+    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
+        context.wellFormed do
+      throw "jointConsensus Context is noncanonical or committee is not well formed"
+    pure ⟨context⟩
+
+instance : ToJson JointConsensusSettings where
+  toJson pin := .str (Minidregg.Host.Json.encodeHex
+    (Minidregg.Compiler.GenericSimplexCodec.contextStream.encode pin.context))
 
 /-- Operator configuration pins the physical completion custodian's exact
 Ed25519 public key. It is never selected by an incoming request. -/
@@ -570,6 +594,7 @@ structure Settings where
   providerServices : Option (List ProviderMeteringSettings) := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
+  jointConsensus : Option JointConsensusSettings := none
   lifecycleManagement : Option LifecycleManagementSettings := none
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
@@ -621,6 +646,31 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   completionCustodianKey := settings.completionCustodianKey.map
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
+  jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
+
+/-- Check the complete declared source genesis before opening or authoring
+under this profile. Membership enters runtime semantics with only the anchor
+omitted; the exact anchor and its source policies must reconstruct together.
+This pure check also works before the physical Store is initialized. -/
+def Settings.checkJointConsensus (settings : Settings) : Except String Unit := do
+  let some pin := settings.jointConsensus | return ()
+  let config := settings.config
+  unless pin.context.scope ==
+      Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode config.deployment.domain do
+    throw "jointConsensus scope differs from native deployment"
+  let anchorTag := "MINI-SIMPLEX-SOURCE-GENESIS/v1".toUTF8.toList
+  let some (height,seed) := Minidregg.Compiler.GenericSimplexSourceAnchor.anchorStream.toLawful.decode
+      (pin.context.instanceBytes.drop anchorTag.length)
+    | throw "jointConsensus requires an exact canonical source genesis anchor"
+  unless height == config.genesisHeight &&
+      Minidregg.Compiler.GenericSimplexSourceAnchor.anchorBytes height seed == pin.context.instanceBytes do
+    throw "jointConsensus source anchor height or encoding mismatch"
+  unless NativeHost.seedIdentity seed == config.expectedSeed do
+    throw "jointConsensus source anchor differs from expectedSeed"
+  let genesis ← Minidregg.Compiler.DurableReceiverIO.loadSeed
+    Minidregg.Compiler.ResourceBirthCodec.rootBytes (config.logStart seed) seed
+  let _ ← NativeHost.validateLoaded config genesis
+  pure ()
 
 def Settings.providerMeteringPin (settings : Settings) :
     Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
@@ -707,6 +757,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   discard <| IO.ofExcept settings.continuityIds
   discard <| IO.ofExcept settings.lifetimeDispatchPins
   IO.ofExcept settings.checkDisabledEvaluators
+  IO.ofExcept settings.checkJointConsensus
   if let some tariff := settings.grainBirthTariff then
     unless 0 < tariff.base do
       throw (IO.userError "grainBirthTariff.base must be positive")

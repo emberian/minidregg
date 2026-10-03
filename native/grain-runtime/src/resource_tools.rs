@@ -749,6 +749,9 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":{"from":name,"to":name,
                 "relation":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
                 "required":["from","to"],"additionalProperties":false}}),
+        json!({"name":"mini_doc_review",
+            "description":"Land an explicit reviewed document proposal against selected source context. Supply the exact context bundle and intended ordinary document actions. Changed or revoked cited inputs refuse; prior started operations require exact recovery. Ordinary document append remains separate.",
+            "inputSchema":{"type":"object","properties":{"context":{"type":"object"},"targets":{"type":"array","minItems":1,"maxItems":8}},"required":["context","targets"],"additionalProperties":false}}),
         json!({"name":"mini_doc_append",
             "description":"Append a line to document `doc` (a turn). Admitted only where you hold a grant to write `doc` and its law admits you; otherwise the Host refuses and says why (no-grant, law-denied).",
             "inputSchema":{"type":"object","properties":{"doc":name,"text":{"type":"string","maxLength":3000}},
@@ -770,6 +773,9 @@ pub(crate) fn validate_room_write(name: &str, arguments: &Value) -> Result<()> {
             bounded_name(arguments, "doc")?;
             bounded_text(arguments, "text")?;
         }
+        "mini_doc_review" => {
+            crate::resident_context::reviewed_arguments(arguments)?;
+        }
         "mini_doc_link" => {
             only_keys(arguments, &["from", "to", "relation"])?;
             bounded_name(arguments, "from")?;
@@ -790,7 +796,7 @@ pub(crate) fn compact_doc_rendering(text: &str) -> String {
 }
 
 /// The room tools that write (each one a metered turn).
-pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append"];
+pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append", "mini_doc_review"];
 
 pub(crate) fn is_room_tool(name: &str) -> bool {
     room_tool_specs().iter().any(|spec| spec["name"] == name)
@@ -1134,6 +1140,25 @@ impl RoomTools<'_> {
                 let run = Self::ok_or_ending(self.line_with(&line, spawned)?)?;
                 Ok(json!({"said":run.stdout.trim(),"text":text}))
             }
+            "mini_doc_review" => {
+                let (context,request)=crate::resident_context::reviewed_arguments(arguments)?;
+                let dir=self.config.home.join("requests");
+                fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+                let metadata=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
+                if !metadata.is_dir()||metadata.uid()!=unsafe{libc::geteuid()} {
+                    return Err("review requests must be an owned real directory".into());
+                }
+                fs::set_permissions(&dir,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;
+                let context_name=format!("{id}-context.json");
+                let request_name=format!("{id}-review.json");
+                crate::resident_context::retain_review_file(&dir.join(&context_name),&context)?;
+                crate::resident_context::retain_review_file(&dir.join(&request_name),&request)?;
+                if !self.config.workspace.join("proposals").join(&id).join("proposal.json").exists() {
+                    Self::ok_or_ending(self.line(&format!("doc review {id} @{context_name} @{request_name}"))?)?;
+                }
+                let run=Self::ok_or_ending(self.line_with(&format!("submit {id}"),spawned)?)?;
+                Ok(json!({"proposal":id,"reviewed":true,"support":"selected-current-base-native-guards","submitted":run.stdout.trim()}))
+            }
             "mini_doc_link" | "mini_doc_append" => {
                 let propose = if name == "mini_doc_link" {
                     only_keys(arguments, &["from", "to", "relation"])?;
@@ -1473,7 +1498,7 @@ mod tests {
     #[test]
     fn room_tools_are_seven_and_writes_are_metered() {
         let names: Vec<String> = super::room_tool_specs().iter().map(|s| s["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_context", "mini_doc_show", "mini_doc_link", "mini_doc_append"]);
+        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_context", "mini_doc_show", "mini_doc_link", "mini_doc_review", "mini_doc_append"]);
         for write in super::ROOM_WRITE_TOOLS {
             assert!(names.iter().any(|n| n == write));
         }

@@ -608,12 +608,6 @@
       "qualification": "AUTHORED_UNCOMPILED_WIP"
     },
     {
-      "path": "Host/Main.lean",
-      "owner": "joint_reserve_birth_authority",
-      "sha256": "e306ec5d466e70255a69855302d02161a5eb02c708aa2386d008c98b3c393953",
-      "qualification": "authored-uncompiled; controller/native-source reviewed by member OO; native qualification pending"
-    },
-    {
       "path": "docs/README.md",
       "owner": "mini_objective_bend_documentation",
       "sha256": "afb4b638a11c34b8d388d2ad1874ffe4ac83b78a841adac17c06993c54005c70",
@@ -2096,12 +2090,6 @@
       "qualification": "PASS module+axiom gates in proof owner current tranche; exact approved frozen copy"
     },
     {
-      "path": "Kernel/NativeHostContext.lean",
-      "owner": "joint_receiver_construction",
-      "sha256": "39c3f415b8529a794693c2e91bf01d7f7c8f111c8b42b750ceec1c381bd198d8",
-      "qualification": "AUTHORED_UNCOMPILED_WIP"
-    },
-    {
       "path": "Kernel/NativeHostReplay.lean",
       "owner": "joint_receiver_construction",
       "sha256": "9c85703b9932ee9e04f0028b6c4c491fa8fdc8a68862a97803d055d0abf4acca",
@@ -2958,6 +2946,30 @@
       "owner": "bend_semantics_audit",
       "sha256": "2b30a27049969ae2a2facfab1805a23ad29327744ab68aa5546f348822013afc",
       "qualification": "AUTHORED UNCOMPILED interpolation; native v3 job09 actual PASS documented separately"
+    },
+    {
+      "path": "Host/Main.lean",
+      "owner": "captain reconciled authored shared hunks",
+      "sha256": "6374dd8fd98ce9b2205834bcbfd4d299c1e9443f42761a0843c2fa81ac6b3afa",
+      "qualification": "WIP source integration; native cohort qualification pending"
+    },
+    {
+      "path": "Kernel/NativeHostContext.lean",
+      "owner": "captain reconciled authored shared hunks",
+      "sha256": "57a6e80b59f99f967229f98cdaf5949863f013a72153e2a7f17dc3ba9263d599",
+      "qualification": "WIP source integration; native cohort qualification pending"
+    },
+    {
+      "path": "native/grain-runtime/src/resource_tools.rs",
+      "owner": "captain reconciled authored shared hunks",
+      "sha256": "0fd15762ebe6d2a3ae379f05da07ea02a7631ebcc94c90ce6481cf9a91ec5000",
+      "qualification": "WIP source integration; native cohort qualification pending"
+    },
+    {
+      "path": "native/resource-client/src/workspace.rs",
+      "owner": "captain reconciled authored shared hunks",
+      "sha256": "f418fcf09f055df3e4bd63669f46225928adea158ac4f82decfdd5016b61521d",
+      "qualification": "WIP source integration; native cohort qualification pending"
     }
   ]
 }

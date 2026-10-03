@@ -3058,8 +3058,8 @@ fn propose_summary_once(
             let names = selected.iter().map(|entry| {
                 let obj = entry.as_object().ok_or("proposal target must be an object")?;
                 if !obj.contains_key("name") || !obj.contains_key("payload")
-                    || obj.keys().any(|key| !matches!(key.as_str(), "name" | "payload" | "expectedTargetRoot")) {
-                    return Err("proposal target may contain only name, payload and optional expectedTargetRoot".into());
+                    || obj.keys().any(|key| !matches!(key.as_str(), "name" | "payload" | "expectedTargetRoot" | "expectedObserveCapability")) {
+                    return Err("proposal target may contain only name, payload and optional expectedTargetRoot/expectedObserveCapability".into());
                 }
                 let name = member(entry, "name")?.to_owned();
                 if !seen.insert(name.clone()) { return Err("duplicate named target".into()); }
@@ -3078,6 +3078,13 @@ fn propose_summary_once(
             for ((entry, reference), (view, challenge, signed)) in
                 selected.iter().zip(&references).zip(observations) {
                 let local_name = member(entry, "name")?;
+                if let Some(value)=entry.get("expectedObserveCapability") {
+                    let expected=value.as_str().ok_or("expectedObserveCapability must be a decimal string")?;
+                    field_decimal(expected,"pinned observe capability")?;
+                    if reference["observeCapability"].as_str()!=Some(expected) {
+                        return Err("the selected observe capability changed before proposal authoring".into());
+                    }
+                }
                 let protected = reference.get("protectedDocument").is_some();
                 let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
