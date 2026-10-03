@@ -4,10 +4,12 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import pwd
 import sys
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('provision', Path(__file__).with_name('platform-provision.py'))
 p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
@@ -132,6 +134,97 @@ class ProvisioningContract(unittest.TestCase):
         self.assertEqual(world.run('path-argument',[Path(sys.executable),'-c','print("ok")']), 'ok\n')
         command=json.loads((run/'logs/0001-path-argument.command.json').read_text())
         self.assertEqual(command[0],str(Path(sys.executable)))
+    def managed_plan(self):
+        root=Path(self.plan['root']);root.mkdir(mode=0o700)
+        units=self.root/'units';units.mkdir()
+        return dict(self.plan,preparedEmptyRoot=True,nodeDirectory='node',sshd=str(Path('/usr/bin/true').resolve()),
+                    serviceManager={'type':'systemd-system','systemctl':['/usr/bin/sudo','-n','/usr/bin/systemctl'],'unitDirectory':str(units),
+                                    'units':{'operator':'world-store.service','public':'world-ingress.service','sshd':'world-sshd.service'}}),units
+    def test_service_units_are_a_function_of_the_plan(self):
+        plan,_=self.managed_plan();root=Path(plan['root']);binary=str(self.root/'binary')
+        rendered=p.rendered_units(plan,p.load(self.root/'manifest.json'))
+        self.assertEqual(set(rendered),{'world-store.service','world-ingress.service','world-sshd.service'})
+        words=lambda *argv:'ExecStart='+' '.join(json.dumps(str(word)) for word in argv)+'\n'
+        store,ingress,entrance=(rendered['world-'+name+'.service'] for name in ('store','ingress','sshd'))
+        self.assertIn(words(binary,'serve-operator','--host',binary,'--config',root/'node/deployment/pinned-config.json','--socket',root/'sock/operator.sock'),store)
+        self.assertIn(words(binary,'serve-public-proxy','--socket',root/'sock/public.sock','--upstream',root/'sock/operator.sock','--config',root/'node/deployment/pinned-config.json'),ingress)
+        self.assertIn(words(plan['sshd'],'-D','-e','-f',root/'ssh/sshd_config'),entrance)
+        for text in rendered.values():
+            self.assertIn('User='+pwd.getpwuid(os.getuid()).pw_name+'\n',text)
+            self.assertIn('WorkingDirectory='+str(root)+'\n',text)
+            # The single-socket public `serve` is never a published topology.
+            self.assertNotIn('"serve"',text)
+        # Rendering publishes and creates nothing.
+        self.assertEqual(list(root.iterdir()),[])
+    def test_unpublished_or_different_units_refuse_before_genesis(self):
+        plan,units=self.managed_plan();manifest=p.load(self.root/'manifest.json')
+        shown={'LoadState':'loaded','ActiveState':'inactive','MainPID':'0','DropInPaths':'','NeedDaemonReload':'no'}
+        show=lambda name:dict(shown,FragmentPath=str(units/name))
+        exact=p.rendered_units(plan,manifest)
+        with patch.object(p,'root_custody'),patch.object(p,'systemd_show',side_effect=show):
+            with self.assertRaisesRegex(ValueError,'not published'):p.validate(plan)
+            p.validate(plan,published=False)
+            for name,text in exact.items():(units/name).write_text(text)
+            p.validate(plan)
+            # A descriptor naming the private pair while a public serve runs is refused here.
+            (units/'world-store.service').write_text(exact['world-store.service'].replace('serve-operator','serve'))
+            with self.assertRaisesRegex(ValueError,'differs from this plan'):p.validate(plan)
+            (units/'world-store.service').write_text(exact['world-store.service'])
+            for change,message in (({'ActiveState':'active','MainPID':'77'},'already running'),
+                                   ({'DropInPaths':'/etc/systemd/system/world-store.service.d/x.conf'},'exactly the published unit'),
+                                   ({'NeedDaemonReload':'yes'},'exactly the published unit'),({'LoadState':'not-found'},'exactly the published unit')):
+                saved=dict(shown);shown.update(change)
+                with self.assertRaisesRegex(ValueError,message):p.validate(plan)
+                shown.clear();shown.update(saved)
+            p.validate(plan)
+        with patch.object(p,'systemd_show',side_effect=show):
+            with self.assertRaisesRegex(ValueError,'root-owned custody'):p.validate(plan)
+        self.assertEqual(list(Path(plan['root']).iterdir()),[])
+    def test_invalid_service_manager_declarations_refuse(self):
+        plan,_=self.managed_plan()
+        p.validate(plan,published=False)
+        for mutate in (lambda m:m.update(type='systemd-user'),lambda m:m.update(systemctl=['systemctl']),
+                       lambda m:m.update(systemctl=['/usr/bin/sudo','/bin/sh']),lambda m:m.update(systemctl=[]),
+                       lambda m:m['units'].update(public=m['units']['operator']),lambda m:m['units'].pop('sshd'),
+                       lambda m:m['units'].update(operator='../x.service'),lambda m:m.update(unitDirectory='etc/systemd/system'),
+                       lambda m:m.update(extra=True)):
+            changed=copy.deepcopy(plan);mutate(changed['serviceManager'])
+            with self.assertRaises(ValueError):p.validate(changed,published=False)
+    @unittest.skipUnless(Path('/proc').exists(),'Linux process identity')
+    def test_managed_service_starts_and_stops_only_through_its_unit(self):
+        run=self.root/'managed';run.mkdir();(run/'logs').mkdir()
+        world=p.World(run)
+        world.state['serviceManager']={'type':'systemd-system','systemctl':['/usr/bin/sudo','-n','/usr/bin/systemctl'],'unitDirectory':'/etc/systemd/system',
+                                       'units':{'operator':'w-store.service','public':'w-ingress.service','sshd':'w-sshd.service'}}
+        calls=[];unit={'ActiveState':'inactive','MainPID':'0','InvocationID':''};starts=True
+        def control(label,argv,env=None):
+            calls.append([str(word) for word in argv])
+            if argv[-2]=='start' and starts:unit.update(ActiveState='active',MainPID=str(os.getpid()),InvocationID='first')
+            if argv[-2]=='stop':unit.update(ActiveState='inactive',MainPID='0')
+            return ''
+        with patch.object(world,'run',side_effect=control),patch.object(p,'systemd_show',side_effect=lambda name:dict(unit)):
+            world.spawn('operator',['mini','serve-operator'],lambda:True)
+            retained=world.state['services']['operator']
+            self.assertEqual((retained['unit'],retained['manager'],retained['pid'],retained['invocationId']),('w-store.service','systemd-system',os.getpid(),'first'))
+            self.assertEqual(calls,[['/usr/bin/sudo','-n','/usr/bin/systemctl','start','w-store.service']])
+            # No child of this constructor exists to be signalled later.
+            self.assertEqual(world.children,{})
+            self.assertEqual(json.loads((run/'runtime.json').read_text())['services']['operator']['unit'],'w-store.service')
+            retained['unit']='other.service'
+            with self.assertRaisesRegex(ValueError,'does not declare'):world.stop(['operator'])
+            self.assertEqual(len(calls),1)
+            retained['unit']='w-store.service'
+            world.stop(['operator'])
+            self.assertEqual(calls[-1],['/usr/bin/sudo','-n','/usr/bin/systemctl','stop','w-store.service'])
+            self.assertNotIn('operator',world.state['services'])
+            starts=False
+            with self.assertRaisesRegex(ValueError,'did not stay active'):world.spawn('public',['mini','serve-public-proxy'],lambda:True)
+            self.assertNotIn('public',world.state['services'])
+    def test_managed_world_emits_no_owned_process_restart_hook(self):
+        hooks=self.root/'retained-hooks';hooks.mkdir()
+        for name in ('platform-provision.py','platform-native-hooks.py'):(hooks/name).write_text(name)
+        self.assertEqual(set(p.journey_hooks(hooks,self.root,True)),{'group-boundary'})
+        self.assertEqual(set(p.journey_hooks(hooks,self.root,False)),{'group-boundary','restart'})
     @unittest.skipUnless(Path('/proc').exists(),'Linux owned process groups')
     def test_owned_process_stop_and_pid_reuse_refusal(self):
         run=self.root/'runtime';run.mkdir();(run/'logs').mkdir()

@@ -5,6 +5,9 @@ The source workroom provisioner owns the single genesis and initial native grain
 birth. This glue enrolls independent member keys on that same Store; hooks cannot
 bootstrap another one. check launches nothing. Services and prior evidence stay
 under a fresh dedicated root; stop/restart signal only pinned owned process groups.
+With a declared serviceManager the private operator, its public relay and the member
+SSH entrance are root-published SYSTEM units from birth: units renders them from the
+plan, check/start refuse any published unit that differs, and no process is owned here.
 """
 import argparse
 import hashlib
@@ -32,6 +35,96 @@ def simple(path, exists=True):
     value = str(Path(path).absolute())
     require(re.fullmatch(r"/[A-Za-z0-9_./-]+", value) and "/../" not in value, "simple absolute path required")
     return Path(value).resolve(strict=exists)
+
+
+SERVICES = ("operator", "public", "sshd")
+DESCRIPTIONS = {"operator": "Mini supplied Store operator", "public": "Mini supplied Store public ingress",
+                "sshd": "Mini supplied Store member SSH entrance"}
+
+
+def unit(argv, user, description, cwd):
+    require(re.fullmatch(r"/[A-Za-z0-9_./-]+", cwd), "unit working directory requires a simple absolute path")
+    # systemd parses quoted words independently of the shell. Percent is an
+    # expansion character even inside quotes; literal arguments escape it.
+    words = [json.dumps(str(word).replace("%", "%%")) for word in argv]
+    return ("[Unit]\nDescription=" + description + "\n[Service]\nType=exec\nUser=" + user
+            + "\nUMask=0077\nWorkingDirectory=" + cwd
+            + "\nExecStart=" + " ".join(words)
+            + "\nKillMode=control-group\nTimeoutStopSec=30\nRestart=no\n")
+
+
+def service_argv(mini, host, config, public, private):
+    """The one definition of the private operator and its public relay."""
+    return {"operator": [mini, "serve-operator", "--host", host, "--config", config, "--socket", private],
+            "public": [mini, "serve-public-proxy", "--socket", public, "--upstream", private, "--config", config]}
+
+
+def service_manager(plan):
+    """Optional: the world's long-lived services are root-published SYSTEM units from birth."""
+    manager = plan.get("serviceManager")
+    if manager is None:
+        return None
+    require(type(manager) is dict and set(manager) == {"type", "systemctl", "unitDirectory", "units"}
+            and manager["type"] == "systemd-system", "unknown service manager")
+    control = manager["systemctl"]
+    require(type(control) is list and 1 <= len(control) <= 4
+            and all(type(word) is str and re.fullmatch(r"/[A-Za-z0-9_./-]+|-[a-z]", word) for word in control)
+            and control[0].startswith("/") and control[-1].startswith("/") and Path(control[-1]).name == "systemctl",
+            "service manager control must be an absolute systemctl invocation")
+    units = manager["units"]
+    require(type(units) is dict and set(units) == set(SERVICES)
+            and all(type(name) is str and re.fullmatch(r"[A-Za-z0-9_.@-]+\.service", name) and len(name.encode()) <= 255
+                    for name in units.values())
+            and len(set(units.values())) == len(SERVICES), "service manager requires distinct operator, public and sshd units")
+    directory = manager["unitDirectory"]
+    require(type(directory) is str and directory.startswith("/") and Path(directory).is_dir()
+            and simple(directory) == Path(directory), "unit directory must be a canonical existing directory")
+    return manager
+
+
+def rendered_units(plan, manifest):
+    """Unit text is a function of the plan alone, so root can publish it before genesis."""
+    manager = service_manager(plan)
+    require(manager is not None, "plan declares no service manager")
+    require(os.getuid() != 0, "units name the unprivileged Store operator; render them as that user")
+    root, node = root_layout(plan)
+    commands = service_argv(manifest["mini"], manifest["host"], node / "deployment/pinned-config.json",
+                            root / "sock/public.sock", root / "sock/operator.sock")
+    commands["sshd"] = [simple(plan.get("sshd", "/usr/sbin/sshd")), "-D", "-e", "-f", root / "ssh/sshd_config"]
+    user = pwd.getpwuid(os.getuid()).pw_name
+    return {manager["units"][name]: unit(commands[name], user, DESCRIPTIONS[name], str(root)) for name in SERVICES}
+
+
+def root_custody(path):
+    for entry in (path, *path.parents):
+        metadata = entry.stat()
+        require(metadata.st_uid == 0 and not metadata.st_mode & 0o022,
+                "service unit requires immutable root-owned custody: " + str(entry))
+
+
+def systemd_show(name):
+    reply = subprocess.run(["/usr/bin/systemctl", "show", name,
+                            "--property=LoadState,ActiveState,MainPID,FragmentPath,DropInPaths,NeedDaemonReload,InvocationID"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    require(reply.returncode == 0, "service manager cannot describe " + name)
+    return dict(line.split("=", 1) for line in reply.stdout.splitlines() if "=" in line)
+
+
+def published_units(plan, manifest, birth):
+    """A unit that differs from this plan is the public-`serve`-behind-a-private-descriptor failure."""
+    manager = service_manager(plan)
+    for name, text in rendered_units(plan, manifest).items():
+        path = Path(manager["unitDirectory"]) / name
+        require(path.is_file() and not path.is_symlink(), "service unit is not published: " + name)
+        root_custody(path)
+        require(path.read_text() == text, "published service unit differs from this plan: " + name)
+        shown = systemd_show(name)
+        require(shown.get("LoadState") == "loaded" and shown.get("FragmentPath") == str(path)
+                and not shown.get("DropInPaths") and shown.get("NeedDaemonReload") == "no",
+                "service manager has not loaded exactly the published unit: " + name)
+        if birth:
+            require(shown.get("ActiveState") == "inactive" and shown.get("MainPID") == "0",
+                    "service unit is already running before genesis: " + name)
 
 
 def observer_allocation(plan):
@@ -70,7 +163,7 @@ def root_layout(plan):
     return root, root / name
 
 
-def validate(plan):
+def validate(plan, published=True):
     require(plan["type"] == "mini-platform-provision-v1", "unknown provisioning plan")
     root, _ = root_layout(plan)
     source = simple(plan["sourceRepo"])
@@ -124,6 +217,10 @@ def validate(plan):
     joined.workload(dict(plan, members={name: {} for name in names}, prefix=plan.get("prefix", "platform")))
     require(re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,23}", plan.get("prefix", "platform")), "invalid journey prefix")
     require("WORKROOM_OPERATOR_POLICY" in (source / "scripts/workroom/provision.sh").read_text(), "source recipe lacks pre-genesis operator policy contract")
+    if service_manager(plan) is not None:
+        rendered_units(plan, manifest)
+        if published:
+            published_units(plan, manifest, birth=True)
     return root, source, manifest
 
 
@@ -136,6 +233,17 @@ def retain_hooks(root):
         shutil.copyfile(source, retained / name)
         (retained / name).chmod(0o700)
     return retained
+
+
+def journey_hooks(hooks_root, root, managed):
+    hooks = {"group-boundary": {"executable": str(hooks_root / "platform-native-hooks.py"), "sha256": digest(hooks_root / "platform-native-hooks.py"),
+                                "args": ["--state", str(root / "runtime.json")]}}
+    if not managed:
+        # This hook signals processes this constructor owns. A service-managed
+        # world leaves the adapter missing until its manager supplies a drained one.
+        hooks["restart"] = {"executable": str(hooks_root / "platform-provision.py"), "sha256": digest(hooks_root / "platform-provision.py"),
+                            "args": ["hook", "--state", str(root / "runtime.json")]}
+    return hooks
 
 
 def allocated_workload(plan, names):
@@ -187,8 +295,31 @@ class World:
         require(process.returncode == 0, f"{label}: native command refused; see {base}")
         return process.stdout.decode()
 
+    def managed(self, name):
+        manager = self.state.get("serviceManager")
+        return manager["units"][name] if manager else None
+
     def spawn(self, name, argv, ready):
         require(name not in self.state["services"], "service already tracked: " + name)
+        managed = self.managed(name)
+        if managed:
+            # The published unit, not this process, owns the service. Its text was
+            # checked against the plan; the manager's main PID is what is retained.
+            self.run(name + "-unit-start", [*self.state["serviceManager"]["systemctl"], "start", managed])
+            shown = systemd_show(managed)
+            require(shown.get("ActiveState") == "active" and shown.get("MainPID", "0") != "0",
+                    f"{name} unit did not stay active; see journalctl -u {managed}")
+            self.state["services"][name] = dict(proc_identity(int(shown["MainPID"])), argv=[str(value) for value in argv],
+                                                manager="systemd-system", unit=managed, invocationId=shown["InvocationID"])
+            self.persist()
+            deadline = time.monotonic() + 60
+            while not ready():
+                current = systemd_show(managed)
+                require(current.get("ActiveState") == "active" and current.get("MainPID") == shown["MainPID"],
+                        f"{name} unit exited; see journalctl -u {managed}")
+                require(time.monotonic() < deadline, name + " readiness timeout")
+                time.sleep(0.2)
+            return
         output = open(self.root / "logs" / (name + ".log"), "ab", buffering=0)
         process = subprocess.Popen([str(value) for value in argv], stdin=subprocess.DEVNULL, stdout=output,
                                    stderr=subprocess.STDOUT, start_new_session=True)
@@ -206,6 +337,17 @@ class World:
         for name in names:
             retained = self.state["services"].get(name)
             if not retained:
+                continue
+            if "unit" in retained:
+                managed = retained["unit"]
+                require(retained.get("manager") == "systemd-system" and managed == self.managed(name),
+                        "refusing to stop a unit this world does not declare: " + name)
+                self.run(name + "-unit-stop", [*self.state["serviceManager"]["systemctl"], "stop", managed])
+                shown = systemd_show(managed)
+                require(shown.get("ActiveState") in ("inactive", "failed") and shown.get("MainPID") == "0",
+                        "service unit did not stop: " + name)
+                self.state["services"].pop(name)
+                self.persist()
                 continue
             pid = retained["pid"]
             try:
@@ -248,8 +390,9 @@ class World:
                     path.unlink()
                 finally:
                     probe.close()
-        self.spawn("operator", [m["mini"], "serve-operator", "--host", m["host"], "--config", config, "--socket", private], lambda: Path(private).is_socket())
-        self.spawn("public", [m["mini"], "serve-public-proxy", "--socket", public, "--upstream", private, "--config", config], lambda: Path(public).is_socket())
+        commands = service_argv(m["mini"], m["host"], config, public, private)
+        self.spawn("operator", commands["operator"], lambda: Path(private).is_socket())
+        self.spawn("public", commands["public"], lambda: Path(public).is_socket())
 
     def shell(self, workspace, home, line, label):
         m = self.state["manifest"]
@@ -278,6 +421,9 @@ def start(plan):
     save(root / "plan.json", plan)
     world = World(root)
     world.state.update(manifest=manifest, manifestPath=plan["manifest"], manifestSha256=plan["manifestSha256"], timeoutSeconds=plan.get("timeoutSeconds", 600), nodeRoot=str(node))
+    manager = service_manager(plan)
+    if manager:
+        world.state["serviceManager"] = manager
     world.persist()
     world.run("completion-key", [manifest["mini"], "keygen", "--secret", root / "custody/completion.seed", "--public", root / "custody/completion.pub"])
     policy = dict({"grainBirthTariff": {"base": 2, "perBirth": 1}}, **plan.get("operatorPolicy", {}))
@@ -333,7 +479,9 @@ def start(plan):
         adapter.write_bytes(simple(plan['paidEntryAdapter']['path']).read_bytes());adapter.chmod(0o700)
         require(digest(adapter)==plan['paidEntryAdapter']['sha256'],'paid entry adapter changed before retention')
         paid_request=root/'paid-entry-request.json';paid_state=root/'paid-entry-result.json'
+        # The adapter's population bound and native timeout are the plan's, not its own defaults.
         save(paid_request,{'type':'mini-paid-entry-provision-v1','manifest':plan['manifest'],'manifestSha256':plan['manifestSha256'],'sourceRepo':str(source),
+          'maxMembers':plan.get('maxMembers',100),'timeoutSeconds':plan.get('timeoutSeconds',600),
           'deployment':{'config':str(config),'configSha256':digest(config),'socket':world.state['publicSocket'],'operatorSocket':world.state['privateSocket'],'genesis':str(node/'genesis.json')},
           'operatorWorkspace':str(sponsor),'observerWorkspace':str(observer_workspace),'observer':{'capability':observer['capability'],'enrolCapability':observer['enrolCapability']},
           'factoryControl':'53','evidenceDirectory':str(paid_root),
@@ -417,8 +565,11 @@ LogLevel VERBOSE
     spec = {"type": "mini-joined-member-journey-v1", "manifest": plan["manifest"], "manifestSha256": plan["manifestSha256"], "prefix": plan.get("prefix", "platform"),
             "deployment": {"config": str(config), "configSha256": digest(config), "socket": world.state["publicSocket"], "publicSocket": world.state["publicSocket"], "privateSocket": world.state["privateSocket"]},
             "members": inventory, "maxConcurrency": plan.get("maxConcurrency", 16), "sweeps": plan.get("sweeps", []),
-            "hooks": {"restart": {"executable": str(hooks_root / "platform-provision.py"), "sha256": digest(hooks_root / "platform-provision.py"), "args": ["hook", "--state", str(root / "runtime.json")]}}}
-    spec["hooks"]["group-boundary"] = {"executable": str(hooks_root / "platform-native-hooks.py"), "sha256": digest(hooks_root / "platform-native-hooks.py"), "args": ["--state", str(root / "runtime.json")]}
+            "hooks": journey_hooks(hooks_root, root, manager is not None)}
+    if "timeoutSeconds" in plan:
+        # Member operations are native effects too; an earlier client timeout
+        # would abandon one whose outcome is still unknown.
+        spec["timeoutSeconds"] = plan["timeoutSeconds"]
     if paid_state:
         spec['hooks']['paid-entry']={'executable':str(adapter),'sha256':digest(adapter),'args':['--state',str(paid_state)],
                                     'paidSubjects':[member['subject'] for member in paid_members.values()]}
@@ -449,19 +600,32 @@ LogLevel VERBOSE
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("check", "start", "restart", "stop", "hook"))
+    parser.add_argument("mode", choices=("check", "units", "start", "restart", "stop", "hook"))
     parser.add_argument("plan", nargs="?")
     parser.add_argument("--state")
     parser.add_argument("--request")
     parser.add_argument("--result")
+    parser.add_argument("--output")
     args = parser.parse_args()
     os.umask(0o077)
-    if args.mode in ("check", "start"):
+    if args.mode in ("check", "units", "start"):
         require(args.plan, "plan required")
         plan = load(args.plan)
         if args.mode == "check":
             root, source, manifest = validate(plan)
-            print(json.dumps({"launches": False, "root": str(root), "population": len(plan["members"]), "manifest": plan["manifest"], "oneStore": True}))
+            print(json.dumps({"launches": False, "root": str(root), "population": len(plan["members"]), "manifest": plan["manifest"], "oneStore": True,
+                              "serviceUnits": sorted(plan["serviceManager"]["units"].values()) if "serviceManager" in plan else None}))
+        elif args.mode == "units":
+            # Publishes nothing: root installs these exact bytes, then check/start verify them.
+            require(args.output, "units requires a fresh --output directory")
+            _, _, manifest = validate(plan, published=False)
+            output = Path(args.output).absolute()
+            output.mkdir(mode=0o700)
+            units = rendered_units(plan, manifest)
+            for name, text in units.items():
+                (output / name).write_text(text)
+            print(json.dumps({"launches": False, "unitDirectory": plan["serviceManager"]["unitDirectory"],
+                              "units": {name: digest(output / name) for name in units}}))
         else:
             print(start(plan))
         return
@@ -471,6 +635,8 @@ def main():
     if args.mode == "stop":
         world.stop(["sshd", "public", "operator"])
         return
+    require("serviceManager" not in state,
+            "service-managed world: restart belongs to its manager's drained stop/start, not this owned-process hook")
     request = None
     if args.mode == "hook":
         require(args.request and args.result, "hook request/result required")

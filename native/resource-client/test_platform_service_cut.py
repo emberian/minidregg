@@ -62,6 +62,14 @@ class DrainBoundary(unittest.TestCase):
     def test_exit_after_native_drain_before_runtime_publication(self): self.case({}, True, "operator")
     def test_public_exit_before_runtime_publication(self): self.case({}, True, "public")
     def test_absent_operator_without_native_drain_refuses(self): self.case({}, False, "operator", True)
+    def test_cut_and_birth_publication_share_one_unit_definition(self):
+        self.assertIs(cut.unit, cut.provision.unit)
+        commands = cut.provision.service_argv("/c/mini", "/c/host", "/n/config.json", "/s/public.sock", "/s/operator.sock")
+        store = cut.unit(commands["operator"], "operator", cut.provision.DESCRIPTIONS["operator"], "/s")
+        self.assertIn('ExecStart="/c/mini" "serve-operator" "--host" "/c/host" "--config" "/n/config.json" "--socket" "/s/operator.sock"\n', store)
+        self.assertIn('"serve-public-proxy" "--socket" "/s/public.sock" "--upstream" "/s/operator.sock"',
+                      cut.unit(commands["public"], "operator", cut.provision.DESCRIPTIONS["public"], "/s"))
+        with self.assertRaises(ValueError): cut.unit(commands["operator"], "operator", "x", "relative")
     def test_reused_live_pid_is_not_absence(self):
         import os
         identity=cut.provision.proc_identity(os.getpid()); identity['uid']+=1

@@ -57,15 +57,8 @@ def protected(value):
     return path
 
 
-def unit(argv, user, description, cwd):
-    require(re.fullmatch(r"/[A-Za-z0-9_./-]+", cwd), "unit working directory requires a simple absolute path")
-    # systemd parses quoted words independently of the shell. Percent is an
-    # expansion character even inside quotes; literal arguments escape it.
-    words = [json.dumps(str(word).replace("%", "%%")) for word in argv]
-    return ("[Unit]\nDescription=" + description + "\n[Service]\nType=exec\nUser=" + user
-            + "\nUMask=0077\nWorkingDirectory=" + cwd
-            + "\nExecStart=" + " ".join(words)
-            + "\nKillMode=control-group\nTimeoutStopSec=30\nRestart=no\n")
+# One renderer: a cut proposal and a from-birth publication cannot disagree on unit text.
+unit = provision.unit
 
 
 def owned_alive(retained, cwd):
@@ -148,12 +141,10 @@ def prepare(request, output):
     store_unit, public_unit = request["storeUnit"], request["ingressUnit"]
     require(all(re.fullmatch(r"[A-Za-z0-9_.@-]+\.service", name)
                 for name in (store_unit, public_unit)) and store_unit != public_unit, "invalid units")
-    store = [cli["path"], "serve-operator", "--host", roles["host"], "--config", config["path"],
-             "--socket", state["privateSocket"]]
-    ingress = [cli["path"], "serve-public-proxy", "--socket", state["publicSocket"],
-               "--upstream", state["privateSocket"], "--config", config["path"]]
-    write(output / store_unit, unit(store, user, "Mini supplied Store operator", cwds["operator"]))
-    write(output / public_unit, unit(ingress, user, "Mini supplied Store public ingress", cwds["public"]))
+    commands_by_service = provision.service_argv(cli["path"], roles["host"], config["path"],
+                                                 state["publicSocket"], state["privateSocket"])
+    write(output / store_unit, unit(commands_by_service["operator"], user, provision.DESCRIPTIONS["operator"], cwds["operator"]))
+    write(output / public_unit, unit(commands_by_service["public"], user, provision.DESCRIPTIONS["public"], cwds["public"]))
     descriptor = {"protocol": "mini-service-deployment-binding-v1", "dataRoot": str(root),
         "nodeRoot": state.get("nodeRoot", str(root / "world")), "operatorSocket": state["privateSocket"],
         "publicSocket": state["publicSocket"], "storeUnit": store_unit, "ingressUnit": public_unit,
@@ -162,6 +153,22 @@ def prepare(request, output):
         "operatorWorkspace": str(root / "operator-workspace"), "deployment": {
             "config": config, "manifest": pin(selected), "rolePaths": roles, "cli": cli,
             "memberCommands": commands}}
+    manager = state.get("serviceManager")
+    if manager:
+        # Born under SYSTEM units: nothing is cut over, so the proposal must
+        # describe exactly what already runs. Any difference refuses here
+        # instead of becoming a descriptor that names another topology.
+        require(manager["units"]["operator"] == store_unit and manager["units"]["public"] == public_unit,
+                "requested units differ from the world's service manager")
+        for name in (store_unit, public_unit):
+            require((Path(manager["unitDirectory"]) / name).read_text() == (output / name).read_text(),
+                    "published unit differs from the running world: " + name)
+        for name in ("operator", "public", "sshd"):
+            require(state["services"][name].get("unit") == manager["units"][name], "service is not its declared unit: " + name)
+        require(roster.read_bytes() == (output / "authorized_keys").read_bytes(),
+                "live roster differs from the authoritative forced-command inventory")
+        descriptor["auxiliaryUnits"] = [{"unit": manager["units"]["sshd"], "manager": "system", "serviceUid": uid,
+                                         "statePaths": [str(roster.parent)]}]
     write(output / "deployment-binding.json", descriptor)
     # The reviewed stop implementation and its ownership checks travel with
     # the proposal; later source edits cannot change an already prepared cut.

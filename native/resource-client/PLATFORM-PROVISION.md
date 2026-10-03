@@ -26,6 +26,37 @@ Its bytes must match the source recipe exactly and its entire canonical ancestry
 must be root-owned and unwritable by other users. Forced commands record that
 actual executable path; selecting a candidate never relabels a different wrapper.
 
+By default the private operator, its public relay and the member SSH entrance are
+process groups this constructor owns. For a service deployment declare instead
+
+```json
+"serviceManager": {"type": "systemd-system",
+  "systemctl": ["/usr/bin/sudo", "-n", "/usr/bin/systemctl"],
+  "unitDirectory": "/etc/systemd/system",
+  "units": {"operator": "NAME-store.service", "public": "NAME-ingress.service",
+            "sshd": "NAME-sshd.service"}}
+```
+
+and those three services are root-published SYSTEM units running as the Store
+operator from birth. Unit text is a function of the plan alone, so it exists before
+genesis: `units PLAN --output NEW-DIR` renders the three files as the operator and
+publishes nothing; root installs those bytes and reloads the manager. `check` and
+`start` then require each unit to be root-custodied, byte-identical to the plan's
+rendering, loaded without drop-ins and not yet run. A published unit that would
+serve another topology (for example a public single-socket `serve` under a
+descriptor that names the private pair) is refused before the Store is created.
+`start` launches the services only through `systemctl`; it owns no process, retains
+each unit's main PID identity in `runtime.json`, and emits no `restart` journey
+hook, because the owned-process restart is not a drained service restart. That
+adapter stays explicitly missing until the service owner supplies one. `stop`
+stops the three units. `platform-service-cut.py prepare` on such a world cuts
+nothing over: it re-derives the units, roster and descriptor from the running
+world, refuses any difference from what is published, and records the SSH
+entrance as the descriptor's auxiliary unit.
+
+A plan's `timeoutSeconds` and `maxMembers` also bound the paid adapter and the
+emitted journey; neither falls back to a shorter adapter default.
+
 Example plan (paths and SHA must refer to the supplied candidate family):
 
 ```json
