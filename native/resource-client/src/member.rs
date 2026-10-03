@@ -237,12 +237,24 @@ fn object_value(field: &Value, value: &Value) -> String {
     value.to_string()
 }
 
-fn projection(root: &Path, selected: Option<&str>) -> Result<Value> {
+fn projection(root: &Path, selected: Option<&str>, home: Option<&Path>) -> Result<Value> {
     let pin = workspace::load(root)?;
     let config = workspace::bounded_json(&workspace::member_path(&pin, "config")?)?;
-    projection_with(root,&pin,&config,selected,
+    let mut value = projection_with(root,&pin,&config,selected,
         |name|workspace::reference(root,name),
-        |reference|workspace::signed_view(root,&pin,reference,"resource").map(|(view,challenge,_)|(view,challenge)))
+        |reference|workspace::signed_view(root,&pin,reference,"resource").map(|(view,challenge,_)|(view,challenge)))?;
+    fill_request_status(&mut value, selected, home);
+    Ok(value)
+}
+
+/// The room's resident row takes this member's requests from the one
+/// request classifier (`hermes::request_rows`, as `hermes status` last ran it).
+fn fill_request_status(value: &mut Value, selected: Option<&str>, home: Option<&Path>) {
+    if let (Some(name), Some(home)) = (selected, home) {
+        if value["resident"]["subject"].as_str().is_some_and(|s| s != "0") {
+            value["resident"]["requestStatus"] = crate::hermes::home_request_status(home, name);
+        }
+    }
 }
 
 fn projection_with(root: &Path, pin: &Value, config: &Value, selected: Option<&str>,
@@ -481,13 +493,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         Some(v) if v == std::ffi::OsStr::new("true") => true,
         _ => return Err("--json must be true or false".into()),
     };
+    let home = args.optional("home").map(PathBuf::from);
     let action = args
         .optional("action")
         .map(|v| v.into_string().map_err(|_| "member action must be UTF-8"))
         .transpose()?;
     args.finish()?;
     let value = match action.as_deref() {
-        None | Some("workspace") => projection(&root, name.as_deref())?,
+        None | Some("workspace") => projection(&root, name.as_deref(), home.as_deref())?,
         Some("app-status") => application::status(
             &root,
             &workspace::load(&root)?,
@@ -694,5 +707,24 @@ mod tests {
         assert_eq!(r["assignment"], "11");
         assert_eq!(r["activation"]["status"], "unavailable");
         assert_eq!(r["requestStatus"]["status"], "unavailable");
+    }
+
+    #[test]
+    fn resident_request_status_is_filled_only_for_a_room_with_hermes() {
+        let home = std::env::temp_dir().join(format!("mini-member-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join("chat/rooms")).unwrap();
+        std::fs::write(home.join("chat/rooms/lab.requests.json"), json!({"type":"mini-hermes-request-status-v1",
+            "room":"lab","hermes":"8","height":9,"requests":[{"number":2,"status":"started"}]}).to_string()).unwrap();
+        let mut with = json!({"resident":{"subject":"8","requestStatus":{"status":"unavailable"}}});
+        fill_request_status(&mut with, Some("lab"), Some(&home));
+        assert_eq!(with["resident"]["requestStatus"]["status"], "started");
+        let mut without = json!({"resident":{"subject":"0","requestStatus":{"status":"unavailable"}}});
+        fill_request_status(&mut without, Some("lab"), Some(&home));
+        assert_eq!(without["resident"]["requestStatus"]["status"], "unavailable");
+        let mut unselected = with.clone();
+        unselected["resident"]["requestStatus"] = json!({"status":"unavailable"});
+        fill_request_status(&mut unselected, None, Some(&home));
+        assert_eq!(unselected["resident"]["requestStatus"]["status"], "unavailable");
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

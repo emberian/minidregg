@@ -1196,7 +1196,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let json_output = args.last().is_some_and(|s| s == "--json");
             if json_output { args.pop(); }
             if args.len() > 1 { return Err(usage_of("home").to_owned()); }
-            let mut flags = vec![flag("dir", session.workspace.clone())];
+            let mut flags = vec![flag("dir", session.workspace.clone()), flag("home", session.home.clone())];
             if let Some(name) = args.first() { ref_name(name,"reference")?; flags.push(flag("name",name)); }
             if json_output { flags.push(flag("json","true")); }
             Plan::Client {command:"member".into(),flags,writes:vec![]}
@@ -4138,9 +4138,9 @@ mod tests {
     fn home_checks_only_the_selected_member_reference() {
         let s = session();
         assert_eq!(client(plan(&s,"home lab --json").unwrap()),
-            ("member".into(),pairs(&[("dir","/w"),("name","lab"),("json","true")]),vec![]));
+            ("member".into(),pairs(&[("dir","/w"),("home","/h"),("name","lab"),("json","true")]),vec![]));
         assert_eq!(client(plan(&s,"home").unwrap()),
-            ("member".into(),pairs(&[("dir","/w")]),vec![]));
+            ("member".into(),pairs(&[("dir","/w"),("home","/h")]),vec![]));
         assert!(plan(&s,"home lab other").is_err());
     }
 

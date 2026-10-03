@@ -54,6 +54,7 @@ pub(crate) const NODE_FILE: &str = "hermes/node.json";
 pub(crate) const VERBS: &[crate::shell::Verb] = &[
     crate::shell::Verb { name: "summon", usage: "summon ROOM as librarian|runner [--budget N] [--every N] [--program @FILE] [--hermes SUBJECT] [--i-know]", operation: "founder: the till (if none), Hermes's budget account funded N from mine, Hermes on the roster (chat invite), the role's documents and grants, the program document ROOM-hermes-ROLE, the room's hermes fields, the hand-off in HOME/outbox/H" },
     crate::shell::Verb { name: "ask", usage: "ask [ROOM] TEXT", operation: "say --to HERMES in the room (Hermes is the room cell's `hermes` field, a signed read)" },
+    crate::shell::Verb { name: "hermes", usage: "hermes status [ROOM] | hermes cancel N [ROOM]", operation: "status: a signed read of the room's streams; each of my requests to Hermes with Hermes's latest typed status for it | cancel: append {\"type\":\"withdraw\"} replying to my request #N, addressed to Hermes (it cancels the request only while it is still queued)" },
     crate::shell::Verb { name: "dismiss", usage: "dismiss ROOM", operation: "founder: revoke the room grant and the role's delegations to Hermes, zero the room's hermes fields, ask Hermes to return the unspent budget (HOME/outbox/H/dismiss-ROOM.json)" },
 ];
 
@@ -70,6 +71,8 @@ pub(crate) enum Line {
     },
     Ask { room: Option<String>, text: String },
     Dismiss { room: String },
+    Status { room: Option<String> },
+    Cancel { room: Option<String>, number: u64 },
 }
 
 /// Map `summon`/`ask`/`dismiss` lines; `None` for any other verb.
@@ -89,6 +92,20 @@ pub(crate) fn plan(verb: &str, rest: &str) -> Option<Result<Line, String>> {
             } else {
                 Line::Ask { room: None, text: chat::free_text(rest) }
             })
+        }
+        "hermes" => {
+            let words: Vec<&str> = rest.split_whitespace().collect();
+            let room = |name: Option<&&str>| -> Result<Option<String>, String> {
+                name.map(|n| chat::ref_name(n, "room name").map(|()| (*n).to_owned())).transpose()
+            };
+            match words.as_slice() {
+                ["status", rest @ ..] if rest.len() <= 1 => room(rest.first()).map(|room| Line::Status { room }),
+                ["cancel", n, rest @ ..] if rest.len() <= 1 => match n.parse::<u64>() {
+                    Ok(number) if number > 0 => room(rest.first()).map(|room| Line::Cancel { room, number }),
+                    _ => Err(usage("hermes")),
+                },
+                _ => Err(usage("hermes")),
+            }
         }
         "dismiss" => {
             let words: Vec<&str> = rest.split_whitespace().collect();
@@ -158,6 +175,128 @@ pub(crate) fn run(session: &Session, line: Line) -> Result<(), Done> {
         }
         Line::Ask { room, text } => ask(session, room, text),
         Line::Dismiss { room } => dismiss(session, &room),
+        Line::Status { room } => status(session, room),
+        Line::Cancel { room, number } => cancel(session, room, number),
+    }
+}
+
+// ---------------------------------------------------------------- status, cancel
+
+/// One of a member's requests to Hermes, as the room's signed streams show it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RequestRow {
+    /// Feed entry number of the request (`#N` in this read).
+    pub number: usize,
+    pub cell: String,
+    pub sequence: u64,
+    pub height: u64,
+    /// `unacknowledged` until Hermes publishes a status; then its latest
+    /// status, where a terminal status (completed, refused, cancelled) is final.
+    pub status: String,
+    pub detail: String,
+    /// The author appended a `withdraw` for it.
+    pub withdrawn: bool,
+}
+
+impl RequestRow {
+    pub(crate) fn json(&self) -> Value {
+        json!({"number":self.number,"cell":self.cell,"sequence":self.sequence,"height":self.height,
+            "status":self.status,"detail":self.detail,"withdrawn":self.withdrawn,
+            "cancellable":self.cancellable()})
+    }
+    /// Only a request Hermes has not started may be withdrawn.
+    pub(crate) fn cancellable(&self) -> bool {
+        !self.withdrawn && matches!(self.status.as_str(), "unacknowledged" | "queued")
+    }
+}
+
+fn terminal(status: &str) -> bool {
+    matches!(status, "completed" | "refused" | "cancelled")
+}
+
+/// THE request-status classifier: `hermes status`, `hermes cancel` and the
+/// `home` row all use it. Only entries authored by `hermes` count as status;
+/// only entries authored by `me` count as requests and withdrawals.
+pub(crate) fn request_rows(feed: &chat::Feed, me: &str, hermes: &str) -> Vec<RequestRow> {
+    let mut rows: Vec<RequestRow> = feed.feed.iter().enumerate()
+        .filter(|(_, e)| e.author == me && e.to.as_deref() == Some(hermes)
+            && matches!(chat::kind_of(e), chat::Kind::Say { .. }))
+        .map(|(i, e)| RequestRow { number: i + 1, cell: e.cell.clone(), sequence: e.sequence, height: e.height,
+            status: "unacknowledged".into(), detail: String::new(), withdrawn: false })
+        .collect();
+    for e in &feed.feed {
+        let Some((cell, sequence)) = &e.re else { continue };
+        let Some(row) = rows.iter_mut().find(|r| r.cell == *cell && r.sequence == *sequence) else { continue };
+        match chat::kind_of(e) {
+            chat::Kind::RequestStatus { status, text } if e.author == hermes && !terminal(&row.status) => {
+                row.status = status;
+                row.detail = text;
+            }
+            chat::Kind::Withdraw if e.author == me => row.withdrawn = true,
+            _ => {}
+        }
+    }
+    rows
+}
+
+fn requests_cache(session: &Session, room: &str) -> PathBuf {
+    chat::chat_dir(session).join("rooms").join(format!("{room}.requests.json"))
+}
+
+fn room_rows(session: &Session, room: &str) -> Result<(Vec<RequestRow>, Vec<String>), Done> {
+    let me = chat::me(session)?;
+    let h = room_hermes(session, room)?.ok_or_else(|| usage(format!("there is no Hermes in {room}")))?;
+    let (feed, missing) = chat::room_feed(session, room)?;
+    let rows = request_rows(&feed, &me, &h);
+    // The home row reads this last signed classification (discovery only).
+    put(&requests_cache(session, room), &json!({"type":"mini-hermes-request-status-v1","room":room,"hermes":h,
+        "height":feed.feed.last().map(|e| e.height),"requests":rows.iter().map(RequestRow::json).collect::<Vec<_>>()}))?;
+    Ok((rows, missing))
+}
+
+fn status(session: &Session, room: Option<String>) -> Result<(), Done> {
+    let room = match room { Some(room) => room, None => chat::current_room(session).map_err(err)?.name };
+    let (rows, missing) = room_rows(session, &room)?;
+    if rows.is_empty() {
+        println!("you have no requests to Hermes in {room}");
+    }
+    for row in &rows {
+        let withdrawn = if row.withdrawn && !terminal(&row.status) { " (withdraw requested)" } else { "" };
+        let detail = if row.detail.is_empty() { String::new() } else { format!(": {}", row.detail) };
+        println!("#{} {}{withdrawn}{detail}", row.number, row.status);
+    }
+    for line in missing {
+        println!("  (unread: {line})");
+    }
+    Ok(())
+}
+
+fn cancel(session: &Session, room: Option<String>, number: u64) -> Result<(), Done> {
+    let room = match room { Some(room) => room, None => chat::current_room(session).map_err(err)?.name };
+    let (rows, _) = room_rows(session, &room)?;
+    let row = rows.iter().find(|r| r.number as u64 == number)
+        .ok_or_else(|| usage(format!("#{number} is not one of your requests to Hermes in {room} (hermes status)")))?;
+    if !row.cancellable() {
+        return Err(usage(format!("#{number} is {}{}: only a request Hermes has not started can be withdrawn",
+            row.status, if row.withdrawn { " and already withdrawn" } else { "" })));
+    }
+    let h = room_hermes(session, &room)?.ok_or_else(|| usage(format!("there is no Hermes in {room}")))?;
+    let result = chat::append_reply(session, &room, json!({"type":"withdraw"}), &h, (row.cell.clone(), row.sequence))?;
+    println!("withdraw of #{number} appended ({}); Hermes cancels it if it is still queued",
+        result.get("transactionId").and_then(Value::as_str).unwrap_or("submitted"));
+    Ok(())
+}
+
+/// The `home` row for a room: the last `hermes status` classification this
+/// member made, never a claim about the resident's process.
+pub(crate) fn home_request_status(chat_home: &Path, room: &str) -> Value {
+    let path = chat_home.join("chat").join("rooms").join(format!("{room}.requests.json"));
+    match chat::get_json(&path) {
+        Some(value) if value["type"] == "mini-hermes-request-status-v1" => json!({
+            "status": value["requests"].as_array().and_then(|r| r.last()).map(|r| r["status"].clone()).unwrap_or(json!("none")),
+            "requests": value["requests"], "height": value["height"],
+            "origin": "last-signed-hermes-status-read", "refresh": format!("hermes status {room}")}),
+        _ => json!({"status":"unavailable","refresh":format!("hermes status {room}")}),
     }
 }
 
@@ -614,7 +753,7 @@ fn ask(session: &Session, room: Option<String>, text: String) -> Result<(), Done
         None => chat::current_room(session).map_err(err)?.name,
     };
     let h = room_hermes(session, &room)?.ok_or_else(|| usage(format!("there is no Hermes in {room} (its founder summons one)")))?;
-    let line = chat::Line::Say { room: Some(room), to: Some(h), re: None, text: chat::Text::Inline(text), via: None, operation_record: None, expected_reply: None };
+    let line = chat::Line::Say { room: Some(room), to: Some(h), re: None, text: chat::Text::Inline(text), via: None, operation_record: None, expected_reply: None, status: None };
     match chat::run(session, line) {
         (0, _) => Ok(()),
         done => Err(done),
@@ -788,5 +927,85 @@ mod tests {
         assert_eq!(runner_cells(program).unwrap(), (vec!["lab-data".into(), "lab-paper".into()], vec!["lab-summary".into()]));
         assert!(runner_cells("- **Inputs** (read): a\n").is_err());
         assert!(runner_cells("- **Outputs** (write): bad/name\n").is_err());
+    }
+
+    fn entry(height: u64, author: &str, cell: &str, sequence: u64, to: Option<&str>, re: Option<(&str, u64)>, payload: Value) -> chat::Entry {
+        chat::Entry { height, author: author.into(), cell: cell.into(), sequence, topic: String::new(),
+            to: to.map(str::to_owned), re: re.map(|(c, s)| (c.to_owned(), s)),
+            payload: chat::Payload::Verified(payload.to_string()), owner: author.into() }
+    }
+
+    /// One classifier: only Hermes's entries are statuses, only the
+    /// author's own entries are requests and withdrawals, and a terminal
+    /// status is final whatever arrives later.
+    #[test]
+    fn request_rows_take_status_only_from_hermes_and_keep_terminal_final() {
+        let say = |text: &str| json!({"type":"say","text":text});
+        let st = |s: &str, t: &str| json!({"type":"request-status","status":s,"text":t});
+        let feed = chat::merge(vec![
+            entry(1, "7", "70", 1, Some("9"), None, say("first")),
+            entry(2, "7", "70", 2, Some("9"), None, say("second")),
+            entry(3, "8", "80", 1, Some("9"), None, say("not mine")),
+            entry(4, "7", "70", 3, Some("8"), None, say("not to hermes")),
+            entry(5, "9", "90", 1, Some("7"), Some(("70", 1)), st("queued", "1 ahead")),
+            entry(6, "8", "80", 2, Some("7"), Some(("70", 1)), st("completed", "forged by a member")),
+            entry(7, "9", "90", 2, Some("7"), Some(("70", 1)), st("started", "")),
+            entry(8, "9", "90", 3, Some("7"), Some(("70", 1)), st("completed", "replied #12")),
+            entry(9, "9", "90", 4, Some("7"), Some(("70", 1)), st("started", "late duplicate")),
+            entry(10, "7", "70", 4, Some("9"), Some(("70", 2)), json!({"type":"withdraw"})),
+            entry(11, "8", "80", 3, Some("9"), Some(("70", 1)), json!({"type":"withdraw"})),
+            entry(12, "9", "90", 5, Some("7"), None, st("cancelled", "no ref: not a status")),
+        ], Some("7".into()));
+        let rows = request_rows(&feed, "7", "9");
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].number, rows[0].status.as_str(), rows[0].detail.as_str(), rows[0].withdrawn),
+                   (1, "completed", "replied #12", false));
+        assert!(!rows[0].cancellable());
+        assert_eq!((rows[1].number, rows[1].status.as_str(), rows[1].withdrawn), (2, "unacknowledged", true));
+        assert!(!rows[1].cancellable(), "already withdrawn");
+        let other = request_rows(&feed, "8", "9");
+        assert_eq!(other.len(), 1);
+        assert!(other[0].cancellable());
+    }
+
+    #[test]
+    fn hermes_status_and_cancel_parse_and_refuse_malformed_lines() {
+        assert_eq!(plan("hermes", " status").unwrap().unwrap(), Line::Status { room: None });
+        assert_eq!(plan("hermes", " status lab").unwrap().unwrap(), Line::Status { room: Some("lab".into()) });
+        assert_eq!(plan("hermes", " cancel 4 lab").unwrap().unwrap(), Line::Cancel { room: Some("lab".into()), number: 4 });
+        for bad in [" cancel", " cancel 0", " cancel x", " status a b", " restart", " cancel 3 lab extra"] {
+            assert!(plan("hermes", bad).unwrap().is_err(), "{bad}");
+        }
+    }
+
+    /// The home row reports the last signed classification, or unavailable.
+    #[test]
+    fn home_row_reads_the_classifier_output_never_runtime_liveness() {
+        let home = std::env::temp_dir().join(format!("mini-hermes-home-{}", std::process::id()));
+        let rooms = home.join("chat").join("rooms");
+        fs::create_dir_all(&rooms).unwrap();
+        assert_eq!(home_request_status(&home, "lab")["status"], "unavailable");
+        let row = RequestRow { number: 3, cell: "70".into(), sequence: 1, height: 5, status: "queued".into(),
+            detail: String::new(), withdrawn: false };
+        fs::write(rooms.join("lab.requests.json"), json!({"type":"mini-hermes-request-status-v1","room":"lab",
+            "hermes":"9","height":5,"requests":[row.json()]}).to_string()).unwrap();
+        let value = home_request_status(&home, "lab");
+        assert_eq!(value["status"], "queued");
+        assert_eq!(value["requests"][0]["cancellable"], true);
+        assert_eq!(value["origin"], "last-signed-hermes-status-read");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn request_status_say_is_typed_and_needs_its_request_and_author() {
+        let parsed = chat::plan("say --to 7 --re 4 --status queued 1 ahead").unwrap().unwrap();
+        assert!(matches!(parsed, chat::Line::Say { status: Some(ref s), re: Some(4), .. } if s == "queued"));
+        assert!(chat::plan("say --to 7 --status queued hi").unwrap().is_err());
+        assert!(chat::plan("say --re 4 --status queued hi").unwrap().is_err());
+        assert!(chat::plan("say --to 7 --re 4 --status running hi").unwrap().is_err());
+        let status = entry(1, "9", "90", 1, Some("7"), Some(("70", 1)), json!({"type":"request-status","status":"started"}));
+        assert_eq!(chat::kind_of(&status), chat::Kind::RequestStatus { status: "started".into(), text: String::new() });
+        let unbound = entry(1, "9", "90", 1, Some("7"), None, json!({"type":"withdraw"}));
+        assert!(matches!(chat::kind_of(&unbound), chat::Kind::Raw(_)));
     }
 }

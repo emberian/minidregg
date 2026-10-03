@@ -152,7 +152,7 @@ pub(crate) enum Text {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Line {
-    Say { room: Option<String>, to: Option<String>, re: Option<u64>, text: Text, via: Option<Via>, operation_record: Option<PathBuf>, expected_reply: Option<(String, u64)> },
+    Say { room: Option<String>, to: Option<String>, re: Option<u64>, text: Text, via: Option<Via>, operation_record: Option<PathBuf>, expected_reply: Option<(String, u64)>, status: Option<String> },
     Tail { room: Option<String>, count: usize, since: Option<u64>, follow: bool, json: bool, held: bool, entry: Option<(String, u64)>, discovery: Option<String> },
     Topic(Option<String>),
     Pin(u64),
@@ -271,6 +271,7 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
     let mut re = None;
     let mut file = None;
     let mut operation_record = None;
+    let mut status = None;
     let (mut expected_cell, mut expected_sequence) = (None, None);
     let (mut network, mut id, mut name) = (None, None, None);
     while let Some((word, after)) = split(rest) {
@@ -285,6 +286,12 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
             }
             "--to" => to = Some(value.trim_start_matches('@').to_owned()),
             "--re" => re = Some(number(value, "--re")?),
+            // A resident's typed request-status entry, replying to the request.
+            "--status" => {
+                if !REQUEST_STATES.contains(&value) || status.replace(value.to_owned()).is_some() {
+                    return Err(format!("--status is one of {}", REQUEST_STATES.join(", ")));
+                }
+            }
             "--expect-re-cell" => {
                 decimal(value, "--expect-re-cell")?;
                 if expected_cell.replace(value.to_owned()).is_some() { return Err("duplicate --expect-re-cell".into()); }
@@ -348,7 +355,10 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
         (Some(cell),Some(sequence)) if re.is_some() => Some((cell,sequence)),
         _ => return Err("reply expectation requires --re, --expect-re-cell and --expect-re-sequence together".into()),
     };
-    Ok(Line::Say { room, to, re, text, via, operation_record, expected_reply })
+    if status.is_some() && (re.is_none() || to.is_none() || via.is_some()) {
+        return Err("a request status replies to its request (--re) and addresses its author (--to)".into());
+    }
+    Ok(Line::Say { room, to, re, text, via, operation_record, expected_reply, status })
 }
 
 fn parse_tail(rest: &str) -> Result<Line, String> {
@@ -932,9 +942,17 @@ pub(crate) enum Kind {
     Pin,
     Unpin,
     React(String),
+    /// The author withdraws its own request (`ref`), addressed to the resident.
+    Withdraw,
+    /// A resident's state for the request it replies to (`ref`).
+    RequestStatus { status: String, text: String },
     Raw(String),
     Unavailable,
 }
+
+/// The request states a resident publishes, in lifecycle order. The last
+/// three are terminal.
+pub(crate) const REQUEST_STATES: &[&str] = &["queued", "started", "completed", "refused", "cancelled"];
 
 pub(crate) fn kind_of(entry: &Entry) -> Kind {
     let text = match &entry.payload {
@@ -964,6 +982,13 @@ pub(crate) fn kind_of(entry: &Entry) -> Kind {
         Some("pin") => Kind::Pin,
         Some("unpin") => Kind::Unpin,
         Some("react") => s("emoji").map(Kind::React).unwrap_or_else(|| Kind::Raw(text.clone())),
+        Some("withdraw") if entry.re.is_some() => Kind::Withdraw,
+        Some("request-status") if entry.re.is_some() => match s("status") {
+            Some(status) if REQUEST_STATES.contains(&status.as_str()) => {
+                Kind::RequestStatus { status, text: s("text").unwrap_or_default() }
+            }
+            _ => Kind::Raw(text.clone()),
+        },
         _ => Kind::Raw(text.clone()),
     }
 }
@@ -1346,6 +1371,9 @@ pub(crate) fn render_entry(feed: &Feed, n: usize, names: &Names) -> String {
         Kind::Unpin if founder => " unpinned".into(),
         Kind::Unpin => format!(" unpinned (ignored: only {founder_name}, the founder, pins in this room)"),
         Kind::React(emoji) => format!(" reacted {} to {}", clip(&emoji, 32), reference(e)),
+        Kind::Withdraw => format!(" withdrew request {}", reference(e)),
+        Kind::RequestStatus { status, text } => format!(" request {} is {status}{}", reference(e),
+            if text.is_empty() { String::new() } else { format!(": {}", clip(&text, 200)) }),
         Kind::Raw(text) => format!(": {}", clip(&text, 400)),
         Kind::Unavailable => match e.payload {
             Payload::Binary => ": [payload is not text]".into(),
@@ -1369,12 +1397,16 @@ fn entry_json(feed: &Feed, n: usize, names: &Names) -> Value {
         Kind::Pin => ("pin", None, None),
         Kind::Unpin => ("unpin", None, None),
         Kind::React(x) => ("react", Some(x), None),
+        Kind::Withdraw => ("withdraw", None, None),
+        Kind::RequestStatus { status, text } => ("request-status", Some(format!("{status}: {text}")), None),
         Kind::Raw(t) => ("raw", Some(t), None),
         Kind::Unavailable => ("unavailable", None, None),
     };
     let re = e.re.as_ref().and_then(|r| feed.feed.iter().position(|x| x.cell == r.0 && x.sequence == r.1)).map(|i| i + 1);
+    let status = match kind_of(e) { Kind::RequestStatus { status, .. } => Some(status), _ => None };
     json!({"n":n,"height":e.height,"author":e.author,"name":names.of(&e.author),"cell":e.cell,
-        "sequence":e.sequence,"topic":e.topic,"to":e.to,"re":re,"kind":kind,"text":text,
+        "sequence":e.sequence,"topic":e.topic,"to":e.to,"re":re,"kind":kind,"text":text,"status":status,
+        "reCell":e.re.as_ref().map(|r| r.0.clone()),"reSequence":e.re.as_ref().map(|r| r.1),
         "via":via.map(|v| json!({"network":v.network,"id":v.id,"name":v.name}))})
 }
 
@@ -1415,6 +1447,22 @@ fn names(session: &Session) -> Names {
         .and_then(|w| w.get("subject").and_then(Value::as_str).map(str::to_owned))
         .unwrap_or_default();
     Names { me, pet: petnames(session) }
+}
+
+/// The merged, freshly read feed of room `name` (signed stream reads under
+/// this session's room grant).
+pub(crate) fn room_feed(session: &Session, name: &str) -> Result<(Feed, Vec<String>), Done> {
+    let room = load_room(session, name).map_err(error)?;
+    let (feed, _, missing) = read_room(session, &room)?;
+    Ok((feed, missing))
+}
+
+/// Append a payload replying to the exact entry (cell, sequence), addressed
+/// to `to`, on this member's own stream in room `name`.
+pub(crate) fn append_reply(session: &Session, name: &str, payload: Value, to: &str, re: (String, u64)) -> Result<Value, Done> {
+    let room = load_room(session, name).map_err(error)?;
+    let topic = cached_topic(session, &room);
+    append(session, &room, payload, Some(to.to_owned()), Some(re), topic)
 }
 
 fn resolve_member(session: &Session, who: &str) -> Result<String, Done> {
@@ -1558,7 +1606,7 @@ fn require_reply_expectation(actual: Option<&(String,u64)>, expected: Option<&(S
 
 fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
     match line {
-        Line::Say { room, to, re, text, via, operation_record, expected_reply } => {
+        Line::Say { room, to, re, text, via, operation_record, expected_reply, status } => {
             let room = match room {
                 Some(name) => load_room(session, &name),
                 None => current_room(session),
@@ -1579,7 +1627,10 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             let to = to.map(|t| resolve_member(session, &t)).transpose()?;
             let re = re.map(|n| entry_ref(session, &room, n)).transpose()?;
             require_reply_expectation(re.as_ref(), expected_reply.as_ref()).map_err(error)?;
-            let mut payload = json!({"type":"say","text":text});
+            let mut payload = match &status {
+                Some(status) => json!({"type":"request-status","status":status,"text":text}),
+                None => json!({"type":"say","text":text}),
+            };
             if let Some(v) = &via {
                 payload["via"] = json!(v.network);
                 payload["author"] = json!({"id":v.id,"name":v.name});
@@ -2181,11 +2232,11 @@ mod tests {
     fn chat_verbs_take_the_rest_of_the_line_as_text() {
         assert_eq!(
             plan("say it's #1, isn't it").unwrap().unwrap(),
-            Line::Say { room: None, to: None, re: None, text: Text::Inline("it's #1, isn't it".into()), via: None, operation_record: None, expected_reply: None }
+            Line::Say { room: None, to: None, re: None, text: Text::Inline("it's #1, isn't it".into()), via: None, operation_record: None, expected_reply: None, status: None }
         );
         assert_eq!(
             plan("say --to @bob --re 12 'yes, agreed'").unwrap().unwrap(),
-            Line::Say { room: None, to: Some("bob".into()), re: Some(12), text: Text::Inline("yes, agreed".into()), via: None, operation_record: None, expected_reply: None }
+            Line::Say { room: None, to: Some("bob".into()), re: Some(12), text: Text::Inline("yes, agreed".into()), via: None, operation_record: None, expected_reply: None, status: None }
         );
         assert_eq!(
             plan("say --in commons --via discord --via-id 42 --via-name zed --file d-1.txt").unwrap().unwrap(),
@@ -2194,7 +2245,8 @@ mod tests {
                 to: None,
                 re: None,
                 text: Text::File("d-1.txt".into()),
-                via: Some(Via { network: "discord".into(), id: "42".into(), name: "zed".into() }), operation_record: None, expected_reply: None
+                via: Some(Via { network: "discord".into(), id: "42".into(), name: "zed".into() }), operation_record: None, expected_reply: None,
+                status: None
             }
         );
         assert!(plan("say").unwrap().is_err());
