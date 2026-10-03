@@ -50,6 +50,14 @@ construct() {
   cp "$RUN_DIR/log/$N.out" "$RUN_DIR/parent-$id.json"
   python3 "$HERE/jworld-construction.py" --parent "$RUN_DIR/parent-$id.json" --target "$TARGET" \
     --revision "$revision" --out "$RUN_DIR/home/requests"
+  if [ -n "${DEFINITION_AUTHOR:-}" ]; then
+    "$DEFINITION_AUTHOR" "$RUN_DIR/home/requests/retarget.json" "$RUN_DIR/retarget-$id.bin"
+  else
+    "$MINI" author --host "$HOST" --config "$CONFIG" --kind world-prototype-definition \
+      --input "$RUN_DIR/home/requests/retarget.json" --output "$RUN_DIR/retarget-$id.bin"
+  fi
+  python3 "$HERE/jworld-construction.py" --parent "$RUN_DIR/parent-$id.json" --target "$TARGET" \
+    --revision "$revision" --out "$RUN_DIR/home/requests" --definition-bytes "$RUN_DIR/retarget-$id.bin"
   say "program create constructor-$id @constructor.json open"
   local program
   program=$(jq -er '.programId' "$WORKSPACE/programs/constructor-$id.json")
