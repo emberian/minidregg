@@ -261,6 +261,25 @@ class ComposedTests(unittest.TestCase):
         self.assertTrue(result["phases"]["connector"].startswith("blocked: prerequisite apps"))
         self.assertTrue(result["phases"]["residents"].startswith("unbuilt"))
 
+    def test_inventory_pin_ignores_recorded_rooms_but_not_members(self):
+        value = self.spec(inventorySha256=c.inventory_sha(self.value))
+        c.plan(value)
+        self.value["rooms"] = {"created": {"x": {"name": "lab-r1"}}}
+        self.world.write_text(json.dumps(self.value))
+        c.plan(value)
+        self.value["members"]["ada"]["subject"] = "999"
+        self.world.write_text(json.dumps(self.value))
+        with self.assertRaisesRegex(ValueError, "member inventory changed"):
+            c.plan(value)
+
+    def test_a_stopped_phase_reports_later_phases_as_not_reached(self):
+        shell = Shell(self.value["members"])
+        shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
+        result = self.scenario(self.spec(phases=["rooms", "apps", "residents"]), shell).run()
+        self.assertTrue(result["phases"]["rooms"].startswith("stopped"))
+        self.assertTrue(result["phases"]["apps"].startswith("not reached: stopped at rooms; would be blocked"))
+        self.assertTrue(result["phases"]["residents"].startswith("not reached: stopped at rooms; would be unbuilt"))
+
     def test_changed_spec_needs_a_fresh_state_directory(self):
         shell = Shell(self.value["members"])
         self.scenario(self.spec(), shell).run()

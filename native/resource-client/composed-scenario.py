@@ -106,6 +106,11 @@ def inventory(world):
     return members, ssh
 
 
+def inventory_sha(world):
+    projection = {"members": world["members"], "ssh": world["ssh"], "unitUser": world.get("unitUser")}
+    return hashlib.sha256(json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def select(selector, members, population):
     """An explicit list of inventory names, "population", or {"entry": E}."""
     if selector == "population":
@@ -129,6 +134,10 @@ def plan(spec):
     if "worldSha256" in spec:
         require(sha(world_path) == spec["worldSha256"], "world inventory changed")
     members, ssh = inventory(world)
+    if "inventorySha256" in spec:
+        # Pins only who acts and how (members, forced-SSH coordinates), so
+        # recording new rooms in the same inventory file does not move it.
+        require(inventory_sha(world) == spec["inventorySha256"], "world member inventory changed")
     population = select(spec.get("population", list(members)), members, list(members))
     require(len(population) >= 2, "a composed scenario needs at least two members")
     op = spec["operationPrefix"]
@@ -596,6 +605,9 @@ class Scenario:
                 except (step_ledger.LedgerFenced, Undecided, ValueError, RuntimeError, KeyError,
                         json.JSONDecodeError) as error:
                     statuses[phase] = "stopped: " + str(error)
+                    for later in self.p["phases"][self.p["phases"].index(phase) + 1:]:
+                        if not str(statuses.get(later, "")).startswith(("pass", "fail (probes)")):
+                            statuses[later] = f"not reached: stopped at {phase}; would be {ready[later]}"
                     self.persist()
                     return self.report()
                 mine = [r for r in self.state["rows"] if r["id"].startswith(phase + ":")
@@ -658,6 +670,7 @@ def main(argv=None):
     if words[0] == "check" and len(words) == 2:
         p = plan(spec)
         result = {"type": "mini-composed-scenario-check-v1", "effects": False,
+                  "inventorySha256": inventory_sha(p["world"]),
                   "population": p["population"], "rooms": p["rooms"], "phases": readiness(spec, p)}
     elif words[0] == "status" and len(words) == 2:
         result = status(spec)
