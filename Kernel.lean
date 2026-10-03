@@ -130,3 +130,13 @@ import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view i
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge
 
 import Kernel.WorldKindChecks -- descriptor/instance preparation refusals for shipped world methods
+
+-- Source-connected construction; runtime protocol joins remain explicit.
+import Kernel.NativeObservationOpeningCache
+import Kernel.WorldPrototypeConstruction
+import Kernel.WorldMethodTrace
+import Kernel.PrivateSuccessorCustody
+import Kernel.JointInvocationCandidate
+import Kernel.JointDecisionRecovery
+import Kernel.JointReservation
+import Kernel.NativeJointAgreement

@@ -139,3 +139,8 @@ import Assurance.KeyPreRotationAudit
 
 -- Current member-admin / delegated-manager contracts and executable authoring poles.
 import Kernel.ApplicationManagedPolicyCheck
+
+-- Source-connected construction; runtime protocol joins remain explicit.
+import Assurance.PrivateEvaluatorCustodyJoin
+import Assurance.PrivateEvaluatorCustodyChecks
+import Assurance.WorldPrototypeConstructionChecks

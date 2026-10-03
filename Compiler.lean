@@ -119,3 +119,8 @@ import Compiler.ZkmlTraceCheck
 import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v3 + ABI/v4, programId, birth admissibility
 import Compiler.StoreHiding -- K-NARROW-HIDE: salted-root views (opened entries + salts, sealed leaves): view_root_recomputes, narrowed_view_independent_of_uncovered_given_salts, salt_disclosed_iff_value_disclosed, commitment_hides (premise SaltedLeafHiding); K-HIDE-ROTATE: the per-write blinding ratchet — change_detection_only_via_root (every sealed leaf moves), narrowed_view_independent_of_uncovered_across_writes (premise RatchetedViewHiding, poles toyRatchet_hides / toyStatic_reveals), ratchet_determined_by_birth, ratchet_advances_on_write
 import Compiler.Evaluator -- K-EVAL: Machine (data) + Evaluator (every fact a field; exhausted_says_nothing required; E2: entry, oracle = export, writesOf, sample), Evaluator.nock, registry := [nock]
+
+-- Source-connected construction; runtime protocol joins remain explicit.
+import Compiler.ObliviousEvaluator
+import Compiler.PrivateSuccessorCustodyCodec
+import Compiler.PrivateWorldIR
