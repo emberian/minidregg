@@ -656,10 +656,13 @@ pub(crate) fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String
     if let Some(socket) = crate::SOCKET.get() {
         cmd.arg("--socket").arg(socket);
     }
+    let started = std::time::Instant::now();
     let out = cmd
         .stdin(Stdio::null())
         .output()
         .map_err(|e| error(format!("cannot run the mini client: {e}")))?;
+    let action = flags.iter().find(|(n, _)| *n == "action").map(|(_, v)| v.to_string_lossy().into_owned()).unwrap_or_default();
+    crate::trace::record("spawn", &format!("mini {command} {action}"), 0, out.stdout.len(), started);
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {

@@ -921,6 +921,7 @@ pub(crate) fn invoke_pinned_deadline(
     frame.extend_from_slice(&expected);
     frame.push(operation);
     frame.extend_from_slice(payload);
+    let started = Instant::now();
     let mut stream = connect_unix_deadline(socket, deadline)
         .map_err(|e| format!("cannot connect within deadline: {e}"))?;
     write_frame(
@@ -937,6 +938,7 @@ pub(crate) fn invoke_pinned_deadline(
     })
     .map_err(|e| format!("uncertain host response read: {e}"))?
     .ok_or_else(|| "uncertain host response: connection closed".to_owned())?;
+    crate::trace::record("host", &format!("op{operation}"), frame.len(), reply.len(), started);
     if reply.len() > HOST_MAX_FRAME || reply.is_empty() {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
@@ -1100,10 +1102,12 @@ fn invoke_inner(
     }
     frame.push(operation);
     frame.extend_from_slice(payload);
+    let started = std::time::Instant::now();
     let reply = match endpoint(socket)? {
         Endpoint::Unix(path) => exchange_unix(path, &frame)?,
         Endpoint::Remote(destination) => crate::proxy::exchange(destination, &frame)?,
     };
+    crate::trace::record("host", &format!("op{operation}"), frame.len(), reply.len(), started);
     if reply.len() > HOST_MAX_FRAME {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }

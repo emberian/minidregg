@@ -2762,6 +2762,13 @@ fn start_text(session: &Session) -> String {
 
 /// Run one line; returns (exit code, keep going).
 pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
+    let started = std::time::Instant::now();
+    let result = line_untraced(session, text);
+    crate::trace::record("line", text, 0, result.0 as usize, started);
+    result
+}
+
+fn line_untraced(session: &Session, text: &str) -> (i32, bool) {
     let ending = match plan(session, text) {
         Err(message) => Ending::Usage(message),
         Ok(Plan::Exit) => return (EXIT_OK, false),

@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 mod agent_lifetime_grant;
+mod trace;
 #[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]

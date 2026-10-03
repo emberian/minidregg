@@ -333,11 +333,13 @@ fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Re
     Ok(identity)
 }
 fn local_identity(verifier: &Path, config: &Path) -> Result<Value> {
+    let started = std::time::Instant::now();
     let output = Command::new(verifier)
         .arg(config)
         .arg("profile")
         .output()
         .map_err(fail)?;
+    crate::trace::record("spawn", "verifier profile", 0, output.stdout.len(), started);
     if !output.status.success() || output.stdout.len() as u64 > MAX_JSON {
         return Err(fail("local verifier profile failed or exceeded bound"));
     }
@@ -539,6 +541,7 @@ impl HostProof<'_> {
         self.settings.check(&config)?;
         // Challenge heights include genesisHeight. Lean converts them to receipt
         // accepted-count coordinates and binds domain/semantics to this config.
+        let started = std::time::Instant::now();
         let result = Command::new(&self.settings.verifier)
             .arg(&config)
             .arg("continuity-point")
@@ -546,6 +549,7 @@ impl HostProof<'_> {
             .arg(&output)
             .output()
             .map_err(fail)?;
+        crate::trace::record("spawn", "verifier continuity-point", 0, result.stdout.len(), started);
         if !result.status.success() {
             return Err(fail("local Lean verifier refused observation point"));
         }
@@ -606,6 +610,7 @@ impl HostProof<'_> {
         create_file(&response_path, response_bytes)?;
         create_file(&result_path, b"")?;
         self.settings.check(&config)?;
+        let started = std::time::Instant::now();
         let result = Command::new(&self.settings.verifier)
             .arg(&config)
             .arg("continuity-verify")
@@ -614,6 +619,7 @@ impl HostProof<'_> {
             .arg(&result_path)
             .output()
             .map_err(fail)?;
+        crate::trace::record("spawn", "verifier continuity-verify", 0, result.stdout.len(), started);
         if !result.status.success() {
             return Err(fail("local Lean verifier refused continuity proof"));
         }
