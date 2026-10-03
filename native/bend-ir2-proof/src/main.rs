@@ -42,7 +42,7 @@ fn require_subset(descriptor: &EffectVmDescriptor2) -> Result<(), Box<dyn Error>
         match constraint {
             VmConstraint2::WindowGate(gate) if !gate.on_transition && local_only(&gate.body) => {},
             VmConstraint2::Base(VmConstraint::PiBinding { row: VmRow::First, col, pi_index })
-                if col == pi_index && *pi_index < descriptor.public_input_count => {
+                if *col < descriptor.trace_width && *pi_index < descriptor.public_input_count => {
                 if !pinned.insert(*pi_index) { return Err("duplicate public pin".into()); }
             },
             _ => return Err("descriptor outside emitted local-row grammar".into()),

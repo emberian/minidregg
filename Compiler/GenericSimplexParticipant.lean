@@ -75,6 +75,20 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
       Minidregg.Compiler.GenericSimplexPending.discover state p.pending},result)
   | _ => return (p,result)
 
+/-- Preserve the existing outer native call family before generic historical
+replay. In particular, a signed invocation hidden inside a birth/install frame
+must not bypass the live invocation budget or another family's receiver. These
+are the existing native parsers, not alternate signature/admission validators. -/
+def sourceCallShape : Minidregg.Compiler.NativeHostCodec.SignedCall → Bool
+  | .invoke _ => true
+  | .birth bytes =>
+      (Minidregg.Kernel.GrainResourceBirthPolicyController.decodeIngress bytes).isSome ||
+      (Minidregg.Kernel.ResourceBirthPolicyController.Concrete.decodeIngress bytes).isSome
+  | .install bytes => (Minidregg.Kernel.PolicyInstallReceiver.decodeIngress bytes).isSome
+  | .delegate bytes => (Minidregg.Kernel.CapabilityDelegationReceiver.decodeIngress bytes).isSome
+  | .revoke bytes => (Minidregg.Kernel.CapabilityRevocationReceiver.decodeIngress bytes).isSome
+  | .renounce bytes => (Minidregg.Kernel.CapabilityRenounce.decodeIngress bytes).isSome
+
 /-- The resident client retains NativeHostCodec.SignedCall in call.bin.
 Historical source records retain the inner signed ingress; ordinary invocation
 adds only this deployment's fixed domain/profile using the existing native
@@ -84,6 +98,8 @@ def sourceIngressOfCall (config : SourceConfig) (callBytes : Bytes) : Except Str
     | throw "unsupported or noncanonical native signed call"
   unless Minidregg.Compiler.NativeHostCodec.callCodec.encode call == callBytes do
     throw "noncanonical native signed call"
+  unless sourceCallShape call do
+    throw "native signed call tag does not match its ingress"
   match call with
   | .invoke signed =>
     pure (Minidregg.Kernel.DeclaredResourceController.signedBytes
@@ -274,15 +290,22 @@ theorem invocation_call_preserves_signed (config : SourceConfig)
     sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode (.invoke signed)) =
       .ok (Minidregg.Kernel.DeclaredResourceController.signedBytes
         config.deployment.domain config.profile.semantics signed) := by
-  simp [sourceIngressOfCall]
-  rfl
+  simp [sourceIngressOfCall,sourceCallShape] <;> rfl
 
-theorem birth_call_preserves_ingress (config : SourceConfig) (bytes : Bytes) :
+theorem birth_call_preserves_ingress (config : SourceConfig) (bytes : Bytes)
+    (valid : sourceCallShape (.birth bytes) = true) :
     sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode (.birth bytes)) =
       .ok bytes := by
-  simp [sourceIngressOfCall]
-  rfl
+  simp [sourceIngressOfCall,valid] <;> rfl
 
+theorem mismatched_call_refused (config : SourceConfig)
+    (call : Minidregg.Compiler.NativeHostCodec.SignedCall)
+    (mismatch : sourceCallShape call = false) :
+    sourceIngressOfCall config (Minidregg.Compiler.NativeHostCodec.callCodec.encode call) =
+      .error "native signed call tag does not match its ingress" := by
+  simp [sourceIngressOfCall,mismatch] <;> rfl
+
+#assert_axioms mismatched_call_refused
 #assert_axioms invocation_call_preserves_signed
 #assert_axioms birth_call_preserves_ingress
 end Minidregg.Compiler.GenericSimplexParticipant

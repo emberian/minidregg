@@ -16,9 +16,10 @@ const named=(value:unknown,label:string):string=>{
 const distinct=(names:string[],label:string)=>{if(new Set(names).size!==names.length)throw new Error("duplicate "+label);};
 const declarationName=(d:any)=>d.kind==="function"?d.signature.name:d.name;
 
-export function captureObjective(specPath:string,outputDirectory:string){
+export function captureObjective(specPath:string,outputDirectory:string,options:{adoptCapturedEdition?:boolean}={}){
  const requestBytes=readFileSync(specPath);const request=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(requestBytes));
- if(request.schema!=="dregg.objective-bend.package-input.v1"||request.edition!=="objective-bend-1")throw new Error("Objective package schema/edition required");
+ const adopted=options.adoptCapturedEdition===true&&request.schema==="dregg.bend.package-input.v1";
+ if(!adopted&&(request.schema!=="dregg.objective-bend.package-input.v1"||request.edition!=="objective-bend-1"))throw new Error("Objective package schema/edition required");
  if(!Array.isArray(request.modules)||request.modules.length<1||request.modules.length>256)throw new Error("module capacity");
  distinct(request.modules.map((m:any)=>named(m.name,"module name")),"module name");
  const entryModule=index(request.entryModule,"entry module"),entryDefinition=named(request.entryDefinition,"entry definition");
@@ -39,9 +40,9 @@ export function captureObjective(specPath:string,outputDirectory:string){
   const imports=ast.imports.map((edge,j)=>{
    const lock=m.imports[j],target=index(lock.module,"import module");
    if(target>=i)throw new Error("imports must reference an earlier sealed module");
-   if(lock.alias!==edge.alias||lock.path!==edge.path)throw new Error("source import path/alias differs: "+m.name);
-   if(!/^\.\/[A-Za-z_]\w*\.obend$/.test(edge.path))throw new Error("Objective edition 1 imports require sealed ./NAME.obend paths");
-   if(edge.path!=="./"+modules[target].name+".obend")throw new Error("source import target differs: "+m.name);
+   if(lock.alias!==edge.alias||(!adopted||lock.path!==undefined)&&lock.path!==edge.path)throw new Error("source import path/alias differs: "+m.name);
+   if(!/^\.\/[A-Za-z_]\w*\.(?:obend|bend)$/.test(edge.path))throw new Error("Objective edition 1 imports require sealed ./NAME.obend or ./NAME.bend paths");
+   if(edge.path!=="./"+modules[target].name+".obend"&&edge.path!=="./"+modules[target].name+".bend")throw new Error("source import target differs: "+m.name);
    if(lock.sha256!==undefined&&lock.sha256!==modules[target].sha256)throw new Error("changed imported bytes: "+m.name);
    return {...edge,module:String(target),moduleName:modules[target].name,sha256:modules[target].sha256};
   });
@@ -61,15 +62,15 @@ export function captureObjective(specPath:string,outputDirectory:string){
  const packageInput={schema:"dregg.bend.package-input.v1",modules:records.map(m=>({name:m.name,sourcePath:m.sourcePath,imports:m.imports.map(e=>({alias:e.alias,module:e.module}))})),entryModule:String(entryModule),entryDefinition};
  const packageInputPath=resolve(join(outputDirectory,"package-input.json"));
  writeFileSync(packageInputPath,JSON.stringify(packageInput,null,2)+"\n",{flag:"wx"});
- const result={schema:"dregg.objective-bend.captured-package.v1",edition:"objective-bend-1",parserSchema:"dregg.objective-bend.module.v1",requestSha256:digest(requestBytes),modules:records,entryModule:String(entryModule),entryDefinition,
+ const result={parserSourceSha256:digest(readFileSync(join(import.meta.dirname,"objective-parser.ts"))),producerSourceSha256:digest(readFileSync(import.meta.path)),schema:"dregg.objective-bend.captured-package.v1",edition:"objective-bend-1",parserSchema:"dregg.objective-bend.module.v1",requestSha256:digest(requestBytes),requestSchema:request.schema,editionSelection:adopted?"explicit-caller-adoption":"declared-request",modules:records,entryModule:String(entryModule),entryDefinition,
   sourceEntry:records[entryModule].name+"."+entryDefinition,packageInputPath,
   sourceStatus:"exact locked source and parsed AST",semanticStatus:"requires Objective elaboration and execution receipt",theoremScope:"no embedded BendTT typing or totality theorem asserted"};
  writeFileSync(join(outputDirectory,"objective.json"),JSON.stringify(result,null,2)+"\n",{flag:"wx"});return result;
 }
 if(import.meta.main){
- const [specPath,outputDirectory]=process.argv.slice(2);
+ const [specPath,outputDirectory,editionOption]=process.argv.slice(2);
  if(!specPath||!outputDirectory)throw new Error("usage: objective-frontend PACKAGE_SPEC OWNED_OUTPUT_DIRECTORY");
- try{console.log(JSON.stringify(captureObjective(specPath,outputDirectory)));}
+ try{console.log(JSON.stringify(captureObjective(specPath,outputDirectory,{adoptCapturedEdition:editionOption==="--objective-edition-1"})));}
  catch(error){const diagnostic=error&&typeof error==="object"&&"stage" in error?error:{schema:"dregg.bend.compiler-diagnostic.v1",stage:"objective-package-capture",message:String(error)};
  mkdirSync(outputDirectory,{recursive:true});writeFileSync(join(outputDirectory,"diagnostic.json"),JSON.stringify(diagnostic,null,2)+"\n");console.error(JSON.stringify(diagnostic));process.exitCode=2;}
 }

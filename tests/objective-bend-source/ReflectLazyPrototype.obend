@@ -1,0 +1,10 @@
+edition ObjectiveBend 1
+
+spec Named for Nat:
+  law retained: true
+
+extension Identity(self: Nat, super: Nat) -> Nat:
+  self
+
+def inspect() -> String:
+  metadata(reflect(prototype(Named, fix(Identity, 0n)))).name

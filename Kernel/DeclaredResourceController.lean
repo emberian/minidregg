@@ -4,6 +4,7 @@ Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
+import Kernel.ResourceInvocationSignatureFirst
 import Kernel.BendPreparedOutput
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
@@ -1831,15 +1832,19 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
       match recordedInvocation deployment.domain profile.semantics command signed durable with
       | .error _ => ordinaryResult .transactionConflict
       | .ok (some recorded) => ordinaryResult (.replayed recorded)
-      | .ok none =>
-          match prepareFrom deployment profile ambient durable directory? command with
-          | .error reason => ordinaryResult (.rejected reason)
-          | .ok prepared =>
-              if shape : PhysicalShape prepared then
-                match ← admit native prepared signed with
-                | .error reason => ordinaryResult (.rejected reason)
-                | .ok accepted => acceptedResult prepared shape accepted
-              else ordinaryResult (.rejected .physicalPreparation)
+      | .ok none => do
+          let authentication ← ResourceInvocationSignatureFirst.authenticate native
+            deployment profile.semantics ambient durable command signed.authorityEnvelope
+          ResourceInvocationSignatureFirst.continueAfter authentication
+            (fun reason => ordinaryResult (.rejected reason)) (do
+              match prepareFrom deployment profile ambient durable directory? command with
+              | .error reason => ordinaryResult (.rejected reason)
+              | .ok prepared =>
+                  if shape : PhysicalShape prepared then
+                    match ← admit native prepared signed with
+                    | .error reason => ordinaryResult (.rejected reason)
+                    | .ok accepted => acceptedResult prepared shape accepted
+                  else ordinaryResult (.rejected .physicalPreparation))
 
 /-- The receiver over the image's own directory, loaded here. A caller holding
 that directory passes it to `withAcceptedLoadedFrom` (`withAcceptedLoaded_eq_from`). -/

@@ -234,6 +234,12 @@ def recoverAttempt (config : NativeHost.Config) (selected : Config) (initial : S
         BendInvocation.encode attempt.publication.candidate do
       return .error "retained attempt has no completed matching predecessor"
     return .ok none
+  let some sourceArtifact := BendWorldProgramCodec.decode source
+    | return .error "retained source canonical artifact refused"
+  let .ok _ := BendArtifactBinding.check sourceArtifact compiler
+    | return .error "retained original source/compiler constructive binding refused"
+  let .ok () := BendFheArtifact.checkWireProfile sourceArtifact compiler
+    | return .error "retained physical input/output/disclosure profile refused"
   unless attempt.source == source && attempt.compiler == compiler &&
       attempt.key == key && attempt.request == request &&
       attempt.publication.subject == initial.subject &&
@@ -330,7 +336,7 @@ def runFiles (config : NativeHost.Config) (nativeConfigPath : String)
       let .ok pin ← fileSHA256 compilerPath | return .error "compiler pin unavailable"
       unless pin == session.compilerSHA256 do return .error "compiler differs from independently admitted deployment pin"
       let .ok prepared ← prepareContext config session signer (← read sourcePath)
-          (BendKeyRecord.encode handle.registered)
+          (BendKeyRecord.encode handle.registered) (← read compilerPath)
         | return .error "current source/key/result preparation refused"
       writeFresh contextPath (contextJson session prepared).compress.toUTF8.toList
       return .ok ()
@@ -352,7 +358,7 @@ def runFiles (config : NativeHost.Config) (nativeConfigPath : String)
         writeReleased releasedPath released.bytes
         return .ok ()
       let session ← IO.ofExcept (← selectedSession config selected initial signer)
-      let .ok prepared ← prepareContext config session signer sourceBytes keyBytes
+      let .ok prepared ← prepareContext config session signer sourceBytes keyBytes compilerBytes
         | return .error "current commit context unavailable"
       let .ok physical ← checkPhysical session prepared selected.physicalSnapshotRoot
           compilerBytes requestBytes completionBytes

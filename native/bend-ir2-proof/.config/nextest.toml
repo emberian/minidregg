@@ -1,0 +1,6 @@
+# This real Keccak proof is intentionally outside the default fast tests.
+[profile.default]
+default-filter = 'not test(bounded_cshake_proof_binds_digest_and_validity)'
+
+[profile.heavy]
+default-filter = 'test(bounded_cshake_proof_binds_digest_and_validity)'

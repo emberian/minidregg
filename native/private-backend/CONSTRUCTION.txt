@@ -34,7 +34,7 @@ Executed composition now includes:
 Qualification limits remain concrete. Arithmetic is variable-time GF(2^128),
 static cumulative f<n/3, authenticated independent confidential reliable party
 channels, SHA256 classical ROM and honest crash disks. No complete simulator,
-QROM/PQ AMPC theorem, generic authenticated Boolean evaluator, complete
+QROM/PQ AMPC theorem, complete generic authenticated Boolean evaluator, complete
 accusation availability/fault-elimination ACS/GOD construction, holder-private
 output or successor resharing is supplied by these component checks.
 
@@ -79,8 +79,8 @@ fails closed on uncertain persistence. Unix test authority demonstrates crash
 ordering, not a separately protected malicious-storage rollback authority.
 Compiler/PrivateBackendBoundary and PrivateAllocationReceipt compiled; four
 actual native fixture frames matched Rust exactly with arbitrary-width Nat
-digests. The fifth bounded source projection and circuit-plan fixture remain
-interop joins; raw codec roundtrips are not native fixture qualification.
+digests. The actual circuit-plan fixture passed Rust interoperability in r18; the fifth
+bounded source projection remains an interop join; raw codec roundtrips are not native fixture qualification.
 
 circuit_batch reserves the WHOLE fixed tick-major AND-row plan before first
 material release even on private halt/refusal. Partial prefixes remain spent.
@@ -162,3 +162,44 @@ n=16,N=128,tau<=4 this loses about27 bits before Q (about101 bits left in this
 term). This is accounting, not a complete simulator/refinement/security proof.
 The new ML-KEM capsule does not change the coupled protocol's classical ROM,
 variable-time arithmetic, cumulative static corruption or QROM boundaries.
+
+
+Actual shared-wire evaluator (r21/r22):
+field_network consumes actual ACSS accepted input shares and actual King checked
+tuples, executes common constant/XOR/AND gates, and robustly opens masked values
+using n-f MATCHING authenticated degree-f points over the growing roster. It
+does not interpolate the first threshold of arrivals. Counted x*(x+1) checks
+are part of the full Plan and no selected row survives a bitness refusal. Three
+new r21 tests passed13:18:49UTC (actual Boolean combinations, delayed honest
+point after corrupt early points, nonbit refusal after complete consumption).
+Bit-check values are publicly opened in this reference profile: privacy of an
+arbitrary invalid honest field input is NOT claimed.
+
+The original endpoint-private initialization and transactional event/outbox WAL
+are now joined. Two r22 tests passed13:44:11UTC: pending masked-opening restart
+replays the original recursive outbox and completes coherent shared AND;
+completed restart retains output, while wrong Plan/holder, modified initial
+bytes or absent external burn anchor refuse. This is honest crash storage and
+actual original creation, not arbitrary checkpoint reachability, source current
+activation, privateRecovery or independent malicious-storage integrity.
+
+New r23 SOURCE WIP: reserve_many canonical binding retains ordered full public
+inventories plus actual original seed reservation IDs; seed/pool/tuple aliases
+and crossed holder/access structures refuse before getters. All selected rows
+from all inventories are atomically anchor-reserved before the first accepted
+input/tuple getter. Unselected tails remain unused. The new anchor batch request
+preserves old single-row journal bytes/history while eliminating whole-journal
+append/fsync for every row. Full-sized batch, multi-stock actual protocol and
+incomplete-input refusal checks are authored but not yet run.
+
+Current runnable Network bound remains8192 gates and public row bound65536;
+per-inventory King capacity32. The actual admitted smallest controller is13237
+gates/4709AND, two raw ticks require9418AND baseline, so this profile does NOT
+yet run that controller. Full unroll adds counted input/handled/release gates.
+Native source budget/receiver packet quota, graph profile and repeated-inventory
+producer remain concrete joins. Sequential current Engine openings also need
+public dependency-layer vector batching (minimal controller AND-depth29) before
+claiming useful full-controller latency. Native source205 original-prefix
+authority and sealed recipient route still refuse until their actual producer
+is joined. Shared Boolean outputs are recipient-local shares, never an audience
+release or successor privateRecovery grant.

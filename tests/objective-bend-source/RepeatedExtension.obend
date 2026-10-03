@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+
+extension AddOne(self: Nat, super: Nat) -> Nat:
+  super + 1n
+
+def repeated(seed: Nat) -> Nat:
+  fix(compose(AddOne, AddOne), seed)

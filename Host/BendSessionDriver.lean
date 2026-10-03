@@ -4,6 +4,7 @@ source/key reads, ordinary opaque storage and independent current release.
 Source authored WIP: shared next-cohort replay/Host dispatch and custody signer
 route must qualify before an executable governed run is claimed. -/
 import Host.BendReceiving
+import Host.BendFheArtifact
 import Host.BendOwnerManifestJson
 import Host.BendReturnReleaseAuthoring
 import Kernel.BendKeyRegistration
@@ -66,6 +67,8 @@ structure Prepared where
   keyRoot : Digest
   resultRoot : Digest
   sourceTrace : WorldMethodTrace.Trace
+  compilerBytes : List UInt8
+  compiled : BendArtifactBinding.Checked source compilerBytes
   predecessor : Option BendInvocation.Result
 
 def readCommand (s : Session) : DeclaredResourceController.Command :=
@@ -128,7 +131,7 @@ def signCommand (config : NativeHost.Config) (opened : NativeHost.Opened config)
 /-- Same admitted source/key/result observation; no raw caller-supplied store
 or root is promoted to provenance. The observed data stays local to the driver. -/
 def prepareContext (config : NativeHost.Config) (s : Session) (signer : Signer)
-    (sourceBytes : List UInt8) (keyBytes : List UInt8) : IO (Except String Prepared) := do
+    (sourceBytes : List UInt8) (keyBytes : List UInt8) (compilerBytes : List UInt8) : IO (Except String Prepared) := do
   unless s.capacity.length == 10 && BendOwnerManifestJson.sha256Shape s.compilerSHA256 &&
       BendOwnerManifestJson.sha256Shape s.physicalBinarySHA256 &&
       BendOwnerManifestJson.sha256Shape s.physicalTransformerSHA256 &&
@@ -157,6 +160,12 @@ def prepareContext (config : NativeHost.Config) (s : Session) (signer : Signer)
             registered.method == BendInvocation.methodId loaded.artifact &&
             registered.material.transformerSHA256 == s.physicalTransformerSHA256 do
           return .error "source/key/session exact material binding differs"
+        unless loaded.artifact.profile.bounds[8]? == some 524288 do
+          return .error "admitted opaque BFV full-return envelope differs"
+        let .ok compiled := BendArtifactBinding.check loaded.artifact compilerBytes
+          | return .error "admitted current source/compiler constructive binding refused"
+        let .ok () := BendFheArtifact.checkWireProfile loaded.artifact compilerBytes
+          | return .error "current source physical input/output/disclosure profile refused"
         let inherited : Except String (Option BendInvocation.Result) := do
           if s.predecessor.value == 0 then return none
           let target := command.targets[resultIndex]
@@ -180,7 +189,8 @@ def prepareContext (config : NativeHost.Config) (s : Session) (signer : Signer)
           sourceRoot := command.targets[sourceIndex].expectedTargetRoot
           keyRoot := command.targets[keyIndex].expectedTargetRoot
           resultRoot := command.targets[resultIndex].expectedTargetRoot
-          sourceTrace := loaded.trace, predecessor := predecessor }
+          sourceTrace := loaded.trace, compilerBytes := compilerBytes
+          compiled := compiled, predecessor := predecessor }
       else return .error "native source/key/result read layout refused")
     (fun _ => pure (.error "current source/key observation admission refused"))
 
@@ -259,10 +269,10 @@ private def commitOpaque (config : NativeHost.Config) (s : Session) (signer : Si
     (inputIds : List Digest) (completionBytes : List UInt8)
     (retain : BendOpaqueResultReceiver.Publication → SignedCommand → IO (Except String Unit)) :
     IO (Except String Stored) := do
-  let .ok current ← prepareContext config s signer sourceBytes keyBytes
+  let .ok current ← prepareContext config s signer sourceBytes keyBytes previous.compilerBytes
     | return .error "current source/key/result commit recheck refused"
   unless current.definition == previous.definition && current.invocation == previous.invocation &&
-      current.authority == previous.authority && current.sourceRoot == previous.sourceRoot &&
+      current.authority == previous.authority && current.compilerBytes == previous.compilerBytes && current.sourceRoot == previous.sourceRoot &&
       current.keyRoot == previous.keyRoot && current.resultRoot == previous.resultRoot &&
       BendKeyRecord.encode current.registered == BendKeyRecord.encode previous.registered &&
       BendWorldProgramCodec.encode current.source == BendWorldProgramCodec.encode previous.source do
@@ -305,6 +315,8 @@ assumptions; this is not an attestation against a hostile host OS. -/
 def checkPhysical (s : Session) (p : Prepared) (snapshot : String)
     (compilerBytes requestBytes completionBytes : List UInt8) :
     IO (Except String CheckedPhysical) := do
+  unless compilerBytes == p.compilerBytes do
+    return .error "physical compiler bytes differ from admitted source-derived plan"
   let .ok binarySHA ← fileSHA256 s.physicalBinary
     | return .error "physical checker executable unavailable"
   unless binarySHA == s.physicalBinarySHA256 do

@@ -12,7 +12,7 @@ Actual raw-backend privacy refutation passed on 2026-10-03: both one-row witness
 
 The current capacity constructor derives a trace-opening budget: the actual default main AIR requests two extension openings, each with four base coordinates, plus nineteen base-row FRI queries. The 27-coordinate budget rounds up to 32 independently randomized trace rows. It rejects unsafe capacities and shifted LDE overflow. Actual minimum32 and normal256 proofs for both witnesses, public-input tamper rejection, and finite observation-map rank/coupling regressions passed. This count alone is not a proof of hiding: full evaluation-map coverage, quotient masking and FRI transcript decoupling remain obligations.
 
-Experimental v3 adds a profile-owned challenger wrapper. It samples the actual degree-four extension until powers 1,a,a²,a³ have full rank, using paired deterministic rejection and a bounded fail-closed limit. Base-field and PoW operations delegate unchanged. The profile/version, exact parameters and public capacity are absorbed before proof messages. This changes the protocol; it must not reinterpret old proofs. The old profile remains test-only. At publication the v3 checks are pending; conditioned-challenge soundness bounds and full zero knowledge are not claimed.
+Experimental v3 adds a profile-owned challenger wrapper. It samples the actual degree-four extension until powers 1,a,a²,a³ have full rank, using paired deterministic rejection and a bounded fail-closed limit. Base-field and PoW operations delegate unchanged. The profile/version, exact parameters and public capacity are absorbed before proof messages. This changes the protocol; it must not reinterpret old proofs. The old profile remains test-only. The paired draw-order, capacity, cross-profile and actual proof regressions passed. Conditioned-challenge soundness bounds and full zero knowledge are not claimed.
 
 CLI: `prove descriptor.json public.csv trace.csv proof.bin`, or `verify descriptor.json public.csv proof.bin`. It accepts only the declared local-row grammar. Existing reexecution admission remains in force. Public proof inputs must eventually come from the independently authorized projection and real constrained commitments; neither source metadata nor an opaque proof buffer establishes computation.
 
@@ -39,3 +39,39 @@ claim that missing distribution already exists.
 The v4 conditioned extension challenge distribution remains experimental. The
 finite rank, draw-order and same-public/different-private tests do not prove the
 whole Fiat–Shamir protocol sound or its full transcript zero knowledge.
+
+### Actual admitted controller proof
+
+`Verify/BendUnrolledDirectEmit.lean` constructs an admitted `Lab "yes"` through
+`Assurance.BendObliviousMinimal.prepare`, unrolls the complete twelve-control
+machine graph for two raw ticks, and checks that the decoded result is the
+independently expected label with zero source reductions. Its descriptor uses
+`BendTraceDirect.lower`, the proven interpretation of the existing AIR syntax.
+`BendUnrolledDirect.accepted_run` proves arbitrary satisfying field rows force
+every actual raw graph step; it does not assume an honest witness generator.
+The initial 44 bits and final handled/state 45 bits are all public in this fixture.
+
+On an allocated host with the qualified Lean closure, generate a fresh directory:
+
+```
+lean --run Verify/BendUnrolledDirectEmit.lean /path/to/public-fixture
+BEND_UNROLLED_FIXTURE=/path/to/public-fixture \
+BEND_UNROLLED_PROOF_OUTPUT=/path/to/private-proof-output \
+cargo nextest run --release --locked --offline \
+  -E 'test(source_admitted_full_controller_proof_binds_input_handled_and_output)'
+```
+
+The actual test passed on 2026-10-03: prove/verify, then rejection of changed input,
+handled status and final state. The direct AIR used 26,521 columns and took 7.182s,
+versus 202,289 columns and 52.008s for the equivalent generic flattened descriptor
+on the same bounded host. The latter first exposed a real recursive emitter stack
+overflow; `EmitSystemFast` repairs it with proved exact descriptor equality.
+These are measured instances, not performance bounds or cryptographic theorems.
+
+The public fixture establishes executable source/controller/prover conformance.
+General source coverage, raw controller simulation, actual parser/PCS soundness,
+full Fiat–Shamir soundness, full-transcript hiding and native world proof admission
+remain separate obligations. No claimed `BindingCommitment` injectivity or deployed
+2^-55 composition bound is imported. `BendCommitmentReduction` instead constructs
+an actual domain-separated cSHAKE collision from different canonical input openings
+with the same public commitment; a concrete collision-resistance bound is still needed.

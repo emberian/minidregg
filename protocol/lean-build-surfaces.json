@@ -30,7 +30,9 @@
     "Compiler.PrivateBackendBoundaryFixture",
     "Host.BendActivityAuthor",
     "Host.BendActivityFixture",
+    "Host.BendCommitmentIR2Emit",
     "Host.BendContinuationProbe",
+    "Host.BendFheArtifactCheck",
     "Host.BendLogicEmit",
     "Host.BendLogicMuxEmit",
     "Host.BendLogicPreludeEmit",
@@ -43,12 +45,17 @@
     "Host.BendPackage",
     "Host.BendSurfaceSmoke",
     "Host.BendTraceIR2Emit",
+    "Host.ClientConsentSession",
     "Host.ObjectiveBendCaptured",
     "Host.ObjectiveBendPartialAuthor",
     "Host.ObjectiveBendPublicationAuthor",
     "Host.PortableContinuationProbe",
     "Host.PrivateCircuitPlanFixture",
+    "Host.SourceAgreementReader",
     "Host.WorldPrototypeDefinitionAuthor",
+    "Verify.BendMinimalCensus",
+    "Verify.BendUnrolledDirectEmit",
+    "Verify.BendUnrolledIR2Emit",
     "Verify.GenericSimplexHarness",
     "Verify.GenericSimplexNativeHarness",
     "Verify.NativeJointSourceFixture"
@@ -188,6 +195,13 @@
       "ownerReportedStatus": "new source; qualification pending coherent warm batch"
     },
     {
+      "module": "Assurance.BendObliviousMinimal",
+      "path": "Assurance/BendObliviousMinimal.lean",
+      "sha256": "6c7eef1e3ba6c38d310c8e0f6cfcce4c19e0ef716117c51864fa89d7f23dcfa6",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
       "module": "Assurance.BendObliviousRollbackWitness",
       "path": "Assurance/BendObliviousRollbackWitness.lean",
       "sha256": "b6c80e1cfa1183610c083fa617caf283c38cf48f1e8ef03343d92bdb76e0aec8",
@@ -199,7 +213,7 @@
       "path": "Assurance/BendObliviousSourceJoin.lean",
       "sha256": "eb8770c1beed649253a7ed289a170307546d6e06d3c7e1257ef38ad3b775c065",
       "surface": "default",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED_REPAIR"
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Assurance.BendSourceAudit",
@@ -1359,9 +1373,9 @@
     {
       "module": "Compiler.BendArtifactBinding",
       "path": "Compiler/BendArtifactBinding.lean",
-      "sha256": "f3bbfd0622601acee358ba8f4c16c6f4a4e65c250905724c73410c4abc812f86",
+      "sha256": "727685e4f8b71386643754ed7931289bfe67ab121ebf89ef6418f2b67a205d90",
       "surface": "authored-research",
-      "ownerReportedStatus": "Source repair WIP: actual source span offsets; native source capacity uses actual bounds[7]; Prelude receipt equivalence authored uncompiled; assigned coherent leaf check next"
+      "ownerReportedStatus": "Lean4.30 actual assigned four-module cohort PASS check-binding-frontend-04; actual generic embedded Package/core receipt and numeric CLI PASS"
     },
     {
       "module": "Compiler.BendClosureCompile",
@@ -1385,6 +1399,13 @@
       "ownerReportedStatus": "PASS scoped Lean+axiom accounting; Host separately executed save/resume cuts7/3/12"
     },
     {
+      "module": "Compiler.BendClosureInitialize",
+      "path": "Compiler/BendClosureInitialize.lean",
+      "sha256": "d317b83aa401a03b60b054a6d3f264a2bb07e7454f143a69eef5dfc076e8e20d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "Checked against exact owned warm imports. Initializer general denotation/source-count theorem; actual initializer inhabitant/refuser not run. Fixture actual fresh four-store genesis initialized, zero accepted history; first signed submit held for frontier tag-specific ingress repair."
+    },
+    {
       "module": "Compiler.BendClosureInput",
       "path": "Compiler/BendClosureInput.lean",
       "sha256": "44dc6e73e21b3d8fbab213c906763262ec8cbce052e12c089f930d536dbe0c03",
@@ -1397,6 +1418,13 @@
       "sha256": "1aa9b639f5723eca6e1a7dd89af6ecbf87b7c2a3579e1a382a714633ba833e24",
       "surface": "default",
       "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "module": "Compiler.BendCommitmentReduction",
+      "path": "Compiler/BendCommitmentReduction.lean",
+      "sha256": "a444ff386b071d89fa8018834fdb40039f1b6628493a1d8765b88ad216c9ca2a",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS constructive actual cSHAKE collision extraction; no injectivity or security assumption"
     },
     {
       "module": "Compiler.BendCoreAdmission",
@@ -1550,14 +1578,14 @@
       "path": "Compiler/BendNaturalArtifact.lean",
       "sha256": "79654400df1d3e2ae403bad921d05ef9431219d38bc86fea2c48d9fce40bc9d8",
       "surface": "default",
-      "ownerReportedStatus": "Objective parser: actual six source probes parse; receipt/compiler/native binding: authored uncompiled WIP; no new semantic or native admission claim"
+      "ownerReportedStatus": "Lean4.30 actual assigned four-module cohort PASS check-binding-frontend-04; actual generic embedded Package/core receipt and numeric CLI PASS"
     },
     {
       "module": "Compiler.BendNaturalCheckedCompiler",
       "path": "Compiler/BendNaturalCheckedCompiler.lean",
       "sha256": "a31f714647ee06eab0f494af253a4f1aba19a763b70eb173fba3db4c8384ff52",
       "surface": "default",
-      "ownerReportedStatus": "Authored repair after bounded source diagnostics; closures in arbitrary expression positions + independent lazy source probes; coherent receipt leaf retry pending"
+      "ownerReportedStatus": "Lean4.30 actual assigned four-module cohort PASS check-binding-frontend-04; actual generic embedded Package/core receipt and numeric CLI PASS"
     },
     {
       "module": "Compiler.BendNaturalCircuit",
@@ -1770,6 +1798,34 @@
       "ownerReportedStatus": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
     },
     {
+      "module": "Compiler.BendProofCshake",
+      "path": "Compiler/BendProofCshake.lean",
+      "sha256": "3ece5abc100b18961c2aa36d0a52fb3baa48927870fde55e2cce930fe80ef6f7",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS shared Boolean cSHAKE graph; universal sponge refinement OPEN"
+    },
+    {
+      "module": "Compiler.BendProofCshakeBounded",
+      "path": "Compiler/BendProofCshakeBounded.lean",
+      "sha256": "41f11ae1a120b7af061596378b6dbb12e213f6301f51b7a2756aba483a5683dd",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS public-prefix specification constants variant; original whole-prefix reference retained"
+    },
+    {
+      "module": "Compiler.BendProofCshakeBoundedChecks",
+      "path": "Compiler/BendProofCshakeBoundedChecks.lean",
+      "sha256": "ba3852f48fae5ecc48d4b154fe1ae8ca6fee08b297d76514706e2d92dd3ce11b",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS 5 explicit compiled boundary/refusal/prefix-variant checks"
+    },
+    {
+      "module": "Compiler.BendProofCshakeChecks",
+      "path": "Compiler/BendProofCshakeChecks.lean",
+      "sha256": "e8946889ae7027ee80c3e4651df72e7065f6bce4a5af8ea18ff612d7f3ab3ee0",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS 3 explicit compiled framing/padding conformance instances"
+    },
+    {
       "module": "Compiler.BendProofKeccak",
       "path": "Compiler/BendProofKeccak.lean",
       "sha256": "c0af4ab93c3354bb4cfca01b43f2a2747f6c7986822fd280f83195a8c356ea47",
@@ -1900,7 +1956,7 @@
       "path": "Compiler/BendSurfaceLowering.lean",
       "sha256": "d4984d16eaaa7a5f82c7b19988be7af67fc86a20e0f88da5349194dec0a42da7",
       "surface": "authored-research",
-      "ownerReportedStatus": "WIP source ABI v2 repair; exact sealed source emission2 PASS; v2 Lean/runtime qualification pending"
+      "ownerReportedStatus": "Captain scoped compile PASS and actual v2 emitted helper Book receiving PASS (2026-10-03); source/world admission and native installed profile separate"
     },
     {
       "module": "Compiler.BendTraceConstraints",
@@ -1908,6 +1964,13 @@
       "sha256": "58e330f252395c42e0a9cbf024b308015adbfa8ab031dc541a43e9bd1907723b",
       "surface": "default",
       "ownerReportedStatus": "PASS Lean4.30 standard-axiom gates, log lean-constraints-check-03; generic actual DAG relation not full Bend controller"
+    },
+    {
+      "module": "Compiler.BendTraceDirect",
+      "path": "Compiler/BendTraceDirect.lean",
+      "sha256": "18e0a57a356561d8867ac27aa18a78ac7b6eadd0f4729bf185c4026b3efd07e5",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS generic direct AIR fold equivalence and arbitrary witness network forcing"
     },
     {
       "module": "Compiler.BendTraceEvaluation",
@@ -1924,11 +1987,25 @@
       "ownerReportedStatus": "Own previous algebraic proofs PASS; NEW typed wire printer authored UNCOMPILED. Repairs actual current Bread nested parser key order."
     },
     {
+      "module": "Compiler.BendTracePublicPins",
+      "path": "Compiler/BendTracePublicPins.lean",
+      "sha256": "ca9be0f806826b87413355cafac06099f71e25fd363b8de7ceac5ab19dda5ab0",
+      "surface": "authored-research",
+      "ownerReportedStatus": "ACTUAL PASS13:29 selected public wire binding equivalence"
+    },
+    {
       "module": "Compiler.BendTraceSound",
       "path": "Compiler/BendTraceSound.lean",
       "sha256": "fa1b57c8b9ab34c637e4d56033989cb1906842cf6f8d7f6f171a2b2438481746",
       "surface": "default",
       "ownerReportedStatus": "ACTUAL PASS12:07:36 standard axioms"
+    },
+    {
+      "module": "Compiler.BendUnrolledDirect",
+      "path": "Compiler/BendUnrolledDirect.lean",
+      "sha256": "87a3bbdca188aa360e9879b56e8889bcfb291830315fe111d3376614099e3ec9",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS general arbitrary satisfying direct AIR witness forces full actual raw run and selected pins"
     },
     {
       "module": "Compiler.BendUnrolledIR2",
@@ -2274,6 +2351,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.CurrentRecipientRecord",
+      "path": "Compiler/CurrentRecipientRecord.lean",
+      "sha256": "7012c417d2c1085d11175a8043f15a23534cf4741bf08d09f7f48930888bdf71",
+      "surface": "authored-research",
+      "ownerReportedStatus": "COMPILED axiom gates PASS exact373 b723a784"
+    },
+    {
       "module": "Compiler.DeclaredActionAir",
       "path": "Compiler/DeclaredActionAir.lean",
       "sha256": "dd9cbbe88bc1707c801e99c4f48f783fd29a8b494e79ef40ba34160693d06ba3",
@@ -2391,6 +2475,13 @@
       "sha256": "df6ba96f018091fa54f2d9685a361007cefdf2e4e4437a46ab317bec6841239c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.EmitSystemFast",
+      "path": "Compiler/EmitSystemFast.lean",
+      "sha256": "52fb1d781f18ec0a1a555759914dfefb425537c1b08d928f304f3b93b04614b3",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS general exact equality and real large fixture execution"
     },
     {
       "module": "Compiler.Evaluator",
@@ -2542,9 +2633,9 @@
     {
       "module": "Compiler.GenericSimplexParticipant",
       "path": "Compiler/GenericSimplexParticipant.lean",
-      "sha256": "3e8087c8804eb3b24b4c70fe89e6af6db9c2b19a0afcfbabe95da9f943f6f0ef",
+      "sha256": "80514e3328650a85cd91fcd7bf51802acc41bd8619772647d9ddaec4e274b052",
       "surface": "authored-research",
-      "ownerReportedStatus": "COMPILE PASS against frozen qualified373; actual source fixture NOT RUN"
+      "ownerReportedStatus": "PASS call-family-check.log Lean and axiom gates"
     },
     {
       "module": "Compiler.GenericSimplexPending",
@@ -2946,6 +3037,13 @@
       "ownerReportedStatus": "ACTUAL PASS5 standard-axiom gates12:01:18"
     },
     {
+      "module": "Compiler.ObliviousNatAdd",
+      "path": "Compiler/ObliviousNatAdd.lean",
+      "sha256": "deb572f7801df10694d0546c87da6cb8bf97e44b8d797bcc1de743a1bc0c934d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "Authored uncompiled WIP: generic source Expr\u2192SAME Boolean Op DAG full-adder/ripple, explicit carries/range profile; full network/source simulation remains required, no private execution claim"
+    },
+    {
       "module": "Compiler.ObliviousNetwork",
       "path": "Compiler/ObliviousNetwork.lean",
       "sha256": "6a322ddaaf611e085a23677f02af1a843adb7489b1f6babdeaefbe72bf4b7b18",
@@ -3198,6 +3296,13 @@
       "ownerReportedStatus": "authored/uncompiled; new-only warm check queued"
     },
     {
+      "module": "Compiler.PrivateCircuitAllocationFast",
+      "path": "Compiler/PrivateCircuitAllocationFast.lean",
+      "sha256": "90394fcf14b84536e606aa80a802c5cfca799653b55a37857d32e6133a2cfb7d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
       "module": "Compiler.PrivateSuccessorCustodyCodec",
       "path": "Compiler/PrivateSuccessorCustodyCodec.lean",
       "sha256": "f8e2f7235a70cc3d93550a6b2f183093442b7a06ae897e7f16549de8eb918700",
@@ -3315,6 +3420,13 @@
       "sha256": "9411598826d06c6025b311240d550c9381a6433d95bab52b9793bd23ea8504b9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.SourceAgreementLegacyCodec",
+      "path": "Compiler/SourceAgreementLegacyCodec.lean",
+      "sha256": "66a8c852def5ea058227364fae3bc1407c6656c815f672f7d9ea438bf66da85a",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
     },
     {
       "module": "Compiler.Sp800185Cshake256",
@@ -3912,11 +4024,32 @@
       "ownerReportedStatus": "AUTHORED WIP UNCOMPILED/UNRUN; real pin/current-image -> sourcechecked native command exporter and original signed source sealing"
     },
     {
+      "module": "Host.BendCommitmentIR2Emit",
+      "path": "Host/BendCommitmentIR2Emit.lean",
+      "sha256": "fa29b04b881e63f987c4fe320825f9f0bc86a151749f93f75a6378160f01bb9a",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS actual private preimage fixed capacity graph\u2192direct AIR fixture;257 public digest/validity bits"
+    },
+    {
       "module": "Host.BendContinuationProbe",
       "path": "Host/BendContinuationProbe.lean",
       "sha256": "663470770e5f6e46241e034a0893f30f4e96d1134a9af0a15de46867c4107be2",
       "surface": "authored-research",
       "ownerReportedStatus": "PASS scoped Lean+axiom accounting; Host separately executed save/resume cuts7/3/12"
+    },
+    {
+      "module": "Host.BendFheArtifact",
+      "path": "Host/BendFheArtifact.lean",
+      "sha256": "087d5e6b89d6014e253dc4de9a74fc8c5e270c9bd8e0bbdeb973e55c3b33c269",
+      "surface": "authored-research",
+      "ownerReportedStatus": "authored-uncompiled; actual surface arithmeticEntry distinct from generated core entry; packet12 supersedes11"
+    },
+    {
+      "module": "Host.BendFheArtifactCheck",
+      "path": "Host/BendFheArtifactCheck.lean",
+      "sha256": "0dcec7d8259e18fd366a89ad19a450587b7b37b6edb9dd3bdc538bf1951b1f87",
+      "surface": "authored-research",
+      "ownerReportedStatus": "authored-uncompiled; actual surface arithmeticEntry distinct from generated core entry; packet12 supersedes11"
     },
     {
       "module": "Host.BendLogicEmit",
@@ -3951,7 +4084,7 @@
       "path": "Host/BendMemberFrontendCheck.lean",
       "sha256": "71f3493c2a88da9421059ccc983b80775788336006b40406e28ea983730f1e4f",
       "surface": "authored-research",
-      "ownerReportedStatus": "Actual arbitrary package/parser/safe_emit PASS Base+independenthelper+importedcomposition b80f9526...; Mini frontend check authored uncompiled WIP; no source-native authority claim"
+      "ownerReportedStatus": "Lean4.30 actual assigned four-module cohort PASS check-binding-frontend-04; actual generic embedded Package/core receipt and numeric CLI PASS"
     },
     {
       "module": "Host.BendNaturalEmit",
@@ -4003,6 +4136,13 @@
       "ownerReportedStatus": "WIP; Studio Rust parser PASS only, new shared Host library extraction/Partial encoder uncompiled, no native Studio receiving"
     },
     {
+      "module": "Host.BendProofWitness",
+      "path": "Host/BendProofWitness.lean",
+      "sha256": "769457498de6b7481e1e470632bc3dfedf5231b8fbb88adc2e119e7ec0040ba4",
+      "surface": "authored-research",
+      "ownerReportedStatus": "ACTUAL PASS13:29 linear residue witness producer"
+    },
+    {
       "module": "Host.BendReceiving",
       "path": "Host/BendReceiving.lean",
       "sha256": "509b7f7e7e8d73ec62c328aced69a785e7c6e9f03732538072cc57c7de34fdc9",
@@ -4021,35 +4161,35 @@
       "path": "Host/BendSessionCursor.lean",
       "sha256": "08ef83af98f3be8aac61696d2d485b8b2fcdbaa9f8571a07eb40d0588ddcdaa0",
       "surface": "authored-research",
-      "ownerReportedStatus": "actual compile PASS check-driver-06.log; Cursor codecs/general roundtrips standard-three; no executed governed journey/no cryptographic refinement"
+      "ownerReportedStatus": "authored-uncompiled; actual surface arithmeticEntry distinct from generated core entry; packet12 supersedes11"
     },
     {
       "module": "Host.BendSessionDriver",
       "path": "Host/BendSessionDriver.lean",
-      "sha256": "54008a8ee5ae673a03b15b9a2426139d050f1bf6d45379ea7f5a08fd70de2cad",
+      "sha256": "66a99806a48edb699fe68dbeb0de006d2002e26852dd3b4ac0ffb3fc0d6337b3",
       "surface": "authored-research",
-      "ownerReportedStatus": "actual compile PASS check-driver-06.log; Cursor codecs/general roundtrips standard-three; no executed governed journey/no cryptographic refinement"
+      "ownerReportedStatus": "authored-uncompiled; actual surface arithmeticEntry distinct from generated core entry; packet12 supersedes11"
     },
     {
       "module": "Host.BendSessionDriverJson",
       "path": "Host/BendSessionDriverJson.lean",
-      "sha256": "281c9aa5fcd8914c323d9dc93d06626678fa420a88c3f1e01bd47487f9a69bd0",
+      "sha256": "8de0140569fb6eb2a3ab3a0467eb2d61f22aa5f0b598f363dfb5b9a5d0b5651d",
       "surface": "authored-research",
-      "ownerReportedStatus": "actual compile PASS check-driver-06.log; Cursor codecs/general roundtrips standard-three; no executed governed journey/no cryptographic refinement"
+      "ownerReportedStatus": "authored-uncompiled; actual surface arithmeticEntry distinct from generated core entry; packet12 supersedes11"
     },
     {
       "module": "Host.BendSurfaceJson",
       "path": "Host/BendSurfaceJson.lean",
       "sha256": "ea1140ab32584fb5323ec6ceccadb14fcb1be7a49a1cd4209fbf81dc06f493c6",
       "surface": "authored-research",
-      "ownerReportedStatus": "WIP source ABI v2 repair; exact sealed source emission2 PASS; v2 Lean/runtime qualification pending"
+      "ownerReportedStatus": "Captain scoped compile PASS and actual v2 emitted helper Book receiving PASS (2026-10-03); source/world admission and native installed profile separate"
     },
     {
       "module": "Host.BendSurfaceSmoke",
       "path": "Host/BendSurfaceSmoke.lean",
       "sha256": "9133f66e14af0e62de7af67ce78a877ca031f8c73754711888bc7dc5c997124d",
       "surface": "authored-research",
-      "ownerReportedStatus": "WIP source ABI v2 repair; exact sealed source emission2 PASS; v2 Lean/runtime qualification pending"
+      "ownerReportedStatus": "Captain scoped compile PASS and actual v2 emitted helper Book receiving PASS (2026-10-03); source/world admission and native installed profile separate"
     },
     {
       "module": "Host.BendTraceIR2Emit",
@@ -4094,11 +4234,25 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Host.ClientConsentSession",
+      "path": "Host/ClientConsentSession.lean",
+      "sha256": "f3a0e3d2015c2717f74e6ff9cf684342f2c99448d19f721679b548dc7fd4e8e7",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Host.CshakeBench",
       "path": "Host/CshakeBench.lean",
       "sha256": "6de9e79944678b5d8d4cda47bcee516e296bedf8768d6921a2261e24c1cb0bde",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Host.CurrentRecipientVerifier",
+      "path": "Host/CurrentRecipientVerifier.lean",
+      "sha256": "7060b74cea9573e3570ad845ff461527874fd722bd713b650eb1ea7df053c090",
+      "surface": "authored-research",
+      "ownerReportedStatus": "AUTHORED source-only exit-code type repair; new check imminent"
     },
     {
       "module": "Host.CurrentResourceBirthAuthoring",
@@ -4379,6 +4533,41 @@
       "sha256": "55c04fccd413d81b46981d4f8be77452efdb1356bd3c9dec0bbcb3852a8541f4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Host.SourceAgreementBirth",
+      "path": "Host/SourceAgreementBirth.lean",
+      "sha256": "a7eff069d1721caf77f5e16b895ce4b57c6b123165c4a392c2f6d31bcd21a626",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
+    },
+    {
+      "module": "Host.SourceAgreementContextInspection",
+      "path": "Host/SourceAgreementContextInspection.lean",
+      "sha256": "ff063283d90233a668b2225efd0346d2bbc59b5a9e0ea3fda785821cfcf80428",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
+    },
+    {
+      "module": "Host.SourceAgreementJson",
+      "path": "Host/SourceAgreementJson.lean",
+      "sha256": "61ca037acba4c92a381b030fb9ed517fa90debc545cebb4e7a13bf3ac7789808",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
+    },
+    {
+      "module": "Host.SourceAgreementLegacyView",
+      "path": "Host/SourceAgreementLegacyView.lean",
+      "sha256": "1d456d2057bb6271d4ecbe14e2895bfbb1a91bac8cc09619eb5158e3b637c0f1",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
+    },
+    {
+      "module": "Host.SourceAgreementReader",
+      "path": "Host/SourceAgreementReader.lean",
+      "sha256": "9082ae6caa628494f836046cfcb71891afe1f966a40089ff68890be26e983e2d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS Lean+C reader r2"
     },
     {
       "module": "Host.WorldFoldBench",
@@ -5734,9 +5923,9 @@
     {
       "module": "Kernel.DeclaredResourceController",
       "path": "Kernel/DeclaredResourceController.lean",
-      "sha256": "4e27b66f019cae628b5501acb8c499ff5fa205cc6f80b6338d4c9515e6fd620d",
+      "sha256": "cb558d5c9fe4beafbb7faaecfeadd6fce67d644a46e7c86abde31f220bf68dd2",
       "surface": "default",
-      "ownerReportedStatus": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
     },
     {
       "module": "Kernel.DeclaredResourceProjection",
@@ -6600,6 +6789,13 @@
       "ownerReportedStatus": "AUTHORED_UNCOMPILED"
     },
     {
+      "module": "Kernel.JointBackendPartyRecovery",
+      "path": "Kernel/JointBackendPartyRecovery.lean",
+      "sha256": "e302ccba2ed9e430e6b4ff99d458cdd73ad90cf03717fff37427b05f8762ef5a",
+      "surface": "authored-research",
+      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+    },
+    {
       "module": "Kernel.JointControlBootstrap",
       "path": "Kernel/JointControlBootstrap.lean",
       "sha256": "e67ac85a5d23336063b9310c5bc9e0b8165130cc173d1aff4ec802be3ee2b305",
@@ -6759,6 +6955,20 @@
       "sha256": "d6aaed259ef24e0cc3147bfd31cfd1bc7bde63e89d0ed0242f36931840bc3979",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.NativeCurrentMemberKey",
+      "path": "Kernel/NativeCurrentMemberKey.lean",
+      "sha256": "3766213905d7e5c1220692a4b70524d45e8658975d8ede640cc5c3751ddf6f0c",
+      "surface": "authored-research",
+      "ownerReportedStatus": "COMPILED axiom gates PASS exact373 b723a784"
+    },
+    {
+      "module": "Kernel.NativeCurrentMemberKeyIO",
+      "path": "Kernel/NativeCurrentMemberKeyIO.lean",
+      "sha256": "ff7bdd75d46579296992a69b9509029bd0872656fe98b676efaa565dc3e543c1",
+      "surface": "authored-research",
+      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
     },
     {
       "module": "Kernel.NativeHistorySelection",
@@ -7447,6 +7657,13 @@
       "ownerReportedStatus": "source repair; controller81c PASS; receiver pending checkpoint"
     },
     {
+      "module": "Kernel.ResourceInvocationSignatureFirst",
+      "path": "Kernel/ResourceInvocationSignatureFirst.lean",
+      "sha256": "067cb322f6a4f893871ad4f3238818f76ada1faea1995a0e9934e4b611fd942f",
+      "surface": "default",
+      "ownerReportedStatus": "helper qualified immutable373; signature-first-03.log named axiom gates; shared receiver hunk pending coherent qualification"
+    },
+    {
       "module": "Kernel.ResourceMoneyOperationDomain",
       "path": "Kernel/ResourceMoneyOperationDomain.lean",
       "sha256": "b2a9d5fccbca00ee674832f14b15b8de1de51d345976b2ef1c50bc20179c6195",
@@ -7841,7 +8058,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "6f6266a62fe151bdb590d27f4e31bcd0282ba91e92f0f7b7235c39349974238d",
+      "sha256": "43dabd4f86eec6e2f52a1d39f709a931f92d42a59aed9193fe53d5f4459dee6d",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9057,11 +9274,18 @@
       "ownerReportedStatus": "AUTHORED repair after check01: explicit ghost-context parameters; not rechecked"
     },
     {
+      "module": "Theory.BendClosureDeadFunction",
+      "path": "Theory/BendClosureDeadFunction.lean",
+      "sha256": "de47c4353184141c49ef9cacecd0021e40b1b45b1a7aafddf021221f6410db65",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
       "module": "Theory.BendClosureDeadSteps",
       "path": "Theory/BendClosureDeadSteps.lean",
-      "sha256": "61043be00f86dccb884a97c4b71f8052e26f9a01784230377c744d7adb23e158",
+      "sha256": "997fca4e17fe64192dba67e85ced2f06198c7e56ac594bdaba49be2de0ed96d1",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Theory.BendClosureDecode",
@@ -9078,11 +9302,32 @@
       "ownerReportedStatus": "PASS controller-denotation-check-01; exact current source qualified"
     },
     {
+      "module": "Theory.BendClosureKnownArgument",
+      "path": "Theory/BendClosureKnownArgument.lean",
+      "sha256": "5502148860660aa762f226b33550c46094513d16067205882589f5dc4fbe787d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
       "module": "Theory.BendClosureMachine",
       "path": "Theory/BendClosureMachine.lean",
       "sha256": "9082847ba94378ec90e9a4d7febf617fc4e35595e96a66a779571d3795f6a8cf",
       "surface": "default",
       "ownerReportedStatus": "source repair/API append awaiting immediate coherent check"
+    },
+    {
+      "module": "Theory.BendClosureMatchingSteps",
+      "path": "Theory/BendClosureMatchingSteps.lean",
+      "sha256": "c78bed6141064565a3d87f6ce0cb7f155f8c7a4a81fe20590bd88a10ae805542",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
+      "module": "Theory.BendClosureProjectionSteps",
+      "path": "Theory/BendClosureProjectionSteps.lean",
+      "sha256": "d50dedc21581b72416acf9efbb14f2069cb2d613ea04bdaa249366f5ddb9a6a6",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Theory.BendClosureReadiness",
@@ -9096,7 +9341,7 @@
       "path": "Theory/BendClosureRefusalPrefix.lean",
       "sha256": "46e59cdb771186836d1b3a2922ed9c65184f960ef8e393965420a864210ed801",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Theory.BendClosureReification",
@@ -9127,11 +9372,32 @@
       "ownerReportedStatus": "AUTHORED UNCOMPILED; depends on graded Response source"
     },
     {
+      "module": "Theory.BendClosureRetainedFrames",
+      "path": "Theory/BendClosureRetainedFrames.lean",
+      "sha256": "0f069562567126aca9d3379a9052c2ecaaa0c9f858434fba778f589aa1347a11",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
+    },
+    {
       "module": "Theory.BendClosureRetainedReady",
       "path": "Theory/BendClosureRetainedReady.lean",
       "sha256": "bc6e349b850d5eaa5143ab4b8fc695f1f4686b7200132b1be18ea749521209ef",
       "surface": "authored-research",
       "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+    },
+    {
+      "module": "Theory.BendClosureRetainedTransitions",
+      "path": "Theory/BendClosureRetainedTransitions.lean",
+      "sha256": "76717df8e91498484554d5265cf24bdd817891626d85193ca3ad582a6b83a341",
+      "surface": "authored-research",
+      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "module": "Theory.BendClosureReturnFrames",
+      "path": "Theory/BendClosureReturnFrames.lean",
+      "sha256": "216036ae2a2e1ff62650b9e9444fc1f8a031351c7eeda8de8adef124dd1e5516",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Theory.BendClosureReturnSteps",
@@ -9160,6 +9426,13 @@
       "sha256": "4fad6811c963cffb40faa90ed05bcf6d39cb328423414ad0451092c325bb43b2",
       "surface": "default",
       "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+    },
+    {
+      "module": "Theory.BendClosureUnderapplication",
+      "path": "Theory/BendClosureUnderapplication.lean",
+      "sha256": "3096646d86ba3d35e861ba9fd2282815c1b9a1b7c490039a774a17889c2db02c",
+      "surface": "authored-research",
+      "ownerReportedStatus": "PASS"
     },
     {
       "module": "Theory.BendClosureValueSteps",
@@ -9701,18 +9974,25 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Theory.ObjectiveBendDemandMachine",
+      "path": "Theory/ObjectiveBendDemandMachine.lean",
+      "sha256": "b8df5dcd701894f8d89eb202a19b6ed20a240a0ac55361bea0ad7ae50c6140b2",
+      "surface": "authored-research",
+      "ownerReportedStatus": "ACTUAL_SCOPED_PASS"
+    },
+    {
       "module": "Theory.ObjectiveBendExtensions",
       "path": "Theory/ObjectiveBendExtensions.lean",
-      "sha256": "2cf6f55ec45ed0fd74d3e07eccf7aa1cd2997dbb118ac43f0890c0cae23636d9",
+      "sha256": "82923d3a743f463381cb212da96e2889fc5148d6db2c492a797463f5909a5f63",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+      "ownerReportedStatus": "ACTUAL_SCOPED_PASS"
     },
     {
       "module": "Theory.ObjectiveBendOpenRecursion",
       "path": "Theory/ObjectiveBendOpenRecursion.lean",
-      "sha256": "395970e9373366be83b642919db0069e6921d1e6af57335f39759974231c0621",
+      "sha256": "0d0f8edf7b9650a576ff280f37c601947e916ca329f3eafb2325a47b4db0e3b8",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+      "ownerReportedStatus": "ACTUAL_SCOPED_PASS"
     },
     {
       "module": "Theory.PlanBinding",
@@ -9883,11 +10163,32 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Verify.BendMinimalCensus",
+      "path": "Verify/BendMinimalCensus.lean",
+      "sha256": "22ce776f07cc7610883585412b699c8834fdb901672e20e5664b2e2ede7cc852",
+      "surface": "authored-research",
+      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+    },
+    {
       "module": "Verify.BendObliviousProbe",
       "path": "Verify/BendObliviousProbe.lean",
       "sha256": "0bec4fe76b3503e5752be549177ec370c44f8f4ff67f350ab3cc6b619a628ef9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Verify.BendUnrolledDirectEmit",
+      "path": "Verify/BendUnrolledDirectEmit.lean",
+      "sha256": "91dccfa237a750bc02bf5c666726d125d86eb40a7e384d409547bc570643762c",
+      "surface": "authored-research",
+      "ownerReportedStatus": "Diagnostic emitter relocated to Verify; previous private artifact qualified, new namespace scoped check pending"
+    },
+    {
+      "module": "Verify.BendUnrolledIR2Emit",
+      "path": "Verify/BendUnrolledIR2Emit.lean",
+      "sha256": "320ba49756d06ac77e186398dce22c9d1c037f018ad56a6bb56c20e74d91f10f",
+      "surface": "authored-research",
+      "ownerReportedStatus": "Diagnostic emitter relocated to Verify; previous private artifact qualified, new namespace scoped check pending"
     },
     {
       "module": "Verify.GenericSimplexAxioms",
@@ -9915,14 +10216,14 @@
       "path": "Verify/GenericSimplexOperatorBridge.lean",
       "sha256": "4fe93de1461de06e6123730e4c1aa5b24533531084b599a901f85cdc00a22b8f",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED exact-prefix completion refinement; prior full-tip-equality bridge compiled"
+      "ownerReportedStatus": "PASS call-family-check.log Lean and axiom gates"
     },
     {
       "module": "Verify.GenericSimplexSourceHarness",
       "path": "Verify/GenericSimplexSourceHarness.lean",
       "sha256": "025bdfd0bbe6c6b034ade2ed69a96ceb686dd8ce9f46f6dd7f3cce5c6a12c376",
       "surface": "authored-research",
-      "ownerReportedStatus": "COMPILE PASS against frozen qualified373; actual source fixture NOT RUN"
+      "ownerReportedStatus": "PASS call-family-check.log Lean and axiom gates"
     },
     {
       "module": "Verify.JointDecisionRecovery",
@@ -9934,9 +10235,9 @@
     {
       "module": "Verify.NativeJointSourceFixture",
       "path": "Verify/NativeJointSourceFixture.lean",
-      "sha256": "6b365ce03b69c36479fe9263644090560075420efaa9b56e54fa2c53425c4138",
+      "sha256": "cc8daee06d9b7a02b63eaa5acb476ece17aca329f256aaaef1d4383e6a57dc12",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED; no initialized stores or signed ingress execution claimed"
+      "ownerReportedStatus": "Checked against exact owned warm imports. Initializer general denotation/source-count theorem; actual initializer inhabitant/refuser not run. Fixture actual fresh four-store genesis initialized, zero accepted history; first signed submit held for frontier tag-specific ingress repair."
     },
     {
       "module": "Verify.ResourceReserveBirthFixture",

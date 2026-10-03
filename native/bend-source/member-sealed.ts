@@ -38,6 +38,15 @@ export type Transcript = {
   definitions: string[];
 };
 
+// A sealed header resolves exactly the manifest edge; no source path is loaded.
+export function sourceImport(text: string): {path:string;alias:string} {
+  const named = /^import\s+([A-Za-z_]\w*)\s+from\s+"(\.\/[^"\\]+\.bend)"\s*(?:#.*)?$/.exec(text);
+  if (named) return {alias:named[1],path:named[2]};
+  const ordinary = /^import\s+(\S+)(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/.exec(text);
+  if (!ordinary) throw new Error("malformed source import");
+  return {path:ordinary[1],alias:ordinary[2]??""};
+}
+
 // Match the pinned loader's leading import grammar. Replacing characters with
 // spaces retains every source offset for diagnostics without granting a loader
 // access to paths. Manifest edges must equal the actually parsed imports.
@@ -53,10 +62,7 @@ function header(module: Module, index: number, modules: Module[]): {
     const trimmed = lines[line].trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
     if (!/^import(\s|$)/.test(trimmed)) break;
-    const parsed = /^import\s+(\S+)(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/.exec(trimmed);
-    fail(parsed !== null, "malformed source import");
-    const path = parsed![1];
-    const alias = parsed![2] ?? "";
+    const {path,alias} = sourceImport(trimmed);
     fail(alias !== "" || path === "Base", "only Base has an empty alias");
     fail(path === "Base" || /^\.\/(?:[A-Za-z_][\w-]*\/)*[A-Za-z_][\w-]*\.bend$/.test(path),
       "only sealed local import paths are supported; resolve external names before publication");

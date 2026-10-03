@@ -110,12 +110,25 @@ impl Anchor {
                 return Err(bad("authority checksum"));
             }
             let next = Journal::decode(&b)?;
-            if next.allocations.len() != journal.allocations.len() + 1 {
-                return Err(bad("authority discontinuity"));
+            let added = next
+                .allocations
+                .len()
+                .checked_sub(journal.allocations.len())
+                .filter(|x| *x > 0 && *x <= 65536)
+                .ok_or_else(|| bad("authority discontinuity"))?;
+            let prefix = &next.allocations[..added];
+            let first = &prefix[0];
+            if prefix.iter().any(|a| {
+                a.consumed || a.generation != first.generation || a.purpose != first.purpose
+            }) {
+                return Err(bad("authority batch context"));
             }
-            let a = &next.allocations[0];
-            if a.consumed || journal.reserve(a.id.clone(), a.generation.clone(), a.purpose)? != next
-            {
+            let ids = prefix
+                .iter()
+                .rev()
+                .map(|a| a.id.clone())
+                .collect::<Vec<_>>();
+            if journal.reserve_batch(&ids, first.generation.clone(), first.purpose)? != next {
                 return Err(bad("authority transition"));
             }
             journal = next;
@@ -131,7 +144,18 @@ impl Anchor {
         if self.poisoned {
             return Err(bad("authority poisoned by uncertain IO"));
         }
-        let next = self.journal.reserve(id, g, p)?;
+        self.reserve_batch(&[id], g, p)
+    }
+    pub fn reserve_batch(
+        &mut self,
+        ids: &[Correlation],
+        g: Generation,
+        p: Purpose,
+    ) -> Result<Vec<u8>> {
+        if self.poisoned {
+            return Err(bad("authority poisoned by uncertain IO"));
+        }
+        let next = self.journal.reserve_batch(ids, g, p)?;
         let b = next.encode();
         let append = (|| {
             self.log.write_all(&(b.len() as u32).to_le_bytes())?;
@@ -146,6 +170,23 @@ impl Anchor {
         self.journal = next;
         Ok(b)
     }
+    pub fn handle(&mut self, b: &[u8]) -> Result<Vec<u8>> {
+        if self.poisoned {
+            return Err(bad("authority uncertain"));
+        }
+        match b.split_first() {
+            Some((0, [])) => Ok(self.journal.encode()),
+            Some((1, b)) => {
+                let (id, g, p) = parse_request(b)?;
+                self.reserve(id, g, p)
+            }
+            Some((2, b)) => {
+                let (ids, g, p) = parse_batch_request(b)?;
+                self.reserve_batch(&ids, g, p)
+            }
+            _ => Err(bad("anchor request")),
+        }
+    }
 }
 pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
     let mut a = Anchor::open(root)?;
@@ -157,17 +198,7 @@ pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
         s.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
         let answer = (|| {
             let b = read_packet(&mut s)?;
-            if a.poisoned {
-                return Err(bad("authority uncertain"));
-            }
-            match b.split_first() {
-                Some((0, [])) => Ok(a.journal.encode()),
-                Some((1, b)) => {
-                    let (id, g, p) = parse_request(b)?;
-                    a.reserve(id, g, p)
-                }
-                _ => Err(bad("anchor request")),
-            }
+            a.handle(&b)
         })();
         let mut response = vec![];
         match answer {
@@ -382,6 +413,71 @@ mod tests {
             generation: Nat::new(1),
             configuration: Nat::new(2),
         }
+    }
+    #[test]
+    fn full_controller_sized_batch_is_single_durable_record_and_preserves_old_rows() {
+        let p = temp("batch-9418");
+        let old = Correlation {
+            pool: Nat::new(9),
+            row: Nat::new(0),
+        };
+        let rows = (0..9418)
+            .map(|i| Correlation {
+                pool: Nat::new(42),
+                row: Nat::new(i),
+            })
+            .collect::<Vec<_>>();
+        let (first_len, full_len, expected);
+        {
+            let mut a = Anchor::open(&p).unwrap();
+            let first = a.reserve(old.clone(), g(), Purpose::Coin).unwrap();
+            first_len = first.len();
+            let mut req = vec![2];
+            req.extend(batch_request(&rows, &g(), Purpose::Triple));
+            let full = a.handle(&req).unwrap();
+            full_len = full.len();
+            expected = Journal::decode(&full).unwrap();
+            assert_eq!(expected.spent.len(), 9419);
+            assert_eq!(
+                &expected.spent[..9418],
+                rows.iter().rev().cloned().collect::<Vec<_>>()
+            );
+            assert_eq!(fs::metadata(p.join("authority.log")).unwrap().len() as usize, first_len+full_len+2*36,
+                "one complete append for the whole fixed Plan, not one whole-journal append per row");
+            let before = a.journal.clone();
+            assert!(a
+                .reserve_batch(
+                    &[
+                        Correlation {
+                            pool: Nat::new(43),
+                            row: Nat::new(0)
+                        },
+                        rows[0].clone()
+                    ],
+                    g(),
+                    Purpose::AudiencePad
+                )
+                .is_err());
+            assert_eq!(
+                a.journal, before,
+                "all-row preflight must not partially consume a refused batch"
+            );
+        }
+        let mut a = Anchor::open(&p).unwrap();
+        assert_eq!(
+            a.journal, expected,
+            "lost response/restart preserves exact completed batch"
+        );
+        assert!(a.reserve_batch(&rows, g(), Purpose::Triple).is_err());
+        assert!(a.reserve(old, g(), Purpose::Triple).is_err());
+        let mut bad = fs::read(p.join("authority.log")).unwrap();
+        *bad.last_mut().unwrap() ^= 1;
+        drop(a);
+        fs::write(p.join("authority.log"), bad).unwrap();
+        assert!(
+            Anchor::open(&p).is_err(),
+            "complete checksum fault stays a hard refusal"
+        );
     }
     #[test]
     fn lost_reply_and_relabel() {

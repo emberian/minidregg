@@ -949,10 +949,42 @@ pub(crate) fn live_mailbox(
         .iter()
         .map(|v| parse_live_core(&p, v))
         .collect::<Result<Vec<_>>>()?;
-    bind_epoch_profile(root, &p, 4, admitted, &live_plan(&p, 4, origin, tick)?)?;
-    if let Some(v) = claim(root, &p, 3, input)? {
-        return Ok(v);
+    let plan = live_plan(&p, 4, origin, tick)?;
+    let mut admission = b"Mini/live-mailbox-admission/v1".to_vec();
+    admission.extend_from_slice(&p.aad(4));
+    for n in [plan.origin, plan.tick, plan.when, segment.len() as u64] {
+        admission.extend_from_slice(&n.to_le_bytes());
     }
+    // Full opaque input retained, not only its digest: source responsibility
+    // survives even if no gateway request reached qualified durable admission.
+    admission.extend_from_slice(segment);
+    let claimed = root.join(format!("live-mailbox-epoch-{epoch}.admitted"));
+    let output = root.join(format!("epoch-{epoch}-stage-3.output"));
+    if root.join(format!("epoch-{epoch}-profile")).exists()
+        || ["input", "claimed"].iter().any(|suffix| {
+            root.join(format!("epoch-{epoch}-stage-3.{suffix}"))
+                .exists()
+        })
+    {
+        return Err("live mailbox refuses legacy journal migration".into());
+    }
+    if claimed.exists() {
+        if read_private(&claimed, admission.len())? != admission {
+            return Err("changed live mailbox exact admission/profile refused".into());
+        }
+        if !output.exists() {
+            return Err("live mailbox claimed without output; uncertainty, no native redispatch or reshuffle".into());
+        }
+        let cached = read_private(&output, 19 + p.width * p.payload)?;
+        unbatch(&p, LAYERS, &cached)?;
+        return Ok(cached);
+    }
+    if output.exists() {
+        return Err("live mailbox orphan output without admitted input".into());
+    }
+    // One fsynced immutable record binds profile, exact authenticated input and
+    // consumed receiver fence before any physical gateway offer/fetch.
+    persist(&claimed, &admission)?;
     let mut replies = Vec::with_capacity(width);
     for core in cores {
         let (id, cap, result) = match core {
@@ -1257,6 +1289,106 @@ mod tests {
             assert_eq!(packet.len(), p.size(hop + 1));
         }
         assert_eq!(packet, original);
+    }
+    #[test]
+    fn live_mailbox_grouped_exact_input_replay_crash_and_orphan_fences() {
+        let root = scratch();
+        let (secrets, publics) = keys();
+        let paths: Vec<_> = secrets
+            .iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let path = root.join(format!("key-{i}"));
+                persist(&path, key.key_bytes().unwrap().as_ref()).unwrap();
+                path
+            })
+            .collect();
+        let auth: Vec<_> = (0..4).map(|i| vec![i + 1; 32]).collect();
+        let mut segment = live_register(
+            &root.join("registrar"),
+            0,
+            2,
+            1024,
+            &[
+                live_cover(0, 2, 1024, &publics).unwrap(),
+                live_cover(0, 2, 1024, &publics).unwrap(),
+            ],
+            &auth,
+            1000,
+            1000,
+        )
+        .unwrap();
+        for hop in 0..3 {
+            segment = live_relay(
+                &root.join(format!("relay-{hop}")),
+                0,
+                2,
+                1024,
+                hop,
+                &paths[hop],
+                &auth[hop],
+                &segment,
+                1000,
+                1000,
+            )
+            .unwrap();
+        }
+        let gateway = native::AsyncDispatch::open(
+            &root.join("gateway"),
+            &root.join("no-native.sock"),
+            b"{}",
+            4,
+            32,
+            950,
+        )
+        .unwrap();
+        let receiver = root.join("receiver");
+        let call = |state: &Path, origin| {
+            live_mailbox(
+                &gateway, state, 0, 2, 1024, &paths[3], &auth[3], &segment, origin, 1000,
+            )
+        };
+        let out = call(&receiver, 1000).unwrap();
+        assert_eq!(call(&receiver, 1000).unwrap(), out);
+        assert!(call(&receiver, 2000).is_err());
+        let admitted =
+            read_private(&receiver.join("live-mailbox-epoch-0.admitted"), 65536).unwrap();
+        assert!(admitted.ends_with(&segment));
+        assert!(!receiver.join("epoch-0-profile").exists());
+        assert!(!receiver.join("epoch-0-stage-3.input").exists());
+        assert!(!receiver.join("epoch-0-stage-3.claimed").exists());
+        let interrupted = root.join("interrupted");
+        directory(&interrupted).unwrap();
+        persist(
+            &interrupted.join("live-mailbox-epoch-0.admitted"),
+            &admitted,
+        )
+        .unwrap();
+        assert!(call(&interrupted, 1000)
+            .unwrap_err()
+            .contains("uncertainty"));
+        assert!(!interrupted.join("epoch-0-stage-3.output").exists());
+        let orphan = root.join("orphan");
+        directory(&orphan).unwrap();
+        persist(&orphan.join("epoch-0-stage-3.output"), &out).unwrap();
+        assert!(call(&orphan, 1000).unwrap_err().contains("orphan"));
+        let legacy = root.join("legacy");
+        directory(&legacy).unwrap();
+        persist(&legacy.join("epoch-0-profile"), b"legacy").unwrap();
+        assert!(call(&legacy, 1000).unwrap_err().contains("legacy"));
+        let corrupt = root.join("corrupt");
+        directory(&corrupt).unwrap();
+        persist(&corrupt.join("live-mailbox-epoch-0.admitted"), &admitted).unwrap();
+        persist(&corrupt.join("epoch-0-stage-3.output"), b"bad").unwrap();
+        assert!(call(&corrupt, 1000).is_err());
+        assert_eq!(
+            std::fs::read_dir(root.join("gateway"))
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|x| x == "class"))
+                .count(),
+            0
+        );
     }
     #[test]
     fn live_relay_grouped_admission_exact_replay_crash_and_conflict_fences() {

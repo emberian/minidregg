@@ -28,7 +28,7 @@ theorem step_dead_pair (limits : Limits) (library : Library) (state : State)
     step limits library state =
       {allocationState state heap pointer (directData instruction) with
         stack := .second .Q0 pointer :: state.stack, control := .evaluate second environment} := by
-  cases instruction <;> simp [step, control, evaluate, code, found, closure,
+  cases instruction <;> simp [Quan.live, step, control, evaluate, code, found, closure,
     BendClosureMachine.allocate, firstCode, allocated, push, allocationState,
     directData, Nat.not_le_of_lt room, go] <;> rfl
 
@@ -76,7 +76,7 @@ theorem step_dead_let (limits : Limits) (library : Library) (state : State)
     step limits library state =
       {afterEnvironment (allocationState state middle pointer (directData instruction)) heap nextEnvironment with
         control := .evaluate body nextEnvironment, sourceSteps := state.sourceSteps + 1} := by
-  cases instruction <;> simp [step, control, evaluate, code, found, closure,
+  cases instruction <;> simp [Quan.live, step, control, evaluate, code, found, closure,
     BendClosureMachine.allocate, valueCode, allocated, BendClosureMachine.bind, isData,
     installed, allocationState, afterEnvironment, directData, sourceStep, go] <;> rfl
 
@@ -115,7 +115,6 @@ theorem dead_let_source {book : Book} (limits : Limits) (library : Library) (sta
     exact .unlet (by intro impossible; cases impossible) (by intro impossible; cases impossible)
   · rw [step_dead_let limits library state pc environment value body pointer nextEnvironment
       instruction middle heap control found valueCode allocated installed]
-    rfl
 
 #assert_axioms closure_allocation_run
 #assert_axioms step_dead_pair

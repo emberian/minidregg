@@ -112,7 +112,7 @@ structure Checked (artifact : BendWorldProgramCodec.Artifact) (compilerBytes : L
     some (((string json "surfaceSource").toOption.getD "").toUTF8.toList)
   nativeCore : artifact.book = core.bytes
   nativeEntry : artifact.entry = (string json "entry").toOption.getD ""
-  sourceVerified : verifySource json core artifact.entry (artifact.profile.bounds[7]?).getD 0 = .ok ()
+  sourceVerified : verifySource json core artifact.entry ((artifact.profile.bounds[7]?).getD 0) = .ok ()
   planExact : artifact.plan = planId compilerBytes
   sourceProfile : artifact.profile.upstream = BendWorldSource.upstreamPin ∧
     artifact.profile.semantics = "bendtt-eval-walk-947db722-v1" ∧
@@ -139,7 +139,7 @@ def check (artifact : BendWorldProgramCodec.Artifact) (compilerBytes : List UInt
               some (((string json "surfaceSource").toOption.getD "").toUTF8.toList) then
             if nativeCore : artifact.book = core.bytes then
               if nativeEntry : artifact.entry = (string json "entry").toOption.getD "" then
-                if sourceVerified : verifySource json core artifact.entry (artifact.profile.bounds[7]?).getD 0 = .ok () then
+                if sourceVerified : verifySource json core artifact.entry ((artifact.profile.bounds[7]?).getD 0) = .ok () then
                   if planExact : artifact.plan = planId compilerBytes then
                     if sourceProfile : artifact.profile.upstream = BendWorldSource.upstreamPin ∧
                         artifact.profile.semantics = "bendtt-eval-walk-947db722-v1" ∧

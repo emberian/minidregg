@@ -142,10 +142,13 @@ def scenario(name,real):
                     (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
             start(command('cover',d/f'client{i}-worker',out,0,i,'--source',source,'--keys',keycsv))
         # Establish complete cover inventory before public links begin.
-        for _ in range(6000):
+        # This is public profile admission, before any cohort connection. Use
+        # the existing60s startup interval, reserving10s for enrolled links;
+        # never start an incomplete inventory or move the original origin.
+        while int(time.time()*1000) < origin-10000:
             if all((d/f'client{i}-out'/f'epoch-{N-1}.cover').exists() for i in range(W)):break
             time.sleep(.005)
-        else:raise RuntimeError('cover inventory did not finish')
+        else:raise RuntimeError('cover inventory did not finish before original public startup cutoff')
         registrar_sources=[directory(d/f'client{i}-incoming') for i in range(W)]
         start(command('registrar',d/'registrar-worker',d/'batch0-out',1,0,
             '--source',','.join(map(str,registrar_sources)),'--auth-keys',authcsv))
@@ -201,6 +204,10 @@ def scenario(name,real):
         for label in ['batch0-out','batch1-out','batch2-out','batch3-out','broadcast-out']:
             counts[label]=sum((d/label/f'epoch-{epoch}.payload').exists() for epoch in range(N))
         latencies=[v['relative_ms']-(v['epoch']+v['phase']*G+1)*T for v in public]
+        valid_delivery={f'client{i}':sum(
+            (d/f'client{i}-broadcast'/f'epoch-{epoch}.record').exists()
+            and (d/f'client{i}-broadcast'/f'epoch-{epoch}.record').read_bytes()[0]==1
+            for epoch in range(N)) for i in range(W)}
         (d/'public-run-summary.json').write_text(json.dumps({
             'tick_ms':T,'processing_slots':G,'epochs':N,'epoch_buffer_lengths':N/G,
             'contribution_to_broadcast_schedule_ms':5*G*T,
@@ -208,10 +215,17 @@ def scenario(name,real):
             'records_observed':len(public),'records_expected':12*N,
             'min_wire_lateness_ms':min(latencies) if latencies else None,
             'max_wire_lateness_ms':max(latencies) if latencies else None,
-            'durable_useful_epoch_counts':counts,'actual_source_submissions':len(forwarded),
+            'durable_produced_epoch_counts':counts,'valid_delivered_broadcast_epochs':valid_delivery,'actual_source_submissions':len(forwarded),
             'errors':errors},indent=2))
-baseline=scenario('all-cover',False)
-active=scenario('native-delayed',True)
-assert baseline==active,'public epoch/slot/phase/record shape changed with hidden work'
+# Historical lookup is read-only; preserve BOTH poles even if processing
+# refutes baseline. An unsuccessful pole never becomes a qualified comparison.
+results={};failures=[]
+for name,real in [('all-cover',False),('native-delayed',True)]:
+    try:results[name]=scenario(name,real)
+    except Exception as error:
+        failures.append(name+': '+repr(error))
+        log.write(('REFUTED '+failures[-1]+'\n').encode())
+if failures:raise RuntimeError('; '.join(failures))
+assert results['all-cover']==results['native-delayed'],'public epoch/slot/phase/record shape changed with hidden work'
 log.write(b'PASS matched public shapes at 1s: all-cover and delayed actual native work; no missing broadcast, no catch-up burst; initial physical continuation and authorized fresh-cap repair fetch returned exact source outcome; exactly two source submissions.\n')
 log.close()

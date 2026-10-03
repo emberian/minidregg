@@ -1,0 +1,197 @@
+/- Executable demand/sharing candidate for the NEW Objective Bend runtime core.
+It consumes actual elaborated Objective terms, not a linked method dictionary.
+Thunk identity is stable through evaluating→cached update; Fix uses one tied
+heap address. All values here are effect-free: native authority and affine
+continuations are not constructors and cannot be minted/copied by this machine.
+Weak-head reference adequacy, graph/capture ownership and new type metatheory
+remain obligations; old BendTT metatheory is not asserted for this edition. -/
+import Theory.ObjectiveBendOpenRecursion
+namespace Minidregg.Theory.ObjectiveBendDemandMachine
+open Minidregg.Theory.ObjectiveBendOpenRecursion
+set_option autoImplicit false
+
+abbrev Address := Nat
+abbrev Environment := List Address
+inductive RuntimeValue where
+  | closure (body : Term) (environment : Environment)
+  | natural (value : Nat)
+  | label (value : String)
+  | record (fields : List (String × Address))
+  | specification (metadata extension : Address)
+  | prototype (specification target : Address)
+  deriving Repr
+structure Closure where
+  term : Term
+  environment : Environment
+  deriving Repr
+inductive Cell where
+  | suspended (origin : Closure)
+  | evaluating (origin : Closure)
+  | cached (origin : Closure) (value : RuntimeValue)
+  deriving Repr
+inductive Frame where
+  | argument (term : Term) (environment : Environment)
+  | update (address : Address)
+  | field (name : String)
+  | reflect | metadata | project
+  | extend (fields : List (String × Term)) (environment : Environment)
+  | condition (zero successorBody : Term) (environment : Environment)
+  | binaryLeft (primitive : Primitive) (right : Term) (environment : Environment)
+  | binaryRight (primitive : Primitive) (left : RuntimeValue)
+  deriving Repr
+inductive Refusal where
+  | unbound | missingCell | missingField | wrongValue | invalidUpdate | capacity
+  deriving Repr
+inductive Control where
+  | evaluate (term : Term) (environment : Environment)
+  | enter (address : Address)
+  | blackhole (address : Address)
+  | returned (value : RuntimeValue)
+  | complete (value : RuntimeValue)
+  | refused (reason : Refusal)
+  deriving Repr
+structure State where
+  heap : Array Cell
+  control : Control
+  stack : List Frame
+  deriving Repr
+structure Limits where
+  heap : Nat
+  stack : Nat
+  deriving Repr
+
+def initial (term : Term) : State := ⟨#[],.evaluate term [],[]⟩
+def allocateFields (heap : Array Cell) (environment : Environment)
+    (fields : List (String × Term)) : Array Cell × List (String × Address) :=
+  let pair := fields.foldl (fun (prior : Array Cell × List (String × Address)) field =>
+    (prior.1.push (.suspended ⟨field.2,environment⟩),(field.1,prior.1.size)::prior.2)) (heap,[])
+  (pair.1,pair.2.reverse)
+def valueTerm : RuntimeValue → Option Term
+  | .natural n => some (.nat n) | .label name => some (.label name) | _ => none
+def scalarValue : Term → Option RuntimeValue
+  | .nat n => some (.natural n) | .label name => some (.label name) | _ => none
+
+def stepRaw (state : State) : State :=
+  match state.control with
+  | .complete _ | .refused _ | .blackhole _ => state
+  | .enter address => match state.heap[address]? with
+    | none => {state with control:=.refused .missingCell}
+    | some (.evaluating _) => {state with control:=.blackhole address}
+    | some (.cached _ value) => {state with control:=.returned value}
+    | some (.suspended origin) =>
+      {state with heap:=state.heap.set! address (.evaluating origin), control:=.evaluate origin.term origin.environment,stack:=.update address::state.stack}
+  | .evaluate term environment => match term with
+    | .bound index => match environment[index]? with
+      | some address => {state with control:=.enter address}
+      | none => {state with control:=.refused .unbound}
+    | .lam body => {state with control:=.returned (.closure body environment)}
+    | .nat n => {state with control:=.returned (.natural n)}
+    | .label name => {state with control:=.returned (.label name)}
+    | .app function argument => {state with control:=.evaluate function environment, stack:=.argument argument environment::state.stack}
+    | .mix lower upper => {state with control:=.evaluate (mixBody lower upper) environment}
+    | .fix spec inherited =>
+      let address := state.heap.size
+      let body := Term.app (Term.app (spec.rename Nat.succ) (.bound 0)) (inherited.rename Nat.succ)
+      {state with heap:=state.heap.push (.suspended ⟨body,address::environment⟩),control:=.enter address}
+    | .specification descriptor extension =>
+      let address := state.heap.size
+      {state with heap:= (state.heap.push (.suspended ⟨descriptor,environment⟩)).push (.suspended ⟨extension,environment⟩), control:=.returned (.specification address (address+1))}
+    | .prototype spec target =>
+      let address := state.heap.size
+      {state with heap:= (state.heap.push (.suspended ⟨spec,environment⟩)).push (.suspended ⟨target,environment⟩), control:=.returned (.prototype address (address+1))}
+    | .reflect term => {state with control:=.evaluate term environment,stack:=.reflect::state.stack}
+    | .metadata term => {state with control:=.evaluate term environment,stack:=.metadata::state.stack}
+    | .project term => {state with control:=.evaluate term environment,stack:=.project::state.stack}
+    | .record fields =>
+      let allocated := allocateFields state.heap environment fields
+      {state with heap:=allocated.1,control:=.returned (.record allocated.2)}
+    | .get target name => {state with control:=.evaluate target environment,stack:=.field name::state.stack}
+    | .extend inherited fields => {state with control:=.evaluate inherited environment, stack:=.extend fields environment::state.stack}
+    | .ifZero value zero successorBody => {state with control:=.evaluate value environment, stack:=.condition zero successorBody environment::state.stack}
+    | .binary primitive left right => {state with control:=.evaluate left environment, stack:=.binaryLeft primitive right environment::state.stack}
+  | .returned value => match state.stack with
+    | [] => {state with control:=.complete value}
+    | frame::rest => match frame with
+      | .update address => match state.heap[address]? with
+        | some (.evaluating origin) =>
+          {state with heap:=state.heap.set! address (.cached origin value),stack:=rest}
+        | _ => {state with control:=.refused .invalidUpdate,stack:=rest}
+      | .reflect => match value with
+        | .prototype spec _ => {state with control:=.enter spec,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .metadata => match value with
+        | .specification descriptor _ => {state with control:=.enter descriptor,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .project => match value with
+        | .prototype _ target => {state with control:=.enter target,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .argument argument environment => match value with
+        | .specification _ extension => {state with control:=.enter extension}
+
+        | .closure body captured => {state with heap:=state.heap.push (.suspended ⟨argument,environment⟩), control:=.evaluate body (state.heap.size::captured),stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .field name => match value with
+        | .record fields => match fields.find? (fun field => field.1 == name) with
+          | some (_,address) => {state with control:=.enter address,stack:=rest}
+          | none => {state with control:=.refused .missingField,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .extend fields environment => match value with
+        | .record inherited =>
+          let allocated := allocateFields state.heap environment fields
+          let retained := inherited.filter (fun prior => !(fields.any fun field => field.1 == prior.1))
+          {state with heap:=allocated.1,control:=.returned (.record (allocated.2++retained)),stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .condition zero successorBody environment => match value with
+        | .natural 0 => {state with control:=.evaluate zero environment,stack:=rest}
+        | .natural (n+1) => {state with heap:=state.heap.push (.cached ⟨.nat n,[]⟩ (.natural n)), control:=.evaluate successorBody (state.heap.size::environment),stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .binaryLeft primitive right environment =>
+        {state with control:=.evaluate right environment,stack:=.binaryRight primitive value::rest}
+      | .binaryRight primitive left =>
+        match (valueTerm left).bind (fun l => (valueTerm value).bind (primitiveResult primitive l)) with
+        | some result => match scalarValue result with
+          | some next => {state with control:=.returned next,stack:=rest}
+          | none => {state with control:=.refused .wrongValue,stack:=rest}
+        | none => {state with control:=.refused .wrongValue,stack:=rest}
+
+/-- A blackhole is a non-result divergence observation, not a catchable language
+exception. Tick exhaustion and allocation capacity suspend with the EXACT
+pre-transition state, so raising bounds never loses control/environment/stack. -/
+inductive Suspension where
+  | ticks | capacity
+  deriving Repr
+inductive Outcome where
+  | finished (value : RuntimeValue) (state : State)
+  | suspended (reason : Suspension) (state : State)
+  | divergent (address : Address) (state : State)
+  | refused (reason : Refusal) (state : State)
+  deriving Repr
+
+def step (limits : Limits) (state : State) : Outcome :=
+  match state.control with
+  | .complete value => .finished value state
+  | .blackhole address => .divergent address state
+  | .refused reason => .refused reason state
+  | _ =>
+    let next := stepRaw state
+    if next.heap.size ≤ limits.heap && next.stack.length ≤ limits.stack then
+      .suspended .ticks next
+    else .suspended .capacity state
+
+def runBounded (limits : Limits) : Nat → State → Outcome
+  | 0,state => match state.control with
+    | .complete value => .finished value state
+    | .blackhole address => .divergent address state
+    | .refused reason => .refused reason state
+    | _ => .suspended .ticks state
+  | ticks+1,state => match step limits state with
+    | .suspended .ticks next => runBounded limits ticks next
+    | other => other
+
+/-- Compatibility projection for inspecting retained state; Outcome must be
+used when distinguishing completion, suspension and divergence matters. -/
+def run (limits : Limits) (ticks : Nat) (state : State) : State :=
+  match runBounded limits ticks state with
+  | .finished _ retained | .suspended _ retained | .divergent _ retained | .refused _ retained => retained
+
+end Minidregg.Theory.ObjectiveBendDemandMachine

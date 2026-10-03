@@ -111,7 +111,7 @@ fn composition_controls(site: &Site, value: &Value, manifest: &Manifest) -> Stri
         .modules
         .iter()
         .enumerate()
-        .map(|(i, m)| format!("<option value=\"{i}\">{}</option>", escape(&m.name)))
+        .map(|(i, m)| format!("<option value=\"{i}\"{}>{}</option>", if i == manifest.entry_module { " selected" } else { "" }, escape(&m.name)))
         .collect::<String>();
     let mut body=format!("<section><h2>Compose modules</h2>{}<label>Module name<input name=name required></label><label>Source document reference<input name=reference required></label><button>Add module</button></form>{}<label>Entry module<select name=module>{options}</select></label><label>Entry definition<input name=definition required value=\"{}\"></label><button>Select entry</button></form>",form("add-module"),form("entry"),escape(&manifest.entry_definition));
     for (i, module) in manifest.modules.iter().enumerate().skip(1) {

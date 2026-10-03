@@ -1,6 +1,9 @@
 //! Durable receipt continuity custody. Lean owns every proof decision; this module
 //! only bounds transport, serializes completions, and durably remembers verified points.
 pub(crate) mod carry;
+#[path = "current_recipient_source.rs"]
+mod current_recipient;
+pub(crate) use current_recipient::{current_recipient_source, VerifiedCurrentRecipient};
 use crate::{workspace, Result, SOCKET};
 use serde_json::{json, Value};
 use std::cmp::Ordering;

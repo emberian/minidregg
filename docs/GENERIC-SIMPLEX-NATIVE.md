@@ -56,7 +56,10 @@ The client artifact boundary is the existing canonical
 `runCall` decode that exact frame; an invocation retains its existing signed
 command and receives only the deployment's fixed domain/profile encoding.
 Birth, install and capability calls retain their original inner ingress bytes.
-The adapter performs no signing and does not grant admission. New invocations
+The adapter first checks the existing native decoder for the outer call family.
+A birth/install/capability wrapper cannot smuggle signed invocation bytes into
+generic historical replay and bypass the live invocation budget. The adapter
+performs no signing and does not grant admission. New invocations
 retain the existing local synchronous step bound; historical replay and receipt
 lookup use the original admission rather than applying today's local bound.
 Internal refusal details are operator diagnostics. A shared Host submit hook
@@ -94,11 +97,11 @@ logical ancestry still needs a bounded chunk/reassembly transport before it
 exceeds a single protocol frame. No pruning or finite-lifetime guarantee follows
 from the storage adapter.
 
-Still required for integrated qualification: current-source compilation; the
-actual four-node native source fixture; the shared Host propose/await hook; local
-guard and receive-provenance extraction into the global consensus proof; source
-funding and private recovery joins; and justified checkpoint/reconfiguration
-liability retention. VerifiedCommit verifies real signatures at an IO boundary;
+Current source consumer compilation passed against the frozen receiver cohort.
+Still required for integrated qualification: the actual four-node signed source
+action, shared Host propose/await hook, the final native-consumer binding to the
+reachable-engine proof, source funding and private recovery joins, and justified
+checkpoint/reconfiguration liability retention. VerifiedCommit verifies real signatures at an IO boundary;
 it is not itself a proof of cryptographic unforgeability or executable refinement.
 
 
@@ -114,7 +117,8 @@ some participants without blocking lookup of the earlier completed call. An exce
 outcome and refreshes actual sources; it is never reported as a rollback.
 
 `testing/generic-simplex-operator.py` speaks the existing four-byte little-endian
-length plus opcode/payload protocol. The owner supplies
+length plus opcode/payload protocol and its exact 12,102,760-byte Host body
+bound (distinct from the crypto helper frame limit). The owner supplies
 `MINI_AGREEMENT_BRIDGE_CONFIG`, whose JSON has:
 
 - `readerCommand`: explicit argv for the matching native Host on source store 0.
@@ -137,9 +141,13 @@ there is no automatic second semantic dispatch. Exact lookup/retry uses the
 existing source receipt and agreement evidence.
 
 Current qualification: seven Python framing/file/process-boundary checks pass,
-including an actual child timeout with no redispatch. The initial Lean operator bridge
-compiled against the passing source consumer and frozen receiver cohort. Its
-subsequent exact-prefix completion refinement awaits its scoped check. The
-matched Host/client integration and real source fixture have not run.
+including an actual child timeout with no redispatch. The Lean operator bridge, exact-prefix completion refinement and native
+call-family guard compile against the passing source consumer and frozen receiver
+cohort. The matched Host/client integration and first actual source action have
+not run.
 This local four-participant driver does not claim four independent processes or
 failure domains. Operator service fuel is not a source-funded recovery grant.
+
+The native call-family guard and general mismatch-refusal theorem passed their
+scoped check before the first source action. The earlier compiled adapter lacked
+this outer/inner family equality; no source mutation was run through it.

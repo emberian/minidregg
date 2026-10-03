@@ -1,10 +1,33 @@
-/- Independent, target-parametric modular-extension meaning. This is neither
-selector resolution nor an authorization model. A target may be a number,
+/- Independent, context/target-parametric modular-extension meaning. This is neither
+selector resolution nor an authorization model. Inherited and provided target types may differ. A target may be a number,
 function, document, record, or another specification. Partial specifications
 retain their requirements and laws before any fixed point is available.
 The implementation must separately represent this meaning in executable code. -/
+/- FixedPoint below is an algebraic equation only. It does not choose the least or
+computational fixed point or imply operational convergence. Behavioral law
+retention is an optional compatible-interface policy, not all ModExt semantics. -/
 namespace Minidregg.Theory.ObjectiveBendExtensions
 set_option autoImplicit false
+
+/-- OPEN modular extensions may strengthen/change their inherited target.
+Context-dependent target families retain self-sensitive typing. Homogeneous
+endomorphisms below are only the closed special case. -/
+abbrev OpenExtension (C : Type) (V W : C → Type) := (context : C) → V context → W context
+
+def composeOpen {C : Type} {U V W : C → Type}
+    (earlier : OpenExtension C U V) (later : OpenExtension C V W) : OpenExtension C U W :=
+  fun context inherited => later context (earlier context inherited)
+
+def OpenFixedPoint {C : Type} {U : C → Type}
+    (extension : OpenExtension C U (fun _ => C)) (self : C) (inherited : U self) : Prop :=
+  extension self inherited = self
+
+/-- A genuine changing-target witness: Unit→List Nat→Nat under final context
+Nat. This cannot be expressed as a homogeneous Nat endomorphism composition. -/
+theorem heterogeneous_fixed_point :
+    OpenFixedPoint (composeOpen
+      (fun (self : Nat) (_ : Unit) => [self])
+      (fun (_ : Nat) (inherited : List Nat) => inherited.length)) 1 () := rfl
 
 abbrev Extension (A : Type) := A → A → A
 

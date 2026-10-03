@@ -1,0 +1,89 @@
+import importlib.util
+import io
+from pathlib import Path
+import struct
+import sys
+import tempfile
+import unittest
+
+path = Path(__file__).with_name("generic-simplex-operator.py")
+spec = importlib.util.spec_from_file_location("agreement_operator", path)
+bridge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bridge)
+
+
+class NativeFrameBoundary(unittest.TestCase):
+    def test_exact_all_operation_roundtrips(self):
+        for operation in range(256):
+            stream = io.BytesIO()
+            bridge.write_frame(stream, operation, bytes((0, 255, operation)))
+            stream.seek(0)
+            self.assertEqual(bridge.read_frame(stream), (operation, bytes((0, 255, operation))))
+            self.assertIsNone(bridge.read_frame(stream))
+
+    def test_truncation_and_length_refusal(self):
+        for raw in (b"\x01", struct.pack("<I", 0),
+                    struct.pack("<I", bridge.MAX_FRAME + 1),
+                    struct.pack("<I", 3) + b"\x02x"):
+            with self.assertRaises(RuntimeError):
+                bridge.read_frame(io.BytesIO(raw))
+
+    def test_no_mutation_forwarding_set(self):
+        self.assertEqual(bridge.READ_ONLY, frozenset((0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 91, 144)))
+        self.assertNotIn(2, bridge.READ_ONLY)
+        self.assertFalse((set(range(12, 256)) - {91, 144}) & bridge.READ_ONLY)
+
+    def test_original_call_cannot_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as name:
+            path = Path(name) / "call.bin"
+            bridge.save_call(path, b"exact-original")
+            with self.assertRaises(FileExistsError):
+                bridge.save_call(path, b"replacement")
+            self.assertEqual(path.read_bytes(), b"exact-original")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_actual_child_reply_is_opaque_and_original_retained(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            code = ("import os,sys;from pathlib import Path;"
+                    "p=Path(sys.argv[2]);p.write_bytes(b'opaque-native-frame');"
+                    "os.chmod(p,0o600)")
+            reply = bridge.run_submission([sys.executable, "-c", code],
+                                          root, 12, 2, b"original-call")
+            self.assertEqual(reply, b"opaque-native-frame")
+            tickets = list(root.iterdir())
+            self.assertEqual(len(tickets), 1)
+            self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"original-call")
+
+    def test_child_timeout_has_no_automatic_redispatch(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            code = ("import sys,time;from pathlib import Path;"
+                    "Path(sys.argv[1]).with_name('started').write_text('once');"
+                    "time.sleep(5)")
+            with self.assertRaisesRegex(RuntimeError, "completion uncertain"):
+                bridge.run_submission([sys.executable, "-c", code],
+                                      root, 12, 1, b"retained-after-timeout")
+            tickets = list(root.iterdir())
+            self.assertEqual(len(tickets), 1)
+            self.assertEqual((tickets[0] / "started").read_text(), "once")
+            self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"retained-after-timeout")
+            self.assertFalse((tickets[0] / "outcome.bin").exists())
+
+    def test_outcome_rejects_public_and_linked_files(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            path = root / "outcome.bin"
+            path.write_bytes(b"opaque-native-codec")
+            path.chmod(0o644)
+            with self.assertRaises(RuntimeError):
+                bridge.read_outcome(path)
+            path.chmod(0o600)
+            self.assertEqual(bridge.read_outcome(path), b"opaque-native-codec")
+            (root / "link").symlink_to(path)
+            with self.assertRaises(OSError):
+                bridge.read_outcome(root / "link")
+
+
+if __name__ == "__main__":
+    unittest.main()

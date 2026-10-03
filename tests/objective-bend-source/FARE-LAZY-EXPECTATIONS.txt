@@ -1,0 +1,30 @@
+Independent primary-scholar source consumers, 2026-10-03
+
+These files were written against the compiler owner's concrete source grammar.
+No parser, typechecker, evaluator or backend success is asserted by authorship.
+They deliberately do not import a backend evaluator into their intended meaning.
+
+LazyUnusedArgument.result converges to Nat 7 in the intended non-strict source.
+Its unused second argument is fix(identity), which has no weak-head normal form.
+A strict argument evaluation CPS machine diverges before entering keep; giving
+that machine a resumable clock does not repair the mismatch. A first-order/Data
+backend CAN pass by encoding delayed expressions and environments correctly.
+
+LazyUnusedField.result converges to Nat 7. Tying the whole record lazily is not
+sufficient if all fields are evaluated when the record is first demanded. The
+bad field must remain suspended when good is selected. Requesting bad instead
+has no Nat result; resource exhaustion must remain suspension, not zero or a
+successful mathematical fixed-point witness.
+
+LazySharedField.result converges to Nat 512 in pure CBN and call-by-need alike.
+It also discriminates their cost: call-by-need must evaluate the expensive
+field's ONE thunk identity at most once, and force its cached result on the
+second selection. Ordinary distinct work(8n) calls are not required to share.
+Observe diagnostic counts privately or in a specified public cost semantics;
+do not add an effectful counter and silently assume a theorem for the pure core.
+A checkpoint after that field has been forced must preserve its cached value
+and identity on restore. Serialization success alone is not that theorem.
+
+Primary motivation: LTUO sections 5.3.2.3 (Lazy Y), 5.3.2.5 and 10.3.2
+(Suspended Records or Records of Suspensions). These particular programs are
+our independent discriminators, not quoted examples or claims made by Faré.

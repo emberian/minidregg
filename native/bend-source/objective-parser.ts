@@ -26,12 +26,13 @@ const splitParameters=(raw:string):Parameter[]=>{
  for(let i=0;i<raw.length;i++){if("(<[".includes(raw[i]))depth++;if(")>]".includes(raw[i]))depth--;if(raw[i]===","&&depth===0){pieces.push(raw.slice(start,i));start=i+1;}}
  pieces.push(raw.slice(start));
  return pieces.map(piece=>{const m=/^\s*([+-]?)([A-Za-z_]\w*)\s*:\s*(.+?)\s*$/.exec(piece);
-  if(!m)throw new Error("invalid typed parameter");return {name:m[2],type:m[3],quantity:m[1]==="+"?"copy":m[1]==="-"?"dead":"default"};});
+  if(!m){const inferred=/^\s*([+-]?)([A-Za-z_]\w*)\s*$/.exec(piece);if(!inferred)throw new Error("invalid parameter");return {name:inferred[2],type:"_",quantity:inferred[1]==="+"?"copy":inferred[1]==="-"?"dead":"default"};}
+  return {name:m[2],type:m[3],quantity:m[1]==="+"?"copy":m[1]==="-"?"dead":"default"};});
 };
 const signature=(raw:string,line:Line):Signature=>{
- const m=/^([A-Za-z_]\w*)\s*\((.*)\)\s*->\s*(.+?)\s*$/.exec(raw);
- if(!m)fail(line,"expected typed method signature");
- try{return {name:m[1],parameters:splitParameters(m[2]),resultType:m[3],span:span(line)};}catch(e){fail(line,String(e));}
+ const m=/^([A-Za-z_]\w*)\s*\((.*)\)(?:\s*->\s*(.+?))?\s*$/.exec(raw);
+ if(!m)fail(line,"expected method signature");
+ try{return {name:m[1],parameters:splitParameters(m[2]),resultType:m[3]??"_",span:span(line)};}catch(e){fail(line,String(e));}
 };
 export function expression(text:string,sourceSpan:Span):Expr{
  const tokens:{text:string,start:number,end:number}[]=[];let at=0;
@@ -116,6 +117,8 @@ export function parseObjective(source:string){
  while(cursor<lines.length){
   const line=lines[cursor++];if(line.indent!==0)fail(line,"unexpected indentation");
   if(line.text==="edition ObjectiveBend 1")continue;
+  const namedImport=/^import\s+([A-Za-z_]\w*)\s+from\s+"(\.\/[^"\\]+\.(?:obend|bend))"$/.exec(line.text);
+  if(namedImport){imports.push({path:namedImport[2],alias:namedImport[1],span:span(line)});continue;}
   const imported=/^import\s+(\S+)(?:\s+as\s+([A-Za-z_]\w*))?$/.exec(line.text);
   if(imported){imports.push({path:imported[1],alias:imported[2]??"",span:span(line)});continue;}
   const spec=/^spec\s+([A-Za-z_]\w*)\s+for\s+(.+):$/.exec(line.text);

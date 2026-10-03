@@ -1,5 +1,8 @@
 //! Canonical subset of Compiler.PrivateSuccessorCustodyCodec.
-use std::io::{Error, ErrorKind, Result};
+use std::{
+    collections::BTreeSet,
+    io::{Error, ErrorKind, Result},
+};
 pub const MAX: usize = 16 * 1024 * 1024;
 pub fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
@@ -130,7 +133,7 @@ impl Generation {
         })
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Correlation {
     pub pool: Nat,
     pub row: Nat,
@@ -218,17 +221,12 @@ impl Journal {
             });
         }
         r.finish()?;
+        let spent = j.spent.iter().collect::<BTreeSet<_>>();
+        let allocated = j.allocations.iter().map(|a| &a.id).collect::<BTreeSet<_>>();
         if j.encode() != b
-            || j.spent.len() != j.allocations.len()
-            || j.allocations.iter().any(|a| !j.spent.contains(&a.id))
-            || j.spent
-                .iter()
-                .enumerate()
-                .any(|(i, x)| j.spent[..i].contains(x))
-            || j.allocations
-                .iter()
-                .enumerate()
-                .any(|(i, x)| j.allocations[..i].iter().any(|y| x.id == y.id))
+            || spent.len() != j.spent.len()
+            || allocated.len() != j.allocations.len()
+            || spent != allocated
         {
             return Err(bad("not canonical reachable journal"));
         }
@@ -240,27 +238,68 @@ impl Journal {
         generation: Generation,
         purpose: Purpose,
     ) -> Result<Self> {
-        if self.spent.contains(&id) {
-            return Err(Error::new(ErrorKind::AlreadyExists, "spent physical row"));
+        self.reserve_batch(&[id], generation, purpose)
+    }
+    /// Identical journal bytes to repeated reserve in the supplied order, but
+    /// preflights every stable ID before copying/persisting any of the batch.
+    pub fn reserve_batch(
+        &self,
+        ids: &[Correlation],
+        generation: Generation,
+        purpose: Purpose,
+    ) -> Result<Self> {
+        if ids.is_empty() || ids.len() > 65536 {
+            return Err(bad("empty/over-capacity physical reservation batch"));
         }
-        let mut j = self.clone();
-        j.spent.insert(0, id.clone());
-        j.allocations.insert(
-            0,
-            Allocation {
-                id,
-                generation,
-                purpose,
-                consumed: false,
-            },
-        );
+        let mut seen = self.spent.iter().cloned().collect::<BTreeSet<_>>();
+        for id in ids {
+            if !seen.insert(id.clone()) {
+                return Err(Error::new(
+                    ErrorKind::AlreadyExists,
+                    "spent/aliased physical row",
+                ));
+            }
+        }
+        let mut j = Self {
+            spent: ids
+                .iter()
+                .rev()
+                .cloned()
+                .chain(self.spent.iter().cloned())
+                .collect(),
+            allocations: ids
+                .iter()
+                .rev()
+                .cloned()
+                .map(|id| Allocation {
+                    id,
+                    generation: generation.clone(),
+                    purpose,
+                    consumed: false,
+                })
+                .chain(self.allocations.iter().cloned())
+                .collect(),
+        };
         if j.encode().len() > MAX {
             return Err(bad("journal exhausted: source retirement proof required"));
         }
+        // The original canonical ordering is part of the source-native codec.
+        j.spent.shrink_to_fit();
         Ok(j)
     }
     pub fn extends(&self, old: &Self) -> bool {
-        old.spent.iter().all(|id| self.spent.contains(id))
+        let spent = self.spent.iter().collect::<BTreeSet<_>>();
+        old.spent.iter().all(|id| spent.contains(id))
+    }
+    pub fn preserves_allocations(&self, old: &Self) -> bool {
+        let indexed = self
+            .allocations
+            .iter()
+            .map(|a| (&a.id, a))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        old.allocations
+            .iter()
+            .all(|a| indexed.get(&a.id).is_some_and(|x| **x == *a))
     }
 }
 pub fn request(id: &Correlation, g: &Generation, p: Purpose) -> Vec<u8> {
@@ -305,4 +344,37 @@ mod tests {
         assert!(Journal::decode(&b).is_err());
         assert!(Journal::decode(&[]).is_err());
     }
+}
+
+pub fn batch_request(ids: &[Correlation], g: &Generation, p: Purpose) -> Vec<u8> {
+    let mut b = b"DREGG.PRIVATE.RESERVE.BATCH\x01".to_vec();
+    g.put(&mut b);
+    Nat::new(p as u64).put(&mut b);
+    Nat::new(ids.len() as u64).put(&mut b);
+    for id in ids {
+        id.put(&mut b);
+    }
+    b
+}
+pub fn parse_batch_request(b: &[u8]) -> Result<(Vec<Correlation>, Generation, Purpose)> {
+    let frame = b"DREGG.PRIVATE.RESERVE.BATCH\x01";
+    if !b.starts_with(frame) {
+        return Err(bad("batch reservation frame"));
+    }
+    let mut r = Reader::new(&b[frame.len()..])?;
+    let g = Generation::get(&mut r)?;
+    let p = purpose(r.nat()?.value()?)?;
+    let count = r.count()?;
+    if count == 0 || count > 65536 {
+        return Err(bad("batch reservation count"));
+    }
+    let mut ids = Vec::with_capacity(count);
+    for _ in 0..count {
+        ids.push(Correlation::get(&mut r)?);
+    }
+    r.finish()?;
+    if batch_request(&ids, &g, p) != b {
+        return Err(bad("batch canonical"));
+    }
+    Ok((ids, g, p))
 }

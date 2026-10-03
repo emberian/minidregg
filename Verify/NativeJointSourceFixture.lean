@@ -2,14 +2,14 @@
 Real source fixture for four independently stored Mini agreement participants.
 The initializer derives a fresh source genesis under the actual agreed runtime
 profile, then binds its exact seed to the committee context. Every subsequent
-setup/workdesk ingress goes through GenericSimplexSourceHarness.run. No supplied
+setup/workdesk ingress goes through GenericSimplexSourceHarness.runCall. No supplied
 record, validation callback, checked engine input, or accepted history is seeded.
 This source is WIP until checked with the common receiver's qualified outputs.
 -/
 import Kernel.NativeHostGenesis
-import Kernel.NativeHost
+import Kernel.NativeHostContext
 import Compiler.GenericSimplexSourceAnchor
-import Verify.GenericSimplexSourceHarness
+import Verify.GenericSimplexOperatorBridge
 import Lean
 
 namespace Minidregg.Verify.NativeJointSourceFixture
@@ -60,14 +60,11 @@ def baseConfig (root : System.FilePath) (helpers : Helpers)
     (context : Context) (index : Nat) : NativeHost.Config :=
   { deployment := ⟨⟨8500⟩, 10, 11, 12⟩
     federation := ⟨9⟩
-    template := ⟨⟨5⟩, 100000, 10000⟩
+    template := {issuer := ⟨5⟩, ownerBudget := 100000, lifetime := 10000}
     tariff := ⟨3, 2, 1, 0, 99, 0⟩
     genesisHeight := 10
     expectedSeed := ⟨0⟩
-    storage := { binary := helpers.store
-      root := replicaDirectory root index / "source"
-      key := replicaDirectory root index / "checkpoint.key"
-      checkpointEvery := 8 }
+    storage := { binary := helpers.store, root := replicaDirectory root index / "source", key := replicaDirectory root index / "checkpoint.key", checkpointEvery := 8 }
     signature := ⟨helpers.signature⟩
     jointControl := none
     activityControl := none
@@ -101,7 +98,21 @@ def derive (root : System.FilePath) (helpers : Helpers) (context : Context)
     (genesis (baseConfig root helpers context 0) alice bob)).mapError
       (fun detail => s!"fixture source genesis refused: {repr detail}"))
 
-def initialize (root : System.FilePath) (helpers : Helpers)
+/-- Same explicit fresh-genesis bootstrap as NativeHost.bootstrap, factored here
+so the fixture consumes the coherent Context/Genesis/Replay cohort without a
+foreign Host/Main overlay. Validation and physical exact-seed readback remain. -/
+def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :
+    IO (Except String Unit) := do
+  match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
+  | .error detail => return .error detail
+  | .ok durable =>
+      if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+      match NativeHost.validateLoaded config durable with
+      | .error detail => return .error detail
+      | .ok _ =>
+          return ← DurableReceiverIO.bootstrap config.transport ResourceBirthCodec.rootBytes durable.image.seed
+
+def initializeStores (root : System.FilePath) (helpers : Helpers)
     (alicePath bobPath : System.FilePath) : IO Unit := do
   require (!(← root.pathExists)) "fixture root exists; use a fresh owner-private directory"
   privateDirectory root
@@ -136,7 +147,7 @@ def initialize (root : System.FilePath) (helpers : Helpers)
       expectedSeed := NativeHost.seedIdentity built.image.seed}
     require (config.runtimeParameters == (baseConfig root helpers context 0).runtimeParameters)
       "binding exact source anchor changed the normalized runtime semantics"
-    IO.ofExcept (← NativeHost.bootstrap config (DurableReceiverCodec.encode built.image))
+    IO.ofExcept (← bootstrapFresh config (DurableReceiverCodec.encode built.image))
     writePrivate (native root helpers index).journal
       (journalStream.encode (⟨bound,index,0,[],[]⟩ : Journal)).toByteArray
   IO.FS.writeFile (root / "manifest.json") (Json.mkObj
@@ -175,20 +186,33 @@ def openReplicas (root : System.FilePath) (helpers : Helpers) :
     replicas := replicas.push ⟨config,participant⟩
   return replicas
 
-def runIngress (root : System.FilePath) (helpers : Helpers)
+def runCall (root : System.FilePath) (helpers : Helpers)
     (ingress : System.FilePath) (fuel : Nat) : IO Unit := do
   let replicas ← openReplicas root helpers
-  let _ ← GenericSimplexSourceHarness.run fuel replicas (← IO.FS.readBinFile ingress).toList
+  let _ ← GenericSimplexSourceHarness.runCall fuel replicas (← IO.FS.readBinFile ingress).toList
   pure ()
+
+/-- Operator output is a native Outcome frame in a private file. Diagnostic
+stdout never substitutes for a receipt. Original signed call bytes are retained. -/
+def submitCall (root : System.FilePath) (helpers : Helpers)
+    (callFile outputFile : System.FilePath) (fuel : Nat) : IO Unit := do
+  let replicas ← openReplicas root helpers
+  let (_, outcome) ← GenericSimplexOperatorBridge.submit fuel replicas
+    (← IO.FS.readBinFile callFile).toList
+  writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
 
 end Minidregg.Verify.NativeJointSourceFixture
 
+open Minidregg.Verify.NativeJointSourceFixture
+
 def main (args : List String) : IO Unit := do
-  open Minidregg.Verify.NativeJointSourceFixture in
   match args with
   | ["init", root, store, signature, agreement, alice, bob] =>
-      initialize root ⟨store,signature,agreement⟩ alice bob
+      initializeStores root ⟨store,signature,agreement⟩ alice bob
   | ["run", root, store, signature, agreement, ingress, fuel] =>
       let some fuel := fuel.toNat? | throw (IO.userError "invalid finite service fuel")
-      runIngress root ⟨store,signature,agreement⟩ ingress fuel
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | run ROOT STORE SIGNATURE AGREEMENT SIGNED_INGRESS FUEL")
+      runCall root ⟨store,signature,agreement⟩ ingress fuel
+  | ["submit-call", root, store, signature, agreement, callFile, outputFile, fuel] =>
+      let some fuel := fuel.toNat? | throw (IO.userError "invalid finite service fuel")
+      submitCall root ⟨store,signature,agreement⟩ callFile outputFile fuel
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | run ROOT STORE SIGNATURE AGREEMENT ORIGINAL_SIGNED_CALL FUEL")

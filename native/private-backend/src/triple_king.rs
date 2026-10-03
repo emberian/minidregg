@@ -101,6 +101,7 @@ pub struct PreparedBasis {
     random: RandomShares,
     bytes: Vec<u8>,
     consumer_generation: Generation,
+    preparation_rows: Vec<Correlation>,
 }
 impl PreparedBasis {
     /// Local coherent degree-f / committed degree-2f inputs. Neither zero
@@ -266,6 +267,7 @@ impl PreparedBasis {
             },
             bytes,
             consumer_generation: consumer.clone(),
+            preparation_rows: ids,
         })
     }
     pub fn bytes(&self) -> &[u8] {
@@ -289,27 +291,24 @@ pub(crate) fn burn_preparation(
 ) -> Result<()> {
     let _guard = custody::lock(&local.with_extension("preparation.lock"))?;
     let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    let mut planned = before.clone();
-    for id in ids {
-        planned = planned.reserve(id.clone(), g.clone(), Purpose::Triple)?;
-    }
-    let mut confirmed = before;
-    for id in ids {
-        let mut req = vec![1];
-        req.extend(crate::codec::request(id, g, Purpose::Triple));
-        let next = Journal::decode(&custody::rpc(anchor, &req)?)?;
-        if !next.extends(&confirmed)
-            || !confirmed
-                .allocations
-                .iter()
-                .all(|a| next.allocations.contains(a))
-            || !next.allocations.iter().any(|a| {
-                a.id == *id && a.generation == *g && a.purpose == Purpose::Triple && !a.consumed
-            })
-        {
-            return Err(bad("preparation allocation binding/retention"));
-        }
-        confirmed = next;
+    before.reserve_batch(ids, g.clone(), Purpose::Triple)?;
+    let mut req = vec![2];
+    req.extend(crate::codec::batch_request(ids, g, Purpose::Triple));
+    let confirmed = Journal::decode(&custody::rpc(anchor, &req)?)?;
+    let indexed = confirmed
+        .allocations
+        .iter()
+        .map(|a| (&a.id, a))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if !confirmed.extends(&before)
+        || !confirmed.preserves_allocations(&before)
+        || ids.iter().any(|id| {
+            indexed
+                .get(id)
+                .is_none_or(|a| a.generation != *g || a.purpose != Purpose::Triple || a.consumed)
+        })
+    {
+        return Err(bad("preparation batch allocation binding/retention"));
     }
     // Persist exact original manifest with the whole completed reservation.
     let mut receipt = b"DREGG.PREPARATION.BURN.V1".to_vec();
@@ -321,12 +320,7 @@ pub(crate) fn burn_preparation(
         return Err(bad("preparation burn readback"));
     }
     let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    if !latest.extends(&confirmed)
-        || !confirmed
-            .allocations
-            .iter()
-            .all(|a| latest.allocations.contains(a))
-    {
+    if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
         return Err(bad("preparation anchor regression"));
     }
     Ok(())
@@ -368,6 +362,7 @@ pub struct CheckedTriples {
     count: usize,
     context: [u8; 32],
     basis_bytes: Vec<u8>,
+    preparation_rows: Vec<Correlation>,
     holder: u16,
     triples: Vec<(Field, Field, Field)>,
 }
@@ -386,6 +381,11 @@ impl CheckedTriples {
     }
     pub fn basis_bytes(&self) -> &[u8] {
         &self.basis_bytes
+    }
+    /// Public identities burned before the King seed getters. Relabeling a
+    /// consumer generation does not make these original seeds independent.
+    pub fn preparation_rows(&self) -> &[Correlation] {
+        &self.preparation_rows
     }
     pub fn holder(&self) -> u16 {
         self.holder
@@ -815,6 +815,7 @@ impl TripleKing {
                     count: self.basis.count,
                     context: self.context,
                     basis_bytes: self.basis.bytes.clone(),
+                    preparation_rows: self.basis.preparation_rows.clone(),
                     holder: me,
                     triples,
                 });
@@ -1129,12 +1130,7 @@ pub(crate) mod tests {
                     match listener.accept() {
                         Ok((mut s, _)) => {
                             let b = custody::read_packet(&mut s).unwrap();
-                            let out = match b[0] {
-                                0 => Ok(a.journal.encode()),
-                                1 => crate::codec::parse_request(&b[1..])
-                                    .and_then(|(id, g, p)| a.reserve(id, g, p)),
-                                _ => Err(bad("fixture RPC")),
-                            };
+                            let out = a.handle(&b);
                             let mut reply = vec![];
                             match out {
                                 Ok(b) => {
@@ -1163,6 +1159,11 @@ pub(crate) mod tests {
             }
         }
     }
+    impl AnchorFixture {
+        pub(crate) fn socket(&self) -> &Path {
+            &self.sock
+        }
+    }
     impl Drop for AnchorFixture {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::SeqCst);
@@ -1176,10 +1177,17 @@ pub(crate) mod tests {
         prepared_count(1, fault)
     }
     fn prepared_count(count: usize, fault: Option<u16>) -> Vec<Vec<PreparedSource>> {
+        prepared_count_instance(count, fault, 0)
+    }
+    fn prepared_count_instance(
+        count: usize,
+        fault: Option<u16>,
+        instance: u64,
+    ) -> Vec<Vec<PreparedSource>> {
         let mut holders = vec![vec![]; 4];
         for dealer in 0..3u16 {
-            let ag = generation(100 + dealer as u64);
-            let og = generation(200 + dealer as u64);
+            let ag = generation(100 + dealer as u64 + 1000 * instance);
+            let og = generation(200 + dealer as u64 + 1000 * instance);
             let mut aa = (0..4)
                 .map(|i| {
                     AcssId::new(i, dealer, 4, 1, &ag, acss_seed_count(count, 1).unwrap()).unwrap()
@@ -1188,7 +1196,12 @@ pub(crate) mod tests {
             let polys = (0..acss_seed_count(count, 1).unwrap())
                 .map(|i| {
                     vec![
-                        Field(0x10000 + dealer as u128 * 157 + i as u128 * 31),
+                        Field(
+                            0x10000
+                                + dealer as u128 * 157
+                                + i as u128 * 31
+                                + instance as u128 * 419,
+                        ),
                         Field(i as u128 + 17),
                     ]
                 })
@@ -1562,14 +1575,17 @@ pub(crate) mod tests {
         .is_err());
     }
     pub(crate) fn checked_for_consumer(count: usize) -> Vec<CheckedTriples> {
-        let material = prepared_count(count, None);
+        checked_inventory(count, 0)
+    }
+    pub(crate) fn checked_inventory(count: usize, instance: u64) -> Vec<CheckedTriples> {
+        let material = prepared_count_instance(count, None, instance);
         let mut anchors = vec![];
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&format!("consumer-{i}"));
             let a = AnchorFixture::new(&r);
             let basis = PreparedBasis::reserve_new(
-                &generation(300),
+                &generation(300 + 1000 * instance),
                 0,
                 count,
                 0,
@@ -1578,7 +1594,7 @@ pub(crate) mod tests {
                 &r.join("burn"),
             )
             .unwrap();
-            nodes.push(TripleKing::new(&generation(300), basis).unwrap());
+            nodes.push(TripleKing::new(&generation(300 + 1000 * instance), basis).unwrap());
             anchors.push(a);
         }
         let mut q = start(&mut nodes);
