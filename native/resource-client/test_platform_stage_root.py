@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import io
 import shlex
+import tempfile
+import json
 import tarfile
 import unittest
 spec=importlib.util.spec_from_file_location("platform_stage_root",Path(__file__).with_name("platform-stage-root.py"))
@@ -52,3 +54,23 @@ class RootStageTests(unittest.TestCase):
         self.assertNotIn("MINI_ROOT",text)
         with self.assertRaisesRegex(RuntimeError,"operator account invalid"):
             stage.credential_wrapper(Path("/var/lib/mini-r2"),"hbox;touch")
+
+    def test_metadata_hash_follows_selected_component_not_candidate(self):
+        with tempfile.TemporaryDirectory() as folder:
+            staged=Path(folder);component=staged/"launcher/component-manifest.json";component.parent.mkdir()
+            component.write_text(json.dumps({"host":"/family/host"}));original=stage.sha(component)
+            (staged/"candidate.json").write_text("different provenance bytes")
+            value={"componentManifest":"/family/launcher/component-manifest.json","componentManifestSha256":original}
+            rewritten={};result=stage.metadata_variant(value,Path("/family"),Path("/frame/candidate"),staged,rewritten)
+            self.assertEqual(result["componentManifest"],"/frame/candidate/launcher/component-manifest.json")
+            self.assertEqual(result["componentManifestSha256"],stage.sha(component))
+            self.assertNotEqual(result["componentManifestSha256"],stage.sha(staged/"candidate.json"))
+            self.assertEqual(stage.read(component),{"host":"/frame/candidate/host"})
+            self.assertEqual(stage.metadata_variant(value,Path("/family"),Path("/frame/candidate"),staged,rewritten),result)
+    def test_metadata_dependency_mutation_refused_before_rewrite(self):
+        with tempfile.TemporaryDirectory() as folder:
+            staged=Path(folder);component=staged/"component.json";component.write_text("{}")
+            value={"componentManifest":"/family/component.json","componentManifestSha256":"0"*64}
+            with self.assertRaisesRegex(RuntimeError,"original bytes differ"):
+                stage.metadata_variant(value,Path("/family"),Path("/frame/candidate"),staged,{})
+            self.assertEqual(component.read_text(),"{}")

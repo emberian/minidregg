@@ -47,6 +47,25 @@ def publish(path,value):
     with path.open("x") as out:
         json.dump(value,out,sort_keys=True,indent=2);out.write("\n");out.flush();os.fsync(out.fileno())
     os.chmod(path,0o444)
+def metadata_variant(value,old,new,staged,rewritten):
+    result=rewrite(value,str(old),str(new))
+    for field in ("componentManifest","hostExecutionSupplement"):
+        digest_field=field+"Sha256"
+        if field not in result:continue
+        need(digest_field in value,"metadata dependency hash absent: "+field)
+        selected=Path(result[field]);need(selected.is_relative_to(new),"metadata dependency outside selected family: "+field)
+        target=staged/selected.relative_to(new)
+        need(target.is_file() and not target.is_symlink(),"metadata dependency absent: "+field)
+        expected=value[digest_field]
+        if target in rewritten:
+            need(rewritten[target][0]==expected,"metadata dependency original pin differs: "+field)
+            result[digest_field]=rewritten[target][1]
+        else:
+            need(sha(target)==expected,"metadata dependency original bytes differ: "+field)
+            nested=rewrite(read(target),str(old),str(new))
+            target.unlink();publish(target,nested)
+            rewritten[target]=(expected,sha(target));result[digest_field]=rewritten[target][1]
+    return result
 def credential_wrapper(frame,operator):
     need(re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}",operator) is not None,"operator account invalid")
     frame=absolute(frame)
@@ -128,14 +147,13 @@ def stage(manifest,expected,frame,infra,pins,operator):
         tar.extractall(dest/"source",members=safe_archive(tar),filter="data")
     root_manifest=rewrite(value,str(family),str(final))
     # Root path metadata has its own hashes; executable role bytes remain verbatim.
+    rewritten_metadata={}
     for role in ("candidate","executionDependencies"):
         if role in roles:
             original=roles[role];target=dest/original.relative_to(family)
-            metadata=rewrite(read(original),str(family),str(final))
-            if role=="executionDependencies" and "candidate" in roles:
-                component=dest/roles["candidate"].relative_to(family)
-                metadata["componentManifestSha256"]=sha(component)
+            metadata=metadata_variant(read(original),family,final,dest,rewritten_metadata)
             target.unlink();publish(target,metadata)
+            rewritten_metadata[target]=(sha(original),sha(target))
             root_manifest["sha256"][role]=sha(target)
     if "executionDependencies" in roles:
         target=dest/roles["executionDependencies"].relative_to(family)
@@ -145,6 +163,10 @@ def stage(manifest,expected,frame,infra,pins,operator):
             row["sha256"]=root_manifest["sha256"][role]
         target.unlink();publish(target,metadata)
         root_manifest["sha256"]["executionDependencies"]=sha(target)
+    # Aliased metadata roles retain the rewritten selected file's actual hash.
+    for role,origin in roles.items():
+        if origin.is_relative_to(family) and origin.suffix==".json":
+            root_manifest["sha256"][role]=sha(dest/origin.relative_to(family))
     root_manifest.update(upstreamManifest=str(final/"sealed-manifest.json"),upstreamManifestSha256=expected,
                          rootStaging=str(frame/"staging.json"))
     for role,pin in root_manifest["sha256"].items():
