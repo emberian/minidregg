@@ -396,3 +396,40 @@ without capture.
   proposals. Remedy 4 is Rust, but lives in
   `native/credential-signature-verifier` and
   `native/hyperdocument-link-sqlite-store`, outside this lane's files tonight.
+
+## Round 2: persistent helpers (cause 4), Rust side done, Lean caller proposal
+
+On main: `9309a9be` (signature verifier) and `4eeb1b1f` (SQLite store). Both
+`serve` loops now answer each argv frame in-process with the one-shot
+command's own function, so the reply bytes are unchanged and
+`Compiler/NativeCoprocess.lean` needs no change. The store's crash and hold
+fixtures still fork. An unchanged anchor is fsynced once per process.
+
+Changes still worth making on the Lean side (proposals, not edits):
+
+1. **Verification bytes in the frame, not in three temp files.**
+   - Today: `Compiler/CredentialSignatureIO.lean:53-70` `verify` runs
+     `IO.FS.withTempDir`, writes `public-key.bin`, `frame.bin` and
+     `signature.bin`, sends their paths, and the server reads them back.
+     That is a directory create, three writes and a recursive delete per
+     signature.
+   - Proposed verifier command `verify-hex KEYHEX FRAMEHEX SIGHEX`, the same
+     `verify_strict` over decoded bytes. The frame bound is 64 KiB per
+     argument, so the Lean caller falls back to files above it.
+   - Proposed Lean change: `verify` sends
+     `#["verify-hex", hex publicKey, hex frame, hex signature]` when
+     `frame.length ≤ 32 KiB`, and otherwise keeps the current temp-file path.
+     `parseOutput` is unchanged.
+   - The trust story is unchanged: the same Rust verifier and the same
+     response grammar.
+2. **One open SQLite connection in the store server.** Each in-process
+   request still opens the database and runs its PRAGMAs (`lib.rs:442-446`).
+   A per-root connection cache in `serve` is Rust-only. It needs the
+   anchor/flock discipline reviewed before it ships, so it was not attempted
+   tonight.
+3. **Fewer store round trips per refresh.** `durable-read` returns the
+   suffix, but the Host still asks for a read after every append to confirm
+   it (`readBackEntry`). The append reply could carry the read-back entry.
+   That changes the frame contract, so it needs a Lean change on the caller
+   (`Compiler/DurableReceiverIO.lean:1080`) and a matching verified decode of
+   the combined reply.
