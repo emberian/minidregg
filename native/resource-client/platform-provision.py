@@ -177,11 +177,13 @@ def validate(plan, published=True):
         require(path.is_file(), "missing source recipe: " + str(path))
     if "sshLauncher" in plan:
         launcher = plan["sshLauncher"]
-        require(type(launcher) is dict and set(launcher) == {"path", "sha256"}, "invalid SSH launcher pin")
+        require(type(launcher) is dict and set(launcher) in ({"path", "sha256"}, {"path", "sha256", "renderer"}), "invalid SSH launcher pin")
+        renderer = launcher.get("renderer", "mini-shell-ssh")
+        require(renderer in ("mini-shell-ssh", "mini-shell-ssh-credentials"), "unknown SSH source renderer")
         path = simple(launcher["path"])
         require(Path(launcher["path"]).absolute() == path, "SSH launcher must be canonical")
         require(path.is_file() and os.access(path, os.X_OK)
-                and digest(path) == launcher["sha256"] == digest(source / "deploy/shell/mini-shell-ssh"),
+                and digest(path) == launcher["sha256"] == digest(source / "deploy/shell" / renderer),
                 "SSH launcher differs from the pinned source renderer")
         for parent in (path, *path.parents):
             metadata = parent.stat()

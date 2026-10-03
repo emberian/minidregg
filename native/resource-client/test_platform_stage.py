@@ -36,6 +36,7 @@ class StageTests(unittest.TestCase):
         values=self.planned();p=values["provision-plan.json"]
         self.assertEqual(p["members"][-1]["name"],"connector-1")
         self.assertEqual(p["manifestSha256"],self.options["manifestSha256"])
+        self.assertEqual(p["sshLauncher"]["renderer"],"mini-shell-ssh-credentials")
         self.assertTrue(p["sshLauncher"]["path"].endswith("/mini-shell-ssh-credentials"))
         self.assertEqual(p["sshLauncher"]["sha256"],stage.sha(self.source/"deploy/shell/mini-shell-ssh-credentials"))
         self.assertEqual(p["serviceManager"]["units"]["operator"],"mini-test-r2-store.service")

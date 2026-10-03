@@ -68,6 +68,20 @@ class ProvisioningContract(unittest.TestCase):
             p.validate(dict(plan,sshLauncher={'path':str(copied),'sha256':p.digest(copied)}))
         source.write_text('changed source')
         with self.assertRaisesRegex(ValueError,'pinned source renderer'):p.validate(plan)
+    def test_opt_in_credential_launcher_pins_its_explicit_source_renderer(self):
+        executable=Path('/usr/bin/true').resolve()
+        source=Path(self.plan['sourceRepo'])/'deploy/shell/mini-shell-ssh-credentials'
+        source.write_bytes(executable.read_bytes())
+        launcher={'path':str(executable),'sha256':p.digest(executable),'renderer':'mini-shell-ssh-credentials'}
+        p.validate(dict(self.plan,sshLauncher=launcher))
+        with self.assertRaisesRegex(ValueError,'pinned source renderer'):
+            p.validate(dict(self.plan,sshLauncher={k:v for k,v in launcher.items() if k!='renderer'}))
+        for name in ('../mini-shell-ssh-credentials','arbitrary'):
+            with self.assertRaisesRegex(ValueError,'unknown SSH source renderer'):
+                p.validate(dict(self.plan,sshLauncher=dict(launcher,renderer=name)))
+        source.write_text('changed credential launcher')
+        with self.assertRaisesRegex(ValueError,'pinned source renderer'):
+            p.validate(dict(self.plan,sshLauncher=launcher))
     def test_selected_names_map_to_actual_subjects_and_keep_concurrency(self):
         self.plan['workload']={'members':['member-0','member-1'],'concurrency':8}
         p.validate(self.plan)
