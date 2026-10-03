@@ -57,6 +57,18 @@ def transport {config : Config} {opened : Opened config}
           snapshot.canonicalBytes admitted.pin.cell = opened.durable.snapshot.canonicalBytes admitted.pin.cell
       then .ok () else .error (.durable .transactionConflict) }
 
+theorem transport_other_facets {config : Config} {opened : Opened config}
+    {intent : DataIntent ResourceBirthCodec.rootBytes}
+    (admitted : Admission config opened intent)
+    (snapshot : DataSnapshot ResourceBirthCodec.rootBytes)
+    (proposed : DataIntent ResourceBirthCodec.rootBytes)
+    (accepted : (transport admitted).sourceGate snapshot proposed = .ok ()) :
+    config.otherFacetGate .activity snapshot proposed = .ok () := by
+  cases checked : config.otherFacetGate .activity snapshot proposed with
+  | error reason => simp [transport, checked] at accepted
+  | ok value => cases value; exact checked
+
 #assert_axioms admit
 #assert_axioms transport
+#assert_axioms transport_other_facets
 end Minidregg.Kernel.BendActivityBootstrap

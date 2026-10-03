@@ -33,7 +33,7 @@ theorem lookup_equivalent (linked : Linked helpers layers) :
       have inCore : d ∈ linked.core.book := List.mem_of_find?_eq_some coreFound
       have inCandidate : d ∈ candidate helpers layers := (linked_definitions linked).mem_iff.mp inCore
       have absent := List.find?_eq_none.mp found d inCandidate
-      have matched : (d.k == name) = true := List.find?_some coreFound
+      have matched : (d.k == name) = true := List.find?_some (p := fun definition : Def => definition.k == name) coreFound
       exact False.elim (absent matched)
 
 theorem eval_retained (linked : Linked helpers layers)

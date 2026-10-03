@@ -22,6 +22,8 @@ theorem direct_value_source {book : Book} {program : Program} {pc : Nat}
     (direct : directValue instruction = true) (substitution : Subst) :
     Value book (Term.sub substitution source) := by
   cases exact <;> simp_all [directValue, Term.sub]
+  all_goals subst_vars
+  all_goals simp_all [directValue, Term.sub]
   all_goals constructor
 
 theorem step_direct_value (limits : Limits) (library : Library) (state : State)
@@ -65,6 +67,7 @@ theorem direct_value_stutter {book : Book} (limits : Limits) (library : Library)
       cases impossible
   · rw [step_direct_value limits library state pc environment pointer instruction heap
       control found direct allocated]
+    rfl
 
 #assert_axioms direct_value_source
 #assert_axioms step_direct_value

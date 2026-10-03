@@ -175,3 +175,12 @@ forged chunk refused; original producer bytes stayed intact. This confirms the
 physical continuation artifact join. Running the source continuation consumer
 on repaired bytes is tracked separately; no Activity or successor activation
 is implied. Private runtime evidence remains outside the public source packet.
+
+
+The source-capsule probe's `check-restored` now additionally reads the actual
+independently held canonical participant public pin, checks its configured
+subject/key/source identity, and verifies the supplied authenticated receipt
+continuity extension to the restored endpoint. A source/archive rollback cannot
+pass merely because its own old journal replays correctly. Lost participant
+anchors or compromised participant storage remain the explicit receipt
+continuity boundary. This WIP consumer has not yet run.

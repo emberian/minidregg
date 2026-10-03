@@ -10,30 +10,32 @@ import Theory.BendLiveMachine
 
 namespace Minidregg.Compiler.BendSurfaceLowering
 open Minidregg.Compiler
+open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
 open Minidregg.Theory.BendTT
 open BendWorldSurface
+abbrev BTerm := Minidregg.Theory.BendTT.Term
 set_option autoImplicit false
 
-def fieldsTerm : List Term → Term
+def fieldsTerm : List BTerm → BTerm
   | [] => .Lab "()"
   | value :: rest => .Tup .Q1 value (fieldsTerm rest)
-def constructor (name : String) (fields : List Term) : Term :=
+def constructor (name : String) (fields : List BTerm) : BTerm :=
   .Tup .Q1 (.Lab name) (fieldsTerm fields)
-def decodeFields : Term → Option (List Term)
+def decodeFields : BTerm → Option (List BTerm)
   | .Lab "()" => some []
   | .Tup .Q1 value rest => (decodeFields rest).map (value :: ·)
   | _ => none
-def decodeConstructor (name : String) : Term → Option (List Term)
+def decodeConstructor (name : String) : BTerm → Option (List BTerm)
   | .Tup .Q1 (.Lab found) fields =>
       if found = name then decodeFields fields else none
   | _ => none
 
-def listTerm {α : Type} (encode : α → Term) : List α → Term
+def listTerm {α : Type} (encode : α → BTerm) : List α → BTerm
   | [] => constructor "Nil" []
   | value :: rest => constructor "Con" [encode value, listTerm encode rest]
-def decodeList {α : Type} (decode : Term → Option α) : Term → Option (List α)
+def decodeList {α : Type} (decode : BTerm → Option α) : BTerm → Option (List α)
   | .Tup .Q1 (.Lab "Nil") (.Lab "()") => some []
   | .Tup .Q1 (.Lab "Con") (.Tup .Q1 value (.Tup .Q1 rest (.Lab "()"))) => do
       let value ← decode value
@@ -41,31 +43,31 @@ def decodeList {α : Type} (decode : Term → Option α) : Term → Option (List
       pure (value :: rest)
   | _ => none
 
-theorem decode_fieldsTerm (fields : List Term) : decodeFields (fieldsTerm fields) = some fields := by
+theorem decode_fieldsTerm (fields : List BTerm) : decodeFields (fieldsTerm fields) = some fields := by
   induction fields with
   | nil => rfl
   | cons value rest ih => simp [fieldsTerm, decodeFields, ih]
 
-theorem decode_constructor (name : String) (fields : List Term) :
+theorem decode_constructor (name : String) (fields : List BTerm) :
     decodeConstructor name (constructor name fields) = some fields := by
   simp [decodeConstructor, constructor, decode_fieldsTerm]
 
-theorem decode_listTerm {α : Type} (encode : α → Term) (decode : Term → Option α)
+theorem decode_listTerm {α : Type} (encode : α → BTerm) (decode : BTerm → Option α)
     (inverse : ∀ value, decode (encode value) = some value) (values : List α) :
     decodeList decode (listTerm encode values) = some values := by
   induction values with
   | nil => rfl
   | cons value rest ih => simp [listTerm, constructor, fieldsTerm, decodeList, inverse, ih]
 
-def digestTerm (value : Digest) : Term :=
+def digestTerm (value : Digest) : BTerm :=
   BendSourceRepresentation.bytesTerm (digestStream.encode value)
-def stringTerm (value : String) : Term :=
+def stringTerm (value : String) : BTerm :=
   BendSourceRepresentation.bytesTerm value.toUTF8.toList
-def decodeDigest (term : Term) : Option Digest := do
+def decodeDigest (term : BTerm) : Option Digest := do
   let bytes ← BendSourceRepresentation.decodeBytes term
   let (value, rest) ← digestStream.decodePrefix bytes
   if rest.isEmpty && decide (digestStream.encode value = bytes) then some value else none
-def decodeString (term : Term) : Option String := do
+def decodeString (term : BTerm) : Option String := do
   let bytes ← BendSourceRepresentation.decodeBytes term
   let value ← String.fromUTF8? ⟨bytes.toArray⟩
   if !value.contains (Char.ofNat 0) && decide (value.toUTF8.toList = bytes) then some value else none
@@ -75,28 +77,28 @@ theorem decode_digestTerm (value : Digest) : decodeDigest (digestTerm value) = s
   simp only [List.append_nil] at decoded
   simp [decodeDigest, digestTerm, BendSourceRepresentation.decode_bytesTerm, decoded]
 
-def intentTerm (value : Intent) : Term := constructor "WorldSurface.Intent"
+def intentTerm (value : Intent) : BTerm := constructor "WorldSurface.Intent"
   [digestTerm value.artifact, stringTerm value.exportName, digestTerm value.program,
    BendSourceRepresentation.natTerm value.«instance», digestTerm value.expectedRoot,
    BendSourceRepresentation.bytesTerm value.arguments]
-def nodeTerm (value : Node) : Term := constructor "WorldSurface.Node"
+def nodeTerm (value : Node) : BTerm := constructor "WorldSurface.Node"
   [BendSourceRepresentation.natTerm value.tag, BendSourceRepresentation.natTerm value.slot,
    stringTerm value.label, BendSourceRepresentation.natListTerm value.children]
-def sourceTerm (value : Surface) : Term := constructor "WorldSurface.Surface"
+def sourceTerm (value : Surface) : BTerm := constructor "WorldSurface.Surface"
   [digestTerm value.artifact, stringTerm value.exportName, listTerm nodeTerm value.nodes,
    BendSourceRepresentation.natTerm value.root, listTerm intentTerm value.intents]
 
-def decodeIntent (term : Term) : Option Intent := do
+def decodeIntent (term : BTerm) : Option Intent := do
   let [artifact, exportName, program, instanceTerm, expectedRoot, arguments] ←
     decodeConstructor "WorldSurface.Intent" term | none
   pure ⟨← decodeDigest artifact, ← decodeString exportName, ← decodeDigest program,
     ← BendSourceRepresentation.decodeNat instanceTerm, ← decodeDigest expectedRoot,
     ← BendSourceRepresentation.decodeBytes arguments⟩
-def decodeNode (term : Term) : Option Node := do
+def decodeNode (term : BTerm) : Option Node := do
   let [tag, slot, label, children] ← decodeConstructor "WorldSurface.Node" term | none
   pure ⟨← BendSourceRepresentation.decodeNat tag, ← BendSourceRepresentation.decodeNat slot,
     ← decodeString label, ← BendSourceRepresentation.decodeNatList children⟩
-def decodeSurface (term : Term) : Option Surface := do
+def decodeSurface (term : BTerm) : Option Surface := do
   let [artifact, exportName, nodes, root, intents] ←
     decodeConstructor "WorldSurface.Surface" term | none
   pure ⟨← decodeDigest artifact, ← decodeString exportName, ← decodeList decodeNode nodes,
@@ -105,11 +107,11 @@ def decodeSurface (term : Term) : Option Surface := do
 /-- Check canonical structural inverse against the actual returned term. This
 does not admit a claimed output: decoding happens first and every source byte,
 constructor, field order and quantity must then reconstruct the exact result. -/
-def lower (term : Term) : Option Surface := do
+def lower (term : BTerm) : Option Surface := do
   let value ← decodeSurface term
   if sourceTerm value = term then some value else none
 
-theorem lower_exact {term : Term} {value : Surface} (h : lower term = some value) :
+theorem lower_exact {term : BTerm} {value : Surface} (h : lower term = some value) :
     sourceTerm value = term := by
   unfold lower at h
   cases decoded : decodeSurface term with
@@ -159,9 +161,9 @@ theorem abi_definition_exact {core : BendCoreAdmission.Checked} {definitions : B
 /-- Expected origin is an independent receiving input, never taken from an
 output label. This is only an output witness: it creates neither observations
 nor prepared action authority. -/
-structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term)
+structure Evaluated (core : BendCoreAdmission.Checked) (initial : BTerm)
     (artifact : Digest) (exportName : String) (observationCount : Nat) where
-  result : Term
+  result : BTerm
   count : Nat
   trace : BendLiveMachine.Trace core.book count initial result
   value : Value core.book result
@@ -172,7 +174,7 @@ structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term)
   bounds : bounded surface observationCount = true
 
 def execute (core : BendCoreAdmission.Checked) (classificationTicks steps : Nat)
-    (initial : Term) (artifact : Digest) (exportName : String)
+    (initial : BTerm) (artifact : Digest) (exportName : String)
     (observationCount : Nat) : Option (Evaluated core initial artifact exportName observationCount) :=
   if abi : abiMatches core = true then
     match BendLiveMachine.executeChecked core.book classificationTicks steps initial with
@@ -188,12 +190,12 @@ def execute (core : BendCoreAdmission.Checked) (classificationTicks steps : Nat)
             else none
   else none
 
-theorem evaluated_source_exact {core : BendCoreAdmission.Checked} {initial : Term}
+theorem evaluated_source_exact {core : BendCoreAdmission.Checked} {initial : BTerm}
     {artifact : Digest} {exportName : String} {observationCount : Nat}
     (output : Evaluated core initial artifact exportName observationCount) :
     sourceTerm output.surface = output.result := lower_exact output.decoded
 
-theorem evaluated_origin_exact {core : BendCoreAdmission.Checked} {initial : Term}
+theorem evaluated_origin_exact {core : BendCoreAdmission.Checked} {initial : BTerm}
     {artifact : Digest} {exportName : String} {observationCount : Nat}
     (output : Evaluated core initial artifact exportName observationCount) :
     output.surface.artifact = artifact ∧ output.surface.exportName = exportName :=

@@ -7,7 +7,7 @@ use dregg_circuit::descriptor_ir2::{IR2_EXT_DEGREE, IR2_FRI_COMMIT_POW_BITS,
     IR2_FRI_LOG_BLOWUP, IR2_FRI_LOG_FINAL_POLY_LEN, IR2_FRI_MAX_LOG_ARITY,
     IR2_FRI_NUM_QUERIES, IR2_FRI_QUERY_POW_BITS};
 use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
-use p3_challenger::DuplexChallenger;
+use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{Field, extension::BinomialExtensionField};
@@ -23,12 +23,13 @@ type Compress = TruncatedPermutation<Perm, 2, 8, 16>;
 type Mmcs = MerkleTreeHidingMmcs<<BabyBear as Field>::Packing,
     <BabyBear as Field>::Packing, Hash, Compress, ProofRng, 2, 8, 8>;
 type ChallengeMmcs = ExtensionMmcs<BabyBear, Extension, Mmcs>;
-type Challenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
+type InnerChallenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
+type Challenger = crate::full_degree_challenger::FullDegreeChallenger<InnerChallenger>;
 type Pcs = HidingFriPcs<BabyBear, Radix2DitParallel<BabyBear>, Mmcs, ChallengeMmcs, ProofRng>;
 pub type Config = StarkConfig<Pcs, Extension, Challenger>;
-pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-trace-opening-budget-v2";
+pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-full-degree-trace-budget-v3";
 
-fn fresh_unchecked() -> Result<Config, getrandom::Error> {
+fn fresh_checked(capacity: crate::masking_budget::TraceCapacity) -> Result<Config, getrandom::Error> {
     let permutation = default_babybear_poseidon2_16();
     let make_mmcs = || -> Result<Mmcs, getrandom::Error> {
         Ok(Mmcs::new(PaddingFreeSponge::new(permutation.clone()),
@@ -49,15 +50,24 @@ fn fresh_unchecked() -> Result<Config, getrandom::Error> {
     };
     let pcs = Pcs::new(Radix2DitParallel::default(), value_mmcs, parameters,
         4, ProofRng::from_os()?);
-    Ok(StarkConfig::new(pcs, Challenger::new(permutation)))
+    let mut transcript = InnerChallenger::new(permutation);
+    // Bind this changed sampling protocol before any proof message. The old
+    // profile never absorbed this frame, so it is not silently reinterpreted.
+    transcript.observe(BabyBear::new(PROFILE.len() as u32));
+    for byte in PROFILE.bytes() { transcript.observe(BabyBear::new(byte as u32)); }
+    // Exact versioned parameters, including the authorized public capacity.
+    for value in [IR2_EXT_DEGREE, IR2_FRI_LOG_BLOWUP, IR2_FRI_LOG_FINAL_POLY_LEN,
+        IR2_FRI_MAX_LOG_ARITY, IR2_FRI_NUM_QUERIES, IR2_FRI_COMMIT_POW_BITS,
+        IR2_FRI_QUERY_POW_BITS, 4, 8, crate::masking_budget::MAIN_EXTENSION_OPENINGS,
+        crate::masking_budget::REQUIRED_TRACE_MASKS, capacity.rows()] {
+        transcript.observe(BabyBear::new(value as u32));
+    }
+    Ok(StarkConfig::new(pcs, Challenger::new(transcript)))
 }
 
 /// Enforces the derived trace-opening budget before constructing a deployment
 /// candidate. Quotient/FRI decoupling remains a separate qualification.
 pub fn for_capacity(capacity: crate::masking_budget::TraceCapacity) -> Result<Config, getrandom::Error> {
-    let _ = capacity.rows();
-    fresh_unchecked()
+    fresh_checked(capacity)
 }
 
-#[cfg(test)]
-pub fn raw_for_regression() -> Result<Config, getrandom::Error> { fresh_unchecked() }

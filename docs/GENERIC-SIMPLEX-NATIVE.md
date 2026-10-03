@@ -1,9 +1,11 @@
 # Native Generic Simplex agreement
 
-This is an in-progress domain-log implementation. The frozen first engine and
-four-node transport harness passed earlier scoped checks. The current source
-validation, transferable COMMIT witness repair and participant integration are
-authored but not yet qualified together.
+This is an in-progress domain-log implementation. The current engine, inert
+source-history validation cache, transferable COMMIT witness implementation and
+streaming storage adapter compile. The four-logical-node native harness passes
+with actual TCP, ML-DSA, selective Byzantine COMMIT delivery, durable certificate
+recovery after restart, lost CAS replies and the streaming CAS helper. The source
+participant and actual workdesk fixture are not yet qualified together.
 
 The model is a fixed committee of n = 3f + 1 with at most f cumulatively Byzantine
 members, authenticated reliable delivery and partial synchrony. The configured

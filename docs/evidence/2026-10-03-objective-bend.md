@@ -27,14 +27,33 @@ public deployment claim. Source pointers let readers inspect the actual contract
 
 ## Published source cohort
 
-Commit `2ebce376f656331fe8d049fb4dbec958bf6d08a6` publishes the additive
-language, backend and documentation source cohort, including authored WIP.
+Commit `2ebce376f656331fe8d049fb4dbec958bf6d08a6` publishes 329 additive
+source paths from 27 contributors, including authored WIP. Subsequent source
+integration at `9c39e5898e73691344ba8e4ec7392bf0409991f8` includes later
+construction deltas. These are source-publication checkpoints; shared-interface
+reconciliation and receiving qualification continue independently.
 The public Workshop raw source, checked static core Book, linker and Run/Export
 drivers are present at the paths in the developer guide. Documentation links,
 driver arguments and the core Book hash were rechecked against this source.
 This publication did not rebuild or requalify the native Host. Checked owner
 results below retain their exact earlier scope; newer authored persistence,
 refinement, runtime and protocol joins do not become checked merely by landing.
+
+## Product receiving boundary at the source checkpoint
+
+The retained OO/document qualification is still the Host/client pair pinned below;
+SPK qualification remains scoped to the separately selected `a593a970` family.
+A restored connection to an existing document view changes access, not the
+execution qualification of newer source.
+
+| Product path | Current boundary |
+| --- | --- |
+| [Studio and authored Surface](../OBJECTIVE-BEND-SURFACE.md) | Authored Surface route is not registered. Source-return lowering, exact provider attribution, native preparation and editor/publication must join before it is a usable Studio route. |
+| [Resident current-base review](../RESIDENT-CONTEXT.md) | Projection/component checks are separate from matched native receiving. `mini_doc_review` is authored WIP; the receiving journey is not yet a completed resident review-and-land path. |
+| [Workshop](../../world/Workshop/README.md) | Actual full-Card source executions are recorded. Rendering, exact decoded result binding and governed effect preparation remain native joins; a linked source Card is not an installed interface. |
+| [Shared station](../../examples/objective-bend-station/STATUS.txt) | Initial Books checked; later scalar/native-plan cases and scripted resident still need their receiving qualification. No hosted GM or installed shared consequence is inferred. |
+| [Collective and allocation](../BEND-COLLECTIVE-DOMAINS.md) | Checked domain decisions do not install adopted source or settle money. Canonical Book funding, exact input membership and atomic native transfers remain explicit joins. |
+| [Portable continuation](../PORTABLE-CONTINUATION.md) | Five native archive component tests do not establish complete inventory, successor authority, private rekey, old-worker fencing or whole-home transfer. |
 
 ## Recorded qualification and open join
 

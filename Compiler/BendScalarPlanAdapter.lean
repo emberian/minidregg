@@ -23,6 +23,8 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.Store
 open Minidregg.Theory.CellRegistry
+open Minidregg.Theory.CausalVersionDag
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Kernel.DeclaredResourceController
 set_option autoImplicit false
 
@@ -47,11 +49,11 @@ structure NativePlan where
 /-- Exact type declarations captured from the emitted sealed WorldPlanScalar
 module. Constructor names alone are insufficient: the complete definitions and
 whole checked Book must be retained by the profile binding. -/
-def listType (element : String) : Term := .App .Q0 (.Ref "List.q2") (.Ref element)
-def fieldsType : List Term → Term
+def listType (element : String) : BTerm := .App .Q0 (.Ref "List.q2") (.Ref element)
+def fieldsType : List BTerm → BTerm
   | [] => .Enu ["()"]
   | type :: rest => .Sig .Q1 type (fieldsType rest)
-def singleArmsDef (name : String) (fields : List Term) : Def :=
+def singleArmsDef (name : String) (fields : List BTerm) : Def :=
   ⟨name ++ ".arms", .All .Q1 (.Enu [name]) (.Typ .Q2),
     .Mat name (fieldsType fields) .Efq, false⟩
 def singleTypeDef (name : String) : Def :=
@@ -73,7 +75,7 @@ def abiDefinitions : List Def :=
      .Sig .Q1 (.Enu ["WorldPlanScalar.Refused", "WorldPlanScalar.Planned"])
        (.App .Q1 (.Ref "WorldPlanScalar.PlanResult.arms") (.Var 0)), false⟩]
 
-structure ABIBinding (book : Book) where
+structure ABIBinding (book : Book) : Type where
   natBinding : NatBookBinding book
   listBinding : ListBookBinding book
   checked : Book.check book = .ok ()
@@ -93,21 +95,21 @@ def bindABI (core : BendCoreAdmission.Checked) : Option (ABIBinding core.book) :
 
 def rootCodec : LawfulCodec Digest := ResourceBirthCodec.strictCodec digestStream.toLawful
 
-def refTerm (ref : Ref) : Term :=
+def refTerm (ref : Ref) : BTerm :=
   .Tup .Q1 (.Lab "WorldPlanScalar.Ref") (.Tup .Q1 (natTerm ref.resourceID)
     (.Tup .Q1 (bytesTerm (rootCodec.encode ref.root)) (.Lab "()")))
-def decodeRef : Term → Option Ref
-  | .Tup .Q1 (.Lab "WorldPlanScalar.Ref") (.Tup .Q1 id (.Tup .Q1 root (.Lab "()"))) => do
-      let resourceID ← decodeNat id
+def decodeRef : BTerm → Option Ref
+  | .Tup .Q1 (.Lab "WorldPlanScalar.Ref") (.Tup .Q1 resourceTerm (.Tup .Q1 root (.Lab "()"))) => do
+      let resourceID ← decodeNat resourceTerm
       let bytes ← decodeBytes root
       let digest ← rootCodec.decode bytes
       pure ⟨resourceID, digest⟩
   | _ => none
 
-def writeTerm (write : Write) : Term :=
+def writeTerm (write : Write) : BTerm :=
   .Tup .Q1 (.Lab "WorldPlanScalar.Write") (.Tup .Q1 (natTerm write.field)
     (.Tup .Q1 (natTerm write.before) (.Tup .Q1 (natTerm write.after) (.Lab "()"))))
-def decodeWrite : Term → Option Write
+def decodeWrite : BTerm → Option Write
   | .Tup .Q1 (.Lab "WorldPlanScalar.Write") (.Tup .Q1 field
       (.Tup .Q1 before (.Tup .Q1 after (.Lab "()")))) => do
       let f ← decodeNat field
@@ -116,11 +118,11 @@ def decodeWrite : Term → Option Write
       pure ⟨f, b, a⟩
   | _ => none
 
-def listTerm {α : Type} (item : α → Term) : List α → Term
+def listTerm {α : Type} (item : α → BTerm) : List α → BTerm
   | [] => .Tup .Q1 (.Lab "Nil") (.Lab "()")
   | a :: rest => .Tup .Q1 (.Lab "Con")
       (.Tup .Q1 (item a) (.Tup .Q1 (listTerm item rest) (.Lab "()")))
-def decodeList {α : Type} (item : Term → Option α) : Term → Option (List α)
+def decodeList {α : Type} (item : BTerm → Option α) : BTerm → Option (List α)
   | .Tup .Q1 (.Lab "Nil") (.Lab "()") => some []
   | .Tup .Q1 (.Lab "Con") (.Tup .Q1 a (.Tup .Q1 rest (.Lab "()"))) => do
       let head ← item a
@@ -128,20 +130,20 @@ def decodeList {α : Type} (item : Term → Option α) : Term → Option (List �
       pure (head :: tail)
   | _ => none
 
-def scalarTerm (scalar : Scalar) : Term :=
+def scalarTerm (scalar : Scalar) : BTerm :=
   .Tup .Q1 (.Lab "WorldPlanScalar.ScalarEffect") (.Tup .Q1 (refTerm scalar.ref)
     (.Tup .Q1 (listTerm writeTerm scalar.writes) (.Lab "()")))
-def decodeScalar : Term → Option Scalar
+def decodeScalar : BTerm → Option Scalar
   | .Tup .Q1 (.Lab "WorldPlanScalar.ScalarEffect") (.Tup .Q1 ref (.Tup .Q1 writes (.Lab "()"))) => do
       let r ← decodeRef ref
       let ws ← decodeList decodeWrite writes
       pure ⟨r, ws⟩
   | _ => none
 
-def planTerm (plan : NativePlan) : Term :=
+def planTerm (plan : NativePlan) : BTerm :=
   .Tup .Q1 (.Lab "WorldPlanScalar.NativePlan") (.Tup .Q1 (listTerm refTerm plan.reads)
     (.Tup .Q1 (listTerm scalarTerm plan.effects) (.Lab "()")))
-def decodePlan : Term → Option NativePlan
+def decodePlan : BTerm → Option NativePlan
   | .Tup .Q1 (.Lab "WorldPlanScalar.NativePlan") (.Tup .Q1 reads (.Tup .Q1 effects (.Lab "()"))) => do
       let rs ← decodeList decodeRef reads
       let es ← decodeList decodeScalar effects
@@ -154,7 +156,7 @@ def decodePlan : Term → Option NativePlan
 @[simp] theorem decode_writeTerm (write : Write) : decodeWrite (writeTerm write) = some write := by
   cases write
   simp [writeTerm, decodeWrite, decode_natTerm]
-@[simp] theorem decode_listTerm {α : Type} (item : α → Term) (decoder : Term → Option α)
+@[simp] theorem decode_listTerm {α : Type} (item : α → BTerm) (decoder : BTerm → Option α)
     (roundtrip : ∀ a, decoder (item a) = some a) (items : List α) :
     decodeList decoder (listTerm item items) = some items := by
   induction items with
@@ -175,12 +177,12 @@ inductive PlanResult where
   | planned (plan : NativePlan)
   deriving DecidableEq, Repr
 
-def resultTerm : PlanResult → Term
+def resultTerm : PlanResult → BTerm
   | .refused reason => .Tup .Q1 (.Lab "WorldPlanScalar.Refused")
       (.Tup .Q1 (natTerm reason) (.Lab "()"))
   | .planned plan => .Tup .Q1 (.Lab "WorldPlanScalar.Planned")
       (.Tup .Q1 (planTerm plan) (.Lab "()"))
-def decodeResult : Term → Option PlanResult
+def decodeResult : BTerm → Option PlanResult
   | .Tup .Q1 (.Lab "WorldPlanScalar.Refused") (.Tup .Q1 reason (.Lab "()")) =>
       (decodeNat reason).map PlanResult.refused
   | .Tup .Q1 (.Lab "WorldPlanScalar.Planned") (.Tup .Q1 plan (.Lab "()")) =>
@@ -322,7 +324,7 @@ produce a Plan certificate; malformed constructor AST also fails closed. -/
 def lowerResult {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (command : Command) (result : Term) :
+    (command : Command) (result : BTerm) :
     Option (Sigma fun source => BoundPlan deployment loaded command source) := do
   let decoded ← decodeResult result
   match decoded with
@@ -379,41 +381,41 @@ theorem write_admitted (ref : Ref) (write : Write) :
     DeclaredActionLowering.writableKeyCheck]
 
 /-- Every source before-value is the actual native value at its precise
-ordered prefix, including repeated writes to the same field. -/
+ordered prior, including repeated writes to the same field. -/
 theorem source_before_at_prefix {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {deployment : CanonicalCellRegistry.Deployment}
     {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
     {command : Command} {scalar : Scalar}
     (bound : BoundScalar deployment loaded command scalar)
-    (prefix suffix : List Write) (write : Write)
-    (position : scalar.writes = prefix ++ write :: suffix) :
-    (Patch.run bound.pre.logical (sourcePatch scalar.ref prefix))
+    (prior suffix : List Write) (write : Write)
+    (position : scalar.writes = prior ++ write :: suffix) :
+    (Patch.run bound.pre.logical (sourcePatch scalar.ref prior))
       (writeKey scalar.ref write).address = some (Int.ofNat write.before) := by
   have valid := bound.guardsExact
   rw [position] at valid
-  have patchExact : sourcePatch scalar.ref (prefix ++ write :: suffix) =
-      sourcePatch scalar.ref prefix ++ sourcePatch scalar.ref (write :: suffix) := by
+  have patchExact : sourcePatch scalar.ref (prior ++ write :: suffix) =
+      sourcePatch scalar.ref prior ++ sourcePatch scalar.ref (write :: suffix) := by
     simp [sourcePatch]
   rw [patchExact] at valid
   have tail := ((Patch.validFrom_append bound.pre.logical
-    (sourcePatch scalar.ref prefix) (sourcePatch scalar.ref (write :: suffix))).mp valid).2
+    (sourcePatch scalar.ref prior) (sourcePatch scalar.ref (write :: suffix))).mp valid).2
   exact (DeclaredActionLowering.guardedSet_enabled_iff _ _ _ _).mp tail.1
 
 theorem aliased_command_refused {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (command : Command) (source : NativePlan)
-    (alias : ¬ (command.targets.map Target.target).Nodup) :
+    (aliased : ¬ (command.targets.map Target.target).Nodup) :
     bindPlan deployment loaded command source = none := by
-  simp [bindPlan, alias]
+  simp [bindPlan, aliased]
 
 theorem aliased_effect_refused {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (command : Command) (source : NativePlan)
-    (alias : ¬ (source.effects.map (fun s => s.ref.resourceID)).Nodup) :
+    (aliased : ¬ (source.effects.map (fun s => s.ref.resourceID)).Nodup) :
     bindPlan deployment loaded command source = none := by
-  simp [bindPlan, alias]
+  simp [bindPlan, aliased]
 
 theorem stale_root_impossible {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {deployment : CanonicalCellRegistry.Deployment}
@@ -436,8 +438,8 @@ theorem ordered_correspondence {durable : DurableReceiverIO.Loaded ResourceBirth
 /-- Source computation remains witnessed by the actual source machine. The
 output decoder is this specific immutable structural codec; accepting arbitrary
 client effect bytes is not an alternate execution route. -/
-structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term) where
-  result : Term
+structure Evaluated (core : BendCoreAdmission.Checked) (initial : BTerm) where
+  result : BTerm
   count : Nat
   trace : BendLiveMachine.Trace core.book count initial result
   value : Value core.book result
@@ -446,7 +448,7 @@ structure Evaluated (core : BendCoreAdmission.Checked) (initial : Term) where
   decoded : decodeResult result = some output
 
 def execute (core : BendCoreAdmission.Checked) (abi : ABIBinding core.book) (classificationTicks steps : Nat)
-    (initial : Term) : Option (Evaluated core initial) :=
+    (initial : BTerm) : Option (Evaluated core initial) :=
   match BendLiveMachine.executeChecked core.book classificationTicks steps initial with
   | .refused _ _ _ _ => none
   | .complete result count trace value =>
@@ -458,7 +460,7 @@ def execute (core : BendCoreAdmission.Checked) (abi : ABIBinding core.book) (cla
 native current-cell binding. Raw structural decoding is not a source execution
 certificate. Current method/input/authority/funding admission is additional. -/
 structure BoundResult {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (core : BendCoreAdmission.Checked) (initial : Term)
+    (core : BendCoreAdmission.Checked) (initial : BTerm)
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (command : Command) where
@@ -468,7 +470,7 @@ structure BoundResult {durable : DurableReceiverIO.Loaded ResourceBirthCodec.roo
   bound : BoundPlan deployment loaded command source
 
 def bindEvaluated {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {core : BendCoreAdmission.Checked} {initial : Term}
+    {core : BendCoreAdmission.Checked} {initial : BTerm}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (command : Command) (evaluated : Evaluated core initial) :
@@ -480,16 +482,17 @@ def bindEvaluated {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
       pure ⟨evaluated, source, outputExact, bound⟩
 
 theorem completed_refusal_inert {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {core : BendCoreAdmission.Checked} {initial : Term}
+    {core : BendCoreAdmission.Checked} {initial : BTerm}
     (deployment : CanonicalCellRegistry.Deployment)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (command : Command) (evaluated : Evaluated core initial) (reason : Nat)
     (refusal : evaluated.output = .refused reason) :
     bindEvaluated deployment loaded command evaluated = none := by
-  simp [bindEvaluated, refusal]
+  unfold bindEvaluated
+  split <;> simp_all
 
 theorem completed_source_exact_native {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {core : BendCoreAdmission.Checked} {initial : Term}
+    {core : BendCoreAdmission.Checked} {initial : BTerm}
     {deployment : CanonicalCellRegistry.Deployment}
     {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
     {command : Command} (result : BoundResult core initial deployment loaded command) :

@@ -103,6 +103,14 @@ def completedReceipt {config : SourceConfig} (p : Participant config) (payload :
       if record == payload then some index else none)
   p.source.verified.receipts[index]?
 
+/-- Lost submit responses can be recovered from the exact original signed
+ingress, even when the caller never received the derived proposal bytes. -/
+def completedIngress {config : SourceConfig} (p : Participant config) (signedIngress : Bytes) :
+    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
+  let index ← p.source.verified.opened.durable.image.accepted.zipIdx.findSome?
+    (fun (record,index) => if record.event.canonicalBytes == signedIngress then some index else none)
+  p.source.verified.receipts[index]?
+
 /-- One flat fanout slot. Skipping self also consumes a slot, keeping service
 finite independently of committee size. -/
 def packetAt {config : SourceConfig} (p : Participant config) (state : State)

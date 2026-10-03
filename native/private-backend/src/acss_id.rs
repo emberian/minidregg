@@ -1029,4 +1029,83 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn seven_party_compressed_proof_two_faults_and_two_local_aborts_recover() {
+        let g = generation();
+        let input = vec![
+            vec![Field(42), Field(7), Field(3)],
+            vec![Field(91), Field(11), Field(9)],
+            vec![Field(17), Field(23), Field(13)],
+        ];
+        let mut ns = (0..7)
+            .map(|i| AcssId::new(i, 0, 7, 2, &g, 3).unwrap())
+            .collect::<Vec<_>>();
+        let mut out = ns[0].dealer(&input, [29; 32]).unwrap();
+        for p in &mut out {
+            if let Body::Row { holder, message } = &mut p.message.body {
+                if *holder == 1 || *holder == 2 {
+                    if let private_send::Body::Cipher(PhaseMessage::Init(cipher)) =
+                        &mut message.body
+                    {
+                        cipher[0] ^= 1;
+                    }
+                }
+            }
+        }
+        let mut q = out.into_iter().map(|p| (0, p)).collect::<VecDeque<_>>();
+        drain(&mut ns, &mut q, None);
+        for i in [1, 2] {
+            assert!(matches!(
+                ns[i].local_sharing(),
+                Some(LocalSharing::Rejected(_))
+            ));
+        }
+        for i in [3, 4, 5] {
+            assert!(matches!(
+                ns[i].local_sharing(),
+                Some(LocalSharing::Accepted(_))
+            ));
+        }
+        for holder in [1, 2] {
+            for i in [1, 2, 3] {
+                q.extend(
+                    ns[i]
+                        .request_open(holder)
+                        .unwrap()
+                        .into_iter()
+                        .map(|p| (i as u16, p)),
+                );
+            }
+            drain(&mut ns, &mut q, None);
+            for n in &ns {
+                assert_eq!(n.accusation(holder).unwrap().fault(), FaultParty::Dealer(0));
+            }
+        }
+        for i in 1..=5 {
+            q.extend(
+                ns[i]
+                    .request_public_reconstruction()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        let mut steps = 0;
+        while let Some((sender, p)) = q.pop_front() {
+            steps += 1;
+            assert!(steps < 500000);
+            if [0, 6].contains(&sender) || [0, 6].contains(&p.to) {
+                continue;
+            }
+            let receiver = p.to;
+            let out = ns[receiver as usize].receive(sender, p.message).unwrap();
+            q.extend(out.into_iter().map(|p| (receiver, p)));
+        }
+        for n in &ns[1..=5] {
+            assert_eq!(
+                n.public_reconstruction().unwrap().secrets(),
+                [Field(42), Field(91), Field(17)]
+            );
+        }
+    }
 }

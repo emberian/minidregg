@@ -235,7 +235,7 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
 def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
     (systemCell : CellId) : Transport :=
   ⟨config.read, fun height entry => config.append height entry, config.putCheckpoint,
-    config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell⟩
+    config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok ()⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -1088,8 +1088,8 @@ theorem Loaded.judge_tail {rootBytes : List UInt8 → Digest} (transport : Trans
     Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent = .ok () := by
   simp only [Loaded.judge, pinned] at accepted
   cases checked : transport.sourceGate loaded.snapshot intent with
-  | error reason => simp [checked] at accepted
-  | ok unit => simpa [checked] using accepted
+  | error reason => simp [checked, Except.bind] at accepted
+  | ok value => cases value; simpa [checked, Except.bind] using accepted
 
 /-- Publish against the exact image on which the controller admitted the
 operation: append entry `h + 1` only while the head is `h`. One attempt, no

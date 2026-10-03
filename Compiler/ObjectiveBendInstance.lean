@@ -10,6 +10,7 @@ import Theory.AssertAxioms
 
 namespace Minidregg.Compiler.ObjectiveBendInstance
 open Minidregg.Theory.Store
+open Minidregg.Theory.TypedAuthorization
 open WorldKindDescriptor
 open Tower256ConcreteBackend
 open ObjectiveBendComposition
@@ -61,22 +62,28 @@ structure PinSpace (descriptor : Descriptor) where
 
 def bytesValue {descriptor : Descriptor} (space : PinSpace descriptor)
     (bytes : List UInt8) : (layout descriptor).Value space.space :=
-  Eq.mpr (by simp [layout, ScalarCodec.Value, space.bytes]) bytes
+  Eq.mpr (by
+    change (descriptor.fields.get space.space).codec.Value = List UInt8
+    rw [space.bytes]
+    rfl) bytes
 
 def valueBytes {descriptor : Descriptor} (space : PinSpace descriptor)
     (value : (layout descriptor).Value space.space) : List UInt8 :=
-  Eq.mp (by simp [layout, ScalarCodec.Value, space.bytes]) value
+  Eq.mp (by
+    change (descriptor.fields.get space.space).codec.Value = List UInt8
+    rw [space.bytes]
+    rfl) value
 
 def pinAt (value : Kernel.WorldKindInstance.Instance) (space : PinSpace value.descriptor) : Option Pin :=
-  (value.store ⟨space.space, 0⟩).bind fun bytes => decode (valueBytes space bytes)
+  (value.store ⟨space.space, (0 : Nat)⟩).bind fun bytes => decode (valueBytes space bytes)
 
 /-- Birth initializes the pin at key zero alongside any member-authored state.
 It does not grant creation authority or bypass the kind's birth law. The ordinary
 WorldKindCell.instanceOf supplies the immutable descriptor/kind-root binding. -/
-def initialize (descriptor : Descriptor) (valid : descriptor.Valid)
+def initialState (descriptor : Descriptor) (valid : descriptor.Valid)
     (state : Store (layout descriptor)) (space : PinSpace descriptor) (pin : Pin) :
     Kernel.WorldKindInstance.Instance :=
-  ⟨descriptor, valid, state.set ⟨space.space, 0⟩ (some (bytesValue space (encode pin)))⟩
+  ⟨descriptor, valid, state.set ⟨space.space, (0 : Nat)⟩ (some (bytesValue space (encode pin)))⟩
 
 /-- Per-object construction retains the actual object, decoded pin and full
 source construction evidence. Its state is the existing typed store. -/
@@ -98,7 +105,7 @@ theorem prepared_pin_preserved (value : Kernel.WorldKindInstance.Instance)
     pinAt prepared.post space = pinAt value space := by
   unfold pinAt
   rw [Kernel.WorldKindInstance.prepared_preserves_rom prepared
-    ⟨space.space, 0⟩ space.immutable]
+    ⟨space.space, (0 : Nat)⟩ space.immutable]
 
 def Instance.after (object : Instance)
     (prepared : Kernel.WorldKindInstance.Prepared object.value) : Instance :=

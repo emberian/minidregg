@@ -77,3 +77,22 @@ native landing guards; current laws and participant grants still decide.
 Ordinary `mini_doc_append` retains its separate single-document contract.
 The new action is authored WIP at this shipment and awaits scoped Rust/native
 receiving checks.
+
+## Observation custody pins
+
+Document context now includes the actual selected `readCapability`.
+Authored summary support records include `capability` as well as name,
+source and root. Missing legacy custody pins or a rebound/revoked observe
+capability suppress derived inference text. Source/root equality alone cannot
+justify reusing context after a local reference changes its read authority.
+
+Reviewed preparation carries `expectedObserveCapability` alongside source-root
+pins. The ordinary preparer compares this at the exact resolved signed-read
+reference and retains that capability in its native admission plan. These
+identifiers are current-authority dependencies, not caller credentials or
+proof that authored prose is true. Current native grant/policy checks remain
+necessary at submission. This repair is WIP pending scoped Rust/native checks.
+
+The receiving journey now explicitly submits every named append/edit proposal;
+those shell commands prepare only. Birth/move retain their existing native
+boundaries. Preparing a proposal is never reported as installing its effects.

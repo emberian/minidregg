@@ -1,0 +1,41 @@
+Continuing authored Station source — WIP source-only, 2026-10-03
+
+WorldCatalog declares scenes, existing native property/supply references, source
+version and role instructions. Role instructions are authored data, not grants.
+Its inventory query derives ownership from the same admitted global Property
+records; no replicated bag/world heap is created. HeldBy exposes a holder identity
+only already present in the readable property view, and does not infer a hidden
+holder room. Projection of many properties must retain native input uniqueness.
+
+ContinuingWorld derives each next-action alternative by calling the same checked
+SharedConsequences method on the exact captured player/property/supply roots.
+Move/take/drop alternatives are not an auto-script: selecting one re-enters current
+source/native authority and a previous shared root can become stale immediately.
+
+CommonsStation is an independently authored six-scene graph/catalog with twelve
+edges and differing shared-supply costs. Existing actual born property/supply
+references are supplied; catalog never allocates or owns a copy of their state.
+Scenes: Airlock, Engineering, Infirmary, Commons, Workshop, Garden. Replacing this
+source is a governed source change, not mutable host JSON or a hidden Rust table.
+
+StationFaces returns ONE generic WorldSurface shape for readable rooms, coauthoring
+and resident context. It references separately native-admitted slots: room docs,
+participant roster, shared objects/supply, actual history, current proposals,
+decisions, invitations and narrator output. Actions are separately prepared exact
+intents. Source produces indices/prose only; common native bridge checks bounds,
+UTF8, admitted slot vector, immutable source identity and exact intent bindings.
+No copied messages or private world state are accepted as authoritative history.
+
+CoauthoringInstitution and docStudio own proposals/endorsements/decisions/adoption
+and editable source mounts. Station does not duplicate their store or acceptance
+law. Old instances/source histories remain under their actual retained identities.
+Current invite/join authority remains the actual room law; visible invitation data
+is not permission. Participant, narrator and coauthor roles require real principals
+and delegated current capabilities, not role labels in the Catalog.
+
+These four modules are newly authored WIP, unchecked/uncompiled/unexecuted. The
+previous Station source/Book/provider evidence does not cover them. They extend
+independent source/domain use while the actual native admission join finishes.
+Next source-check package adds exact SharedConsequences and common WorldSurface
+imports; no changes to existing fixedgraph/native receiving fixtures needed.
+No new builds, native commands, active Store/provider changes, or fake actions.

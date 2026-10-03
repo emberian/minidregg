@@ -28,6 +28,7 @@ struct Profile {
     payload: usize,
     origin: u64,
     tick: u64,
+    processing: u64,
     first: u64,
     epochs: u64,
 }
@@ -48,6 +49,7 @@ impl Profile {
             || !(1024..=262144).contains(&self.payload)
             || !(100..=60000).contains(&self.tick)
             || self.purpose > 5
+            || !(1..=32).contains(&self.processing)
             || !(1..=4096).contains(&self.epochs)
             || self.slot as usize >= self.width
         {
@@ -62,7 +64,7 @@ impl Profile {
     }
     fn when(&self, epoch: u64) -> Result<u64> {
         epoch
-            .checked_add(self.purpose as u64 + 1)
+            .checked_add(self.purpose as u64 * self.processing + 1)
             .and_then(|v| v.checked_mul(self.tick))
             .and_then(|v| v.checked_add(self.origin))
             .ok_or_else(|| "fixed cohort schedule lifetime exhausted".into())
@@ -77,6 +79,7 @@ impl Profile {
             self.payload as u64,
             self.origin,
             self.tick,
+            self.processing,
             self.first,
             self.epochs,
         ] {
@@ -132,32 +135,61 @@ fn pin(root: &Path, p: &Profile, key: &[u8; 32]) -> Result<()> {
 // Empty/late output becomes physical-unavailable, not a native Pending or a
 // synthetic source receipt. A contribution producer supplies a valid cover
 // packet before its deadline through the live client API.
-fn select(root: &Path, source: &Path, p: &Profile, epoch: u64) -> Result<Vec<u8>> {
-    let retained = root.join(format!("epoch-{epoch}.selected"));
-    if retained.exists() {
-        return read_private(&retained, p.capacity() + 5);
-    }
-    let ready = source.join(format!("epoch-{epoch}.payload"));
-    let cover = source.join(format!("epoch-{epoch}.cover"));
-    let path = if ready.exists() {
-        ready
-    } else if p.purpose == 0 {
-        cover
-    } else {
-        ready
-    };
-    let mut v = vec![0; p.capacity() + 5];
-    if path.exists() {
-        let b = read_private(&path, p.capacity())?;
-        if b.len() != p.capacity() {
-            return Err("guarded cohort segment is not exact public shape".into());
+fn read_record(records: &Path, epoch: u64, capacity: usize) -> Result<Option<Vec<u8>>> {
+    let record = records.join(format!("epoch-{epoch}.record"));
+    if record.exists() {
+        let v = read_private(&record, capacity + 5)?;
+        if v.len() != capacity + 5 {
+            return Err("retained authenticated record shape".into());
         }
-        v[0] = 1;
-        v[1..5].copy_from_slice(&(b.len() as u32).to_le_bytes());
-        v[5..].copy_from_slice(&b);
+        if v[0] == 0 && v[1..].iter().all(|b| *b == 0) {
+            return Ok(None);
+        }
+        if v[0] != 1 || u32::from_le_bytes(v[1..5].try_into().unwrap()) as usize != capacity {
+            return Err("retained authenticated record marker".into());
+        }
+        return Ok(Some(v[5..].to_vec()));
     }
-    persist(&retained, &v)?; // durable immutable selection BEFORE network emission
-    Ok(v)
+    let body = records.join(format!("epoch-{epoch}.payload"));
+    if body.exists() {
+        return Ok(Some(read_private(&body, capacity)?));
+    }
+    Ok(None)
+}
+fn prepare_wire(
+    root: &Path,
+    source: &Path,
+    p: &Profile,
+    key: &[u8; 32],
+    epoch: u64,
+) -> Result<Vec<u8>> {
+    let path = root.join(format!("epoch-{epoch}.ready-wire"));
+    if path.exists() {
+        let wire = read_private(&path, p.capacity() + 5 + OVERHEAD)?;
+        open(p, key, epoch, &wire)?;
+        return Ok(wire);
+    }
+    let mut plain = vec![0; p.capacity() + 5];
+    let body = read_record(source, epoch, p.capacity())?;
+    let body = if body.is_none() && p.purpose == 0 {
+        Some(read_private(
+            &source.join(format!("epoch-{epoch}.cover")),
+            p.capacity(),
+        )?)
+    } else {
+        body
+    };
+    if let Some(v) = body {
+        if v.len() != p.capacity() {
+            return Err("guarded cohort segment exact shape".into());
+        }
+        plain[0] = 1;
+        plain[1..5].copy_from_slice(&(v.len() as u32).to_le_bytes());
+        plain[5..].copy_from_slice(&v);
+    }
+    let wire = seal(p, key, epoch, &plain)?;
+    persist(&path, &wire)?;
+    Ok(wire)
 }
 fn seal(p: &Profile, key: &[u8; 32], epoch: u64, plain: &[u8]) -> Result<Vec<u8>> {
     if plain.len() != p.capacity() + 5 {
@@ -223,18 +255,9 @@ fn open(p: &Profile, key: &[u8; 32], epoch: u64, wire: &[u8]) -> Result<Vec<u8>>
     }
     Ok(plain)
 }
-fn adopt(root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) -> Result<()> {
+fn adopt(_root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) -> Result<()> {
     // Whole exact authenticated record is durable before any consumer sees it.
-    exact(root, &format!("epoch-{epoch}.received"), plain)?;
-    if plain[0] == 1 {
-        exact(output, &format!("epoch-{epoch}.payload"), &plain[5..])
-    } else {
-        exact(
-            output,
-            &format!("epoch-{epoch}.unavailable"),
-            b"physical transport unavailable; no source decision",
-        )
-    }
+    exact(output, &format!("epoch-{epoch}.record"), plain)
 }
 fn send(
     mut stream: TcpStream,
@@ -297,15 +320,7 @@ fn send(
                     .checked_sub(profile.tick / 2)
                     .ok_or("preparation clock exhausted")?;
                 wait(when)?;
-                let path = root.join(format!("epoch-{epoch}.ready-wire"));
-                let wire = if path.exists() {
-                    read_private(&path, profile.capacity() + 5 + OVERHEAD)?
-                } else {
-                    let plain = select(&root, &source, &profile, epoch)?;
-                    let wire = seal(&profile, &key, epoch, &plain)?;
-                    persist(&path, &wire)?;
-                    wire
-                };
+                let wire = prepare_wire(&root, &source, &profile, &key, epoch)?;
                 open(&profile, &key, epoch, &wire)?;
                 Ok(wire)
             })();
@@ -342,19 +357,57 @@ fn receive(
     key: &[u8; 32],
     start: u64,
 ) -> Result<()> {
+    let count = (p.first + p.epochs - start) as usize;
+    if count
+        .checked_mul(p.capacity() + 5)
+        .ok_or("receive inventory overflow")?
+        > 64 * 1024 * 1024
+    {
+        return Err("public retained receive queue exceeds64MiB".into());
+    }
     stream
         .set_read_timeout(Some(Duration::from_millis(p.tick / 2)))
         .map_err(|e| e.to_string())?;
-    for epoch in start..p.first + p.epochs {
-        wait(p.when(epoch)?)?;
-        let mut wire = vec![0; p.capacity() + 5 + OVERHEAD];
-        stream
-            .read_exact(&mut wire)
-            .map_err(|e| format!("declared enrolled link fault: {e}"))?;
-        let plain = open(p, key, epoch, &wire)?;
-        adopt(root, output, p, epoch, &plain)?;
-    }
-    Ok(())
+    // Durable adoption owns its independent bounded queue; no consumer sees a
+    // record before fsync. Disk work cannot stall the fixed receive clock.
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(u64, Vec<u8>)>(count);
+    thread::scope(|scope| {
+        let writer = scope.spawn(move || -> Result<()> {
+            let mut fault = None;
+            for (epoch, plain) in rx {
+                if let Err(e) = adopt(root, output, p, epoch, &plain) {
+                    if fault.is_none() {
+                        fault = Some(e);
+                    }
+                }
+            }
+            // Even uncertain local persistence drains the fixed public lifetime;
+            // it never becomes a traffic-triggered connection termination.
+            match fault {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
+        });
+        let received = (|| {
+            for epoch in start..p.first + p.epochs {
+                wait(p.when(epoch)?)?;
+                let mut wire = vec![0; p.capacity() + 5 + OVERHEAD];
+                stream
+                    .read_exact(&mut wire)
+                    .map_err(|e| format!("declared enrolled link fault: {e}"))?;
+                let plain = open(p, key, epoch, &wire)?;
+                tx.try_send((epoch, plain)).map_err(|_| {
+                    "durable adoption queue failed; no receipt or consumer dispatch"
+                })?;
+            }
+            Ok(())
+        })();
+        drop(tx);
+        let adopted = writer
+            .join()
+            .map_err(|_| "durable adoption worker failed")?;
+        received.and(adopted)
+    })
 }
 fn number(args: &mut Args, name: &str, default: u64) -> Result<u64> {
     args.optional(name)
@@ -566,7 +619,10 @@ fn worker(
                 .iter()
                 .map(|v| v.join(format!("epoch-{epoch}.payload")))
                 .collect::<Vec<_>>();
-            if names.iter().all(|v| v.exists()) {
+            if names
+                .iter()
+                .all(|v| v.exists() || v.with_extension("record").exists())
+            {
                 break Some(names);
             }
             if now_ms()? >= until {
@@ -578,16 +634,23 @@ fn worker(
             continue;
         };
         let result = (|| {
+            let offset = (p.purpose as u64 * (p.processing - 1) + 1)
+                .checked_mul(p.tick)
+                .ok_or("actor clock exhausted")?;
             let origin = p
                 .origin
-                .checked_add(p.tick)
+                .checked_add(offset)
                 .ok_or("actor clock exhausted")?;
             match action {
                 "registrar" => {
                     let n = p.payload + 4640 + 160;
                     let contributions = incoming
                         .iter()
-                        .map(|v| read_private(v, n))
+                        .map(|v| {
+                            read_record(v.parent().unwrap(), epoch, n)?.ok_or_else(|| {
+                                "physical input unavailable; no source verdict".to_string()
+                            })
+                        })
                         .collect::<Result<Vec<_>>>()?;
                     pq::live_register(
                         root,
@@ -603,7 +666,8 @@ fn worker(
                 "relay" => {
                     let n =
                         18 + 160 * p.width + 128 + 19 + p.width * (p.payload + (4 - hop) * 1160);
-                    let segment = read_private(&incoming[0], n)?;
+                    let segment = read_record(incoming[0].parent().unwrap(), epoch, n)?
+                        .ok_or("physical input unavailable")?;
                     pq::live_relay(
                         root,
                         epoch,
@@ -619,7 +683,8 @@ fn worker(
                 }
                 "mailbox" => {
                     let n = 18 + 160 * p.width + 128 + 19 + p.width * (p.payload + 1160);
-                    let segment = read_private(&incoming[0], n)?;
+                    let segment = read_record(incoming[0].parent().unwrap(), epoch, n)?
+                        .ok_or("physical input unavailable")?;
                     pq::live_mailbox(
                         gateway.as_ref().unwrap(),
                         root,
@@ -634,7 +699,12 @@ fn worker(
                     )
                 }
                 "scan" => {
-                    let broadcast = read_private(&incoming[0], 19 + p.width * p.payload)?;
+                    let broadcast = read_record(
+                        incoming[0].parent().unwrap(),
+                        epoch,
+                        19 + p.width * p.payload,
+                    )?
+                    .ok_or("physical broadcast unavailable")?;
                     let opened = pq::live_scan(&caps, epoch, p.width, p.payload, &broadcast)?;
                     let mut v = Vec::new();
                     for b in opened {
@@ -700,6 +770,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             .parse()
             .map_err(|_| "invalid origin")?,
         tick: number(&mut args, "tick-ms", 1000)?,
+        processing: number(&mut args, "processing-slots", 2)?,
         first: number(&mut args, "first-epoch", 0)?,
         epochs: number(&mut args, "epochs", 16)?,
     };
@@ -766,6 +837,7 @@ mod tests {
             payload: 1024,
             origin: 0,
             tick: 100,
+            processing: 1,
             first: 0,
             epochs: 2,
         }
@@ -809,15 +881,19 @@ mod tests {
         let source = temp();
         let mut p = profile();
         p.purpose = 5;
-        let original = select(&root, &source, &p, 0).unwrap();
-        assert_eq!(original[0], 0);
+        let original = prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap();
+        assert_eq!(open(&p, &[7; 32], 0, &original).unwrap()[0], 0);
         persist(&source.join("epoch-0.payload"), &vec![9; p.capacity()]).unwrap();
-        assert_eq!(select(&root, &source, &p, 0).unwrap(), original);
-        let good = select(&root, &source, &p, 1).unwrap();
-        assert_eq!(good[0], 0);
+        assert_eq!(
+            prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap(),
+            original
+        );
+        let good = prepare_wire(&root, &source, &p, &[7; 32], 1).unwrap();
+        assert_eq!(open(&p, &[7; 32], 1, &good).unwrap()[0], 0);
         let output = temp();
-        adopt(&root, &output, &p, 0, &original).unwrap();
-        let mut changed = original;
+        let plain = open(&p, &[7; 32], 0, &original).unwrap();
+        adopt(&root, &output, &p, 0, &plain).unwrap();
+        let mut changed = plain;
         changed[0] = 1;
         assert!(adopt(&root, &output, &p, 0, &changed).is_err());
         fs::remove_dir_all(root).unwrap();
@@ -831,11 +907,15 @@ mod tests {
         let p = profile();
         let cover = vec![4; p.capacity()];
         persist(&source.join("epoch-0.cover"), &cover).unwrap();
-        let selected = select(&root, &source, &p, 0).unwrap();
-        assert_eq!(selected[0], 1);
-        assert_eq!(&selected[5..], &cover);
+        let selected = prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap();
+        let plain = open(&p, &[7; 32], 0, &selected).unwrap();
+        assert_eq!(plain[0], 1);
+        assert_eq!(&plain[5..], &cover);
         persist(&source.join("epoch-0.payload"), &vec![9; p.capacity()]).unwrap();
-        assert_eq!(select(&root, &source, &p, 0).unwrap(), selected);
+        assert_eq!(
+            prepare_wire(&root, &source, &p, &[7; 32], 0).unwrap(),
+            selected
+        );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(source).unwrap();
     }
@@ -863,17 +943,13 @@ mod tests {
         send(stream, &root, &source, &p, &[7; 32], p.first).unwrap();
         worker.join().unwrap();
         assert_eq!(
-            read_private(&output.join("epoch-0.payload"), p.capacity()).unwrap(),
+            read_record(&output, 0, p.capacity()).unwrap().unwrap(),
             vec![3; p.capacity()]
         );
-        assert!(output.join("epoch-1.unavailable").exists());
+        assert!(read_record(&output, 1, p.capacity()).unwrap().is_none());
         assert_eq!(
-            fs::metadata(receiver.join("epoch-0.received"))
-                .unwrap()
-                .len(),
-            fs::metadata(receiver.join("epoch-1.received"))
-                .unwrap()
-                .len()
+            fs::metadata(output.join("epoch-0.record")).unwrap().len(),
+            fs::metadata(output.join("epoch-1.record")).unwrap().len()
         );
         for d in [root, source, receiver, output] {
             fs::remove_dir_all(d).unwrap();
@@ -890,5 +966,54 @@ mod tests {
         p.origin = u64::MAX;
         assert!(p.check().is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn local_adoption_conflict_drains_public_lifetime_without_releasing_changed_record() {
+        let root = temp();
+        let source = temp();
+        let receiver = temp();
+        let output = temp();
+        let mut p = profile();
+        p.purpose = 5;
+        p.origin = now_ms().unwrap() + 100;
+        for epoch in 0..2 {
+            persist(
+                &source.join(format!("epoch-{epoch}.payload")),
+                &vec![3; p.capacity()],
+            )
+            .unwrap();
+        }
+        let original = vec![0; p.capacity() + 5];
+        persist(&output.join("epoch-0.record"), &original).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let rp = p.clone();
+        let rr = receiver.clone();
+        let ro = output.clone();
+        let worker = thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            receive(s, &rr, &ro, &rp, &[7; 32], 0)
+        });
+        send(
+            TcpStream::connect(address).unwrap(),
+            &root,
+            &source,
+            &p,
+            &[7; 32],
+            0,
+        )
+        .unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert_eq!(
+            read_private(&output.join("epoch-0.record"), original.len()).unwrap(),
+            original
+        );
+        assert_eq!(
+            read_record(&output, 1, p.capacity()).unwrap().unwrap(),
+            vec![3; p.capacity()]
+        );
+        for d in [root, source, receiver, output] {
+            fs::remove_dir_all(d).unwrap();
+        }
     }
 }

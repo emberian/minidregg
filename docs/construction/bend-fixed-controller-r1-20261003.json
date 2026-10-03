@@ -1,0 +1,22 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/ObliviousWords.lean",
+      "sha256": "6cd9c460bb0e7390792e729527e3e35622dc3d62059263f5a34ca3ccbdc976fa",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousState.lean",
+      "sha256": "b69638a32bd29836e23dcc437b8bba9732d50d8b37ac466f89e74e0dd39b029c",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousAdministrative.lean",
+      "sha256": "82ad6c1493e4fee0b1ec186ccc4c52ada5c9943468a5fa5e178647d71df0bfbd",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    }
+  ],
+  "scope": "Actual shared Op DAG fixedword operations+wholephysicalstate wirelayout+v2 reverse/install/absorbing dispatch block. Explicit handledfalse forothercases. Fullcontroller/refinement/inputqualification/privatebackend remain open; sourceSteps retained privateboundedword."
+}

@@ -1,0 +1,35 @@
+Scoped Lean warm-import preflight
+
+Run lean-warm-preflight.py before a scoped build using the frozen source/import
+manifest, exact warm artifact manifest, owned output root, and actual LEAN_PATH.
+Include Lean's builtin library path when passing LEAN_PATH explicitly.
+
+The validator is read-only: it never builds, repairs, deletes or rewrites caches.
+PASS means the frozen source and import setup passed; it is not a source theorem,
+compilation result, proof qualification or native receiving claim.
+
+Why this exists: a namespace directory in an earlier search root can hide the
+same namespace in later roots. Testing whether an olean exists anywhere does not
+test the compiler's actual lookup. A new owned Theory directory without an exact
+Theory dependency produced this failure in a foundational receiver build.
+
+Use a per-module union of exact, source-qualified warm dependencies in the owned
+lookup root. Pin source and artifact bytes. Compile selected changed modules to
+owned regular files, never through dependency symlinks. Build the union before
+launching; do not mutate another running job's namespace. For remote placement,
+derive transitive imports from matching .ilean metadata and pin the toolchain;
+this validator consumes a prepared closure, it does not materialize one.
+
+CHECK-MANIFEST schema: imports maps module names to direct imports;
+source_sha256 maps local modules to frozen source digests;
+affected_topological lists changed modules and their dependent closure in order.
+Warm manifest is a list of module/path/sha256 records. Existing qualifications
+must establish that those warm artifacts were produced from the pinned sources;
+hash equality alone does not establish source-to-olean provenance.
+
+--completed optionally lists modules already compiled from the SAME manifest.
+It checks output placement, not historical success. Preserve the producing log
+and manifest alongside resume work; never infer completed from file presence.
+
+python3 test_lean_warm_preflight.py exercises namespace shadowing, exact symlink
+repair, source drift and artifact drift without invoking Lean.

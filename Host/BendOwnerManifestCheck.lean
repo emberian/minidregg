@@ -15,10 +15,11 @@ def refuses (source : String) : IO Unit :=
   match parse source with
   | .error _ => pure ()
   | .ok _ => throw <| IO.userError "malformed public material was accepted"
-def run : IO Unit := do
-  let args ← IO.getArgs
-  unless args.size = 1 do throw <| IO.userError "expected actual public manifest path"
-  let actual ← IO.FS.readFile args[0]!
+def run (args : List String) : IO Unit := do
+  let path ← match args with
+    | [path] => pure path
+    | _ => throw <| IO.userError "expected actual public manifest path"
+  let actual ← IO.FS.readFile path
   let material ← IO.ofExcept (parse actual)
   unless material.publicKey.length > 0 do throw <| IO.userError "actual public key lost"
   let minimal := (Json.mkObj fields).compress
@@ -41,4 +42,4 @@ def run : IO Unit := do
     throw <| IO.userError "mux required key bytes lost"
   IO.println "BEND-OWNER-MANIFEST: actual public material, duplicate/escaped alias/unknown/missing/profile/hex/width/cap refusals PASS"
 end Minidregg.Host.BendOwnerManifestCheck
-def main : IO Unit := Minidregg.Host.BendOwnerManifestCheck.run
+def main (args : List String) : IO Unit := Minidregg.Host.BendOwnerManifestCheck.run args

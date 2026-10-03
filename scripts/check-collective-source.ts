@@ -28,12 +28,15 @@ const dependencies:Record<string,Dep[]>={
    ["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
  CollectiveDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
  SharedBookSettlement:[base,math,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
- SharedSettlementDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],["Shared","./SharedBookSettlement.bend","SharedBookSettlement"]]
+ SharedSettlementDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],["Shared","./SharedBookSettlement.bend","SharedBookSettlement"]],
+ ResidentServiceCommons:[base,math,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
+ WorldSurface:[base],
+ ServiceCommonsFaces:[base,["World","./WorldSurface.bend","WorldSurface"],["Service","./ResidentServiceCommons.bend","ResidentServiceCommons"]]
 };
 const entries:Record<string,string>={
  MarketMath:"divide",CollectiveAdoption:"prepare_install",SingleSellerAllocation:"allocate",
  UniformProRata:"allocate",SingleSellerSettlement:"settle",SingleSellerTransfers:"settle",
- CanonicalBookSettlement:"settle",CanonicalUniformSettlement:"settle",CollectiveDemonstration:"input",SharedBookSettlement:"settle",SharedSettlementDemonstration:"input"
+ CanonicalBookSettlement:"settle",CanonicalUniformSettlement:"settle",CollectiveDemonstration:"input",SharedBookSettlement:"settle",SharedSettlementDemonstration:"input",ResidentServiceCommons:"reserve",ServiceCommonsFaces:"domain_face"
 };
 const results=[];
 for(const [name,entryDefinition] of Object.entries(entries)){

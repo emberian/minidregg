@@ -1,4 +1,5 @@
-import Mathlib.LinearAlgebra.Basic
+import Mathlib.Algebra.Module.LinearMap.Basic
+import Mathlib.Tactic.Abel
 import Theory.AssertAxioms
 
 /- Masking is a linear observation coverage problem. A mask count alone is

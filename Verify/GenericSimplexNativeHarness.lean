@@ -71,7 +71,10 @@ def deliverTCP (binary : String) (runtime : Runtime) (packet : Bytes) : IO Unit 
 /-- Actual selective-Byzantine trace: A and B send COMMIT, C first disables,
 and faulty D sends its COMMIT only to A. Exactly A doCommits. A recovers and
 relays the q original COMMIT signatures without asking B or C to doCommit first. -/
-def selectiveCommitRecovery (binary : String) (original : Array Native) (c : Context) : IO Unit := do
+def selectiveCommitRecovery (binary : String) (original : Array Native) (base : Context) : IO Unit := do
+  -- Independent test execution: fresh journals must never reset an existing
+  -- committee instance while reusing its signed protocol identity.
+  let c := {base with instanceBytes := base.instanceBytes ++ [83,69,76,69,67,84]}
   let nodes := original.map (fun n => {n with journal := n.journal.toString ++ "-selective"})
   for i in List.range 4 do
     writePrivate nodes[i]!.journal (journalStream.encode (⟨c,i,0,[],[]⟩ : Journal)).toByteArray

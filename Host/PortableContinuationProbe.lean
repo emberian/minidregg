@@ -72,6 +72,22 @@ private def artifactInputs (value : Json) : Except String (List (Bytes × System
     return ((← stringField entry "coordinate").toUTF8.toList,
       System.FilePath.mk (← stringField entry "source"))
 
+/-- The held endpoint comes from the participant's independently retained
+public pin file. Identity/key/subject are pinned in operator config; none comes
+from the restored manifest or source archive. Bootstrap custody is external. -/
+private def heldPin (value : Json) (identity : Identity) : IO ParticipantPin := do
+  let subject : SubjectId := ⟨← IO.ofExcept (natural (← IO.ofExcept (field value "subject")))⟩
+  let key ← IO.ofExcept (pinBytes (← IO.ofExcept (field value "publicKey")))
+  let path ← IO.ofExcept (stringField value "heldPin")
+  let bytes := (← IO.FS.readBinFile path).toList
+  let tag := "DREGG.PORTABLE.PARTICIPANT-ACK/v1".toUTF8.toList
+  let some ack := acknowledgementStream.toLawful.decode (bytes.drop tag.length)
+    | throw (IO.userError "participant held public pin malformed")
+  if acknowledgementFrame ack != bytes || ack.participant != subject ||
+      ack.publicKey != key || ack.identity != identity then
+    throw (IO.userError "participant held identity/key/subject differs")
+  return ⟨ack.participant,ack.publicKey,ack.identity,ack.point⟩
+
 private def report (manifest : Manifest) : Json :=
   Json.mkObj [
     ("type", .str "mini-portable-quarantined-custody-v1"),
@@ -116,6 +132,14 @@ def portableProbe (configuration : System.FilePath) (mode : String) : IO Unit :=
         manifest.point != pointOf identity source.durable.image ||
         manifest.image != DurableReceiverCodec.encode source.durable.image then
       throw (IO.userError "portable whole source image identity/cut differs")
+    let participant ← IO.ofExcept (field value "participant")
+    let pin ← heldPin participant identity
+    let extensionPath ← IO.ofExcept (stringField participant "extension")
+    let extensionJson ← IO.ofExcept (Json.parse (← IO.FS.readFile extensionPath))
+    let extension ← IO.ofExcept (Minidregg.Host.ReceiptContinuity.parseExtension extensionJson)
+    let proposed : Acknowledgement := ⟨pin.participant,pin.publicKey,manifest.prefix.identity,manifest.point⟩
+    if (acknowledge pin proposed extension).isNone then
+      throw (IO.userError "portable repair conflicts with independently held participant prefix")
     let inventoryPath ← IO.ofExcept (stringField value "manifestInventory")
     let inventoryPin ← IO.ofExcept (stringField value "manifestInventorySha256")
     IO.ofExcept (← RetainedArtifactIO.checkedFile inventoryPath inventoryPin)

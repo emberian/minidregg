@@ -2,6 +2,7 @@
 //! It consumes Lean-authored descriptors and witnesses; it authors no AIR.
 mod config;
 mod masking_budget;
+mod full_degree_challenger;
 use dregg_circuit::{BabyBear, descriptor_ir2::{parse_vm_descriptor2,
     check_descriptor2_wellformed, prove_vm_descriptor2_for_config,
     EffectVmDescriptor2, TableSem, VmConstraint2, WindowExpr,

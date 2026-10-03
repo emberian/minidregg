@@ -18,7 +18,7 @@ theorem bind_q1 (limits : Limits) (library : Library) (state : State)
       state.heap (.environment value environment) = .ok (pointer, heap)) :
     (BendClosureMachine.bind limits library .Q1 value environment).run state =
       .ok (pointer, afterEnvironment state heap pointer) := by
-  simp [BendClosureMachine.bind, BendClosureMachine.allocate, allocated, afterEnvironment]
+  simp [BendClosureMachine.bind, isData, BendClosureMachine.allocate, allocated, afterEnvironment]
   rfl
 
 theorem step_beta_q1 (limits : Limits) (library : Library) (state : State)
@@ -31,7 +31,7 @@ theorem step_beta_q1 (limits : Limits) (library : Library) (state : State)
     step limits library state =
       {afterEnvironment state heap nextEnvironment with control := .evaluate body nextEnvironment, sourceSteps := state.sourceSteps + 1} := by
   simp [step, control, BendClosureMachine.apply, row, functionRow, code, instruction,
-    BendClosureMachine.bind, BendClosureMachine.allocate, allocated, sourceStep, go,
+    BendClosureMachine.bind, isData, BendClosureMachine.allocate, allocated, sourceStep, go,
     afterEnvironment]
   rfl
 

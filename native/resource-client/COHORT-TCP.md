@@ -93,3 +93,33 @@ custody state remains authority; ready/fallback files are not delivery receipts.
 Five focused cohort tests PASS after repair (781 skipped,0.807s). Release rebuild
 and actual sustained1s matched TCP/native receiving qualification are pending at
 this incremental publication. Earlier failed evidence is preserved separately.
+
+
+## Sustained pipeline repair (incremental source)
+
+The first emission repair compiled and its owned release passed. A12-epoch,
+1Hz all-cover receiving run then delivered ALL144 fixed TCP records without
+shape/timing failure, but useful authenticated relay processing missed release
+preparation in some epochs. Physical cadence alone is not useful delivery.
+The retained failed evidence includes that processing refutation.
+
+The current source reduces durable receive storage to one authenticated canonical
+record and one ready wire, and bounds the asynchronous adoption queue to64MiB.
+A local uncertain adoption drains the full public network lifetime before reporting
+its local fault; consumers never see unfsynced input. Live relays now combine the
+profile, clock, exact manifest/input hashes and shuffle claim into one immutable
+admission, followed by one exact full output. A claim without output stays uncertain;
+legacy ordinary CLI journals are refused by the live codec rather than replayed.
+Ordinary CLI persistence is unchanged. Relay output remains durable before publication.
+
+`--processing-slots` is a public1..32 profile field (default2). Every stage still
+emits one record per second at a1Hz tick, but its fixed stage latency is2 ticks:
+the contribution-to-broadcast path is11 ticks after the public origin. This is not
+1-second end-to-end delivery and is not a worst-case processing certificate.
+The receiving script now uses64 epochs,32 two-slot buffer lengths, complete
+fill/steady/drain, and separate all-cover/native poles. It requires a valid broadcast
+for every epoch, two exact historical native lookups behind a byte-transparent
+2-second delay, physical continuations, fresh-cap reserved repair fetches, and
+no second dispatch. These latest source changes are uncompiled at this shipment;
+actual sustained receiving remains pending. No source-private raw ingress is enabled:
+its native current-enrollment/funded ordered endpoint is separately being constructed.

@@ -101,11 +101,11 @@ def publicStream : StreamCodec Public :=
     (by intro p; cases p; rfl)
 
 def frame : List UInt8 := "DREGG/BEND/PUBLIC-PROJECTION/v1".toUTF8.toList
-def encode (public : Public) : List UInt8 := frame ++ publicStream.encode public
+def encode (statement : Public) : List UInt8 := frame ++ publicStream.encode statement
 def decode (bytes : List UInt8) : Option Public :=
   NockProgramCodec.framedDecode frame publicStream bytes
 
-def publicFields (public : Public) : List BabyBear := BendProofBytes.fields (encode public)
+def publicFields (statement : Public) : List BabyBear := BendProofBytes.fields (encode statement)
 
 def expectedContext (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
     (result : BendInvocation.Result) : Context :=
@@ -135,10 +135,10 @@ input provenance, source execution, PCS soundness or computational hiding.
 The real proof circuit must constrain these equalities and those joins. -/
 def Opens (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
     (result : BendInvocation.Result) (admittedInputBytes : List UInt8)
-    (coins : Coins) (public : Public) : Prop :=
+    (coins : Coins) (statement : Public) : Prop :=
   BendInvocation.matchesArtifact result artifact = true ∧
   artifact.profile.disclosure = policy.id ∧ coins.shape ∧
-  public = project policy artifact result admittedInputBytes coins
+  statement = project policy artifact result admittedInputBytes coins
 
 theorem private_effects_absent (artifact : BendWorldProgramCodec.Artifact)
     (result : BendInvocation.Result) (input : List UInt8) (coins : Coins) :
@@ -148,11 +148,11 @@ theorem public_effects_exact (artifact : BendWorldProgramCodec.Artifact)
     (result : BendInvocation.Result) (input : List UInt8) (coins : Coins) :
     (project .publicEffects artifact result input coins).revealedEffects = result.effects := rfl
 
-theorem roundtrip (public : Public) : decode (encode public) = some public :=
-  NockProgramCodec.framedDecode_encode frame publicStream public
+theorem roundtrip (statement : Public) : decode (encode statement) = some statement :=
+  NockProgramCodec.framedDecode_encode frame publicStream statement
 
-theorem canonical {bytes : List UInt8} {public : Public}
-    (parsed : decode bytes = some public) : encode public = bytes :=
+theorem canonical {bytes : List UInt8} {statement : Public}
+    (parsed : decode bytes = some statement) : encode statement = bytes :=
   NockProgramCodec.framedDecode_canonical parsed
 
 theorem publicFields_injective : Function.Injective publicFields := by

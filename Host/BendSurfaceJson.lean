@@ -6,6 +6,7 @@ import Lean
 
 namespace Minidregg.Host.BendSurfaceJson
 open Minidregg.Compiler.BendWorldSurface
+open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Lean
 set_option autoImplicit false

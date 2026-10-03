@@ -4,8 +4,12 @@
 //! This test exercises the raw IR2 API directly; the CLI now refuses this shape.
 #[path = "../src/config.rs"]
 mod config;
+#[path = "../src/legacy_config.rs"]
+mod legacy_config;
 #[path = "../src/masking_budget.rs"]
 mod masking_budget;
+#[path = "../src/full_degree_challenger.rs"]
+mod full_degree_challenger;
 use dregg_circuit::{BabyBear, descriptor_ir2::{parse_vm_descriptor2,
     prove_vm_descriptor2_for_config, verify_vm_descriptor2_with_config,
     MemBoundaryWitness, UMemBoundaryWitness}};
@@ -28,10 +32,17 @@ fn raw_one_row_hiding_proof_reveals_trace_coefficients() {
     let public = fields(fixture.join("public.csv"));
     let alternate = fields(fixture.join("alternate-trace.csv"));
     assert_ne!(row[5], alternate[5], "the private bit is not determined by public13");
-    let config = config::raw_for_regression().unwrap();
+    let config = legacy_config::raw_for_regression().unwrap();
     let proof = prove_vm_descriptor2_for_config(&descriptor, std::slice::from_ref(&row), &public,
         &MemBoundaryWitness::default(), &[], &UMemBoundaryWitness::default(), &config).unwrap();
     verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config).unwrap();
+    let changed_profile = config::for_capacity(masking_budget::TraceCapacity::checked(32).unwrap()).unwrap();
+    let encoded = postcard::to_allocvec(&proof).unwrap();
+    let reinterpreted: dregg_circuit::descriptor_ir2::Ir2BatchProof<config::Config> =
+        postcard::from_bytes(&encoded).unwrap();
+    assert!(verify_vm_descriptor2_with_config(&descriptor, &reinterpreted, &public, &changed_profile).is_err(),
+        "legacy proof must not verify under the version-bound v3 transcript");
+
     let alternate_proof = prove_vm_descriptor2_for_config(&descriptor,
         std::slice::from_ref(&alternate), &public, &MemBoundaryWitness::default(),
         &[], &UMemBoundaryWitness::default(), &config).unwrap();
@@ -42,7 +53,7 @@ fn raw_one_row_hiding_proof_reveals_trace_coefficients() {
 
     // Replay the public verifier transcript for this no-lookup/no-preprocess
     // local-row descriptor. No RNG state, secret seed or prover data is read.
-    let mut transcript = BatchTranscript::<config::Config>::new(config.initialise_challenger());
+    let mut transcript = BatchTranscript::<legacy_config::Config>::new(config.initialise_challenger());
     transcript.observe_instance_count(1);
     transcript.observe_instance_binding(1, 0, descriptor.trace_width, opened.quotient_chunks.len());
     let pi: Vec<_> = public.iter().map(|value| p3_baby_bear::BabyBear::new(value.as_u32())).collect();
@@ -94,6 +105,10 @@ fn minimum_and_normal_capacity_proofs_preserve_relation() {
                 &MemBoundaryWitness::default(), &[], &UMemBoundaryWitness::default(), &config).unwrap();
             assert_eq!(proof.degree_bits, [capacity.extended_log_height()]);
             verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config).unwrap();
+            let other_capacity = masking_budget::TraceCapacity::checked(if rows == 32 { 64 } else { 128 }).unwrap();
+            let wrong_capacity_config = config::for_capacity(other_capacity).unwrap();
+            assert!(verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &wrong_capacity_config).is_err(),
+                "public capacity is bound into the transcript");
             assert!(verify_vm_descriptor2_with_config(&descriptor, &proof, &wrong_public, &config).is_err());
         }
     }

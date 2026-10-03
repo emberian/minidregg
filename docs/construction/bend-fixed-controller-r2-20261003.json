@@ -1,0 +1,17 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendObliviousCodec.lean",
+      "sha256": "8bf2785d479c07faf6c364b9eed033276c766623f27fea4ef7350f3cb7eb88d6",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Assurance/BendObliviousAdministrativeChecks.lean",
+      "sha256": "9999a0bbfe32932f8cc4341ee4b718322ce0e4844d91acb9c65c8e6e603f7235",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    }
+  ],
+  "scope": "Actual State fixedbit encoder/decoder plus8 administrative DAG\u2192actualMachine.step conformance checks. Explicit compiledtrust; wholecontroller/refinement not claimed."
+}

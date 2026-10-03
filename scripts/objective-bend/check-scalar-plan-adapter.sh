@@ -9,6 +9,20 @@ scalar_threads="${SCALAR_LEAN_THREADS:-2}"
 case "$scalar_threads" in 1|2) ;; *) printf "Use one or two allocated threads\n" >&2; exit 2 ;; esac
 scalar_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mkdir -p "$SCALAR_OLEAN_DIRECTORY/Compiler"
+# Lean selects the first package namespace root; populate own read-only
+# dependency overlay instead of assuming search-path fallback.
+python3 - "$SCALAR_OLEAN_DIRECTORY" "$SCALAR_LEAN_PATH" <<'PY_OVERLAY'
+from pathlib import Path
+import sys
+out=Path(sys.argv[1])
+for root in map(Path,sys.argv[2].split(':')):
+  for source in root.rglob('*'):
+    if not source.is_file(): continue
+    destination=out/source.relative_to(root)
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    if not destination.exists() and not destination.is_symlink():
+      destination.symlink_to(source)
+PY_OVERLAY
 export LEAN_PATH="$SCALAR_OLEAN_DIRECTORY:$SCALAR_LEAN_PATH"
 export LEAN_NUM_THREADS="$scalar_threads"
 cd "$scalar_repo"

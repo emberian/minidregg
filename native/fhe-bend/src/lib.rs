@@ -18,6 +18,8 @@ pub const PRELUDE_PROFILE: &str =
     "bfv-fhe011-degree4096-t1032193-public-prelude-bool-case-depth0-v1";
 pub const MUX_PROFILE: &str =
     "bfv-fhe011-degree4096-t1032193-public-core-enum-mux-plan-depth1-lifetime2-v1";
+pub const PRELUDE_MUX_PROFILE: &str =
+    "bfv-fhe011-degree4096-t1032193-public-prelude-bool-mux-plan-depth1-lifetime2-v1";
 const CAP: usize = 2_000_000;
 pub fn ensure(ok: bool, why: &str) -> Result<()> {
     if ok {
@@ -224,7 +226,7 @@ fn signed_to_field(w: &Value) -> Result<Value> {
 pub fn artifact_arity(a: &Value) -> Result<usize> {
     match string(a, "schema")? {
         "dregg.bend.literal-enum-case.v1" | "dregg.bend.prelude-bool-case.v1" => Ok(1),
-        "dregg.bend.dynamic-enum-mux.v1" => Ok(3),
+        "dregg.bend.dynamic-enum-mux.v1" | "dregg.bend.prelude-bool-mux.v1" => Ok(3),
         _ => Err("unsupported source compiler schema".into()),
     }
 }
@@ -233,6 +235,7 @@ pub fn artifact_profile(a: &Value) -> Result<&'static str> {
         "dregg.bend.literal-enum-case.v1" => Ok(PROFILE),
         "dregg.bend.prelude-bool-case.v1" => Ok(PRELUDE_PROFILE),
         "dregg.bend.dynamic-enum-mux.v1" => Ok(MUX_PROFILE),
+        "dregg.bend.prelude-bool-mux.v1" => Ok(PRELUDE_MUX_PROFILE),
         _ => Err("unsupported source compiler schema".into()),
     }
 }
@@ -278,11 +281,18 @@ pub fn validate_artifact(bytes: &[u8], expected: &str) -> Result<Value> {
         "unsupported compiler/source",
     )?;
     let arity = artifact_arity(&a)?;
-    if string(&a, "schema")? == "dregg.bend.prelude-bool-case.v1" {
+    if string(&a, "schema")? == "dregg.bend.prelude-bool-case.v1"
+        || string(&a, "schema")? == "dregg.bend.prelude-bool-mux.v1"
+    {
         ensure(
             string(&a, "tagEncoding")? == "bend-prelude-bool-sigma-unit-v1"
                 && string(&a, "frontendCorrespondence")? == "captured-safe-emit-structure-v1"
-                && string(&a, "entry")? == "SourceBool.not"
+                && string(&a, "entry")?
+                    == if arity == 1 {
+                        "SourceBool.not"
+                    } else {
+                        "SourceBool.choose"
+                    }
                 && !string(&a, "bookSource")?.is_empty()
                 && !string(&a, "surfaceSource")?.is_empty()
                 && nat(field(&a, "relation")?, "nPublic")? == 0,

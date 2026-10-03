@@ -70,6 +70,8 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
       "replicas use different exact contexts"
     require (replica.participant.source.verified.opened.durable.image ==
       first.participant.source.verified.opened.durable.image) "replicas start at different source histories"
+  let before := replicas
+  let initialCount := first.participant.source.verified.opened.durable.image.accepted.length
   let (participant,proposal) ← propose first.participant signedIngress
   let payload ← match proposal with
     | .ok payload => pure payload
@@ -82,6 +84,25 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
       final.participant.source.verified.opened.durable.image) "source replicas diverged"
     require ((completedReceipt replica.participant payload).isSome)
       "engine output occurred without actual source receipt"
+  -- Deliberately lose all caller completion responses and volatile participant
+  -- state. Reopen protocol journals from the original fixture state, then load
+  -- and reverify actual physical source stores. Nothing resubmits the mutation.
+  let mut restarted : Array Replica := #[]
+  for original in before do
+    let opened ← openParticipant original.config original.participant.runtime.native
+      original.participant.runtime.context original.participant.source
+    let participant ← match opened with
+      | .ok participant => pure participant
+      | .error detail => throw (IO.userError ("protocol restart refused: " ++ detail))
+    let (participant,_) ← reloadSource participant
+    require ((completedIngress participant signedIngress).isSome)
+      "lost-response recovery lacks exact original-ingress receipt"
+    require (participant.source.verified.opened.durable.image.accepted.length == initialCount + 1)
+      "lost-response recovery did not preserve exactly one append"
+    require (participant.source.verified.opened.durable.image ==
+      final.participant.source.verified.opened.durable.image) "restart source readback differs"
+    restarted := restarted.push ⟨original.config,participant⟩
+  IO.println "PASS source lost-response/restart: four independently reread stores, original signed-ingress receipts, exactly one append"
   IO.println "PASS actual source agreement: four independent configured receivers, real admission/replay, TCP, exact common record, physical source readback receipts"
-  return finished
+  return restarted
 end Minidregg.Verify.GenericSimplexSourceHarness

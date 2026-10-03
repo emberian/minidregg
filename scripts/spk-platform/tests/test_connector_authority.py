@@ -6,6 +6,12 @@ import unittest
 spec=importlib.util.spec_from_file_location("connector_authority",Path(__file__).resolve().parents[1]/"connector-authority.py")
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class CustodyTests(unittest.TestCase):
+    def test_grant_budget_uses_actual_parent_without_widening(self):
+        self.assertEqual(m.bound_limit({"id":"12","maxCost":"100000"},"12"),"100000")
+        self.assertEqual(m.bound_limit({"id":"12","maxCost":"10000000"},"12"),"1000000")
+        with self.assertRaisesRegex(RuntimeError,"differs"):
+            m.bound_limit({"id":"13","maxCost":"100000"},"12")
+
     def test_exact_call_selects_recovery_and_incomplete_attempt_fences(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/"attempt"

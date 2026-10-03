@@ -33,6 +33,10 @@ def pending_action(attempt):
     # or reconstruct a fresh proposal after an unsuccessful lookup.
     return "recover" if (attempt / "call.bin").is_file() else "unresolved"
 
+def bound_limit(head, capability):
+    require(head["id"] == capability, "signed document capability differs")
+    return str(min(1000000, int(head["maxCost"])))
+
 def execute(world, root, proposal_id):
     c = s.connector_selection(world)
     owner = world.selection["app"]["owner"]
@@ -56,11 +60,12 @@ def execute(world, root, proposal_id):
                "miniSha256": world.manifest["sha256"]["mini"]}
     retain(root / "input.json", binding)
     serial = 0
-    def run(workspace, *words):
+    def run(workspace, *words, native=False, binary=None):
         nonlocal serial
         serial += 1
         stem = root / (f"{serial:03d}-" + os.urandom(4).hex())
-        argv = [world.manifest["mini"], "workspace", "--dir", str(workspace), *map(str, words)]
+        argv = ([binary or world.manifest["mini"], *map(str, words)] if native else
+                [world.manifest["mini"], "workspace", "--dir", str(workspace), *map(str, words)])
         retain(Path(str(stem) + ".argv.json"), argv)
         with Path(str(stem) + ".out").open("xb") as out, Path(str(stem) + ".err").open("xb") as err:
             result = subprocess.run(argv, stdout=out, stderr=err, timeout=1800, check=False)
@@ -73,9 +78,39 @@ def execute(world, root, proposal_id):
         run(connector_ws, "--action", "create", "--name", c["task"], "--storage", "declared", "--predicate", predicate)
     task = load(task_ref)
     require(task["kind"] == "object" and task["target"] != source_ref["target"], "connector task context overlaps document")
-    request = {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": reader["document"],
-               "recipient": c["subject"], "verbs": ["observe", "mutate"], "maxCost": "1000000"}
-    request_path = root / "document-grant-request.json"; retain(request_path, request)
+    # Shared-name resolution can select the room placing grant. Delegate from
+    # the actual retained document root through an ordinary simple hint alias.
+    alias = "connector-source-" + proposal_id
+    alias_path = owner_ws / "refs" / (alias + ".json")
+    if not alias_path.exists():
+        run(owner_ws, "--action", "import", "--name", alias, "--kind", source_ref["kind"],
+            "--target", source_ref["target"], "--observe-capability", source_ref["observeCapability"],
+            "--operation-capability", source_ref["operationCapability"],
+            "--provenance", owner_ws / "refs" / (reader["document"].replace("/", ".") + ".json"))
+    selected = load(alias_path)
+    require(all(selected.get(k) == source_ref.get(k) for k in ("kind", "target", "observeCapability", "operationCapability")),
+            "retained document alias differs")
+    limit_path = root / "document-grant-limit.json"
+    if not limit_path.exists():
+        pin = load(owner_ws / "workspace.json")
+        query_dir = root / ("document-capability-" + os.urandom(8).hex())
+        query_path = Path(str(query_dir) + ".json")
+        retain(query_path, {"subject": owner, "nonce": str(int.from_bytes(os.urandom(16), "big")),
+                           "purpose": {"type": "query", "kind": "object", "target": source_ref["target"], "view": "capability"},
+                           "grants": [{"kind": "object", "target": source_ref["target"], "capability": source_ref["operationCapability"]}]})
+        run(owner_ws, "query", "--host", pin["host"], "--config", pin["config"], "--socket", pin["socket"],
+            "--intent", query_path, "--key", pin["key"], "--view", "capability", "--dir", query_dir, native=True)
+        inspected = root / (query_dir.name + "-head.json")
+        run(owner_ws, world.config_path, "inspect", "view-object-capability", query_dir / "view.bin", inspected,
+            native=True, binary=world.manifest["host"])
+        head = load(inspected)["head"]
+        retain(limit_path, {"maxCost": bound_limit(head, source_ref["operationCapability"]),
+                            "capabilityView": str(query_dir / "view.json"), "capabilityViewSha256": sha(query_dir / "view.json")})
+    limit = load(limit_path)
+    require(sha(limit["capabilityView"]) == limit["capabilityViewSha256"], "retained grant limit view differs")
+    request = {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": alias,
+               "recipient": c["subject"], "verbs": ["observe", "mutate"], "maxCost": limit["maxCost"]}
+    request_path = root / "document-grant-request-v2.json"; retain(request_path, request)
     proposal = owner_ws / "proposals" / proposal_id
     attempt = owner_ws / "attempts" / proposal_id
     if not proposal.exists():

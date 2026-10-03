@@ -7,7 +7,7 @@ argument bytes; the shared input ABI must decode/type-check them explicitly. -/
 import Compiler.ObjectiveBendInstance
 import Kernel.WorldMethodTrace
 import Kernel.BendInvocationInput
-import Kernel.ObjectiveBendInstanceLoader
+import Kernel.ObjectiveBendReferenceLoader
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.ObjectiveBendCallContext
@@ -64,7 +64,8 @@ The default transaction codec, nonce/nullifier behavior and ordinary rights are
 unchanged. No injectivity of cryptographic hashing is claimed as a theorem. -/
 structure Binding (prepared : PreparedInvocation deployment profile ambient durable command)
     (request : Request) where
-  object : ObjectiveBendInstance.Instance
+  private mk ::
+  object : ObjectiveBendReferenceInstance.Instance
   actions : List WorldKindInstance.Action
   world : command.targets[firstIndex prepared].payload = .world actions
   stateExact :
@@ -80,20 +81,35 @@ structure Binding (prepared : PreparedInvocation deployment profile ambient dura
   selfEnvelope : List UInt8
   selfObserve : ReadLeg prepared (firstIndex prepared) selfEnvelope
 
+/-- Each input is backed by its actual signed current read admission. -/
+structure Observation (prepared : PreparedInvocation deployment profile ambient durable command) where
+  index : TargetIndex command
+  envelope : List UInt8
+  admitted : ReadLeg prepared index envelope
+
+def observationValue (prepared : PreparedInvocation deployment profile ambient durable command)
+    (observation : Observation prepared) : BendInvocationInput.Observation :=
+  BendInvocationInput.observe observation.admitted.selected observation.admitted.checked
+
 /-- Executable binder checks request/pre-state/source equality rather than
 asking a Host caller to assert them. Current read admission is a real token from
 native signature checking; source helper attribution is publication-owned. -/
-def bind (helpers : Minidregg.Theory.BendTT.Book)
-    (prepared : PreparedInvocation deployment profile ambient durable command) (request : Request)
-    (envelope : List UInt8) (read : ReadLeg prepared (firstIndex prepared) envelope) :
+def bind (prepared : PreparedInvocation deployment profile ambient durable command) (request : Request)
+    (envelope : List UInt8) (read : ReadLeg prepared (firstIndex prepared) envelope)
+    (observations : List (Observation prepared)) :
     Except String (Binding prepared request) := do
+  let admitted ← observations.mapM fun observation =>
+    match BendInvocationInput.admitObservation command.subject observation.admitted.selected
+        observation.admitted.checked with
+    | none => .error "source observation belongs to another subject"
+    | some current => .ok current
   match world : command.targets[firstIndex prepared].payload with
   | .world actions =>
     match actual : worldStore command.targets[firstIndex prepared]
         (prepared.targets (firstIndex prepared)).pre.logical with
     | none => throw "self is not native world carrier"
     | some store =>
-      let loaded ← ObjectiveBendInstanceLoader.load helpers store
+      let loaded ← ObjectiveBendReferenceLoader.load store admitted
       let object := loaded.object
       if exactSelf : request.self = command.targets[firstIndex prepared].target then
         if exactRoot : request.selfRoot = (prepared.targets (firstIndex prepared)).pre.root then
@@ -107,16 +123,6 @@ def bind (helpers : Minidregg.Theory.BendTT.Book)
         else throw "OO request differs from authenticated self root"
       else throw "OO request differs from native self participant"
   | _ => throw "OO self participant has wrong native payload role"
-
-/-- Each input is backed by its actual signed current read admission. -/
-structure Observation (prepared : PreparedInvocation deployment profile ambient durable command) where
-  index : TargetIndex command
-  envelope : List UInt8
-  admitted : ReadLeg prepared index envelope
-
-def observationValue (prepared : PreparedInvocation deployment profile ambient durable command)
-    (observation : Observation prepared) : BendInvocationInput.Observation :=
-  BendInvocationInput.observe observation.admitted.selected observation.admitted.checked
 
 /-- The generic source input contains only observations produced by actual
 current read tokens. The selected method's artifact identity is joined by the

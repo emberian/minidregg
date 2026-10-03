@@ -89,6 +89,7 @@ pub(crate) fn reviewed_arguments(arguments:&Value)->Result<(String,String)> {
         if !names.insert(name) {return Err("review duplicates source name".into());}
         crate::decimal(source["source"].as_str().ok_or("review source identity absent")?,"review source identity")?;
         crate::decimal(source["sourceRoot"].as_str().ok_or("review source root absent")?,"review source root")?;
+        crate::decimal(source["readCapability"].as_str().ok_or("review observe capability absent")?,"review observe capability")?;
     }
     let targets=arguments["targets"].as_array().ok_or("review targets absent")?;
     if targets.is_empty()||targets.len()>8 {return Err("review requires1..8 intended document writes".into());}
@@ -146,7 +147,7 @@ mod tests {
     use super::*;
     fn source(root:&str,height:u64)->Value {
         json!({"type":"mini-context-document-v1","authority":"participant-current-signed-read",
-            "name":"notes","source":"22","sourceRoot":root,"observedHeight":height,
+            "name":"notes","source":"22","sourceRoot":root,"readCapability":"32","observedHeight":height,
             "readAuthorityRoot":height.to_string(),"rows":[{"element":"4","revision":"5","parent":"6","predecessor":null,"text":"remember"}]})
     }
     #[test]

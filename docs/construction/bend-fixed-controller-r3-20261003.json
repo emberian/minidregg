@@ -1,0 +1,32 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendObliviousAccess.lean",
+      "sha256": "823ed81e830963065290b8cdffe25040621794569fdf8b5bb06e3ae4bd376ca5",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousProgram.lean",
+      "sha256": "deb0f4c1b4c01ffa1ed104e82d67a992f644072453c13f86dc5e49300b041fc4",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousLookup.lean",
+      "sha256": "4e9199ba505f7753fc935207e540109094a9ebab3bb4667b6989d09fc4aa267f",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousUnspine.lean",
+      "sha256": "3fa76e2af070b41b72aaede33d73153b96184211b1aadd7a24e2ee9f3a39b073",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    },
+    {
+      "path": "Compiler/BendObliviousController.lean",
+      "sha256": "2ca8387e48c6f3ae21793c808a00a1e091ed5650a9bd969be1f0bcddbc4f1ad8",
+      "status": "AUTHORED_UNCOMPILED_PARTIAL_CONTROLLER"
+    }
+  ],
+  "scope": "Actual Lookup1/2+Unspine5 fixedaccess blocks, public code/definitionROM and SAME-input dispatch assembly. Coverage7/12tags, otherhandledfalse. No wholecontroller/privatebackend/source-refinement claim."
+}

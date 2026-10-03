@@ -13,9 +13,7 @@ def fields (bytes : List UInt8) : List BabyBear := bytes.map fieldByte
 
 theorem fieldByte_val (byte : UInt8) : (fieldByte byte).val = byte.toNat := by
   apply ZMod.val_natCast_of_lt
-  have bound := byte.toNat_lt_size
-  change byte.toNat < 2013265921
-  omega
+  exact Nat.lt_trans byte.toNat_lt_size (by decide)
 
 theorem fieldByte_injective : Function.Injective fieldByte := by
   intro left right same

@@ -7,12 +7,16 @@ parser.add_argument('--mini',required=True,type=pathlib.Path)
 parser.add_argument('--fixture',required=True,type=pathlib.Path)
 parser.add_argument('--native-socket',required=True)
 parser.add_argument('--evidence',required=True,type=pathlib.Path)
+parser.add_argument('--epochs',type=int,default=64)
+parser.add_argument('--processing-slots',type=int,default=2)
 a=parser.parse_args()
 mini=a.mini;fixture=a.fixture;e=a.evidence;e.mkdir(mode=0o700)
 log=(e/'receiving.log').open('wb',buffering=0)
 request=(fixture/'request.native').read_bytes();expected=(fixture/'expected-transport-outcome.bin').read_bytes()
 native=a.native_socket
-N=12;P=4096;W=4;T=1000
+N=a.epochs;P=4096;W=4;T=1000;G=a.processing_slots
+if N<12 or N>256 or N%4 or G<1 or G>32:
+    raise SystemExit('public test profile requires12..256 epochs divisibleby4 and1..32 processing slots')
 generation=os.urandom(16).hex()
 common=e/'common';common.mkdir(mode=0o700)
 def run(*args):
@@ -65,7 +69,7 @@ def scenario(name,real):
         return [str(mini),'mix-live','--action',action,'--state',str(directory(state)),
             '--key',str(common/'worker.key'),'--generation',generation,'--slot',str(slot),
             '--phase',str(phase),'--width',str(W),'--payload-bytes',str(P),
-            '--origin-ms',str(origin),'--tick-ms',str(T),'--epochs',str(N),
+            '--origin-ms',str(origin),'--tick-ms',str(T),'--processing-slots',str(G),'--epochs',str(N),
             '--records',str(directory(records)),*map(str,extra)]
     def start(cmd):
         p=subprocess.Popen(cmd,stdout=log,stderr=log);processes.append((p,cmd));return p
@@ -102,7 +106,7 @@ def scenario(name,real):
             if real and i<2:
                 ident=os.urandom(16);cap=os.urandom(32)
                 (source/'epoch-0.intent').write_bytes(b'\x01'+ident+cap+request)
-                for epoch in (3,7,11):
+                for epoch in (3,7,N-1):
                     (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
             start(command('cover',d/f'client{i}-worker',out,0,i,'--source',source,'--keys',keycsv))
         # Establish complete cover inventory before public links begin.
@@ -125,23 +129,23 @@ def scenario(name,real):
         for i in range(W):edge(f'client{i}-registrar',0,i,d/f'client{i}-out',registrar_sources[i])
         for i in range(4):edge(f'stage{i}',i+1,0,d/f'batch{i}-out',d/f'batch{i}-incoming')
         for i in range(W):edge(f'broadcast-client{i}',5,i,d/'broadcast-out',d/f'client{i}-broadcast')
-        limit=time.monotonic()+90
+        limit=time.monotonic()+80+N+5*G
         for p,cmd in processes:
             rc=p.wait(timeout=max(.1,limit-time.monotonic()))
             if rc:raise RuntimeError('actor failed '+str(rc)+': '+repr(cmd))
         for t in observers:t.join(timeout=3)
         if errors:raise RuntimeError('; '.join(errors))
         assert len(public)==12*N,(len(public),12*N)
-        assert all(abs(v['relative_ms']-(v['epoch']+v['phase']+1)*T)<100 for v in public)
+        assert all(abs(v['relative_ms']-(v['epoch']+v['phase']*G+1)*T)<100 for v in public)
         for i in range(W):
             for epoch in range(N):
-                assert (d/f'client{i}-broadcast'/f'epoch-{epoch}.payload').exists(),'missing valid broadcast'
+                record=(d/f'client{i}-broadcast'/f'epoch-{epoch}.record').read_bytes();assert len(record)==5+19+W*P and record[0]==1,'missing valid broadcast'
         if real:
             assert len(forwarded)==2,'second semantic dispatch occurred'
             for i in range(2):
                 first=(d/f'client{i}-opened'/'epoch-0.payload').read_bytes()
                 n=struct.unpack('<I',first[:4])[0];assert n==len(first)-4 and first[4]==3,'not physical continuation'
-                last=(d/f'client{i}-opened'/'epoch-11.payload').read_bytes()
+                last=(d/f'client{i}-opened'/f'epoch-{N-1}.payload').read_bytes()
                 n=struct.unpack('<I',last[:4])[0];assert n==len(last)-4 and last[4:]==expected,'not exact source frame'
         else:assert not forwarded
         public.sort(key=lambda v:(v['phase'],v['slot'],v['epoch']))
@@ -157,6 +161,22 @@ def scenario(name,real):
                 except subprocess.TimeoutExpired:p.kill();p.wait()
         stop.set();listener.close();nt.join(timeout=2)
         delay_path.unlink(missing_ok=True)
+        # Preserve public observations even on a processing refutation. These
+        # contain sizes/times only, never packet bodies or native source bytes.
+        public.sort(key=lambda v:(v['phase'],v['slot'],v['epoch']))
+        (d/'public-wire-observation.json').write_text(json.dumps(public,indent=2))
+        counts={}
+        for label in ['batch0-out','batch1-out','batch2-out','batch3-out','broadcast-out']:
+            counts[label]=sum((d/label/f'epoch-{epoch}.payload').exists() for epoch in range(N))
+        latencies=[v['relative_ms']-(v['epoch']+v['phase']*G+1)*T for v in public]
+        (d/'public-run-summary.json').write_text(json.dumps({
+            'tick_ms':T,'processing_slots':G,'epochs':N,'epoch_buffer_lengths':N/G,
+            'contribution_to_broadcast_schedule_ms':(5*G+1)*T,
+            'records_observed':len(public),'records_expected':12*N,
+            'min_wire_lateness_ms':min(latencies) if latencies else None,
+            'max_wire_lateness_ms':max(latencies) if latencies else None,
+            'durable_useful_epoch_counts':counts,'actual_source_submissions':len(forwarded),
+            'errors':errors},indent=2))
 baseline=scenario('all-cover',False)
 active=scenario('native-delayed',True)
 assert baseline==active,'public epoch/slot/phase/record shape changed with hidden work'

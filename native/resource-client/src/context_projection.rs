@@ -79,6 +79,7 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
     projection["openedBytes"]=json!(opened_bytes);
     projection["unavailableRows"]=json!(unavailable);
     projection["name"]=json!(name);
+    projection["readCapability"]=reference["observeCapability"].clone();
     // Height is observation provenance only; sourceRoot carries currentness.
     projection["observedHeight"]=challenge["height"].clone();
     projection["readAuthorityRoot"]=challenge["worldRoot"].clone();
@@ -108,14 +109,16 @@ fn review_request(base:&Value,request:&Value,lookup:impl Fn(&str)->Result<Value>
     let sources=base["sources"].as_array().ok_or("review context sources absent")?;
     if sources.is_empty()||sources.len()>16 {return Err("review support requires1..16 sources".into());}
     let requested=request["targets"].as_array().ok_or("review targets absent")?;
-    let mut pins=std::collections::BTreeMap::<String,(String,String)>::new();
+    let mut pins=std::collections::BTreeMap::<String,(String,String,String)>::new();
     for source in sources {
         if source["type"]!="mini-context-document-v1" {return Err("review source projection differs".into());}
         let name=member(source,"name")?.to_owned();
         let target=member(source,"source")?.to_owned();
         let root_pin=member(source,"sourceRoot")?.to_owned();
         field_decimal(&root_pin,"context source root")?;
-        if pins.insert(name,(target,root_pin)).is_some(){return Err("review duplicates source name".into());}
+        let read_capability=member(source,"readCapability")?.to_owned();
+        field_decimal(&read_capability,"context observe capability")?;
+        if pins.insert(name,(target,root_pin,read_capability)).is_some(){return Err("review duplicates source name".into());}
     }
     // A current derived summary's own input closure joins landing guards.
     // A proposal cannot use its source document root to hide stale citations.
@@ -128,10 +131,12 @@ fn review_request(base:&Value,request:&Value,lookup:impl Fn(&str)->Result<Value>
                 let identity=member(dependency,"source")?.to_owned();
                 let pin=member(dependency,"root")?.to_owned();
                 field_decimal(&pin,"summary review source root")?;
+                let capability=member(dependency,"capability")?.to_owned();
+                field_decimal(&capability,"summary observe capability")?;
                 match pins.get(&name) {
-                    Some(prior) if prior!=&(identity.clone(),pin.clone())=>return Err("summary review dependency differs from selected source".into()),
+                    Some(prior) if prior!=&(identity.clone(),pin.clone(),capability.clone())=>return Err("summary review dependency differs from selected source".into()),
                     Some(_)=>{},
-                    None=>{pins.insert(name,(identity,pin));}
+                    None=>{pins.insert(name,(identity,pin,capability));}
                 }
             }
         }
@@ -140,22 +145,27 @@ fn review_request(base:&Value,request:&Value,lookup:impl Fn(&str)->Result<Value>
     let mut used=std::collections::BTreeSet::new();
     for target in requested {
         let name=member(target,"name")?;
-        let (identity,root_pin)=pins.get(name).ok_or("review write target has no selected current-base source")?;
+        let (identity,root_pin,read_capability)=pins.get(name).ok_or("review write target has no selected current-base source")?;
         let current_ref=lookup(name)?;
-        if current_ref["target"].as_str()!=Some(identity){return Err("review source reference was rebound".into());}
+        if current_ref["target"].as_str()!=Some(identity)||current_ref["observeCapability"].as_str()!=Some(read_capability){
+            return Err("review source reference or observe capability was rebound".into());
+        }
         if !used.insert(name.to_owned()){return Err("review duplicates target".into());}
         let mut pinned=target.clone();
         if target.get("expectedTargetRoot").is_some_and(|r|r.as_str()!=Some(root_pin)) {
             return Err("review request target differs from selected base".into());
         }
         pinned["expectedTargetRoot"]=json!(root_pin);
+        pinned["expectedObserveCapability"]=json!(read_capability);
         lowered.push(pinned);
     }
-    for (name,(identity,root_pin)) in pins {
+    for (name,(identity,root_pin,read_capability)) in pins {
         if used.contains(&name){continue;}
         let current_ref=lookup(&name)?;
-        if current_ref["target"].as_str()!=Some(identity.as_str()){return Err("review support reference was rebound".into());}
-        lowered.push(json!({"name":name,"expectedTargetRoot":root_pin,"payload":{"type":"read"}}));
+        if current_ref["target"].as_str()!=Some(identity.as_str())||current_ref["observeCapability"].as_str()!=Some(read_capability.as_str()){
+            return Err("review support reference or observe capability was rebound".into());
+        }
+        lowered.push(json!({"name":name,"expectedTargetRoot":root_pin,"expectedObserveCapability":read_capability,"payload":{"type":"read"}}));
     }
     if lowered.is_empty()||lowered.len()>16{return Err("review command exceeds native16-target bound".into());}
     let native_request=json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":lowered});
@@ -174,16 +184,24 @@ fn summary_text(root:&Path,workspace:&Value,value:&Value)->Result<(Option<String
     let mut current=Vec::new();
     let mut unavailable=false;
     for dependency in support {
-        if dependency.as_object().is_none_or(|o|o.len()!=3){return Err("summary pin requires name,source,root".into());}
+        if dependency.as_object().is_none_or(|o|!matches!(o.len(),3|4)){return Err("summary pin requires name,source,root,capability".into());}
         let name=member(dependency,"name")?;
         let source=member(dependency,"source")?;
         let expected=member(dependency,"root")?;
         decimal(source,"summary source")?;field_decimal(expected,"summary source root")?;
         dependencies.push(json!({"source":source,"root":expected}));
+        let Some(capability)=dependency.get("capability").and_then(Value::as_str) else {
+            // Older root-only summaries remain historical authored data but
+            // lack the authority custody needed for new inference.
+            unavailable=true;continue;
+        };
+        field_decimal(capability,"summary observe capability")?;
         // A citation is never a read grant. An unavailable reference/source
         // invalidates the summary's inference text without erasing its history.
         match reference(root,name).and_then(|reference|{
-            if reference["target"].as_str()!=Some(source){return Err("summary reference rebound".into());}
+            if reference["target"].as_str()!=Some(source)||reference["observeCapability"].as_str()!=Some(capability){
+                return Err("summary reference or observe capability rebound".into());
+            }
             signed_view(root,workspace,&reference,"resource")
         }) {
             Ok((view,_,_))=>current.push(json!({"source":source,"root":member(&view["cell"],"root")?})),
@@ -207,8 +225,8 @@ mod tests {
     use super::*;
     fn base()->Value {
         json!({"type":"mini-context-bundle-v1","sources":[
-            {"type":"mini-context-document-v1","name":"reviewed","source":"7","sourceRoot":"70"},
-            {"type":"mini-context-document-v1","name":"evidence","source":"8","sourceRoot":"80"}
+            {"type":"mini-context-document-v1","name":"reviewed","source":"7","sourceRoot":"70","readCapability":"17"},
+            {"type":"mini-context-document-v1","name":"evidence","source":"8","sourceRoot":"80","readCapability":"18"}
         ]})
     }
     fn request()->Value {
@@ -216,20 +234,24 @@ mod tests {
             "targets":[{"name":"reviewed","payload":{"type":"document","actions":[{"type":"append","text":"proposal"}]}}]})
     }
     fn lookup(name:&str)->Result<Value>{
-        Ok(json!({"target":if name=="reviewed"{"7"}else{"8"}}))
+        Ok(json!({"target":if name=="reviewed"{"7"}else{"8"},"observeCapability":if name=="reviewed"{"17"}else{"18"}}))
     }
     #[test]
     fn cited_support_and_write_share_one_native_guarded_command() {
         let native=review_request(&base(),&request(),lookup).unwrap();
         assert_eq!(native["targets"].as_array().unwrap().len(),2);
         assert_eq!(native["targets"][0]["expectedTargetRoot"],"70");
-        assert_eq!(native["targets"][1],json!({"name":"evidence","expectedTargetRoot":"80","payload":{"type":"read"}}));
+        assert_eq!(native["targets"][1],json!({"name":"evidence","expectedTargetRoot":"80","expectedObserveCapability":"18","payload":{"type":"read"}}));
         assert_eq!(native["targets"][0]["payload"],request()["targets"][0]["payload"]);
         assert!(native.get("run").is_none(),"external proposal prose isn't an execution claim");
     }
     #[test]
     fn proposal_cannot_rebind_source_or_replace_selected_base() {
         assert!(review_request(&base(),&request(),|_|Ok(json!({"target":"99"}))).is_err());
+        // Same cell/root under a rebound narrower observation capability
+        // must not launder an earlier source selection into a new review.
+        assert!(review_request(&base(),&request(),|name|Ok(json!({
+            "target":if name=="reviewed"{"7"}else{"8"},"observeCapability":"99"}))).is_err());
         let mut other=request();other["targets"][0]["expectedTargetRoot"]=json!("71");
         assert!(review_request(&base(),&other,lookup).is_err());
         let mut unknown=request();unknown["targets"][0]["name"]=json!("uncited");

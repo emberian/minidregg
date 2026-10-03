@@ -25,6 +25,33 @@ def transport {config : Config} {opened : Opened config}
           snapshot.canonicalBytes admitted.pin.cell = opened.durable.snapshot.canonicalBytes admitted.pin.cell
       then .ok () else .error (.durable .transactionConflict) }
 
+/-- Acceptance of an Activity exception still establishes every other
+protected-facet gate over the SAME snapshot and complete proposed record. -/
+theorem transport_other_facets {config : Config} {opened : Opened config}
+    (admitted : BendActivityIngress.Admitted config opened)
+    (snapshot : DataSnapshot ResourceBirthCodec.rootBytes)
+    (proposed : DataIntent ResourceBirthCodec.rootBytes)
+    (accepted : (transport admitted).sourceGate snapshot proposed = .ok ()) :
+    config.otherFacetGate .activity snapshot proposed = .ok () := by
+  cases checked : config.otherFacetGate .activity snapshot proposed with
+  | error reason => simp [transport, checked] at accepted
+  | ok value => cases value; exact checked
+
+theorem transport_exact_record {config : Config} {opened : Opened config}
+    (admitted : BendActivityIngress.Admitted config opened)
+    (snapshot : DataSnapshot ResourceBirthCodec.rootBytes)
+    (proposed : DataIntent ResourceBirthCodec.rootBytes)
+    (accepted : (transport admitted).sourceGate snapshot proposed = .ok ()) :
+    DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent proposed) =
+      DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent admitted.intent) ∧
+    snapshot.canonicalBytes admitted.pin.cell = opened.durable.snapshot.canonicalBytes admitted.pin.cell := by
+  have other := transport_other_facets admitted snapshot proposed accepted
+  by_cases same : DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent proposed) =
+      DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent admitted.intent) ∧
+      snapshot.canonicalBytes admitted.pin.cell = opened.durable.snapshot.canonicalBytes admitted.pin.cell
+  · exact same
+  · simp [transport, other, same] at accepted
+
 inductive Result (config : Config) (opened : Opened config) where
   | appended (admitted : BendActivityIngress.Admitted config opened)
       (receipt : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes opened.durable admitted.intent)
@@ -60,5 +87,7 @@ def receive (config : Config) (opened : Opened config) (bytes : List UInt8) :
       | .ordinary result => return .ordinary result
 
 #assert_axioms transport
+#assert_axioms transport_other_facets
+#assert_axioms transport_exact_record
 #assert_axioms receive
 end Minidregg.Kernel.BendActivityReceiver

@@ -11,8 +11,11 @@ def main():
     for key in ('mini','host','config','socket','workspace','home','room','prefix','output'):
         p.add_argument('--'+key,required=True)
     p.add_argument('--timeout',type=int,default=180)
+    p.add_argument('--handoff-prepared',action='store_true',help='Stop after actual signed native prepare; agreement receiver owns landing/recovery')
+    p.add_argument('--support-document',action='append',default=[],help='Additional current authorized source reference to cite without mutating it')
     a=p.parse_args()
     if not a.prefix.replace('-','').isalnum():raise SystemExit('prefix must be a unique simple source name')
+    if len(a.support_document)>8 or len(set(a.support_document))!=len(a.support_document):raise SystemExit('support documents require up to8 distinct existing references')
     out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=True)
     os.chmod(out,0o700)
     home=pathlib.Path(a.home);requests=home/'requests'
@@ -28,12 +31,10 @@ def main():
         fd=os.open(out,os.O_RDONLY|os.O_DIRECTORY)
         try:os.fsync(fd)
         finally:os.close(fd)
-    def shell(label,line,effect=False,refusal=False,native_refusal=False):
+    def run_argv(label,argv,effect=False,refusal=False,native_refusal=False):
         prior=state['steps'].get(label)
         if prior and prior['phase']=='done':return prior['stdout']
         if prior:raise RuntimeError('uncertain prior '+label+' retained; inspect/recover exact native attempt before resuming')
-        argv=[a.mini,'shell','--socket',a.socket,'--host',a.host,'--config',a.config,
-              '--workspace',a.workspace,'--home',a.home,'--line',line]
         state['steps'][label]={'phase':'started','command':argv,'effect':effect};retain()
         try:r=subprocess.run(argv,capture_output=True,text=True,timeout=a.timeout,stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:raise RuntimeError('native outcome unknown at '+label+'; do not repeat')
@@ -61,6 +62,14 @@ def main():
         elif r.returncode:
             raise RuntimeError('native '+label+' ended '+str(r.returncode)+'; exact attempt retained')
         state['steps'][label]['phase']='done';retain();return r.stdout
+    def shell(label,line,effect=False,refusal=False,native_refusal=False):
+        argv=[a.mini,'shell','--socket',a.socket,'--host',a.host,'--config',a.config,
+              '--workspace',a.workspace,'--home',a.home,'--line',line]
+        return run_argv(label,argv,effect,refusal,native_refusal)
+    def prepared_write(label,line,proposal):
+        planned=json.loads(shell(label+'-prepare',line))
+        if planned.get('effect')!='none':raise RuntimeError('ordinary document prepare incorrectly claims installation')
+        shell(label+'-submit','submit '+proposal,effect=True)
     def command_file(name,value):
         target=requests/(a.prefix+'-'+name+'.json')
         encoded=json.dumps(value,separators=(',',':')).encode()
@@ -76,21 +85,22 @@ def main():
     def bundle(*sources):return {'type':'mini-context-bundle-v1','sources':list(sources)}
     def summary(pin):
         return {'type':'mini-context-summary-v1','text':'The authored source says initial-evidence.',
-            'support':[{'name':source,'source':pin['source'],'root':pin['sourceRoot']}]}
+            'support':[{'name':source,'source':pin['source'],'root':pin['sourceRoot'],'capability':pin['readCapability']}]}
     source=a.prefix+'-source';target=a.prefix+'-output';memory=a.prefix+'-summary'
     for label,name in [('source',source),('target',target),('summary',memory)]:
         shell('birth-'+label,'doc new '+name+' note --in '+shlex.quote(a.room),effect=True)
-    shell('initial-source','doc append '+a.prefix+'-seed-source '+source+' initial-evidence',effect=True)
-    shell('initial-target','doc append '+a.prefix+'-seed-output '+target+' review-output',effect=True)
+    prepared_write('initial-source','doc append '+a.prefix+'-seed-source '+source+' initial-evidence',a.prefix+'-seed-source')
+    prepared_write('initial-target','doc append '+a.prefix+'-seed-output '+target+' review-output',a.prefix+'-seed-output')
     first=context('first-source',source)
     initial=context('first-output',target)
     summary_file=command_file('summary-initial',summary(first))
-    shell('initial-summary','doc append '+a.prefix+'-seed-summary '+memory+' @'+summary_file,effect=True)
+    prepared_write('initial-summary','doc append '+a.prefix+'-seed-summary '+memory+' @'+summary_file,a.prefix+'-seed-summary')
     derived=context('summary-current',memory)
     rows=derived['rows']
     if not any(r.get('summary',{}).get('status')=='current' and r.get('text')=='The authored source says initial-evidence.' for r in rows):
         raise RuntimeError('current derived summary not received')
-    old=command_file('context-old',bundle(first,initial,derived))
+    external=[context('external-initial-'+str(i),name) for i,name in enumerate(a.support_document)]
+    old=command_file('context-old',bundle(first,initial,derived,*external))
     request=command_file('proposal',{'type':'minidregg-workspace-proposal-v1','action':'invoke',
         'targets':[{'name':target,'payload':{'type':'document','actions':[{'type':'append','text':'review-landed'}]}}]})
     # Author a separate exact proposal before any source change. This tests
@@ -102,8 +112,8 @@ def main():
     if race_plan.get('effect')!='none':raise RuntimeError('prepared race incorrectly claims effect landing')
     # Actual admitted source edit, then structural reorder, each with signed reads.
     shell('source-seen','doc show '+source)
-    shell('source-edit','doc edit '+a.prefix+'-edit '+source+' 1 changed-evidence',effect=True)
-    shell('source-second','doc append '+a.prefix+'-second '+source+' additional-evidence',effect=True)
+    prepared_write('source-edit','doc edit '+a.prefix+'-edit '+source+' 1 changed-evidence',a.prefix+'-edit')
+    prepared_write('source-second','doc append '+a.prefix+'-second '+source+' additional-evidence',a.prefix+'-second')
     shell('source-move','doc move '+source+' 2 1',effect=True)
     after=context('source-after-move',source)
     if after['sourceRoot']==first['sourceRoot']:raise RuntimeError('source edit/move failed to change context dependency')
@@ -126,13 +136,66 @@ def main():
     fresh_summary=summary(after);fresh_summary['text']='The current source says changed-evidence.'
     fresh_file=command_file('summary-fresh',fresh_summary)
     shell('summary-seen','doc show '+memory)
-    shell('summary-revise','doc edit '+a.prefix+'-summary-revise '+memory+' 1 @'+fresh_file,effect=True)
+    prepared_write('summary-revise','doc edit '+a.prefix+'-summary-revise '+memory+' 1 @'+fresh_file,a.prefix+'-summary-revise')
     current_summary=context('summary-rebased',memory)
     current_target=context('output-current',target)
-    selected=command_file('context-fresh',bundle(after,current_target,current_summary))
+    external=[context('external-current-'+str(i),name) for i,name in enumerate(a.support_document)]
+    selected=command_file('context-fresh',bundle(after,current_target,current_summary,*external))
     proposal=a.prefix+'-land'
     planned=json.loads(shell('review-current','doc review '+proposal+' @'+selected+' @'+request))
     if planned.get('effect')!='none':raise RuntimeError('proposal creation incorrectly claims effect landing')
+    if a.handoff_prepared:
+        workspace=pathlib.Path(a.workspace)
+        proposal_dir=workspace/'proposals'/proposal
+        attempt=workspace/'attempts'/proposal
+        run_argv('native-prepared-ingress',[a.mini,'workspace','--action','submit',
+            '--dir',a.workspace,'--intent',str(proposal_dir/'intent.json'),
+            '--attempt',str(attempt),'--prepare-only','true','--socket',a.socket])
+        # Only actual retained public native inputs are handed to the receiver.
+        # No controller journal, provider secret or signing key is included.
+        retained={}
+        for label,path in {'call':attempt/'call.bin','plan':attempt/'plan.bin',
+            'planJson':attempt/'plan.json','preparedIntent':attempt/'intent.json',
+            'config':attempt/'config.json','manifest':attempt/'attempt.json',
+            'authoredIntent':proposal_dir/'intent.json','request':proposal_dir/'request.json',
+            'proposal':proposal_dir/'proposal.json','selectedContext':requests/selected}.items():
+            data=path.read_bytes()
+            retained[label]={'path':str(path),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+        ws=json.loads((workspace/'workspace.json').read_text())
+        actual_manifest=json.loads((attempt/'attempt.json').read_text())
+        declared_host_sha=hashlib.sha256(pathlib.Path(a.host).read_bytes()).hexdigest()
+        effective_host=actual_manifest.get('host')
+        if effective_host:
+            if hashlib.sha256(pathlib.Path(effective_host).read_bytes()).hexdigest()!=declared_host_sha:
+                raise RuntimeError('actual prepared attempt Host differs from supplied matched Host')
+        elif actual_manifest.get('hostSha256')!=declared_host_sha:
+            raise RuntimeError('actual remote prepared Host pin differs from supplied matched Host')
+        if (attempt/'config.json').read_bytes()!=pathlib.Path(a.config).read_bytes():
+            raise RuntimeError('actual prepared config differs from selected receiving config')
+        packet={'type':'mini-context-reviewed-native-ingress-v1','status':'PREPARED-NOT-LANDED',
+            'participant':ws.get('subject'),'workspace':a.workspace,'home':a.home,
+            'room':a.room,'sourceDocument':source,'outputDocument':target,
+            'additionalSupportDocuments':a.support_document,'proposalId':proposal,
+            'attempt':str(attempt),'socket':a.socket,'host':a.host,'mini':a.mini,
+            'hostSha256':declared_host_sha,'actualNativeAttempt':actual_manifest,
+            'miniSha256':hashlib.sha256(pathlib.Path(a.mini).read_bytes()).hexdigest(),
+            'files':retained,
+            'preparedPlan':json.loads((attempt/'plan.json').read_text()),
+            'selectedSupport':json.loads((requests/selected).read_text()),
+            'expectedWrite':'review-landed','sourceAuthority':'current signed participant reads and actual native prepare/assemble',
+            'requires':'Receiver pre-state/config must match this exact prepared native admission prefix; no source bytes rename or re-sign/replan',
+            'notClaimed':['agreement','effect-landing','lost-response-recovery','four-replica-readback','Bend-execution']}
+        packet_path=out/'reviewed-native-ingress.json'
+        encoded=json.dumps(packet,indent=2).encode()
+        if packet_path.exists():
+            if packet_path.read_bytes()!=encoded:raise RuntimeError('prepared native ingress changed')
+        else:
+            fd=os.open(packet_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+            try:os.write(fd,encoded);os.fsync(fd)
+            finally:os.close(fd)
+        state['result']={'status':'PREPARED-NOT-LANDED','ingress':str(packet_path),
+            'ingressSha256':hashlib.sha256(encoded).hexdigest(),'callSha256':retained['call']['sha256']}
+        retain();print(json.dumps(state['result']));return
     shell('submit','submit '+proposal,effect=True)
     shell('lookup','lookup '+proposal)
     readback=shell('readback','doc show '+target)
