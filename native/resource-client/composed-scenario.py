@@ -8,13 +8,22 @@
 
 The population comes from the world's inventory file (WORLD-IDENTITY.json):
 rooms name their owner and members by inventory name or by an inventory
-selector, never by position, and no member count is assumed. Members act only
-through their forced Mini SSH sessions.
+selector, never by position, and no member count is assumed. Room/document
+scenario phases use forced Mini SSH sessions. App and resident adapters use
+checked native workspaces; outside entrance authorization is qualified separately.
 
 Phases run in order: rooms, churn, documents, apps, connector, residents,
 restart. A phase whose adapter is absent from source is reported UNBUILT; one
 whose input or prerequisite phase is absent is BLOCKED with the reason. No
 phase is faked.
+
+Connector binding: {"input": "/provision-input.json", "journeyInput": "/journey-input.json"}.
+An app can instead bind {"worldInputs":{"platformInputs":"/platform-inputs.json",
+"selection":"/selection.json"}}; selection participants are WORLD inventory names.
+Then connector {"app":"APP-KEY"} derives attach, connector, and journey inputs
+through same-store-inputs.py after each retained predecessor result.
+The journey input comes from same-store-inputs.py journey after provisioning;
+a connector passes only after exact publication and independent byte readback.
 
 Every native effect is one retained ledger step (step_ledger.py). A completed
 step never repeats. An interrupted effect is decided on resume by the member's
@@ -46,11 +55,14 @@ REQUIRES = {"rooms": (), "churn": ("rooms",), "documents": ("rooms",), "apps": (
             "connector": ("apps",), "residents": ("rooms",), "restart": ()}
 SPK = HERE.parent.parent / "scripts" / "spk-platform"
 SCRIPTS = HERE.parent.parent / "scripts"
-# In-source adapters each phase composes with. Residents and restart have no
-# adapter that drives forced-SSH members on a supplied world yet.
+# In-source adapters each phase composes with. The typed resident adapter
+# consumes native public-relay workspaces and source-owned service custody.
 ADAPTERS = {"apps": SPK / "same-store-app.py", "connector": SPK / "app-document-provision.py",
             "protected": SCRIPTS / "protected-document-same-store.py",
-            "ordinary": SCRIPTS / "docuverse-same-store.py"}
+            "ordinary": SCRIPTS / "docuverse-same-store.py",
+            "connectorJourney": SPK / "app-document-journey.py",
+            "worldInputs": SPK / "same-store-inputs.py",
+            "resident": HERE.parent.parent / "testing/journeys/same-world-resident.py"}
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,63}")
 KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 # Exit codes the forced shell reports (shell.rs): 3 is a definite Host refusal.
@@ -169,6 +181,28 @@ def plan(spec):
     docs = spec.get("documents", {})
     for key in docs.get("rooms", []):
         require(key in rooms, f"documents names unknown room {key}")
+    for key, binding in spec.get("apps", {}).items():
+        require(KEY.fullmatch(key) is not None, "invalid app binding key")
+        if "worldInputs" in binding:
+            inputs = binding["worldInputs"]
+            require(isinstance(inputs, dict) and set(inputs) == {"platformInputs", "selection"},
+                    "app worldInputs names platformInputs and selection")
+            require(all(isinstance(v, str) and Path(v).is_absolute() for v in inputs.values()),
+                    "app worldInputs paths must be absolute")
+        else:
+            require(isinstance(binding.get("input"), str) and Path(binding["input"]).is_absolute(), "app input must be absolute")
+    if "connector" in spec and "app" in spec["connector"]:
+        require(set(spec["connector"]) == {"app"}, "derived connector names only its app")
+        require(spec["connector"]["app"] in spec.get("apps", {})
+                and "worldInputs" in spec["apps"][spec["connector"]["app"]],
+                "derived connector requires an app with worldInputs")
+    for phase in ("residents", "restart"):
+        value = spec.get(phase, {})
+        if "binding" in value:
+            require(set(value) == {"binding"} and isinstance(value["binding"], str) and Path(value["binding"]).is_absolute(),
+                    "typed " + phase + " names one absolute binding")
+    if "binding" in spec.get("residents", {}) and "binding" in spec.get("restart", {}):
+        require(spec["residents"]["binding"] == spec["restart"]["binding"], "restart must retain the same resident binding")
     concurrency = spec.get("concurrency", 1)
     require(type(concurrency) is int and 1 <= concurrency <= spec.get("maxConcurrency", 16),
             "concurrency must be 1..maxConcurrency")
@@ -207,12 +241,25 @@ def readiness(spec, p):
                 report[phase] = f"unbuilt: {ADAPTERS[phase]} absent"
             elif not spec.get(phase):
                 report[phase] = f"blocked: no {phase} input supplied"
+            elif phase == "connector" and not spec[phase].get("journeyInput") and "app" not in spec[phase]:
+                report[phase] = "blocked: no connector journeyInput supplied; provisioning alone does not capture or publish"
+            elif phase == "connector" and not ADAPTERS["connectorJourney"].is_file():
+                report[phase] = "unbuilt: connector capture/publication journey absent"
             else:
                 report[phase] = "ready"
+        elif "binding" in spec.get(phase, {}):
+            report[phase] = "ready" if ADAPTERS["resident"].is_file() else "unbuilt: typed resident adapter absent"
         else:
             report[phase] = "ready" if spec.get(phase, {}).get("argv") else \
-                f"unbuilt: no in-source {phase} adapter for forced-SSH members; supply {phase}.argv"
+                f"blocked: no typed {phase}.binding supplied"
     return report
+
+
+def input_builder():
+    spec = importlib.util.spec_from_file_location("same_store_inputs", ADAPTERS["worldInputs"])
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    return builder
 
 
 class Scenario:
@@ -227,15 +274,23 @@ class Scenario:
         fcntl.flock(self.lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.state_path = self.root / "state.json"
         self.lock = threading.RLock()
-        if self.state_path.exists():
-            self.state = read(self.state_path)
-            require(self.state["spec"] == spec, "retained scenario spec differs; a changed scenario needs a fresh state directory")
-        else:
-            self.state = {"type": "mini-composed-scenario-state-v1", "spec": spec, "serial": 0,
-                          "rows": [], "phases": {}}
-            self.persist()
-        (self.root / "evidence").mkdir(mode=0o700, exist_ok=True)
-        self.ledger = step_ledger.StepLedger(self.state, self.persist, lock=self.lock)
+        try:
+            if self.state_path.exists():
+                self.state = read(self.state_path)
+                require(self.state["spec"] == spec, "retained scenario spec differs; a changed scenario needs a fresh state directory")
+            else:
+                self.state = {"type": "mini-composed-scenario-state-v1", "spec": spec, "serial": 0,
+                              "rows": [], "phases": {}}
+                self.persist()
+            (self.root / "evidence").mkdir(mode=0o700, exist_ok=True)
+            self.ledger = step_ledger.StepLedger(self.state, self.persist, lock=self.lock)
+            for pin in self.state.get("derivedInputPins", {}).values():
+                require(sha(pin["path"]) == pin["sha256"], "retained world-derived input bytes changed")
+            for pin in self.state.get("worldInputSourcePins", {}).values():
+                require(sha(pin["path"]) == pin["sha256"], "world-derived source input bytes changed")
+        except Exception:
+            self.lockfile.close()
+            raise
 
     def persist(self):
         with self.lock:
@@ -543,7 +598,7 @@ class Scenario:
                                                 "--binding", binding["binding"], "--output", binding["output"]],
                          reentrant=False)
 
-    def adapter(self, label, argv, reentrant):
+    def adapter(self, label, argv, reentrant, check=None):
         if self.ledger.done(label):
             return
         into = self.attempt(label)
@@ -554,19 +609,140 @@ class Scenario:
             done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, check=False)
             stem.with_suffix(".out").write_bytes(done.stdout)
             stem.with_suffix(".err").write_bytes(done.stderr)
-            good = done.returncode == 0
+            good, detail = done.returncode == 0, ""
+            if good and check is not None:
+                try:
+                    check(done.stdout)
+                except (ValueError, RuntimeError, KeyError, OSError) as error:
+                    good, detail = False, str(error)
             self.row({"id": label, "status": "pass" if good else "fail", "rc": done.returncode,
                       "seconds": round(time.monotonic() - start, 3), "loadBefore": before,
-                      "loadAfter": loadavg(), "argv": argv, "evidence": str(stem)})
-            require(good, f"{label}: adapter failed; see {stem}")
+                      "loadAfter": loadavg(), "argv": argv, "evidence": str(stem), "detail": detail})
+            require(good, f"{label}: adapter failed: {detail}; see {stem}")
         self.ledger.step(label, action, into, reentrant=reentrant)
 
+    def derived_input(self, command, app, dependency=None):
+        """Compose the existing constructor input builder; retain exact files once."""
+        binding = self.spec["apps"][app]["worldInputs"]
+        sources = {key: {"path": path, "sha256": sha(path)} for key, path in binding.items()}
+        # Recording rooms may edit WORLD-IDENTITY; identities and SSH entrance
+        # are pinned separately. Every generation matches its constructor rows.
+        source_pins = self.state.setdefault("worldInputSourcePins", {})
+        for key, pin in sources.items():
+            name = app + ":" + key
+            require(name not in source_pins or source_pins[name] == pin, "world input source changed: " + name)
+            source_pins[name] = pin
+        projection = inventory_sha(read(self.p["worldPath"]))
+        prior = self.state.setdefault("worldInputInventorySha256", projection)
+        require(prior == projection, "world input participant inventory changed")
+        self.persist()
+        inputs = self.root / "inputs"
+        inputs.mkdir(mode=0o700, exist_ok=True)
+        path = inputs / (app + "-" + command + ".json")
+        pins = self.state.setdefault("derivedInputPins", {})
+        key = app + ":" + command
+        if key in pins:
+            require(pins[key] == {"path": str(path), "sha256": sha(path)}, "derived input bytes changed")
+            return str(path)
+        # Module and native builder own source-pin, signing-key and authority
+        # validation. key-status is read-only; this method submits no effect.
+        builder = input_builder()
+        world = builder.World(binding["platformInputs"], binding["selection"], self.p["worldPath"])
+        if command == "attach":
+            value = builder.attach(world)
+        elif command == "connector":
+            value = builder.connector(world, dependency)
+        elif command == "journey":
+            value = builder.journey(world, dependency)
+        else:
+            raise ValueError("unsupported derived input command")
+        if path.exists():
+            require(read(path) == value, "unrecorded derived input differs; retain original source operation")
+        else:
+            save(path, value)
+        pins[key] = {"path": str(path), "sha256": sha(path)}
+        self.persist()
+        return str(path)
+
+    def connector_saved(self, output):
+        """Require the source journey's publication and independent byte readback.
+
+        Its rc=0 can also report a retained uncertain outcome. Such an outcome
+        fences this phase and is re-entered through the same retained operation.
+        """
+        result = json.loads(output)
+        binding = read(self.state["connectorJourneyInputPin"]["path"])
+        require(result.get("protocol") == "mini-app-document-journey-result-v1"
+                and result.get("status") == "saved",
+                "connector capture/publication is not saved; retain the operation and resume exact recovery")
+        require(result.get("operation") == binding["operation"], "connector journey returned another operation")
+        require(re.fullmatch(r"[0-9a-f]{64}", str(result.get("callSha256", ""))) is not None,
+                "connector saved result lacks the exact publication call digest")
+        receipt = result.get("receipt", {})
+        require(re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("bodySha256", ""))) is not None
+                and re.fullmatch(r"0|[1-9][0-9]*", str(receipt.get("bodyBytes", ""))) is not None,
+                "connector saved result lacks independently verified export bytes")
+        result_path = self.root / "connector-result.json"
+        if result_path.exists():
+            prior = read(result_path)
+            require(all(prior.get(k) == result.get(k) for k in ("protocol", "status", "operation", "target", "receipt", "callSha256")),
+                    "connector retained saved operation changed")
+        else:
+            save(result_path, result)
+        self.state["connectorResultPin"] = {"path": str(result_path), "sha256": sha(result_path)}
+        self.persist()
+
+    def typed_resident(self, phase, binding):
+        require("connectorResultPin" in self.state, "typed resident requires retained actual connector capture/readback result")
+        captured = self.state["connectorResultPin"]
+        require(sha(captured["path"]) == captured["sha256"], "connector result changed before resident consumption")
+        pin = {"path": binding, "sha256": sha(binding)}
+        pins = self.state.setdefault("derivedInputPins", {})
+        key = "resident:binding"
+        require(key not in pins or pins[key] == pin, "resident/restart binding changed")
+        pins[key] = pin
+        self.persist()
+        through = "verify" if phase == "residents" else "retain"
+        output = self.root / (phase + "-result.json")
+        def checked(raw):
+            result = json.loads(raw)
+            require(result.get("protocol") == "mini-same-world-resident-result-v1" and result.get("passed") is True
+                    and result.get("through") == through and result.get("bindingSha256") == pin["sha256"],
+                    "typed resident did not return this binding's native acceptance result")
+        self.adapter(phase, [sys.executable, str(ADAPTERS["resident"]), "run", "--binding", binding,
+            "--world", self.p["worldPath"], "--connector-result", captured["path"], "--through", through,
+            "--output", str(output)], reentrant=True, check=checked)
+
     def generic(self, phase):
-        for key, value in sorted(self.spec[phase].items()) if phase in ("apps",) else [(None, self.spec[phase])]:
+        if phase == "connector":
+            value = self.spec[phase]
+            if "app" in value:
+                app = value["app"]
+                app_input = read(self.derived_input("attach", app))
+                attached = str(Path(app_input["root"]) / "attachment-result.json")
+                provision_input = self.derived_input("connector", app, attached)
+            else:
+                provision_input = value["input"]
+            self.adapter("connector", [sys.executable, str(ADAPTERS[phase]), provision_input], reentrant=True)
+            if "app" in value:
+                provisioned = str(Path(read(provision_input)["root"]) / "result.json")
+                journey_input = self.derived_input("journey", app, provisioned)
+            else:
+                journey_input = value["journeyInput"]
+            pin = {"path": journey_input, "sha256": sha(journey_input)}
+            retained = self.state.setdefault("connectorJourneyInputPin", pin)
+            require(retained == pin, "connector journey input changed; retain the original operation for exact recovery")
+            self.persist()
+            self.adapter("connector:journey", [sys.executable, str(ADAPTERS["connectorJourney"]), journey_input],
+                         reentrant=True, check=self.connector_saved)
+            return
+        for key, value in sorted(self.spec[phase].items()) if phase == "apps" else [(None, self.spec[phase])]:
             label = phase if key is None else f"{phase}:{key}"
-            if phase in ("apps", "connector"):
-                # Both adapters re-enter their own retained ledgers.
-                self.adapter(label, [sys.executable, str(ADAPTERS[phase]), value["input"]], reentrant=True)
+            if phase == "apps":
+                path = self.derived_input("attach", key) if "worldInputs" in value else value["input"]
+                self.adapter(label, [sys.executable, str(ADAPTERS[phase]), path], reentrant=True)
+            elif "binding" in value:
+                self.typed_resident(phase, value["binding"])
             else:
                 self.adapter(label, list(value["argv"]), reentrant=False)
 
@@ -583,9 +759,13 @@ class Scenario:
         ready = readiness(self.spec, self.p)
         statuses = self.state["phases"]
         for phase in self.p["phases"]:
-            missing = [r for r in REQUIRES[phase]
+            required = REQUIRES[phase]
+            if "binding" in self.spec.get(phase, {}):
+                required = (*required, "connector" if phase == "residents" else "residents")
+            missing = [r for r in required
                        if r in self.p["phases"] and not str(statuses.get(r, "")).startswith("pass")]
-            if str(statuses.get(phase, "")).startswith(("pass", "fail (probes)")):
+            if str(statuses.get(phase, "")).startswith(("pass", "fail (probes)")) and (
+                    phase != "connector" or self.ledger.done("connector:journey")):
                 continue
             if missing:
                 statuses[phase] = f"blocked: prerequisite {', '.join(missing)} has not passed"
@@ -602,7 +782,7 @@ class Scenario:
                         getattr(self, phase)()
                     else:
                         self.generic(phase)
-                except (step_ledger.LedgerFenced, Undecided, ValueError, RuntimeError, KeyError,
+                except (step_ledger.LedgerFenced, Undecided, ValueError, RuntimeError, KeyError, OSError,
                         json.JSONDecodeError) as error:
                     statuses[phase] = "stopped: " + str(error)
                     for later in self.p["phases"][self.p["phases"].index(phase) + 1:]:

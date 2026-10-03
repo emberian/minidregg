@@ -15,7 +15,7 @@ is decided only from durable native evidence (a retained exact attempt, a signed
 room read, or the artifact the source command publishes last); otherwise the run
 stops and names it. Nothing here clears unknown custody or authors a second effect.
 """
-import argparse, concurrent.futures, hashlib, json, os, pathlib, pwd, re, signal, socket as net_socket, subprocess, sys, threading, time
+import argparse, concurrent.futures, fcntl, hashlib, json, os, pathlib, pwd, re, signal, socket as net_socket, subprocess, sys, threading, time
 
 PROGRESS = 'mini-resident-receiving-progress-v2'
 PHASES = ('preflight', 'birth', 'tool-workspace', 'room', 'capture', 'program', 'registration', 'summon', 'requests',
@@ -25,7 +25,7 @@ WAITING = 75  # exit status: a declared external input (capture, root copy, root
 
 
 class Unknown(RuntimeError):
-    """A native outcome is not established. Never retried by this program."""
+    """A native outcome is not established; only its exact native call may resume."""
 
 
 class Refused(RuntimeError):
@@ -228,6 +228,127 @@ class Journal:
             raise Refused('settle decision must be absent or done')
 
 
+def unfinished_room_rows(journal, tag, count):
+    # Started rows remain in the worklist so journaled_room_write fences them.
+    return [i for i in range(count) if journal.state(f'{tag}-{i:03d}') != 'done']
+
+
+def operation_result(output):
+    """Read the native recovery envelope even when shell display follows it."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'\{', output):
+        try:
+            value, _ = decoder.raw_decode(output[match.start():])
+        except ValueError:
+            continue
+        if isinstance(value, dict) and value.get('type') == 'minidregg-operation-recovery-v1':
+            return value
+    raise Unknown('native lookup did not return an exact operation recovery envelope')
+
+
+def journaled_room_write(journal, label, write, operation_record=None, lookup=None, retry=None, binding=None):
+    """Continue only the native immutable operation and its original signed call.
+
+    Legacy steps without an operation record stay fenced. A retained unsigned
+    record also stays unresolved: the adapter cannot create a second proposal.
+    Once a call exists, native retry owns exact submission and receipt continuity.
+    """
+    if operation_record is None:
+        return journal.step(label, write)
+    path = pathlib.Path(operation_record)
+    pins = journal.data['values'].setdefault('roomWriteBindings', {})
+    pin = {'operationRecord': str(path), 'request': binding}
+    if label in pins and pins[label] != pin:
+        raise Refused('room write binding changed for ' + label)
+    if label not in pins:
+        if path.exists() or journal.state(label) == 'started':
+            raise Unknown('unbound retained room write; keep its original evidence: ' + label)
+        pins[label] = pin
+        journal.save()
+
+    def recover():
+        if not path.exists():
+            raise Unknown('room write has no native operation record; original submitter outcome unresolved: ' + label)
+        record = load(path)
+        workspace = pathlib.Path(binding['workspace']).resolve()
+        attempt = pathlib.Path(record.get('attempt', ''))
+        if (record.get('type') != 'minidregg-exact-operation-v1' or record.get('kind') != 'workspace'
+                or record.get('identity', {}).get('workspace') != str(workspace)
+                or not attempt.is_absolute() or attempt.parent != workspace / 'attempts'):
+            raise Refused('native operation record belongs to another workspace or attempt')
+        # The native record's request is immutable; do not recover a collision
+        # at the same pathname merely because its envelope is confirmed.
+        targets = record.get('binding', {}).get('request', {}).get('targets', [])
+        payload = targets[0].get('payload', {}) if len(targets) == 1 else {}
+        try:
+            entry = json.loads(payload.get('text', ''))
+        except ValueError:
+            entry = {}
+        if entry != {'type': 'say', 'text': binding['text']} or payload.get('to') != binding['to']:
+            raise Refused('native room write request differs from the retained service binding')
+        result = lookup(path)
+        def checked(value):
+            if (value.get('type') != 'minidregg-operation-recovery-v1'
+                    or value.get('operationRecord') != str(path) or value.get('attempt') != str(attempt)):
+                raise Refused('exact recovery returned another native operation')
+            return value.get('status')
+        status = checked(result)
+        if status == 'uncertain' and (attempt / 'call.bin').is_file():
+            retry(attempt)  # native retry: same bytes, same attempt, no fresh challenge
+            result = lookup(path)
+            status = checked(result)
+        if status != 'confirmed':
+            raise Unknown('native room write remains ' + str(status) + '; retain exact operation ' + str(path))
+        outcome = result.get('outcome', {})
+        if outcome.get('type') != 'confirmed' or outcome.get('confirmation') not in ('installed', 'replayed'):
+            raise Unknown('room write recovery lacks native confirmation')
+        return result
+
+    def action():
+        write(path)
+        return recover()
+    if path.exists() and journal.state(label) is None:
+        # The service pin was fsynced before command launch. Recovery after a
+        # crash between native completion and Journal.begin remains exact.
+        journal.begin(label)
+    return journal.step(label, action, probe=recover if journal.state(label) == 'started' else None)
+
+
+def exact_payment_snapshot(workspace, lookup):
+    """Account for every retained native payment, including request-status notices.
+
+    Called after the driver and its client subprocesses ended. The native
+    lookup owns confirmation; no bounded controller/feed journal decides costs.
+    """
+    payments = []
+    for path in sorted((pathlib.Path(workspace) / 'room-operations').glob('*-payment.json')):
+        record = load(path)
+        result = lookup(path)
+        status = result.get('status')
+        if status in ('not-submitted', 'refused'):
+            continue
+        if (result.get('type') != 'minidregg-operation-recovery-v1' or status != 'confirmed'
+                or result.get('operationRecord') != str(path) or result.get('attempt') != record.get('attempt')):
+            raise Unknown('payment exact recovery unresolved: ' + str(path))
+        if record.get('kind') == 'no-effect':
+            continue
+        if record.get('kind') != 'fleet':
+            raise Refused('unexpected room payment operation kind')
+        attempt = pathlib.Path(record['attempt'])
+        plan = load(attempt / 'plan.json')['command']
+        transfer = record['binding']['transfer']
+        if plan['transfer'] != transfer:
+            raise Refused('native payment plan differs from its operation binding')
+        outcome = result.get('outcome', {})
+        if outcome.get('type') != 'confirmed' or outcome.get('confirmation') not in ('installed', 'replayed'):
+            raise Unknown('payment lacks native confirmation')
+        payments.append({'operationRecord': str(path), 'operationRecordSha256': digest(path),
+            'attempt': str(attempt), 'price': int(transfer['amount']), 'fee': int(plan['fee']),
+            'statusNotice': re.fullmatch(r'rs[0-9]+-payment.json', path.name) is not None, 'transaction': outcome.get('transactionId')})
+    return {'prices': sum(p['price'] for p in payments), 'fees': sum(p['fee'] for p in payments),
+            'payments': len(payments), 'modelPayments': sum(not p['statusNotice'] for p in payments), 'paymentEvidence': payments}
+
+
 def arguments(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--platform-inputs', required=True)
@@ -237,7 +358,7 @@ def arguments(argv=None):
     p.add_argument('--request-counts', help='comma separated addressed requests per author (default 1 each)')
     p.add_argument('--provider-witness', required=True, help='inventory name of the provider task owner (not an author)')
     p.add_argument('--room-alias', required=True)
-    p.add_argument('--room-mode', required=True, choices=('create', 'existing'), help='create: founder runs chat new; existing: founder chat room already present')
+    p.add_argument('--room-mode', required=True, choices=('create', 'existing', 'adopt'), help='create: chat new; existing: chat already present; adopt: founder adopts a supplied workroom')
     p.add_argument('--shared-document-reference', required=True)
     p.add_argument('--capture-reference', required=True)
     p.add_argument('--fixture-acp', required=True)
@@ -259,7 +380,7 @@ def arguments(argv=None):
     a.request_counts = [int(v) for v in a.request_counts.split(',')] if a.request_counts else [1] * len(a.authors)
     if len(a.authors) < 2 or len(a.request_counts) != len(a.authors) or not all(1 <= n <= 8 for n in a.request_counts):
         p.error('at least two authors, and one request count in 1..8 for each author')
-    if not 100 < a.held_rows <= 400 or not 0 <= a.prepoll_rows <= 400 or a.held_rows + a.prepoll_rows + 2 * sum(a.request_counts) + CALIBRATION_ROWS > 480:
+    if not 100 < a.held_rows <= 400 or not 0 <= a.prepoll_rows <= 400 or a.held_rows + a.prepoll_rows + 5 * sum(a.request_counts) + CALIBRATION_ROWS > 480:
         p.error('held rows must exceed the 100-row tail and all rows must stay inside one signed 500-row read')
     if not 300 <= a.worker_wall_seconds <= 1800 or not 60 <= a.turn_reserve_seconds < a.worker_wall_seconds:
         p.error('worker wall time is 300..1800 seconds (the source bound) and the turn reserve must be inside it')
@@ -362,6 +483,10 @@ def main(argv=None):
 
     if not root.exists():
         root.mkdir(mode=0o700)
+    # One process owns this receiving journal; its native subprocesses are
+    # reaped before this lock is released. Exact retries remain safe after cuts.
+    receiving_lock = open(root / 'receiving.lock', 'a')
+    fcntl.flock(receiving_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     journal = Journal(root / 'progress.json')
     for item in a.settle:
         label, _, decision = item.partition('=')
@@ -494,32 +619,39 @@ def main(argv=None):
         entries = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
         return [e for e in entries if isinstance(e.get('n'), int) and 'author' in e and 'sequence' in e]
 
-    def said(member, text, to=None):
-        return [e for e in room_feed('signed-room-lookup', member) if e.get('author') == member['subject'] and e.get('text') == text and e.get('to') == to]
-
     def say(member, label, line, text, to=None):
-        """One room entry, exactly once: an unknown earlier attempt is decided by the signed room read."""
-        def probe():
-            return True if said(member, text, to) else None
+        workspace = pathlib.Path(member['workspace']).resolve()
+        operation = workspace / 'operations' / f'resident-{a.task}-{label}.json'
+        binding = {'workspace': str(workspace), 'room': room_alias, 'text': text, 'to': to}
 
-        def action():
-            try:
-                shell(member, label, line, effect=True)
-            except Unknown:
-                if not said(member, text, to):
-                    raise
-            return True
-        row = journal.data['steps'].get(label)
-        if row and row['state'] == 'started' and probe() is None:
-            # The submitting client is gone and the signed room has no such entry: definitely absent.
-            journal.drop(label)
-            row = None
-        return journal.step(label, action, probe if row else None)
+        def action(path):
+            if to is not None:
+                # ask has no operation-record option. Its native signed room
+                # read chooses Hermes; preserve that decision before recorded say.
+                tariff = json.loads(run(label + '-ask-routing', [mini, 'credit', '--action', 'room',
+                                       '--dir', workspace, '--room', room_alias]))
+                if (tariff.get('type') != 'minidregg-room-tariff-v1' or tariff.get('authority') != 'signed-read'
+                        or tariff.get('tariff', {}).get('hermes') != to):
+                    raise Refused('current signed room Hermes differs from the addressed request')
+            native_line = f'say --in {room_alias} --operation-record {path}'
+            if to is not None:
+                native_line += ' --to ' + to
+            native_line += ' ' + json.dumps(text)
+            shell(member, label, native_line, effect=True)
+
+        return journaled_room_write(journal, label, action, operation,
+            lambda path: operation_result(run(label + '-exact-lookup', [mini, 'credit', '--action', 'lookup-operation',
+                                           '--dir', workspace, '--operation-record', path])),
+            lambda attempt: run(label + '-exact-retry', [mini, 'retry', '--attempt', attempt, '--mode', 'submit',
+                                                        '--socket', member_socket], effect=True),
+            binding)
 
     def rows(tag, text, count):
         """`count` ordinary rows written concurrently, one writer per author; returns (rows, seconds)."""
-        present = {e.get('text') for e in room_feed(tag + '-present')}
-        todo = [i for i in range(count) if f'{text} {i:03d}' not in present]
+        # Only this journal's acknowledged operation decides completion.
+        # A visible matching row can belong to another operation, while an
+        # absent row may have fallen outside the recent tail.
+        todo = unfinished_room_rows(journal, tag, count)
         start = time.monotonic()
 
         def writer(k):
@@ -554,7 +686,7 @@ def main(argv=None):
     if a.room_mode == 'existing':
         if not founder_record.exists() or load(founder_record).get('founder') != founder_subject:
             raise Refused('existing room alias is not a chat room founded by the first author')
-    elif journal.state('room-create') is None and (founder_record.exists() or (founder_ws / 'refs' / (room_alias + '.json')).exists()):
+    elif a.room_mode == 'create' and journal.state('room-create') is None and (founder_record.exists() or (founder_ws / 'refs' / (room_alias + '.json')).exists()):
         raise Refused('room alias already names something in the founder workspace; choose another alias or --room-mode existing')
     shell(founder, 'capture-destination-native-read', 'doc show ' + capture_alias)
     save('source-inputs.json', {'platformInputs': str(context_path), 'platformInputsSha256': digest(context_path), 'manifest': str(manifest_path),
@@ -635,10 +767,13 @@ def main(argv=None):
 
     # ------------------------------------------------------------ room
     phase('room')
-    # Hermes is summoned into a CHAT room (roster, one stream per member). A workroom
-    # made by `room new` has no roster and cannot receive summon/ask.
+    # Source chat adopt adds the native roster to a founder's existing workroom.
+    # It preserves the room people already share and their document authority.
     if a.room_mode == 'create':
         journal.step('room-create', lambda: shell(founder, 'room-create', 'chat new ' + room_alias, effect=True) and True,
+                     lambda: True if founder_record.exists() and load(founder_record).get('founder') == founder_subject and load(founder_record).get('stream') else None)
+    if a.room_mode == 'adopt':
+        journal.step('room-adopt', lambda: shell(founder, 'room-adopt', 'chat adopt ' + room_alias, effect=True) and True,
                      lambda: True if founder_record.exists() and load(founder_record).get('founder') == founder_subject and load(founder_record).get('stream') else None)
     room_cell = load(founder_ws / 'refs' / (room_alias + '.json'))['target']
     shell(founder, 'shared-room-native-read', 'tail --in ' + room_alias + ' --json -n 1')
@@ -1121,17 +1256,18 @@ def main(argv=None):
           {'summaryAlias': summary_alias, 'firstLines': [r['reply'].splitlines()[0] for r in records]})
     replies = {r['reply'] for r in records}
     for member in authors:
-        seen = [e for e in room_feed('signed-delivered-history', member) if e.get('author') == tool_subject and e.get('to') == member['subject']]
+        seen = [e for e in room_feed('signed-delivered-history', member) if e.get('kind') == 'say' and e.get('author') == tool_subject and e.get('to') == member['subject']]
         check('author ' + member['subject'] + ' reads exactly one signed final per request despite late delivery',
               len(seen) == requested[member['subject']] and all(e.get('text') in replies for e in seen), seen)
     if 'after' not in values:
-        payments = [r['payment'] for r in controller_journal()['roomResolutions'] if r['tool'] in ('mini_say', 'mini_doc_append')]
-        remember('after', {'resident': resident_state(), 'balances': native_balances('before-replay'), 'book': credit('after-receive-account', ws, account_name),
-                           'till': credit('after-receive-till', founder_ws, room_alias + '-till'), 'prices': sum(int(p['price']) for p in payments),
-                           'fees': sum(int(p['fee']) for p in payments), 'payments': len(payments)})
+        snapshot = exact_payment_snapshot(ws, lambda path: operation_result(run('payment-exact-lookup',
+            [mini, 'credit', '--action', 'lookup-operation', '--dir', ws, '--operation-record', path])))
+        remember('after', dict(snapshot, resident=resident_state(), balances=native_balances('before-replay'),
+            book=credit('after-receive-account', ws, account_name), till=credit('after-receive-till', founder_ws, room_alias + '-till')))
+
     after, before_money = values['after'], values['before']
-    check('native Book payments cover one policy-controlled summary and one addressed reply per request exactly once',
-          after['payments'] == 2 * total_requests and after['prices'] == 2 * total_requests and after['till'] - before_money['till'] == after['prices']
+    check('native Book payments reconcile summaries, finals and typed status notices exactly once',
+          after['modelPayments'] == 2 * total_requests and after['prices'] >= 2 * total_requests and after['till'] - before_money['till'] == after['prices']
           and before_money['book'] - after['book'] == after['prices'] + after['fees'], {'before': before_money, 'after': after})
 
     # ------------------------------------------------------------ replay

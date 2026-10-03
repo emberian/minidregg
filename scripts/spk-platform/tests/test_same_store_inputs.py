@@ -97,6 +97,34 @@ class InputTests(unittest.TestCase):
             patcher = patch.object(target, "protected_parent"); patcher.start(); self.addCleanup(patcher.stop)
         patcher = patch.object(inputs.subprocess, "run", side_effect=lambda argv, **kw: self.w.key_status(argv, **kw)); self.run = patcher.start(); self.addCleanup(patcher.stop)
 
+    def named_world(self):
+        return {"type": "mini-world-identity-v1", "members": {
+            "person-" + str(i): row for i, row in enumerate(self.w.ctx["memberInventory"].values())}}
+
+    def test_named_selection_resolves_nonpositional_owner_members_and_connector_reader(self):
+        selected = json.loads(json.dumps(self.w.selection))
+        selected["app"]["owner"] = "person-1"
+        for i, row in enumerate(selected["app"]["members"].values()):
+            row["subject"] = "person-" + str(i)
+        selected["connector"] = {"subject": "person-3", "reader": {"subject": "person-0"}}
+        resolved = inputs.named_selection(self.w.ctx, selected, self.named_world())
+        self.assertEqual(resolved["app"]["owner"], self.w.subjects[1])
+        self.assertEqual(resolved["connector"]["reader"]["subject"], self.w.subjects[0])
+        self.assertEqual(selected["app"]["owner"], "person-1", "caller selection is immutable")
+
+    def test_named_world_cannot_bind_another_workspace_or_duplicate_subject(self):
+        selected = dict(self.w.selection)
+        world = self.named_world(); world["members"]["person-1"] = dict(world["members"]["person-1"], workspace="/another/store")
+        with self.assertRaisesRegex(RuntimeError, "participant differ"):
+            inputs.named_selection(self.w.ctx, selected, world)
+        world = self.named_world(); world["members"]["alias"] = world["members"]["person-0"]
+        with self.assertRaisesRegex(RuntimeError, "subjects repeat"):
+            inputs.named_selection(self.w.ctx, selected, world)
+
+    def test_named_selection_rejects_numeric_identity_guesses(self):
+        with self.assertRaisesRegex(RuntimeError, "must name"):
+            inputs.named_selection(self.w.ctx, self.w.selection, self.named_world())
+
     def test_profile_takes_management_custody_and_namespace_from_the_supplied_world(self):
         value = inputs.profile(self.w.build())
         self.assertEqual(value["management"], {"subject": MANAGER, "keyId": "90812", "keyEpoch": "2",

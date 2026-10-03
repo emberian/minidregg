@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("composed", HERE / "composed-scenario.py")
@@ -149,8 +150,8 @@ class ComposedTests(unittest.TestCase):
         self.assertEqual(p["population"], ["ada", "bo", "cy"])
         ready = c.readiness(value, p)
         self.assertTrue(ready["apps"].startswith("blocked: no apps input"))
-        self.assertTrue(ready["residents"].startswith("unbuilt"))
-        self.assertTrue(ready["restart"].startswith("unbuilt"))
+        self.assertTrue(ready["residents"].startswith("blocked"))
+        self.assertTrue(ready["restart"].startswith("blocked"))
         self.assertIn("protected: blocked", ready["documents"])
         for broken, message in [
             ({"rooms": {"x": {"name": "lab", "owner": "zed", "members": ["ada", "zed"]}}}, "not in the world inventory"),
@@ -163,6 +164,105 @@ class ComposedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 c.plan(self.spec(**broken))
         self.assertFalse(self.state.exists(), "check must not create scenario state")
+
+    def test_derived_connector_requires_named_world_app_binding(self):
+        bad = self.spec(phases=["connector"], connector={"app": "sheet"})
+        with self.assertRaisesRegex(ValueError, "requires an app"):
+            c.plan(bad)
+        good = self.spec(phases=["apps", "connector"],
+            apps={"sheet": {"worldInputs": {"platformInputs": "/world/platform-inputs.json", "selection": "/world/selection.json"}}},
+            connector={"app": "sheet"})
+        self.assertEqual(c.readiness(good, c.plan(good))["connector"], "ready")
+
+    def test_derived_world_inputs_feed_actual_adapters_in_order_and_are_retained(self):
+        fixture_spec = importlib.util.spec_from_file_location("input_fixture_tests",
+            HERE.parent.parent / "scripts/spk-platform/tests/test_same_store_inputs.py")
+        fixture = importlib.util.module_from_spec(fixture_spec); fixture_spec.loader.exec_module(fixture)
+        root = self.root / "supplied"; root.mkdir()
+        w = fixture.World(root)
+        w.selection["app"]["owner"] = "person-1"
+        for index, row in enumerate(w.selection["app"]["members"].values()):
+            row["subject"] = "person-" + str(index)
+        w.selection["connector"] = {"subject": "person-3", "name": "csv", "expectedHost": "csv.spk.localhost:18443",
+            "sheet": "lab-sheet", "role": "1", "task": "task", "document": "document", "resources": "650001", "capabilities": "980001",
+            "reader": {"subject": "person-0", "document": "shared-notes"}, "endpoint": "https://csv.spk.localhost:18443/", "ca": None, "operation": "export-1"}
+        (root / "platform-inputs.json").write_text(json.dumps(w.ctx))
+        (root / "selection.json").write_text(json.dumps(w.selection))
+        inventory = {"type": "mini-world-identity-v1", "unitUser": "hbox",
+            "ssh": self.value["ssh"], "members": {
+                "person-" + str(i): dict(row, sshKeyFile="/keys/" + str(i), entry="paid")
+                for i, row in enumerate(w.ctx["memberInventory"].values())}}
+        self.world.write_text(json.dumps(inventory))
+        value = self.spec(phases=["apps", "connector"], population=list(inventory["members"]), rooms={},
+            apps={"sheet": {"worldInputs": {"platformInputs": str(root / "platform-inputs.json"), "selection": str(root / "selection.json")}}},
+            connector={"app": "sheet"})
+        calls = []
+        def run(argv, **kwargs):
+            if len(argv) > 1 and argv[1] == "key-status":
+                return w.key_status(argv)
+            calls.append(Path(argv[1]).name)
+            binding = c.read(argv[2])
+            if calls[-1] == "same-store-app.py":
+                target = Path(binding["root"]); target.mkdir()
+                fixture_path = target / "fixture.json"
+                fixture_path.write_text(json.dumps({"keys": binding["keys"], "application": binding["application"], "delegates": binding["delegates"]}))
+                (target / "attachment-result.json").write_text(json.dumps({"protocol": "mini-spk-same-store-attached-v1",
+                    "miniConfigSha256": w.ctx["identity"]["configSha256"], "fixture": str(fixture_path), "appId": binding["application"]["app"]}))
+                output = b"{}"
+            elif calls[-1] == "app-document-provision.py":
+                target = Path(binding["root"]); target.mkdir()
+                connector_fixture = target / "fixture.json"; connector_fixture.write_text("{}")
+                (target / "result.json").write_text(json.dumps({"protocol": "mini-app-document-provisioned-v1",
+                    "subject": binding["delegate"]["subject"], "fixture": str(connector_fixture)}))
+                output = b"{}"
+            else:
+                self.assertEqual(calls[-1], "app-document-journey.py")
+                output = json.dumps({"protocol": "mini-app-document-journey-result-v1", "status": "saved", "operation": binding["operation"],
+                    "callSha256": "a" * 64, "receipt": {"bodySha256": "b" * 64, "bodyBytes": "11"}}).encode()
+            return mock.Mock(returncode=0, stdout=output, stderr=b"")
+        with mock.patch.object(c, "input_builder", return_value=fixture.inputs), \
+                mock.patch.object(fixture.inputs.f, "protected_parent"), mock.patch.object(c.subprocess, "run", side_effect=run):
+            first = c.Scenario(value, "spec.json").run()
+            self.assertEqual(first["phases"], {"apps": "pass", "connector": "pass"})
+            second = c.Scenario(value, "spec.json").run()
+            self.assertEqual(second["phases"], first["phases"])
+        self.assertEqual(calls, ["same-store-app.py", "app-document-provision.py", "app-document-journey.py"])
+        state = c.read(self.state / "state.json")
+        self.assertEqual(set(state["derivedInputPins"]), {"sheet:attach", "sheet:connector", "sheet:journey"})
+        (root / "selection.json").write_text("{}")
+        with self.assertRaisesRegex(ValueError, "source input bytes changed"):
+            scenario = c.Scenario(value, "spec.json")
+            scenario.close()
+
+    def test_typed_resident_and_restart_retain_same_binding_and_fixed_source_adapter(self):
+        binding = self.root / "resident-binding.json"; binding.write_text("{}")
+        connector = self.root / "connector-result.json"; connector.write_text("{}")
+        value = self.spec(phases=["residents", "restart"], residents={"binding": str(binding)}, restart={"binding": str(binding)})
+        calls = []
+        def run(argv, **kwargs):
+            calls.append(argv)
+            through = argv[argv.index("--through") + 1]
+            return mock.Mock(returncode=0, stderr=b"", stdout=json.dumps({"protocol": "mini-same-world-resident-result-v1",
+                "passed": True, "through": through, "bindingSha256": c.sha(binding)}).encode())
+        scenario = c.Scenario(value, "spec.json")
+        scenario.state["connectorResultPin"] = {"path": str(connector), "sha256": c.sha(connector)}
+        scenario.persist()
+        with mock.patch.object(c.subprocess, "run", side_effect=run):
+            result = scenario.run()
+        self.assertEqual(result["phases"], {"residents": "pass", "restart": "pass"})
+        self.assertEqual([argv[argv.index("--through") + 1] for argv in calls], ["verify", "retain"])
+        self.assertTrue(all(Path(argv[1]).name == "same-world-resident.py" for argv in calls))
+        self.assertTrue(all(argv[argv.index("--connector-result") + 1] == str(connector) for argv in calls))
+        with self.assertRaisesRegex(ValueError, "same resident binding"):
+            c.plan(self.spec(phases=["residents", "restart"], residents={"binding": str(binding)}, restart={"binding": "/another.json"}))
+
+    def test_typed_resident_cannot_run_without_actual_connector_result(self):
+        binding = self.root / "resident-binding.json"; binding.write_text("{}")
+        value = self.spec(phases=["residents"], residents={"binding": str(binding)})
+        with mock.patch.object(c.subprocess, "run") as native:
+            result = c.Scenario(value, "spec.json").run()
+        self.assertIn("requires retained actual connector", result["phases"]["residents"])
+        native.assert_not_called()
 
     def test_rooms_phase_composes_create_invite_import_and_one_document(self):
         shell = Shell(self.value["members"])
@@ -259,7 +359,7 @@ class ComposedTests(unittest.TestCase):
         self.assertEqual(result["phases"]["rooms"], "pass")
         self.assertTrue(result["phases"]["apps"].startswith("blocked: no apps input"))
         self.assertTrue(result["phases"]["connector"].startswith("blocked: prerequisite apps"))
-        self.assertTrue(result["phases"]["residents"].startswith("unbuilt"))
+        self.assertTrue(result["phases"]["residents"].startswith("blocked"))
 
     def test_inventory_pin_ignores_recorded_rooms_but_not_members(self):
         value = self.spec(inventorySha256=c.inventory_sha(self.value))
@@ -278,7 +378,93 @@ class ComposedTests(unittest.TestCase):
         result = self.scenario(self.spec(phases=["rooms", "apps", "residents"]), shell).run()
         self.assertTrue(result["phases"]["rooms"].startswith("stopped"))
         self.assertTrue(result["phases"]["apps"].startswith("not reached: stopped at rooms; would be blocked"))
-        self.assertTrue(result["phases"]["residents"].startswith("not reached: stopped at rooms; would be unbuilt"))
+        self.assertTrue(result["phases"]["residents"].startswith("not reached: stopped at rooms; would be blocked"))
+
+    def connector_spec(self):
+        journey = self.root / "journey-input.json"
+        journey.write_text(json.dumps({"operation": "export-1"}))
+        return self.spec(phases=["connector"], connector={
+            "input": str(self.root / "provision-input.json"), "journeyInput": str(journey)})
+
+    def saved_export(self, **changes):
+        value = {"protocol": "mini-app-document-journey-result-v1", "status": "saved",
+                 "operation": "export-1", "callSha256": "a" * 64,
+                 "receipt": {"bodyBytes": "3", "bodySha256": "b" * 64}}
+        value.update(changes)
+        return value
+
+    def adapter_response(self, value):
+        return c.subprocess.CompletedProcess([], 0, json.dumps(value).encode(), b"")
+
+    def test_connector_requires_capture_journey_binding_before_provisioning(self):
+        value = self.spec(phases=["connector"], connector={"input": "/provision.json"})
+        self.assertIn("blocked: no connector journeyInput", c.readiness(value, c.plan(value))["connector"])
+        with mock.patch.object(c.subprocess, "run") as run:
+            result = c.Scenario(value, "spec.json").run()
+        self.assertTrue(result["phases"]["connector"].startswith("blocked"))
+        run.assert_not_called()
+
+    def test_connector_runs_capture_readback_after_provision_and_repeats_nothing(self):
+        value = self.connector_spec()
+        with mock.patch.object(c.subprocess, "run", side_effect=[
+                self.adapter_response({"protocol": "mini-app-document-provisioned-v1"}),
+                self.adapter_response(self.saved_export())]) as run:
+            result = c.Scenario(value, "spec.json").run()
+            self.assertEqual(result["phases"]["connector"], "pass")
+            self.assertEqual(Path(run.call_args_list[0].args[0][1]).name, "app-document-provision.py")
+            self.assertEqual(Path(run.call_args_list[1].args[0][1]).name, "app-document-journey.py")
+            c.Scenario(value, "spec.json").run()
+            self.assertEqual(run.call_count, 2)
+
+    def test_zero_exit_source_uncertain_is_not_success_and_resume_skips_provision(self):
+        value = self.connector_spec()
+        with mock.patch.object(c.subprocess, "run", side_effect=[
+                self.adapter_response({}),
+                self.adapter_response(self.saved_export(status="source-uncertain")),
+                self.adapter_response(self.saved_export())]) as run:
+            first = c.Scenario(value, "spec.json").run()
+            self.assertTrue(first["phases"]["connector"].startswith("stopped:"))
+            self.assertEqual(first["pending"]["name"], "connector:journey")
+            second = c.Scenario(value, "spec.json").run()
+            self.assertEqual(second["phases"]["connector"], "pass")
+            names = [Path(call.args[0][1]).name for call in run.call_args_list]
+            self.assertEqual(names.count("app-document-provision.py"), 1)
+            self.assertEqual(names.count("app-document-journey.py"), 2)
+
+    def test_pending_connector_cannot_switch_to_new_capture_at_same_input_path(self):
+        value = self.connector_spec()
+        with mock.patch.object(c.subprocess, "run", side_effect=[
+                self.adapter_response({}), self.adapter_response(self.saved_export(status="uncertain"))]) as run:
+            first = c.Scenario(value, "spec.json").run()
+        self.assertEqual(first["pending"]["name"], "connector:journey")
+        Path(value["connector"]["journeyInput"]).write_text(json.dumps({"operation": "export-2"}))
+        with mock.patch.object(c.subprocess, "run") as run:
+            second = c.Scenario(value, "spec.json").run()
+        run.assert_not_called()
+        self.assertIn("journey input changed", second["phases"]["connector"])
+        self.assertEqual(second["pending"]["name"], "connector:journey")
+
+    def test_old_provision_only_pass_must_receive_the_export_before_passing(self):
+        value = self.connector_spec()
+        scenario = c.Scenario(value, "spec.json")
+        scenario.ledger.step("connector", lambda: None, scenario.attempt("old-provision"), reentrant=True)
+        scenario.state["phases"]["connector"] = "pass"
+        scenario.persist()
+        scenario.close()
+        with mock.patch.object(c.subprocess, "run", return_value=self.adapter_response(self.saved_export())) as run:
+            result = c.Scenario(value, "spec.json").run()
+        self.assertEqual(result["phases"]["connector"], "pass")
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(Path(run.call_args.args[0][1]).name, "app-document-journey.py")
+
+    def test_saved_export_for_another_operation_or_without_verified_bytes_stays_pending(self):
+        value = self.connector_spec()
+        for response in (self.saved_export(operation="foreign"), self.saved_export(receipt={}),
+                         self.saved_export(callSha256="")):
+            with mock.patch.object(c.subprocess, "run", return_value=self.adapter_response(response)):
+                result = c.Scenario(value, "spec.json").run()
+            self.assertTrue(result["phases"]["connector"].startswith("stopped:"))
+            self.assertEqual(result["pending"]["name"], "connector:journey")
 
     def test_changed_spec_needs_a_fresh_state_directory(self):
         shell = Shell(self.value["members"])

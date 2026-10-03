@@ -60,15 +60,44 @@ def consecutive(first, names, what):
     return {name: str(int(first) + index) for index, name in enumerate(names)}
 
 
+def named_selection(context, selection, world):
+    """Resolve inventory names only after matching both retained world inventories."""
+    require(world.get("type") == "mini-world-identity-v1", "unknown named world inventory")
+    members = world.get("members", {})
+    require(isinstance(members, dict) and members, "named world inventory has no members")
+    subjects = []
+    for name, row in members.items():
+        subject = row.get("subject")
+        retained = context["memberInventory"].get(subject)
+        require(retained is not None and retained.get("subject") == subject
+                and all(retained.get(key) == row.get(key) for key in ("workspace", "home")),
+                "world inventory and constructor participant differ: " + name)
+        subjects.append(subject)
+    require(len(set(subjects)) == len(subjects), "named world inventory subjects repeat")
+    result = json.loads(json.dumps(selection))
+    def subject(name):
+        require(isinstance(name, str) and name in members, "selection must name a world inventory member: " + str(name))
+        return members[name]["subject"]
+    result["app"]["owner"] = subject(result["app"]["owner"])
+    for row in result["app"]["members"].values():
+        row["subject"] = subject(row["subject"])
+    if "connector" in result:
+        result["connector"]["subject"] = subject(result["connector"]["subject"])
+        result["connector"]["reader"]["subject"] = subject(result["connector"]["reader"]["subject"])
+    return result
+
+
 class World:
     """The supplied world's retained inventory, checked against its own pins."""
 
-    def __init__(self, platform_inputs, selection):
+    def __init__(self, platform_inputs, selection, world_inventory=None):
         self.inputs_path = absolute(platform_inputs)
         self.ctx = load(self.inputs_path)
         self.selection = exact(load(absolute(selection)),
             ["protocol", "evidence", "grainsRoot", "brokerSocket", "package", "app"], ["leaseSeconds", "sizeClass", "connector"], "selection")
         require(self.selection["protocol"] == SELECTION, "unknown selection protocol")
+        if world_inventory is not None:
+            self.selection = named_selection(self.ctx, self.selection, load(absolute(world_inventory)))
         identity = self.ctx["identity"]
         self.manifest_path = absolute(self.ctx["manifest"])
         require(sha(self.manifest_path) == identity["manifestSha256"], "supplied manifest pin differs")
@@ -274,11 +303,12 @@ def main():
     parser.add_argument("command", choices=["profile", "attach", "connector", "journey"])
     for name in ("platform-inputs", "selection", "output"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--world-inventory", help="WORLD-IDENTITY.json: selection participant fields contain inventory names")
     parser.add_argument("--attached")
     parser.add_argument("--provisioned")
     args = parser.parse_args()
     require(os.getuid() != 0, "run as the Store operator")
-    world = World(args.platform_inputs, args.selection)
+    world = World(args.platform_inputs, args.selection, args.world_inventory)
     if args.command == "profile":
         value = profile(world)
     elif args.command == "attach":
