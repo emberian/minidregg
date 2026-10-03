@@ -128,8 +128,8 @@ pub(crate) struct Notice {
     pub author: String,
     pub cell: String,
     pub sequence: u64,
-    /// The request's feed number when it was observed (`say --re`), guarded
-    /// by its stable cell/sequence.
+    /// The request's feed number when the notice was owed. Informational:
+    /// the write re-reads the current number for its stable cell/sequence.
     pub number: u64,
     pub status: String,
     pub text: String,

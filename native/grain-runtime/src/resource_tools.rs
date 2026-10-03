@@ -1176,13 +1176,23 @@ impl RoomTools<'_> {
     /// record of operation `op`. Re-entering looks the record up.
     pub fn write_status(&self, op: &str, notice: &crate::resident_requests::Notice) -> Result<Value> {
         if !crate::resident_requests::STATUSES.contains(&notice.status.as_str()) || notice.text.is_empty()
-            || notice.number == 0 || notice.sequence == 0
+            || notice.sequence == 0
             || !notice.author.bytes().all(|b| b.is_ascii_digit()) || !notice.cell.bytes().all(|b| b.is_ascii_digit()) {
             return Err("request-status notice is malformed".into());
         }
+        // The feed number moves as history grows: take it from a fresh signed
+        // read of the exact request (which also refreshes the number the
+        // client resolves `--re` against), as the final reply does.
+        let fresh = self.read("mini_stream_entry", &json!({"cell":notice.cell,"sequence":notice.sequence.to_string()}))?;
+        let numbers: Vec<u64> = fresh["entries"].as_array().into_iter().flatten()
+            .filter(|e| e["author"] == notice.author && e["cell"] == notice.cell && e["sequence"] == notice.sequence)
+            .filter_map(|e| e["n"].as_u64()).collect();
+        let [number] = numbers[..] else {
+            return Err("request entry absent or ambiguous in fresh signed room history".into());
+        };
         let file = self.request_file(&format!("{}.txt", Self::proposal(op)), &notice.text)?;
-        let line = format!("say --in {} --operation-record {} --to {} --re {} --expect-re-cell {} --expect-re-sequence {} --status {} --file {file}",
-            self.config.room, self.operation_record(op, "write")?.display(), notice.author, notice.number,
+        let line = format!("say --in {} --operation-record {} --to {} --re {number} --expect-re-cell {} --expect-re-sequence {} --status {} --file {file}",
+            self.config.room, self.operation_record(op, "write")?.display(), notice.author,
             notice.cell, notice.sequence, notice.status);
         let run = Self::ok_or_ending(self.line(&line)?)?;
         Ok(json!({"said":run.stdout.trim()}))
