@@ -110,12 +110,12 @@ class PreRoomTests(unittest.TestCase):
                 probe.rows.append({"id": label, "seconds": 1.0 + len(seen), "hostCpuSeconds": 0.1, "batches": []})
                 return "ok"
 
-            original = latency.Probe.call
-            latency.Probe.call = lambda self, label, line: call(label, line)
+            original = prebaseline.latency.Probe.call
+            prebaseline.latency.Probe.call = lambda self, label, line: call(label, line)
             try:
                 summary = probe.prebaseline(2)
             finally:
-                latency.Probe.call = original
+                prebaseline.latency.Probe.call = original
             self.assertEqual([line for _, line in seen[:4]], ["whoami", "refs", "read account", "read factory"])
             self.assertEqual(len(seen), 8)
             self.assertEqual(set(summary), {"session", "discovery", "signed-read-account", "signed-read-factory"})
