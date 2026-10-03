@@ -4942,8 +4942,8 @@
     {
       "path": "native/spk-host/src/broker.rs",
       "owner": "takeover_service",
-      "sha256": "6afb3b394efb7c80dc633f5333facdf26316a27ce3dc1c788f57019d281e209f",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "4839996f2398849876265f683ae86b4e59b62daa717fdb9ae9d8c3b31669d759",
+      "qualification": "Root reviewed exact fd-custody source merge; six scoped checks and disposable freeze/SIGKILL/thaw receiving PASS; production family activation separate",
       "candidateSha256": "b0980cb15c5115a92a9c5ec0fbc428c5c6a6ea934ad74902e6749a3ebb46fff9"
     },
     {

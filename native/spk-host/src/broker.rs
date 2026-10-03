@@ -31,6 +31,9 @@ mod runtime_adoption;
 #[path = "broker_home.rs"]
 mod home_visibility;
 
+#[path = "broker_volume_custody.rs"]
+mod volume_custody;
+
 pub const SOCKET: &str = "/run/mini-spk-broker.sock";
 const MAX_REQUEST: u64 = 16 * 1024;
 const MAX_CONFIG: u64 = 64 * 1024;
@@ -640,6 +643,7 @@ impl Broker {
         root_dir(&broker.join("units"), 0o700)?;
         root_dir(&broker.join("runtimes"), 0o700)?;
         root_dir(&broker.join("unit-runtimes"), 0o700)?;
+        volume_custody::recover(&config.grains_root)?;
         let log = OpenOptions::new()
             .append(true)
             .create(true)
@@ -773,6 +777,9 @@ impl Broker {
     }
 
     fn handle(&mut self, request: Request) -> io::Result<Value> {
+        // A prior copy may have returned after an uncertain thaw. Reconcile
+        // retained freeze custody before admitting another physical action.
+        volume_custody::recover(self.root())?;
         match request {
             Request::Identify {} => Ok(json!({"protocol":"mini-spk-broker-identity-v1",
                 "grainsRoot":self.root(),"brokerSocket":socket_path(self.root(), self.config.broker_socket.as_deref())?,
@@ -1194,55 +1201,8 @@ impl Broker {
                         active.join(",")
                     )));
                 }
-                let name = volume_name(&store, &app);
-                let image = self.root().join("volumes").join(format!("{name}.ext4"));
-                let mount = self.root().join("vars").join(&name);
-                let exports = self.root().join(&store).join("exports");
-                match fs::symlink_metadata(&exports) {
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        fs::create_dir(&exports)?;
-                        std::os::unix::fs::chown(
-                            &exports,
-                            Some(self.operator_uid),
-                            Some(self.operator_gid),
-                        )?;
-                        fs::set_permissions(&exports, fs::Permissions::from_mode(0o700))?;
-                    }
-                    Err(error) => return Err(error),
-                    Ok(meta) if !meta.is_dir() || meta.uid() != self.operator_uid => {
-                        return Err(invalid("exports directory identity drift"))
-                    }
-                    Ok(_) => {}
-                }
-                let stamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|_| invalid("clock"))?
-                    .as_secs();
-                let out_path = exports.join(format!("{app}-{stamp}.ext4"));
-                // The app is stopped; freezing still fences any straggling
-                // writer for the duration of the copy.
-                let mount_text = mount.to_str().ok_or_else(|| invalid("path"))?;
-                helper(Path::new("/usr/sbin/fsfreeze"), &["-f", mount_text])?;
-                let copied = (|| -> io::Result<String> {
-                    let mut source = File::open(&image)?;
-                    let mut out = OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .mode(0o600)
-                        .open(&out_path)?;
-                    io::copy(&mut source, &mut out)?;
-                    out.sync_all()?;
-                    file_sha256(&mut File::open(&out_path)?)
-                })();
-                helper(Path::new("/usr/sbin/fsfreeze"), &["-u", mount_text])?;
-                let sha = copied?;
-                std::os::unix::fs::chown(
-                    &out_path,
-                    Some(self.operator_uid),
-                    Some(self.operator_gid),
-                )?;
-                Ok(json!({"image":out_path,"sha256":sha,
-                    "bytes":fs::metadata(&out_path)?.len().to_string()}))
+                volume_custody::export(self.root(),&store,&app,self.operator_uid,self.operator_gid)
+
             }
         }
     }
@@ -1265,8 +1225,7 @@ pub fn backup(config_path: &Path, out: &Path) -> io::Result<Value> {
 impl Broker {
     fn backup_into(&self, out: &Path) -> io::Result<Value> {
         let broker = self;
-        fs::create_dir(out)?;
-        fs::set_permissions(out, fs::Permissions::from_mode(0o700))?;
+        let backup=volume_custody::BackupTarget::create(out,self.operator_uid)?;
         let volumes = broker.root().join("volumes");
         let mut names = Vec::new();
         for entry in fs::read_dir(&volumes)? {
@@ -1284,55 +1243,16 @@ impl Broker {
                 .split_once('-')
                 .filter(|(store, app)| store_key(store) && decimal(app))
                 .ok_or_else(|| invalid(format!("registration name {name} refused")))?;
-            let image = volumes.join(format!("{name}.ext4"));
-            let mount = broker.root().join("vars").join(&name);
             let active = broker.app_units_active(store, app)?;
-            let mounted = Command::new("/usr/bin/findmnt")
-                .args(["-n", "-M"])
-                .arg(&mount)
-                .stdout(Stdio::null())
-                .status()?
-                .success();
-            let copy = out.join(format!("{name}.ext4"));
-            let mount_text = mount.to_str().ok_or_else(|| invalid("path"))?;
-            let started = std::time::Instant::now();
-            if mounted {
-                helper(Path::new("/usr/sbin/fsfreeze"), &["-f", mount_text])?;
-            }
-            let copied = helper(
-                Path::new("/usr/bin/cp"),
-                &[
-                    "--sparse=always",
-                    image.to_str().ok_or_else(|| invalid("path"))?,
-                    copy.to_str().ok_or_else(|| invalid("path"))?,
-                ],
-            );
-            if mounted {
-                helper(Path::new("/usr/sbin/fsfreeze"), &["-u", mount_text])?;
-            }
-            copied?;
-            let frozen_ms = started.elapsed().as_millis();
-            fs::copy(
-                volumes.join(format!("{name}.conf")),
-                out.join(format!("{name}.conf")),
-            )?;
-            let sha = file_sha256(&mut File::open(&copy)?)?;
-            let fsck = Command::new("/usr/sbin/e2fsck")
-                .args(["-fn"])
-                .arg(&copy)
-                .stdin(Stdio::null())
-                .output()?;
-            let listing = Command::new("/usr/sbin/debugfs")
-                .args(["-R", "ls -l /"])
-                .arg(&copy)
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output()?;
+            let copy=out.join(format!("{name}.ext4"));
+            let captured=backup.copy_volume(broker.root(),&name,!active.is_empty())?;
+            let fsck=volume_custody::inspect_copy("/usr/sbin/e2fsck",&["-fn"],&captured.file)?;
+            let listing=volume_custody::inspect_copy("/usr/sbin/debugfs",&["-R","ls -l /"],&captured.file)?;
             grains.push(json!({
             "name":name,"store":store,"app":app,
             "state":if active.is_empty() { "stopped-exact" } else { "running-frozen-crash-consistent" },
-            "activeUnits":active,"frozenMs":frozen_ms.to_string(),
-            "image":copy,"sha256":sha,"bytes":fs::metadata(&copy)?.len().to_string(),
+             "activeUnits":active,"frozenMs":captured.frozen_ms.to_string(),
+            "image":copy,"sha256":captured.hash,"bytes":captured.bytes.to_string(),
             "e2fsck":if fsck.status.success() { "clean" } else { "errors" },
             "rootListing":String::from_utf8_lossy(&listing.stdout).lines()
                 .map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>(),
@@ -1340,12 +1260,7 @@ impl Broker {
         }
         let manifest = json!({"protocol":"mini-spk-grain-backup-v1","grainsRoot":broker.root(),
         "grains":grains});
-        write_root_text(
-            &out.join("grains-backup.json"),
-            &serde_json::to_string_pretty(&manifest)?,
-            0o600,
-            false,
-        )?;
+        backup.write_manifest(&manifest)?;
         Ok(manifest)
     }
 }

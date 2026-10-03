@@ -2787,7 +2787,7 @@
     {
       "module": "Compiler.NativeDurableEventRegistry",
       "path": "Compiler/NativeDurableEventRegistry.lean",
-      "sha256": "d4f7f3e0fd4cdc40f335787c412f775bdd048628bf480653ffbd948b8235a00f",
+      "sha256": "5fad77d597d5d9f1e5823cd43a7762c22fe1ac9faf7fc31816ceb61990425b0a",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4236,7 +4236,7 @@
     {
       "module": "Host.ClientConsentSession",
       "path": "Host/ClientConsentSession.lean",
-      "sha256": "f3a0e3d2015c2717f74e6ff9cf684342f2c99448d19f721679b548dc7fd4e8e7",
+      "sha256": "816efce5c62331558a02e7a65104001deccfb5027c3a1bf9bdfaafddfb3790d1",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
