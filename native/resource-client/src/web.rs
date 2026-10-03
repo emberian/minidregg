@@ -14,6 +14,8 @@
 //! start, so another local user or a page in the browser cannot read it.
 
 mod editor;
+#[path = "web/world.rs"]
+mod world;
 #[path = "web/search.rs"]
 mod search;
 
@@ -219,7 +221,7 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }
     if request.method == "POST" {
         let parts: Vec<_> = segments.iter().map(String::as_str).collect();
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -567,6 +569,7 @@ impl Site {
                 match parts.as_slice() {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
+                    ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
                 }
             }
@@ -587,6 +590,8 @@ impl Site {
             ["doc", name, "history"] => self.history(name),
             ["doc", name, "diff", from, to] => self.diff(name, from, to),
             ["at", height, "doc", name] => self.doc(name, Some(height)),
+            ["object",name] => world::page(self,name,false),
+            ["object",name,"behavior"] => world::page(self,name,true),
             ["board", name] => self.board(name),
             ["room", name] => self.room(name),
             ["stream", _] => simple(
@@ -666,7 +671,8 @@ impl Site {
             rows.push_str(&format!(
                 "<tr data-ref=\"{n}\"><td><a href=\"{base}/doc/{n}\">{n}</a>{room}</td><td>{k}</td><td>{t}</td>\
                  <td><a href=\"{base}/doc/{n}\">doc</a> | <a href=\"{base}/doc/{n}/history\">history</a> | \
-                 <a href=\"{base}/board/{n}\">board</a> | <a href=\"{base}/room/{n}\">room</a></td></tr>\n",
+                 <a href=\"{base}/board/{n}\">board</a> | <a href=\"{base}/room/{n}\">room</a> | \
+                 <a href=\"{base}/object/{n}\">object</a></td></tr>\n",
                 n = escape(name),
                 k = escape(reference["kind"].as_str().unwrap_or("?")),
                 t = short(target),
@@ -821,7 +827,9 @@ impl Site {
         match self.read(&reference, "resource") {
             Ok((view, challenge, _)) => {
                 let entries = view["cell"]["entries"].as_array().cloned().unwrap_or_default();
-                let body = if is_content(&entries) {
+                let body = if let Some(body) = world::body(self,name,&view,false) {
+                    body
+                } else if is_content(&entries) {
                     format!(
                         "<p class=note>{0} is a document, not a board: <a href=\"{1}/doc/{0}\">read it as one</a>.</p>\n",
                         escape(name),

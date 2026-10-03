@@ -5,6 +5,9 @@
 
 use super::*;
 
+#[path = "../web_actions.rs"]
+pub(crate) mod actions;
+
 const SESSION_TYPE: &str = "mini-web-edit-v2";
 const LEGACY_SESSION_TYPE: &str = "mini-web-edit-v1";
 
@@ -19,6 +22,8 @@ pub(crate) struct Edit {
     pub status: String,
     pub message: String,
     pub outcome: Option<Value>,
+    pub action: Option<Value>,
+    pub structure: String,
 }
 
 fn directory(root: &Path, id: &str) -> Result<PathBuf> {
@@ -111,10 +116,13 @@ pub(crate) fn load(root: &Path, workspace: &Value, name: &str, id: &str) -> Resu
         status: "editing".into(),
         message: String::new(),
         outcome: None,
+        action: None,
+        structure: actions::structure(&session["seen"]),
     };
     if started.exists() {
         let start = bounded_json(&started)?;
         edit.text = member(&start, "text")?.into();
+        edit.action = start.get("action").filter(|a| !a.is_null()).cloned();
         edit.status = "uncertain".into();
         edit.message = "This save started. Its exact outcome is not yet known. Check the retained operation before making another save.".into();
         let attempt = member_path(&start, "attempt")?;
@@ -146,12 +154,35 @@ pub(crate) fn submit(
     id: &str,
     text: &str,
 ) -> Result<Edit> {
+    submit_operation(root, workspace, name, id, Some(text), None)
+}
+
+pub(crate) fn submit_action(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    id: &str,
+    action: &Value,
+) -> Result<Edit> {
+    actions::validate(action)?;
+    submit_operation(root, workspace, name, id, None, Some(action))
+}
+
+fn submit_operation(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    id: &str,
+    text: Option<&str>,
+    action: Option<&Value>,
+) -> Result<Edit> {
     let (dir, session) = retained(root, workspace, name, id)?;
+    let text = text.unwrap_or(member(&session, "text")?);
     let _writer = crate::transport::service_lock(&dir.join("save.lock"))?;
     if dir.join("started.json").exists() {
         let start = bounded_json(&dir.join("started.json"))?;
-        if start["text"] != text {
-            return Err("this editor already saved different text; its retained save must be resolved first".into());
+        if start["text"] != text || start.get("action").filter(|a| !a.is_null()) != action {
+            return Err("this editor already started different work; its retained operation must be resolved first".into());
         }
         return load(root, workspace, name, id);
     }
@@ -161,58 +192,68 @@ pub(crate) fn submit(
                 .into(),
         );
     }
-    let plan = push_actions(&session["seen"], text.as_bytes())?;
     let (attempt, _) = new_attempt(root)?;
     let proposal = format!("web-{id}");
-    // create_new and fsync make one save per session durable before any call.
+    // Retain the exact authored operation before reads, preparation or submission.
     save(
         &dir.join("started.json"),
-        &json!({"text":text,"attempt":attempt,"proposal":proposal}),
+        &json!({"text":text,"action":action,"attempt":attempt,"proposal":proposal}),
     )?;
-    if plan.actions.is_empty() {
-        save(
-            &dir.join("result.json"),
-            &json!({"status":"unchanged","message":"No changes to save. Nothing was submitted."}),
-        )?;
-        return load(root, workspace, name, id);
-    }
-    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-        "targets":[{"name":name,"payload":{"type":"content","actions":plan.actions}}]});
     crate::take_host_decision();
-    let result =
-        propose_request(root, workspace, &request, &proposal, None, false).and_then(|_| {
-            submit_intent(
-                root,
-                workspace,
-                &root.join("proposals").join(&proposal).join("intent.json"),
-                "intent",
-                false,
-                Some(&attempt),
-            )
-        });
+    let mut text_plan = None;
+    let result = (|| -> Result<()> {
+        let request = match action {
+            Some(action) => actions::plan(root, workspace, name, &session["seen"], action)?,
+            None => {
+                let plan = push_actions(&session["seen"], text.as_bytes())?;
+                if plan.actions.is_empty() {
+                    save(
+                        &dir.join("result.json"),
+                        &json!({"status":"unchanged","message":"No changes to save. Nothing was submitted."}),
+                    )?;
+                    return Ok(());
+                }
+                let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                    "targets":[{"name":name,"payload":{"type":"content","actions":plan.actions}}]});
+                text_plan = Some(plan);
+                request
+            }
+        };
+        propose_request(root, workspace, &request, &proposal, None, false)?;
+        submit_intent(
+            root,
+            workspace,
+            &root.join("proposals").join(&proposal).join("intent.json"),
+            "intent",
+            false,
+            Some(&attempt),
+        )
+    })();
     if let Err(error) = result {
         let decided = crate::take_host_decision().is_some();
-        let message = if decided {
-            match stale_lines(root, workspace, name, &session["seen"], &plan) {
-                Ok(Some(stale)) => format!("{stale}. Your draft remains below."),
-                _ => format!(
-                    "The Store refused this save: {}. Your draft remains below.",
-                    crate::web::refusal_text(&error).unwrap_or(error.clone())
-                ),
-            }
-        } else if !attempt.join("call.bin").exists() {
-            format!("The client could not prepare this save: {error}. Your draft remains below.")
+        let detail = if decided {
+            text_plan
+                .as_ref()
+                .and_then(|plan| {
+                    stale_lines(root, workspace, name, &session["seen"], plan)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_else(|| crate::web::refusal_text(&error).unwrap_or(error))
         } else {
-            format!("The save reply was interrupted: {error}. Check its exact outcome; your draft remains below.")
+            error
         };
-        // A Host refusal is definitive. A missing call before any submit is a
-        // preparation failure; all other errors preserve uncertainty.
         let status = if decided {
             "refused"
         } else if !attempt.join("call.bin").exists() {
             "failed"
         } else {
             "uncertain"
+        };
+        let message = match status {
+            "refused" => format!("The Store refused this operation: {detail}. Your draft and authored action remain below."),
+            "failed" => format!("The client could not prepare this operation: {detail}. Nothing was submitted. Your draft and authored action remain below."),
+            _ => format!("The reply was interrupted: {detail}. Check the exact outcome; your draft and authored action remain below."),
         };
         save(
             &dir.join("result.json"),
@@ -365,6 +406,36 @@ mod tests {
         assert_eq!(edit.status, "saved");
         assert_eq!(edit.text, "saved text\n");
         assert_eq!(edit.outcome.unwrap()["height"], "13");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn connection_action_retries_recover_exact_identity_without_new_source_reads() {
+        let (root, workspace, dir) = session();
+        let action = json!({"type":"transclude","source":"source","from":"1","to":"2","mode":"snapshot","death":"invalidate"});
+        let attempt = root.join("attempts/pinned-action");
+        save(
+            &dir.join("started.json"),
+            &json!({"text":"original\n","action":action,"attempt":attempt,"proposal":"pinned"}),
+        )
+        .unwrap();
+        // No source, Host or key exists: repeated POST must use only retained work.
+        let edit = submit_action(&root, &workspace, "paper", ID, &action).unwrap();
+        assert_eq!(edit.status, "uncertain");
+        assert_eq!(edit.action, Some(action.clone()));
+        let mut changed = action.clone();
+        changed["mode"] = json!("live");
+        assert!(submit_action(&root, &workspace, "paper", ID, &changed).is_err());
+        assert!(submit(&root, &workspace, "paper", ID, "original\n").is_err());
+        assert!(!root.join("proposals").exists());
+        assert_eq!(
+            lookup(&root, &workspace, "paper", ID).unwrap().status,
+            "failed"
+        );
+        assert_eq!(
+            load(&root, &workspace, "paper", ID).unwrap().action,
+            Some(action)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

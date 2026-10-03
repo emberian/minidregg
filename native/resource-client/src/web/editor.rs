@@ -217,6 +217,56 @@ fn predicate_html(predicate: &Value, depth: usize) -> String {
     }
 }
 
+/// An action shares the editor's one durable operation identity.
+pub(super) fn action(site: &Site, name: &str, id: &str, body: &[u8]) -> Page {
+    let fields = match form(body) {
+        Ok(fields) => fields,
+        Err(error) => return simple(400, "Cannot connect", &error),
+    };
+    let value = Value::Object(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v.replace("\r\n", "\n"))))
+            .collect(),
+    );
+    match web_author::submit_action(&site.root, &site.workspace, name, id, &value) {
+        Ok(edit) => render(site, &edit),
+        Err(error) => match web_author::load(&site.root, &site.workspace, name, id) {
+            Ok(mut edit) => {
+                edit.message = format!("This action was not submitted: {error}");
+                edit.action = Some(value);
+                let mut page = render(site, &edit);
+                page.status = 400;
+                page
+            }
+            Err(_) => failure_page("Cannot connect", &error),
+        },
+    }
+}
+
+fn connections(url: &str) -> String {
+    let target = format!("{url}/action");
+    format!("<section data-document-connections><h2>Connect knowledge</h2>\
+        <details><summary>Comment on a line</summary><form method=post action=\"{target}\">\
+        <input type=hidden name=type value=annotate><label>Line <input name=line type=number min=1 required></label>\
+        <label>Comment <textarea name=text maxlength=4096 required></textarea></label><button>Add comment</button></form></details>\
+        <details><summary>Publish a source range</summary><form method=post action=\"{target}\">\
+        <input type=hidden name=type value=range><label>First line <input name=from type=number min=1 required></label>\
+        <label>Last line <input name=to type=number min=1 required></label><button>Publish range</button></form></details>\
+        <details><summary>Quote a published range</summary><form method=post action=\"{target}\">\
+        <input type=hidden name=type value=transclude><label>Source reference <input name=source required></label>\
+        <label>First source line <input name=from type=number min=1 required></label>\
+        <label>Last source line <input name=to type=number min=1 required></label>\
+        <label>Meaning <select name=mode><option value=snapshot>Pinned quote</option><option value=live>Live transclusion</option></select></label>\
+        <label>If an endpoint disappears <select name=death><option value=invalidate>Show unavailable</option>\
+        <option value=keepTombstone>Keep its place</option><option value=preferPrevious>Follow previous</option>\
+        <option value=preferNext>Follow next</option></select></label><button>Insert quote</button></form>\
+        <p>Publish the range in the source first. Opening this quote always asks for the reader's own source access.</p></details>\
+        <details><summary>Link another resource</summary><form method=post action=\"{target}\">\
+        <input type=hidden name=type value=link><label>Target reference <input name=to required></label>\
+        <input type=hidden name=relation value=0><button>Add link</button></form></details></section>")
+}
+
 fn inspector(site: &Site, name: &str) -> String {
     let mut out = String::from("<aside class=inspector><h2>Inspect this document</h2>");
     let reference = match workspace::reference(&site.root, name) {
@@ -336,6 +386,10 @@ fn render(site: &Site, edit: &Edit) -> Page {
             escape(&edit.message)
         ));
     }
+    if let Some(action) = &edit.action {
+        body.push_str(&format!("<details open data-authored-action><summary>Retained authored action</summary><pre>{}</pre></details>",
+            escape(&serde_json::to_string_pretty(action).unwrap_or_default())));
+    }
     if let Some(outcome) = &edit.outcome {
         body.push_str("<dl data-write-receipt>");
         for (key, label) in [
@@ -366,6 +420,10 @@ fn render(site: &Site, edit: &Edit) -> Page {
     if terminal {
         body.push_str(&format!("<p><a href=\"{base}/doc/{name}/edit\">Open the current version for another edit</a>. This draft remains here for copying and comparison.</p>"));
     }
+    if edit.status == "editing" {
+        body.push_str(&connections(&url));
+    }
+    body.push_str(&edit.structure);
     body.push_str(&format!("<details><summary>Rendered version at the start of this edit</summary>{}</details></section>",edit.preview));
     body.push_str(&inspector(site, &edit.name));
     body.push_str("</div>");
@@ -419,6 +477,19 @@ mod tests {
         let mut huge = good;
         huge[3].1 = "196673";
         assert!(body_length(&post(&huge)).is_err());
+    }
+    #[test]
+    fn connection_forms_use_the_same_durable_editor_action_route() {
+        let html = connections("/secret/doc/paper/edit/0123");
+        assert_eq!(
+            html.matches("action=\"/secret/doc/paper/edit/0123/action\"")
+                .count(),
+            4
+        );
+        assert!(html.contains("value=snapshot"));
+        assert!(html.contains("value=live"));
+        assert!(html.contains("value=annotate"));
+        assert!(!html.contains("script"));
     }
     #[test]
     fn forms_preserve_text_and_refuse_duplicate_or_invalid_fields() {
