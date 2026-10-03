@@ -1,0 +1,25 @@
+{
+  "finding": "Sparse board rendering scanned all task numbers up to maximum u128 field address",
+  "base_revision": "96a4165",
+  "source_path": "native/resource-client/src/web.rs",
+  "packet_sha256": "8924e57896335abee8673af264710d733df7501426ab5efa8719f077f51b0e75",
+  "repair": "Visit sorted present even state fields at2+; sparse owner map lookup; preserve duplicate first sorted value and fields table",
+  "isolated_validation": {
+    "kind": "exact production escape/render_fields bodies with Value access shim",
+    "result": "2PASS",
+    "tests": [
+      "adjacent_layout",
+      "sparse_extreme_board"
+    ]
+  },
+  "common_receiving": {
+    "owner": "captain",
+    "status": "packet delivered; exact common import ACK pending"
+  },
+  "integration_validation": {
+    "owner": "consent",
+    "batch": "Rust07",
+    "test": "web::tests::board_rendering_visits_sparse_state_fields_without_address_scan",
+    "status": "queued in warm combined client batch"
+  }
+}

@@ -1,0 +1,153 @@
+#>horse_entries_entrance_machines
+#:audit
+^"provenance"{
+ revision: "96a4165f81ceee32452b381780970e54b9dce886"
+ @receipt: ~"./provenance.json"
+ @topology: ~"../../maps/runtime.spw"
+ kind: "source facts and mentally executed scenarios; no deployed-service claim"
+}
+^"cli_dispatch"{
+ @source: ~"../../../native/resource-client/src/main.rs"
+ spans_read: ["3161-4437 whole run executable dispatch", "4438-4479 main and error endings"]
+ state: ["arguments", "selected transport", "pinned image", "typed operation", "command ending"]
+ guards: ["remote and socket mutually exclusive", "remote commands allowlisted", "SSH identity and Host SHA explicitly pinned", "Args.finish rejects unused inputs in branch"]
+ transitions: ["bend-session-sign/fleet-sign enter before standard Args parser", "serve opens participant socket; serve-operator opens custody control; serve-public-proxy filters separately", "workspace/member/web/shell and payment/traffic families enter dedicated modules"]
+ authority: "Client dispatch chooses physical route; configured Lean Host controls semantic meaning"
+ debt: "All top-level run branches read; dedicated command implementations remain only partially read"
+}
+^"web_ingress"{
+ @source: ~"../../../native/resource-client/src/web.rs"
+ @bounds: ~"../../../native/resource-client/src/web_admission.rs"
+ spans_read: ["run 54-107", "parse_request/gate 149-259", "render_fields 534-579", "Site.serve/route 588-674", "respond 991-1014", "web_admission.rs whole"]
+ input_identity: "127.0.0.1 port + per-launch random secret; workspace subject/key on signed reads"
+ states: ["accepted permit", "bounded header/body ingress", "Host/Origin/fetch-site/token gate", "signed read or custody lock", "HTML response", "permit released"]
+ guards: ["IPv4 loopback bind only", "exactly one allowed Host", "foreign Origin/cross-site refused", "route segments restricted", "POST route whitelist", "header+body share ten-second absolute ingress deadline"]
+ serialization: "POST and draft-opening GET serialize owner-private custody; signed reads may proceed concurrently"
+ durability: "Native editor/create modules retain attempts; HTTP output itself is not acceptance"
+ scenario: "Disconnect after native submission can lose page response while state is admitted; lookup must resolve retained attempt rather than construct a new mutation"
+ finding: "Sparse board field rendering iterates to max address and can exhaust all 16 permits; sparse repair packet submitted to captain"
+ debt: "Editor/create/studio inner attempts and all page helpers not yet fully read; docuverse owner covers Studio"
+}
+^"socket_supervisor"{
+ @source: ~"../../../native/resource-client/src/transport.rs"
+ @proxy: ~"../../../native/resource-client/src/public_proxy.rs"
+ spans_read: ["HostProcess 1275-1343", "supervise 1390-1650", "public_proxy connection/run 281-458"]
+ states: ["listener", "bounded per-connection ingress", "config/image envelope checked", "queue", "single Host exchange", "response or uncertainty", "restart/reopen"]
+ guards: ["operator UID must match", "operation allowlists differ", "queue refusal before Host admission", "public relay checks upstream config/mode each request and same UID"]
+ serialization: "One shared Host process runs queued requests one at a time; idle socket holds only its reader"
+ acknowledgment: "Refusal254 can be emitted before forwarding; after first upstream write proxy closes on failure without claiming refusal"
+ recovery: "Exchange failure drops that job, kills/reaps child and starts new Host; it does not resubmit the uncertain request"
+ scenario: "Host CAS succeeds then dies before reply. Client sees missing frame; restart reopens Store; exact lookup may confirm admission without a second physical effect permit"
+ debt: "Envelope/allowlist full definitions and all transport deadline adapters still open"
+}
+^"host_session"{
+ @source: ~"../../../Host/Main.lean"
+ spans_read: ["run 5640-5658", "stdio initial dispatch 5926-5998", "framing+special dispatch 2090-2430", "dispatchSession/operator-paid authoring 1786-2090", "session Current/Walked/confirm 1079-1175", "Kernel/NativeHostSession whole executable definitions", "DurableReceiverIO CAS/readback/extendFrom1080-1205"]
+ states: ["configured services", "pinned signature verifier", "optional live session", "verified session refresh", "receiver outcome", "reply", "session advanced or poisoned"]
+ guards: ["canonical frame bounds", "op153 alone gets retained lookup overhead", "malformed complete frame is refused and loop continues", "truncated frame exits", "throw after output write exits rather than emit a second frame", "poisoned state returns unavailable then exits"]
+ fresh_operations: ["34/164 application dispatch", "46 paid agent", "76 agent lifetime", "26 launch claim"]
+ read_operations: ["152 current stream continuity", "154 current route admission"]
+ acknowledgment: "Special physical-tip callback emits fresh permit only at checked tip; this is point-in-time authority, not a lease"
+ history: "Application historical/committed recovery replies contain receipts and never authorize another fd3 call"
+ scenario: "Permit reply is written; physical process generation changes before fd3 delivery. Semantic checked tip alone cannot prevent stale external delivery; hostd must fence generation"
+ debt: "Remaining stdio fnDispatch operation cases5926-7154 and receiver implementations not yet fully executed in this pass"
+}
+^"discord"{
+ @main: ~"../../../native/discord-entrance/src/main.rs"
+ @source: ~"../../../native/discord-entrance/src/server.rs"
+ spans_read: ["main whole", "Config/App/handle/run_job/connection/serve whole"]
+ states: ["raw signed HTTP", "application/user/token validated", "seen ID retained", "roster session", "line checked", "inflight slot", "deferral on wire", "per-session lock", "forced command", "log", "follow-up PATCH"]
+ authority: "Discord user selects rostered local session; forced command reaches that session workspace/custody, with Host rules current"
+ acknowledgment: "No execution until DEFERRED write succeeds. Successful socket write does not prove human receipt; follow-up failure logged after execution"
+ durability: "seen IDs and session locks are process memory at pinned revision; execution log append failure does not undo line"
+ ordering: "Mutex serializes one session, not FIFO; Discord owner confirms r1 removes inaccurate arrival-order doc and retains accepted/started uncertainty journal"
+ owner: "discord_world_integration owns durable dedup/mirror catch-up repair; no duplicate edit here"
+ debt: "Signature/session/http helper definitions and live repaired source revision not yet reviewed; owner folds RAII connection slot into next packet to prevent panic leaking capacity"
+}
+^"spk_resident"{
+ @main: ~"../../../native/spk-host/src/main.rs"
+ @source: ~"../../../native/spk-host/src/resident_service.rs"
+ spans_read: ["main whole", "resident run 970-1100"]
+ entry_verbs: ["qualify/materialize/inspect-installed", "install-prepare/install-complete", "broker-serve", "grain", "resident-bootstrap/resident-run/resident-stop", "human-custodian-init", "checkpoint-pause-check/checkpoint-backup"]
+ states: ["operator-private artifacts", "unit/config bound", "journal open", "prior start reconciliation OR fresh preflight", "package/config/custody pins", "lifecycle BEGIN/claim", "physical worker", "completion", "entrances"]
+ guards: ["umask077 before operations", "existing journal selects reconciliation", "all later attempt paths checked before consuming BEGIN", "operator artifacts outside worker-writable ancestry", "signed package digest exact", "all human/agent custody preflight before one-shot claim", "HTTP bind waits for START completion"]
+ terminal: "grain UNRESOLVED exits3, supervisor must not restart uncertain record; resident errors exit1"
+ debt: "Physical launch/claim/completion tail and reconcile_prior_start definitions remain SPK owner coverage"
+}
+^"private_and_agreement"{
+ @private: ~"../../../native/private-backend/src/main.rs"
+ @crypto: ~"../../../native/joint-agreement-crypto/src/main.rs"
+ private_spans_read: ["main and run whole"]
+ private_inputs: "worker config + bounded stdin DispatchClaim; reserves bind correlation and generation in native worker"
+ private_split: "reserve verb uses explicit test Generation fixture; worker is real receiving route. Never promote reserve CLI test into native receiving evidence"
+ crypto_role: "Sign/verify/MAC/CAS/TCP primitive only; cannot grant authority/count quorum/parse candidate"
+ cas_cut: "exclusive stable lock inode -> exact expected bytes -> fresh temporary -> rename -> directory fsync; lost reply can be reconciled by retained frame"
+ debt: "crypto primitive read/CAS/run browsed; private worker/allocation and Lean agreement state transitions not fully read"
+}
+
+^"objective_migration"{
+ @producer: ~"../../../Host/BendFheArtifact.lean"
+ @binding: ~"../../../Compiler/BendArtifactBinding.lean"
+ @source: ~"../../../Compiler/BendWorldSource.lean"
+ @codec: ~"../../../Compiler/BendWorldProgramCodec.lean"
+ spans_read: ["BendFheArtifact whole", "BendWorldProgramCodec whole", "BendSessionDriver 1-170", "Bend client signer whole"]
+ source_present_legacy: ["FheArtifact.produce semantics bendtt-eval-walk-947db722-v1", "arithmetic bendtt-structural-nat-exact-v1", "Kernel.BendNativeRun evaluator/charge", "Binding.verifySource BendTT.Book.get", "BendWorldSource upstream947db722/toolchain4.34"]
+ user_authority: "Objective Bend only; TT historical/disabled for new activation"
+ missing_current_route: "Objective receiving Artifact/profile/central current-source/input/output/current-authority/funding acceptance"
+ owner_evidence: "World sourceCore4 r6+lowerer r7 typed preview and native BoundPlan exist; not Accepted. Composition ObjectiveDemandCode canonicalTerm/ROM; compiler typed numeric binding; FHE driver migration; World central statement/profile"
+}
+^"closed_private_worker"{
+ @source: ~"../../../native/private-backend/src/native_worker.rs"
+ spans_read: ["Config/DispatchClaim/invoke_native/receive 1-360"]
+ states: ["protected operator profile", "canonical dispatch", "recipient capsule opened with key custody", "fixed native verifier exact original-prefix check", "original frozen output bootstrap", "receiver WAL replay+append", "endpoint-owned keyed pending receipt"]
+ guards: ["fixed protocol/context and party bounds", "recipient key custody open", "native executable descriptor SHA before exec", "45s native verifier timeout", "checked enrollment/receipt exact equals dispatch", "immutable bootstrap SHA", "pending outbox never exported clear"]
+ acknowledgment: "Pending reply carries semantic/carrier/hiding commitments only; not source Qualified/terminalYES or current audience release"
+ disconnected_at_pin: "Host/Main96a4165 has no private203/204/205 dispatch cases; owner source packets are separate joins"
+ debt: "Key custody, Receiver/WAL internals and private release receiving remain other-owner coverage"
+}
+
+^"session_refresh_contract"{
+ @session: ~"../../../Kernel/NativeHostSession.lean"
+ @durable: ~"../../../Compiler/DurableReceiverIO.lean"
+ states: ["MAC checkpoint+suffix opening", "ordinary validated tip", "lazy genesis re-admission walk", "suffix authenticated/replayed", "exact receiver readback adopted", "poisoned"]
+ refresh: "No new entries returns retained opening; new entries continue chain/MAC/executor then incremental cell validation"
+ replay: "Provenance request performs one physical extension, then verifies/extends admitted chronology; ordinary requests avoid genesis walk cost"
+ adoption: "Exact CAS readback replaces opened+walked together only while full predecessor image matches; delayed historical readback cannot roll newer opening backwards"
+ authority: "Every unseen suffix is re-admitted at its original height; current requests recheck current law against refreshed opening"
+ physical_premise: "Unchanged externally anchored Head checks seed+retained last entry; insert-only Store API preserves earlier prefix. Equal-head cached refresh is justified under honest SQLite/OS immutable-prefix contract. Altering earlier SQL entries or replacing both Store+anchor is outside it; generic Transport type itself does not carry physical proof"
+}
+^"repair_and_owner_receipts"{
+ board: "Isolated sparse-board.patch sent captain; exact-body Rust harness2PASS; actual crate regression queued consent Rust07; common receiving pending"
+ discord: "Owner confirms serialization-only correction/durable accepted+started journals; RAII connection permit follow-up accepted"
+ objective: "FHE owner will remove/disable old TT session/signing activation pending real Objective Artifact/profile; compiler new typed numeric binding; source remains separate until received"
+ @exits: ~"../horse-exits/exits.spw"
+ @consistency: ~"../horse-consistency/consistency.spw"
+ @bounds: ~"../horse-bounds/bounds.spw"
+}
+
+^"attempt_families"{
+ @entry: ~"../../../native/resource-client/src/main.rs"
+ @reserve: ~"../../../native/resource-client/src/agent_reserve.rs"
+ @session: ~"../../../native/resource-client/src/session_enrollment.rs"
+ @share: ~"../../../native/resource-client/src/share_issue.rs"
+ @frontier: ~"../../../native/resource-client/src/fn_frontier.rs"
+ @namespace: ~"../../../native/resource-client/src/fn_namespace.rs"
+ states: ["source request", "source-owned signing plan", "custody approval/seal", "retained ingress", "submit", "confirmed/refused/contention/uncertain", "exact lookup"]
+ dispatch_fact: "Reserve/session/grant/lifetime-paid families expose plan/seal/submit/lookup with retained attempt paths. Explicit payer-sign exists separately; paid authority is not app authority"
+ transport_fact: "fn namespace register/lookup and frontier advance/lookup refuse caller socket override and use retained operator socket. Public share receipt lookup binds transaction/event/count/root"
+ guard_fact: "Bootstrap/audit require direct Host CLI. Public inspect exposes only fn-inbox-resource/application-permission-schema. Consumer drain max-pages1..16; resume-ack uses retained state"
+ abstraction: "These are neighboring instances of an attempt-custody protocol; exact family codecs/approval/current authority remain separate and cannot be merged by label alone"
+ coverage: "Top-level transitions traced from full run definition; inner attempt implementation belongs exits/consistency/bounds and remains partial"
+}
+^"actual_source_agreement_entry"{
+ @source: ~"../../../Verify/GenericSimplexSourceHarness.lean"
+ spans_read: ["whole executable crossTCP/drive/run/runCall"]
+ entry_owner_report: "testing/source-agreement-operator.py invokes private minidregg-agreement-operator CONFIG stdio; operator source entry not yet present in publication snapshot"
+ identity: "op2 retains exact SignedCall call.bin -> source ingress -> complete canonical record. Completion uses original completedCall/receiptPrefix across four source replicas, never request nonce alone"
+ states: ["load actual stores", "completed/retained offer recovery OR genuinely new proposal", "durable authenticated packet delivery", "source-native records admitted", "completed receipt on all replicas", "exact recovery"]
+ guards: ["exact n4/f1", "four distinct source store paths/journal paths", "durable signer identity matches array index", "exact common committee context and starting source image", "actual source receipts required at completion"]
+ driver_cost: "Drive drains at most64 queued packets, then services each replica; finite fuel. crossTCP launches helper and tmp files per packet; these are actual loopback TCP hops in a shared driver, not proof of distributed-service liveness"
+ defect_at_pin: "run includes explicit four-journal lost-response/reopen test after every successful new mutation. Frontier owns production runSource split; source independently checked but not linked production at owner report"
+ current_owner_evidence: "First room birth+replay carrier PASS; second document call retained absent/pending. No repeated submission of original uncertain call"
+ boundary: "Owner report is receiving evidence lead, distinct from pinned executable definitions; full operator bridge not read here"
+}

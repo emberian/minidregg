@@ -1,0 +1,11 @@
+#>mini_spw_mount
+#:mount
+^[workbench]{
+  @root: ~"./_workbench"
+  revision: "651b535b5171e9ed419570f4cd64b53914094433"
+  version: "0.3.0"
+  @spec: ~"./_workbench/lib/spw-v0.3.0/"
+  @cli: ~"./_workbench/packages/spw-cli/"
+}
+^[engage]{ surfaces: ["parser", "cli", "mounted-consumer-review"] }
+^[boundary]{ exclude: ".spw/_workbench/**" owner: "consumer" }

@@ -1,0 +1,114 @@
+{
+  "reviewed_revision": "96a4165f81ceee32452b381780970e54b9dce886",
+  "workbench_revision": "651b535b5171e9ed419570f4cd64b53914094433",
+  "scope": "exact file bytes, not qualification",
+  "states": {
+    "match": 17,
+    "drift": 0,
+    "missing": 0
+  },
+  "files": [
+    {
+      "source": "Compiler/BendWorldProgramCodec.lean",
+      "state": "match",
+      "expected_sha256": "1a22c68aa7a1e7f7d5e721a501722ade1b2189fd97e9196609be2d0f3d3c00da",
+      "observed_sha256": "1a22c68aa7a1e7f7d5e721a501722ade1b2189fd97e9196609be2d0f3d3c00da"
+    },
+    {
+      "source": "Compiler/BendWorldSource.lean",
+      "state": "match",
+      "expected_sha256": "0ee9feacd0af7633d461386b06c0753eb0e30481a51097242048f206c11d9089",
+      "observed_sha256": "0ee9feacd0af7633d461386b06c0753eb0e30481a51097242048f206c11d9089"
+    },
+    {
+      "source": "Compiler/DurableReceiverIO.lean",
+      "state": "match",
+      "expected_sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4",
+      "observed_sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4"
+    },
+    {
+      "source": "Host/BendFheArtifact.lean",
+      "state": "match",
+      "expected_sha256": "d44bed3a873ece921eca34dd5fa71af5060fff33f70cd11fde24860901f9cad2",
+      "observed_sha256": "d44bed3a873ece921eca34dd5fa71af5060fff33f70cd11fde24860901f9cad2"
+    },
+    {
+      "source": "Host/Main.lean",
+      "state": "match",
+      "expected_sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224",
+      "observed_sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224"
+    },
+    {
+      "source": "Kernel/NativeHostSession.lean",
+      "state": "match",
+      "expected_sha256": "a6671cf734fe1d63ad447361869f5eaf500f3819f7038446f92a85d8262395a7",
+      "observed_sha256": "a6671cf734fe1d63ad447361869f5eaf500f3819f7038446f92a85d8262395a7"
+    },
+    {
+      "source": "native/discord-entrance/src/main.rs",
+      "state": "match",
+      "expected_sha256": "3863503500a305865c0c2ac9f174055bb56dd69cbbf94569b4428f08a207f397",
+      "observed_sha256": "3863503500a305865c0c2ac9f174055bb56dd69cbbf94569b4428f08a207f397"
+    },
+    {
+      "source": "native/discord-entrance/src/server.rs",
+      "state": "match",
+      "expected_sha256": "c7aff061a687ec35f0be4dc623b4d2bc56329188bcce126d3243f70be4861671",
+      "observed_sha256": "c7aff061a687ec35f0be4dc623b4d2bc56329188bcce126d3243f70be4861671"
+    },
+    {
+      "source": "native/private-backend/src/main.rs",
+      "state": "match",
+      "expected_sha256": "6d23a31098f72a52ba4f5d43b0c754c3887b166a89b38787a3c39ea32930009f",
+      "observed_sha256": "6d23a31098f72a52ba4f5d43b0c754c3887b166a89b38787a3c39ea32930009f"
+    },
+    {
+      "source": "native/private-backend/src/native_worker.rs",
+      "state": "match",
+      "expected_sha256": "3912af2ec8274fdce07b7d01907f64e442ce8bb59a476c881c67c3e744a1e469",
+      "observed_sha256": "3912af2ec8274fdce07b7d01907f64e442ce8bb59a476c881c67c3e744a1e469"
+    },
+    {
+      "source": "native/resource-client/src/bend_session.rs",
+      "state": "match",
+      "expected_sha256": "546e4d1568d03398a0bb923332fcf9561d7baa0dcca21ed986e2f55548b0bd05",
+      "observed_sha256": "546e4d1568d03398a0bb923332fcf9561d7baa0dcca21ed986e2f55548b0bd05"
+    },
+    {
+      "source": "native/resource-client/src/main.rs",
+      "state": "match",
+      "expected_sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f",
+      "observed_sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f"
+    },
+    {
+      "source": "native/resource-client/src/public_proxy.rs",
+      "state": "match",
+      "expected_sha256": "17469fc076953c5abdebd9d10ad79d888113aafb6fe5e2a0fd05dec31c580502",
+      "observed_sha256": "17469fc076953c5abdebd9d10ad79d888113aafb6fe5e2a0fd05dec31c580502"
+    },
+    {
+      "source": "native/resource-client/src/transport.rs",
+      "state": "match",
+      "expected_sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8",
+      "observed_sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8"
+    },
+    {
+      "source": "native/resource-client/src/web.rs",
+      "state": "match",
+      "expected_sha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a",
+      "observed_sha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a"
+    },
+    {
+      "source": "native/resource-client/src/web_admission.rs",
+      "state": "match",
+      "expected_sha256": "f5ac24514d674ca9aecae99da46eed54ffd9830b20a496f4bf57b3b50961384c",
+      "observed_sha256": "f5ac24514d674ca9aecae99da46eed54ffd9830b20a496f4bf57b3b50961384c"
+    },
+    {
+      "source": "native/spk-host/src/main.rs",
+      "state": "match",
+      "expected_sha256": "604749425d51d5112f4e6b1a5ce4d0adb5a3c52610831f92ea836d5299ae26b3",
+      "observed_sha256": "604749425d51d5112f4e6b1a5ce4d0adb5a3c52610831f92ea836d5299ae26b3"
+    }
+  ]
+}

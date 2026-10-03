@@ -1,0 +1,91 @@
+{
+  "surface": "spw.doctor/1",
+  "root": ".",
+  "paths": {
+    "mode": "relative",
+    "consumerRoot": ".",
+    "spwRoot": ".spw",
+    "workbenchRoot": ".spw/_workbench"
+  },
+  "workbench": {
+    "head": "651b535b5171",
+    "checkout": "clean",
+    "declaredPin": "651b535b5171e9ed419570f4cd64b53914094433",
+    "pin": "match"
+  },
+  "scan": {
+    "defaultExclusions": [
+      ".git",
+      "node_modules",
+      "dist",
+      "release",
+      "_workbench",
+      ".agents",
+      ".spw/gen"
+    ]
+  },
+  "status": "ok",
+  "checks": [
+    {
+      "id": "git-root",
+      "status": "ok",
+      "summary": "git repository detected"
+    },
+    {
+      "id": "spw-root",
+      "status": "ok",
+      "summary": ".spw directory present"
+    },
+    {
+      "id": "workbench-root",
+      "status": "ok",
+      "summary": ".spw/_workbench present"
+    },
+    {
+      "id": "workbench-package",
+      "status": "ok",
+      "summary": "workbench package metadata found"
+    },
+    {
+      "id": "workbench-revision",
+      "status": "ok",
+      "summary": "workbench HEAD 651b535b5171"
+    },
+    {
+      "id": "workbench-checkout",
+      "status": "ok",
+      "summary": "workbench checkout clean"
+    },
+    {
+      "id": "workbench-pin",
+      "status": "ok",
+      "summary": "declared workbench pin 651b535b5171e9ed419570f4cd64b53914094433 matches HEAD"
+    },
+    {
+      "id": "workbench-runtime",
+      "status": "ok",
+      "summary": "workbench dependencies installed"
+    },
+    {
+      "id": "consumer-index",
+      "status": "ok",
+      "summary": ".spw/index.spw present"
+    },
+    {
+      "id": "consumer-workspace",
+      "status": "ok",
+      "summary": ".spw/workspace.spw present"
+    },
+    {
+      "id": "consumer-mount",
+      "status": "ok",
+      "summary": ".spw/mount.spw present"
+    },
+    {
+      "id": "consumer-orientation",
+      "status": "ok",
+      "summary": ".spw/README.md present"
+    }
+  ],
+  "next": []
+}
