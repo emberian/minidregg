@@ -1233,47 +1233,131 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
 pub(crate) fn signed_views(
     root: &Path, workspace: &Value, references: &[Value], view: &str,
 ) -> Result<Vec<(Value, Value, PathBuf)>> {
-    let mut expanded = Vec::<Value>::new();
-    let mut purposes = Vec::<Value>::new();
-    let mut inspections = Vec::<String>::new();
-    let mut guards_by_identity = std::collections::BTreeMap::<(String,String,String),usize>::new();
-    let mut requested = Vec::<(usize,Vec<Value>,Vec<usize>)>::new();
-    for reference in references {
+    signed_views_mixed(root, workspace, references, &vec![view.to_owned(); references.len()])
+}
+
+#[derive(Default)]
+struct SignedReadBatch {
+    references: Vec<Value>,
+    purposes: Vec<Value>,
+    inspections: Vec<String>,
+    requested: Vec<(usize, Vec<Value>, Vec<usize>)>,
+}
+
+/// A guard is shareable only under the exact same observing capability.
+fn read_guard_identity(reference: &Value) -> Result<(String, String, String)> {
+    Ok((member(reference, "kind")?.to_owned(), member(reference, "target")?.to_owned(),
+        member(reference, "observeCapability")?.to_owned()))
+}
+
+/// Partition only at requested-read boundaries. Every target retains all its
+/// discovery guards in its own native batch, including after a boundary.
+fn signed_read_batches(references: &[Value], views: &[String]) -> Result<Vec<SignedReadBatch>> {
+    if references.is_empty() || references.len() > 16 || references.len() != views.len() {
+        return Err("signed read collection requires 1 through 16 matching references and views".into());
+    }
+    let mut batches = Vec::new();
+    let mut batch = SignedReadBatch::default();
+    let mut guard_indices = std::collections::BTreeMap::new();
+    for (reference, view) in references.iter().zip(views) {
         let guards = if reference.get("sharedName").is_some() {
             shared_names::guard_references(reference)?
         } else { Vec::new() };
-        let mut guard_indices = Vec::new();
-        for guard in &guards {
-            let key = (member(guard,"kind")?.to_owned(),member(guard,"target")?.to_owned(),
-                member(guard,"observeCapability")?.to_owned());
-            let index = if let Some(index) = guards_by_identity.get(&key) { *index } else {
-                let index = expanded.len();
-                expanded.push(guard.clone());
-                purposes.push(json!({"type":"query","kind":member(guard,"kind")?,
+        let identities = guards.iter().map(read_guard_identity).collect::<Result<Vec<_>>>()?;
+        let missing = identities.iter().filter(|key| !guard_indices.contains_key(*key)).count();
+        if batch.references.len() + missing + 1 > 16 {
+            if batch.requested.is_empty() {
+                return Err("signed read has too many discovery guards".into());
+            }
+            batches.push(batch);
+            batch = SignedReadBatch::default();
+            guard_indices.clear();
+        }
+        if guards.len() + 1 > 16 {
+            return Err("signed read has too many discovery guards".into());
+        }
+        let mut selected_guards = Vec::new();
+        for (guard, identity) in guards.iter().zip(identities) {
+            let index = if let Some(index) = guard_indices.get(&identity) { *index } else {
+                let index = batch.references.len();
+                batch.references.push(guard.clone());
+                batch.purposes.push(json!({"type":"query","kind":member(guard,"kind")?,
                     "target":member(guard,"target")?,"view":"resource-scope"}));
-                inspections.push("view-resource-scope".to_owned());
-                guards_by_identity.insert(key,index);
+                batch.inspections.push("view-resource-scope".to_owned());
+                guard_indices.insert(identity, index);
                 index
             };
-            guard_indices.push(index);
+            selected_guards.push(index);
         }
-        let index = expanded.len();
-        expanded.push(reference.clone());
-        purposes.push(json!({"type":"query","kind":member(reference,"kind")?,
+        let index = batch.references.len();
+        batch.references.push(reference.clone());
+        batch.purposes.push(json!({"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view}));
-        inspections.push(if view == "capability" {
+        batch.inspections.push(if view == "capability" {
             format!("view-{}-capability",member(reference,"kind")?)
         } else { format!("view-{view}") });
-        requested.push((index,guards,guard_indices));
+        batch.requested.push((index, guards, selected_guards));
     }
-    let batch = signed_views_purposes(root,workspace,&expanded,&purposes,&inspections,None)?;
-    references.iter().zip(requested).map(|(reference,(target,guards,indices))| {
-        if !guards.is_empty() {
-            shared_names::check_opened_views(reference,&guards,
-                &indices.iter().map(|i| batch[*i].0.clone()).collect::<Vec<_>>())?;
+    batches.push(batch);
+    Ok(batches)
+}
+
+/// Independent reads of different view types share ordinary signed transport.
+/// Collections spanning batches must agree on every native image coordinate;
+/// a write between them triggers the proposal's existing whole-action retry.
+fn signed_views_mixed(
+    root: &Path, workspace: &Value, references: &[Value], views: &[String],
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    // Keep the existing seven-exchange singleton path; wrapping one local
+    // read in observation-batch would add four pure codec exchanges.
+    if references.len() == 1 && views.len() == 1 {
+        let read = signed_view(root, workspace, &references[0], &views[0])?;
+        check_read_coordinates(None, &read.1)?;
+        return Ok(vec![read]);
+    }
+    signed_views_mixed_with(references, views, |batch| {
+        signed_views_purposes(root, workspace, &batch.references,
+            &batch.purposes, &batch.inspections, None)
+    })
+}
+
+fn signed_views_mixed_with(
+    references: &[Value], views: &[String],
+    mut read: impl FnMut(&SignedReadBatch) -> Result<Vec<(Value, Value, PathBuf)>>,
+) -> Result<Vec<(Value, Value, PathBuf)>> {
+    let batches = signed_read_batches(references, views)?;
+    let mut result = Vec::new();
+    let mut image = None::<Value>;
+    let mut offset = 0;
+    for batch in batches {
+        let reads = read(&batch)?;
+        if reads.len() != batch.references.len() {
+            return Err("signed read collection count differs from requested queries".into());
         }
-        Ok(batch[target].clone())
-    }).collect()
+        for (_, challenge, _) in &reads {
+            check_read_coordinates(image.as_ref(), challenge)?;
+            if image.is_none() { image = Some(challenge.clone()); }
+        }
+        for (target, guards, indices) in batch.requested {
+            if !guards.is_empty() {
+                shared_names::check_opened_views(&references[offset], &guards,
+                    &indices.iter().map(|i| reads[*i].0.clone()).collect::<Vec<_>>())?;
+            }
+            result.push(reads[target].clone());
+            offset += 1;
+        }
+    }
+    Ok(result)
+}
+
+fn check_read_coordinates(previous: Option<&Value>, challenge: &Value) -> Result<()> {
+    for field in ["domain", "semantics", "federation", "worldRoot", "height", "authorityRoot"] {
+        let current = member(challenge, field)?;
+        if let Some(previous) = previous {
+            if member(previous, field)? != current { return Err(OBSERVATIONS_MOVED.into()); }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -2965,26 +3049,31 @@ fn propose_summary_once(
             if selected.is_empty() || selected.len() > 16 {
                 return Err("invoke proposal needs 1..16 targets".into());
             }
-            let mut target_rows = Vec::new();
-            let mut grants = Vec::new();
-            let command_nonce = random_nonce()?;
-            let mut image = None::<String>;
             let mut seen = std::collections::BTreeSet::new();
-            for entry in selected {
-                let obj = entry
-                    .as_object()
-                    .ok_or("proposal target must be an object")?;
+            let names = selected.iter().map(|entry| {
+                let obj = entry.as_object().ok_or("proposal target must be an object")?;
                 if !obj.contains_key("name") || !obj.contains_key("payload")
                     || obj.keys().any(|key| !matches!(key.as_str(), "name" | "payload" | "expectedTargetRoot")) {
                     return Err("proposal target may contain only name, payload and optional expectedTargetRoot".into());
                 }
+                let name = member(entry, "name")?.to_owned();
+                if !seen.insert(name.clone()) { return Err("duplicate named target".into()); }
+                Ok(name)
+            }).collect::<Result<Vec<_>>>()?;
+            // Resolve each room/index chain once for this action, then re-check
+            // the pinned bindings alongside the actual target observations.
+            let references = shared_names::resolve_many(root, workspace, &names)?
+                .into_iter().map(|reference| protected_document::reference_context(root, reference))
+                .collect::<Result<Vec<_>>>()?;
+            let observations = signed_views(root, workspace, &references, "resource")?;
+            let mut target_rows = Vec::new();
+            let mut grants = Vec::new();
+            let command_nonce = random_nonce()?;
+            let mut image = None::<String>;
+            for ((entry, reference), (view, challenge, signed)) in
+                selected.iter().zip(&references).zip(observations) {
                 let local_name = member(entry, "name")?;
-                if !seen.insert(local_name.to_owned()) {
-                    return Err("duplicate named target".into());
-                }
-                let reference = protected_document::reference_context(root, reference(root, local_name)?)?;
                 let protected = reference.get("protectedDocument").is_some();
-                let (view, challenge, signed) = signed_view(root, workspace, &reference, "resource")?;
                 let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
@@ -3197,13 +3286,15 @@ fn propose_summary_once(
             if selected_verbs.is_empty() || selected_verbs.len() > 8 {
                 return Err("delegation needs 1..8 narrowed verbs".into());
             }
-            let (resource, resource_challenge, _) =
-                signed_view(root, workspace, &reference, "resource")?;
-            let (policy, policy_challenge, _) = signed_view(root, workspace, &reference, "policy")?;
             let mut parent_ref = reference.clone();
             parent_ref["observeCapability"] = json!(parent_id);
-            let (capability, cap_challenge, _) =
-                signed_view(root, workspace, &parent_ref, "capability")?;
+            let reads = signed_views_mixed(root, workspace,
+                &[reference.clone(), reference.clone(), parent_ref],
+                &["resource".to_owned(), "policy".to_owned(), "capability".to_owned()])?;
+            let mut reads = reads.into_iter();
+            let (resource, resource_challenge, _) = reads.next().ok_or("delegation resource observation absent")?;
+            let (policy, policy_challenge, _) = reads.next().ok_or("delegation policy observation absent")?;
+            let (capability, cap_challenge, _) = reads.next().ok_or("delegation capability observation absent")?;
             let image = member(&resource_challenge, "worldRoot")?;
             let authority = signed_authority_root(&resource_challenge)?;
             for challenge in [&policy_challenge, &cap_challenge] {
@@ -7246,6 +7337,143 @@ mod tests {
         assert_eq!(lowered[0]["before"]["payload"], hex(b"b"));
         assert!(content_actions(&lowered, false).is_ok());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn batch_reference(target: usize) -> Value {
+        json!({"kind":"object","target":target.to_string(),"observeCapability":"7"})
+    }
+
+    fn batch_shared_reference(target: usize, room: usize, index: usize) -> Value {
+        let mut reference = batch_reference(target);
+        reference["sharedName"] = json!({"room":room.to_string(),"index":index.to_string(),
+            "name":"index", "roomRef":batch_reference(room), "indexRef":batch_reference(index)});
+        reference
+    }
+
+    fn batch_coordinates() -> Value {
+        json!({"domain":"10","semantics":"11","federation":"15","worldRoot":"12","height":"13","authorityRoot":"14"})
+    }
+
+    #[test]
+    fn whole_action_batch_delegation_keeps_distinct_views_and_parent_authority() {
+        let reference = batch_reference(30);
+        let mut parent = reference.clone();
+        parent["observeCapability"] = json!("9");
+        let batches = signed_read_batches(&[reference.clone(), reference, parent],
+            &["resource".into(), "policy".into(), "capability".into()]).unwrap();
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.purposes.iter().map(|p| p["view"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["resource", "policy", "capability"]);
+        assert_eq!(batch.inspections, ["view-resource", "view-policy", "view-object-capability"]);
+        assert_eq!(batch.references[2]["observeCapability"], "9");
+        assert_eq!(batch.requested.iter().map(|row| row.0).collect::<Vec<_>>(), [0, 1, 2]);
+    }
+
+    #[test]
+    fn whole_action_batch_shared_guards_keep_capabilities_and_fit_native_bound() {
+        let refs = (0..16).map(|i| batch_shared_reference(100 + i, 10, 20)).collect::<Vec<_>>();
+        let batches = signed_read_batches(&refs, &vec!["resource".into(); refs.len()]).unwrap();
+        assert_eq!(batches.iter().map(|b| b.references.len()).collect::<Vec<_>>(), [16, 4]);
+        assert_eq!(batches.iter().map(|b| b.requested.len()).collect::<Vec<_>>(), [14, 2]);
+        for batch in &batches {
+            assert!(batch.references.len() <= 16);
+            for (_, guards, indices) in &batch.requested {
+                assert_eq!(indices, &[0, 1]);
+                for (guard, index) in guards.iter().zip(indices) {
+                    assert_eq!(&batch.references[*index], guard);
+                    assert_eq!(batch.purposes[*index]["view"], "resource-scope");
+                }
+            }
+        }
+        let mut other = refs[1].clone();
+        other["sharedName"]["roomRef"]["observeCapability"] = json!("8");
+        let batches = signed_read_batches(&[refs[0].clone(), other], &["resource".into(), "resource".into()]).unwrap();
+        assert_eq!(batches[0].references.len(), 5);
+        assert_ne!(batches[0].requested[0].2[0], batches[0].requested[1].2[0]);
+        assert_eq!(batches[0].requested[0].2[1], batches[0].requested[1].2[1]);
+    }
+
+    #[test]
+    fn whole_action_batch_unique_guards_split_without_losing_target_order() {
+        let refs = (0..16).map(|i| batch_shared_reference(100 + i, 1000 + i, 2000 + i))
+            .collect::<Vec<_>>();
+        let batches = signed_read_batches(&refs, &vec!["resource".into(); 16]).unwrap();
+        assert_eq!(batches.iter().map(|b| b.references.len()).collect::<Vec<_>>(), [15, 15, 15, 3]);
+        let ordered = batches.iter().flat_map(|batch| batch.requested.iter()
+            .map(|(target,_,_)| batch.references[*target].clone())).collect::<Vec<_>>();
+        assert_eq!(ordered, refs);
+        for batch in batches {
+            for (_, guards, indices) in &batch.requested {
+                for (guard, index) in guards.iter().zip(indices) { assert_eq!(&batch.references[*index], guard); }
+            }
+        }
+        assert!(signed_read_batches(&[], &[]).is_err());
+        assert!(signed_read_batches(&refs, &["resource".into()]).is_err());
+        let seventeen = vec![batch_reference(1); 17];
+        assert!(signed_read_batches(&seventeen, &vec!["resource".into(); 17]).is_err());
+    }
+
+    #[test]
+    fn whole_action_batch_joins_receiving_results_and_refuses_mixed_images() {
+        let refs = (0..16).map(batch_reference).collect::<Vec<_>>();
+        let views = vec!["resource".into(); refs.len()];
+        let mut calls = 0;
+        let result = signed_views_mixed_with(&refs, &views, |batch| {
+            calls += 1;
+            Ok(batch.references.iter().map(|reference|
+                (reference.clone(), batch_coordinates(), PathBuf::from("retained-observation"))).collect())
+        }).unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(result.iter().map(|r| r.0.clone()).collect::<Vec<_>>(), refs);
+        for field in ["domain", "semantics", "federation", "worldRoot", "height", "authorityRoot"] {
+            let mut calls = 0;
+            let failed = signed_views_mixed_with(&refs, &views, |batch| {
+                calls += 1;
+                Ok(batch.references.iter().enumerate().map(|(i,reference)| {
+                    let mut at = batch_coordinates();
+                    if i == 15 { at[field] = json!("different"); }
+                    (reference.clone(), at, PathBuf::new())
+                }).collect())
+            });
+            assert_eq!(failed.unwrap_err(), OBSERVATIONS_MOVED);
+            assert_eq!(calls, 1);
+        }
+        assert!(signed_views_mixed_with(&refs, &views, |_| Ok(vec![])).is_err());
+        assert!(check_read_coordinates(None, &json!({"worldRoot":"12"})).is_err());
+    }
+
+    #[test]
+    fn whole_action_batch_never_returns_partial_reads_after_boundary_movement_or_refusal() {
+        // Six sets of distinct room/index dependencies force two coherent batches.
+        let refs = (0..6).map(|i| batch_shared_reference(2000 + i, 1000 + i, 2000 + i))
+            .collect::<Vec<_>>();
+        let views = vec!["resource".into(); refs.len()];
+        for refusal in [false, true] {
+            let mut calls = 0;
+            let result = signed_views_mixed_with(&refs, &views, |batch| {
+                calls += 1;
+                if refusal && calls == 2 { return Err("signed query refused".into()); }
+                Ok(batch.references.iter().zip(&batch.purposes).map(|(reference,purpose)| {
+                    let mut at = batch_coordinates();
+                    if calls == 2 { at["worldRoot"] = json!("new-world"); }
+                    // These fixtures represent signed resource-scope metadata:
+                    // index binding is checked independently for each target.
+                    let cell = if reference["target"].as_str().unwrap().starts_with('1') {
+                        json!({"entries":[{"key":{"field":shared_names::INDEX_FIELD},
+                            "value":(reference["target"].as_str().unwrap().parse::<usize>().unwrap() + 1000).to_string()}]})
+                    } else { json!({"entries":[]}) };
+                    let resource = json!({"type":"resource","cell":cell});
+                    let view = if purpose["view"] == "resource-scope" {
+                        json!({"type":"resource-scope","resource":resource,"capability":{
+                            "kind":"object","head":{"id":"7","fields":null}}})
+                    } else { resource };
+                    (view, at, PathBuf::new())
+                }).collect())
+            });
+            assert_eq!(calls, 2);
+            assert_eq!(result.unwrap_err(), if refusal { "signed query refused" } else { OBSERVATIONS_MOVED });
+        }
     }
 
     #[test]
