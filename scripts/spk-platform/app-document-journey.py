@@ -43,8 +43,11 @@ def binding(config, provisioned):
     register = load(absolute(provisioned["registrationRequest"]))
     require(register["expectedApp"] == provisioned["app"] and register["expectedAppGeneration"] == provisioned["generation"], "retained registration identity differs")
     route = provisioned["route"]
-    require(absolute(route["tokenFile"]) == absolute(route["directory"]) / ("browser.token" if provisioned["sessionKind"] == "web" else "api.token"), "credential path differs from source route")
-    token = custody.private_file(absolute(route["tokenFile"])).read_text().strip()
+    web = provisioned["sessionKind"] == "web"
+    require(absolute(route["tokenFile"]) == absolute(route["directory"]) / ("bootstrap.token" if web else "api.token"), "credential path differs from source route")
+    # A web session's credential is its cookie value; the route's bootstrap
+    # token is a browser's one-shot exchange for that cookie and stays unspent.
+    token = custody.private_file(absolute(route["directory"]) / ("browser.token" if web else "api.token")).read_text().strip()
     return {"type": "mini-app-document-binding-v1", "subject": provisioned["subject"],
         "appReference": "app", "app": provisioned["app"], "generation": provisioned["generation"],
         "packageReference": "package", "packageManifest": provisioned["packageManifest"],
