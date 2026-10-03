@@ -1,9 +1,24 @@
 #!/usr/bin/python3
+"""Scripted ACP worker for the resident receiving journey.
+
+Every turn requires exactly one selected addressed request and performs the
+actual native read, provider exchange, summary append and readback. The first
+turn in this workspace is held at an end_turn gate (the driver is killed while
+it waits); every later turn also sends the ordinary model reply itself so the
+controller's final delivery must recognise it instead of writing twice. Which
+author is served first is the controller's decision and is never assumed here.
+"""
 import hashlib,http.client,json,os,pathlib,sqlite3,subprocess,sys,time,urllib.parse
 os.umask(0o077)
 W=pathlib.Path('/workspace'); HOME=W/'.hermes'; SID='native-completion-cut'
 def save(name,value): (W/name).write_text(json.dumps(value,indent=2))
 def send(v): sys.stdout.write(json.dumps(v)+'\n');sys.stdout.flush()
+def bounds():
+    value=json.loads((W/'fixture-config.json').read_text())
+    if value.get('protocol')!='mini-resident-fixture-acp-config-v1':raise RuntimeError('fixture configuration protocol differs')
+    gate=value.get('gateSeconds');gateway=value.get('gatewayTimeoutSeconds')
+    if type(gate) is not int or not 1<=gate<=1800 or type(gateway) is not int or not 1<=gateway<=660:raise RuntimeError('fixture deadlines outside declared bounds')
+    return gate,gateway
 mcp=None; serial=0; tools=[]
 def call(method,params):
     global serial
@@ -41,6 +56,7 @@ for line in sys.stdin:
         save('actual-catalogue.json',tools)
         send({'jsonrpc':'2.0','id':ident,'result':{'sessionId':SID,'_meta':{'miniToolCatalogue':{'type':'mini-hermes-tool-catalogue-v1','valid':True,'names':names}}}})
     elif method=='session/prompt':
+        gate_seconds,gateway_seconds=bounds()
         prompt=''.join(p.get('text','') for p in params['prompt'])
         assignment=json.loads(prompt.split('Assignment: ',1)[1])
         docs=assignment.get('docs',[])
@@ -48,14 +64,21 @@ for line in sys.stdin:
         inputs=[d for d in docs if 'observe' in d['verbs'] and 'mutate' not in d['verbs']]
         outputs=[d for d in docs if 'mutate' in d['verbs']]
         if assignment.get('role')!='runner' or len(inputs)!=1 or len(outputs)!=1:raise RuntimeError('fixture requires exact source runner input/output assignment')
+        # Refuse before any provider or native write: this fixture serves only
+        # an addressed request, never an unaddressed maintenance turn.
+        entries=assignment.get('recentMemberEntries',[])
+        if len(entries)!=1 or 'selectedRequest' not in assignment:raise RuntimeError('fixture requires exactly one selected addressed request')
+        selected=entries[0]
+        ordinal=len(list(W.glob('turn-*.json')))+1
+        tag=f'{ordinal:03d}'
         doc=inputs[0]['name']
         output=outputs[0]['name']
         rooms=call('tools/call',{'name':'mini_room_ls','arguments':{}})
         if rooms.get('isError'): raise RuntimeError(str(rooms))
-        save('signed-room-read.json',rooms)
+        save('signed-room-read-'+tag+'.json',rooms)
         read=call('tools/call',{'name':'mini_doc_show','arguments':{'doc':doc}})
         if read.get('isError'): raise RuntimeError(str(read))
-        save('signed-document-read.json',read)
+        save('signed-document-read-'+tag+'.json',read)
         p=profile(); url=urllib.parse.urlsplit(p['base_url'].rstrip('/')+'/chat/completions')
         messages=[{'role':'user','content':prompt},
             {'role':'assistant','tool_calls':[{'id':'captured-input-read','type':'function','function':{'name':'mcp__mini_grain__mini_doc_show','arguments':json.dumps({'doc':doc})}}]},
@@ -63,10 +86,10 @@ for line in sys.stdin:
         body=json.dumps({'model':p['default'],'messages':messages,
             'max_tokens':64,'stream':True,'stream_options':{'include_usage':True},
             'tools':[{'type':'function','function':{'name':'mcp__mini_grain__'+t['name'],'description':t.get('description',''),'parameters':t['inputSchema']}} for t in tools]}).encode()
-        conn=http.client.HTTPConnection(url.hostname,url.port,timeout=600)
+        conn=http.client.HTTPConnection(url.hostname,url.port,timeout=gateway_seconds)
         conn.request('POST',url.path,body,{'Content-Type':'application/json','Authorization':'Bearer '+p['api_key']})
         response=conn.getresponse(); raw=response.read(); conn.close()
-        (W/'gateway.sse').write_bytes(raw)
+        (W/('gateway-'+tag+'.sse')).write_bytes(raw)
         if response.status!=200: raise RuntimeError('gateway status '+str(response.status))
         text=''
         for row in raw.decode().splitlines():
@@ -75,17 +98,16 @@ for line in sys.stdin:
                 if choices: text+=choices[0].get('delta',{}).get('content','')
         if not text: raise RuntimeError('provider gave no final content')
         written=call('tools/call',{'name':'mini_doc_append','arguments':{'doc':output,'text':text}})
-        save('shared-summary-write.json',written)
+        save('shared-summary-write-'+tag+'.json',written)
         if written.get('isError'):raise RuntimeError('source protected summary write failed: '+str(written))
         verified=call('tools/call',{'name':'mini_doc_show','arguments':{'doc':output}})
-        save('shared-summary-readback.json',verified)
+        save('shared-summary-readback-'+tag+'.json',verified)
         if verified.get('isError') or text not in json.dumps(verified):raise RuntimeError('source summary readback did not verify body')
-        # The second author exercises ordinary native model-say deduplication;
-        # the first author still requires delayed final delivery after >100 rows.
-        selected=assignment['recentMemberEntries'][0]
-        if selected['text'].startswith('Request B'):
+        # Later turns exercise ordinary native model-say deduplication; the
+        # first still requires the delayed final delivery after the held rows.
+        if ordinal>1:
             ordinary=call('tools/call',{'name':'mini_say','arguments':{'text':text,'to':selected['author'],'re':str(selected['n'])}})
-            save('ordinary-model-say.json',ordinary)
+            save('ordinary-model-say-'+tag+'.json',ordinary)
             if ordinary.get('isError'): raise RuntimeError('ordinary source model-say failed: '+str(ordinary))
         with sqlite3.connect(HOME/'state.db') as db:
             db.execute('CREATE TABLE IF NOT EXISTS messages(session TEXT, role TEXT, content TEXT)')
@@ -93,11 +115,15 @@ for line in sys.stdin:
         db.close()
         with open(HOME/'state.db','rb') as stream: os.fsync(stream.fileno())
         send({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':SID,'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':text}}}})
-        save('end-turn-gate.json',{'pid':os.getpid(),'text':text,'promptSha256':hashlib.sha256(prompt.encode()).hexdigest(),'sqliteSha256':hashlib.sha256((HOME/'state.db').read_bytes()).hexdigest()})
-        deadline=time.monotonic()+600
-        while not (W/'release-end-turn').exists():
-            if time.monotonic()>deadline: raise RuntimeError('fixture gate timeout')
-            time.sleep(.05)
+        evidence={'ordinal':ordinal,'pid':os.getpid(),'text':text,'author':selected['author'],'cell':selected['cell'],'sequence':selected['sequence'],
+            'ordinarySay':ordinal>1,'promptSha256':hashlib.sha256(prompt.encode()).hexdigest(),'sqliteSha256':hashlib.sha256((HOME/'state.db').read_bytes()).hexdigest()}
+        if ordinal==1:
+            save('end-turn-gate.json',evidence)
+            deadline=time.monotonic()+gate_seconds
+            while not (W/'release-end-turn').exists():
+                if time.monotonic()>deadline: raise RuntimeError('fixture gate timeout')
+                time.sleep(.05)
+        save('turn-'+tag+'.json',evidence)
         mcp.stdin.close();mcp.wait(timeout=5)
         send({'jsonrpc':'2.0','id':ident,'result':{'stopReason':'end_turn'}})
     elif ident is not None: send({'jsonrpc':'2.0','id':ident,'error':{'code':-32601,'message':'fixture method unsupported'}})

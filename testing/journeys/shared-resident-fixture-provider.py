@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Scripted no-paid SSE fixture; summarizes the actual native document read."""
+"""Scripted no-paid SSE fixture; summarizes the actual native document read.
+
+The listening port is an explicit input so a restart of this separately managed
+unit keeps the endpoint already published in the root-copied provider table.
+"""
 import argparse,hashlib,http.server,json,os,pathlib,threading,unicodedata
-p=argparse.ArgumentParser();p.add_argument('--state',required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--state',required=True);p.add_argument('--port',type=int,required=True);a=p.parse_args()
+if not 1024<a.port<65536:raise SystemExit('fixture provider needs an explicit unprivileged port')
 os.umask(0o077);state=pathlib.Path(a.state);lock=threading.Lock()
 def write(name,value):
     destination=state/name;temporary=state/(name+'.tmp')
@@ -39,6 +44,6 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
         data=(''.join('data: '+json.dumps(value)+'\n\n' for value in chunks)+'data: [DONE]\n\n').encode()
         self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def log_message(self,*args):pass
-server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint)
+server=http.server.ThreadingHTTPServer(('127.0.0.1',a.port),Endpoint)
 write('provider-ready.json',{'protocol':'mini-resident-fixture-provider-ready-v1','pid':os.getpid(),'endpoint':f'http://127.0.0.1:{server.server_port}/v1/chat/completions','sourceSha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()})
 server.serve_forever()
