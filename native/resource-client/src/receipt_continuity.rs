@@ -4,6 +4,7 @@ pub(crate) mod carry;
 #[path = "current_source.rs"]
 mod current_source;
 pub(crate) use current_source::{with_current_source, CurrentSourceOperation, CurrentSourceReadback};
+pub(crate) use current_source::run as pin_current_source_helper;
 #[path = "current_recipient_source.rs"]
 mod current_recipient;
 pub(crate) use current_recipient::{current_recipient_source, VerifiedCurrentRecipient};
@@ -317,7 +318,7 @@ static PROFILED: std::sync::Mutex<Vec<(PathBuf, String, Vec<u8>, Value)>> =
     std::sync::Mutex::new(Vec::new());
 
 fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Result<Value> {
-    let bytes = fs::read(config).map_err(fail)?;
+    let bytes = crate::agent_reserve::bounded(config, MAX_JSON as usize)?;
     if let Some((_, _, _, identity)) = PROFILED
         .lock()
         .map_err(|_| fail("verifier profile cache poisoned"))?
@@ -326,10 +327,10 @@ fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Re
     {
         return Ok(identity.clone());
     }
-    let identity = local_identity(verifier, config)?;
-    // The verifier read the config itself; keep the entry only if the bytes
-    // it could have read are still the bytes this key names.
-    if fs::read(config).map_err(fail)? == bytes {
+    let identity = local_identity(verifier, verifier_sha256, config, &bytes)?;
+    // Execution used these exact sealed bytes on Linux. Retain the pathname
+    // fence as well; a changed configuration does not populate this cache key.
+    if crate::agent_reserve::bounded(config, MAX_JSON as usize)? == bytes {
         let mut cache = PROFILED
             .lock()
             .map_err(|_| fail("verifier profile cache poisoned"))?;
@@ -338,13 +339,18 @@ fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Re
     }
     Ok(identity)
 }
-fn local_identity(verifier: &Path, config: &Path) -> Result<Value> {
+fn pinned_verifier(verifier: &Path, verifier_sha256: &str, config: &Path,
+    config_bytes: &[u8]) -> Result<crate::transport::PinnedLocalInvocation> {
+    let expected: [u8; 32] = crate::decode_hex(verifier_sha256).map_err(fail)?
+        .try_into().map_err(|_| fail("local verifier pin must be exactly 32 bytes"))?;
+    crate::transport::PinnedLocalInvocation::new(verifier, config, &expected, config_bytes)
+        .map_err(fail)
+}
+fn local_identity(verifier: &Path, verifier_sha256: &str, config: &Path,
+    config_bytes: &[u8]) -> Result<Value> {
+    let invocation = pinned_verifier(verifier, verifier_sha256, config, config_bytes)?;
     let started = std::time::Instant::now();
-    let output = Command::new(verifier)
-        .arg(config)
-        .arg("profile")
-        .output()
-        .map_err(fail)?;
+    let output = invocation.output(&[std::ffi::OsStr::new("profile")]).map_err(fail)?;
     crate::trace::record("spawn", "verifier profile", 0, output.stdout.len(), started);
     if !output.status.success() || output.stdout.len() as u64 > MAX_JSON {
         return Err(fail("local verifier profile failed or exceeded bound"));
@@ -447,10 +453,9 @@ pub(crate) fn key_source(
     let output_path = scratch.join("output.bin");
     create_file(&input_path, input)?;
     create_file(&output_path, b"")?;
-    let status = Command::new(&settings.verifier).arg(&config).arg(verb).arg(kind)
-        .arg(&input_path).arg(&output_path)
-        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
-        .status().map_err(fail)?;
+    let invocation = pinned_verifier(&settings.verifier, &settings.verifier_sha256, &config, &config_bytes)?;
+    let status = invocation.status(&[std::ffi::OsStr::new(verb), std::ffi::OsStr::new(kind),
+        input_path.as_os_str(), output_path.as_os_str()]).map_err(fail)?;
     if !status.success() { return Err(fail(format!("pinned local verifier refused {kind}"))); }
     if crate::host_image_sha256(&settings.verifier)? != settings.verifier_sha256
         || crate::agent_reserve::bounded(&config, MAX_JSON as usize)? != config_bytes
@@ -530,8 +535,17 @@ struct HostProof<'a> {
     workspace: &'a Value,
     settings: &'a Settings,
     scratch: PathBuf,
+    // One immutable executable/config pair for the entire multi-hop proof.
+    invocation: crate::transport::PinnedLocalInvocation,
+    config_bytes: Vec<u8>,
 }
 impl HostProof<'_> {
+    fn check_launch(&self, config: &Path) -> Result<()> {
+        if crate::agent_reserve::bounded(config, MAX_JSON as usize)? != self.config_bytes {
+            return Err(fail("continuity verifier config changed during proof"));
+        }
+        self.settings.check(config)
+    }
     fn challenge_point(&self, challenge: &Value) -> Result<Point> {
         let config = workspace::member_path(self.workspace, "config")?;
         let hop = self.scratch.join(workspace::random_nonce()?);
@@ -544,17 +558,12 @@ impl HostProof<'_> {
         }
         create_file(&input, &bytes)?;
         create_file(&output, b"")?;
-        self.settings.check(&config)?;
+        self.check_launch(&config)?;
         // Challenge heights include genesisHeight. Lean converts them to receipt
         // accepted-count coordinates and binds domain/semantics to this config.
         let started = std::time::Instant::now();
-        let result = Command::new(&self.settings.verifier)
-            .arg(&config)
-            .arg("continuity-point")
-            .arg(&input)
-            .arg(&output)
-            .output()
-            .map_err(fail)?;
+        let result = self.invocation.output(&[std::ffi::OsStr::new("continuity-point"),
+            input.as_os_str(), output.as_os_str()]).map_err(fail)?;
         crate::trace::record("spawn", "verifier continuity-point", 0, result.stdout.len(), started);
         if !result.status.success() {
             return Err(fail("local Lean verifier refused observation point"));
@@ -566,10 +575,15 @@ impl HostProof<'_> {
             .join("attempts")
             .join(format!("continuity-{}", workspace::random_nonce()?));
         workspace::make_private_dir(&scratch)?;
+        let config = workspace::member_path(workspace, "config")?;
+        let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
+        let invocation = pinned_verifier(&settings.verifier, &settings.verifier_sha256, &config, &config_bytes)?;
         Ok(HostProof {
             workspace,
             settings,
             scratch,
+            invocation,
+            config_bytes,
         })
     }
 }
@@ -615,15 +629,10 @@ impl HostProof<'_> {
         create_file(&request_path, &bytes)?;
         create_file(&response_path, response_bytes)?;
         create_file(&result_path, b"")?;
-        self.settings.check(&config)?;
+        self.check_launch(&config)?;
         let started = std::time::Instant::now();
-        let result = Command::new(&self.settings.verifier)
-            .arg(&config)
-            .arg("continuity-verify")
-            .arg(&request_path)
-            .arg(&response_path)
-            .arg(&result_path)
-            .output()
+        let result = self.invocation.output(&[std::ffi::OsStr::new("continuity-verify"),
+            request_path.as_os_str(), response_path.as_os_str(), result_path.as_os_str()])
             .map_err(fail)?;
         crate::trace::record("spawn", "verifier continuity-verify", 0, result.stdout.len(), started);
         if !result.status.success() {
@@ -946,9 +955,11 @@ pub(crate) fn initialize(
     }
     let verifier = crate::absolute(&selected)?;
     let config = workspace::member_path(workspace, "config")?;
+    let verifier_sha256 = crate::host_image_sha256(&verifier)?;
+    let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
     let settings = Settings {
-        identity: local_identity(&verifier, &config)?,
-        verifier_sha256: crate::host_image_sha256(&verifier)?,
+        identity: local_identity(&verifier, &verifier_sha256, &config, &config_bytes)?,
+        verifier_sha256,
         verifier,
     };
     // The only operation allowed to trust a first endpoint. No value is exposed
@@ -993,9 +1004,11 @@ pub(crate) fn replace_verifier(root: &Path, workspace: &Value, verifier: &Path) 
     let retained = anchor(&custody, &old)?;
     let verifier = crate::absolute(verifier)?;
     let config = workspace::member_path(workspace, "config")?;
+    let verifier_sha256 = crate::host_image_sha256(&verifier)?;
+    let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
     let replacement = Settings {
-        identity: local_identity(&verifier, &config)?,
-        verifier_sha256: crate::host_image_sha256(&verifier)?,
+        identity: local_identity(&verifier, &verifier_sha256, &config, &config_bytes)?,
+        verifier_sha256,
         verifier,
     };
     if replacement.identity != old.identity {
@@ -1472,16 +1485,25 @@ mod tests {
         let config = root.0.join("config.json");
         fs::write(&config, b"{\"a\":1}").unwrap();
         let runs = || fs::read_to_string(&count).map(|t| t.lines().count()).unwrap_or(0);
-        let first = checked_identity(&verifier, "sha-a", &config).unwrap();
+        let sha_a = crate::host_image_sha256(&verifier).unwrap();
+        let first = checked_identity(&verifier, &sha_a, &config).unwrap();
         assert_eq!(first["domain"], "7");
-        assert_eq!(checked_identity(&verifier, "sha-a", &config).unwrap(), first);
+        assert_eq!(checked_identity(&verifier, &sha_a, &config).unwrap(), first);
         assert_eq!(runs(), 1);
         fs::write(&config, b"{\"a\":2}").unwrap();
-        checked_identity(&verifier, "sha-a", &config).unwrap();
+        checked_identity(&verifier, &sha_a, &config).unwrap();
         assert_eq!(runs(), 2);
-        checked_identity(&verifier, "sha-b", &config).unwrap();
+        // A claimed new pin must match an actual changed executable, not an
+        // arbitrary cache label. The failed pin cannot execute or fill cache.
+        assert!(checked_identity(&verifier, &"0".repeat(64), &config).is_err());
+        assert_eq!(runs(), 2);
+        let mut changed = fs::read(&verifier).unwrap();
+        changed.extend_from_slice(b"\n# new pinned edition\n");
+        fs::write(&verifier, changed).unwrap();
+        let sha_b = crate::host_image_sha256(&verifier).unwrap();
+        checked_identity(&verifier, &sha_b, &config).unwrap();
         assert_eq!(runs(), 3);
-        checked_identity(&verifier, "sha-b", &config).unwrap();
+        checked_identity(&verifier, &sha_b, &config).unwrap();
         assert_eq!(runs(), 3);
     }
 

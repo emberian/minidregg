@@ -1393,8 +1393,8 @@
     {
       "path": "native/resource-client/src/transport.rs",
       "owner": "joint_reserve_birth_authority",
-      "sha256": "3e1d4b53c0a5a4fdb9f6e0725c7c1ac46b9c2cde013e1635477547f9cf22c375",
-      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied",
+      "sha256": "9f17779ee07e55e842f2764c0440a424fd24755e052679a910dca34a11e35e40",
+      "qualification": "Exact immutable Rust14 receiving: 23 focused sealed-helper/parent/current-source tests and production PASS; fresh onboarding nine actual checks PASS. No native profile activation implied",
       "candidateSha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8"
     },
     {
@@ -5306,8 +5306,8 @@
     {
       "path": "native/resource-client/src/current_source.rs",
       "owner": "resume_private_construction",
-      "sha256": "a5d385686808c66b71bb616d0244beae9f18bee392961f0989f8eb7069f5f0a9",
-      "qualification": "ACTUAL lockedpoint/fullreadback/scope/key tests+release PASS; matchedcurrentrecipientnativeCLI/Store receiving NOT run"
+      "sha256": "386ade725df351c6f4aedd13cc7231080d882408fb6e6eafec82af64d4edfac7",
+      "qualification": "Exact immutable Rust14 receiving: 23 focused sealed-helper/parent/current-source tests and production PASS; fresh onboarding nine actual checks PASS. No native profile activation implied"
     },
     {
       "path": "native/resource-client/src/current_recipient_source.rs",
@@ -5769,8 +5769,8 @@
     {
       "path": "native/resource-client/src/main.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
-      "sha256": "91c30c3010f96fb2d759ffadcbd6d01cdfdc7785aadb99afe5c2954a78991e0a",
-      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied",
+      "sha256": "8f131a1250101b3d85cbf17d90484feb8363c056aca5cfaf72eea4ba6f6faf00",
+      "qualification": "Exact immutable Rust14 receiving: 23 focused sealed-helper/parent/current-source tests and production PASS; fresh onboarding nine actual checks PASS. No native profile activation implied",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
       "candidateSha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f"
     },
@@ -6045,8 +6045,8 @@
     {
       "path": "native/resource-client/src/receipt_continuity.rs",
       "owner": "captain reviewed source integration",
-      "sha256": "ef0fa2877d1a7060c0d0e2e838854a2996259d73d9bf3e8d4d910f5ba131eef1",
-      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+      "sha256": "191d416915a384c9594cf7b62fbdf56da682a15d31ee8771d5d81b9fa64ecd05",
+      "qualification": "Exact immutable Rust14 receiving: 23 focused sealed-helper/parent/current-source tests and production PASS; fresh onboarding nine actual checks PASS. No native profile activation implied"
     },
     {
       "path": "native/resource-client/src/retry_evidence.rs",
@@ -6083,6 +6083,24 @@
       "owner": "captain reviewed source integration",
       "sha256": "e1cefd98ab5e64e71ae863bbf15a4b302d55ab7419207108897494fdf52e5691",
       "qualification": "Exact finite source integration; Rust10 changed filters47PASS with old nonce-parser failure retained; repaired job six checksPASS; two-line borrowed RoomKey API production receiving pending"
+    },
+    {
+      "path": "native/resource-client/src/fresh_onboarding.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "a31cf63c6450ee8c1d4542ddd2fc6721d20038ee717f8084ee651182f3f5a027",
+      "qualification": "Exact immutable Rust14 receiving: 23 focused sealed-helper/parent/current-source tests and production PASS; fresh onboarding nine actual checks PASS. No native profile activation implied"
+    },
+    {
+      "path": "native/resource-client/journey.d/job-refund-recovery.py",
+      "owner": "captain reviewed source integration",
+      "sha256": "b6307c05b7762032858b2ebc816ffecdda93b733229aeb1165e8924fcadd93d8",
+      "qualification": "Source-authored modern lost-confirmation fixture; native modern receiving awaits matched consent provider. Own-root cleanup refusal guard PASS."
+    },
+    {
+      "path": "native/resource-client/journey.d/job-refund-legacy-recovery.py",
+      "owner": "captain reviewed source integration",
+      "sha256": "21b3439297b76c376b1b52538816b5a61b8477648de7d6cbc5a57190b15c3c8a",
+      "qualification": "Actual fresh owned native-world legacy original settlement lookup twice PASS: same receipt/all four coordinates, unchanged balance, no resubmit/second refund; original tested c861 success-path preserved, new own-root cleanup guard PASS. Modern new send/payout resistance remains open."
     }
   ]
 }

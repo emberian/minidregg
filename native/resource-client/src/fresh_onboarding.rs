@@ -42,9 +42,11 @@ fn baseline_target(source: &HostProof<'_>, record: &Value, challenge: &Value) ->
 
 pub(crate) fn verifier_pin(config: &Path, verifier: &Path) -> Result<Value> {
     let verifier = crate::absolute(verifier)?;
+    let verifier_sha256 = crate::host_image_sha256(&verifier)?;
+    let config_bytes = crate::agent_reserve::bounded(config, MAX_JSON as usize)?;
     Ok(Settings {
-        identity: local_identity(&verifier, config)?,
-        verifier_sha256: crate::host_image_sha256(&verifier)?,
+        identity: local_identity(&verifier, &verifier_sha256, config, &config_bytes)?,
+        verifier_sha256,
         verifier,
     }
     .json())
@@ -124,14 +126,16 @@ pub(crate) fn prepare(
     }
     let verifier = crate::absolute(&selected)?;
     let config = workspace::member_path(workspace, "config")?;
+    let verifier_sha256 = crate::host_image_sha256(&verifier)?;
+    let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
     let settings = Settings {
-        identity: local_identity(&verifier, &config)?,
-        verifier_sha256: crate::host_image_sha256(&verifier)?,
+        identity: local_identity(&verifier, &verifier_sha256, &config, &config_bytes)?,
+        verifier_sha256,
         verifier,
     };
     let enrollment = workspace::random_nonce()?;
     let mut record = json!({"type":TYPE,"enrollment":enrollment,"state":"awaiting-first-read",
-        "settings":settings.json(),"configSha256":config_sha(workspace)?,
+        "settings":settings.json(),"configSha256":crate::hex(&<sha2::Sha256 as sha2::Digest>::digest(&config_bytes)),
         "workspace":binding(workspace)});
     if let Some(reference) = reference {
         record["reference"] = reference;

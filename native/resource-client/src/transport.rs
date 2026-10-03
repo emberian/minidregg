@@ -1290,6 +1290,57 @@ fn serve_with_mode(
     )
 }
 
+/// A local child invocation with privately held execution/settings custody.
+/// Synchronous status/output are the only execution APIs: no Command or child can escape
+/// and outlive these images. Linux executes sealed bytes; other platforms only
+/// recheck pathnames and retain their documented check/use race boundary.
+pub(crate) struct PinnedLocalInvocation {
+    host: std::path::PathBuf,
+    config: std::path::PathBuf,
+    image: fs::File,
+    config_image: Option<fs::File>,
+    #[cfg(not(target_os = "linux"))]
+    expected_image: [u8; 32],
+    #[cfg(not(target_os = "linux"))]
+    expected_config: Vec<u8>,
+}
+impl PinnedLocalInvocation {
+    pub(crate) fn new(host: &Path, config: &Path, expected_image: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
+        let config_image = HostProcess::checked_config(config, expected_config)?;
+        let image = HostProcess::checked_image(host, expected_image)?;
+        Ok(Self {
+            host: host.to_path_buf(), config: config.to_path_buf(), image, config_image,
+            #[cfg(not(target_os = "linux"))]
+            expected_image: *expected_image,
+            #[cfg(not(target_os = "linux"))]
+            expected_config: expected_config.to_vec(),
+        })
+    }
+
+    fn command(&self) -> Result<Command, String> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Keep per-invocation refusal fences, without claiming the pathname
+            // becomes immutable between this check and the actual child exec.
+            let _ = HostProcess::checked_config(&self.config, &self.expected_config)?;
+            let _ = HostProcess::checked_image(&self.host, &self.expected_image)?;
+        }
+        HostProcess::pinned_command(&self.host, &self.config, &self.image, self.config_image.as_ref())
+    }
+
+    pub(crate) fn status(&self, arguments: &[&std::ffi::OsStr]) -> Result<std::process::ExitStatus, String> {
+        self.command()?.args(arguments).stdout(Stdio::null()).stderr(Stdio::null())
+            .status().map_err(|e| format!("cannot invoke pinned local source {}: {e}", self.host.display()))
+    }
+
+    /// Captured output has std::process::Command::output semantics. Consumers
+    /// enforce their source-specific output contract before using these bytes.
+    pub(crate) fn output(&self, arguments: &[&std::ffi::OsStr]) -> Result<std::process::Output, String> {
+        self.command()?.args(arguments).output()
+            .map_err(|e| format!("cannot capture pinned local source {}: {e}", self.host.display()))
+    }
+}
+
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
 struct HostProcess {
     child: std::process::Child,
@@ -1387,7 +1438,7 @@ impl HostProcess {
         Ok(image)
     }
 
-    fn start_checked_images(host: &Path, config: &Path, image: fs::File, config_image: Option<fs::File>) -> Result<Self, String> {
+    fn pinned_command(host: &Path, config: &Path, image: &fs::File, config_image: Option<&fs::File>) -> Result<Command, String> {
         #[cfg(target_os = "linux")]
         let executable = std::path::PathBuf::from(format!(
             "/proc/{}/fd/{}", std::process::id(), image.as_raw_fd()));
@@ -1396,11 +1447,17 @@ impl HostProcess {
         let executable = host.to_path_buf();
         #[cfg(target_os = "linux")]
         let config_argument = std::path::PathBuf::from(format!("/proc/{}/fd/{}",
-            std::process::id(), config_image.as_ref().ok_or("missing immutable host config")?.as_raw_fd()));
+            std::process::id(), config_image.ok_or("missing immutable host config")?.as_raw_fd()));
         #[cfg(not(target_os = "linux"))]
         let config_argument = config.to_path_buf();
         let mut command = Command::new(executable);
-        command.arg(config_argument).arg("stdio");
+        command.arg(config_argument);
+        Ok(command)
+    }
+
+    fn start_checked_images(host: &Path, config: &Path, image: fs::File, config_image: Option<fs::File>) -> Result<Self, String> {
+        let mut command = Self::pinned_command(host, config, &image, config_image.as_ref())?;
+        command.arg("stdio");
         let mut process = Self::start(&mut command, &host.display().to_string())?;
         process._image = Some(image);
         process._config_image = config_image;
@@ -1898,6 +1955,48 @@ mod tests {
         assert!(second.child.wait().unwrap().success());
         assert_eq!(reply, "replacement");
         drop(second);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_local_invocation_uses_exact_images_across_multiple_commands() {
+        use std::ffi::OsStr;
+        let directory = std::env::temp_dir().join(format!("mini-local-seal-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host");
+        let config = directory.join("config");
+        let output = directory.join("output");
+        let original = b"#!/bin/sh\n[ \"$(cat \"$1\")\" = original ] || exit 9\nprintf '%s' \"$2\" >> \"$3\"\nprintf '%s' \"$2\"\nprintf original >&2\n";
+        fs::write(&host, original).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&config, b"original").unwrap();
+        let expected = host_image_sha256(&host).unwrap();
+        let invocation = PinnedLocalInvocation::new(&host, &config, &expected, b"original").unwrap();
+        let changed = b"#!/bin/sh\nexit 33\n";
+        fs::write(&host, changed).unwrap();
+        fs::write(&config, b"changed").unwrap();
+        let replacement = directory.join("replacement");
+        fs::write(&replacement, changed).unwrap();
+        fs::rename(&replacement, &host).unwrap();
+        fs::write(&replacement, b"replacement").unwrap();
+        fs::rename(&replacement, &config).unwrap();
+        for verb in ["author", "inspect", "inspect-readback"] {
+            assert!(invocation.status(&[OsStr::new(verb), output.as_os_str()]).unwrap().success());
+        }
+        let captured = invocation.output(&[OsStr::new("capture"), output.as_os_str()]).unwrap();
+        assert!(captured.status.success());
+        assert_eq!(captured.stdout, b"capture");
+        assert_eq!(captured.stderr, b"original");
+        assert_eq!(fs::read(&output).unwrap(), b"authorinspectinspect-readbackcapture");
+        // A replace/restore attack can satisfy caller pathname fences. It still
+        // cannot change the code/settings that any of the three children used.
+        fs::write(&host, original).unwrap();
+        fs::write(&config, b"original").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), expected);
+        assert_eq!(read_config(&config).unwrap(), b"original");
+        drop(invocation);
         fs::remove_dir_all(directory).unwrap();
     }
 
