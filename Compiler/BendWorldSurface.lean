@@ -18,7 +18,7 @@ structure Intent where
   artifact : Digest
   exportName : String
   program : Digest
-  instance : Nat
+  «instance» : Nat
   expectedRoot : Digest
   arguments : List UInt8
   deriving DecidableEq, Repr
@@ -45,7 +45,7 @@ def intentStream : StreamCodec Intent :=
     (StreamCodec.product PolicyRecordCodec.stringStream
     (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
     (StreamCodec.product digestStream bytesStream)))))
-    (fun i => (i.artifact, i.exportName, i.program, i.instance, i.expectedRoot, i.arguments))
+    (fun i => (i.artifact, i.exportName, i.program, i.«instance», i.expectedRoot, i.arguments))
     (fun i => ⟨i.1, i.2.1, i.2.2.1, i.2.2.2.1, i.2.2.2.2.1, i.2.2.2.2.2⟩)
     (by intro i; cases i; rfl)
 

@@ -4,6 +4,8 @@
 //! This test exercises the raw IR2 API directly; the CLI now refuses this shape.
 #[path = "../src/config.rs"]
 mod config;
+#[path = "../src/masking_budget.rs"]
+mod masking_budget;
 use dregg_circuit::{BabyBear, descriptor_ir2::{parse_vm_descriptor2,
     prove_vm_descriptor2_for_config, verify_vm_descriptor2_with_config,
     MemBoundaryWitness, UMemBoundaryWitness}};
@@ -26,7 +28,7 @@ fn raw_one_row_hiding_proof_reveals_trace_coefficients() {
     let public = fields(fixture.join("public.csv"));
     let alternate = fields(fixture.join("alternate-trace.csv"));
     assert_ne!(row[5], alternate[5], "the private bit is not determined by public13");
-    let config = config::fresh().unwrap();
+    let config = config::raw_for_regression().unwrap();
     let proof = prove_vm_descriptor2_for_config(&descriptor, std::slice::from_ref(&row), &public,
         &MemBoundaryWitness::default(), &[], &UMemBoundaryWitness::default(), &config).unwrap();
     verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config).unwrap();
@@ -63,4 +65,36 @@ fn raw_one_row_hiding_proof_reveals_trace_coefficients() {
         (a + b).as_canonical_u32()
     }).collect();
     assert_eq!(recovered, row.iter().map(|value| value.as_u32()).collect::<Vec<_>>());
+}
+
+#[test]
+fn derived_trace_budget_refuses_unsafe_capacities() {
+    use masking_budget::{TraceCapacity, REQUIRED_TRACE_MASKS, MIN_TRACE_ROWS};
+    assert_eq!(REQUIRED_TRACE_MASKS, 27);
+    assert_eq!(MIN_TRACE_ROWS, 32);
+    for rows in [0, 1, 2, 4, 8, 16, 27, 31] {
+        assert!(TraceCapacity::checked(rows).is_err(), "unsafe capacity {rows}");
+    }
+    for rows in [32, 64, 256] { assert!(TraceCapacity::checked(rows).is_ok()); }
+}
+
+#[test]
+fn minimum_and_normal_capacity_proofs_preserve_relation() {
+    let fixture = PathBuf::from(std::env::var("BEND_IR2_FIXTURE").unwrap());
+    let descriptor = parse_vm_descriptor2(&fs::read_to_string(fixture.join("descriptor.json")).unwrap()).unwrap();
+    let public = fields(fixture.join("public.csv"));
+    let wrong_public = fields(fixture.join("tampered-public.csv"));
+    for rows in [masking_budget::MIN_TRACE_ROWS, 256] {
+        let capacity = masking_budget::TraceCapacity::checked(rows).unwrap();
+        let config = config::for_capacity(capacity).unwrap();
+        for filename in ["trace.csv", "alternate-trace.csv"] {
+            let row = fields(fixture.join(filename));
+            let trace = vec![row; capacity.rows()];
+            let proof = prove_vm_descriptor2_for_config(&descriptor, &trace, &public,
+                &MemBoundaryWitness::default(), &[], &UMemBoundaryWitness::default(), &config).unwrap();
+            assert_eq!(proof.degree_bits, [capacity.extended_log_height()]);
+            verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config).unwrap();
+            assert!(verify_vm_descriptor2_with_config(&descriptor, &proof, &wrong_public, &config).is_err());
+        }
+    }
 }

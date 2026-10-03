@@ -81,6 +81,33 @@ theorem bits_length {width : Nat} (row : PackedRow width) :
   simp [bits, natBits]
   omega
 
+/-- Publication checks this once. It justifies replacing live String equality
+by finite name-index equality in the fixed controller; duplicate source Book
+definitions still retain their separate first-definition lookup semantics. -/
+structure Interning (program : Program) : Type where
+  unique : program.names.toList.Nodup
+
+def checkInterning (program : Program) : Option (Interning program) :=
+  if unique : program.names.toList.Nodup then some ⟨unique⟩ else none
+
+theorem name_indices_exact {program : Program} (interning : Interning program)
+    {left right : Nat} {leftName rightName : String}
+    (leftFound : program.names[left]? = some leftName)
+    (rightFound : program.names[right]? = some rightName) :
+    leftName = rightName ↔ left = right := by
+  constructor
+  · intro equal
+    subst rightName
+    have bound := (Array.getElem?_eq_some_iff.mp leftFound).1
+    have same : program.names.toList[left]? = program.names.toList[right]? := by
+      simpa using leftFound.trans rightFound.symm
+    exact (List.getElem?_inj (by simpa using bound) interning.unique).mp same
+  · intro equal
+    subst right
+    exact Option.some.inj (leftFound.symm.trans rightFound)
+
+#assert_axioms checkInterning
+#assert_axioms name_indices_exact
 #assert_axioms unpack_pack
 #assert_axioms unpack_fits
 #assert_axioms bits_length

@@ -21,8 +21,8 @@ compiled but its independent fifth interoperability fixture is still pending.
 Raw receipt decoding does not verify a protected anchor or source authority.
 A source promise additionally requires actual qualified successor recovery.
 
-authenticated_ingress.rs is authored WIP; its four focused tests are queued,
-not run at this packet freeze. It has one canonical enrolled-party envelope
+authenticated_ingress.rs four focused release tests PASS. Its later actual inner
+protocol/generation binding and bounded progress ABI also passed two changed tests. It has one canonical enrolled-party envelope
 and private WAL receiver: sender comes from current source manifest selection
 and existing native credential admission, never shuffled mix-slot identity.
 SourcePartyAuthority is an explicit external native receiver join, not a caller
@@ -41,9 +41,12 @@ WAL checksum is for honest crash integrity, not malicious disk authenticity.
 Future-view WouldBlock requires reliable retention/retry, not silent dropping.
 Full 16MiB WAL/outbox frames are local, never transport payloads.
 
-Fixed circuit capacity must reserve and burn all planned tick/gate correlations
-before any secret material release, including ticks after private halt/refusal.
-Current physical reserve is per-row; full batch API is remaining construction.
+circuit_batch.rs now reserves/fsyncs all exact fixed public tick/gate rows before
+ANY secret read/release, including ticks after private halt/refusal. Partial
+prefix failure burns allocated rows; wrong material shape after complete reserve
+burns the complete plan and returns no material. Its two narrow tests PASS.
+Native Plan interoperability fixture remains pending; the core is material
+custody, not checked triples or source authority.
 Coherent AVSS/ACSS-Id, real distributed proof/triple checking, authenticated Boolean
 wires and holder-private output remain necessary. Native descriptor, source
 maintenance budgets, protected anchor and canonical common qualified generation
@@ -67,3 +70,24 @@ resource wrapper and isolated target. Do not run all historical tests repeatedly
 The host-specific check-boundary.sh needs pinned Lean4.30 and existing warm source
 dependencies; it must not trigger a dependency rebuild. No keys, actual journals,
 private report/transcript, caches, artifacts or build outputs belong to this packet.
+
+Actual ACSS-Id joins now run: real bivariate private rows + dZK column proof,
+immutable acceptance before RA, complaint/f+1 request-gated view opening and
+robust authenticated public reconstruction. Four baseline checks PASS. The new
+malformed-dealer trace alters one ciphertext row, gets local typed rejection,
+identifies Dealer0 via actual opened proof, then reconstructs exact [42,91] at
+all honest parties after Dealer0 disappears, including the locally aborted
+holder. acss_id_store stores full dealer seed/polynomials/recursive outbox
+before publication and replays exact rows/proofs; two store tests PASS.
+New seven focused tests PASS, sixty unchanged skipped; no broad old rerun.
+
+Bounded PROGRESS ABI binds full enrolled semantic signing preimage and exact
+private WAL outbox digest/byte count. It has no terminal Qualified result. Raw
+decoding is a claim. The source-native current enrollment/funded Pending and
+Appended endpoint must bind actual worker readback to its own ordered receipt.
+Individual outbox messages need actual native enrolled sender credentials before
+opaque transport; whole private WAL/outbox is never a public carrier.
+
+Next real distributed construction is Sh2t-Id, owned by the coupled proof lane,
+then checked TripleKingDN/dispute/authenticated AND/input bitness and evaluator
+private output. The completed dZK/ACSS traces do not substitute for that work.

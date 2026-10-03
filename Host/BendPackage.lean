@@ -58,15 +58,15 @@ end Minidregg.Host.BendPackage
 def main (args : List String) : IO UInt32 := do
   let [specPath, outputPath] := args | do
     IO.eprintln "usage: bend-package PACKAGE_SPEC_JSON PACKAGE_BYTES"
-    return 2
+    return (2 : UInt32)
   try
     let source ← IO.FS.readFile specPath
     let .ok json := Lean.Json.parse source | do
       IO.eprintln "invalid sealed package JSON"
-      return 2
+      return (2 : UInt32)
     match ← Minidregg.Host.BendPackage.load json with
-    | .error reason => IO.eprintln reason; return 2
+    | .error reason => IO.eprintln reason; return (2 : UInt32)
     | .ok package =>
         IO.FS.writeBinFile outputPath ⟨(encode package).toArray⟩
-        return 0
-  catch error => IO.eprintln error.toString; return 2
+        return (0 : UInt32)
+  catch error => IO.eprintln error.toString; return (2 : UInt32)

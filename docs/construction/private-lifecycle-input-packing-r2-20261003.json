@@ -1,0 +1,17 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendClosureInput.lean",
+      "sha256": "44dc6e73e21b3d8fbab213c906763262ec8cbce052e12c089f930d536dbe0c03",
+      "status": "AUTHORED_UNCOMPILED"
+    },
+    {
+      "path": "Compiler/BendClosurePacking.lean",
+      "sha256": "1aa9b639f5723eca6e1a7dd89af6ecbf87b7c2a3579e1a382a714633ba833e24",
+      "status": "AUTHORED_UNCOMPILED"
+    }
+  ],
+  "scope": "Input now uses actual Machine allocator/cache; source Data\u2192Value helper. Packing checks unique name interning and derives exact String/index equality. No privateprotocol or fullcircuit claim."
+}

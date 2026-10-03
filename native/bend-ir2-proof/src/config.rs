@@ -26,9 +26,9 @@ type ChallengeMmcs = ExtensionMmcs<BabyBear, Extension, Mmcs>;
 type Challenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
 type Pcs = HidingFriPcs<BabyBear, Radix2DitParallel<BabyBear>, Mmcs, ChallengeMmcs, ProofRng>;
 pub type Config = StarkConfig<Pcs, Extension, Challenger>;
-pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-height256-v1";
+pub const PROFILE: &str = "mini-bend-ir2-hiding-experimental-p3-82cfad73-salt8-trace-opening-budget-v2";
 
-pub fn fresh() -> Result<Config, getrandom::Error> {
+fn fresh_unchecked() -> Result<Config, getrandom::Error> {
     let permutation = default_babybear_poseidon2_16();
     let make_mmcs = || -> Result<Mmcs, getrandom::Error> {
         Ok(Mmcs::new(PaddingFreeSponge::new(permutation.clone()),
@@ -51,3 +51,13 @@ pub fn fresh() -> Result<Config, getrandom::Error> {
         4, ProofRng::from_os()?);
     Ok(StarkConfig::new(pcs, Challenger::new(permutation)))
 }
+
+/// Enforces the derived trace-opening budget before constructing a deployment
+/// candidate. Quotient/FRI decoupling remains a separate qualification.
+pub fn for_capacity(capacity: crate::masking_budget::TraceCapacity) -> Result<Config, getrandom::Error> {
+    let _ = capacity.rows();
+    fresh_unchecked()
+}
+
+#[cfg(test)]
+pub fn raw_for_regression() -> Result<Config, getrandom::Error> { fresh_unchecked() }

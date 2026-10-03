@@ -229,3 +229,44 @@ Activity exemption must preserve all other facets. Exact current native command
 admission, funding, Appended readback, shared dispatch/outcome identity and worker
 fence must consume the same predecessor. Source authority alone cannot bless a
 forged checkpoint. No second application journal is introduced.
+
+QUALIFIED RESTART AND NEW NATIVE SOURCE PATH (2026-10-03 10:31 UTC)
+The whole machine codec, all-state serialized_resume_exact, actual finite-enum
+response injection, source typing/new-segment/progress join, and SourceJoin now
+PASS. Separate OS process save/resume at cuts 7 (lookup), 3 (evaluate), 12
+(complete) passes exact state/result/count plus context/generation/canonical/size
+refusals. Logs: continuation-check-20261003T101702Z.log (first four modules),
+continuation-host-check-20261003T101821Z.log (Host plus all restart cases), under
+/tank/dregg-build/codex-private-lifecycle-20261003 on hbox. This is process-restart
+conformance, not power-loss/fsync/native-authority evidence. Portable owner has
+now repaired the genuine cut7 file through actual native chunk custody, exact
+bytes verified; running the producer on that repaired file is next runtime join.
+
+Authored next native path, UNCOMPILED:
+- Compiler/BendActivityProgram: canonical checked public Book + named Ref entry
+  joins actual ClosureCompile and InvocationAdmission; same Book/term and method
+  output type retained. Named function entries may return a function; completion
+  is not automatically an effect or a fully applied invocation.
+- BendActivityBootstrap: actual native governed absent→bare content birth.
+- BendActivityIngress event62: owner/current signed command admission, exact
+  actual-start initialization from bare or actual-run predecessor successor,
+  public bounded verifier tariff, preserved native writes/guards/all ten charge
+  lanes, exact predecessor nullifier and actual funded preflight.
+- BendActivityReceiver: existing native CAS/tail/readback, exact source-byte
+  recorded retry before recomputation, no second journal. The admitted token
+  grants only its Activity gate exception while otherFacetGate checks joint.
+  config.transport preserves consensus refusal of unordered local appends.
+
+Important refinement: the signature must authorize the complete action including
+ticks and public tariff inputs. A completed absorbing state otherwise permits
+an unsigned relay to inflate ticks while retaining the same signed post.
+Ingress now requires original command.nonce = domain-separated cSHAKE of canonical
+program/phase/generation/ordinal/ticks; it states the cryptographic assumption,
+not hash injectivity. Scope/semantics are additionally bound by original native
+signed ingress. Current owner/signature checks precede expensive source compile.
+
+Joint owner owns shared Config protected-facet aggregation and typed event62
+chronological replay; graded owner owns the Activity adapter and live receiver.
+No external dispatch/response event is admitted yet. Next: qualify prerequisites,
+wire typed live/replay receiving, test native initialize/advance/retry/stale CAS,
+then pending yielded Plan→post-durability effect→authorized typed response.

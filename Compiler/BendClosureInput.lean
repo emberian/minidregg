@@ -29,11 +29,18 @@ theorem DataTree.source_data (tree : DataTree) : Data tree.source := by
   | refl => exact .rfl
   | pair q first second ihFirst ihSecond => exact .tup (fun _ => ihFirst) ihSecond
 
+theorem data_value {book : Book} {term : Term} (data : Data term) : Value book term := by
+  induction data with
+  | lab => exact .lab
+  | rfl => exact .rfl
+  | tup _ _ first second => exact .tup first second
+
 inductive Failure where
   | missingLiteral
   | arena (reason : Refusal)
   | missingEmptyEnvironment
   | validation
+  | machine (reason : BendClosureMachine.Failure)
   deriving DecidableEq, Repr
 
 /-- First matching literal instruction. Fixed-program private lowering uses
@@ -87,6 +94,52 @@ def load (shape : Shape) (program : Program) (heap : Heap)
       pure ⟨next, pointer, same ▸ decoded.exact⟩
     else throw .validation
 
+/-- The State loader invokes the actual controller allocator, preserving its
+computed Data cache instead of inventing a parallel readiness mechanism. -/
+abbrev StateLoad := StateT State (Except Failure)
+
+def appendState (limits : Limits) (library : Library) (row : Row) : StateLoad Nat := do
+  let state ← get
+  match (BendClosureMachine.allocate limits library row).run state with
+  | .error reason => throw (.machine reason)
+  | .ok (pointer, next) => set next; pure pointer
+
+def lowerState (limits : Limits) (library : Library) (emptyEnvironment : Nat) :
+    DataTree → StateLoad Nat
+  | .label name => do
+    match literal library.program (.label name) with
+    | none => throw .missingLiteral
+    | some pc => appendState limits library (.closure pc emptyEnvironment)
+  | .refl => do
+    match literal library.program .refl with
+    | none => throw .missingLiteral
+    | some pc => appendState limits library (.closure pc emptyEnvironment)
+  | .pair quantity first second => do
+    let first ← lowerState limits library emptyEnvironment first
+    let second ← lowerState limits library emptyEnvironment second
+    appendState limits library (.pair quantity first second)
+
+structure LoadedState (program : Program) (tree : DataTree) where
+  state : State
+  pointer : Nat
+  exact : Denotes program state.heap pointer tree.source
+
+def loadState (limits : Limits) (library : Library) (state : State)
+    (emptyEnvironment : Nat) (tree : DataTree) :
+    Except Failure (LoadedState library.program tree) := do
+  if state.heap.get? emptyEnvironment != some .nil then throw .missingEmptyEnvironment
+  let (pointer, next) ← (lowerState limits library emptyEnvironment tree).run state
+  match decode library.program next.heap (next.heap.used + library.program.code.size + 1) pointer with
+  | none => throw .validation
+  | some decoded =>
+    if same : decoded.term = tree.source then
+      pure ⟨next, pointer, same ▸ decoded.exact⟩
+    else throw .validation
+
+theorem state_loaded_exact {program : Program} {tree : DataTree}
+    (loaded : LoadedState program tree) :
+    Denotes program loaded.state.heap loaded.pointer tree.source := loaded.exact
+
 theorem loaded_exact {program : Program} {tree : DataTree}
     (loaded : Loaded program tree) : Denotes program loaded.heap loaded.pointer tree.source :=
   loaded.exact
@@ -95,7 +148,10 @@ theorem loaded_data {program : Program} {tree : DataTree}
     (_loaded : Loaded program tree) : Data tree.source := tree.source_data
 
 #assert_axioms DataTree.source_data
+#assert_axioms data_value
 #assert_axioms load
 #assert_axioms loaded_exact
 #assert_axioms loaded_data
+#assert_axioms loadState
+#assert_axioms state_loaded_exact
 end Minidregg.Compiler.BendClosureInput

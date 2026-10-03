@@ -41,9 +41,9 @@ theorem counted_sender_received {v : View} {kind : Kind} {arg : Argument} {party
     ∃ m ∈ v.received, m.sender = party ∧ m.kind = kind ∧ m.value = arg := by
   simp only [countedSenders, List.mem_eraseDups, List.mem_map, List.mem_filter] at member
   obtain ⟨m, ⟨inside, condition⟩, sender⟩ := member
-  have pair := (Bool.and_eq_true.mp condition).1
-  have k : m.kind = kind := by simpa using (Bool.and_eq_true.mp pair).1
-  have a : m.value = arg := by simpa using (Bool.and_eq_true.mp pair).2
+  have k : m.kind = kind := by
+    cases h : m.kind <;> cases kind <;> simp_all [BEq.beq, instBEqKind.beq, Kind.ctorIdx]
+  have a : m.value = arg := by simp_all
   exact ⟨m, inside, sender, k, a⟩
 
 /-- The demanded receive invariant is concrete: every stored message has an

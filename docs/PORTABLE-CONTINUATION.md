@@ -152,3 +152,26 @@ The full old private allocation descriptor/immutable spent anchor and external
 uncertain dispatch join have no new generic transfer permission here. Actual
 worker-governance, old-worker fence and qualified successor rekey remain
 unfinished joins; reserveObject is not worker-transfer governance.
+
+
+## Participant-held acknowledgement (new WIP)
+
+`Compiler/PortableParticipantPinIO.lean` consumes the opaque archive-retained,
+signature-verified, continuity-checked ACK and persists its public endpoint in
+an independently provisioned participant-owned directory through the shared
+native exact CAS transport. It returns a Held token only after durable reply
+and exact readback. Stale/forked or newer local pins refuse; a lost-reply retry
+uses same-bytes CAS/fsync rather than treating equality alone as durability.
+Bootstrap identity/key/first endpoint are independently authenticated and never
+learned from a restored manifest. This is a public client anchor, not a second
+source journal or authority plane. The producer and consumer remain uncompiled
+WIP until their exact assigned native/source check joins.
+
+Actual Bend custody join at 10:31UTC captured the qualified 329-byte cut-7
+checkpoint (SHA256 `2075ce3b1638d89dcc4b2577d1e1aeb39307e36ea184228e94b5b4b0feaf87be`),
+checked bounded retrieval and byte-exact restore, then repaired an independently
+empty receiving archive and restored the same checkpoint. Existing output and
+forged chunk refused; original producer bytes stayed intact. This confirms the
+physical continuation artifact join. Running the source continuation consumer
+on repaired bytes is tracked separately; no Activity or successor activation
+is implied. Private runtime evidence remains outside the public source packet.

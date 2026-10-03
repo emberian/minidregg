@@ -39,6 +39,21 @@ def encode (source : Source) : List UInt8 := frame ++ sourceStream.encode source
 def decode (bytes : List UInt8) : Option Source :=
   NockProgramCodec.framedDecode frame sourceStream bytes
 
+/-- The original signed command nonce commits to the complete phase action and
+its public tariff inputs, excluding only the signature envelope itself. Thus an
+unsigned relay cannot increase ticks/checker cost on an absorbing result while
+reusing the same signature. This uses the same explicit cryptographic digest
+assumption as native command identity; it is not an injectivity theorem. -/
+def actionBytes (source : Source) : List UInt8 :=
+  BendActivityProgram.sourceStream.encode source.program ++
+    (StreamCodec.product StreamCodec.bool (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))).encode
+      (source.initialize,source.generation,source.ordinal,source.ticks)
+
+def actionNonce (source : Source) : Nat :=
+  (Sp800185Cshake256.hash "DREGG/BEND/ACTIVITY-AUTHORIZED-ACTION/v1".toUTF8.toList
+    (actionBytes source)).digest.value
+
 /-- A public versioned verifier tariff. proofWork counts bounded controller
 microticks; memoryTouches charges the fixed public arena/stack/input/lookup
 capacity per tick. This is not a wall-clock bound or hidden source-step meter.
@@ -95,7 +110,7 @@ def construct {config : Config} {opened : Opened config}
     (pinned : config.activityControl = some pin)
     (program : BendActivityProgram.Prepared source.program)
     (current : Current config opened) : Option (Admitted config opened) := do
-  if current.command.subject != pin.owner then none else do
+  if current.command.subject != pin.owner || current.command.nonce != actionNonce source then none else do
     if signedExact : source.signedBytes = signedBytes config.deployment.domain config.profile.semantics current.signed then do
       let base := current.intent
       let mut claims := base.nullifiers
@@ -132,7 +147,6 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8)
   if !replay && source.ticks > config.activityTickLimit then return .error "activity live tick limit"
   let some pin := config.activityControl | return .error "activity facet not enabled"
   if pinned : config.activityControl = some pin then
-    let some program := BendActivityProgram.prepare source.program | return .error "activity source admission refused"
     let some (domain,semantics,signed) := decodeSignedBytes source.signedBytes
       | return .error "malformed activity signed operation"
     if domain != config.deployment.domain || semantics != config.profile.semantics then
@@ -146,6 +160,10 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8)
         match ← DeclaredResourceController.admit config.signature prepared signed with
         | .error _ => return .error "activity current source authority refused"
         | .ok accepted =>
+          if command.subject != pin.owner || command.nonce != actionNonce source then
+            return .error "activity owner or signed action mismatch"
+          let some program := BendActivityProgram.prepare source.program
+            | return .error "activity source admission refused"
           let current : Current config opened := ⟨command,signed,prepared,shape,accepted⟩
           let some admitted := construct source pin pinned program current
             | return .error "activity exact phase or funding refused"

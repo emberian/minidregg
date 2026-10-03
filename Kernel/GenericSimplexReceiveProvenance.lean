@@ -1,4 +1,5 @@
 import Kernel.GenericSimplexLocal
+import Mathlib.Tactic.SplitIfs
 
 namespace Minidregg.Kernel.GenericSimplexReceiveProvenance
 open Minidregg.Kernel.GenericSimplex
@@ -59,10 +60,10 @@ theorem register_backed {external : Message → Prop} {state : State} (message :
   · subst other; exact available
 
 theorem backed_weaken {external next : Message → Prop} {state : State}
-    (backed : Backed external state) (include : ∀ m, external m → next m) :
+    (backed : Backed external state) (widen : ∀ m, external m → next m) :
     Backed next state := by
   intro view member message received
-  exact (backed view member message received).imp (include message) id
+  exact (backed view member message received).imp (widen message) id
 
 theorem broadcast_backed {external : Message → Prop} {state : State}
     (number : Nat) (kind : Kind) (arg : Argument) (backed : Backed external state) :
@@ -80,6 +81,77 @@ theorem broadcast_backed {external : Message → Prop} {state : State}
       exact Or.inr (by simp [broadcast_audit, message])
   · exact Or.inr (by simpa only [broadcast_audit, register_audit, List.mem_append,
       List.mem_singleton] using Or.inl oldSend)
+
+theorem backed_audit_append {external : Message → Prop} {state : State}
+    (events : List AuditEvent) (backed : Backed external state) :
+    Backed external {state with audit := state.audit ++ events} := by
+  intro view member message received
+  rcases backed view member message received with origin | self
+  · exact Or.inl origin
+  · exact Or.inr (List.mem_append.mpr (Or.inl self))
+
+theorem putView_received_unchanged {external : Message → Prop} {state : State}
+    (number : Nat) (view : View) (backed : Backed external state)
+    (same : view.received = (viewAt state number).received) :
+    Backed external (putView state view) := by
+  apply putView_backed view backed
+  intro message member
+  exact viewAt_backed backed number message (same ▸ member)
+
+theorem clear_backed {external : Message → Prop} {state : State}
+    (number : Nat) (arg : Argument) (backed : Backed external state) :
+    Backed external (clear state number arg) := by
+  cases arg with
+  | none =>
+    simp only [clear]
+    split
+    · exact backed
+    · apply backed_audit_append
+      exact putView_received_unchanged number _ backed rfl
+  | some block =>
+    simp only [clear]
+    split
+    · apply backed_audit_append
+      exact putView_received_unchanged number _ backed rfl
+    · exact backed
+
+theorem doCommit_backed {external : Message → Prop} {state : State}
+    (number : Nat) (block : Block) (backed : Backed external state) :
+    Backed external (doCommit state number block) := by
+  have cleared := clear_backed number (some block) backed
+  have recorded := putView_received_unchanged number
+    {viewAt (clear state number (some block)) number with committed := some block} cleared rfl
+  have appended := backed_audit_append
+    [.commit (clear state number (some block)).self number block] recorded
+  unfold doCommit
+  dsimp only
+  split_ifs <;> first | exact backed | exact cleared | exact appended
+
+theorem castVote_backed {external : Message → Prop} {state : State}
+    (number : Nat) (block : Block) (backed : Backed external state) :
+    Backed external (castVote state number block) := by
+  unfold castVote
+  dsimp only
+  split
+  · exact backed
+  · apply broadcast_backed
+    exact putView_received_unchanged number _ backed rfl
+
+theorem sendCandidate_backed {external : Message → Prop} {state : State}
+    (number : Nat) (arg : Argument) (backed : Backed external state) :
+    Backed external (sendCandidate state number arg) := by
+  unfold sendCandidate
+  dsimp only
+  split
+  · exact backed
+  · apply broadcast_backed
+    exact putView_received_unchanged number _ backed rfl
+
+#assert_axioms doCommit_backed
+#assert_axioms castVote_backed
+#assert_axioms sendCandidate_backed
+
+#assert_axioms clear_backed
 
 #assert_axioms viewAt_backed
 #assert_axioms putView_backed

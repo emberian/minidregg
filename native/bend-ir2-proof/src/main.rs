@@ -1,6 +1,7 @@
 //! Offline proof conformance harness. This is not a world admission endpoint.
 //! It consumes Lean-authored descriptors and witnesses; it authors no AIR.
 mod config;
+mod masking_budget;
 use dregg_circuit::{BabyBear, descriptor_ir2::{parse_vm_descriptor2,
     check_descriptor2_wellformed, prove_vm_descriptor2_for_config,
     EffectVmDescriptor2, TableSem, VmConstraint2, WindowExpr,
@@ -49,14 +50,12 @@ fn require_subset(descriptor: &EffectVmDescriptor2) -> Result<(), Box<dyn Error>
     if pinned.len() != descriptor.public_input_count { return Err("missing public pin".into()); }
     Ok(())
 }
-// Fixed public padding prevents the immediate degree-one/OOD disclosure of
-// a one-row hiding trace. 256 is an experimental capacity, NOT a derived ZK
-// bound; the full quotient/FRI transcript leakage budget is still unqualified.
-const MAIN_ROWS: usize = 256;
-const EXTENDED_LOG_HEIGHT: usize = 9;
-fn check_proof_shape(proof: &Ir2BatchProof<config::Config>) -> Result<(), Box<dyn Error>> {
-    if proof.degree_bits != [EXTENDED_LOG_HEIGHT] {
-        return Err("unexpected proof instances or masking height".into());
+// This profile's public capacity is derived from its exact opening budget.
+// It addresses trace-opening leakage only; full transcript hiding remains open.
+fn check_proof_shape(proof: &Ir2BatchProof<config::Config>,
+    capacity: masking_budget::TraceCapacity) -> Result<(), Box<dyn Error>> {
+    if proof.degree_bits != [capacity.extended_log_height()] {
+        return Err("unexpected proof instances or masking capacity".into());
     }
     Ok(())
 }
@@ -71,21 +70,22 @@ fn run() -> Result<(), Box<dyn Error>> {
     require_subset(&descriptor)?;
     let public = read_fields(Path::new(&args[3]))?;
     if public.len() != descriptor.public_input_count { return Err("public length mismatch".into()); }
-    let config = config::fresh().map_err(|error| format!("proof entropy unavailable: {error}"))?;
+    let capacity = masking_budget::TraceCapacity::checked(masking_budget::MIN_TRACE_ROWS)?;
+    let config = config::for_capacity(capacity).map_err(|error| format!("proof entropy unavailable: {error}"))?;
     if args[1] == "prove" {
         let row = read_fields(Path::new(&args[4]))?;
         if row.len() != descriptor.trace_width { return Err("trace width mismatch".into()); }
-        let trace = vec![row; MAIN_ROWS];
+        let trace = vec![row; capacity.rows()];
         let proof = prove_vm_descriptor2_for_config(&descriptor, &trace, &public,
             &MemBoundaryWitness::default(), &[], &UMemBoundaryWitness::default(), &config)?;
-        check_proof_shape(&proof)?;
+        check_proof_shape(&proof, capacity)?;
         verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config)?;
         fs::write(&args[5], postcard::to_allocvec(&proof)?)?;
     } else {
         let bytes = fs::read(&args[4])?;
         let (proof, rest): (Ir2BatchProof<config::Config>, _) = postcard::take_from_bytes(&bytes)?;
         if !rest.is_empty() { return Err("trailing proof bytes".into()); }
-        check_proof_shape(&proof)?;
+        check_proof_shape(&proof, capacity)?;
         verify_vm_descriptor2_with_config(&descriptor, &proof, &public, &config)?;
     }
     println!("PASS profile={} mode={}; experimental backend conformance only", config::PROFILE, args[1]);

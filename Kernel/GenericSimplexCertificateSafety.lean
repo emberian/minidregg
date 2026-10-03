@@ -177,8 +177,8 @@ theorem attributed_commit_sends_prefix_consistent {tr : Trace} {roster faulty : 
   · exact Or.inl (certificate_ancestor_of_later rules size faultBound w v right left (Or.inr b) a order)
   · exact Or.inr (certificate_ancestor_of_later rules size faultBound v w left right (Or.inr a) b order)
 
-/-- A descendant certificate covers every application prefix. No new signature
-or certificate for that truncated prefix is constructed. -/
+/-- A descendant certificate covers every application sourcePrefix. No new signature
+or certificate for that truncated sourcePrefix is constructed. -/
 abbrev sourceHistory := Minidregg.Kernel.GenericSimplex.applicationHistory
 
 theorem sourceHistory_preserves_prefix {a b : Block} (h : a.IsPrefix b) :
@@ -195,19 +195,19 @@ theorem certified_source_histories_compatible {tr : Trace} {roster faulty : Fins
     sourceHistory_preserves_prefix sourceHistory_preserves_prefix
 
 /-- Equal-length next prefixes of one history contain the same next record. -/
-theorem same_history_next {prefix history : Block} {left right : Bytes}
-    (a : (prefix ++ [left]).IsPrefix history)
-    (b : (prefix ++ [right]).IsPrefix history) : left = right := by
-  have between : (prefix ++ [left]).IsPrefix (prefix ++ [right]) :=
+theorem same_history_next {sourcePrefix history : Block} {left right : Bytes}
+    (a : (sourcePrefix ++ [left]).IsPrefix history)
+    (b : (sourcePrefix ++ [right]).IsPrefix history) : left = right := by
+  have between : (sourcePrefix ++ [left]).IsPrefix (sourcePrefix ++ [right]) :=
     List.prefix_of_prefix_length_le a b (by simp)
   have equal := between.eq_of_length (by simp)
   have tails := List.append_cancel_left equal
   simpa using tails
 
-theorem compatible_histories_next {prefix a b : Block} {left right : Bytes}
+theorem compatible_histories_next {sourcePrefix a b : Block} {left right : Bytes}
     (compatible : a.IsPrefix b ∨ b.IsPrefix a)
-    (leftCovered : (prefix ++ [left]).IsPrefix a)
-    (rightCovered : (prefix ++ [right]).IsPrefix b) : left = right := by
+    (leftCovered : (sourcePrefix ++ [left]).IsPrefix a)
+    (rightCovered : (sourcePrefix ++ [right]).IsPrefix b) : left = right := by
   rcases compatible with before | after
   · exact same_history_next (leftCovered.trans before) rightCovered
   · exact same_history_next leftCovered (rightCovered.trans after)
@@ -215,19 +215,19 @@ theorem compatible_histories_next {prefix a b : Block} {left right : Bytes}
 /-- Consumer contract: full descendant certificates remain unchanged, while the
 receiver applies exactly one covered record at its durable source index. -/
 theorem certified_next_record_unique {tr : Trace} {roster faulty : Finset Nat}
-    {f v w : Nat} {a b prefix : Block} {left right : Bytes}
+    {f v w : Nat} {a b sourcePrefix : Block} {left right : Bytes}
     (rules : LocalFaithful tr roster faulty f)
     (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
     (certA : AttributedCommitSends tr roster faulty f v a)
     (certB : AttributedCommitSends tr roster faulty f w b)
-    (coveredA : (prefix ++ [left]).IsPrefix (sourceHistory a))
-    (coveredB : (prefix ++ [right]).IsPrefix (sourceHistory b)) : left = right :=
+    (coveredA : (sourcePrefix ++ [left]).IsPrefix (sourceHistory a))
+    (coveredB : (sourcePrefix ++ [right]).IsPrefix (sourceHistory b)) : left = right :=
   compatible_histories_next
     (certified_source_histories_compatible rules size faultBound certA certB) coveredA coveredB
 
-theorem covered_next_at_exact_index {prefix history : Block} {record : Bytes}
-    (covered : (prefix ++ [record]).IsPrefix history) :
-    history[prefix.length]? = some record := by
+theorem covered_next_at_exact_index {sourcePrefix history : Block} {record : Bytes}
+    (covered : (sourcePrefix ++ [record]).IsPrefix history) :
+    history[sourcePrefix.length]? = some record := by
   obtain ⟨suffix, equality⟩ := covered
   rw [← equality]
   simp [List.append_assoc, List.getElem?_append]

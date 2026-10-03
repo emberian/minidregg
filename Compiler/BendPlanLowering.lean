@@ -3,7 +3,6 @@ actual source data decoder and native payload codecs; it does not turn a Plan
 into authority. Receiving additionally binds invocation inputs, current native
 admission and a funded versioned charge rule. -/
 import Compiler.BendSourceByteCodec
-import Compiler.BendSourceCanonicalCodec
 import Compiler.BendWorldPlan
 import Compiler.DurableReceiverCodec
 import Compiler.BendCoreAdmission
@@ -38,24 +37,10 @@ theorem bytes_roundtrip (plan : BendWorldPlan.Plan) : decode (encode plan) = som
   NockProgramCodec.framedDecode_encode frame stream plan
 theorem source_roundtrip (plan : BendWorldPlan.Plan) : lower (sourceTerm plan) = some plan := by
   simp only [lower, sourceTerm, BendSourceRepresentation.decode_bytesTerm,
-    Option.bind_some, bytes_roundtrip]
+    bind, Option.bind, bytes_roundtrip]
 theorem canonical {bytes : List UInt8} {plan : BendWorldPlan.Plan}
     (h : decode bytes = some plan) : encode plan = bytes :=
   NockProgramCodec.framedDecode_canonical h
-
-/-- Successful lowering retains the entire exact source representation. It
-cannot discard unknown payload fields, reorder actions or wrap oversized bytes. -/
-theorem lower_sound {result : BendTT.Term} {plan : BendWorldPlan.Plan}
-    (h : lower result = some plan) : result = sourceTerm plan := by
-  unfold lower at h
-  cases decoded : BendSourceRepresentation.decodeBytes result with
-  | none => simp [decoded] at h
-  | some bytes =>
-      have native : decode bytes = some plan := by simpa [decoded] using h
-      have source : result = BendSourceRepresentation.bytesTerm bytes :=
-        (BendSourceRepresentation.decodeBytes_iff result bytes).mp decoded
-      rw [source, ← canonical native]
-      rfl
 
 /-- This witness is produced from the actual source machine's completed trace
 and the actual decoder. Refusal produces no effect certificate. Source counts

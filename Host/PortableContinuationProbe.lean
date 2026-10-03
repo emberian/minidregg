@@ -28,7 +28,7 @@ private def digest (value : Json) : Except String Digest := do
 private def unhex (text : String) : Except String Bytes := do
   let input := text.toUTF8
   if input.size % 2 != 0 then throw "even-length hexadecimal required"
-  let nibble := fun byte =>
+  let nibble := fun (byte : UInt8) =>
     if byte ≥ 48 && byte ≤ 57 then some (byte.toNat - 48)
     else if byte ≥ 97 && byte ≤ 102 then some (byte.toNat - 87)
     else none
@@ -62,7 +62,8 @@ private def capsule (value : Json) : Except String CarriedSegmentIO.SourceCapsul
       ← pinBytes (← field pins "profile")⟩ }
 
 private def archiveConfig (value : Json) : Except String PortableContinuationArchiveIO.NativeConfig := do
-  return ⟨← stringField value "binary", ← stringField value "binarySha256", ← stringField value "root"⟩
+  return ⟨System.FilePath.mk (← stringField value "binary"), ← stringField value "binarySha256",
+    System.FilePath.mk (← stringField value "root")⟩
 
 private def artifactInputs (value : Json) : Except String (List (Bytes × System.FilePath)) := do
   let array ← value.getArr?

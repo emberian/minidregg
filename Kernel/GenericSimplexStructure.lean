@@ -11,11 +11,12 @@ set_option autoImplicit false
 /-- Structural preservation only: exact actor, append-only audit and audit
 ownership. This does not claim any vote guard, quorum cause or consensus fact. -/
 def Preserves (before after : State) : Prop :=
-  AuditExtension before after ∧ (OwnedAudit before → OwnedAudit after)
+  (after.self = before.self ∧ before.audit.IsPrefix after.audit) ∧
+    (OwnedAudit before → OwnedAudit after)
 
-theorem preserves_refl (s : State) : Preserves s s := ⟨AuditExtension.refl s, id⟩
+theorem preserves_refl (s : State) : Preserves s s := ⟨⟨rfl, List.prefix_refl _⟩, id⟩
 theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c) :
-    Preserves a c := ⟨ab.1.trans bc.1, fun owned => bc.2 (ab.2 owned)⟩
+    Preserves a c := ⟨⟨bc.1.1.trans ab.1.1, ab.1.2.trans bc.1.2⟩, fun owned => bc.2 (ab.2 owned)⟩
 
 @[simp] theorem preserves_put (a b : State) (v : View) :
     Preserves a (putView b v) ↔ Preserves a b := Iff.rfl
@@ -25,10 +26,20 @@ theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c
     (views : List View) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (delivered : List Block) (tip : Block)
     (needsPoll failed : Bool) :
-    Preserves a { self := b.self, current := current, deadline := deadline, now := now,
-      views := views, checked := checked, offers := offers, outbox := outbox,
-      audit := b.audit, delivered := delivered, committedTip := tip,
-      needsPoll := needsPoll, failed := failed } ↔ Preserves a b := Iff.rfl
+    Preserves a {
+      self := b.self
+      current := current
+      deadline := deadline
+      now := now
+      views := views
+      checked := checked
+      offers := offers
+      outbox := outbox
+      audit := b.audit
+      delivered := delivered
+      committedTip := tip
+      needsPoll := needsPoll
+      failed := failed } ↔ Preserves a b := Iff.rfl
 
 theorem preserves_broadcast {a b : State} (view : Nat) (kind : Kind) (arg : Argument)
     (prior : Preserves a b) : Preserves a (broadcast b view kind arg) :=
@@ -61,15 +72,15 @@ theorem preserves_fold {α : Type} (action : State → α → State)
 
 macro "audit_step" : tactic => `(tactic|
   first
-    | exact preserves_refl _
+    | with_reducible exact preserves_refl _
     | assumption
-    | apply preserves_broadcast
-    | apply preserves_clear
-    | apply preserves_commit
-    | apply preserves_candidate
-    | apply preserves_vote
     | fail_if_no_progress simp only [preserves_put, preserves_record]
-    | split)
+    | split
+    | with_reducible apply preserves_broadcast
+    | with_reducible apply preserves_clear
+    | with_reducible apply preserves_commit
+    | with_reducible apply preserves_candidate
+    | with_reducible apply preserves_vote)
 
 macro "audit_chain" : tactic => `(tactic| repeat' audit_step)
 
@@ -158,7 +169,9 @@ theorem step_preserves (c : Config) (s : State) (input : Input) :
     | checked block =>
       dsimp only
       audit_chain
-    | offer payload => audit_chain
+    | offer payload =>
+      dsimp only
+      audit_chain
     | poll => exact preserves_refl s
     | tick time =>
       dsimp only
@@ -170,19 +183,30 @@ theorem step_preserves (c : Config) (s : State) (input : Input) :
 theorem start_structure (c : Config) (party time : Nat) :
     (start c party time).self = party ∧ OwnedAudit (start c party time) := by
   unfold start
-  dsimp only
   split
   · exact ⟨rfl, by intro event inside; cases inside⟩
   · have entered := enterView_preserves c
       {self := party, now := time, deadline := time + c.timeout} 1
     have advanced := preserves_trans entered (pump_preserves c c.pumpBudget _)
-    exact ⟨advanced.1.sameSelf, advanced.2 (by intro event inside; cases inside)⟩
+    exact ⟨advanced.1.1, advanced.2 (by intro event inside; cases inside)⟩
 
 def structuralAuditLaws (c : Config) : StructuralAuditLaws c where
   startSelf party time := (start_structure c party time).1
   startOwned party time := (start_structure c party time).2
-  stepExtension state input := (step_preserves c state input).1
+  stepExtension state input := ⟨(step_preserves c state input).1.1, (step_preserves c state input).1.2⟩
   stepOwned state input := (step_preserves c state input).2
+
+/-- The actual reachable engine now has exact actor projection with no
+structural preservation hypothesis supplied by a caller. Causal send guards
+remain a separate required proof, so this does not yet assert LocalFaithful. -/
+theorem actual_reachable_projected {c : Config} {faulty : Finset Nat}
+    {sourceChecked : Minidregg.Kernel.GeneralSimplexReachability.Network → Nat → Block → Prop}
+    {initialTime : Nat} {net : Minidregg.Kernel.GeneralSimplexReachability.Network}
+    (reachable : Minidregg.Kernel.GeneralSimplexReachability.Reachable
+      c faulty sourceChecked initialTime net) : ProjectedNetwork c faulty net :=
+  reachable_projected (structuralAuditLaws c) reachable
+
+#assert_axioms actual_reachable_projected
 
 #assert_axioms valueRules_preserves
 #assert_axioms progressOuter_preserves

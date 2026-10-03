@@ -77,7 +77,7 @@ theorem decode_digestTerm (value : Digest) : decodeDigest (digestTerm value) = s
 
 def intentTerm (value : Intent) : Term := constructor "WorldSurface.Intent"
   [digestTerm value.artifact, stringTerm value.exportName, digestTerm value.program,
-   BendSourceRepresentation.natTerm value.instance, digestTerm value.expectedRoot,
+   BendSourceRepresentation.natTerm value.«instance», digestTerm value.expectedRoot,
    BendSourceRepresentation.bytesTerm value.arguments]
 def nodeTerm (value : Node) : Term := constructor "WorldSurface.Node"
   [BendSourceRepresentation.natTerm value.tag, BendSourceRepresentation.natTerm value.slot,
@@ -87,10 +87,10 @@ def sourceTerm (value : Surface) : Term := constructor "WorldSurface.Surface"
    BendSourceRepresentation.natTerm value.root, listTerm intentTerm value.intents]
 
 def decodeIntent (term : Term) : Option Intent := do
-  let [artifact, exportName, program, instance, expectedRoot, arguments] ←
+  let [artifact, exportName, program, instanceTerm, expectedRoot, arguments] ←
     decodeConstructor "WorldSurface.Intent" term | none
   pure ⟨← decodeDigest artifact, ← decodeString exportName, ← decodeDigest program,
-    ← BendSourceRepresentation.decodeNat instance, ← decodeDigest expectedRoot,
+    ← BendSourceRepresentation.decodeNat instanceTerm, ← decodeDigest expectedRoot,
     ← BendSourceRepresentation.decodeBytes arguments⟩
 def decodeNode (term : Term) : Option Node := do
   let [tag, slot, label, children] ← decodeConstructor "WorldSurface.Node" term | none
@@ -122,17 +122,22 @@ theorem lower_exact {term : Term} {value : Surface} (h : lower term = some value
         exact reconstruction
       · contradiction
 
+def decimalBound (value : Nat) : Bool := decide ((toString value).length ≤ 80)
+
 def bounded (value : Surface) (observationCount : Nat) : Bool :=
-  decide (value.nodes.length ≤ 1024 ∧ value.intents.length ≤ 1024 ∧
+  decide (observationCount ≤ 1024 ∧ value.nodes.length ≤ 1024 ∧ value.intents.length ≤ 1024 ∧
     value.root < value.nodes.length) &&
+  decimalBound value.artifact.value &&
   !value.exportName.isEmpty && decide (value.exportName.toUTF8.size ≤ 16384) &&
   (List.finRange value.nodes.length).all (fun index =>
     let node := value.nodes[index]
-    decide (node.tag ≤ 4 ∧ node.label.toUTF8.size ≤ 16384 ∧ node.children.length ≤ 1024) &&
+    decide (node.tag ≤ 4 ∧ node.slot < 1024 ∧ node.label.toUTF8.size ≤ 16384 ∧ node.children.length ≤ 1024) &&
     node.children.all (fun child => decide (child < index.val)) &&
     (if node.tag = 1 ∨ node.tag = 2 then decide (node.slot < observationCount)
      else if node.tag = 3 then decide (node.slot < value.intents.length) else true)) &&
-  value.intents.all (fun intent => !intent.exportName.isEmpty &&
+  value.intents.all (fun intent => decimalBound intent.artifact.value &&
+    decimalBound intent.program.value && decimalBound intent.«instance» &&
+    decimalBound intent.expectedRoot.value && !intent.exportName.isEmpty &&
     decide (intent.exportName.toUTF8.size ≤ 16384 ∧ intent.arguments.length ≤ 8192))
 
 /- ABI text is generated below from the actual sealed source emission. -/

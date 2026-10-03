@@ -19,7 +19,7 @@ def hex (bytes : List UInt8) : String := String.ofList (bytes.flatMap fun byte =
 
 def intent (value : Intent) : Json := Json.mkObj
   [("artifact", digest value.artifact), ("exportName", .str value.exportName),
-   ("program", digest value.program), ("instance", decimal value.instance),
+   ("program", digest value.program), ("instance", decimal value.«instance»),
    ("expectedRoot", digest value.expectedRoot), ("arguments", .str (hex value.arguments))]
 def node (value : Node) : Json := Json.mkObj
   [("tag", decimal value.tag), ("slot", decimal value.slot), ("label", .str value.label),

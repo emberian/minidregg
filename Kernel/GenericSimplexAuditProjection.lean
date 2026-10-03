@@ -91,7 +91,7 @@ theorem initial_projected (c : Config) (faulty : Finset Nat) (time : Nat)
   · intro party _ _; exact laws.startOwned party time
   · intro party member _
     apply project_flatMap_member party (List.range c.parties)
-      (fun p => (start c p time).audit) (List.nodup_range _) (by simpa using member)
+      (fun p => (start c p time).audit) List.nodup_range (by simpa using member)
     intro actor _ event eventMember
     simpa only [laws.startSelf] using laws.startOwned actor time event eventMember
 
