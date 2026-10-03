@@ -191,12 +191,14 @@ impl CommandEnding {
         }
     }
 }
-static COMMAND_ENDING: Mutex<Option<CommandEnding>> = Mutex::new(None);
+thread_local! {
+    static COMMAND_ENDING: std::cell::RefCell<Option<CommandEnding>> = const { std::cell::RefCell::new(None) };
+}
 pub(crate) fn note_command_ending(ending: CommandEnding) {
-    *COMMAND_ENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ending);
+    COMMAND_ENDING.with(|slot| *slot.borrow_mut() = Some(ending));
 }
 pub(crate) fn take_command_ending() -> Option<CommandEnding> {
-    COMMAND_ENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
+    COMMAND_ENDING.with(|slot| slot.borrow_mut().take())
 }
 
 /// The Host's own verdict on the latest request, retained as data at the point
@@ -218,37 +220,33 @@ pub(crate) enum HostDecision {
     Outcome(Value),
 }
 
-static HOST_DECISION: Mutex<Option<HostDecision>> = Mutex::new(None);
+// Request scratch belongs to its caller. Concurrent browser/native views
+// must not consume another caller's refusal and change their recovery class.
+thread_local! {
+    static HOST_DECISION: std::cell::RefCell<Option<HostDecision>> = const { std::cell::RefCell::new(None) };
+}
 
 pub(crate) fn note_host_decision(decision: HostDecision) {
-    *HOST_DECISION
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(decision);
+    HOST_DECISION.with(|slot| *slot.borrow_mut() = Some(decision));
 }
 
 pub(crate) fn take_host_decision() -> Option<HostDecision> {
-    HOST_DECISION
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take()
+    HOST_DECISION.with(|slot| slot.borrow_mut().take())
 }
 
 /// A refused `doc push`'s diagnosis: which pulled lines changed since the
 /// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
 /// line, above the Host's own decoding of the same refusal.
-static LINE_REFUSAL: Mutex<Option<String>> = Mutex::new(None);
+thread_local! {
+    static LINE_REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
 
 pub(crate) fn note_line_refusal(lines: String) {
-    *LINE_REFUSAL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(lines);
+    LINE_REFUSAL.with(|slot| *slot.borrow_mut() = Some(lines));
 }
 
 pub(crate) fn take_line_refusal() -> Option<String> {
-    LINE_REFUSAL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take()
+    LINE_REFUSAL.with(|slot| slot.borrow_mut().take())
 }
 
 /// Exit code for a request the Host refused.
@@ -4936,5 +4934,32 @@ mod tests {
         assert!(directory.join("retry-0001.json").is_file());
         assert!(directory.join("retry-0002.json").is_file());
         fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod concurrent_request_scratch_tests {
+    use super::*;
+    #[test]
+    fn concurrent_requests_keep_exact_refusal_and_recovery_class() {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
+        let mut workers = Vec::new();
+        for member in 0..4 {
+            let barrier = barrier.clone();
+            workers.push(std::thread::spawn(move || {
+                let outcome = json!({"type":"refused", "reason":format!("member-{member}")});
+                note_host_decision(HostDecision::Outcome(outcome.clone()));
+                note_command_ending(CommandEnding::Undecided(format!("attempt-{member}")));
+                note_line_refusal(format!("line-{member}"));
+                barrier.wait();
+                assert_eq!(take_host_decision(), Some(HostDecision::Outcome(outcome)));
+                assert!(matches!(take_command_ending(), Some(CommandEnding::Undecided(id)) if id == format!("attempt-{member}")));
+                assert_eq!(take_line_refusal(), Some(format!("line-{member}")));
+                assert_eq!(take_host_decision(), None);
+            }));
+        }
+        barrier.wait();
+        assert!(take_host_decision().is_none());
+        for worker in workers { worker.join().unwrap(); }
     }
 }

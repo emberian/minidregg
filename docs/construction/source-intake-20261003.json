@@ -554,12 +554,6 @@
       "qualification": "5 scoped native tests and release compilation PASS; public route unregistered"
     },
     {
-      "path": "native/resource-client/src/web.rs",
-      "owner": "docuverse_deos_construction",
-      "sha256": "fcefc5c16030b4d24d1e880da214424e9ceaebeb35f1bf5dd8f114d8e9586d92",
-      "qualification": "compiled module registration and identifier wrapping CSS; current demo unchanged"
-    },
-    {
       "path": "world/Workshop/WorldSurface.bend",
       "owner": "docuverse_deos_construction",
       "sha256": "6ec6da27172065f14b1e755d1bf23b08fb193b6e291c0e8c55bdde43f4bbbd51",
@@ -1526,22 +1520,10 @@
       "qualification": "PASS joined release and 17 distinct scoped Rust checks; source only"
     },
     {
-      "path": "native/resource-client/src/pq_mailbox.rs",
-      "owner": "resume_private_construction",
-      "sha256": "5014081e5d4106e35d102168b2db1269d3027b293b674a991f28043518d429bc",
-      "qualification": "SOURCE AUTHORED/reviewed; Rustfmt or Python parse PASS; compile/runtime pending"
-    },
-    {
       "path": "docs/ASYNC-NATIVE-CUSTODY.md",
       "owner": "native_performance_construction",
       "sha256": "4a18f0ac5a45c49f6d008eae69ec402330fd551c4a0b9df73b715e788908b886",
       "qualification": "PASS joined release and 17 distinct scoped Rust checks; source only"
-    },
-    {
-      "path": "native/resource-client/src/main.rs",
-      "owner": "resume_private_construction",
-      "sha256": "b8c648b1421a9b6a734c10285b0dd1a2ffa8168a320a939ccc7334d96c3e5055",
-      "qualification": "compiled PASS; reconcile only12 guarded module/command lines, do not replace common main"
     },
     {
       "path": "native/resource-client/TRAFFIC-PRIVACY.md",
@@ -2970,6 +2952,42 @@
       "owner": "captain reconciled authored shared hunks",
       "sha256": "f418fcf09f055df3e4bd63669f46225928adea158ac4f82decfdd5016b61521d",
       "qualification": "WIP source integration; native cohort qualification pending"
+    },
+    {
+      "path": "native/resource-client/src/proxy.rs",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "67c373fe59f22bcb4ce1189f0dde9f09dfc4d16ac0e84b149ae0d35bbaef6b05",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "native/resource-client/src/web.rs",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "5da1b06d0d7f520eff8112b57c64f9a3f60c2bf4b00f0c0c8f6733ce36d1e6ef",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "native/resource-client/src/web_admission.rs",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "f5ac24514d674ca9aecae99da46eed54ffd9830b20a496f4bf57b3b50961384c",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "native/resource-client/src/main.rs",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "968b358de82ecc276358b7b229f0d1d372e9cddd560f54c011525502fe4f30ac",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "docs/NATIVE-MULTIUSER-CAPACITY.md",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "81b1e6e0f32ca3c56908c879938703c254a729d35ea4c281dded414d3b43ae8a",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "native/resource-client/src/pq_mailbox.rs",
+      "owner": "multiuser capacity / traffic reviewed shared hunks",
+      "sha256": "5014081e5d4106e35d102168b2db1269d3027b293b674a991f28043518d429bc",
+      "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
     }
   ]
 }

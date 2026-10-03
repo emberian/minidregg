@@ -486,6 +486,16 @@ fn verify_transition(
     m: &[u8],
     auth: &[u8],
 ) -> Result<()> {
+    prepare_transition(p, hop, key, input, m, auth).map(|_| ())
+}
+fn prepare_transition(
+    p: &Profile,
+    hop: usize,
+    key: &DecapsulationKey,
+    input: &[u8],
+    m: &[u8],
+    auth: &[u8],
+) -> Result<Vec<Vec<u8>>> {
     verify_manifest(p, hop, m, auth)?;
     let packets = unbatch(p, hop, input)?;
     let mut before: Vec<_> = packets.iter().map(|v| Sha256::digest(v).to_vec()).collect();
@@ -493,15 +503,16 @@ fn verify_transition(
     if before != stage_set(p, hop, m) {
         return Err("active omission/replacement/input-set substitution refused".into());
     }
-    let mut after = packets
+    let next = packets
         .iter()
-        .map(|v| peel(p, hop, key, v).map(|v| Sha256::digest(&v).to_vec()))
+        .map(|v| peel(p, hop, key, v))
         .collect::<Result<Vec<_>>>()?;
+    let mut after: Vec<_> = next.iter().map(|v| Sha256::digest(v).to_vec()).collect();
     after.sort();
     if after != stage_set(p, hop + 1, m) {
         return Err("active peeled-output-set substitution refused".into());
     }
-    Ok(())
+    Ok(next)
 }
 
 struct ReleasePlan {
@@ -853,17 +864,74 @@ pub(crate) fn live_relay(
     }
     let (admitted, input) = segment.split_at(n);
     let key = read_key(keypath)?;
-    verify_transition(&p, hop, &key, input, admitted, auth)?;
-    bind_epoch_profile(
-        root,
-        &p,
-        hop + 1,
-        admitted,
-        &live_plan(&p, hop + 1, origin, tick)?,
-    )?;
+    let mut next = prepare_transition(&p, hop, &key, input, admitted, auth)?;
+    let admission = live_relay_admission(&p, hop, admitted, input, origin, tick)?;
+    let stem = format!("live-epoch-{}-stage-{hop}", p.epoch);
+    let claim = root.join(format!("{stem}.admitted"));
+    let output = root.join(format!("{stem}.output"));
+    // A live admission is a single immutable group of the profile, registered
+    // sets, exact input and consumed-shuffle fence. Ordinary CLI journals keep
+    // their existing codec; an old claim cannot silently become a new shuffle.
+    if root.join(format!("epoch-{}-profile", p.epoch)).exists()
+        || ["input", "claimed", "output"].iter().any(|suffix| {
+            root.join(format!("epoch-{}-stage-{hop}.{suffix}", p.epoch))
+                .exists()
+        })
+    {
+        return Err("live relay refuses legacy epoch journal migration".into());
+    }
+    if claim.exists() {
+        if read_private(&claim, 1024)? != admission {
+            return Err("changed live relay admission/profile replay refused".into());
+        }
+        if !output.exists() {
+            return Err(
+                "live relay claimed without output; outcome uncertain, no new shuffle".into(),
+            );
+        }
+        let cached = read_private(&output, n + 19 + p.width * p.size(hop + 1))?;
+        if cached.get(..n) != Some(admitted) {
+            return Err("live relay cached manifest mismatch".into());
+        }
+        let next = unbatch(&p, hop + 1, &cached[n..])?;
+        let mut set: Vec<_> = next.iter().map(|v| Sha256::digest(v).to_vec()).collect();
+        set.sort();
+        if set != stage_set(&p, hop + 1, admitted) {
+            return Err("live relay cached output set mismatch".into());
+        }
+        return Ok(cached);
+    }
+    if output.exists() {
+        return Err("live relay orphan output without durable admission".into());
+    }
+    // Every incoming layer was authenticated above, before the one durable
+    // claim. Failure/crash after this point preserves uncertainty permanently.
+    persist(&claim, &admission)?;
+    shuffle(&mut next)?;
     let mut out = admitted.to_vec();
-    out.extend_from_slice(&process_relay(root, &p, hop, &key, input)?);
+    out.extend_from_slice(&batch(&p, hop + 1, &next)?);
+    // Full canonical manifest+batch readback is durable before TCP preparation
+    // can publish it. Its exact replay never regenerates a secret permutation.
+    persist(&output, &out)?;
     Ok(out)
+}
+fn live_relay_admission(
+    p: &Profile,
+    hop: usize,
+    manifest: &[u8],
+    input: &[u8],
+    origin: u64,
+    tick: u64,
+) -> Result<Vec<u8>> {
+    let plan = live_plan(p, hop + 1, origin, tick)?;
+    let mut v = b"Mini/live-relay-admission/v1".to_vec();
+    v.extend_from_slice(&p.aad(hop + 1));
+    v.extend_from_slice(&plan.origin.to_le_bytes());
+    v.extend_from_slice(&plan.tick.to_le_bytes());
+    v.extend_from_slice(&plan.when.to_le_bytes());
+    v.extend_from_slice(&Sha256::digest(manifest));
+    v.extend_from_slice(&Sha256::digest(input));
+    Ok(v)
 }
 enum LiveCore {
     Ordinary([u8; 16], [u8; 32], Vec<u8>),
@@ -1207,6 +1275,72 @@ mod tests {
             })
             .collect();
         (secrets, publics)
+    }
+    #[test]
+    fn live_relay_grouped_admission_exact_replay_crash_and_conflict_fences() {
+        let root = scratch();
+        let (secret, public) = keys();
+        let keypath = root.join("key");
+        persist(&keypath, secret[0].key_bytes().unwrap().as_ref()).unwrap();
+        let p = Profile {
+            epoch: 3,
+            width: 2,
+            payload: 1024,
+        };
+        let auth: Vec<_> = (0..4).map(|i| vec![i + 1; 32]).collect();
+        let segment = live_register(
+            &root.join("registrar"),
+            p.epoch,
+            p.width,
+            p.payload,
+            &[
+                live_cover(p.epoch, p.width, p.payload, &public).unwrap(),
+                live_cover(p.epoch, p.width, p.payload, &public).unwrap(),
+            ],
+            &auth,
+            1000,
+            1000,
+        )
+        .unwrap();
+        let relay = |state: &Path, clock, mac: &[u8]| {
+            live_relay(
+                state, p.epoch, p.width, p.payload, 0, &keypath, mac, &segment, clock, 1000,
+            )
+        };
+        let good = root.join("good");
+        let out = relay(&good, 1000, &auth[0]).unwrap();
+        assert_eq!(relay(&good, 1000, &auth[0]).unwrap(), out);
+        assert_eq!(fs::read_dir(&good).unwrap().count(), 2);
+        assert!(relay(&good, 1001, &auth[0]).is_err());
+        assert!(relay(&good, 1000, &[99; 32]).is_err());
+        let n = 18 + 160 * p.width + 128;
+        let frame = live_relay_admission(&p, 0, &segment[..n], &segment[n..], 1000, 1000).unwrap();
+        let crash = root.join("crash");
+        directory(&crash).unwrap();
+        persist(&crash.join("live-epoch-3-stage-0.admitted"), &frame).unwrap();
+        assert!(relay(&crash, 1000, &auth[0])
+            .unwrap_err()
+            .contains("uncertain"));
+        assert!(!crash.join("live-epoch-3-stage-0.output").exists());
+        let changed = root.join("changed");
+        directory(&changed).unwrap();
+        let mut wrong = frame.clone();
+        *wrong.last_mut().unwrap() ^= 1;
+        persist(&changed.join("live-epoch-3-stage-0.admitted"), &wrong).unwrap();
+        assert!(relay(&changed, 1000, &auth[0]).is_err());
+        let orphan = root.join("orphan");
+        directory(&orphan).unwrap();
+        persist(&orphan.join("live-epoch-3-stage-0.output"), &out).unwrap();
+        assert!(relay(&orphan, 1000, &auth[0]).is_err());
+        let legacy = root.join("legacy");
+        directory(&legacy).unwrap();
+        persist(&legacy.join("epoch-3-stage-0.claimed"), b"claimed").unwrap();
+        assert!(relay(&legacy, 1000, &auth[0]).is_err());
+        assert!(!legacy.join("live-epoch-3-stage-0.admitted").exists());
+        let unauth = root.join("unauth");
+        assert!(relay(&unauth, 1000, &[99; 32]).is_err());
+        assert_eq!(fs::read_dir(&unauth).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn epoch_profile_binding_cannot_equivocate_clock_or_registered_sets() {

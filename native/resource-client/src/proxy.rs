@@ -20,7 +20,7 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Relays frames until the client closes its side. `check` decides whether a
 /// frame may reach the socket; `forward` is one socket exchange. Returns the
@@ -71,8 +71,6 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
 }
 
 struct Session {
-    destination: String,
-    identity: Option<PathBuf>,
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
@@ -86,7 +84,32 @@ impl Session {
     }
 }
 
-static SESSIONS: Mutex<Vec<Session>> = Mutex::new(Vec::new());
+// The registry lock covers discovery only. Holding it during a 600-second
+// host wait would serialize independent worlds, applications and residents.
+struct SessionSlot {
+    destination: String,
+    identity: Option<PathBuf>,
+    session: Mutex<Option<Session>>,
+}
+struct SessionTable(Mutex<Vec<Arc<SessionSlot>>>);
+static SESSIONS: SessionTable = SessionTable(Mutex::new(Vec::new()));
+const MAX_SESSIONS: usize = 32;
+
+impl SessionTable {
+fn slot(&self, destination: &str, identity: Option<&Path>) -> Result<Arc<SessionSlot>, String> {
+    transport::remote_destination(destination)?;
+    let mut sessions = self.0.lock().map_err(|_| "remote session table poisoned")?;
+    if let Some(slot) = sessions.iter().find(|slot| slot.destination == destination && slot.identity.as_deref() == identity) {
+        return Ok(slot.clone());
+    }
+    if sessions.len() >= MAX_SESSIONS {
+        return Err("busy: remote destination limit (32 per client process)".into());
+    }
+    let slot = Arc::new(SessionSlot { destination: destination.into(), identity: identity.map(Path::to_path_buf), session: Mutex::new(None) });
+    sessions.push(slot.clone());
+    Ok(slot)
+}
+}
 
 fn ssh_program() -> OsString {
     std::env::var_os("MINI_SSH")
@@ -94,13 +117,12 @@ fn ssh_program() -> OsString {
         .unwrap_or_else(|| "ssh".into())
 }
 
-fn open(destination: &str) -> Result<Session, String> {
+fn open(destination: &str, identity: Option<&Path>) -> Result<Session, String> {
     transport::remote_destination(destination)?;
     let program = ssh_program();
     let mut command = Command::new(&program);
     command.args(["-T", "-o", "BatchMode=yes"]);
-    let identity = crate::ssh_identity().map(Path::to_path_buf);
-    if let Some(identity) = &identity { command.arg("-i").arg(identity).args(["-o", "IdentitiesOnly=yes"]); }
+    if let Some(identity) = identity { command.arg("-i").arg(identity).args(["-o", "IdentitiesOnly=yes"]); }
     let mut child = command.args(["--", destination])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -111,8 +133,6 @@ fn open(destination: &str) -> Result<Session, String> {
     let stdout = child.stdout.take().ok_or("ssh stdout unavailable")?;
     transport::set_nonblocking(&stdin).map_err(|error| format!("cannot bound ssh input: {error}"))?;
     Ok(Session {
-        destination: destination.to_owned(),
-        identity,
         child,
         stdin,
         stdout,
@@ -124,21 +144,18 @@ fn open(destination: &str) -> Result<Session, String> {
 /// new one. As with the unix socket, a failure after the write leaves the
 /// request's status uncertain.
 pub(crate) fn exchange(destination: &str, frame: &[u8]) -> Result<Vec<u8>, String> {
-    let mut sessions = SESSIONS
-        .lock()
-        .map_err(|_| "remote session table poisoned")?;
-    let index = match sessions.iter().position(|s| s.destination == destination && s.identity.as_deref() == crate::ssh_identity()) {
-        Some(index) => index,
-        None => {
-            sessions.push(open(destination)?);
-            sessions.len() - 1
-        }
-    };
-    let session = &mut sessions[index];
-    match transport::exchange_stdio(&mut session.stdin, &mut session.stdout, frame) {
+    let slot = SESSIONS.slot(destination, crate::ssh_identity())?;
+    let mut session = slot.session.lock().map_err(|_| "remote session poisoned")?;
+    if session.is_none() {
+        *session = Some(open(&slot.destination, slot.identity.as_deref())?);
+    }
+    let running = session.as_mut().expect("opened session");
+    match transport::exchange_stdio(&mut running.stdin, &mut running.stdout, frame) {
         Ok(reply) => Ok(reply),
         Err(error) => {
-            sessions.swap_remove(index).close();
+            // Close only this stream. This exact request is NEVER resent; a
+            // later explicit request may reopen after custody recovery.
+            session.take().expect("opened session").close();
             Err(error)
         }
     }
@@ -180,6 +197,41 @@ mod tests {
             out.push(frame);
         }
         out
+    }
+
+    #[test]
+    fn distinct_world_sessions_progress_while_one_is_blocked() {
+        let sessions = Arc::new(SessionTable(Mutex::new(Vec::new())));
+        let slow = sessions.slot("slow-world", Some(Path::new("alice.key"))).unwrap();
+        let slow_lock = slow.session.lock().unwrap();
+        let (done, completed) = std::sync::mpsc::channel();
+        let independent = sessions.clone();
+        let worker = std::thread::spawn(move || {
+            for member in 0..8 {
+                let slot = independent.slot(&format!("world-{member}"), Some(Path::new("alice.key"))).unwrap();
+                let _turn = slot.session.lock().unwrap();
+            }
+            done.send(()).unwrap();
+        });
+        completed.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        let same = sessions.slot("slow-world", Some(Path::new("alice.key"))).unwrap();
+        assert!(Arc::ptr_eq(&slow, &same));
+        assert!(same.session.try_lock().is_err(), "same stream stays serial");
+        let other_key = sessions.slot("slow-world", Some(Path::new("bob.key"))).unwrap();
+        assert!(!Arc::ptr_eq(&slow, &other_key), "credential pins separate streams");
+        drop(slow_lock);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn destination_capacity_is_bounded_before_opening_or_transmission() {
+        let sessions = SessionTable(Mutex::new(Vec::new()));
+        assert!(sessions.slot("-bad", None).is_err());
+        for member in 0..MAX_SESSIONS {
+            sessions.slot(&format!("member-{member}"), None).unwrap();
+        }
+        assert!(sessions.slot("overflow", None).err().unwrap().contains("destination limit"));
+        assert!(sessions.slot("member-0", None).is_ok(), "existing member still progresses at capacity");
     }
 
     #[test]

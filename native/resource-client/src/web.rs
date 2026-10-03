@@ -14,6 +14,8 @@
 //! start, so another local user or a page in the browser cannot read it.
 
 mod editor;
+#[path = "web_admission.rs"]
+mod admission;
 mod create;
 mod inspect;
 mod resident;
@@ -31,7 +33,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 const MAX_REQUEST: usize = 16 * 1024;
 
@@ -65,6 +68,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err(format!("bound {bound}, which is not 127.0.0.1"));
     }
     let site = Site {
+        mutations: Mutex::new(()),
         home,
         subject: workspace::member(&workspace, "subject")?.to_owned(),
         root,
@@ -78,10 +82,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     );
     println!("mini web: the path secret changes every launch; document forms use your current authority");
     std::io::stdout().flush().map_err(|error| error.to_string())?;
+    let site = Arc::new(site);
+    let handler: Arc<dyn Fn(TcpStream, Instant) + Send + Sync> = Arc::new(move |stream, deadline| {
+        if let Err(error) = site.serve(stream, deadline) {
+            eprintln!("mini web: {error}");
+        }
+    });
+    let connections = admission::Pool::new(admission::MAX_CONNECTIONS);
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(error) = site.serve(stream) {
+                if let Err(error) = connections.dispatch(stream, handler.clone()) {
                     eprintln!("mini web: {error}");
                 }
             }
@@ -113,6 +124,9 @@ fn launch_token() -> Result<String> {
 }
 
 struct Site {
+    // Forms and draft-opening GETs may mutate owner-private custody. Complete
+    // ingress first, then serialize those paths without blocking signed views.
+    mutations: Mutex<()>,
     home: Option<PathBuf>,
     root: PathBuf,
     workspace: Value,
@@ -534,14 +548,14 @@ impl Site {
         format!("/{}", self.token)
     }
 
-    fn serve(&self, mut stream: TcpStream) -> Result<()> {
+    fn serve(&self, mut stream: TcpStream, deadline: Instant) -> Result<()> {
         stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
+            .set_write_timeout(Some(Duration::from_secs(10)))
             .map_err(|error| error.to_string())?;
         let mut head = Vec::new();
         let mut buffer = [0u8; 2048];
         while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-            let read = stream.read(&mut buffer).map_err(|error| error.to_string())?;
+            let read = admission::read_ingress(&mut stream, &mut buffer, deadline).map_err(|error| error.to_string())?;
             if read == 0 {
                 return Ok(());
             }
@@ -569,10 +583,11 @@ impl Site {
                 if body.len() > length { return respond(&mut stream,false,&simple(400,"Cannot save","unexpected bytes after the form"),&self.base(),&self.subject); }
                 while body.len() < length {
                     let remaining = (length-body.len()).min(buffer.len());
-                    let read = stream.read(&mut buffer[..remaining]).map_err(|e|e.to_string())?;
+                    let read = admission::read_ingress(&mut stream, &mut buffer[..remaining], deadline).map_err(|e|e.to_string())?;
                     if read == 0 { return respond(&mut stream,false,&simple(400,"Cannot save","incomplete document form"),&self.base(),&self.subject); }
                     body.extend_from_slice(&buffer[..read]);
                 }
+                let _mutation = self.mutations.lock().map_err(|_| "browser custody lock poisoned")?;
                 let parts: Vec<_> = segments.iter().map(String::as_str).collect();
                 match parts.as_slice() {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
@@ -584,7 +599,16 @@ impl Site {
                 }
             }
             Gate::Route(segments) if segments == ["search"] => search::page(self, &request.target),
-            Gate::Route(segments) => self.route(&segments),
+            Gate::Route(segments) => {
+                let draft = matches!(segments.first().map(String::as_str), Some("new-document"))
+                    || segments.get(2).is_some_and(|part| part == "edit" || part == "new-document")
+                    || segments.first().is_some_and(|part| part == "studio")
+                        && segments.get(2).is_some_and(|part| part == "module");
+                let _mutation = if draft {
+                    Some(self.mutations.lock().map_err(|_| "browser custody lock poisoned")?)
+                } else { None };
+                self.route(&segments)
+            },
         };
         respond(&mut stream, head_only, &page, &self.base(), &self.subject)
     }
