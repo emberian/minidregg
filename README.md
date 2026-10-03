@@ -1,187 +1,179 @@
-# minidregg
+# Mini
 
-**Start here:** [Mini system guide](docs/README.md) · [Objective Bend](docs/OBJECTIVE-BEND.md) · [developer guide](docs/DEVELOPING.md) · [dated receiving scope](docs/evidence/2026-10-03-objective-bend.md). The proof-system introduction below retains its original source-scoped history.
+**A programmable shared world for people and agents.**
 
-**A Lean-first semantic kernel and proof system, built at AI speed under
-instruments designed on the assumption that AI-scale proving fails silently.**
+Mini is growing into the next Dregg: an environment where documents, applications,
+communities and ongoing computations share explicit rules for authority, resources,
+privacy and history. Members should be able to inspect how their tools work,
+compose new behavior, delegate bounded work to agents and evolve their shared
+world without handing every application unrestricted access to everything else.
 
-**Project site:** [emberian.github.io/minidregg](https://emberian.github.io/minidregg/)
-· architecture: [`PROJECT.md`](PROJECT.md) · laws: [`ATLAS.md`](ATLAS.md) ·
-evidence ledger: [`GOAL.md`](GOAL.md)
+[System guide](docs/README.md) · [Objective Bend](docs/OBJECTIVE-BEND.md) ·
+[Developer guide](docs/DEVELOPING.md) · [Current evidence](docs/evidence/2026-10-03-objective-bend.md)
 
-This tree began on 2026-08-07. It tracks 878 Lean files (`git ls-files
-'*.lean'`): 815 library modules, every one imported from the `Minidregg`
-umbrella (`scripts/check-build-closure.sh` fails otherwise), and 63
-standalone `scripts/` programs and `docs/evidence/` probes. Its proof system,
-**Selvage** (`Selvage/`, 150 files, ~77K lines), carries **zero `sorry`, zero
-`axiom` declarations**. Every `#print axioms` in a tracked file is
-`#guard_msgs`-pinned (`scripts/check-proof-hygiene.sh` fails on a bare one), so
-an axiom regression fails the build rather than printing into a log nobody
-reads; eight of those pinned footprints name `native_decide` compiler axioms.
-`lake build Minidregg` builds green (9,294 jobs, Mathlib included).
-Those facts are cheap to state and cheap to check; the interesting part is
-the discipline that makes them mean something.
+## What you can build
 
-## The problem this repo takes seriously: green is not true
+Mini brings several experiences onto one underlying system:
 
-Machine-checked developments fail in ways the kernel cannot see: a soundness
-theorem quantified over a type nothing inhabits; a bridge hypothesis that
-mis-states what the unmodeled half does; a bound proved "explicit" but never
-exhibited below 1; a spec that hypothesizes exactly the gap that is the bug.
-These are not hypothetical failure classes — each has occurred in shipped,
-peer-reviewed verification work across the ecosystem, our own included. At
-AI-assisted proving speed, they are the *dominant* failure mode: the prover
-never tires of producing green things.
+- **A living workdesk:** shared documents, source and history inspection,
+  transclusion, annotations, research and review.
+- **Programmable communities and worlds:** member-authored objects, tools,
+  institutions, collective fiction, allocation rules and service commons.
+- **Hosted applications and continuing residents:** SPK application packages,
+  browser/API access, Hermes tools and agents with selected context, delegated
+  authority and recoverable requests.
+- **Persistent computation:** activities that retain their execution context and
+  pending obligations, with governed evolution, export and resumption.
 
-minidregg's answer is to make vacuity **mechanically detectable**, and to
-treat every safeguard as itself needing a demonstration that it can fire:
+These are connected construction goals with working parts. The native shell and
+browser expose documents, rooms, signed inspection, member-authored kinds and
+instances, and guarded method proposals. Objective Bend source composition and
+execution have runnable examples. The full source-authored Studio, new Bend native
+effect route, continuing activity lifecycle and cross-provider restoration are
+being integrated. The [evidence index](docs/evidence/2026-10-03-objective-bend.md)
+identifies the exact source and executable scope behind each result.
 
-- **Statement-first, with refutation teeth.** Every keystone theorem ships
-  with a satisfying witness *and* a falsifying case showing its hypotheses
-  are constraints — an inhabitation theorem alone is satisfied by a carrier
-  that does nothing. Where a bound is claimed sharp, the tree exhibits the
-  adversary attaining it (e.g. the light-client proximity error
-  `(⌊δ·n⌋+1)/|F|` is proved *and attained* by a landed example).
-- **A carrier census** (`scripts/CarrierCensus.lean`): a mechanized
-  environment query for types that are quantified over somewhere and
-  constructed nowhere — the signature of vacuous quantification. It found
-  four provably-uninhabitable cell schemas in this tree (we then proved the
-  emptiness: a materializer exists **iff** the state space is countable, and
-  the deleted total-function carrier wasn't). The census self-tests against
-  carriers whose status is known by construction, because an instrument that
-  silently stops detecting looks exactly like a clean tree.
-- **Premise inhabitation as a deliverable.** "The theorem is conditional on
-  H" is acceptable only with either a witness for H or a named, tracked
-  obligation. Several of this tree's results exist precisely to close
-  premises other developments carry silently.
-- **No `#guard` in any library module.** A fact worth asserting is worth
-  naming: `theorem` + `decide`/`rfl` + a pinned axiom footprint. `#guard` is
-  a compiled evaluation with the name, term, and axiom record deleted. (Seven
-  remain in one standalone probe, `scripts/probe-fn-portable-line.lean`, which
-  no build runs.)
-- **Lean authors the artifacts.** Constraint systems, descriptors, and
-  protocol data are *emitted from Lean* and consumed by Rust; Rust is
-  generated glue or opaque fallible computation, never a semantics. A
-  hand-written model "of" an implementation is a twin, and twins drift — the
-  emit pipeline makes the checked object and the deployed object the same
-  object. (`Compiler/Emit.lean` → JSON descriptors → the native side
-  `include_str!`s them. The build rewrites every emitted file, and
-  `scripts/local-gates.sh` fails when one differs from its committed copy.)
+## How it fits together
 
-If you build verification tooling: the instruments are the part of this repo
-we most want challenged.
+A member reads an authorized view, computes a proposal, and submits it under the
+current rules. The same path applies to a human command, an agent tool and an
+object method.
+
+```text
+authored modules and partial specifications
+                   ↓
+       checked program + pinned profile
+                   ↓
+ authorized inputs → computation → typed effects and results
+                   ↓
+ current grants · laws · read roots · funding
+                   ↓
+       admitted durable transition
+                   ↓
+ views · retained outcomes · delivery · authorized private release
+```
+
+**Lean owns transition meaning and admission.** The kernel checks current
+capabilities, laws, exact state dependencies and resource accounting. Rust supplies
+physical clients, signing and custody, storage, transport and hosted-service
+adapters. Canonical encodings and generated artifacts connect these boundaries.
+
+**Computation proposes; authority admits.** A correct calculation cannot grant
+itself permission. A reference does not confer ownership. A cached program does
+not cache authority, and an approved community proposal still needs the actual
+installation transition.
+
+**Durability includes uncertainty.** A lost reply retains the original operation
+and its recovery path. Delivery, external completion and private-result release
+have their own obligations; they do not become complete merely because a local
+computation returned.
+
+See the [system map](docs/README.md#find-the-contract-and-its-implementation) for
+the contracts and source modules at each boundary.
+
+## Objective Bend
+
+[Objective Bend](docs/OBJECTIVE-BEND.md) is Mini's primary authored language and
+live-environment direction. Nock remains supported for existing programs and
+history. Bend starts from a pinned dependent affine core; its implementation and
+language may evolve with explicit semantics, versioning and refinement.
+
+A partial specification provides methods and declares what it requires. Authors
+compose these specifications using final self and prior super, then check the
+actual linked program. Immutable source, typed captures and per-invocation closures
+connect reusable behavior to persistent objects. Methods return typed proposed
+effects and independent results; reflective views use authorized observations.
+
+The [Workshop example](world/Workshop/README.md) demonstrates this directly:
+one author supplies catalog and review, another adds an audit requirement, and
+a third completes it and changes presentation without editing the original
+modules. Its driver rejects the incomplete composition and checks the completed
+program. The [language guide](docs/OBJECTIVE-BEND.md) explains the example and
+its path toward native admission.
+
+## Try a checked composition
+
+Prerequisites: this repository, the toolchain pinned in
+[lean-toolchain](lean-toolchain), and matching compiled imports for
+`Compiler.ObjectiveBendWorkshop`. Prepare dependencies through the
+[bounded build workflow](docs/DEVELOPING.md#build-and-verify-without-disturbing-another-run);
+a fresh clone alone does not contain those artifacts. From the repository root:
+
+```sh
+lake env lean --run examples/objective-bend-workshop/Run.lean \
+  examples/objective-bend-workshop/MemberExtension.bendtt
+```
+
+The driver reports the expected missing `finalSelf.audit`, then accepts the
+completed and extended compositions. It checks the committed emitted Book;
+regenerating that Book is a separate step when editing the original `.bend`
+source. This command needs no running Mini world or credentials.
+
+For an enrolled participant with a matched native client, Host configuration,
+workspace and session home, inspect the actual shell interface:
+
+```sh
+mini shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+  --workspace "$WORKSPACE" --home "$SESSION_HOME" --line 'help instance'
+```
+
+Inside the shell, `instance show NAME` reads an authorized instance;
+`instance call ID NAME METHOD` prepares a proposal; `submit ID` attempts admission.
+Use the retained attempt for recovery after an uncertain reply. The
+[client guide](native/resource-client/README.md) covers enrollment and workspace
+setup; [world programming](native/resource-client/WORLD-PROGRAMMER.md) covers
+native kinds, programs and methods. These native commands do not yet publish
+arbitrary Objective Bend source through a completed Studio workflow.
+
+## Privacy and agreement
+
+Private computation, traffic privacy and distributed agreement are core
+requirements. Execution plans can combine native computation, bounded oblivious
+execution, reusable circuits, proof verification and homomorphic computation,
+provided they preserve the declared result, arithmetic, resource and disclosure
+contracts. Private returns have independent custody and current release rules.
+
+Current construction includes a fixed-access Bend controller, executed Bool/BFV
+fragments, traffic/custody components and a native Generic Simplex engine.
+Their general refinements and joined world receiving paths have distinct
+qualification boundaries. Encryption alone does not hide a traffic schedule;
+an agreement certificate alone does not authorize or physically install a change.
+
+Read [execution and privacy](docs/OBJECTIVE-BEND.md#execution-and-privacy),
+[traffic privacy](native/resource-client/TRAFFIC-PRIVACY.md),
+[native agreement](docs/GENERIC-SIMPLEX-NATIVE.md) and
+[portable continuation](docs/PORTABLE-CONTINUATION.md) for their actual contracts.
 
 ## Selvage
 
-Selvage is the proof-system layer: hash-based, small-field, post-quantum in
-its assumptions, and aimed at the **compilation half of the SNARK stack** —
-the layer between "an interactive protocol is round-by-round sound" and "a
-deployed non-interactive verifier accepts only true things," which is where
-published soundness analyses most often stop. In the tree today, sorry-free:
+Selvage is Mini's proof-system research and construction layer. It develops
+hash-based, small-field machinery for proximity, sumcheck, transcript compilation,
+accumulation and verifiable history, with explicit security assumptions and
+bounds. Its results support the larger goal of making computations and histories
+cheap to verify, including private computation.
 
-- **FRI/Reed–Solomon proximity** with exact, attained error bounds at the
-  unique-decoding threshold; regime interfaces (`JohnsonRegime`,
-  `HalfThresholdRegime`) tracking the 2025–26 proximity-gap literature,
-  including the refutations — conjectured legs are *named hypotheses*, never
-  silent.
-- **Correlated agreement** machinery, and the seams to consume external CA
-  results as they are mechanized.
-- **A light-client soundness suite** (`LightClientSound`, `…FS`,
-  `…Grinding`): commit-then-sample verification with the Fiat–Shamir
-  transport and a grinding bound whose try-count factor is proved
-  *necessary* — the two-candidate grinder that beats the fixed-chain bound
-  is exhibited, not assumed away.
-- **The RBR→Fiat–Shamir compiler theorem** (`fsKeystone`): `(t+k)·ε_rbr`,
-  unconditional, over an *inhabited* lazy-sampling random-oracle handler
-  rather than an axiomatized one.
-- **BCS-style transform soundness at the deployed alphabet** — roots,
-  opened columns, opening proofs — with erasure-correction extractors, plus
-  state-restoration soundness. To our knowledge no other mechanized
-  development has these; they are roadmap items or stubs elsewhere.
-- **Accumulation-scheme depth composition** (`Selvage/Depth.lean`): the
-  hash-based accumulation depth theorem machine-checked — including a proof
-  that the published theorem's literal statement **fails at a corner case**
-  (`OB2_depth_composition_false`), with the one-guard repair. Mechanization
-  that only ever confirms the paper is not earning its keep.
-- **Sponge indifferentiability** (the `SpongeIndiff*` family): to our
-  knowledge the only mechanized indifferentiability development outside
-  EasyCrypt's CCS'19 SHA-3 proof, and the first in a foundational
-  kernel-checked prover. (Honest scope note: indifferentiability alone does
-  not close Fiat–Shamir *knowledge* soundness; the extraction-friendly
-  strengthening is tracked as an open obligation, not claimed.)
-- **A two-sided, parameter-concrete security budget**: the deployed
-  configuration's error is proved `≤ 2^-55` *and* `> 2^-56`, with the
-  dominant term named. A bound that is merely "explicit" can be vacuously
-  loose; a two-sided bound cannot.
-- Sumcheck (with an AIR-embeddable verifier), LogUp, additive FRI over
-  binary towers, ZK extraction games, and the mixed-field soundness
-  accounting (`MixedFieldBudget`) that prices base-vs-extension choices as
-  theorems rather than folklore.
+A theorem, a compiled controller and a deployed verifier establish different
+things. Mini keeps their connections explicit through named obligations,
+inhabitation and counterexample checks, axiom accounting, emitted artifacts and
+actual receiving tests. The [source](Selvage/) and
+[project architecture](PROJECT.md) describe the proof work and its runtime joins.
 
-**The honest gate, stated plainly:** Selvage is currently theory ahead of
-runtime — the accumulation architecture it proves is not yet the one any
-deployed prover here runs, and some sharp results are proved at small
-domains while the deployed-parameter statements carry named hypotheses. The
-per-file docstrings say which is which; `GOAL.md` tracks the distance. We
-consider publishing that distance part of the method.
+## Develop and contribute
 
-## Relation to the ecosystem
+Start with [AGENTS.md](AGENTS.md) and the [developer guide](docs/DEVELOPING.md).
+Use an independent build snapshot and the repository's bounded native builder:
 
-This work is complementary to — and gratefully downstream of — the current
-mechanization wave: **ArkLib**'s IOR framework and coding-theory library,
-the **S-two AIR verification** (Avigad et al.), **Hirai's** FRI
-round-by-round soundness formalization, **VCVio**'s oracle framework, the
-**CompPoly** decoders, and the simplified-FRI-RBR line (Garreta–Mohnblatt–
-Wagner) written explicitly to enable work like this. The near-term prize we
-care most about is *compositional*: the ecosystem now holds proved
-unique-decoding correlated agreement, an MCA-conditional FRI-RBR theorem,
-and (here) the FS/BCS compilation layer — three trees, no one of which can
-produce an unconditional, non-interactive, deployment-parameter FRI
-soundness statement alone. Together they can. We are actively building
-toward that composition and would rather do it *with* the other trees'
-authors than in parallel.
+```sh
+scripts/build-native-host.sh --help
+```
 
-## Where this is going
+Choose the smallest check that can refute your change. Native acceptance uses a
+matched executable manifest and a fresh Store through the
+[journey](docs/JOURNEY.md); source checks do not imply that a new executable was
+built or deployed. Keep current qualification in the evidence index rather than
+copying live counts into introductions.
 
-The severe version of the ambition: **a fully open, post-quantum,
-machine-checked path from "a computation ran" to "anyone can verify it
-cheaply" — for programs, for ML inference, and ultimately for encrypted
-computation** — with every soundness claim either proved two-sided at
-deployed parameters or carrying a named, priced, falsifiable hypothesis.
-Concretely on the bench: vector-relation proving for the BFV pipeline
-already emitted from Lean here; a commit-then-audit sampling theorem (the
-economics that make heavyweight proving deployable are a supermartingale
-argument away from being a *checked* deployment guarantee, with the error
-budget — commitment binding, beacon grindability, checker soundness —
-composed into one number, which no deployment currently states); and the
-verified-artifact layer for verifiable inference, where the tables and
-constraint semantics are proved against mathematical specifications rather
-than trusted.
-
-The kernel/medium half of the repo (typed requests, request-indexed
-authority, canonical state transitions, hyperdocuments with transclusion and
-causal history, the durable/WAL layer with idempotent replay) is the same
-construction pointed at systems: receipts instead of unauditable assertions,
-for users and agents alike. `PROJECT.md` has the architecture; it is one
-object, not a federation of demos.
-
-## Engaging
-
-Everything here is open and intended to stay that way — the position of this
-project is that **verifiability is not an enterprise feature**. Issues, mail,
-and adversarial readings are all welcome; the most valuable contribution is
-a demonstration that one of our theorems is vacuous, because either the
-instruments catch it (good) or they gain a new tooth (better).
-
-Build: `lake build Minidregg`. The gate is `scripts/local-gates.sh`. It runs
-every gate even after one is red and exits with the number of red gates: proof
-hygiene, the umbrella build (with AxiomCensus and every executable), emitted-file
-drift (the build may change no tracked file), the prover glue, the build-closure
-census, the Host.Main closure against its pin (`scripts/gates/host-closure.pin`),
-the import tier table (`scripts/check-import-boundary.sh`: `Theory/` imports only
-Mathlib and Theory, `Selvage/` only Mathlib, Theory and Selvage; the full table is
-in the script), the `@[export]` census, the filtered native tests
-(`scripts/check-rust-tests.sh`), and the journey from this tree on a fresh Store
-(`scripts/check-journey.sh`).
-Unsigned commits indicate autonomous agent work; the evidence ledger records
-exact committed-source replays on independent machines.
+Contributions can improve authored tools and worlds, close a source-to-runtime
+connection, simplify a repeated mechanism, strengthen a proof, or expose a claim
+that the current evidence does not support. The aim is one system whose useful
+behavior and guarantees grow together.
