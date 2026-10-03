@@ -5,7 +5,7 @@
   "sha256": "e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce",
   "adaptation": "namespace wrapper; two ite_eq_left proof rewrites replaced by Lean 4.30 if_pos; definitions and theorem statements unchanged",
   "compiled": true,
-  "first_probe": "Lean4.30 reached late termination proof; two missing ite_eq_left uses repaired with if_pos; source and executor rechecks PASS",
+  "first_probe": "Lean 4.30 reached late termination proof; two missing ite_eq_left uses; compatibility recheck pending",
   "compiler": "Lean4.30.0",
   "verification": {
     "source": "bend-live-check-01.log",

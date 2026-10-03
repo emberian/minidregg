@@ -70,6 +70,10 @@ fn assignment_fingerprint(prepared: &Value) -> Result<String> {
 
 fn prompt_assignment(prepared: &Value) -> Value {
     let mut brief = prepared.clone();
+    if let Some(context)=prepared.get("contextProjection") {
+        // Validated when collected; a malformed bundle still fails the bounded prompt preflight.
+        brief["contextProjection"]=crate::resident_context::brief(context).unwrap_or_else(|_|context.clone());
+    }
     if let Some(program) = brief["program"].as_str() {
         brief["program"] = json!(resource_tools::compact_doc_rendering(program));
     }

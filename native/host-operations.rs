@@ -342,3 +342,7 @@ pub const LAW_DIAGNOSTIC: u8 = 192;
 pub const APPLICATION_DISPATCH_READY: u8 = 193;
 // active; public,operator; owner: application-dispatch/member-workspace
 pub const APPLICATION_DISPATCH_AUTHENTICATED_PLAN: u8 = 194;
+// active; public,operator; owner: resource-reserve-birth
+pub const RESERVE_RESOURCE_BIRTH_PLAN: u8 = 201;
+// active; public,operator; owner: resource-reserve-birth
+pub const RESERVE_RESOURCE_BIRTH_ASSEMBLE: u8 = 202;

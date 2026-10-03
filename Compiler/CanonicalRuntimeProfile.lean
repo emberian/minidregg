@@ -67,7 +67,7 @@ def keyCommitmentAdoptionVersion : List UInt8 :=
 height window, inherited lineage, current kind/descriptor/ROM guards and composed
 exports all contribute; a newborn local law is installed without self-gating birth. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS.EXPLICIT-PLACEMENT-OR-UNRESTRICTED-MUTATION/v5".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND.AUTHORED-WINDOW-BOUNDED-LAG.INHERITED-LINEAGE.CURRENT-KIND-ROOT-DESCRIPTOR-ROM-GUARDS.COMPOSED-EXPORTS.EXPLICIT-PLACEMENT-OR-UNRESTRICTED-MUTATION.ORDINARY-TWO-GRANTS.EXPLICIT-RESERVE-THREE-GRANTS.INDEPENDENT-CURRENT-OWNER-CONSENT/v6".toUTF8.toList
 
 /-- Delegation checks current composed resource law and exact parent/child authority
 against authenticated dependencies from the same image. -/
@@ -233,13 +233,15 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.mutateObject),
        CredentialAuthorityEntryCodec.verbTag (.delegateObject),
        CredentialAuthorityEntryCodec.verbTag (.appendObject),
-       CredentialAuthorityEntryCodec.verbTag (.placeObject)],
+       CredentialAuthorityEntryCodec.verbTag (.placeObject),
+       CredentialAuthorityEntryCodec.verbTag (.reserveObject)],
       [requestKindTag .account,
        CredentialAuthorityEntryCodec.verbTag (.observeAccount),
        CredentialAuthorityEntryCodec.verbTag (.transfer),
        CredentialAuthorityEntryCodec.verbTag (.delegateAccount),
        CredentialAuthorityEntryCodec.verbTag (.mintAsset),
-       CredentialAuthorityEntryCodec.verbTag (.burnAsset)],
+       CredentialAuthorityEntryCodec.verbTag (.burnAsset),
+       CredentialAuthorityEntryCodec.verbTag (.reserveAccount)],
       [requestKindTag .program,
        CredentialAuthorityEntryCodec.verbTag (.observeProgram),
        CredentialAuthorityEntryCodec.verbTag (.installProgram),
@@ -247,7 +249,8 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.installPolicy),
        CredentialAuthorityEntryCodec.verbTag (.revokeCapability),
        CredentialAuthorityEntryCodec.verbTag (.observePayment),
-       CredentialAuthorityEntryCodec.verbTag (.tickClock)]]]
+       CredentialAuthorityEntryCodec.verbTag (.tickClock),
+       CredentialAuthorityEntryCodec.verbTag (.reserveProgram)]]]
 
 def encode (template : FactoryTemplate) : List UInt8 :=
   runtimeStream.encode (sourceComponents, template)

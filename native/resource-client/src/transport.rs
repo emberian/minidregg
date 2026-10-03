@@ -262,6 +262,9 @@ fn carried_lookup_request(payload: &[u8]) -> bool {
 
 pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
+        // Explicit reserve birth methods carry canonical signed source/owner requests.
+        // Host verifies the exact descriptor and current authority independently.
+        [201 | 202, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // Source-owned enrollment quote and exact paid claim status/quote. Host validates fields;
         // ingress only bounds the JSON object before any backend exchange.
         [121 | 181 | 182, payload @ ..] => !payload.is_empty() && payload.len() <= 4096

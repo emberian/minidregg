@@ -23,6 +23,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+#[path = "async_dispatch.rs"]
+mod async_dispatch;
+pub(crate) use async_dispatch::{AsyncDispatch, DispatchState};
+
 const DOMAIN: &[u8] = b"Mini/native-scheduled-transport/v1";
 const HEADER: usize = 42;
 const TAG: usize = 16;

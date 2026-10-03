@@ -142,7 +142,16 @@ class World:
         workspace, pin = self.member(subject)
         seed = absolute(pin["key"])
         public = Path(str(seed) + ".pub")
-        require(public.is_file() and len(public.read_bytes()) == 32, "participant public key file absent beside its seed: " + subject)
+        paid = self.ctx["memberInventory"][subject].get("paidEntry")
+        if paid is not None:
+            joined = absolute(paid["joinDir"])
+            require(absolute(paid["miniKeyFile"]) == seed and seed == joined / "mini.key"
+                    and workspace == joined / "workspace" and absolute(paid["workspace"]) == workspace,
+                    "paid key custody differs from constructor inventory")
+            # Native join_solana_v2 writes mini.key and mini.pub separately.
+            public = joined / "mini.pub"
+        require(public.is_file() and not public.is_symlink() and len(public.read_bytes()) == 32,
+                "participant public key file absent from constructor custody: " + subject)
         try:
             output = subprocess.run([self.manifest["mini"], "key-status", "--workspace", str(workspace)], capture_output=True, timeout=120, check=False)
         except subprocess.TimeoutExpired:

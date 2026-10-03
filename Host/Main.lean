@@ -39,6 +39,8 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 86=private participant key enrollment plan, 87=private detached key assembly,
 88=checked participant key enrollment submit, 89=receipt-only key lookup,
 91=current resource birth intent from verified history.
+201=explicit reserve resource birth plan with independent current owner consent,
+202=detached reserve resource birth assembly; ordinary birth91 stays unchanged.
 96=private fleet turn plan behind a signed account observation, 97=detached fleet
 assembly, 98=checked fleet turn submit, 99=receipt-only fleet lookup, 100=topic
 poll since a cursor behind a signed account observation, 101=agent fleet head
@@ -175,6 +177,7 @@ import Host.Json
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
+import Kernel.NativeHostReserveBirth
 import Host.FnInboxView
 import Host.GrainOriginCommand
 import Host.ProviderUsage
@@ -6567,6 +6570,22 @@ def run (arguments : List String) : IO UInt32 := do
                                     else Minidregg.Kernel.NockDoor.stateNow program view
                             return (operation, (if isPeek then Minidregg.Host.Json.nockDoorPeekJson verdict
                               else Minidregg.Host.Json.nockDoorStateJson verdict).compress.toUTF8.toList)
+                        | 201 =>
+                            unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "reserve birth request exceeds host frame bound")
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (←
+                              NativeHostReserveBirth.authorWireLoaded pinnedConfig opened payload)
+                            unless plan.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "reserve birth plan exceeds host frame bound")
+                            return ((201 : UInt8), plan)
+                        | 202 =>
+                            unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "reserve birth assembly exceeds host frame bound")
+                            let call ← IO.ofExcept (NativeHostReserveBirth.assembleWire payload)
+                            unless call.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "reserve birth call exceeds host frame bound")
+                            return ((202 : UInt8), call)
                         | 91 =>
                             unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth request exceeds host frame bound")
@@ -7103,6 +7122,22 @@ def run (arguments : List String) : IO UInt32 := do
           let (base, height, index) ← IO.ofExcept (← NativeHost.presenceIndex config)
           IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
           IO.println s!"index {(presenceIndexJson index).compress}"
+          pure 0
+      | "reserve-birth-plan", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let request ← readBoundedBytes input maxFrame
+            let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
+            let plan ← IO.ofExcept (← NativeHostReserveBirth.authorWireLoaded pinnedConfig opened request)
+            unless plan.length ≤ maxFrame do
+              throw (IO.userError "reserve birth plan exceeds host frame bound")
+            writeBytes output plan
+            pure 0
+      | "reserve-birth-assemble", [input, output] =>
+          let request ← readBoundedBytes input maxFrame
+          let call ← IO.ofExcept (NativeHostReserveBirth.assembleWire request)
+          unless call.length ≤ maxFrame do
+            throw (IO.userError "reserve birth call exceeds host frame bound")
+          writeBytes output call
           pure 0
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))

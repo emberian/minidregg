@@ -147,6 +147,19 @@ class InputTests(unittest.TestCase):
         manifest, artifacts = app.validate(value)
         self.assertEqual(artifacts["spkHost"]["path"], str(self.w.root / "spkHost"))
 
+    def test_paid_join_public_key_uses_exact_constructor_custody(self):
+        subject=self.w.subjects[1];row=self.w.ctx['memberInventory'][subject]
+        workspace=Path(row['workspace']);pin=json.loads((workspace/'workspace.json').read_text())
+        seed=workspace.parent/'mini.key';seed.write_bytes(bytes(32));seed.chmod(0o600)
+        public=workspace.parent/'mini.pub';public.write_bytes(bytes(32))
+        pin['key']=str(seed);(workspace/'workspace.json').write_text(json.dumps(pin))
+        row['paidEntry']={'joinDir':str(workspace.parent),'miniKeyFile':str(seed),'workspace':str(workspace)}
+        value=inputs.attach(self.w.build())
+        self.assertEqual(value['keys'][subject]['publicKeyPath'],str(public))
+        row['paidEntry']['miniKeyFile']=str(self.w.root/'wrong.key')
+        (self.w.root/'wrong.key').write_bytes(bytes(32))
+        with self.assertRaisesRegex(RuntimeError,'paid key custody differs'):
+            inputs.attach(self.w.build())
     def test_population_is_a_parameter(self):
         for members in (1, 10):
             with tempfile.TemporaryDirectory() as temp:

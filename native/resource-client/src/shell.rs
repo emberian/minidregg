@@ -1336,6 +1336,23 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     flags.push(flag(if action == "epoch-export" { "output" } else { "bundle" }, session.home.join("requests").join(file)));
                     client("workspace", flags)
                 }
+                "context" => {
+                    if !matches!(w.len(),3|5) {return Err("doc context NAME [MAX-ROWS MAX-BYTES]".into());}
+                    ref_name(&w[2],"context document")?;
+                    let mut flags=vec![flag("action","doc-context"),flag("dir",ws()),flag("name",w[2].clone())];
+                    if w.len()==5 {flags.push(flag("max-rows",w[3].clone()));flags.push(flag("max-bytes",w[4].clone()));}
+                    client("workspace",flags)
+                }
+                "review" => {
+                    arity(&w,4,4,"doc review ID @CONTEXT @REQUEST")?;
+                    workspace_name(&w[2],"review proposal")?;
+                    let context=w[3].strip_prefix('@').ok_or("review context uses @FILE")?;
+                    let request=w[4].strip_prefix('@').ok_or("review request uses @FILE")?;
+                    session_file(context,"review context")?;session_file(request,"review request")?;
+                    client("workspace",vec![flag("action","context-review"),flag("dir",ws()),
+                        flag("proposal-id",w[2].clone()),flag("context",session.home.join("requests").join(context)),
+                        flag("request",session.home.join("requests").join(request))])
+                }
                 "search" => {
                     if !matches!(w.len(), 4 | 6) { return Err("doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR]".into()); }
                     let mut flags = vec![flag("action","doc-search"),flag("dir",ws()),flag("text",w[2].clone()),flag("scope",w[3].clone())];

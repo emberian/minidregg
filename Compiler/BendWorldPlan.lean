@@ -68,7 +68,7 @@ Observation and validated accounting legs are not arbitrary application writes. 
 def effectsOf (command : Command) : List Effect :=
   (List.finRange command.targets.length).filterMap fun index =>
     match command.targets[index].payload with
-    | .read | .computeFunding _ => none
+    | .read | .kindRead | .computeFunding _ => none
     | payload => some ⟨index.val, payload⟩
 
 def matchesCommand (plan : Plan) (command : Command) : Bool :=

@@ -85,6 +85,11 @@ structure Transport where
   (`NativeHostContext.Config.transport`); `none` is a bare durable log with no
   system law, which only the durable-protocol probes construct. -/
   systemCell : Option CellId
+  /-- A deployment-pinned source gate. Live receive and semantic replay run
+  the same gate over the actual loaded snapshot. Native joint controllers use
+  a typed exact-intent capability; raw client records never select an exemption. -/
+  sourceGate : {rootBytes : List UInt8 → Digest} → DataSnapshot rootBytes →
+    DataIntent rootBytes → Except RejectReason Unit := fun _ _ => .ok ()
 
 structure NativeConfig where
   binary : System.FilePath
@@ -1068,10 +1073,23 @@ judged on the loaded snapshot.  The receiving loop and the replay walk
 (`NativeHostReplay.advance`) both call exactly this. -/
 def Loaded.judge {rootBytes : List UInt8 → Digest} (transport : Transport)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) : Except RejectReason Unit :=
-  match transport.systemCell with
-  | none => .ok ()
-  | some systemId =>
-      Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent
+  do
+    transport.sourceGate loaded.snapshot intent
+    match transport.systemCell with
+    | none => .ok ()
+    | some systemId =>
+        Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent
+
+/-- Adding a reservation gate cannot erase the existing tail-law obligation. -/
+theorem Loaded.judge_tail {rootBytes : List UInt8 → Digest} (transport : Transport)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) (systemId : CellId)
+    (pinned : transport.systemCell = some systemId)
+    (accepted : loaded.judge transport intent = .ok ()) :
+    Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent = .ok () := by
+  simp only [Loaded.judge, pinned] at accepted
+  cases checked : transport.sourceGate loaded.snapshot intent with
+  | error reason => simp [checked] at accepted
+  | ok unit => simpa [checked] using accepted
 
 /-- Publish against the exact image on which the controller admitted the
 operation: append entry `h + 1` only while the head is `h`. One attempt, no

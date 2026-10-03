@@ -1,5 +1,7 @@
 # minidregg
 
+**Start here:** [Mini system guide](docs/README.md) · [Objective Bend](docs/OBJECTIVE-BEND.md) · [developer guide](docs/DEVELOPING.md) · [dated receiving scope](docs/evidence/2026-10-03-objective-bend.md). The proof-system introduction below retains its original source-scoped history.
+
 **A Lean-first semantic kernel and proof system, built at AI speed under
 instruments designed on the assumption that AI-scale proving fails silently.**
 

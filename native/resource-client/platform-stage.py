@@ -154,7 +154,7 @@ def plan(options, probe=True):
         "serviceManager":{"type":"systemd-system","systemctl":["/usr/bin/sudo","-n","/usr/bin/systemctl"],
                           "unitDirectory":"/etc/systemd/system","units":units}}
     room = recipe_prefix + "-r0"
-    selection = {"protocol":"mini-spk-same-store-selection-v1","evidence":str(evidence / "app"),
+    selection = {"protocol":"mini-spk-same-store-selection-v1","evidence":str(store / "app-evidence"),
         "grainsRoot":str(grains),"brokerSocket":str(grains / "broker.sock"),
         "package":{"path":str(package),"sha256":options["packageSha256"]},
         "app":{"owner":"member-0","room":room,"resources":"8502","capabilities":"9502",
@@ -178,11 +178,16 @@ def plan(options, probe=True):
             "candidate":{"manifest":str(manifest_path),"sha256":options["manifestSha256"],"sourceCommit":sealed["sourceCommit"]},
             "namespace":{"frame":str(frame),"operatorUid":uid,"appUidGidPool":options["appUids"],
                          "ports":ports,"units":units,"brokerUnit":prefix+"-broker.service"},
+            "taskReadiness":{"argv":["/usr/bin/python3",str(source/"native/resource-client/platform-task-readiness.py"),
+                "--platform-inputs",str(store/"platform-inputs.json"),"--evidence",str(store/"app-task-readiness")],
+                "sourceSha256":sha(source/"native/resource-client/platform-task-readiness.py"),
+                "requires":"completed native constructor; before app birth"},
             "sourceProfile":"regenerate CanonicalRuntimeProfile from this exact Host/Store and fresh genesis",
             "requirements":["root-stage immutable candidate and pinned infra",
                 "prepare operator-owned private empty Store root",
                 "publish exact generated SYSTEM units",
                 "isolate SPK package/inbox or qualify exact global immutable package before ingest",
+                "prepare source parent/tool tasks through exact native readiness before app birth",
                 "attach then provision connector then create connector TLS route",
                 "bind from native runtime only after constructor and room refs exist",
                 "register exact controller ready.json before resume",
@@ -232,8 +237,8 @@ def inventory(directory):
     context_path=Path(provision["root"])/"platform-inputs.json"
     manifest=read(context["manifest"])
     alias_plan={"protocol":"mini-native-held-reference-plan-v1","platformInputs":str(context_path),
-        "argv":[manifest["mini"],"workspace","--action","import","--dir",str(workspace),
-                "--name",alias,"--from-ref",str(workspace/"refs"/(room+".notes.json"))],
+        "argv":["/usr/bin/python3",str(Path(__file__).resolve()),"alias","--directory",str(directory)],
+        "consumerSourceSha256":sha(Path(__file__).resolve()),
         "sourceReference":str(workspace/"refs"/(room+".notes.json")),
         "destinationReference":str(workspace/"refs"/(alias+".json")),
         "receiving":"native alias import after actual room bootstrap; no new source authority"}
@@ -247,6 +252,37 @@ def inventory(directory):
         "auxiliaryUnits":[{"unit":units["sshd"],"manager":"system","serviceUid":options["operatorUid"],"statePaths":[str(root/"ssh")]}]}
     return {"bootstrap-world.json":world,"rooms-scenario.json":spec,"held-reference-plan.json":alias_plan,
             "deployment-binding-plan.json":deployment}
+
+def alias_import_argv(mini,workspace,source,alias):
+    held=read(source)
+    need(held.get("type")=="minidregg-participant-reference-v1" and held.get("kind")=="object"
+         and not any(k in held for k in ("private","sealedIn","sealedRoom","sharedName")),
+         "alias requires an ordinary held public reference")
+    argv=[mini,"workspace","--action","import","--dir",str(workspace),"--name",alias,
+          "--kind","object","--provenance",str(source)]
+    for field,flag in (("target","target"),("observeCapability","observe-capability"),
+                       ("operationCapability","operation-capability"),("controlCapability","control-capability")):
+        value=held.get(field)
+        if value is None and field in ("operationCapability","controlCapability"):continue
+        need(isinstance(value,str) and re.fullmatch(r"[1-9][0-9]*",value) is not None,
+             "held reference coordinate invalid: "+field)
+        argv.extend(["--"+flag,value])
+    return argv
+
+def retain_alias(directory):
+    options,provision,runtime,context,names,first,world=constructor_world(directory)
+    workspace=Path(first["workspace"]);room=provision["prefix"]+"-r0"
+    source=workspace/"refs"/(room+".notes.json");alias="r2-captured-source"
+    argv=alias_import_argv(read(context["manifest"])["mini"],workspace,source,alias)
+    destination=workspace/"refs"/(alias+".json")
+    if not destination.exists():subprocess.run(argv,check=True)
+    held=read(destination);original=read(source)
+    need(held.get("name")==alias and held.get("kind")==original["kind"]
+         and all(held.get(k)==original.get(k) for k in ("target","observeCapability","operationCapability","controlCapability")),
+         "existing alias differs from actual held reference")
+    return {"protocol":"mini-native-held-reference-retained-v1","sourceReference":str(source),
+            "sourceSha256":sha(source),"reference":str(destination),"referenceSha256":sha(destination),
+            "effects":"native client hint import only; every use requires current signed authority"}
 
 def bind(directory):
     directory=absolute(directory)
@@ -318,10 +354,12 @@ def publish(directory, values):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command",choices=["plan","inventory","bind"])
+    parser.add_argument("command",choices=["plan","inventory","alias","bind"])
     parser.add_argument("--options")
     parser.add_argument("--directory",required=True)
     args=parser.parse_args()
+    if args.command=="alias":
+        print(json.dumps(retain_alias(absolute(args.directory)),sort_keys=True));return
     if args.command=="plan":
         need(args.options is not None,"plan requires --options")
         values=plan(read(args.options))

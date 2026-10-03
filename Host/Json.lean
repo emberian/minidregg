@@ -51,6 +51,7 @@ import Host.ApplicationSpkLaunchDescriptorAuthoring
 import Kernel.NockProgramCell
 import Kernel.NockDoor
 import Kernel.DocumentHistory
+import Host.ResidentContextInspection
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -5536,6 +5537,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
         ("entries", .arr <| entries.toArray.map fun (k, r, p) => streamTailEntryJson k r p)]
   | "view-quotes" => quotesJson bytes
+  | "context-document" => ResidentContextInspection.document bytes
+  | "context-support" => ResidentContextInspection.support bytes
   | "view-document" => documentJson bytes
   | "view-diff" => diffJson bytes
   | "view-history" => historyJson bytes

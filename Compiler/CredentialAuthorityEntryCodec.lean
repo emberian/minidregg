@@ -86,17 +86,20 @@ def verbTag : {kind : ResourceKind} → Verb kind → Nat
   | _, .observePayment => 6
   | _, .tickClock => 11
   | _, .placeObject => 10
+  | _, .reserveObject | _, .reserveAccount | _, .reserveProgram => 12
 
 def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .object, 1 => .observeObject
   | .object, 2 => .mutateObject
   | .object, 7 => .appendObject
   | .object, 10 => .placeObject
+  | .object, 12 => .reserveObject
   | .object, _ => .delegateObject
   | .account, 1 => .observeAccount
   | .account, 2 => .transfer
   | .account, 8 => .mintAsset
   | .account, 9 => .burnAsset
+  | .account, 12 => .reserveAccount
   | .account, _ => .delegateAccount
   | .program, 1 => .observeProgram
   | .program, 2 => .installProgram
@@ -104,6 +107,7 @@ def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .program, 5 => .revokeCapability
   | .program, 6 => .observePayment
   | .program, 11 => .tickClock
+  | .program, 12 => .reserveProgram
   | .program, _ => .delegateProgram
 
 theorem verbOfTag_tag {kind : ResourceKind} (verb : Verb kind) :

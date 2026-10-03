@@ -113,6 +113,11 @@ inductive Verb : ResourceKind → Type
   own law. "May add to the room, may not edit what is in it." `mutateObject`
   covers it too (`Verb.AllowedBy`). -/
   | placeObject : Verb .object
+  /-- Freeze one exact currently admissible effect until its joint decision.
+  Ordinary mutation/transfer/install grants never cover this promise. -/
+  | reserveObject : Verb .object
+  | reserveAccount : Verb .account
+  | reserveProgram : Verb .program
   deriving DecidableEq, Repr
 
 /-- The granted verbs that cover a requested verb: the verb itself, and for an
@@ -1431,3 +1436,20 @@ end Minidregg.Theory.TypedAuthorization
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans
 /-- info: 'Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans
+
+namespace Minidregg.Theory.TypedAuthorization
+/-- Install-promise authority is independently scoped for every existing kind. -/
+def reserveVerb : (kind : ResourceKind) → Verb kind
+  | .object => .reserveObject
+  | .account => .reserveAccount
+  | .program => .reserveProgram
+@[simp] theorem reserveVerb_allowed_iff_mem (kind : ResourceKind) (verbs : Finset (Verb kind)) :
+    (reserveVerb kind).AllowedBy verbs ↔ reserveVerb kind ∈ verbs := by
+  cases kind <;> simp [reserveVerb, Verb.AllowedBy, Verb.grantors]
+theorem ordinary_mutate_cannot_reserve : ¬ Verb.reserveObject.AllowedBy {Verb.mutateObject} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+theorem ordinary_transfer_cannot_reserve : ¬ Verb.reserveAccount.AllowedBy {Verb.transfer} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+theorem ordinary_install_cannot_reserve : ¬ Verb.reserveProgram.AllowedBy {Verb.installProgram} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+end Minidregg.Theory.TypedAuthorization

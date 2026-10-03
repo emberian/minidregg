@@ -19,6 +19,7 @@ mod inspect;
 mod resident;
 #[path = "web/world.rs"]
 mod world;
+mod surface;
 #[path = "web/search.rs"]
 mod search;
 
@@ -38,7 +39,8 @@ const CSS: &str = "body{font:15px/1.45 system-ui,sans-serif;max-width:60rem;marg
 padding:0 1rem;color:#1d1d1f;background:#fdfdfb}a{color:#0b5cad}\
 header{border-bottom:1px solid #ccc;margin-bottom:1rem}.ctx{font-size:12px;color:#555}\
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e3e3e3;padding:.2rem .4rem;\
-text-align:left;vertical-align:top}code,.id{font:12px ui-monospace,monospace}\
+text-align:left;vertical-align:top}code,.id{font:12px ui-monospace,monospace;overflow-wrap:anywhere}\
+pre{white-space:pre-wrap;overflow-wrap:anywhere}\
 .refusal{border-left:4px solid #b3261e;padding:.4rem .8rem;background:#fbeeee}\
 .note{color:#555;font-size:13px}blockquote{border-left:3px solid #999;margin:.3rem 0;padding:0 .7rem}\
 .stale{color:#8a5a00}.ann{font-size:13px;color:#333;margin:.2rem 0 .2rem 1rem}";

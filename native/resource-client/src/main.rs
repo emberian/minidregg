@@ -78,6 +78,10 @@ mod channel;
 #[cfg(unix)]
 mod scheduled_transport;
 #[cfg(unix)]
+mod pq_mailbox;
+#[cfg(unix)]
+mod cohort_tcp;
+#[cfg(unix)]
 mod selected_exchange;
 #[cfg(unix)]
 mod selected_publisher;
@@ -3216,6 +3220,10 @@ fn run(mut args: Args) -> Result<()> {
         "channel" => channel::run(args),
         #[cfg(unix)]
         "traffic" => scheduled_transport::run(args),
+        #[cfg(unix)]
+        "mix" => pq_mailbox::run(args),
+        #[cfg(unix)]
+        "mix-live" => cohort_tcp::run(args),
         #[cfg(unix)]
         "adopt-next-key" => key_adoption::run(args),
         #[cfg(unix)]

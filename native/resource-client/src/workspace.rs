@@ -26,6 +26,8 @@ use std::sync::Mutex;
 
 #[path = "doc_search.rs"]
 pub(crate) mod doc_search;
+#[path = "context_projection.rs"]
+pub(crate) mod context_projection;
 
 const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
@@ -62,6 +64,8 @@ mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
+#[path = "world_surface.rs"]
+pub(crate) mod world_surface;
 #[path = "world_prototype.rs"]
 mod world_prototype;
 
@@ -6509,6 +6513,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let revision = os_string(args.required("revision")?,"revision")?;
             args.finish()?;
             print_json(&doc_search::follow(&root,&workspace,&name,&target,&atom,&revision)?)
+        }
+        "doc-context" => {
+            let name=os_string(args.required("name")?,"context document")?;
+            let rows=args.optional("max-rows").map(|v|os_string(v,"context rows").and_then(|s|s.parse::<usize>().map_err(|_|"invalid context rows".into()))).transpose()?.unwrap_or(64);
+            let bytes=args.optional("max-bytes").map(|v|os_string(v,"context bytes").and_then(|s|s.parse::<usize>().map_err(|_|"invalid context bytes".into()))).transpose()?.unwrap_or(8192);
+            args.finish()?;
+            print_json(&context_projection::document(&root,&workspace,&name,rows,bytes)?)
+        }
+        "context-review" => {
+            let id=os_string(args.required("proposal-id")?,"review proposal")?;
+            let base=bounded_json_limit(&path(args.required("context")?),16*1024*1024)?;
+            let request=bounded_json(&path(args.required("request")?))?;
+            args.finish()?;
+            print_json(&context_projection::review(&root,&workspace,&id,&base,&request)?)
         }
         "doc-show" => {
             let name = os_string(args.required("name")?, "document name")?;

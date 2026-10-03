@@ -15,7 +15,7 @@ class StageTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name)
         self.source=self.base/"source"
-        recipes=("native/resource-client/paid-entry-adapter.py","deploy/shell/mini-shell-ssh","deploy/shell/mini-shell-ssh-credentials",
+        recipes=("native/resource-client/paid-entry-adapter.py","native/resource-client/platform-task-readiness.py","deploy/shell/mini-shell-ssh","deploy/shell/mini-shell-ssh-credentials",
                  "testing/journeys/shared-resident-fixture-acp","testing/journeys/shared-resident-fixture-provider.py")
         for recipe in recipes:
             p=self.source/recipe;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(recipe)
@@ -37,6 +37,10 @@ class StageTests(unittest.TestCase):
         self.assertEqual(p["members"][-1]["name"],"connector-1")
         self.assertEqual(p["manifestSha256"],self.options["manifestSha256"])
         self.assertEqual(p["sshLauncher"]["renderer"],"mini-shell-ssh-credentials")
+        self.assertEqual(values["app-selection-template.json"]["evidence"],p["root"]+"/app-evidence")
+        ready=values["receiving-plan.json"]["taskReadiness"]
+        self.assertEqual(ready["sourceSha256"],stage.sha(self.source/"native/resource-client/platform-task-readiness.py"))
+        self.assertIn("--platform-inputs",ready["argv"])
         self.assertTrue(p["sshLauncher"]["path"].endswith("/mini-shell-ssh-credentials"))
         self.assertEqual(p["sshLauncher"]["sha256"],stage.sha(self.source/"deploy/shell/mini-shell-ssh-credentials"))
         self.assertEqual(p["serviceManager"]["units"]["operator"],"mini-test-r2-store.service")
@@ -96,6 +100,19 @@ class StageTests(unittest.TestCase):
         (root/"platform-inputs.json").write_text(json.dumps(context))
         (root/"runtime.json").write_text(json.dumps({"root":str(root),"allocationNames":names,"nodeRoot":str(root/"node")}))
         return directory,root,members,names
+    def test_public_held_alias_uses_numeric_native_import_not_delegation(self):
+        source=self.base/'held.json'
+        value={'type':'minidregg-participant-reference-v1','kind':'object','target':'123',
+               'observeCapability':'456','operationCapability':'456','controlCapability':None}
+        source.write_text(json.dumps(value))
+        argv=stage.alias_import_argv('/mini',self.base/'workspace',source,'capture')
+        self.assertNotIn('--from-ref',argv)
+        self.assertEqual(argv[argv.index('--target')+1],'123')
+        self.assertEqual(argv[argv.index('--observe-capability')+1],'456')
+        self.assertIn('--provenance',argv)
+        for field,invalid in (('private',{}),('sharedName','notes'),('type','minidregg-delegated-reference-v1'),('target','01')):
+            source.write_text(json.dumps(dict(value,**{field:invalid})))
+            with self.assertRaises(RuntimeError):stage.alias_import_argv('/mini',self.base/'workspace',source,'capture')
     def test_inventory_bootstraps_rooms_before_binding(self):
         directory,root,members,names=self.completed_constructor()
         values=stage.inventory(directory)

@@ -1969,6 +1969,30 @@
       "owner": "application-dispatch/member-workspace",
       "purpose": "Member-authenticated exact app request planning after current signature and five full current resource-grant observations; operator preparation36 remains private",
       "receiver": "fnDispatch"
+    },
+    {
+      "code": 201,
+      "symbol": "RESERVE_RESOURCE_BIRTH_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "resource-reserve-birth",
+      "purpose": "explicit reservation-capable resource birth authoring",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 202,
+      "symbol": "RESERVE_RESOURCE_BIRTH_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "resource-reserve-birth",
+      "purpose": "independent source and owner consent assembly",
+      "receiver": "fnDispatch"
     }
   ],
   "response_markers": [

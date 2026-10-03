@@ -234,9 +234,13 @@ def charge {height : Height}
   | .incidences => 3 + accepted.descriptor.createRequests.length
   | .turnBytes => accepted.ingress.bytes.length
   | .memoryTouches => accepted.prepared.writes.length + (readGuards accepted).length
-  | .witnessBytes => (credentialBundleStream.encode accepted.ingress.ingress.credentials).length
+  | .witnessBytes => (credentialBundleStream.encode accepted.ingress.ingress.credentials).length +
+      (match accepted.ingress.ownerConsentEnvelopes with
+       | none => 0
+       | some owners => ((StreamCodec.list bytesStream).encode owners).length)
   | .proofWork => 2 + accepted.descriptor.createRequests.length +
-      accepted.descriptor.resourceBatch.operations.length
+      accepted.descriptor.resourceBatch.operations.length +
+      (match accepted.ingress.ownerConsentEnvelopes with | none => 0 | some owners => owners.length)
   | .storageBytes =>
       (accepted.prepared.writes.map fun write => write.canonicalPostBytes.length).sum +
         accepted.ingress.bytes.length

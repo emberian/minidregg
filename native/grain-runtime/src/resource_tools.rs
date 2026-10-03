@@ -738,6 +738,9 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
                 "to":{"type":"string","pattern":"^[0-9]+$","maxLength":20},
                 "re":{"type":"string","pattern":"^[0-9]+$","maxLength":10}},
                 "required":["text"],"additionalProperties":false}}),
+        json!({"name":"mini_doc_context",
+            "description":"Select bounded current document context with exact source/revision/placement dependencies. Derived summaries lose inference text after their support changes.",
+            "inputSchema":{"type":"object","properties":{"doc":{"type":"string"},"maxRows":{"type":"string"},"maxBytes":{"type":"string"}},"required":["doc"],"additionalProperties":false}}),
         json!({"name":"mini_doc_show",
             "description":"Read a document’s current signed lines and links. After a confirmed write, read again to verify the change. Use document aliases in replies; renderer headers and hashes are observation metadata, not document prose. Read-only.",
             "inputSchema":{"type":"object","properties":{"doc":name},"required":["doc"],"additionalProperties":false}}),
@@ -991,6 +994,14 @@ impl RoomTools<'_> {
                 let mut docs = run.stdout.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
                 let state = docs.next().ok_or("tail printed no room state")?;
                 Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
+            }
+            "mini_doc_context" => {
+                only_keys(arguments,&["doc","maxRows","maxBytes"])?;
+                let doc=bounded_name(arguments,"doc")?;
+                let rows=bounded_decimal(arguments,"maxRows",3)?.unwrap_or_else(||"64".into());
+                let bytes=bounded_decimal(arguments,"maxBytes",5)?.unwrap_or_else(||"8192".into());
+                let run=Self::ok_or_ending(self.line(&format!("doc context {doc} {rows} {bytes}"))?)?;
+                serde_json::from_str(run.stdout.trim()).map_err(|e|format!("signed context document output: {e}"))
             }
             "mini_doc_show" => {
                 only_keys(arguments, &["doc"])?;
@@ -1462,7 +1473,7 @@ mod tests {
     #[test]
     fn room_tools_are_seven_and_writes_are_metered() {
         let names: Vec<String> = super::room_tool_specs().iter().map(|s| s["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_show", "mini_doc_link", "mini_doc_append"]);
+        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_context", "mini_doc_show", "mini_doc_link", "mini_doc_append"]);
         for write in super::ROOM_WRITE_TOOLS {
             assert!(names.iter().any(|n| n == write));
         }

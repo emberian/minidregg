@@ -514,6 +514,92 @@ def checkTemplate (prepared : PreparedBirth profile.compilerProfile deployment p
       (oldAuthority prepared) height descriptor)) :=
   checkTemplateAt profile.template (oldAuthority prepared) height descriptor
 
+/-! ### Explicit reservation-enabled factory method
+
+The ordinary method remains exactly two grants. The reservation method is a
+separate canonical signed ingress and requires each owner's current-key consent.
+-/
+inductive FactoryMethod where
+  | ordinary
+  | reserve
+  deriving DecidableEq, Repr
+
+/-- No room-descendant scope and no ordinary verbs accompany reservation. -/
+def ReserveOwnerGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
+  grant.NativeForBirth item ∧
+    grant.capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
+    grant.capability.head.scope.verbs = {reserveVerb grant.kind} ∧
+    grant.capability.head.holder = .subject item.owner
+
+def ReserveTemplateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
+  (∀ grant ∈ descriptor.grants, RootGrantShape template authority height grant) ∧
+  (∀ item ∈ descriptor.births, ∃ native ∈ descriptor.grants,
+    NativeOwnerGrant native item ∧ ∃ control ∈ descriptor.grants,
+    PolicyOwnerGrant control item ∧ ∃ reserve ∈ descriptor.grants,
+    ReserveOwnerGrant reserve item ∧
+      native.capability.head.id ≠ control.capability.head.id ∧
+      native.capability.head.id ≠ reserve.capability.head.id ∧
+      control.capability.head.id ≠ reserve.capability.head.id) ∧
+  (∀ grant ∈ descriptor.grants, ∃ item ∈ descriptor.births,
+    NativeOwnerGrant grant item ∨ PolicyOwnerGrant grant item ∨ ReserveOwnerGrant grant item) ∧
+  descriptor.grants.length = 3 * descriptor.births.length
+
+instance reserveOwnerGrantDecidable (grant : AuthorityGrant) (item : BirthItem Registry) :
+    Decidable (ReserveOwnerGrant grant item) := by
+  unfold ReserveOwnerGrant
+  infer_instance
+
+instance reserveTemplateBoundDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    Decidable (ReserveTemplateBound template authority height descriptor) := by
+  unfold ReserveTemplateBound
+  infer_instance
+
+def MethodTemplateBound (method : FactoryMethod)
+    (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
+  match method with
+  | .ordinary => TemplateBound template authority height descriptor
+  | .reserve => ReserveTemplateBound template authority height descriptor
+
+instance methodTemplateBoundDecidable (method : FactoryMethod)
+    (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    Decidable (MethodTemplateBound method template authority height descriptor) := by
+  cases method <;> unfold MethodTemplateBound <;> infer_instance
+
+theorem reserve_all_grants_bound {template : CanonicalRuntimeProfile.FactoryTemplate}
+    {authority : AuthState} {height : Height} {descriptor : Descriptor Registry}
+    (bound : ReserveTemplateBound template authority height descriptor) : descriptor.AllGrantsBound := by
+  intro grant member
+  obtain ⟨item, born, native | control | reserve⟩ := bound.2.2.1 grant member
+  · exact ⟨item, born, Or.inl native.1⟩
+  · exact ⟨item, born, Or.inr control.1⟩
+  · exact ⟨item, born, Or.inl reserve.1⟩
+
+theorem reserve_exact_target {grant : AuthorityGrant} {item : BirthItem Registry}
+    (bound : ReserveOwnerGrant grant item) :
+    grant.capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} := bound.2.1
+
+theorem reserve_exact_verb {grant : AuthorityGrant} {item : BirthItem Registry}
+    (bound : ReserveOwnerGrant grant item) :
+    grant.capability.head.scope.verbs = {reserveVerb grant.kind} := bound.2.2.1
+
+theorem ordinary_owner_has_no_reserve (kind : ResourceKind) :
+    reserveVerb kind ∉ ownerVerbs kind := by cases kind <;> decide
+
+theorem ordinary_reserve_disjoint {template : CanonicalRuntimeProfile.FactoryTemplate}
+    {authority : AuthState} {height : Height} {descriptor : Descriptor Registry}
+    (present : descriptor.births ≠ [])
+    (reserve : ReserveTemplateBound template authority height descriptor) :
+    ¬ TemplateBound template authority height descriptor := by
+  intro ordinary
+  have npos : 0 < descriptor.births.length := List.length_pos.mpr present
+  have two := ordinary.2.2.2
+  have three := reserve.2.2.2
+  omega
+
 /-- A correct ordinary program-edit grant never includes policy replacement,
 even though both resources use the same numerical target id. -/
 theorem owner_program_cannot_replace_policy :
@@ -1212,16 +1298,21 @@ structure Pending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) : Prop where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  templateBound : TemplateBound profile.template (oldAuthority prepared) height descriptor
+  method : FactoryMethod
+  templateBound : MethodTemplateBound method profile.template (oldAuthority prepared) height descriptor
   bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
 
 def preparePending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (height : Height) : Except Reject (PLift (Pending prepared height)) := do
+    (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (PLift (Pending prepared height)) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  let templateBound ← checkTemplate prepared height
+  let templateBound : PLift (MethodTemplateBound method profile.template
+      (oldAuthority prepared) height descriptor) ← match method with
+    | .ordinary => checkTemplate prepared height
+    | .reserve => require (ReserveTemplateBound profile.template
+        (oldAuthority prepared) height descriptor) .grantTemplate
   let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
     descriptor) .roomLineage
   letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
@@ -1231,7 +1322,7 @@ def preparePending
       (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
   if cells : Function.Injective (layout prepared).cellId then
     if requests : Function.Injective (branchIdentity prepared height) then
-      .ok ⟨⟨checked.down, templateBound.down, bornLineage.down, cells, requests⟩⟩
+      .ok ⟨⟨checked.down, method, templateBound.down, bornLineage.down, cells, requests⟩⟩
     else .error .ambiguousRequests
   else .error .duplicateCell
 
@@ -1633,6 +1724,28 @@ def ingressRawCodec : LawfulCodec Ingress where
 
 def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
 
+/-- Independent canonical frame for the explicit opted-in source method.
+Every owner envelope is retained by the same birth event on replay. -/
+def reserveIngressFrame : List UInt8 :=
+  "DREGG/RESOURCE-RESERVE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [1]
+
+open Minidregg.Compiler.Tower256ConcreteBackend in
+def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
+  StreamCodec.product ingressStream (StreamCodec.list bytesStream)
+
+def reserveIngressRawCodec : LawfulCodec (Ingress × List (List UInt8)) where
+  encode ingress := reserveIngressFrame ++ reserveIngressStream.encode ingress
+  decode bytes := if bytes.take reserveIngressFrame.length = reserveIngressFrame then
+    reserveIngressStream.toLawful.decode (bytes.drop reserveIngressFrame.length) else none
+  decode_encode := by
+    intro ingress
+    have decoded := reserveIngressStream.toLawful.decode_encode ingress
+    change reserveIngressStream.toLawful.decode (reserveIngressStream.encode ingress) = some ingress at decoded
+    simp [decoded]
+
+def reserveIngressCodec : LawfulCodec (Ingress × List (List UInt8)) :=
+  strictCodec reserveIngressRawCodec
+
 structure DecodedIngress where
   private mk ::
   ingress : Ingress
@@ -1641,20 +1754,35 @@ structure DecodedIngress where
     some descriptor
   descriptorCanonical : CanonicalCellRegistry.sourceEncoding.codec.encode descriptor =
     ingress.descriptorBytes
+  ownerConsentEnvelopes : Option (List (List UInt8)) := none
 
-def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
+def decodeOrdinaryIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
   match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes with
   | none => none
   | some descriptor => some ⟨ingress, descriptor, decoded,
-      descriptor_decode_canonical Registry decoded⟩
+      descriptor_decode_canonical Registry decoded, none⟩
+
+def DecodedIngress.method (ingress : DecodedIngress) : FactoryMethod :=
+  if ingress.ownerConsentEnvelopes.isSome then .reserve else .ordinary
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
-  ingressCodec.encode ingress.ingress
+  match ingress.ownerConsentEnvelopes with
+  | none => ingressCodec.encode ingress.ingress
+  | some owners => reserveIngressCodec.encode (ingress.ingress, owners)
 
-theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
-    (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
-  unfold decodeIngress at decoded
+def decodeIngress (bytes : List UInt8) : Option DecodedIngress :=
+  match parsed : reserveIngressCodec.decode bytes with
+  | none => decodeOrdinaryIngress bytes
+  | some raw =>
+      match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode raw.1.descriptorBytes with
+      | none => none
+      | some descriptor => some ⟨raw.1, descriptor, decoded,
+          descriptor_decode_canonical Registry decoded, some raw.2⟩
+
+theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeOrdinaryIngress bytes = some ingress) : ingress.bytes = bytes := by
+  unfold decodeOrdinaryIngress at decoded
   cases parsed : ingressCodec.decode bytes with
   | none => simp [parsed] at decoded
   | some raw =>
@@ -1663,6 +1791,20 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       · contradiction
       · cases Option.some.inj decoded
         exact strictCodec_canonical ingressRawCodec parsed
+
+theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
+  unfold decodeIngress at decoded
+  cases parsed : reserveIngressCodec.decode bytes with
+  | none =>
+      simp only [parsed] at decoded
+      exact decodeOrdinaryIngress_canonical decoded
+  | some raw =>
+      simp only [parsed] at decoded
+      split at decoded
+      · contradiction
+      · cases Option.some.inj decoded
+        exact strictCodec_canonical reserveIngressRawCodec parsed
 
 def CredentialBundle.forBranch (bundle : CredentialBundle) : Branch descriptor → Option BranchCredential
   | .factory => some bundle.factory
@@ -1778,6 +1920,115 @@ def Pending.admitBundleNative [DecidableEq F]
     else return .error .credentialShape
   else return .error .credentialShape
 
+/-- Owner consent has a separate purpose domain and binds the full factory
+source descriptor plus its exact birth incidence. It is not an ordinary write
+request or a capability minted from the nominated owner identity. -/
+def ownerConsentRequest
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (position : Fin descriptor.births.length) : SomeRequest :=
+  let item := descriptor.births.get position
+  ⟨item.resourceKind, {
+    domain := pins.domain
+    semantics := pins.semantics
+    federation := pins.federation
+    subject := item.owner
+    subjectKeyEpoch := (oldAuthority prepared).subjectKeyEpoch item.owner
+    target := ⟨item.create.cellId⟩
+    verb := reserveVerb item.resourceKind
+    argsDigest := CanonicalCellRegistry.sourceEncoding.hashBytes
+      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v1".toUTF8.toList ++
+        CanonicalCellRegistry.sourceEncoding.codec.encode descriptor ++
+        Tower256ConcreteBackend.StreamCodec.nat.encode position.val)
+    effectsDigest := CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor
+    nonce := descriptor.nonce
+    height := height
+    preStateRoot := item.create.expectedPreRoot
+    policyId := ⟨item.create.cellId⟩
+    policyEpoch := 0
+    policyRevision := 0
+    cost := 0 }⟩
+
+structure OwnerConsent
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (position : Fin descriptor.births.length) (envelope : List UInt8) : Type where
+  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  envelopeExact : receipt.envelopeBytes = envelope
+  verified : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+    descriptor.authorityNullifier (ownerConsentRequest prepared height position).2 receipt = true
+
+structure ReserveOwnerConsents
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (envelopes : List (List UInt8)) : Type where
+  lengthExact : envelopes.length = descriptor.births.length
+  owners : (position : Fin descriptor.births.length) →
+    OwnerConsent prepared height position (envelopes[position.val]?.getD [])
+
+def OwnerConsents
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (envelopes : Option (List (List UInt8))) : Type :=
+  match envelopes with
+  | none => Unit
+  | some owners => ReserveOwnerConsents prepared height owners
+
+def verifyOwnerConsentsNative
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (native : CredentialSignatureIO.NativeConfig)
+    (envelopes : Option (List (List UInt8))) :
+    IO (Except Reject (OwnerConsents prepared height envelopes)) := do
+  match envelopes with
+  | none => return .ok ()
+  | some owners =>
+      if count : owners.length = descriptor.births.length then
+        let action := fun (position : Fin descriptor.births.length) => do
+          let envelope := owners[position.val]?.getD []
+          let wanted := ownerConsentRequest prepared height position
+          match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+              descriptor.authorityNullifier wanted.2 envelope with
+          | .error reason => return .error (.nativeSignature reason)
+          | .ok receipt =>
+              match require (receipt.envelopeBytes = envelope) .credentialShape with
+              | .error reason => return .error reason
+              | .ok envelopeExact =>
+                  match require (CredentialSignatureAdmission.verifySignature
+                      prepared.authority.snapshot descriptor.authorityNullifier wanted.2 receipt = true)
+                      .signature with
+                  | .error reason => return .error reason
+                  | .ok verified =>
+                      return .ok (show OwnerConsent prepared height position envelope from
+                        ⟨receipt, envelopeExact.down, verified.down⟩)
+        match ← sequenceFin action with
+        | .error reason => return .error reason
+        | .ok accepted => return .ok ⟨count, accepted⟩
+      else return .error .credentialShape
+
+theorem OwnerConsent.request_exact
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
+    (consent : OwnerConsent prepared height position envelope) :
+    consent.receipt.request = ownerConsentRequest prepared height position ∧
+      consent.receipt.nullifier = descriptor.authorityNullifier :=
+  CredentialSignatureAdmission.verified_request_exact _ _ _ _ consent.verified
+
+theorem OwnerConsent.current_owner_key
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
+    (consent : OwnerConsent prepared height position envelope) :
+    CredentialAuthorityState.currentSigningKey prepared.authority.snapshot.logical
+      (descriptor.births.get position).owner = some consent.receipt.prepared.controller.key := by
+  have current := CredentialSignatureAdmission.checked_key_from_same_snapshot
+    prepared.authority.snapshot consent.receipt
+  rw [consent.request_exact.1] at current
+  exact current
+
+theorem OwnerConsent.current_owner_key_live
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {position : Fin descriptor.births.length} {envelope : List UInt8}
+    (consent : OwnerConsent prepared height position envelope) :
+    CredentialAuthorityState.keyStanding prepared.authority.snapshot.cell
+      (CredentialAuthorityState.signingKeyRevocation consent.receipt.prepared.controller.key) = .live := by
+  rw [consent.receipt.prepared.keyExact]
+  exact consent.receipt.prepared.source.standing
+
 /-- The actual admitted native birth. A caller cannot manufacture it by
 supplying portals, successful Booleans, policy contexts or a prepared state.
 The constructor below is reached only after the fixed whole-bundle verifier. -/
@@ -1788,6 +2039,8 @@ structure AcceptedBirth [DecidableEq F]
   ingress : DecodedIngress
   prepared : PreparedBirth profile.compilerProfile deployment pins durable ingress.descriptor
   pending : Pending prepared height
+  methodExact : pending.method = ingress.method
+  ownerConsents : OwnerConsents prepared height ingress.ownerConsentEnvelopes
   admitted : AdmittedBundle pending ingress.ingress.credentials
 
 /-- A replay-aware durable endpoint calls this only after comparing canonical
@@ -1802,12 +2055,19 @@ def admitDecodedNative [DecidableEq F]
       durable ingress.descriptor height with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
-      match preparePending prepared height with
+      match preparePending prepared height ingress.method with
       | .error reason => return .error reason
       | .ok pending =>
-          match ← pending.down.admitBundleNative native ingress.ingress.credentials with
+          match require (pending.down.method = ingress.method) .credentialShape with
           | .error reason => return .error reason
-          | .ok branches => return .ok ⟨ingress, prepared, pending.down, branches⟩
+          | .ok methodExact =>
+              match ← verifyOwnerConsentsNative prepared height native ingress.ownerConsentEnvelopes with
+              | .error reason => return .error reason
+              | .ok owners =>
+                  match ← pending.down.admitBundleNative native ingress.ingress.credentials with
+                  | .error reason => return .error reason
+                  | .ok branches =>
+                      return .ok ⟨ingress, prepared, pending.down, methodExact.down, owners, branches⟩
 
 def admitNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
@@ -1837,6 +2097,28 @@ theorem AcceptedBirth.native_ingress_exact {height : Height}
 
 def AcceptedBirth.descriptor {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
+
+/-- Extract the actually verified owner receipts retained by a reservation
+method ingress. No public receipt/flag can reconstruct these native tokens. -/
+def AcceptedBirth.reserveOwners {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height)
+    (envelopes : List (List UInt8))
+    (sourceExact : accepted.ingress.ownerConsentEnvelopes = some envelopes) :
+    ReserveOwnerConsents accepted.prepared height envelopes := by
+  have owners := accepted.ownerConsents
+  rw [sourceExact] at owners
+  exact owners
+
+/-- Receiving admission, rather than an authored template claim, retains the
+source-selected reservation method shape over the actual installed descriptor. -/
+theorem AcceptedBirth.reserve_shape {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height)
+    (method : accepted.ingress.method = .reserve) :
+    ReserveTemplateBound profile.template (oldAuthority accepted.prepared) height
+      accepted.descriptor := by
+  have shape := accepted.pending.templateBound
+  rw [accepted.methodExact, method] at shape
+  exact shape
 
 /-- **`birth_under_room_requires_grant`** at the native admission: an admitted
 birth of an item into room `R` names the creator's placing capability, stored in

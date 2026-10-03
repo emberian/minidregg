@@ -6,6 +6,7 @@ mod concierge;
 mod hermes_room;
 mod room_task;
 mod room_resident;
+mod resident_context;
 mod quiescence;
 mod quiescence_transport;
 mod config_migration;

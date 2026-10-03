@@ -19,6 +19,7 @@ import Kernel.AuditTiming
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
 import Kernel.FnSelectiveReleaseSourceReceiver
+import Kernel.BendReturnRelease
 import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationLifecycleClaimCore
 import Kernel.ApplicationLifecycleClaimV2Core
@@ -57,6 +58,9 @@ import Kernel.PurseRefillReceiver
 import Kernel.JobMoneyReceiver
 import Kernel.CertifyReceiver
 import Kernel.CapabilityRenounce
+import Kernel.JointReserveIngress
+import Kernel.JointReceiver
+import Kernel.JointControlBootstrap
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -691,6 +695,9 @@ def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
 never a policy decision, signature Boolean, or arbitrary DataIntent handed in
 from outside. -/
 inductive NativeAdmission (config : Config) (opened : Opened config) : DataIntent rootBytes → Prop
+  | jointReserve (reserved : JointReceiverAdmission.Reserved config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable) :
+      NativeAdmission config opened reserved.intent
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
       config.profile config.deployment opened.pins opened.durable
       (logicalHeight config opened.durable)) :
@@ -826,6 +833,9 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
       (admitted : LifetimeDispatchAt config opened ingress) :
       NativeAdmission config opened admitted.intent
+  | bendReturnRelease {ingress : BendReturnRelease.Ingress}
+      (accepted : BendReturnRelease.Accepted config opened ingress) :
+      NativeAdmission config opened (accepted.intent config opened ingress)
   | selectedSourcePublication {ingress : FnSelectiveReleaseSourcePublication.Ingress}
       (accepted : FnSelectiveReleaseSourceReceiver.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -923,6 +933,54 @@ structure Derived (config : Config) (opened : Opened config) where
     { admitted : CompletionAtV2 config opened ingress // intent = admitted.intent }) := none
   grantIssue : Option (Σ ingress : ApplicationAgentLifetimeGrantSource.Ingress,
     { admitted : LifetimeGrantIssueAt config opened ingress // intent = admitted.intent }) := none
+  jointReservation : Option {reserved : JointReceiverAdmission.Reserved config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable //
+      intent = reserved.intent} := none
+  bootstrap : Option (JointControlBootstrap.Admission config opened intent) := none
+
+/-- Controller-only exception for a precisely rederived source-owned operation.
+Ordinary records continue through the centrally installed conflicting-write gate. -/
+private def Derived.bootstrapAdmission {config : Config} {opened : Opened config}
+    (derived : Derived config opened) : Option (JointControlBootstrap.Admission config opened derived.intent) :=
+  match derived.bootstrap with
+  | some admitted => some admitted
+  | none => do
+      let ordinary ← derived.ordinary
+      let admitted ← JointControlBootstrap.admitInitialize ordinary.shape ordinary.accepted
+      some (ordinary.intentExact.symm ▸ admitted)
+
+/-- Exactly one source-owned controller facet may receive a private exception.
+No normal source transition receives it while the pinned control is uninitialized. -/
+def Derived.transport {config : Config} {opened : Opened config}
+    (derived : Derived config opened) : DurableReceiverIO.Transport :=
+  match derived.jointReservation with
+  | some held => JointReceiver.reservedTransport config opened held.val
+  | none => match derived.bootstrapAdmission with
+    | some admitted => JointControlBootstrap.transport admitted
+    | none => config.transport
+
+theorem Derived.transport_systemCell {config : Config} {opened : Opened config}
+    (derived : Derived config opened) : derived.transport.systemCell = some config.systemCell := by
+  unfold Derived.transport
+  split
+  · exact Config.physicalTransport_systemCell config
+  · split
+    · exact Config.physicalTransport_systemCell config
+    · exact Config.transport_systemCell config
+
+/-- Fresh reserve admission is retained as executable proof data for source
+replay and one physical append; no raw event can construct this witness. -/
+def Derived.ofJointReserve {config : Config} {opened : Opened config}
+    (reserved : JointReceiverAdmission.Reserved config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable) :
+    Derived config opened :=
+  { intent := reserved.intent
+    admission := .jointReserve reserved
+    issue := none
+    begin := none
+    beginV2 := none
+    claimV2 := none
+    jointReservation := some ⟨reserved,rfl⟩ }
 
 /-- Retain the original native birth admission for an exact CAS readback.
 The accepted value can only be made by the complete birth admission path. -/
@@ -930,8 +988,13 @@ def Derived.ofBirth {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
       config.profile config.deployment opened.pins opened.durable
       (logicalHeight config opened.durable)) : Derived config opened :=
-  ⟨ResourceBirthReceiver.intent accepted, .birth accepted,
-    none, none, none, none, none, none, none, none, none⟩
+  { intent := ResourceBirthReceiver.intent accepted
+    admission := .birth accepted
+    issue := none
+    begin := none
+    beginV2 := none
+    claimV2 := none
+    bootstrap := JointControlBootstrap.admitBirth accepted }
 
 theorem Derived.ofBirth_intent {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
@@ -1574,6 +1637,10 @@ private def derive (config : Config) (opened : Opened config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if (JointReserveIngress.decodeSource bytes).isSome then
+    match ← JointReserveIngress.admit config opened bytes with
+    | .error detail => return .error detail
+    | .ok reserved => return .ok (Derived.ofJointReserve reserved)
   if let some ingress := FleetTurn.decodeIngress bytes then
     match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile config.tariff
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -1778,6 +1845,11 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := BendReturnRelease.ingressCodec.decode bytes then
+    match ← BendReturnRelease.admitLoaded config opened ingress with
+    | none => return .error "historical Bend return release admission refused"
+    | some accepted =>
+        return .ok ⟨accepted.intent config opened ingress, .bendReturnRelease accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
     | .error _ => return .error "historical selected source publication admission refused"
@@ -1858,7 +1930,7 @@ private def derive (config : Config) (opened : Opened config)
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
           opened.pins config.signature opened.durable height ingress with
       | .error reason => return .error s!"birth admission refused: {repr reason}"
-      | .ok accepted => return .ok ⟨ResourceBirthReceiver.intent accepted, .birth accepted, none, none, none, none, none, none, none, none, none⟩
+      | .ok accepted => return .ok (Derived.ofBirth accepted)
   | none =>
     match PolicyInstallReceiver.decodeIngress bytes with
     | some ingress =>
@@ -2157,7 +2229,7 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed derived.intent with
   | .inl ready =>
-      match durable.judge config.transport derived.intent with
+      match durable.judge derived.transport derived.intent with
       | .ok () => .ok (durable.extend ready)
       | .error reason => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
@@ -2177,7 +2249,8 @@ theorem advance_judged {config : Config} {opened : Opened config} {derived : Der
   · split
     · rename_i judged
       intro _
-      simpa [DurableReceiverIO.Loaded.judge, Config.transport_systemCell] using judged
+      exact DurableReceiverIO.Loaded.judge_tail derived.transport opened.durable derived.intent
+        config.systemCell derived.transport_systemCell judged
     · intro failed
       cases failed
   all_goals intro failed; cases failed
@@ -2684,7 +2757,7 @@ structure ExactReadback (config : Config) {oldTarget : Durable}
   prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
     old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
     old.opened.durable.resumed derived.intent = .inl ready
-  judged : old.opened.durable.judge config.transport derived.intent = .ok ()
+  judged : old.opened.durable.judge derived.transport derived.intent = .ok ()
   appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
     derived.intent
   after : Opened config
@@ -2703,7 +2776,7 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       old.opened.durable.resumed derived.intent with
   | .inr _ => .error "appended intent no longer prepares at the verified image"
   | .inl ready =>
-      match judged : old.opened.durable.judge config.transport derived.intent with
+      match judged : old.opened.durable.judge derived.transport derived.intent with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok () =>
         match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready) with

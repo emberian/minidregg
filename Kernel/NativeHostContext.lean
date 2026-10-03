@@ -6,6 +6,8 @@ There is one profile, one world-root commitment, and one validation path.
 import Compiler.NativeHostCodec
 import Compiler.GrainResourceBirthController
 
+import Compiler.JointControlFrame
+import Compiler.GenericSimplexCodec
 namespace Minidregg.Kernel.NativeHost
 
 open Minidregg.Theory
@@ -64,6 +66,12 @@ structure Config where
   /-- Compiled-in evaluators this operator disabled (K-EVAL); committed in the profile's
   semantics, so every node of a deployment must agree. -/
   disabledEvaluators : List Digest := []
+  /-- Source-owned joint control resource. Enabling changes the runtime pin;
+  the physical cell/atom/schema are not selected by a submitted operation. -/
+  jointControl : Option JointControlFrame.Pin := none
+  /-- Common source-log epoch/roster/keys/base, pinned by deployment semantics.
+  A certificate never supplies its own verification context. -/
+  jointConsensus : Option GenericSimplexCodec.Context := none
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -93,12 +101,20 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
   | none => []
   | some key =>
       "DREGG/NATIVE-HOST/COMPLETION-CUSTODIAN/v1".toUTF8.toList ++
-        bytesStream.encode key)
+        bytesStream.encode key) ++
+  (match config.jointControl with
+  | none => []
+  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v1".toUTF8.toList ++
+      JointControlFrame.pinStream.encode pin) ++
+  (match config.jointConsensus with
+  | none => []
+  | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v1".toUTF8.toList ++
+      GenericSimplexCodec.contextStream.encode { context with instanceBytes := [] })
 
 /-- Disabling the new mode preserves the complete pre-existing parameter
 preimage, hence its legacy semantics/profile and genesis interpretation. -/
 theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
-    ({ config with grainBirthTariff := none, completionCustodianKey := none } : Config).runtimeParameters =
+    ({ config with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, jointConsensus := none } : Config).runtimeParameters =
       "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
@@ -133,13 +149,32 @@ def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.Cel
 
 /-- The Store transport for this deployment: every new commit is judged by the
 tail law over this deployment's system cell. -/
-def Config.transport (config : Config) : DurableReceiverIO.Transport :=
+def Config.physicalTransport (config : Config) : DurableReceiverIO.Transport :=
   let storage := { config.storage with anchorIdentity :=
     s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}" }
-  storage.transport config.logStart config.systemCell
+  { storage.transport config.logStart config.systemCell with sourceGate := fun snapshot intent =>
+      match config.jointControl with
+      | none => .ok ()
+      | some pin =>
+          match JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent with
+          | .ok () => .ok ()
+          | .error _ => .error (.durable .transactionConflict) }
+
+/-- In an agreed domain the ordinary receiving loop must propose its source
+transition. It cannot secretly append an unordered local application record.
+Typed ordered receivers retain physicalTransport and its unchanged CAS/readback. -/
+def Config.transport (config : Config) : DurableReceiverIO.Transport :=
+  if config.jointConsensus.isSome then
+    { config.physicalTransport with append := fun _ _ => pure .conflict }
+  else config.physicalTransport
 
 theorem Config.transport_systemCell (config : Config) :
-    config.transport.systemCell = some config.systemCell := rfl
+    config.transport.systemCell = some config.systemCell := by
+  unfold Config.transport
+  split <;> rfl
+
+theorem Config.physicalTransport_systemCell (config : Config) :
+    config.physicalTransport.systemCell = some config.systemCell := rfl
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

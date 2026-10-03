@@ -534,7 +534,7 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
         return Err("resident budget account differs from accepted assignment; provision matching controller config before prompting".into());
     }
     let name = manifest["program"]["name"].as_str().ok_or("resident program name absent")?;
-    let program = runner.tools.read("mini_doc_show", &json!({"doc":name}))?;
+    let (program, context_projection) = crate::resident_context::collect(&runner.tools,&manifest)?;
     let me = runner.me()?;
     let binding = json!({"world":ready["world"],
         "roomCell":ready["roomCell"],"assignment":ready["assignment"],"task":task,"handoff":ready["id"],"resident":manifest["hermes"]});
@@ -548,7 +548,7 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
         .filter(|entry| entry["subject"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
     let room_status = runner.tools.read("mini_room_status", &json!({}))?;
     Ok(json!({"type":"mini-hermes-resident-assignment-v1","room":tools.room,"me":me,
-        "role":manifest["role"],"programName":name,"program":program["text"],
+        "role":manifest["role"],"programName":name,"program":program,"contextProjection":context_projection,
         "docs":manifest["docs"],"every":manifest["every"],"account":tools.account,
         "acceptedHeight":ready["acceptedHeight"],"recentMemberEntries":[],"sourceRequests":entries,"sourceRoom":tail["room"],"requestBinding":binding,
         "recentMemberChanges":member_changes,"roomStatus":room_status}))
