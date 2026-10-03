@@ -5,7 +5,14 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::ffi::OsString;
 use std::process::ExitCode;
+
+struct Reply {
+    code: u32,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
 
 fn read_fixed<const N: usize>(path: &Path, role: &str) -> Result<[u8; N], String> {
     let file = File::open(path).map_err(|error| format!("cannot open {role}: {error}"))?;
@@ -18,7 +25,7 @@ fn read_fixed<const N: usize>(path: &Path, role: &str) -> Result<[u8; N], String
         .map_err(|_| format!("{role} must contain exactly {N} raw bytes"))
 }
 
-fn verify(key_path: &Path, frame_path: &Path, signature_path: &Path) -> Result<(), String> {
+fn verify(key_path: &Path, frame_path: &Path, signature_path: &Path) -> Result<&'static [u8], String> {
     let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
     let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
     let key = VerifyingKey::from_bytes(&key_bytes)
@@ -28,20 +35,11 @@ fn verify(key_path: &Path, frame_path: &Path, signature_path: &Path) -> Result<(
 
     // The frame is opaque. Domain separation, key selection, request binding,
     // revocation, and authority are the Lean caller's responsibility.
-    let response: &[u8] = if key.verify_strict(&frame, &signature).is_ok() {
+    Ok(if key.verify_strict(&frame, &signature).is_ok() {
         b"verified\n"
     } else {
         b"invalid\n"
-    };
-    respond(response)
-}
-
-fn respond(response: &[u8]) -> Result<(), String> {
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(response)
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write response: {error}"))
+    })
 }
 
 /// An SSH `string`: a big-endian u32 length, then the bytes.
@@ -71,7 +69,7 @@ fn verify_sshsig(
     namespace_path: &Path,
     message_path: &Path,
     signature_path: &Path,
-) -> Result<(), String> {
+) -> Result<&'static [u8], String> {
     let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
     let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
     let key = VerifyingKey::from_bytes(&key_bytes)
@@ -84,22 +82,19 @@ fn verify_sshsig(
     let message = fs::read(message_path).map_err(|error| format!("cannot read message: {error}"))?;
     let signed = sshsig_signed_data(&namespace, &message)?;
     let signature = Signature::from_bytes(&signature_bytes);
-    let response: &[u8] = if key.verify_strict(&signed, &signature).is_ok() {
+    Ok(if key.verify_strict(&signed, &signature).is_ok() {
         b"verified\n"
     } else {
         b"invalid\n"
-    };
-    respond(response)
+    })
 }
 
 const USAGE: &str = "usage: minidregg-credential-signature-verifier verify <public-key-file> <frame-file> <signature-file>\n       minidregg-credential-signature-verifier verify-sshsig <public-key-file> <namespace-file> <message-file> <signature-file>\n       minidregg-credential-signature-verifier serve";
 
-fn main() -> ExitCode {
-    let arguments: Vec<_> = env::args_os().skip(1).collect();
-    if arguments.len() == 1 && arguments[0] == "serve" {
-        return serve();
-    }
-    let result = match arguments.as_slice() {
+/// One one-shot invocation: its exit code, stdout and stderr. `main` writes
+/// them; `serve` frames them. Both run exactly this function.
+fn invoke(arguments: &[OsString]) -> (u8, Vec<u8>, Vec<u8>) {
+    let result = match arguments {
         [command, public_key, frame, signature] if command == OsStr::new("verify") => {
             verify(Path::new(public_key), Path::new(frame), Path::new(signature))
         }
@@ -113,39 +108,42 @@ fn main() -> ExitCode {
                 Path::new(signature),
             )
         }
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::from(2);
-        }
+        _ => return (2, Vec::new(), format!("{USAGE}\n").into_bytes()),
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("credential signature verifier: {error}");
-            ExitCode::FAILURE
-        }
+        Ok(response) => (0, response.to_vec(), Vec::new()),
+        Err(error) => (1, Vec::new(), format!("credential signature verifier: {error}\n").into_bytes()),
     }
+}
+
+fn main() -> ExitCode {
+    let arguments: Vec<OsString> = env::args_os().skip(1).collect();
+    if arguments.len() == 1 && arguments[0] == "serve" {
+        return serve();
+    }
+    let (code, stdout, stderr) = invoke(&arguments);
+    let wrote = io::stdout().lock().write_all(&stdout).and_then(|()| io::stdout().lock().flush());
+    let _ = io::stderr().lock().write_all(&stderr);
+    if wrote.is_err() {
+        eprintln!("credential signature verifier: cannot write response");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::from(code)
 }
 
 /// `serve`: the long-lived form a Lean Host keeps for its whole lifetime
 /// (`Compiler.NativeCoprocess`). Each request frame on stdin is one argv for
-/// this same executable; it runs as its own child process, so its files, its
-/// stdout, its stderr and its exit code are exactly the one-shot invocation's.
-/// The reply frame carries those three. The Host forks this small process
-/// once instead of forking its own large address space for every call.
+/// this same executable, answered by the one-shot invocation's own function
+/// (`invoke`) in this process, so its files, stdout, stderr and exit code are
+/// exactly the one-shot invocation's. The reply frame carries those three.
+/// The Host starts this small process once; no request forks.
 /// Frames: request `u32 argc, (u32 len, bytes)*`; reply `u32 code,
 /// u64 len, stdout, u64 len, stderr`; integers big-endian. EOF ends it.
 fn serve() -> ExitCode {
-    use std::ffi::OsString;
     use std::io::{BufReader, BufWriter, ErrorKind};
     use std::os::unix::ffi::OsStringExt;
-    use std::os::unix::process::ExitStatusExt;
-    use std::process::{Command, Stdio};
     const MAX_ARGS: usize = 64;
     const MAX_ARG_BYTES: usize = 64 * 1024;
-    let Ok(executable) = env::current_exe() else {
-        return ExitCode::from(2);
-    };
     let mut input = BufReader::new(io::stdin().lock());
     let mut output = BufWriter::new(io::stdout().lock());
     let mut word = [0u8; 4];
@@ -178,20 +176,14 @@ fn serve() -> ExitCode {
         if arguments[0] == "serve" {
             return ExitCode::FAILURE;
         }
-        let Ok(result) = Command::new(&executable)
-            .args(&arguments)
-            .stdin(Stdio::null())
-            .output()
-        else {
-            return ExitCode::FAILURE;
-        };
-        let code: u32 = match (result.status.code(), result.status.signal()) {
-            (Some(code), _) => code as u32,
-            (None, Some(signal)) => 128 + signal as u32,
-            (None, None) => 255,
-        };
+        // The same function a one-shot process runs, in this process: same
+        // stdout, stderr and exit code, without a fork and exec per check. A
+        // panic is reported as a panicking child's would be (code 101).
+        let (code, stdout, stderr) = std::panic::catch_unwind(|| invoke(&arguments))
+            .unwrap_or_else(|_| (101, Vec::new(), b"credential signature verifier: panicked\n".to_vec()));
+        let result = Reply { code: u32::from(code), stdout, stderr };
         let written = output
-            .write_all(&code.to_be_bytes())
+            .write_all(&result.code.to_be_bytes())
             .and_then(|()| output.write_all(&(result.stdout.len() as u64).to_be_bytes()))
             .and_then(|()| output.write_all(&result.stdout))
             .and_then(|()| output.write_all(&(result.stderr.len() as u64).to_be_bytes()))
