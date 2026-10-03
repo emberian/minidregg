@@ -1,7 +1,8 @@
 /- Preservation lemmas over the frozen demand graph and actual source typing.
-Complete all-constructor preservation remains an explicit obligation; the
-lemmas here do not claim that obligation merely by defining a typed relation. -/
+All-constructor preservation connects the checker derivation to every actual
+raw transition; termination, liveness and native authority are separate. -/
 import Theory.ObjectiveBendDemandTyping
+import Theory.ObjectiveBendDemandAdequacy
 namespace Minidregg.Theory.ObjectiveBendDemandPreservation
 open ObjectiveBendTypes ObjectiveBendTyping ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendDemandTyping
 set_option autoImplicit false
@@ -24,8 +25,8 @@ theorem ValueTyping.weaken {assumptions : Assumptions} {before after : AddressTy
   | record row members =>
       refine .record row ?_
       intro fuel name member lookup
-      obtain ⟨address,found,assigned⟩ := members fuel name member lookup
-      exact ⟨address,found,extension address member assigned⟩
+      obtain ⟨address,actual,found,assigned,path⟩ := members fuel name member lookup
+      exact ⟨address,actual,found,extension address actual assigned,path⟩
   | specification metadata ext => exact .specification (extension _ _ metadata) (extension _ _ ext)
   | prototype spec target => exact .prototype (extension _ _ spec) (extension _ _ target)
   | conversion prior agreement ih => exact .conversion ih agreement
@@ -132,8 +133,8 @@ theorem typed_control_not_refused {assumptions : Assumptions} {types : AddressTy
   cases typed <;> simp
 
 /-- Independently qualified graph invariants preserve invalid-update exclusion
-for EVERY stepRaw branch, including states whose type-preservation proof remains
-under construction. This does not establish bad-operand exclusion. -/
+for EVERY stepRaw branch. This independent local lemma uses only busy-update
+invariants; the all-constructor typing theorem below covers operand refusals. -/
 theorem typed_step_no_invalidUpdate {assumptions : Assumptions} {types : AddressTypes}
     {state : State} {result : Ty} (typed : StateTyping assumptions types state result) :
     (stepRaw state).control ≠ .refused .invalidUpdate :=
@@ -345,6 +346,128 @@ theorem canonical_variable_inverse {type : Ty} {index : Nat}
   cases type <;> simp [isVariable] at isVar
   simpa [Ty.canonical] using equal
 
+theorem insert_canonical_tail (row : Ty) (name : String) (member : Ty) :
+    (row.insertCanonical name member).tail = row.tail := by
+  induction row with
+  | field prior old tail oldIH tailIH =>
+      simp only [Ty.insertCanonical]
+      split <;> try rfl
+      split <;> simp_all [Ty.tail]
+  | _ => rfl
+
+theorem canonical_tail (row : Ty) : row.canonical.tail = row.tail.canonical := by
+  induction row with
+  | field name member tail memberIH tailIH =>
+      simpa only [Ty.canonical,Ty.tail,insert_canonical_tail] using tailIH
+  | _ => rfl
+
+/-- A successful finite lookup either uses the explicit prefix or discloses
+its precise unknown tail alias and the already-bounded lookup into that alias.
+Cycles are permitted; the theorem never asks an alias to terminate. -/
+theorem lookup_prefix_or_alias (bounds : Bounds) (fuel : Nat) (row : Ty)
+    (name : String) (member : Ty) (lookup : row.lookup bounds fuel name = some member) :
+    finiteLookup row name = some member ∨
+      (finiteLookup row name = none ∧ ∃ index bound depth,
+        row.tail = .variable index ∧ bounds.lookup index = some bound ∧ bound.lookup bounds depth name = some member) := by
+  induction fuel generalizing row with
+  | zero => simp [Ty.lookup] at lookup
+  | succ fuel ih =>
+      cases row with
+      | field prior type tail =>
+          by_cases hit : prior = name
+          · left; simpa [Ty.lookup,finiteLookup,hit] using lookup
+          · have next : tail.lookup bounds fuel name = some member := by simpa [Ty.lookup,hit] using lookup
+            rcases ih tail next with visible | ⟨absent,index,bound,depth,tailEq,found,next⟩
+            · exact Or.inl (by simpa [finiteLookup,hit] using visible)
+            · exact Or.inr ⟨by simpa [finiteLookup,hit] using absent,index,bound,depth,tailEq,found,next⟩
+      | «variable» index =>
+          cases found : bounds.lookup index with
+          | none => simp [Ty.lookup,found] at lookup
+          | some bound =>
+            exact Or.inr ⟨rfl,index,bound,fuel,rfl,found,by simpa [Ty.lookup,found] using lookup⟩
+      | _ => simp [Ty.lookup] at lookup
+
+theorem finite_lookup_realizes (bounds : Bounds) (row : Ty) (name : String) (member : Ty)
+    (visible : finiteLookup row name = some member) :
+    ∃ fuel, row.lookup bounds fuel name = some member := by
+  induction row with
+  | field prior type tail typeIH tailIH =>
+      by_cases hit : prior = name
+      · exact ⟨1,by simpa [finiteLookup,Ty.lookup,hit] using visible⟩
+      · obtain ⟨fuel,lookup⟩ := tailIH (by simpa [finiteLookup,hit] using visible)
+        exact ⟨fuel+1,by simpa [Ty.lookup,hit] using lookup⟩
+  | _ => simp [finiteLookup] at visible
+
+theorem alias_tail_lookup_realizes (bounds : Bounds) (row : Ty) (name : String) (member : Ty)
+    (absent : finiteLookup row name = none) (index : Nat) (bound : Ty) (depth : Nat)
+    (tail : row.tail = .variable index) (found : bounds.lookup index = some bound)
+    (lookup : bound.lookup bounds depth name = some member) :
+    ∃ fuel, row.lookup bounds fuel name = some member := by
+  induction row with
+  | field prior type rest typeIH restIH =>
+      have hit : prior ≠ name := by intro same; simp [finiteLookup,same] at absent
+      obtain ⟨fuel,next⟩ := restIH (by simpa [finiteLookup,hit] using absent) tail
+      exact ⟨fuel+1,by simpa [Ty.lookup,hit] using next⟩
+  | «variable» prior =>
+      have same : prior = index := by simpa [Ty.tail] using tail
+      subst prior
+      exact ⟨depth+1,by simpa [Ty.lookup,found] using lookup⟩
+  | _ => simp [Ty.tail] at tail
+
+/-- The checker's finite row equality transports every actual bounded lookup,
+including a disclosed recursive tail. Address member types retain a concrete
+canonical-equality proof; unknown members are never fabricated. -/
+theorem canonical_lookup_transport (bounds : Bounds) (actual expected : Ty)
+    (agreement : actual.canonical = expected.canonical) (fuel : Nat) (name : String) (member : Ty)
+    (lookup : expected.lookup bounds fuel name = some member) :
+    ∃ depth actualMember, actual.lookup bounds depth name = some actualMember ∧
+      actualMember.canonical = member.canonical := by
+  have prefixes := canonical_row_lookup_agreement actual expected name agreement
+  rcases lookup_prefix_or_alias bounds fuel expected name member lookup with visible | ⟨absent,index,bound,depth,tail,found,next⟩
+  · rw [visible] at prefixes
+    cases actualPrefix : finiteLookup actual name with
+    | none => simp [actualPrefix] at prefixes
+    | some actualMember =>
+      obtain ⟨depth,actualLookup⟩ := finite_lookup_realizes bounds actual name actualMember actualPrefix
+      exact ⟨depth,actualMember,actualLookup,by simpa [actualPrefix] using prefixes⟩
+  · have actualAbsent : finiteLookup actual name = none := by
+      rw [absent] at prefixes
+      cases actualPrefix : finiteLookup actual name <;> simp_all
+    have tails : actual.tail.canonical = expected.tail.canonical := by
+      simpa only [canonical_tail] using congrArg Ty.tail agreement
+    have actualTail : actual.tail = .variable index :=
+      canonical_variable_inverse (by simpa [tail,Ty.canonical] using tails)
+    obtain ⟨fuel,actualLookup⟩ := alias_tail_lookup_realizes bounds actual name member actualAbsent index bound depth actualTail found next
+    exact ⟨fuel,member,actualLookup,rfl⟩
+
+theorem same_type_lookup_transport {assumptions : Assumptions} {actual expected : Ty}
+    (agreement : sameType assumptions actual expected = true) (fuel : Nat) (name : String) (member : Ty)
+    (lookup : expected.lookup assumptions.bounds fuel name = some member) :
+    ∃ depth actualMember, actual.lookup assumptions.bounds depth name = some actualMember ∧
+      actualMember.canonical = member.canonical := by
+  simp only [sameType,Bool.or_eq_true] at agreement
+  rcases agreement with (canonical | aliasActual) | aliasExpected
+  · exact canonical_lookup_transport assumptions.bounds actual expected (by simpa using canonical) fuel name member lookup
+  · cases actual <;> simp at aliasActual
+    rename_i index
+    cases found : assumptions.bounds.lookup index with
+    | none => simp [found] at aliasActual
+    | some bound =>
+      have equal : bound.canonical = expected.canonical := by simpa [found] using aliasActual
+      obtain ⟨depth,actualMember,actualLookup,memberEq⟩ := canonical_lookup_transport assumptions.bounds bound expected equal fuel name member lookup
+      exact ⟨depth+1,actualMember,by simpa [Ty.lookup,found] using actualLookup,memberEq⟩
+  · cases expected <;> simp at aliasExpected
+    rename_i index
+    cases found : assumptions.bounds.lookup index with
+    | none => simp [found] at aliasExpected
+    | some bound =>
+      have equal : bound.canonical = actual.canonical := by simpa [found] using aliasExpected
+      cases fuel with
+      | zero => simp [Ty.lookup] at lookup
+      | succ fuel =>
+        have next : bound.lookup assumptions.bounds fuel name = some member := by simpa [Ty.lookup,found] using lookup
+        exact canonical_lookup_transport assumptions.bounds actual bound equal.symm fuel name member next
+
 /-- Declared aliases have a deterministic head equation. Its normalization
 relation is partial: cyclic aliases need not produce a head, and no general Fix
 computation or subtype oracle is used in conversion. -/
@@ -498,12 +621,860 @@ theorem boolean_value_form {assumptions : Assumptions} {types : AddressTypes}
   | boolean boolean => exact ⟨boolean,rfl⟩
   | _ => cases scalarKind
 
-/-- Finite source conversion evidence is retained as a path rather than an
-assumed transitive subtype decision procedure. -/
-inductive ConversionPath (assumptions : Assumptions) : Ty → Ty → Prop where
-  | refl (type : Ty) : ConversionPath assumptions type type
-  | step {first middle last : Ty} : ConversionPath assumptions first middle →
-      sameType assumptions middle last = true → ConversionPath assumptions first last
+theorem canonical_same_type (assumptions : Assumptions) (first second : Ty)
+    (agreement : first.canonical = second.canonical) : sameType assumptions first second = true := by
+  simp [sameType,agreement]
+
+theorem specification_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {metadataType extensionType : Ty}
+    (typed : ValueTyping assumptions types value (.specification metadataType extensionType)) :
+    ∃ metadata extension, value = .specification metadata extension := by
+  obtain ⟨head,normal,kind⟩ := value_head_correct typed
+  have same := head_normalizes_unique normal (.direct (.specification metadataType extensionType) rfl)
+  rw [same,Ty.canonical] at kind
+  have shape : valueHead value = .specification := by simpa [typeHead] using kind.symm
+  cases value with
+  | specification metadata extension => exact ⟨metadata,extension,rfl⟩
+  | _ => cases shape
+
+theorem value_specification_fields {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {type : Ty} (typed : ValueTyping assumptions types value type) :
+    ∀ metadata extension, value = .specification metadata extension →
+      ∃ metadataType extensionType,
+        types[metadata]? = some metadataType ∧ types[extension]? = some extensionType ∧
+        HeadNormalizes assumptions.bounds type (.specification metadataType.canonical extensionType.canonical) := by
+  induction typed with
+  | natural value => intros; contradiction
+  | boolean value => intros; contradiction
+  | label value => intros; contradiction
+  | closure environment body safe valid captures => intros; contradiction
+  | record isRow members => intros; contradiction
+  | specification metadataAssigned extensionAssigned =>
+      intro metadata extension same
+      cases same
+      exact ⟨_,_,metadataAssigned,extensionAssigned,.direct _ rfl⟩
+  | prototype spec target => intros; contradiction
+  | conversion prior agreement ih =>
+      intro metadata extension same
+      obtain ⟨metadataType,extensionType,metadataAssigned,extensionAssigned,normal⟩ := ih metadata extension same
+      exact ⟨metadataType,extensionType,metadataAssigned,extensionAssigned,same_type_preserves_head agreement normal⟩
+
+theorem stack_metadata_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ rest, stack = .metadata :: rest → ∃ metadataType extensionType,
+      ValueTyping assumptions types value (.specification metadataType extensionType) ∧
+      StackTyping assumptions types rest metadataType result := by
+  induction continuation with
+  | nil type => intro rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro rest same
+      cases same
+      cases frame with
+      | metadata _ _ => exact ⟨_,_,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- Metadata projection enters the actual stored address representative and
+carries its component conversion into the continuation. No address is retyped
+and a law-bearing specification grants no native authority. -/
+theorem typed_metadata_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value) (stack : state.stack = .metadata :: rest) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control
+    rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨metadataType,extensionType,specTyped,restTyped⟩ := stack_metadata_value typed.stack valueTyped rest stack
+  obtain ⟨metadata,extension,rfl⟩ := specification_value_form specTyped
+  obtain ⟨actualMetadata,actualExtension,metadataAssigned,extensionAssigned,normal⟩ :=
+    value_specification_fields specTyped metadata extension rfl
+  have same := head_normalizes_unique normal (.direct (.specification metadataType extensionType) rfl)
+  have component : actualMetadata.canonical = metadataType.canonical := by
+    simpa [Ty.canonical] using congrArg (fun type => match type with | .specification metadata _ => metadata | _ => type) same
+  refine ⟨step_certificate typed actualMetadata ?_ ?_ ?_⟩
+  · simpa [stepRaw,returned,stack] using typed.heap
+  · simpa [stepRaw,returned,stack] using (ControlTyping.enter metadataAssigned)
+  · simpa [stepRaw,returned,stack] using (StackTyping.conversion (canonical_same_type assumptions _ _ component) restTyped)
+
+def projectionFrame (specification : Bool) : Frame := if specification then .reflect else .project
+
+theorem prototype_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {specType targetType : Ty}
+    (typed : ValueTyping assumptions types value (.prototype specType targetType)) :
+    ∃ spec target, value = .prototype spec target := by
+  obtain ⟨head,normal,kind⟩ := value_head_correct typed
+  have same := head_normalizes_unique normal (.direct (.prototype specType targetType) rfl)
+  rw [same,Ty.canonical] at kind
+  have shape : valueHead value = .prototype := by simpa [typeHead] using kind.symm
+  cases value with
+  | prototype spec target => exact ⟨spec,target,rfl⟩
+  | _ => cases shape
+
+theorem value_prototype_fields {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {type : Ty} (typed : ValueTyping assumptions types value type) :
+    ∀ spec target, value = .prototype spec target → ∃ specType targetType,
+      types[spec]? = some specType ∧ types[target]? = some targetType ∧
+      HeadNormalizes assumptions.bounds type (.prototype specType.canonical targetType.canonical) := by
+  induction typed with
+  | natural value => intros; contradiction
+  | boolean value => intros; contradiction
+  | label value => intros; contradiction
+  | closure environment body safe valid captures => intros; contradiction
+  | record isRow members => intros; contradiction
+  | specification metadata ext => intros; contradiction
+  | prototype specAssigned targetAssigned =>
+      intro spec target same; cases same
+      exact ⟨_,_,specAssigned,targetAssigned,.direct _ rfl⟩
+  | conversion prior agreement ih =>
+      intro spec target same
+      obtain ⟨specType,targetType,specAssigned,targetAssigned,normal⟩ := ih spec target same
+      exact ⟨specType,targetType,specAssigned,targetAssigned,same_type_preserves_head agreement normal⟩
+
+theorem stack_projection_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ specification rest, stack = projectionFrame specification :: rest → ∃ specType targetType,
+      ValueTyping assumptions types value (.prototype specType targetType) ∧
+      StackTyping assumptions types rest (if specification then specType else targetType) result := by
+  induction continuation with
+  | nil type => intro specification rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro specification rest same
+      cases specification <;> simp only [projectionFrame,Bool.false_eq_true,if_false,if_true] at same
+      · cases same
+        cases frame with | project _ _ => exact ⟨_,_,valueTyped,restTyped⟩
+      · cases same
+        cases frame with | reflect _ _ => exact ⟨_,_,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- Reflection and target projection preserve pointer identity and transport
+component conversions to the continuation. The law/native-authority layer is
+not part of this effect-free runtime typing judgment. -/
+theorem typed_prototype_projection_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {rest : List Frame}
+    (typed : StateTyping assumptions types state result) (specification : Bool)
+    (returned : state.control = .returned value)
+    (stack : state.stack = projectionFrame specification :: rest) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control; rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨specType,targetType,protoTyped,restTyped⟩ := stack_projection_value typed.stack valueTyped specification rest stack
+  obtain ⟨spec,target,rfl⟩ := prototype_value_form protoTyped
+  obtain ⟨actualSpec,actualTarget,specAssigned,targetAssigned,normal⟩ := value_prototype_fields protoTyped spec target rfl
+  have same := head_normalizes_unique normal (.direct (.prototype specType targetType) rfl)
+  have specComponent : actualSpec.canonical = specType.canonical := by
+    simpa [Ty.canonical] using congrArg (fun type => match type with | .prototype spec _ => spec | _ => type) same
+  have targetComponent : actualTarget.canonical = targetType.canonical := by
+    simpa [Ty.canonical] using congrArg (fun type => match type with | .prototype _ target => target | _ => type) same
+  cases specification
+  · refine ⟨step_certificate typed actualTarget ?_ ?_ ?_⟩
+    · simpa [stepRaw,returned,stack,projectionFrame] using typed.heap
+    · simpa [stepRaw,returned,stack,projectionFrame] using (ControlTyping.enter targetAssigned)
+    · simpa [stepRaw,returned,stack,projectionFrame] using
+        (StackTyping.conversion (canonical_same_type assumptions _ _ targetComponent) restTyped)
+  · refine ⟨step_certificate typed actualSpec ?_ ?_ ?_⟩
+    · simpa [stepRaw,returned,stack,projectionFrame] using typed.heap
+    · simpa [stepRaw,returned,stack,projectionFrame] using (ControlTyping.enter specAssigned)
+    · simpa [stepRaw,returned,stack,projectionFrame] using
+        (StackTyping.conversion (canonical_same_type assumptions _ _ specComponent) restTyped)
+
+structure CapturedFunction (assumptions : Assumptions) (types : AddressTypes)
+    (body : Term) (environment : Environment) where
+  context : Context
+  annotation : LambdaAnnotation
+  uses : Uses
+  environmentTyped : EnvironmentTyping types context environment
+  bodyTyped : PartialTyping assumptions (⟨annotation.domain,annotation.parameter⟩ :: context) body annotation.codomain uses
+  safe : safeUses (⟨annotation.domain,annotation.parameter⟩ :: context) uses = true
+  valid : validContext assumptions.shareableVariables (⟨annotation.domain,annotation.parameter⟩ :: context) = true
+  captures : reusableAllowed assumptions annotation.reuse context uses.tail = true
+
+def CapturedFunction.arrow {assumptions : Assumptions} {types : AddressTypes}
+    {body : Term} {environment : Environment} (captured : CapturedFunction assumptions types body environment) : Ty :=
+  .arrow captured.annotation.reuse captured.annotation.parameter captured.annotation.domain captured.annotation.codomain
+
+theorem value_closure_fields {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {type : Ty} (typed : ValueTyping assumptions types value type) :
+    ∀ body environment, value = .closure body environment →
+      ∃ captured : CapturedFunction assumptions types body environment,
+        HeadNormalizes assumptions.bounds type captured.arrow.canonical := by
+  induction typed with
+  | natural value => intros; contradiction
+  | boolean value => intros; contradiction
+  | label value => intros; contradiction
+  | record isRow members => intros; contradiction
+  | specification metadata ext => intros; contradiction
+  | prototype spec target => intros; contradiction
+  | closure env bodyTyped safe valid captures =>
+      intro body environment same; cases same
+      exact ⟨⟨_,_,_,env,bodyTyped,safe,valid,captures⟩,.direct _ rfl⟩
+  | conversion prior agreement ih =>
+      intro body environment same
+      obtain ⟨captured,normal⟩ := ih body environment same
+      exact ⟨captured,same_type_preserves_head agreement normal⟩
+
+theorem callable_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {functionType domain codomain : Ty} {reuse : Reuse} {quantity : Quantity}
+    (typed : ValueTyping assumptions types value functionType)
+    (callableEq : callable functionType = .arrow reuse quantity domain codomain) :
+    (∃ body environment, value = .closure body environment) ∨
+      (∃ metadata extension, value = .specification metadata extension) := by
+  cases functionType with
+  | arrow r q d c =>
+      obtain ⟨head,normal,kind⟩ := value_head_correct typed
+      have same := head_normalizes_unique normal (.direct (.arrow r q d c) rfl)
+      rw [same,Ty.canonical] at kind
+      have shape : valueHead value = .function := by simpa [typeHead] using kind.symm
+      cases value with
+      | closure body environment => exact .inl ⟨body,environment,rfl⟩
+      | _ => cases shape
+  | specification metadata extension => exact .inr (specification_value_form typed)
+  | _ => simp [callable] at callableEq
+
+theorem closure_callable_type {bounds : Bounds} {functionType : Ty}
+    {reuse actualReuse : Reuse} {quantity actualQuantity : Quantity}
+    {domain codomain actualDomain actualCodomain : Ty}
+    (normal : HeadNormalizes bounds functionType (Ty.arrow actualReuse actualQuantity actualDomain actualCodomain).canonical)
+    (callableEq : callable functionType = .arrow reuse quantity domain codomain) :
+    functionType = .arrow reuse quantity domain codomain := by
+  cases functionType with
+  | arrow r q d c => exact callableEq
+  | specification metadata extension =>
+      have same := head_normalizes_unique normal (.direct (.specification metadata extension) rfl)
+      simp [Ty.canonical] at same
+  | _ => simp [callable] at callableEq
+
+theorem specification_callable_type {bounds : Bounds} {functionType : Ty}
+    {reuse : Reuse} {quantity : Quantity} {domain codomain metadata extension : Ty}
+    (normal : HeadNormalizes bounds functionType (Ty.specification metadata extension).canonical)
+    (callableEq : callable functionType = .arrow reuse quantity domain codomain) :
+    ∃ metadataType extensionType, functionType = .specification metadataType extensionType := by
+  cases functionType with
+  | specification metadata extension => exact ⟨metadata,extension,rfl⟩
+  | arrow r q d c =>
+      have same := head_normalizes_unique normal (.direct (.arrow r q d c) rfl)
+      simp [Ty.canonical] at same
+  | _ => simp [callable] at callableEq
+
+theorem stack_argument_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ argument environment rest, stack = .argument argument environment :: rest →
+      ∃ functionType domain codomain reuse quantity,
+        ∃ origin : ClosureTyping assumptions types ⟨argument,environment⟩ domain,
+          callable functionType = .arrow reuse quantity domain codomain ∧
+          argumentAllowed assumptions quantity origin.context domain origin.uses = true ∧
+          ValueTyping assumptions types value functionType ∧
+          StackTyping assumptions types rest codomain result := by
+  induction continuation with
+  | nil type => intro argument environment rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro argument environment rest same; cases same
+      cases frame with
+      | argument origin callableEq copyAllowed => exact ⟨_,_,_,_,_,origin,callableEq,copyAllowed,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- Calling a lexical closure allocates the actual argument source at the
+closure's authored domain representative. Its body keeps the original capture
+and quantity evidence; component conversions remain in the continuation. A
+first-class specification enters its stored extension without consuming the
+argument frame. This follows the actual machine's two application branches. -/
+theorem typed_argument_return_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {argument : Term}
+    {environment : Environment} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value)
+    (stack : state.stack = .argument argument environment :: rest) :
+    ∃ after, TypeExtension types after ∧ Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control; rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨ft,domain,codomain,reuse,quantity,argumentOrigin,callableEq,copyAllowed,fnTyped,restTyped⟩ :=
+    stack_argument_value typed.stack valueTyped argument environment rest stack
+  rcases callable_value_form fnTyped callableEq with ⟨body,capturedEnvironment,rfl⟩ | ⟨metadata,extension,rfl⟩
+  · obtain ⟨captured,normal⟩ := value_closure_fields fnTyped body capturedEnvironment rfl
+    have ftEq := closure_callable_type normal callableEq
+    rw [ftEq] at normal
+    have same := head_normalizes_unique normal (.direct (.arrow reuse quantity domain codomain) rfl)
+    have domainEq : captured.annotation.domain.canonical = domain.canonical := by
+      simpa [CapturedFunction.arrow,Ty.canonical] using
+        congrArg (fun type => match type with | .arrow _ _ domain _ => domain | _ => type) same
+    have codomainEq : captured.annotation.codomain.canonical = codomain.canonical := by
+      simpa [CapturedFunction.arrow,Ty.canonical] using
+        congrArg (fun type => match type with | .arrow _ _ _ codomain => codomain | _ => type) same
+    let after := types ++ [captured.annotation.domain]
+    have extension : TypeExtension types after := type_extension_append types _
+    have assigned : after[state.heap.size]? = some captured.annotation.domain := by rw [← typed.heap.length]; simp [after]
+    let argumentNext : ClosureTyping assumptions after ⟨argument,environment⟩ captured.annotation.domain :=
+      ⟨argumentOrigin.context,argumentOrigin.uses,argumentOrigin.environment.weaken extension,
+        .conversion argumentOrigin.source (canonical_same_type assumptions _ _ domainEq.symm),argumentOrigin.safe,argumentOrigin.contextValid⟩
+    let bodyNext : ClosureTyping assumptions after ⟨body,state.heap.size :: capturedEnvironment⟩ captured.annotation.codomain :=
+      ⟨⟨captured.annotation.domain,captured.annotation.parameter⟩ :: captured.context,captured.uses,
+        (captured.environmentTyped.weaken extension).cons assigned,captured.bodyTyped,captured.safe,captured.valid⟩
+    refine ⟨after,extension,⟨step_alloc_certificate typed after captured.annotation.codomain ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,returned,stack] using heap_typed_push typed.heap (.suspended argumentNext)
+    · simpa [stepRaw,returned,stack] using (ControlTyping.evaluate bodyNext)
+    · simpa [stepRaw,returned,stack] using
+        (StackTyping.weaken extension (.conversion (canonical_same_type assumptions _ _ codomainEq) restTyped))
+  · obtain ⟨actualMetadata,actualExtension,metadataAssigned,extensionAssigned,normal⟩ := value_specification_fields fnTyped metadata extension rfl
+    obtain ⟨metadataType,extensionType,ftEq⟩ := specification_callable_type normal callableEq
+    rw [ftEq] at normal callableEq
+    have same := head_normalizes_unique normal (.direct (.specification metadataType extensionType) rfl)
+    have extensionEq : actualExtension.canonical = extensionType.canonical := by
+      simpa [Ty.canonical] using
+        congrArg (fun type => match type with | .specification _ extension => extension | _ => type) same
+    have extensionCallable : callable extensionType = .arrow reuse quantity domain codomain := callableEq
+    refine ⟨types,type_extension_refl types,⟨step_certificate typed actualExtension ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,returned,stack] using typed.heap
+    · simpa [stepRaw,returned,stack] using (ControlTyping.enter extensionAssigned)
+    · simpa [stepRaw,returned,stack] using
+        (StackTyping.conversion (canonical_same_type assumptions _ _ extensionEq)
+          (.cons (.argument argumentOrigin extensionCallable copyAllowed) restTyped))
+
+/-- Inserting a lexical slot shifts precisely the indices at/after its depth.
+This is independent of rigid future-type variables in annotations. -/
+def shiftIndex (depth index : Nat) : Nat := if index < depth then index else index+1
+
+theorem lift_shift_index (depth : Nat) : liftRename (shiftIndex depth) = shiftIndex (depth+1) := by
+  funext index
+  cases index <;> simp [liftRename,shiftIndex]
+  split <;> omega
+
+theorem binding_insert_shift {context : Context} {index depth : Nat} {declared binding : Binding}
+    (found : context[index]? = some declared) :
+    (context.insertIdx depth binding)[shiftIndex depth index]? = some declared := by
+  by_cases before : index < depth
+  · simpa [shiftIndex,before,List.getElem?_insertIdx_of_lt before] using found
+  · have after : depth < index+1 := by omega
+    simpa [shiftIndex,before,List.getElem?_insertIdx_of_gt after] using found
+
+theorem zero_uses_insert (context : Context) (binding : Binding) (depth : Nat)
+    (bound : depth ≤ context.length) :
+    zeroUses (context.insertIdx depth binding) = (zeroUses context).insertIdx depth 0 := by
+  induction depth generalizing context with
+  | zero => simp [zeroUses,List.insertIdx_zero,List.replicate_succ]
+  | succ depth ih =>
+      cases context with
+      | nil => simp at bound
+      | cons first rest =>
+          have tailBound : depth ≤ rest.length := by simpa using bound
+          simpa [zeroUses,List.insertIdx_succ_cons,List.replicate_succ] using congrArg (List.cons 0) (ih rest tailBound)
+
+theorem add_uses_insert (first second : Uses) (depth : Nat)
+    (lengths : first.length = second.length) (bound : depth ≤ first.length) :
+    addUses (first.insertIdx depth 0) (second.insertIdx depth 0) = (addUses first second).insertIdx depth 0 := by
+  induction depth generalizing first second with
+  | zero => rfl
+  | succ depth ih =>
+      cases first with
+      | nil => simp at bound
+      | cons a first =>
+          cases second with
+          | nil => simp at lengths
+          | cons b second =>
+              simp only [List.length_cons,Nat.add_le_add_iff_right] at bound
+              have lengths' : first.length = second.length := Nat.succ.inj lengths
+              simpa [addUses,List.insertIdx_succ_cons,List.zipWith] using congrArg (List.cons (a+b)) (ih first second lengths' bound)
+
+theorem variable_uses_lookup (context : Context) (index query : Nat) :
+    (variableUses context index)[query]? =
+      if query < context.length then some (if query = index then 1 else 0) else none := by
+  by_cases inside : query < context.length <;> simp [variableUses,inside]
+
+theorem variable_uses_insert (context : Context) (binding : Binding) (index depth : Nat)
+    (bound : depth ≤ context.length) :
+    variableUses (context.insertIdx depth binding) (shiftIndex depth index) =
+      (variableUses context index).insertIdx depth 0 := by
+  apply List.ext_getElem?
+  intro query
+  rw [variable_uses_lookup,List.length_insertIdx_of_le_length bound binding,List.getElem?_insertIdx]
+  by_cases before : query < depth
+  · have inside : query < context.length := by omega
+    have shifted : query = shiftIndex depth index ↔ query = index := by
+      by_cases prior : index < depth <;> simp [shiftIndex,prior] <;> omega
+    have newInside : query < context.length+1 := by omega
+    simp [before,inside,newInside,variable_uses_lookup,shifted]
+  · by_cases inserted : query = depth
+    · subst query
+      have notShifted : depth ≠ shiftIndex depth index := by
+        by_cases prior : index < depth <;> simp [shiftIndex,prior] <;> omega
+      have newInside : depth < context.length+1 := by omega
+      simp [before,bound,newInside,notShifted,variableUses]
+    · have positive : 0 < query := by omega
+      have shifted : query = shiftIndex depth index ↔ query-1 = index := by
+        by_cases prior : index < depth <;> simp [shiftIndex,prior] <;> omega
+      have range : query < context.length+1 ↔ query-1 < context.length := by omega
+      simp [before,inserted,variable_uses_lookup,range,shifted]
+
+theorem safe_quantity_zero (quantity : Quantity) : safeQuantity quantity 0 = true := by
+  cases quantity <;> rfl
+
+theorem safe_uses_insert (context : Context) (uses : Uses) (depth : Nat) (binding : Binding)
+    (safe : safeUses context uses = true) (bound : depth ≤ context.length) :
+    safeUses (context.insertIdx depth binding) (uses.insertIdx depth 0) = true := by
+  induction depth generalizing context uses with
+  | zero => simpa [safeUses,List.insertIdx_zero,safe_quantity_zero] using safe
+  | succ depth ih =>
+      cases context with
+      | nil => simp at bound
+      | cons first context =>
+          cases uses with
+          | nil => simp [safeUses] at safe
+          | cons count uses =>
+              have tailBound : depth ≤ context.length := by simpa using bound
+              have facts : safeQuantity first.quantity count = true ∧ safeUses context uses = true := by
+                simpa [safeUses,List.zip,List.all_cons,Bool.and_assoc,Bool.and_left_comm,Bool.and_comm,and_assoc,and_left_comm,and_comm] using safe
+              have tail := ih context uses facts.2 tailBound
+              simpa [safeUses,List.insertIdx_succ_cons,List.zip,List.all_cons,Bool.and_assoc,Bool.and_left_comm,Bool.and_comm,and_assoc,and_left_comm,and_comm] using And.intro facts.1 tail
+
+theorem reusable_captures_insert (variables : List Nat) (context : Context) (uses : Uses)
+    (depth : Nat) (binding : Binding)
+    (captures : reusableCaptures variables context uses = true) (bound : depth ≤ context.length) :
+    reusableCaptures variables (context.insertIdx depth binding) (uses.insertIdx depth 0) = true := by
+  induction depth generalizing context uses with
+  | zero => simpa [reusableCaptures,List.insertIdx_zero] using captures
+  | succ depth ih =>
+      cases context with
+      | nil => simp at bound
+      | cons first context =>
+          cases uses with
+          | nil => simp [reusableCaptures] at captures
+          | cons count uses =>
+              have tailBound : depth ≤ context.length := by simpa using bound
+              have facts : (count == 0 || (first.quantity == .unrestricted && first.type.shareableUnder variables)) = true ∧
+                  reusableCaptures variables context uses = true := by
+                simpa [reusableCaptures,List.zip,List.all_cons,Bool.and_assoc,Bool.and_left_comm,Bool.and_comm,and_assoc,and_left_comm,and_comm] using captures
+              have tail := ih context uses facts.2 tailBound
+              simpa [reusableCaptures,List.insertIdx_succ_cons,List.zip,List.all_cons,Bool.and_assoc,Bool.and_left_comm,Bool.and_comm,and_assoc,and_left_comm,and_comm] using And.intro facts.1 tail
+
+theorem valid_context_insert (variables : List Nat) (context : Context) (depth : Nat) (binding : Binding)
+    (valid : validContext variables context = true) (bindingValid : validContext variables [binding] = true)
+    (bound : depth ≤ context.length) : validContext variables (context.insertIdx depth binding) = true := by
+  induction depth generalizing context with
+  | zero => simpa [validContext,List.insertIdx_zero] using And.intro bindingValid valid
+  | succ depth ih =>
+      cases context with
+      | nil => simp at bound
+      | cons first context =>
+          have tailBound : depth ≤ context.length := by simpa using bound
+          have facts : (first.quantity != .unrestricted || first.type.shareableUnder variables) = true ∧ validContext variables context = true := by
+            simpa [validContext] using valid
+          simpa [validContext,List.insertIdx_succ_cons] using And.intro facts.1 (ih context facts.2 tailBound)
+
+theorem reusable_allowed_insert (assumptions : Assumptions) (reuse : Reuse)
+    (context : Context) (uses : Uses) (depth : Nat) (binding : Binding)
+    (allowed : reusableAllowed assumptions reuse context uses = true) (bound : depth ≤ context.length) :
+    reusableAllowed assumptions reuse (context.insertIdx depth binding) (uses.insertIdx depth 0) = true := by
+  cases reuse with
+  | once => rfl
+  | reusable =>
+      have captures : reusableCaptures assumptions.shareableVariables context uses = true := by simpa [reusableAllowed] using allowed
+      simpa [reusableAllowed] using reusable_captures_insert assumptions.shareableVariables context uses depth binding captures bound
+
+theorem argument_allowed_insert (assumptions : Assumptions) (quantity : Quantity)
+    (context : Context) (type : Ty) (uses : Uses) (depth : Nat) (binding : Binding)
+    (allowed : argumentAllowed assumptions quantity context type uses = true) (bound : depth ≤ context.length) :
+    argumentAllowed assumptions quantity (context.insertIdx depth binding) type (uses.insertIdx depth 0) = true := by
+  cases quantity with
+  | unrestricted =>
+      have facts : type.shareableUnder assumptions.shareableVariables = true ∧
+          reusableCaptures assumptions.shareableVariables context uses = true := by simpa [argumentAllowed] using allowed
+      simpa [argumentAllowed] using And.intro facts.1
+        (reusable_captures_insert assumptions.shareableVariables context uses depth binding facts.2 bound)
+  | _ => rfl
+
+/-- Under a lambda/conditional binder the inserted free slot is one place
+farther down; dropping that original binder restores the outer use vector. -/
+theorem uses_tail_insert {uses : Uses} (nonempty : 0 < uses.length) (depth : Nat) :
+    (uses.insertIdx (depth+1) 0).tail = uses.tail.insertIdx depth 0 := by
+  cases uses with
+  | nil => simp at nonempty
+  | cons head tail => rfl
+
+theorem insert_usage_bound {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses} (typed : PartialTyping assumptions context term type uses)
+    {depth : Nat} (bound : depth ≤ context.length) : depth ≤ uses.length := by rw [source_uses_length typed]; exact bound
+
+/-- General capture-sensitive lexical weakening over EVERY source constructor,
+including nested fields and conditional/lambda binders. The inserted slot is
+unused; its declared context validity is checked rather than assumed pure. -/
+theorem source_insert_binding {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (typed : PartialTyping assumptions context term type uses) :
+    ∀ depth binding, depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
+      PartialTyping assumptions (context.insertIdx depth binding) (term.rename (shiftIndex depth)) type (uses.insertIdx depth 0) := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type uses _ => ∀ depth binding,
+      depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
+      PartialTyping assumptions (context.insertIdx depth binding) (term.rename (shiftIndex depth)) type (uses.insertIdx depth 0))
+    (motive_2 := fun context fields row uses _ => ∀ depth binding,
+      depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
+      FieldsTyping assumptions (context.insertIdx depth binding)
+        (fields.map fun field => (field.1,field.2.rename (shiftIndex depth))) row (uses.insertIdx depth 0))
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+  · intro context index declared found depth binding bound bindingValid
+    simpa only [Term.rename,← variable_uses_insert context binding index depth bound] using
+      (PartialTyping.bound (binding_insert_shift found) : PartialTyping assumptions (context.insertIdx depth binding)
+        (.bound (shiftIndex depth index)) declared.type (variableUses (context.insertIdx depth binding) (shiftIndex depth index)))
+  · intro context value depth binding bound bindingValid
+    simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
+      (PartialTyping.natural (context.insertIdx depth binding) value : PartialTyping assumptions _ (.nat value) .natural _)
+  · intro context value depth binding bound bindingValid
+    simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
+      (PartialTyping.boolean (context.insertIdx depth binding) value : PartialTyping assumptions _ (.boolean value) .boolean _)
+  · intro context value depth binding bound bindingValid
+    simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
+      (PartialTyping.label (context.insertIdx depth binding) value : PartialTyping assumptions _ (.label value) (literalType value) _)
+  · intro context body annotation uses bodyTyped safe valid captures ih depth binding bound bindingValid
+    have bodyBound : depth+1 ≤ (⟨annotation.domain,annotation.parameter⟩ :: context).length := by simpa using bound
+    have nonempty : 0 < uses.length := by rw [source_uses_length bodyTyped]; simp
+    have bodyNext := ih (depth+1) binding bodyBound bindingValid
+    have safeNext := safe_uses_insert _ uses (depth+1) binding safe bodyBound
+    have validNext := valid_context_insert _ _ (depth+1) binding valid bindingValid bodyBound
+    have capturesNext := reusable_allowed_insert assumptions annotation.reuse context uses.tail depth binding captures bound
+    simpa only [Term.rename,lift_shift_index,List.insertIdx_succ_cons,uses_tail_insert nonempty] using
+      (PartialTyping.lambda bodyNext safeNext validNext (by simpa only [List.insertIdx_succ_cons,uses_tail_insert nonempty] using capturesNext))
+  · intro context term actual expected uses prior agreement ih depth binding bound bindingValid
+    exact .conversion (ih depth binding bound bindingValid) agreement
+  · intro context fn arg functionType argumentType domain codomain fu au reuse quantity fnTyped argTyped callableEq same allowed ihFn ihArg depth binding bound bindingValid
+    have counts := add_uses_insert fu au depth ((source_uses_length fnTyped).trans (source_uses_length argTyped).symm) (insert_usage_bound fnTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.application (ihFn depth binding bound bindingValid) (ihArg depth binding bound bindingValid) callableEq same
+        (argument_allowed_insert assumptions quantity context argumentType au depth binding allowed bound))
+  · intro context fields row uses fieldsTyped ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.record (ih depth binding bound bindingValid))
+  · intro context target targetType member uses name fuel targetTyped lookup ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.get (ih depth binding bound bindingValid) lookup)
+  · intro context target fields targetType row tu fu targetTyped fieldsTyped isRow ihTarget ihFields depth binding bound bindingValid
+    have fieldLength := source_uses_length (PartialTyping.record fieldsTyped)
+    have counts := add_uses_insert tu fu depth ((source_uses_length targetTyped).trans fieldLength.symm) (insert_usage_bound targetTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.extend (ihTarget depth binding bound bindingValid) (ihFields depth binding bound bindingValid) isRow)
+  · intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped ihMetadata ihExtension depth binding bound bindingValid
+    have counts := add_uses_insert mu eu depth ((source_uses_length metadataTyped).trans (source_uses_length extensionTyped).symm) (insert_usage_bound metadataTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.specification (ihMetadata depth binding bound bindingValid) (ihExtension depth binding bound bindingValid))
+  · intro context spec target specType targetType su tu specTyped targetTyped ihSpec ihTarget depth binding bound bindingValid
+    have counts := add_uses_insert su tu depth ((source_uses_length specTyped).trans (source_uses_length targetTyped).symm) (insert_usage_bound specTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.prototype (ihSpec depth binding bound bindingValid) (ihTarget depth binding bound bindingValid))
+  · intro context target specType targetType uses prior ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.reflect (ih depth binding bound bindingValid))
+  · intro context target metadataType extensionType uses prior ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.metadata (ih depth binding bound bindingValid))
+  · intro context target specType targetType uses prior ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.project (ih depth binding bound bindingValid))
+  · intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper depth binding bound bindingValid
+    have counts := add_uses_insert lu uu depth ((source_uses_length lowerTyped).trans (source_uses_length upperTyped).symm) (insert_usage_bound lowerTyped bound)
+    have capturesNext := reusable_captures_insert assumptions.shareableVariables context (addUses lu uu) depth binding captures bound
+    simpa only [Term.rename,counts] using
+      (PartialTyping.mix (ihLower depth binding bound bindingValid) (ihUpper depth binding bound bindingValid)
+        lowerCallable upperCallable (by simpa only [counts] using capturesNext) selfShare inheritedShare middleShare)
+  · intro context spec inheritedTerm specType inherited target su iu specTyped callableEq inheritedTyped targetShare inheritedAllowed captures ihSpec ihInherited depth binding bound bindingValid
+    have counts := add_uses_insert su iu depth ((source_uses_length specTyped).trans (source_uses_length inheritedTyped).symm) (insert_usage_bound specTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.fix (ihSpec depth binding bound bindingValid) callableEq (ihInherited depth binding bound bindingValid) targetShare
+        (argument_allowed_insert assumptions .unrestricted context inherited iu depth binding inheritedAllowed bound)
+        (reusable_captures_insert assumptions.shareableVariables context su depth binding captures bound))
+  · intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight depth binding bound bindingValid
+    have counts := add_uses_insert lu ru depth ((source_uses_length leftTyped).trans (source_uses_length rightTyped).symm) (insert_usage_bound leftTyped bound)
+    simpa only [Term.rename,counts] using
+      (PartialTyping.binary primitiveEq (ihLeft depth binding bound bindingValid) (ihRight depth binding bound bindingValid))
+  · intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor depth binding bound bindingValid
+    have successorBound : depth+1 ≤ (⟨.natural,.unrestricted⟩ :: context).length := by simpa using bound
+    have nonempty : 0 < su.length := by rw [source_uses_length successorTyped]; simp
+    have tailLength : su.tail.length = context.length := by simp [List.length_tail,source_uses_length successorTyped]
+    have zeroLength := source_uses_length zeroTyped
+    have firstCounts := add_uses_insert zu su.tail depth (zeroLength.trans tailLength.symm) (insert_usage_bound zeroTyped bound)
+    have sumLength : (addUses zu su.tail).length = context.length := by simp [addUses,List.length_zipWith,zeroLength,tailLength]
+    have allCounts := add_uses_insert vu (addUses zu su.tail) depth ((source_uses_length valueTyped).trans sumLength.symm) (insert_usage_bound valueTyped bound)
+    simpa only [Term.rename,lift_shift_index,List.insertIdx_succ_cons,uses_tail_insert nonempty,firstCounts,allCounts] using
+      (PartialTyping.ifZero (ihValue depth binding bound bindingValid) (ihZero depth binding bound bindingValid)
+        (ihSuccessor (depth+1) binding successorBound bindingValid)
+        (safe_uses_insert _ su (depth+1) binding successorSafe successorBound))
+  · intro context depth binding bound bindingValid
+    simpa only [List.map_nil,← zero_uses_insert context binding depth bound] using (FieldsTyping.nil (context.insertIdx depth binding) : FieldsTyping assumptions _ [] .emptyRow _)
+  · intro context name body rest type row bu ru bodyTyped restTyped ihBody ihRest depth binding bound bindingValid
+    have restLength := source_uses_length (PartialTyping.record restTyped)
+    have counts := add_uses_insert bu ru depth ((source_uses_length bodyTyped).trans restLength.symm) (insert_usage_bound bodyTyped bound)
+    simpa only [List.map_cons,counts] using
+      (FieldsTyping.cons (ihBody depth binding bound bindingValid) (ihRest depth binding bound bindingValid))
+
+theorem shift_zero : shiftIndex 0 = Nat.succ := by funext index; simp [shiftIndex,Nat.succ_eq_add_one]
+
+theorem source_weaken {assumptions : Assumptions} {context : Context} {term : Term} {type : Ty} {uses : Uses}
+    (typed : PartialTyping assumptions context term type uses) (binding : Binding)
+    (bindingValid : validContext assumptions.shareableVariables [binding] = true) :
+    PartialTyping assumptions (binding :: context) (term.rename Nat.succ) type (0 :: uses) := by
+  simpa only [shift_zero,List.insertIdx_zero] using source_insert_binding typed 0 binding (Nat.zero_le _) bindingValid
+
+theorem reusable_zero_uses (variables : List Nat) (context : Context) :
+    reusableCaptures variables context (zeroUses context) = true := by
+  induction context with
+  | nil => rfl
+  | cons binding context ih => simpa [reusableCaptures,zeroUses,List.replicate_succ,List.zip] using ih
+
+theorem variable_uses_cons_zero (context : Context) (binding : Binding) :
+    variableUses (binding :: context) 0 = 1 :: zeroUses context := by
+  simp [variableUses,zeroUses,List.range_succ_eq_map,List.map_map,Function.comp_def,List.map_const']
+
+theorem variable_uses_cons_succ (context : Context) (binding : Binding) (index : Nat) :
+    variableUses (binding :: context) (index+1) = 0 :: variableUses context index := by
+  simp [variableUses,List.range_succ_eq_map,List.map_map,Function.comp_def]
+
+theorem reusable_variable {variables : List Nat} {context : Context} {index : Nat} {binding : Binding}
+    (found : context[index]? = some binding) (quantity : binding.quantity = .unrestricted)
+    (shareable : binding.type.shareableUnder variables = true) :
+    reusableCaptures variables context (variableUses context index) = true := by
+  induction context generalizing index with
+  | nil => simp at found
+  | cons first rest ih =>
+      cases index with
+      | zero =>
+          have same : first = binding := by simpa using found
+          subst first
+          have head : (1 == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true := by simp [quantity,shareable]
+          simpa [variable_uses_cons_zero,reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using And.intro head (reusable_zero_uses variables rest)
+      | succ index =>
+          have tail : rest[index]? = some binding := by simpa using found
+          simpa [variable_uses_cons_succ,reusableCaptures,List.zip] using ih tail
+
+theorem reusable_count_add (quantity : Quantity) (shareable : Bool) (first second : Nat)
+    (left : (first == 0 || (quantity == .unrestricted && shareable)) = true)
+    (right : (second == 0 || (quantity == .unrestricted && shareable)) = true) :
+    (first+second == 0 || (quantity == .unrestricted && shareable)) = true := by
+  by_cases firstZero : first = 0
+  · simpa [firstZero] using right
+  · simpa [firstZero] using left
+
+theorem reusable_count_add_left (quantity : Quantity) (shareable : Bool) (first second : Nat)
+    (combined : (first+second == 0 || (quantity == .unrestricted && shareable)) = true) :
+    (first == 0 || (quantity == .unrestricted && shareable)) = true := by
+  by_cases firstZero : first = 0
+  · simp [firstZero]
+  · have sumNonzero : first+second ≠ 0 := by omega
+    simpa [firstZero,sumNonzero] using combined
+
+theorem reusable_add_uses (variables : List Nat) (context : Context) (first second : Uses)
+    (left : reusableCaptures variables context first = true)
+    (right : reusableCaptures variables context second = true) :
+    reusableCaptures variables context (addUses first second) = true := by
+  induction context generalizing first second with
+  | nil =>
+      have firstEmpty : first = [] := by simpa [reusableCaptures] using left
+      subst first; rfl
+  | cons binding context ih =>
+      cases first with
+      | nil => simp [reusableCaptures] at left
+      | cons first firsts =>
+        cases second with
+        | nil => simp [reusableCaptures] at right
+        | cons second seconds =>
+          have lf : (first == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true ∧ reusableCaptures variables context firsts = true := by
+            simpa [reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using left
+          have rf : (second == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true ∧ reusableCaptures variables context seconds = true := by
+            simpa [reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using right
+          simpa [reusableCaptures,addUses,List.zipWith,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using
+            And.intro (reusable_count_add _ _ first second lf.1 rf.1) (ih firsts seconds lf.2 rf.2)
+
+theorem reusable_add_uses_left (variables : List Nat) (context : Context) (first second : Uses)
+    (firstLength : first.length = context.length) (secondLength : second.length = context.length)
+    (combined : reusableCaptures variables context (addUses first second) = true) :
+    reusableCaptures variables context first = true := by
+  induction context generalizing first second with
+  | nil => cases first with | nil => rfl | cons head tail => simp at firstLength
+  | cons binding context ih =>
+      cases first with
+      | nil => simp at firstLength
+      | cons first firsts =>
+        cases second with
+        | nil => simp at secondLength
+        | cons second seconds =>
+          have fl : firsts.length = context.length := Nat.succ.inj firstLength
+          have sl : seconds.length = context.length := Nat.succ.inj secondLength
+          have facts : (first+second == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true ∧
+              reusableCaptures variables context (addUses firsts seconds) = true := by
+            simpa [reusableCaptures,addUses,List.zipWith,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm,fl,sl] using combined
+          simpa [reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using
+            And.intro (reusable_count_add_left _ _ first second facts.1) (ih firsts seconds fl sl facts.2)
+
+theorem reusable_uses_safe (variables : List Nat) (context : Context) (uses : Uses)
+    (captures : reusableCaptures variables context uses = true) : safeUses context uses = true := by
+  induction context generalizing uses with
+  | nil => cases uses <;> simp_all [safeUses,reusableCaptures]
+  | cons binding context ih =>
+      cases uses with
+      | nil => simp [reusableCaptures] at captures
+      | cons count uses =>
+          have facts : (count == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true ∧ reusableCaptures variables context uses = true := by
+            simpa [reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using captures
+          have head : safeQuantity binding.quantity count = true := by
+            simp only [Bool.or_eq_true,Bool.and_eq_true,beq_iff_eq] at facts
+            rcases facts.1 with zero | ⟨unrestricted,share⟩
+            · subst count; exact safe_quantity_zero _
+            · rw [unrestricted]; rfl
+          simpa [safeUses,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using And.intro head (ih uses facts.2)
+
+theorem reusable_tail {variables : List Nat} {binding : Binding} {context : Context} {uses : Uses}
+    (captures : reusableCaptures variables (binding :: context) uses = true) :
+    reusableCaptures variables context uses.tail = true := by
+  cases uses with
+  | nil => simp [reusableCaptures] at captures
+  | cons head tail =>
+      have facts : (head == 0 || (binding.quantity == .unrestricted && binding.type.shareableUnder variables)) = true ∧ reusableCaptures variables context tail = true := by
+        simpa [reusableCaptures,List.zip,List.all_cons,and_assoc,and_left_comm,and_comm] using captures
+      exact facts.2
+
+structure ReusableTerm (assumptions : Assumptions) (context : Context) (term : Term) (type : Ty) where
+  uses : Uses
+  derivation : PartialTyping assumptions context term type uses
+  captures : reusableCaptures assumptions.shareableVariables context uses = true
+
+def ReusableTerm.weaken {assumptions : Assumptions} {context : Context} {term : Term} {type : Ty}
+    (typed : ReusableTerm assumptions context term type) (binding : Binding)
+    (valid : validContext assumptions.shareableVariables [binding] = true) :
+    ReusableTerm assumptions (binding :: context) (term.rename Nat.succ) type :=
+  ⟨0::typed.uses,source_weaken typed.derivation binding valid,
+    by simpa only [List.insertIdx_zero] using reusable_captures_insert assumptions.shareableVariables context typed.uses 0 binding typed.captures (Nat.zero_le _)⟩
+
+def ReusableTerm.«variable» {assumptions : Assumptions} {context : Context} {index : Nat} {binding : Binding}
+    (found : context[index]? = some binding) (quantity : binding.quantity = .unrestricted)
+    (shareable : binding.type.shareableUnder assumptions.shareableVariables = true) :
+    ReusableTerm assumptions context (.bound index) binding.type :=
+  ⟨variableUses context index,.bound found,reusable_variable found quantity shareable⟩
+
+def ReusableTerm.apply {assumptions : Assumptions} {context : Context}
+    {function argument : Term} {functionType domain codomain : Ty} {reuse : Reuse}
+    (fn : ReusableTerm assumptions context function functionType) (arg : ReusableTerm assumptions context argument domain)
+    (callableEq : callable functionType = .arrow reuse .unrestricted domain codomain)
+    (shareable : domain.shareableUnder assumptions.shareableVariables = true) :
+    ReusableTerm assumptions context (.app function argument) codomain :=
+  ⟨addUses fn.uses arg.uses,.application fn.derivation arg.derivation callableEq rfl
+    (by simpa [argumentAllowed,shareable] using arg.captures),
+    reusable_add_uses assumptions.shareableVariables context fn.uses arg.uses fn.captures arg.captures⟩
+
+def ReusableTerm.abstraction {assumptions : Assumptions} {context : Context} {body : Term}
+    {domain codomain : Ty} {quantity : Quantity}
+    (bodyTyped : ReusableTerm assumptions (⟨domain,quantity⟩ :: context) body codomain)
+    (valid : validContext assumptions.shareableVariables (⟨domain,quantity⟩ :: context) = true) :
+    ReusableTerm assumptions context (.lam body) (.arrow .reusable quantity domain codomain) :=
+  ⟨bodyTyped.uses.tail,.lambda (annotation := ⟨domain,codomain,quantity,.reusable⟩) bodyTyped.derivation (reusable_uses_safe _ _ _ bodyTyped.captures) valid
+    (by simpa [reusableAllowed] using reusable_tail bodyTyped.captures),reusable_tail bodyTyped.captures⟩
+
+theorem source_weaken_twice {assumptions : Assumptions} {context : Context} {term : Term} {type : Ty} {uses : Uses}
+    (typed : PartialTyping assumptions context term type uses) (first second : Binding)
+    (firstValid : validContext assumptions.shareableVariables [first] = true)
+    (secondValid : validContext assumptions.shareableVariables [second] = true) :
+    PartialTyping assumptions (second :: first :: context) (term.rename (fun index => index+2)) type (0::0::uses) := by
+  have shifted := source_weaken (source_weaken typed first firstValid) second secondValid
+  have equation := ObjectiveBendDemandAdequacy.scoped_rename_comp (source_scoped typed) Nat.succ Nat.succ
+  simpa [equation,Nat.succ_eq_add_one,Nat.add_assoc] using shifted
+
+theorem add_zero_uses (context : Context) (uses : Uses) (length : uses.length = context.length) :
+    addUses uses (zeroUses context) = uses := by
+  induction context generalizing uses with
+  | nil => cases uses <;> simp_all [addUses,zeroUses]
+  | cons binding context ih =>
+      cases uses with
+      | nil => simp at length
+      | cons head tail =>
+        have tailLength : tail.length = context.length := Nat.succ.inj length
+        simpa [addUses,zeroUses,List.replicate_succ,List.zipWith] using congrArg (List.cons head) (ih tail tailLength)
+
+theorem add_uses_comm (first second : Uses) : addUses first second = addUses second first := by
+  induction first generalizing second with
+  | nil => cases second <;> rfl
+  | cons head tail ih =>
+      cases second with
+      | nil => rfl
+      | cons other rest =>
+        simp only [addUses,List.zipWith]
+        rw [Nat.add_comm head other]
+        congr 1
+        exact ih rest
+
+def ReusableTerm.shiftTwo {assumptions : Assumptions} {context : Context} {term : Term} {type : Ty}
+    (typed : ReusableTerm assumptions context term type) (first second : Binding)
+    (firstValid : validContext assumptions.shareableVariables [first] = true)
+    (secondValid : validContext assumptions.shareableVariables [second] = true) :
+    ReusableTerm assumptions (second :: first :: context) (term.rename (fun index => index+2)) type :=
+  ⟨0::0::typed.uses,source_weaken_twice typed.derivation first second firstValid secondValid,
+    by
+      have once := reusable_captures_insert assumptions.shareableVariables context typed.uses 0 first typed.captures (Nat.zero_le _)
+      simp only [List.insertIdx_zero] at once
+      simpa only [List.insertIdx_zero] using
+        reusable_captures_insert assumptions.shareableVariables (first :: context) (0::typed.uses) 0 second once (Nat.zero_le _)⟩
+
+/-- The actual mix-generated lexical body is reusable under the checked operand
+capture premise. Both generated parameters retain their shareability evidence;
+composition does not make an affine captured environment duplicable. -/
+def reusable_mix_body {assumptions : Assumptions} {context : Context} {lower upper : Term}
+    {lowerType upperType self inherited middle provided : Ty} {lu uu : Uses}
+    (lowerTyped : PartialTyping assumptions context lower lowerType lu)
+    (upperTyped : PartialTyping assumptions context upper upperType uu)
+    (lowerCallable : callable lowerType = .arrow .reusable .unrestricted self (.arrow .reusable .unrestricted inherited middle))
+    (upperCallable : callable upperType = .arrow .reusable .unrestricted self (.arrow .reusable .unrestricted middle provided))
+    (captures : reusableCaptures assumptions.shareableVariables context (addUses lu uu) = true)
+    (selfShare : self.shareableUnder assumptions.shareableVariables = true)
+    (inheritedShare : inherited.shareableUnder assumptions.shareableVariables = true)
+    (middleShare : middle.shareableUnder assumptions.shareableVariables = true)
+    (contextValid : validContext assumptions.shareableVariables context = true) :
+    ReusableTerm assumptions context (mixBody lower upper)
+      (.arrow .reusable .unrestricted self (.arrow .reusable .unrestricted inherited provided)) := by
+  let selfBinding : Binding := ⟨self,.unrestricted⟩
+  let inheritedBinding : Binding := ⟨inherited,.unrestricted⟩
+  have selfValid : validContext assumptions.shareableVariables [selfBinding] = true := by simp [validContext,selfBinding,selfShare]
+  have inheritedValid : validContext assumptions.shareableVariables [inheritedBinding] = true := by simp [validContext,inheritedBinding,inheritedShare]
+  have oneValid : validContext assumptions.shareableVariables (selfBinding :: context) = true := by
+    simpa [validContext,selfBinding,selfShare] using contextValid
+  have twoValid : validContext assumptions.shareableVariables (inheritedBinding :: selfBinding :: context) = true := by
+    simpa [validContext,inheritedBinding,inheritedShare] using oneValid
+  have lowerCaptures := reusable_add_uses_left assumptions.shareableVariables context lu uu (source_uses_length lowerTyped) (source_uses_length upperTyped) captures
+  have upperCaptures := reusable_add_uses_left assumptions.shareableVariables context uu lu (source_uses_length upperTyped) (source_uses_length lowerTyped) (by simpa only [add_uses_comm] using captures)
+  let lowerReusable : ReusableTerm assumptions context lower lowerType := ⟨lu,lowerTyped,lowerCaptures⟩
+  let upperReusable : ReusableTerm assumptions context upper upperType := ⟨uu,upperTyped,upperCaptures⟩
+  let lowerShifted := lowerReusable.shiftTwo selfBinding inheritedBinding selfValid inheritedValid
+  let upperShifted := upperReusable.shiftTwo selfBinding inheritedBinding selfValid inheritedValid
+  let selfTerm : ReusableTerm assumptions (inheritedBinding :: selfBinding :: context) (.bound 1) self :=
+    ReusableTerm.«variable» (binding := selfBinding) rfl rfl selfShare
+  let inheritedTerm : ReusableTerm assumptions (inheritedBinding :: selfBinding :: context) (.bound 0) inherited :=
+    ReusableTerm.«variable» (binding := inheritedBinding) rfl rfl inheritedShare
+  let lowerSelf := lowerShifted.apply selfTerm lowerCallable selfShare
+  let upperSelf := upperShifted.apply selfTerm upperCallable selfShare
+  let lowerInherited := lowerSelf.apply inheritedTerm rfl inheritedShare
+  let body := upperSelf.apply lowerInherited rfl middleShare
+  exact (body.abstraction twoValid).abstraction oneValid
+
+/-- The suspended knot created by Fix is typed using the same recursive address
+as both the lexical self binding and the resulting target. No evaluation or
+termination of that knot is required by this construction. -/
+def reusable_fix_body {assumptions : Assumptions} {context : Context} {spec seed : Term}
+    {specType inherited target : Ty} {su iu : Uses}
+    (specTyped : PartialTyping assumptions context spec specType su)
+    (specCallable : callable specType = .arrow .reusable .unrestricted target (.arrow .reusable .unrestricted inherited target))
+    (seedTyped : PartialTyping assumptions context seed inherited iu)
+    (targetShare : target.shareableUnder assumptions.shareableVariables = true)
+    (seedAllowed : argumentAllowed assumptions .unrestricted context inherited iu = true)
+    (specCaptures : reusableCaptures assumptions.shareableVariables context su = true) :
+    ReusableTerm assumptions (⟨target,.unrestricted⟩ :: context)
+      (.app (.app (spec.rename Nat.succ) (.bound 0)) (seed.rename Nat.succ)) target := by
+  have seedFacts : inherited.shareableUnder assumptions.shareableVariables = true ∧
+      reusableCaptures assumptions.shareableVariables context iu = true := by
+    simpa [argumentAllowed] using seedAllowed
+  let binding : Binding := ⟨target,.unrestricted⟩
+  have valid : validContext assumptions.shareableVariables [binding] = true := by simp [validContext,binding,targetShare]
+  let specReusable : ReusableTerm assumptions context spec specType := ⟨su,specTyped,specCaptures⟩
+  let seedReusable : ReusableTerm assumptions context seed inherited := ⟨iu,seedTyped,seedFacts.2⟩
+  let selfTerm : ReusableTerm assumptions (binding :: context) (.bound 0) target :=
+    ReusableTerm.«variable» (binding := binding) rfl rfl targetShare
+  exact ((specReusable.weaken binding valid).apply selfTerm specCallable targetShare).apply
+    (seedReusable.weaken binding valid) rfl seedFacts.1
 
 theorem stack_convert_path {assumptions : Assumptions} {types : AddressTypes}
     {first last result : Ty} {stack : List Frame}
@@ -555,6 +1526,209 @@ theorem source_bound_assignment {assumptions : Assumptions} {context : Context}
   · intros; trivial
   · intros; trivial
 
+theorem source_mix_expansion {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    match term with
+    | .mix lower upper => validContext assumptions.shareableVariables context = true →
+        Nonempty (ReusableTerm assumptions context (mixBody lower upper) type)
+    | _ => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type _ _ => match term with
+      | .mix lower upper => validContext assumptions.shareableVariables context = true →
+          Nonempty (ReusableTerm assumptions context (mixBody lower upper) type)
+      | _ => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context term actual expected uses prior agreement ih
+    cases term <;> try trivial
+    intro valid
+    obtain ⟨expanded⟩ := ih valid
+    exact ⟨⟨expanded.uses,.conversion expanded.derivation agreement,expanded.captures⟩⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper valid
+    exact ⟨reusable_mix_body lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare valid⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
+/-- Evaluating every checked mix, including source result conversions, preserves
+its actual lexical capture qualification and the executor's generated body. -/
+theorem typed_mix_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {lower upper : Term} {environment : Environment}
+    (typed : StateTyping assumptions types state result)
+    (evaluate : state.control = .evaluate (.mix lower upper) environment) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    obtain ⟨expanded⟩ := source_mix_expansion origin.source origin.contextValid
+    let next : ClosureTyping assumptions types ⟨mixBody lower upper,environment⟩ typed.current :=
+      ⟨origin.context,expanded.uses,origin.environment,expanded.derivation,
+        reusable_uses_safe _ _ _ expanded.captures,origin.contextValid⟩
+    refine ⟨step_certificate typed typed.current ?_ ?_ ?_⟩
+    · simpa [stepRaw,evaluate] using typed.heap
+    · simpa [stepRaw,evaluate] using (ControlTyping.evaluate next)
+    · simpa [stepRaw,evaluate] using typed.stack
+
+theorem source_fix_expansion {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    match term with
+    | .fix spec seed => ∃ target,
+        target.shareableUnder assumptions.shareableVariables = true ∧
+        Nonempty (ReusableTerm assumptions (⟨target,.unrestricted⟩ :: context)
+          (.app (.app (spec.rename Nat.succ) (.bound 0)) (seed.rename Nat.succ)) target) ∧
+        ConversionPath assumptions target type
+    | _ => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type _ _ => match term with
+      | .fix spec seed => ∃ target,
+          target.shareableUnder assumptions.shareableVariables = true ∧
+          Nonempty (ReusableTerm assumptions (⟨target,.unrestricted⟩ :: context)
+            (.app (.app (spec.rename Nat.succ) (.bound 0)) (seed.rename Nat.succ)) target) ∧
+          ConversionPath assumptions target type
+      | _ => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context term actual expected uses prior agreement ih
+    cases term <;> try trivial
+    obtain ⟨target,share,expanded,path⟩ := ih
+    exact ⟨target,share,expanded,.step path agreement⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context spec seed specType inherited target su iu specTyped callableEq seedTyped share allowed captures ihSpec ihSeed
+    exact ⟨target,share,⟨reusable_fix_body specTyped callableEq seedTyped share allowed captures⟩,.refl target⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
+/-- Generic Fix preserves typed address assignments at its actual cyclic
+allocation. The suspended origin contains the new address, preserving the
+recursive self type and capture quantities without any termination premise. -/
+theorem typed_fix_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {spec seed : Term} {environment : Environment}
+    (typed : StateTyping assumptions types state result)
+    (evaluate : state.control = .evaluate (.fix spec seed) environment) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    obtain ⟨target,share,⟨expanded⟩,path⟩ := source_fix_expansion origin.source
+    let after := types ++ [target]
+    have extension : TypeExtension types after := type_extension_append types [target]
+    have assigned : after[state.heap.size]? = some target := by
+      rw [← typed.heap.length]
+      simp [after]
+    have valid : validContext assumptions.shareableVariables (⟨target,.unrestricted⟩ :: origin.context) = true := by
+      simpa [validContext,share] using origin.contextValid
+    let next : ClosureTyping assumptions after
+        ⟨.app (.app (spec.rename Nat.succ) (.bound 0)) (seed.rename Nat.succ),state.heap.size :: environment⟩ target :=
+      ⟨⟨target,.unrestricted⟩ :: origin.context,expanded.uses,
+        (origin.environment.weaken extension).cons assigned,expanded.derivation,
+        reusable_uses_safe _ _ _ expanded.captures,valid⟩
+    refine ⟨after,extension,⟨step_alloc_certificate typed after target ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,evaluate] using heap_typed_push typed.heap (CellTyping.suspended next)
+    · simpa [stepRaw,evaluate] using (ControlTyping.enter assigned)
+    · simpa [stepRaw,evaluate] using
+        (StackTyping.weaken extension (stack_convert_path path typed.stack))
+
+/-- Every member demanded through an actual typed row is present in the runtime
+record. Conversions retain the address's original assigned type and contribute
+a checked member conversion path, including recursive alias tails. -/
+theorem value_record_member {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {type : Ty} (typed : ValueTyping assumptions types value type) :
+    ∀ fuel name member, type.lookup assumptions.bounds fuel name = some member →
+      ∃ fields address actual,
+        value = .record fields ∧ fields.find? (fun field => field.1 == name) = some (name,address) ∧
+        types[address]? = some actual ∧ ConversionPath assumptions actual member := by
+  induction typed with
+  | record row members =>
+      intro fuel name member lookup
+      obtain ⟨address,actual,found,assigned,path⟩ := members fuel name member lookup
+      exact ⟨_,address,actual,rfl,found,assigned,path⟩
+  | conversion prior agreement ih =>
+      intro fuel name member lookup
+      obtain ⟨depth,actualMember,actualLookup,memberEq⟩ := same_type_lookup_transport agreement fuel name member lookup
+      obtain ⟨fields,address,actual,shape,found,assigned,path⟩ := ih depth name actualMember actualLookup
+      exact ⟨fields,address,actual,shape,found,assigned,.step path (canonical_same_type assumptions actualMember member memberEq)⟩
+  | natural value => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+  | boolean value => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+  | label value => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup,literalType] at lookup
+  | closure environment body safe valid captures => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+  | specification metadata ext => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+  | prototype spec target => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+
+theorem stack_field_member {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ name rest, stack = .field name :: rest →
+      ∃ fields address actual,
+        value = .record fields ∧ fields.find? (fun field => field.1 == name) = some (name,address) ∧
+        types[address]? = some actual ∧ StackTyping assumptions types rest actual result := by
+  induction continuation with
+  | nil => intro name rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro name rest same
+      cases same
+      cases frame with
+      | field lookup =>
+          obtain ⟨fields,address,actual,shape,found,assigned,path⟩ := value_record_member valueTyped _ name _ lookup
+          exact ⟨fields,address,actual,shape,found,assigned,stack_convert_path path restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- All typed field returns enter an existing correctly assigned field address.
+First-field shadowing and finite alias conversions cannot cause missingField
+or wrongValue; the heap's assigned member type remains unchanged. -/
+theorem typed_field_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {name : String} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value)
+    (stack : state.stack = .field name :: rest) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control
+    rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨fields,address,actual,rfl,found,assigned,restTyped⟩ := stack_field_member typed.stack valueTyped name rest stack
+  refine ⟨step_certificate typed actual ?_ ?_ ?_⟩
+  · simpa [stepRaw,returned,stack,found] using typed.heap
+  · simpa [stepRaw,returned,stack,found] using ControlTyping.enter assigned
+  · simpa [stepRaw,returned,stack,found] using restTyped
+
 /-- Bound-variable demand preserves the actual immutable address type; source
 conversions move into the continuation instead of retyping the heap identity. -/
 theorem typed_bound_preserved {assumptions : Assumptions} {types : AddressTypes}
@@ -572,18 +1746,6 @@ theorem typed_bound_preserved {assumptions : Assumptions} {types : AddressTypes}
     · simpa [stepRaw,evaluate,environmentFound] using typed.heap
     · simpa [stepRaw,evaluate,environmentFound] using (ControlTyping.enter assigned)
     · simpa [stepRaw,evaluate,environmentFound] using (stack_convert_path path typed.stack)
-
-theorem add_uses_comm (first second : Uses) : addUses first second = addUses second first := by
-  induction first generalizing second with
-  | nil => cases second <;> rfl
-  | cons head tail ih =>
-      cases second with
-      | nil => rfl
-      | cons other rest =>
-        simp only [addUses,List.zipWith]
-        rw [Nat.add_comm head other]
-        congr 1
-        exact ih rest
 
 theorem safe_add_uses_right (context : Context) (first second : Uses)
     (firstLength : first.length = context.length) (secondLength : second.length = context.length)
@@ -668,6 +1830,518 @@ theorem typed_application_focus_preserved {assumptions : Assumptions} {types : A
     · simpa [stepRaw,evaluate] using (ControlTyping.evaluate fnOrigin)
     · simpa [stepRaw,evaluate] using
         (StackTyping.cons (FrameTyping.argument argOrigin callable copyAllowed) (stack_convert_path path typed.stack))
+
+def sourceFocus (term : Term) (environment : Environment) : Option (Term × Frame) :=
+  match term with
+  | .get target name => some (target,.field name)
+  | .reflect target => some (target,.reflect)
+  | .metadata target => some (target,.metadata)
+  | .project target => some (target,.project)
+  | .extend target fields => some (target,.extend fields environment)
+  | .binary primitive left right => some (left,.binaryLeft primitive right environment)
+  | .ifZero value zero successor => some (value,.condition zero successor environment)
+  | _ => none
+
+structure FocusedSource (assumptions : Assumptions) (types : AddressTypes)
+    (target : Term) (environment : Environment) (frame : Frame) (expected : Ty) where
+  current : Ty
+  output : Ty
+  origin : ClosureTyping assumptions types ⟨target,environment⟩ current
+  continuation : FrameTyping assumptions types frame current output
+  result : ConversionPath assumptions output expected
+
+/-- Source projections and overlays carry their actual demanded origin and
+continuation typing, retaining lexical quantities and finite conversion paths. -/
+theorem source_focus_typed {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    ∀ types environment, EnvironmentTyping types context environment →
+      safeUses context uses = true → validContext assumptions.shareableVariables context = true →
+      match sourceFocus term environment with
+      | some (target,frame) => Nonempty (FocusedSource assumptions types target environment frame type)
+      | none => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type uses _ => ∀ types environment,
+      EnvironmentTyping types context environment → safeUses context uses = true →
+      validContext assumptions.shareableVariables context = true →
+      match sourceFocus term environment with
+      | some (target,frame) => Nonempty (FocusedSource assumptions types target environment frame type)
+      | none => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intro context term actual expected uses prior agreement ih types environment environmentTyped safe valid
+    have focused := ih types environment environmentTyped safe valid
+    cases found : sourceFocus term environment with
+    | none => trivial
+    | some pair =>
+      obtain ⟨target,frame⟩ := pair
+      rw [found] at focused
+      obtain ⟨data⟩ := focused
+      exact ⟨⟨data.current,data.output,data.origin,data.continuation,.step data.result agreement⟩⟩
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intro context target targetType member uses name fuel targetTyped lookup ih types environment environmentTyped safe valid
+    exact ⟨⟨targetType,member,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.field lookup,.refl member⟩⟩
+  · intro context target fields targetType row targetUses fieldUses targetTyped fieldsTyped rowValid ihTarget ihFields types environment environmentTyped safe valid
+    have targetSafe := safe_add_uses_left context targetUses fieldUses (source_uses_length targetTyped)
+      (source_uses_length (PartialTyping.record fieldsTyped)) safe
+    have fieldsSafe := safe_add_uses_right context targetUses fieldUses (source_uses_length targetTyped)
+      (source_uses_length (PartialTyping.record fieldsTyped)) safe
+    exact ⟨⟨targetType,overlay row targetType,⟨context,targetUses,environmentTyped,targetTyped,targetSafe,valid⟩,
+      .extend environmentTyped fieldsTyped fieldsSafe valid rowValid,.refl _⟩⟩
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
+    exact ⟨⟨.prototype specType targetType,specType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.reflect _ _,.refl _⟩⟩
+  · intro context target metadataType extensionType uses targetTyped ih types environment environmentTyped safe valid
+    exact ⟨⟨.specification metadataType extensionType,metadataType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.metadata _ _,.refl _⟩⟩
+  · intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
+    exact ⟨⟨.prototype specType targetType,targetType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.project _ _,.refl _⟩⟩
+  · intros; simp [sourceFocus]
+  · intros; simp [sourceFocus]
+  · intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight types environment environmentTyped safe valid
+    have leftSafe := safe_add_uses_left context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
+    have rightSafe := safe_add_uses_right context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
+    have inputEq : (primitiveTypes primitive).1 = input := congrArg Prod.fst primitiveEq
+    have outputEq : (primitiveTypes primitive).2 = output := congrArg Prod.snd primitiveEq
+    let rightOrigin : ClosureTyping assumptions types ⟨right,environment⟩ input :=
+      ⟨context,ru,environmentTyped,rightTyped,rightSafe,valid⟩
+    have rightOrigin' : ClosureTyping assumptions types ⟨right,environment⟩ (primitiveTypes primitive).1 := by
+      rw [inputEq]; exact rightOrigin
+    have frame : FrameTyping assumptions types (.binaryLeft primitive right environment) input output := by
+      simpa only [inputEq,outputEq] using FrameTyping.binaryLeft rightOrigin'
+    exact ⟨⟨input,output,⟨context,lu,environmentTyped,leftTyped,leftSafe,valid⟩,frame,.refl _⟩⟩
+  · intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor types environment environmentTyped safe valid
+    have vuLength := source_uses_length valueTyped
+    have zuLength := source_uses_length zeroTyped
+    have suLength : su.tail.length = context.length := by simp [List.length_tail,source_uses_length successorTyped]
+    have branchLength : (addUses zu su.tail).length = context.length := by
+      simp [addUses,List.length_zipWith,zuLength,suLength]
+    have valueSafe := safe_add_uses_left context vu (addUses zu su.tail) vuLength branchLength safe
+    have branchSafe := safe_add_uses_right context vu (addUses zu su.tail) vuLength branchLength safe
+    have zeroSafe := safe_add_uses_left context zu su.tail zuLength suLength branchSafe
+    let zeroOrigin : ClosureTyping assumptions types ⟨zero,environment⟩ result :=
+      ⟨context,zu,environmentTyped,zeroTyped,zeroSafe,valid⟩
+    exact ⟨⟨.natural,result,⟨context,vu,environmentTyped,valueTyped,valueSafe,valid⟩,
+      .condition zeroOrigin environmentTyped successorTyped successorSafe valid,.refl _⟩⟩
+  · intros; trivial
+  · intros; trivial
+
+/-- Focusing projection/overlay, binary and conditional source forms preserves the typed stack
+at the exact raw-machine step; no source annotation or row oracle is assumed. -/
+theorem typed_source_focus_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {term target : Term} {environment : Environment} {frame : Frame}
+    (typed : StateTyping assumptions types state result)
+    (evaluate : state.control = .evaluate term environment)
+    (focus : sourceFocus term environment = some (target,frame)) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    have focused := source_focus_typed origin.source types environment origin.environment origin.safe origin.contextValid
+    rw [focus] at focused
+    obtain ⟨data⟩ := focused
+    have next : stepRaw state = {state with control := .evaluate target environment,stack := frame :: state.stack} := by
+      cases term <;> simp [sourceFocus] at focus
+      all_goals
+        obtain ⟨rfl,rfl⟩ := focus
+        simp [stepRaw,evaluate]
+    refine ⟨step_certificate typed data.current ?_ ?_ ?_⟩
+    · simpa [next] using typed.heap
+    · simpa [next] using ControlTyping.evaluate data.origin
+    · simpa [next] using StackTyping.cons data.continuation (stack_convert_path data.result typed.stack)
+
+theorem fields_loop_acc (environment : Environment) (fields : List (String × Term))
+    (heap : Array Cell) (accumulator : List (String × Address)) :
+    fields.foldl (fun (prior : Array Cell × List (String × Address)) field =>
+      (prior.1.push (.suspended ⟨field.2,environment⟩),(field.1,prior.1.size)::prior.2)) (heap,accumulator) =
+    let pair := fields.foldl (fun (prior : Array Cell × List (String × Address)) field =>
+      (prior.1.push (.suspended ⟨field.2,environment⟩),(field.1,prior.1.size)::prior.2)) (heap,[])
+    (pair.1,pair.2 ++ accumulator) := by
+  induction fields generalizing heap accumulator with
+  | nil => rfl
+  | cons field fields ih =>
+      simp only [List.foldl_cons]
+      rw [ih (heap.push (.suspended ⟨field.2,environment⟩)) ((field.1,heap.size)::accumulator)]
+      rw [ih (heap.push (.suspended ⟨field.2,environment⟩)) [(field.1,heap.size)]]
+      simp [List.append_assoc]
+
+theorem allocate_fields_cons (heap : Array Cell) (environment : Environment)
+    (name : String) (body : Term) (fields : List (String × Term)) :
+    allocateFields heap environment ((name,body)::fields) =
+    let allocated := allocateFields (heap.push (.suspended ⟨body,environment⟩)) environment fields
+    (allocated.1,(name,heap.size)::allocated.2) := by
+  simp only [allocateFields,List.foldl_cons]
+  rw [fields_loop_acc]
+  simp [List.reverse_append]
+
+/-- Every field allocation preserves old address assignments and first-name
+lookup, with the field's actual source derivation and captured environment. -/
+theorem typed_fields_allocation {assumptions : Assumptions} {context : Context}
+    {fields : List (String × Term)} {row : Ty} {uses : Uses}
+    (source : FieldsTyping assumptions context fields row uses)
+    {types : AddressTypes} {heap : Array Cell} {environment : Environment}
+    (heapTyped : HeapTyping assumptions types heap)
+    (environmentTyped : EnvironmentTyping types context environment)
+    (safe : safeUses context uses = true)
+    (valid : validContext assumptions.shareableVariables context = true) :
+    ∃ after, TypeExtension types after ∧ HeapTyping assumptions after (allocateFields heap environment fields).1 ∧
+      ∀ fuel name member, row.lookup assumptions.bounds fuel name = some member →
+        ∃ address, (allocateFields heap environment fields).2.find? (fun field => field.1 == name) = some (name,address) ∧
+          after[address]? = some member := by
+  induction fields generalizing row uses types heap with
+  | nil =>
+      cases source
+      refine ⟨types,type_extension_refl types,?_,?_⟩
+      · simpa [allocateFields] using heapTyped
+      · intro fuel name member impossible
+        cases fuel <;> simp [Ty.lookup] at impossible
+  | cons field fields ih =>
+      obtain ⟨name,body⟩ := field
+      cases source with
+      | cons bodyTyped restTyped =>
+        rename_i bodyType tailRow bodyUses restUses
+        have bodyLength := source_uses_length bodyTyped
+        have restLength := source_uses_length (PartialTyping.record restTyped)
+        have bodySafe := safe_add_uses_left context _ _ bodyLength restLength safe
+        have restSafe := safe_add_uses_right context _ _ bodyLength restLength safe
+        let middle := types ++ [bodyType]
+        have firstExtension : TypeExtension types middle := type_extension_append types [bodyType]
+        let bodyOrigin : ClosureTyping assumptions middle ⟨body,environment⟩ _ :=
+          ⟨context,_,environmentTyped.weaken firstExtension,bodyTyped,bodySafe,valid⟩
+        have headHeap := heap_typed_push heapTyped (CellTyping.suspended bodyOrigin)
+        obtain ⟨after,secondExtension,tailHeap,tailMembers⟩ :=
+          ih restTyped headHeap (environmentTyped.weaken firstExtension) restSafe
+        refine ⟨after,type_extension_trans firstExtension secondExtension,?_,?_⟩
+        · simpa only [allocate_fields_cons] using tailHeap
+        · intro fuel query member lookup
+          cases fuel with
+          | zero => simp [Ty.lookup] at lookup
+          | succ fuel =>
+            by_cases hit : name = query
+            · subst query
+              have same : bodyType = member := by simpa [Ty.lookup] using lookup
+              subst member
+              refine ⟨heap.size,?_,?_⟩
+              · simp [allocate_fields_cons]
+              · apply secondExtension
+                rw [← heapTyped.length]
+                simp
+            · have tailLookup : tailRow.lookup assumptions.bounds fuel query = some member := by
+                simpa [Ty.lookup,hit] using lookup
+              obtain ⟨address,found,assigned⟩ := tailMembers fuel query member tailLookup
+              exact ⟨address,by simpa [allocate_fields_cons,hit] using found,assigned⟩
+
+theorem allocate_fields_absent (heap : Array Cell) (environment : Environment)
+    (fields : List (String × Term)) (name : String)
+    (absent : fields.any (fun field => field.1 == name) = false) :
+    (allocateFields heap environment fields).2.find? (fun field => field.1 == name) = none := by
+  induction fields generalizing heap with
+  | nil => rfl
+  | cons field fields ih =>
+      obtain ⟨prior,body⟩ := field
+      have facts : prior ≠ name ∧ fields.any (fun field => field.1 == name) = false := by
+        simpa only [List.any_cons,Bool.or_eq_false_iff,beq_eq_false_iff_ne] using absent
+      simp [allocate_fields_cons,facts.1,ih _ facts.2]
+
+theorem retained_fields_lookup (inherited : List (String × Address)) (fields : List (String × Term))
+    (name : String) (absent : fields.any (fun field => field.1 == name) = false) :
+    (inherited.filter (fun prior => !(fields.any fun field => field.1 == prior.1))).find? (fun field => field.1 == name) =
+      inherited.find? (fun field => field.1 == name) := by
+  induction inherited with
+  | nil => rfl
+  | cons prior inherited ih =>
+      by_cases hit : prior.1 = name
+      · simp [hit,absent]
+      · by_cases removed : fields.any (fun field => field.1 == prior.1) = true
+        · simp [removed,hit,ih]
+        · have keep : fields.any (fun field => field.1 == prior.1) = false := by
+            cases decision : fields.any (fun field => field.1 == prior.1) with
+            | false => rfl
+            | true => exact False.elim (removed decision)
+          simp [keep,hit,ih]
+
+theorem fields_overlay_lookup {assumptions : Assumptions} {context : Context}
+    {fields : List (String × Term)} {row : Ty} {uses : Uses}
+    (source : FieldsTyping assumptions context fields row uses) (inherited : Ty)
+    (fuel : Nat) (name : String) (member : Ty)
+    (lookup : (overlay row inherited).lookup assumptions.bounds fuel name = some member) :
+    (∃ depth, row.lookup assumptions.bounds depth name = some member) ∨
+      (fields.any (fun field => field.1 == name) = false ∧
+        ∃ depth, inherited.lookup assumptions.bounds depth name = some member) := by
+  induction fields generalizing row uses fuel with
+  | nil => cases source; exact Or.inr ⟨rfl,fuel,lookup⟩
+  | cons field fields ih =>
+      obtain ⟨prior,body⟩ := field
+      cases source with
+      | cons bodyTyped restTyped =>
+        rename_i bodyType tailRow bodyUses restUses
+        cases fuel with
+        | zero => simp [Ty.lookup] at lookup
+        | succ fuel =>
+          by_cases hit : prior = name
+          · exact Or.inl ⟨1,by simpa [Ty.lookup,overlay,hit] using lookup⟩
+          · have next : (overlay tailRow inherited).lookup assumptions.bounds fuel name = some member := by
+              simpa [overlay,Ty.lookup,hit] using lookup
+            rcases ih restTyped fuel next with ⟨depth,lookup⟩ | ⟨absent,depth,lookup⟩
+            · exact Or.inl ⟨depth+1,by simpa [Ty.lookup,hit] using lookup⟩
+            · exact Or.inr ⟨by simp [hit,absent],depth,lookup⟩
+
+theorem fields_overlay_row {assumptions : Assumptions} {context : Context}
+    {fields : List (String × Term)} {row : Ty} {uses : Uses}
+    (source : FieldsTyping assumptions context fields row uses) (inherited : Ty)
+    (fuel : Nat) (isRow : inherited.isRow assumptions.bounds fuel = true) :
+    ∃ depth, (overlay row inherited).isRow assumptions.bounds depth = true := by
+  induction fields generalizing row uses with
+  | nil => cases source; exact ⟨fuel,isRow⟩
+  | cons field fields ih =>
+      cases source with
+      | cons bodyTyped restTyped =>
+        obtain ⟨depth,tailRow⟩ := ih restTyped
+        exact ⟨depth+1,by simpa [overlay,Ty.isRow] using tailRow⟩
+
+theorem source_record_decomposition {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    match term with
+    | .record fields => ∃ row, FieldsTyping assumptions context fields row uses ∧
+        ConversionPath assumptions row type
+    | _ => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type uses _ => match term with
+      | .record fields => ∃ row, FieldsTyping assumptions context fields row uses ∧ ConversionPath assumptions row type
+      | _ => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context term actual expected uses prior agreement ih
+    cases term <;> try trivial
+    obtain ⟨row,fields,path⟩ := ih
+    exact ⟨row,fields,.step path agreement⟩
+  · intros; trivial
+  · intro context fields row uses fieldsTyped ihFields
+    exact ⟨row,fieldsTyped,.refl row⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
+/-- Actual record allocation preserves all typed addresses and lazy field
+origins, including declaration-order first-field shadowing. Row conversion is
+retained in the continuation rather than changing any allocated address type. -/
+theorem typed_record_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {fields : List (String × Term)} {environment : Environment}
+    (typed : StateTyping assumptions types state result)
+    (evaluate : state.control = .evaluate (.record fields) environment) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    obtain ⟨row,fieldsTyped,path⟩ := source_record_decomposition origin.source
+    obtain ⟨after,extension,heap,members⟩ :=
+      typed_fields_allocation fieldsTyped typed.heap origin.environment origin.safe origin.contextValid
+    have value : ValueTyping assumptions after (.record (allocateFields state.heap environment fields).2) row :=
+      .record (source_fields_row fieldsTyped) (by
+        intro fuel name member lookup
+        obtain ⟨address,found,assigned⟩ := members fuel name member lookup
+        exact ⟨address,member,found,assigned,.refl member⟩)
+    refine ⟨after,extension,⟨step_alloc_certificate typed after row ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,evaluate] using heap
+    · simpa [stepRaw,evaluate] using ControlTyping.returned value
+    · simpa [stepRaw,evaluate] using
+        StackTyping.weaken extension (stack_convert_path path typed.stack)
+
+theorem record_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {row : Ty} (typed : ValueTyping assumptions types value row)
+    (fuel : Nat) (isRow : row.isRow assumptions.bounds fuel = true) :
+    ∃ fields, value = .record fields := by
+  obtain ⟨head,normal,kind⟩ := value_head_correct typed
+  obtain ⟨rowHead,rowNormal,rowKind⟩ := row_head_normalizes assumptions.bounds fuel row isRow
+  have equal := head_normalizes_unique normal rowNormal
+  subst head
+  have shape : valueHead value = .row := kind.symm.trans rowKind
+  cases value with
+  | record fields => exact ⟨fields,rfl⟩
+  | _ => cases shape
+
+theorem stack_extend_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ fields environment rest, stack = .extend fields environment :: rest →
+      ∃ inherited row context uses,
+        EnvironmentTyping types context environment ∧ FieldsTyping assumptions context fields row uses ∧
+        safeUses context uses = true ∧ validContext assumptions.shareableVariables context = true ∧
+        inherited.isRow assumptions.bounds 64 = true ∧ ValueTyping assumptions types value inherited ∧
+        StackTyping assumptions types rest (overlay row inherited) result := by
+  induction continuation with
+  | nil => intro fields environment rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro fields environment rest same
+      cases same
+      cases frame with
+      | extend environment source safe valid row => exact ⟨_,_,_,_,environment,source,safe,valid,row,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- Returning an inherited record under an overlay preserves its unknown tail
+and immutable address types, while new fields shadow old names in the SAME
+order as the executor. Member conversion evidence remains explicit. -/
+theorem typed_extend_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {fields : List (String × Term)}
+    {environment : Environment} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value)
+    (stack : state.stack = .extend fields environment :: rest) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control
+    rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨inherited,row,context,uses,environmentTyped,source,safe,valid,rowValid,inheritedTyped,restTyped⟩ :=
+    stack_extend_value typed.stack valueTyped fields environment rest stack
+  obtain ⟨prior,rfl⟩ := record_value_form inheritedTyped 64 rowValid
+  obtain ⟨after,extension,heap,newMembers⟩ := typed_fields_allocation source typed.heap environmentTyped safe valid
+  let allocated := allocateFields state.heap environment fields
+  let retained := prior.filter (fun old => !(fields.any fun field => field.1 == old.1))
+  have newValue : ValueTyping assumptions after (.record (allocated.2 ++ retained)) (overlay row inherited) := by
+    refine .record (fields_overlay_row source inherited 64 rowValid) ?_
+    intro fuel name member lookup
+    rcases fields_overlay_lookup source inherited fuel name member lookup with ⟨depth,newLookup⟩ | ⟨absent,depth,oldLookup⟩
+    · obtain ⟨address,found,assigned⟩ := newMembers depth name member newLookup
+      exact ⟨address,member,by simp [List.find?_append,allocated,found],assigned,.refl member⟩
+    · obtain ⟨oldFields,address,actual,shape,found,assigned,path⟩ := value_record_member inheritedTyped depth name member oldLookup
+      cases shape
+      have noNew := allocate_fields_absent state.heap environment fields name absent
+      exact ⟨address,actual,by simpa [List.find?_append,allocated,noNew,retained,retained_fields_lookup prior fields name absent] using found,
+        extension address actual assigned,path⟩
+  refine ⟨after,extension,⟨step_alloc_certificate typed after (overlay row inherited) ?_ ?_ ?_⟩⟩
+  · simpa [stepRaw,returned,stack] using heap
+  · simpa [stepRaw,returned,stack,allocated,retained] using ControlTyping.returned newValue
+  · simpa [stepRaw,returned,stack] using StackTyping.weaken extension restTyped
+
+def pairedTerm (specification : Bool) (left right : Term) : Term :=
+  if specification then .specification left right else .prototype left right
+
+def pairedType (specification : Bool) (left right : Ty) : Ty :=
+  if specification then .specification left right else .prototype left right
+
+def PairDerivation (assumptions : Assumptions) (context : Context)
+    (kind : Bool) (left right : Term) (type : Ty) (uses : Uses) : Prop :=
+  ∃ leftType rightType lu ru,
+    PartialTyping assumptions context left leftType lu ∧
+    PartialTyping assumptions context right rightType ru ∧
+    uses = addUses lu ru ∧ ConversionPath assumptions (pairedType kind leftType rightType) type
+
+theorem source_pair_decomposition {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    match term with
+    | .specification left right => PairDerivation assumptions context true left right type uses
+    | .prototype left right => PairDerivation assumptions context false left right type uses
+    | _ => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type uses _ => match term with
+      | .specification left right => PairDerivation assumptions context true left right type uses
+      | .prototype left right => PairDerivation assumptions context false left right type uses
+      | _ => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context term actual expected uses prior agreement ih
+    cases term <;> try trivial
+    all_goals
+      obtain ⟨lt,rt,lu,ru,leftTyped,rightTyped,counts,path⟩ := ih
+      exact ⟨lt,rt,lu,ru,leftTyped,rightTyped,counts,.step path agreement⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped ihMetadata ihExtension
+    exact ⟨metadataType,extensionType,mu,eu,metadataTyped,extensionTyped,rfl,.refl _⟩
+  · intro context spec target specType targetType su tu specTyped targetTyped ihSpec ihTarget
+    exact ⟨specType,targetType,su,tu,specTyped,targetTyped,rfl,.refl _⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
+/-- Specification and prototype allocation keep both authored source origins,
+their independently typed pointers, and all prior heap identities. -/
+theorem typed_pair_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {left right : Term} {environment : Environment}
+    (typed : StateTyping assumptions types state result) (kind : Bool)
+    (evaluate : state.control = .evaluate (pairedTerm kind left right) environment) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    have decomposition : PairDerivation assumptions origin.context kind left right typed.current origin.uses := by
+      cases kind <;> exact source_pair_decomposition origin.source
+    obtain ⟨leftType,rightType,lu,ru,leftTyped,rightTyped,counts,path⟩ := decomposition
+    have safe : safeUses origin.context (addUses lu ru) = true := by simpa [counts] using origin.safe
+    have leftSafe := safe_add_uses_left origin.context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
+    have rightSafe := safe_add_uses_right origin.context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
+    let middle := types ++ [leftType]
+    let after := middle ++ [rightType]
+    have firstExtension : TypeExtension types middle := type_extension_append types [leftType]
+    have secondExtension : TypeExtension middle after := type_extension_append middle [rightType]
+    have extension := type_extension_trans firstExtension secondExtension
+    let leftOrigin : ClosureTyping assumptions middle ⟨left,environment⟩ leftType :=
+      ⟨origin.context,lu,origin.environment.weaken firstExtension,leftTyped,leftSafe,origin.contextValid⟩
+    let rightOrigin : ClosureTyping assumptions after ⟨right,environment⟩ rightType :=
+      ⟨origin.context,ru,origin.environment.weaken extension,rightTyped,rightSafe,origin.contextValid⟩
+    have heap := heap_typed_push (heap_typed_push typed.heap (CellTyping.suspended leftOrigin)) (CellTyping.suspended rightOrigin)
+    have leftAssigned : after[state.heap.size]? = some leftType := by
+      apply secondExtension
+      rw [← typed.heap.length]
+      simp [middle]
+    have rightAssigned : after[state.heap.size+1]? = some rightType := by
+      rw [← typed.heap.length]
+      simp [after,middle,List.length_append]
+    have value : ValueTyping assumptions after
+        (if kind then .specification state.heap.size (state.heap.size+1) else .prototype state.heap.size (state.heap.size+1))
+        (pairedType kind leftType rightType) := by
+      cases kind
+      · exact .prototype leftAssigned rightAssigned
+      · exact .specification leftAssigned rightAssigned
+    refine ⟨after,extension,⟨step_alloc_certificate typed after (pairedType kind leftType rightType) ?_ ?_ ?_⟩⟩
+    · cases kind <;> simpa [stepRaw,evaluate,pairedTerm,after,middle] using heap
+    · cases kind <;> simpa [stepRaw,evaluate,pairedTerm] using ControlTyping.returned value
+    · cases kind <;> simpa [stepRaw,evaluate,pairedTerm] using
+        StackTyping.weaken extension (stack_convert_path path typed.stack)
 
 /-- Evaluating any immediate source value preserves its assigned result type,
 including captured reusable/once lambdas and both String and Bool scalars. -/
@@ -940,9 +2614,112 @@ theorem typed_completion_preserved {assumptions : Assumptions} {types : AddressT
   · simpa [stepRaw,returned,empty] using (ControlTyping.complete valueTyped)
   · simpa [stepRaw,returned,empty] using typed.stack
 
+/-- Every raw-machine constructor preserves typing over a monotonically
+extended address assignment. Captured quantities travel with lexical origins,
+closures, continuation arguments and generated mix/Fix bodies. -/
+theorem typed_stepRaw_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} (typed : StateTyping assumptions types state result) :
+    ∃ after, TypeExtension types after ∧ Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  cases control : state.control with
+  | enter address => exact ⟨types,type_extension_refl types,typed_enter_preserved typed control⟩
+  | evaluate term environment =>
+      cases term with
+      | bound index => exact ⟨types,type_extension_refl types,typed_bound_preserved typed control⟩
+      | lam body => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
+      | nat number => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
+      | boolean boolean => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
+      | label label => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
+      | app function argument => exact ⟨types,type_extension_refl types,typed_application_focus_preserved typed control⟩
+      | mix lower upper => exact ⟨types,type_extension_refl types,typed_mix_preserved typed control⟩
+      | fix spec seed => exact typed_fix_preserved typed control
+      | record fields => exact typed_record_preserved typed control
+      | specification metadata extension => exact typed_pair_preserved typed true control
+      | prototype spec target => exact typed_pair_preserved typed false control
+      | get target name => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | extend target fields => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | reflect target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | metadata target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | project target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | binary primitive left right => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | ifZero value zero successor => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+  | returned value =>
+      cases stack : state.stack with
+      | nil => exact ⟨types,type_extension_refl types,typed_completion_preserved typed control stack⟩
+      | cons frame rest =>
+          cases frame with
+          | argument argument environment => exact typed_argument_return_preserved typed control stack
+          | update address => exact ⟨types,type_extension_refl types,typed_update_preserved typed control stack⟩
+          | field name => exact ⟨types,type_extension_refl types,typed_field_preserved typed control stack⟩
+          | reflect => exact ⟨types,type_extension_refl types,typed_prototype_projection_preserved typed true control stack⟩
+          | metadata => exact ⟨types,type_extension_refl types,typed_metadata_preserved typed control stack⟩
+          | project => exact ⟨types,type_extension_refl types,typed_prototype_projection_preserved typed false control stack⟩
+          | extend fields environment => exact typed_extend_preserved typed control stack
+          | condition zero successor environment => exact typed_condition_preserved typed control stack
+          | binaryLeft primitive right environment => exact ⟨types,type_extension_refl types,typed_binary_left_preserved typed control stack⟩
+          | binaryRight primitive left => exact ⟨types,type_extension_refl types,typed_binary_right_preserved typed control stack⟩
+  | blackhole address => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
+  | complete value => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
+  | refused reason => exact False.elim (typed_control_not_refused typed.control reason control)
+
+/-- Every finite reachable state of the SAME checked erasure has a typed heap,
+control and continuation. This theorem does not assert that evaluation ends. -/
+theorem checked_reachable_typed (source : AnnotatedTerm) (checked : Checked source [])
+    {state : State} (reachable : ObjectiveBendDemandInvariant.Reachable (initial source.erase) state) :
+    ∃ types, Nonempty (StateTyping source.assumptions types state checked.type) := by
+  induction reachable with
+  | start => exact ⟨[],⟨checked_initial_state source checked⟩⟩
+  | next reachable ih =>
+      obtain ⟨types,⟨typed⟩⟩ := ih
+      obtain ⟨after,extension,next⟩ := typed_stepRaw_preserved typed
+      exact ⟨after,next⟩
+
+/-- Actual closed checker derivations exclude every raw semantic/internal
+refusal along arbitrary reachable executions. Divergence, blackholes and
+bounded-executor resource suspension remain allowed. -/
+theorem checked_reachable_no_refusal (source : AnnotatedTerm) (checked : Checked source [])
+    {state : State} (reachable : ObjectiveBendDemandInvariant.Reachable (initial source.erase) state)
+    (reason : Refusal) : state.control ≠ .refused reason := by
+  obtain ⟨types,⟨typed⟩⟩ := checked_reachable_typed source checked reachable
+  exact typed_control_not_refused typed.control reason
+
+theorem checked_reachable_no_wrong_value_or_missing_field (source : AnnotatedTerm)
+    (checked : Checked source []) {state : State}
+    (reachable : ObjectiveBendDemandInvariant.Reachable (initial source.erase) state) :
+    state.control ≠ .refused .wrongValue ∧ state.control ≠ .refused .missingField :=
+  ⟨checked_reachable_no_refusal source checked reachable .wrongValue,
+    checked_reachable_no_refusal source checked reachable .missingField⟩
+
+/-- The bounded executor cannot return a refusal from ANY typed machine state.
+It may finish, diverge at a blackhole, or suspend with its exact continuation. -/
+theorem typed_runBounded_no_refusal {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} (typed : StateTyping assumptions types state result)
+    (limits : Limits) (ticks : Nat) (reason : Refusal) (retained : State) :
+    runBounded limits ticks state ≠ .refused reason retained := by
+  induction ticks generalizing types state with
+  | zero =>
+      cases control : state.control <;> simp only [runBounded,control] <;> try simp
+      exact False.elim (typed_control_not_refused typed.control _ control)
+  | succ ticks ih =>
+      cases control : state.control <;> simp only [runBounded,step,control] <;> try simp
+      all_goals try exact False.elim (typed_control_not_refused typed.control _ control)
+      all_goals
+        by_cases fits : (stepRaw state).heap.size ≤ limits.heap ∧ (stepRaw state).stack.length ≤ limits.stack
+        · obtain ⟨after,extension,⟨next⟩⟩ := typed_stepRaw_preserved typed
+          simpa [fits] using ih next
+        · simp [fits]
+
+/-- This is the SAME proof-producing checker and SAME decoded erasure consumed
+by ObjectiveBendPreview: successful closed checking excludes bounded-executor
+refusals at any tick, heap and stack budget. No termination claim is added. -/
+theorem check_runBounded_no_refusal (source : AnnotatedTerm) (typeFuel : Nat)
+    (checked : Checked source []) (_accepted : check source [] typeFuel = some checked)
+    (limits : Limits) (ticks : Nat) (reason : Refusal) (retained : State) :
+    runBounded limits ticks (initial source.erase) ≠ .refused reason retained := by
+  exact typed_runBounded_no_refusal (checked_initial_state source checked) limits ticks reason retained
+
 /-- The actual checker token excludes all three internal-reference refusals
-through arbitrary raw-machine reachability, even while full semantic operand
-preservation is an open obligation. Blackholes and bounds may still suspend. -/
+through arbitrary raw-machine reachability. The stronger all-refusal theorem
+above additionally covers semantic operands. Blackholes and bounds may suspend. -/
 theorem checked_reachable_no_internal_refusal (source : AnnotatedTerm)
     (checked : Checked source []) {state : State}
     (reachable : ObjectiveBendDemandInvariant.Reachable (initial source.erase) state) :
@@ -950,82 +2727,167 @@ theorem checked_reachable_no_internal_refusal (source : AnnotatedTerm)
       state.control ≠ .refused .invalidUpdate :=
   ObjectiveBendDemandInvariant.reachable_no_internalRefusal (source_scoped checked.derivation) reachable
 
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.same_type_preserves_head' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms same_type_preserves_head
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.value_head_correct' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms value_head_correct
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_binary_right_no_wrong_value' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_binary_right_no_wrong_value
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_condition_preserved' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_condition_preserved
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_condition_no_wrong_value' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_condition_no_wrong_value
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.canonical_lookup' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms canonical_lookup
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_bound_preserved' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_bound_preserved
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_application_focus_preserved' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_application_focus_preserved
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_enter_preserved' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_enter_preserved
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_update_preserved' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms typed_update_preserved
-/-
+/--
 info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_internal_refusal' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in
 #print axioms checked_reachable_no_internal_refusal
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.source_insert_binding' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms source_insert_binding
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_mix_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_mix_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_fix_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_fix_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_record_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_record_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_field_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_field_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_extend_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_extend_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_stepRaw_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_stepRaw_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_typed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms checked_reachable_typed
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_refusal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms checked_reachable_no_refusal
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_wrong_value_or_missing_field' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms checked_reachable_no_wrong_value_or_missing_field
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_runBounded_no_refusal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_runBounded_no_refusal
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.check_runBounded_no_refusal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms check_runBounded_no_refusal
 
 end Minidregg.Theory.ObjectiveBendDemandPreservation

@@ -65,6 +65,7 @@ layout and every store; the worked instances at the end are evaluated
 witnesses, not the proofs.
 -/
 import Compiler.FiniteDependentMapCodec
+import Compiler.FiniteDependentMapCachedOrdering
 import Compiler.Sp800185Cshake256
 import Compiler.Sp800185Kmac256
 import Theory.CellState
@@ -231,8 +232,17 @@ variable {L : Layout.{0, 0, 0}} (W : Wire L)
 
 /-- The support of a store in canonical address-byte order. -/
 def sortedSupport (store : Store L) : List (Address L) :=
-  letI := addressOrder W
-  store.support.sort (· ≤ ·)
+  FiniteDependentMapCachedOrdering.sortedFinsetCached (addressKey W)
+    (addressKey_injective W)
+    (FiniteDependentMapCachedOrdering.supportCached (addressKey W)
+      (addressKey_injective W) store)
+
+/-- Cached byte ordering preserves the full canonical support list. -/
+theorem sortedSupport_eq (store : Store L) :
+    sortedSupport W store =
+      (letI := addressOrder W; store.support.sort (· ≤ ·)) := by
+  rw [sortedSupport, FiniteDependentMapCachedOrdering.sortedFinsetCached_eq,
+    FiniteDependentMapCachedOrdering.supportCached_eq]
 
 /-- The entries of a store in canonical order.  Every supported address has a
 present value, so `filterMap` drops nothing (`entries_map`). -/
@@ -303,7 +313,7 @@ private theorem filterMap_present (store : Store L) (addresses : List (Address L
 
 theorem mem_sortedSupport (store : Store L) (address : Address L) :
     address ∈ sortedSupport W store ↔ store address ≠ none := by
-  unfold sortedSupport
+  rw [sortedSupport_eq]
   rw [Finset.mem_sort, DFinsupp.mem_support_toFun]
   rfl
 
@@ -329,6 +339,7 @@ theorem fromEntries_entries (store : Store L) : fromEntries (entries W store) = 
 theorem sortedSupport_pairwise (store : Store L) :
     (sortedSupport W store).Pairwise fun left right =>
       addressKey W left < addressKey W right := by
+  rw [sortedSupport_eq]
   letI := addressOrder W
   have ordered := Finset.pairwise_sort store.support (· ≤ ·)
   have distinct := Finset.sort_nodup store.support (· ≤ ·)
@@ -399,7 +410,8 @@ theorem entries_fromEntries_eq_iff (entryList : List (Entry L)) :
 def payloadStream : StreamCodec (Store L) :=
   letI := addressOrder W
   StreamCodec.xmap (entryListStream W) (entries W)
-    (fun items => FiniteDependentMapCodec.fromEntriesFast (items.map Entry.toCoordinate))
+    (fun items => FiniteDependentMapCachedOrdering.fromEntriesCached (addressKey W)
+        (addressKey_injective W) (items.map Entry.toCoordinate))
     (by intro store; simpa [fromEntries] using fromEntries_entries W store)
 
 /-- Reconstruction changes representation only: every payload result and byte is unchanged. -/
@@ -408,9 +420,10 @@ theorem payloadStream_eq :
       StreamCodec.xmap (entryListStream W) (entries W) fromEntries (fromEntries_entries W) := by
   letI := addressOrder W
   have same : (fun items : List (Entry L) =>
-      FiniteDependentMapCodec.fromEntriesFast (items.map Entry.toCoordinate)) = fromEntries := by
+      FiniteDependentMapCachedOrdering.fromEntriesCached (addressKey W)
+        (addressKey_injective W) (items.map Entry.toCoordinate)) = fromEntries := by
     funext items
-    exact FiniteDependentMapCodec.fromEntriesFast_eq _
+    exact FiniteDependentMapCachedOrdering.fromEntriesCached_eq _ _ _
   simp only [payloadStream, same]
 
 /-- Canonical payload decoding: lax decode, then exact re-encoding. -/

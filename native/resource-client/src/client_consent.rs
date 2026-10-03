@@ -223,3 +223,19 @@ pub(crate) fn possession(host:&Path,config:&Path,command:&[u8],subject:&str,key:
     let checked=invoke(host,config,226,&pair(command,&pair(&selected,candidate)?)?)?;
     if checked!=candidate{return Err("native possession frame changed".into());}Ok(checked)
 }
+
+/// Objective-only source WIP. Endpoint 227 must reconstruct the complete
+/// expected typed plan from independently retained intent and Verified source,
+/// bind the selected custody key to this role, and return its own ordered
+/// headers after whole-plan equality. An older provider refuses this endpoint;
+/// callers must never fall back to the offered plan's inspected headers.
+pub(crate) fn objective_headers(host: &Path, config: &Path, retained_intent: &[u8],
+    selected_public_key: &[u8], role: &str, candidate_plan: &[u8]) -> Result<Vec<Vec<u8>>> {
+    if selected_public_key.len() != 32 || role.is_empty() || role.len() > 128 {
+        return Err("invalid local Objective custody selection".into());
+    }
+    let selection = serde_json::to_vec(&json!({"publicKey":hex(selected_public_key),"role":role}))
+        .map_err(|error|error.to_string())?;
+    let payload = pair(retained_intent, &pair(&selection, candidate_plan)?)?;
+    headers(&invoke(host, config, 227, &payload)?)
+}

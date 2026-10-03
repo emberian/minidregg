@@ -1665,12 +1665,20 @@ fn outcome(directory: &Path, pin: &Pin, stem: &str, frame: &[u8], operation: u8)
 
 pub(crate) fn confirmed(value: &Value) -> Result<()> {
     if field(value, "type")? != "confirmed"
-        || !matches!(field(value, "confirmation")?, "installed" | "replayed")
+        || !matches!(field(value, "confirmation")?, "installed" | "replayed" | "recoveredAfterUncertainResponse")
     {
         return Err("enrollment outcome is not a confirmed admitted key".into());
     }
     for field_name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(field(value, field_name)?, field_name)?;
+    }
+    Ok(())
+}
+
+fn confirmed_lookup(value: &Value) -> Result<()> {
+    confirmed(value)?;
+    if field(value, "confirmation")? != "replayed" {
+        return Err("enrollment lookup did not confirm historical acceptance".into());
     }
     Ok(())
 }
@@ -1711,7 +1719,7 @@ fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8]) -> Result<()> {
     );
     let frame = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 89, ingress)?;
     let value = outcome(directory, pin, &stem, &frame, 89)?;
-    confirmed(&value)?;
+    confirmed_lookup(&value)?;
     result(directory, pin, &value)
 }
 
@@ -2012,7 +2020,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_and_replayed_receipts_have_one_stable_result() {
+    fn installed_replayed_and_recovered_receipts_have_one_stable_result() {
         let root = std::env::temp_dir().join(format!(
             "mini-enrollment-result-{}-{}",
             std::process::id(),
@@ -2040,6 +2048,18 @@ mod tests {
             "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         result(&root, &pin, &installed).unwrap();
         result(&root, &pin, &replayed).unwrap();
+        let mut recovered = installed.clone();
+        recovered["confirmation"] = json!("recoveredAfterUncertainResponse");
+        result(&root, &pin, &recovered).unwrap();
+        assert!(confirmed_lookup(&installed).is_err());
+        assert!(confirmed_lookup(&recovered).is_err());
+        assert!(confirmed_lookup(&replayed).is_ok());
+        for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+            let mut changed = recovered.clone();
+            changed[name] = json!("9");
+            assert!(result(&root, &pin, &changed).is_err(), "{name}");
+        }
+
         assert_eq!(
             json_private(&root.join("enrollment.json")).unwrap()["receipt"]["eventId"],
             "2"

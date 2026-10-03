@@ -385,7 +385,7 @@ fn outcome(directory: &Path, stem: &str, frame: &[u8], operation: u8, pin: &Pin)
 
 fn receipt(value: &Value) -> Result<Value> {
     if field(value, "type")? != "confirmed"
-        || !matches!(field(value, "confirmation")?, "installed" | "replayed")
+        || !matches!(field(value, "confirmation")?, "installed" | "replayed" | "recoveredAfterUncertainResponse")
     {
         return Err("enrollment outcome did not confirm native acceptance".into());
     }
@@ -593,6 +593,14 @@ mod tests {
             field(&receipt(&value).unwrap(), "acceptedCount").unwrap(),
             "3"
         );
+        let expected = receipt(&value).unwrap();
+        value["confirmation"] = json!("recoveredAfterUncertainResponse");
+        assert_eq!(receipt(&value).unwrap(), expected);
+        for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(name);
+            assert!(receipt(&missing).is_err(), "{name}");
+        }
         value["acceptedCount"] = json!("0");
         assert!(receipt(&value).is_err());
         value["acceptedCount"] = json!("03");

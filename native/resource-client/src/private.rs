@@ -160,6 +160,12 @@ impl RoomKey {
         self.epoch
     }
 
+    /// Borrow secret material for internal commitments and exact retry checks.
+    /// The owning key remains in its Zeroizing allocation; this returns no copy.
+    pub(crate) fn secret_bytes(&self) -> &[u8; KEY] {
+        &self.key
+    }
+
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> [u8; KEY] {
         *self.key

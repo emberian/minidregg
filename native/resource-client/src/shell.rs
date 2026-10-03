@@ -773,21 +773,17 @@ fn take_switch(words: &mut Vec<String>, word: &str) -> bool {
     words.len() != before
 }
 
-/// An encryption public key: 64 hex digits, or `@FILE` in HOME/requests holding them.
+/// A signed recipient declaration (hex or JSON), or an existing-record public-key selector.
 fn enc_argument(session: &Session, word: &str) -> std::result::Result<String, String> {
     let text = match word.strip_prefix('@') {
         Some(file) => {
             session_file(file, "encryption key file")?;
             let path = session.home.join("requests").join(file);
-            fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?
+            String::from_utf8(session_fs::read(&session.home, &path, 4096)?).map_err(|error| error.to_string())?
         }
         None => word.to_owned(),
     };
-    let text = text.trim().to_owned();
-    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("an encryption public key is 64 hex digits (the invitee's `whoami` prints it)".into());
-    }
-    Ok(text.to_ascii_lowercase())
+    crate::workspace::roomkey::recipient_argument(&text)
 }
 
 /// The birth options of a `create` or `doc new` line, removed from it:

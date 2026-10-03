@@ -120,8 +120,7 @@ fn accepted_outbox(
     if let Some(txn) = transaction(&directory.join("outcome.json"))? {
         return Ok(txn);
     }
-    for index in 0..1000 {
-        let path = directory.join(format!("retry-{index:04}.json"));
+    for path in crate::retry_evidence::outcomes(&directory)?.into_iter().rev() {
         if let Some(txn) = transaction(&path)? {
             return Ok(txn);
         }
@@ -441,6 +440,22 @@ mod tests {
         json!({"type":"fn-exact-post-result-v1","number":number,
             "status":status,"detail":detail,"outboxTransactionId":"123",
             "carrierSha256":"abc"})
+    }
+
+    #[test]
+    fn high_numbered_retained_outbox_confirmation_recovers_without_host_or_resubmit() {
+        let dir = std::env::temp_dir().join(format!("mini-publisher-retained-high-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        drain::private_dir(&dir).unwrap();
+        let attempt = dir.join("outbox-submit"); drain::private_dir(&attempt).unwrap();
+        durable_json(&attempt.join("retry-10000.json"),
+            &json!({"type":"confirmed","confirmation":"recoveredAfterUncertainResponse","transactionId":"123"})).unwrap();
+        durable_json(&attempt.join("retry-10001.transport.json"),
+            &json!({"type":"confirmed","transactionId":"999"})).unwrap();
+        let nonexistent = dir.join("no-host-no-config-no-key-no-intent");
+        assert_eq!(accepted_outbox(&nonexistent, &nonexistent, &nonexistent, &nonexistent, &dir).unwrap(), "123");
+        assert_eq!(fs::read_dir(&attempt).unwrap().count(), 2);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

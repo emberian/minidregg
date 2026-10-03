@@ -870,6 +870,22 @@ pub(crate) fn begin_attempt(attempt: &Path) -> Result<Option<AttemptTicket>> {
         attempt: parent.join(attempt.file_name().ok_or_else(|| fail("attempt has no name"))?),
     }))
 }
+/// The native recovered variant is exact accepted history after readback,
+/// but it is not evidence that this response won a fresh CAS. Check its
+/// lineage like replay, without lowering the durable anchor.
+fn receipt_mode(confirmation: Option<&str>, protected: bool, replay: bool) -> Result<Mode> {
+    if protected && !matches!(confirmation,
+        Some("installed" | "recoveredAfterUncertainResponse" | "replayed")) {
+        return Err(fail("confirmed outcome lacks a known receipt kind"));
+    }
+    Ok(if replay || matches!(confirmation,
+        Some("replayed" | "recoveredAfterUncertainResponse")) {
+        Mode::ReceiptReplay
+    } else {
+        Mode::Ordinary
+    })
+}
+
 pub(crate) fn finish_attempt(
     attempt: Option<AttemptTicket>,
     outcome: &Value,
@@ -884,15 +900,7 @@ pub(crate) fn finish_attempt(
     // Legacy workspaces still complete through finish_resolved so concurrent
     // enablement cannot create an unguarded success after the first trust point.
     let result = (|| {
-        let confirmation = outcome["confirmation"].as_str();
-        if attempt.ticket.is_some() && !matches!(confirmation, Some("installed" | "replayed")) {
-            return Err(fail("confirmed outcome lacks a known receipt kind"));
-        }
-        let mode = if replay || confirmation == Some("replayed") {
-            Mode::ReceiptReplay
-        } else {
-            Mode::Ordinary
-        };
+        let mode = receipt_mode(outcome["confirmation"].as_str(), attempt.ticket.is_some(), replay)?;
         finish_resolved(
             &attempt.root,
             &attempt.workspace,
@@ -1127,6 +1135,31 @@ mod tests {
     }
     fn bytes(root: &Path) -> Vec<u8> {
         fs::read(root.join("anchor.json")).unwrap()
+    }
+
+    #[test]
+    fn recovered_receipt_verifies_history_without_downgrading_anchor() {
+        let mode = receipt_mode(Some("recoveredAfterUncertainResponse"), true, false).unwrap();
+        assert!(mode == Mode::ReceiptReplay);
+        let (root, ticket) = setup(10);
+        let original = bytes(&root.0);
+        let mut proof = Proof::good();
+        finish_locked(&root.0, &ticket, &point(3), mode, &mut proof).unwrap();
+        assert_eq!(proof.calls, 1);
+        assert_eq!(bytes(&root.0), original);
+        proof.reject = true;
+        assert!(finish_locked(&root.0, &ticket, &point(4), mode, &mut proof).is_err());
+        assert_eq!(bytes(&root.0), original);
+    }
+
+    #[test]
+    fn protected_receipt_modes_reject_unknown_kinds_even_on_retry() {
+        assert!(receipt_mode(Some("installed"), true, false).unwrap() == Mode::Ordinary);
+        assert!(receipt_mode(Some("replayed"), true, false).unwrap() == Mode::ReceiptReplay);
+        for confirmation in [None, Some("uncertain"), Some("invented")] {
+            assert!(receipt_mode(confirmation, true, false).is_err());
+            assert!(receipt_mode(confirmation, true, true).is_err());
+        }
     }
 
     #[test]

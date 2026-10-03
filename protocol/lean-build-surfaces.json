@@ -2623,6 +2623,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.FiniteDependentMapCachedOrdering",
+      "path": "Compiler/FiniteDependentMapCachedOrdering.lean",
+      "sha256": "f042cefc005fe2544a7d7cee9d7c0d63e907dd099e382f098b42e0995df9e5c9",
+      "surface": "default",
+      "ownerReportedStatus": "Exact cached dependent-map/support/canonical-list preservation and Store codec Lean+C PASS; historical native successor190 FULL78 audit PASS614.48s; source identity updated; publication copy guards three exact actual log footprints; guarded copy not recompiled, theorem bodies unchanged from qualified51f6adce"
+    },
+    {
       "module": "Compiler.FiniteDependentMapCodec",
       "path": "Compiler/FiniteDependentMapCodec.lean",
       "sha256": "d1ad411097d3bd192da75a178c4174ac0a75564db669ca9282b48c2f487be354",
@@ -3612,9 +3619,9 @@
     {
       "module": "Compiler.StoreCodec",
       "path": "Compiler/StoreCodec.lean",
-      "sha256": "00f5880a10b6d7ec41f08ee8cecba2c6c34a571fc34f96b4b8b5172098531ae0",
+      "sha256": "61081c306ae1820ddb9ef498c0c33169b594139923832803975e010340a02044",
       "surface": "default",
-      "ownerReportedStatus": "No matching owner source report"
+      "ownerReportedStatus": "Exact cached dependent-map/support/canonical-list preservation and Store codec Lean+C PASS; historical native successor190 FULL78 audit PASS614.48s; source identity updated"
     },
     {
       "module": "Compiler.StoreCodecBook",
@@ -10549,16 +10556,16 @@
     {
       "module": "Theory.ObjectiveBendDemandPreservation",
       "path": "Theory/ObjectiveBendDemandPreservation.lean",
-      "sha256": "0041de7b060949779bae75800e8d0b940953524514c7452e9733f6da21488cd8",
+      "sha256": "a15aa3f564d5d6d94e935513c6809a97063778f24f359d7453376d6bb96dbae6",
       "surface": "authored-research",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+      "ownerReportedStatus": "Immutable Core4 r55 exact two-module PASS; all stepRaw constructors preserve typed states, actual closed checker excludes all raw-reachable/bounded refusal; standard guarded axiom footprints only. No termination/liveness/native-authority claim."
     },
     {
       "module": "Theory.ObjectiveBendDemandTyping",
       "path": "Theory/ObjectiveBendDemandTyping.lean",
-      "sha256": "a18b9fcd899256f7c86bd2736ad7956ee7d2dfa1fd0b6a96e12e55584a6ab6fa",
+      "sha256": "ba637885357b948b7f06739827d0ea7007f917336ea47ca4f60f8424283086e7",
       "surface": "authored-research",
-      "ownerReportedStatus": "PASS exact leaf4 warm Core4 type checker r1 / demand typing r24; full all-step preservation OPEN"
+      "ownerReportedStatus": "Immutable Core4 r55 exact two-module PASS; all stepRaw constructors preserve typed states, actual closed checker excludes all raw-reachable/bounded refusal; standard guarded axiom footprints only. No termination/liveness/native-authority claim."
     },
     {
       "module": "Theory.ObjectiveBendExtensions",

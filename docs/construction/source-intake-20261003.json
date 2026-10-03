@@ -1393,8 +1393,8 @@
     {
       "path": "native/resource-client/src/transport.rs",
       "owner": "joint_reserve_birth_authority",
-      "sha256": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "3e1d4b53c0a5a4fdb9f6e0725c7c1ac46b9c2cde013e1635477547f9cf22c375",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied",
       "candidateSha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8"
     },
     {
@@ -5053,8 +5053,8 @@
     {
       "path": "docs/OBJECTIVE-BEND.md",
       "owner": "mini_objective_bend_documentation",
-      "sha256": "c5a5de465822cc8e39758190f06312f36efd11264275160a8e192887cd4ed7c6",
-      "qualification": "Root-reviewed sole Objective guide r9; linked incoming source now present"
+      "sha256": "d11e45d4c8784f0550313f9066efca728dc11af85660d497c69a521218832752",
+      "qualification": "Guide actual served wire2 correction plus immutable qualified type r55 all-constructor safety; scoped guide patch reviewed, links preserved"
     },
     {
       "path": "Compiler/BendCommittedUnroll.lean",
@@ -5281,14 +5281,14 @@
     {
       "path": "Theory/ObjectiveBendDemandTyping.lean",
       "owner": "objective_type_construction",
-      "sha256": "a18b9fcd899256f7c86bd2736ad7956ee7d2dfa1fd0b6a96e12e55584a6ab6fa",
-      "qualification": "PASS exact leaf4 warm Core4 type checker r1 / demand typing r24; full all-step preservation OPEN"
+      "sha256": "ba637885357b948b7f06739827d0ea7007f917336ea47ca4f60f8424283086e7",
+      "qualification": "Immutable Core4 r55 exact two-module PASS; all stepRaw constructors preserve typed states, actual closed checker excludes all raw-reachable/bounded refusal; standard guarded axiom footprints only. No termination/liveness/native-authority claim."
     },
     {
       "path": "Theory/ObjectiveBendDemandPreservation.lean",
       "owner": "objective_type_construction",
-      "sha256": "0041de7b060949779bae75800e8d0b940953524514c7452e9733f6da21488cd8",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "a15aa3f564d5d6d94e935513c6809a97063778f24f359d7453376d6bb96dbae6",
+      "qualification": "Immutable Core4 r55 exact two-module PASS; all stepRaw constructors preserve typed states, actual closed checker excludes all raw-reachable/bounded refusal; standard guarded axiom footprints only. No termination/liveness/native-authority claim.",
       "candidateSha256": "fad73bbe689a91766dca2a4954a5638f2591bbae15a5eb035fb57d0066d115af"
     },
     {
@@ -5385,8 +5385,8 @@
     {
       "path": "native/resource-client/src/roomkey.rs",
       "owner": "member_oo_construction",
-      "sha256": "c22d825b875fa4819d924c68c5c3b669e7f3cf488ae6f312702c7f44a89a15b6",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "d48b2d45c3df8582d6d35f5d8dd4431bc2629335c9229109f1e118152a33f389",
+      "qualification": "Exact finite source integration; Rust10 changed filters47PASS with old nonce-parser failure retained; repaired job six checksPASS; two-line borrowed RoomKey API production receiving pending",
       "candidateSha256": "0084b49d04266efcc148d1229fb9ecbc593c5e34ab7d9f5436bbe320b87cf6e3"
     },
     {
@@ -5555,8 +5555,8 @@
     {
       "path": "native/resource-client/src/bend_session.rs",
       "owner": "homomorphic_bend_construction",
-      "sha256": "546e4d1568d03398a0bb923332fcf9561d7baa0dcca21ed986e2f55548b0bd05",
-      "qualification": "authored-uncompiled exact shared reserved dispatcher/client signer join"
+      "sha256": "a0312875dd5773c8ae73858c455770d44fce0116382940fddf2b2a373074020a",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
     },
     {
       "path": "native/fhe-bend/src/lib.rs",
@@ -5739,8 +5739,8 @@
     {
       "path": "native/resource-client/src/workspace.rs",
       "owner": "captain reconciled authored shared hunks",
-      "sha256": "84e0f8767a80e542d4d86374d85bb12a225932a59d9da07afa7a08fd06bc7aef",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "c963eea892bf4144197ad19cc98e4eb2f9c9c3669d5bab7698ea55a68890be52",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
       "candidateSha256": "e4478848d291201b097012a3f508f562df2d1edf118930c2417049f0f9984ff7"
     },
@@ -5769,8 +5769,8 @@
     {
       "path": "native/resource-client/src/main.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
-      "sha256": "a4366a646640aa92f3f6759ec5b5d24958763c9bc07fafe57abbd4abeca0ed02",
-      "qualification": "Captain hunk integration; coherent compilation pending",
+      "sha256": "91c30c3010f96fb2d759ffadcbd6d01cdfdc7785aadb99afe5c2954a78991e0a",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
       "candidateSha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f"
     },
@@ -5999,6 +5999,90 @@
       "owner": "scenario_objective_world",
       "sha256": "da18483354a019718e2875c6ca839106c57222df4440e50049f5d51a411435a8",
       "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "Compiler/StoreCodec.lean",
+      "owner": "captain reviewed source integration",
+      "sha256": "61081c306ae1820ddb9ef498c0c33169b594139923832803975e010340a02044",
+      "qualification": "Exact cached dependent-map/support/canonical-list preservation and Store codec Lean+C PASS; historical native successor190 FULL78 audit PASS614.48s; source identity updated"
+    },
+    {
+      "path": "Compiler/FiniteDependentMapCachedOrdering.lean",
+      "owner": "captain reviewed source integration",
+      "sha256": "f042cefc005fe2544a7d7cee9d7c0d63e907dd099e382f098b42e0995df9e5c9",
+      "qualification": "Exact cached dependent-map/support/canonical-list preservation and Store codec Lean+C PASS; historical native successor190 FULL78 audit PASS614.48s; source identity updated; publication copy guards three exact actual log footprints; guarded copy not recompiled, theorem bodies unchanged from qualified51f6adce"
+    },
+    {
+      "path": "native/resource-client/src/client_consent.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "f02aabcff13000f1109f4f61fcd938f0d5aa4e9827ebf783606bc803a297b6b4",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/drain.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "dc8454cf14db8ba8e13fe027d184d0fdc2db6a81a2ca66c1dd3b53a04f00ecdb",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/job.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "ddc9594c683353b772c1091355d21515f6a27f800969c317abe20b7ca0f10c09",
+      "qualification": "Exact finite source integration; Rust10 changed filters47PASS with old nonce-parser failure retained; repaired job six checksPASS; two-line borrowed RoomKey API production receiving pending"
+    },
+    {
+      "path": "native/resource-client/src/participant_enrollment.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "05b79bf3f002c8914c3d834180585377944476e3f658ec71c1d378e705adb705",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/publisher.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "ee2010a5198ec35f07f45c97a045c9b6a7cc0337435834bab067d4d6d373a3bf",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/receipt_continuity.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "ef0fa2877d1a7060c0d0e2e838854a2996259d73d9bf3e8d4d910f5ba131eef1",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/retry_evidence.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "103a6437e6bc134c97e68ef589b39ccc87e93e56274aa6d603e9b7d726c17440",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/selected_exchange.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "d1ba58eb5cc059226d2556514462389878cb650ce4d4e7f9a81eaefb19b6d351",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/selected_release.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "1313b3619c6b5a5dc1951f6e1d8e117697dbe5b91850bab209e066b3b64f2273",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/session_enrollment.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "243f8c25e8c0d0311e1a4dbaf754ee53366787d726f90f7f0355c5d0406cd94e",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/shell.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "ab6b9f797f728f0f738ecb22c1034d87a5ae8b3dc969963bf782a3b2e2471882",
+      "qualification": "Reviewed finite source fan-in; exact coherent client Rust10 receiving in progress; no native activation implied"
+    },
+    {
+      "path": "native/resource-client/src/private.rs",
+      "owner": "captain reviewed source integration",
+      "sha256": "e1cefd98ab5e64e71ae863bbf15a4b302d55ab7419207108897494fdf52e5691",
+      "qualification": "Exact finite source integration; Rust10 changed filters47PASS with old nonce-parser failure retained; repaired job six checksPASS; two-line borrowed RoomKey API production receiving pending"
     }
   ]
 }

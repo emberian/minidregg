@@ -382,10 +382,26 @@ fn invocation_family(request: &Value) -> Result<Option<Value>> {
     Ok(Some(family.clone()))
 }
 
+fn invocation_bend(request: &Value) -> Result<Option<Value>> {
+    let Some(bend) = request.get("bend") else { return Ok(None); };
+    if request.get("run").is_some() {
+        return Err("an invocation may contain either run or bend, not both".into());
+    }
+    let claim = bend.as_str().ok_or("bend claim must be canonical hexadecimal")?;
+    if claim.is_empty() || claim.len() > 2 * INVOCATION_CONTEXT_MAX_BYTES || claim.len() % 2 != 0
+        || !claim.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        return Err("bend claim must be bounded nonempty canonical lowercase hex".into());
+    }
+    // The native author checks BendExecutionClaim.decode/canonical bytes. The
+    // client only preserves the original bytes and does not infer authority.
+    Ok(Some(bend.clone()))
+}
+
 fn unsigned_invocation_command(subject: &str, nonce: &str, targets: Vec<Value>,
-    run: Option<Value>, family: Option<Value>) -> Value {
+    run: Option<Value>, bend: Option<Value>, family: Option<Value>) -> Value {
     let mut command = json!({"subject":subject,"nonce":nonce,"targets":targets});
     if let Some(claim) = run { command["run"] = claim; }
+    if let Some(claim) = bend { command["bend"] = claim; }
     // The exact family is part of the command sent to the native author and
     // signed receiver, never an annotation outside that command.
     if let Some(statement) = family { command["family"] = statement; }
@@ -3066,10 +3082,11 @@ fn propose_summary_once(
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
             let claimed = obj.contains_key("run");
+            let bend = invocation_bend(&request)?;
             let family = invocation_family(&request)?;
-            if obj.len() != 3 + usize::from(claimed) + usize::from(family.is_some())
+            if obj.len() != 3 + usize::from(claimed) + usize::from(bend.is_some()) + usize::from(family.is_some())
                 || !obj.contains_key("targets") {
-                return Err("invoke proposal may contain only type, action, targets, run, family".into());
+                return Err("invoke proposal may contain only type, action, targets, run, bend, family".into());
             }
             // K-RAN: a Nock run claim rides inside the signed command; the Host
             // parses it exactly (programId, sample, output, steps) and re-executes.
@@ -3269,7 +3286,7 @@ fn propose_summary_once(
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
             let command = unsigned_invocation_command(member(workspace,"subject")?,
-                &command_nonce, target_rows, run, family);
+                &command_nonce, target_rows, run, bend, family);
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
                 "grants":grants})
@@ -4045,22 +4062,16 @@ pub(crate) enum AttemptOutcome {
 }
 
 pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome> {
-    let mut names = Vec::new();
-    for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let file = entry.file_name();
-        let Some(file) = file.to_str() else { continue };
-        if file == "outcome.json" || (file.starts_with("retry-") && file.ends_with(".json")) {
-            names.push(file.to_owned());
-        }
-    }
-    names.sort();
+    let mut paths = Vec::new();
+    let original = attempt.join("outcome.json");
+    if original.exists() { paths.push(original); }
+    paths.extend(crate::retry_evidence::outcomes(attempt)?);
     let mut newest_refused = None;
-    for name in names.iter().rev() {
-        let value = bounded_json(&attempt.join(name))?;
+    for path in paths.iter().rev() {
+        let value = bounded_json(path)?;
         newest_refused.get_or_insert(value.get("type").and_then(Value::as_str) == Some("refused"));
         if value.get("type").and_then(Value::as_str) == Some("confirmed")
-            && matches!(value.get("confirmation").and_then(Value::as_str), Some("installed" | "replayed")) {
+            && matches!(value.get("confirmation").and_then(Value::as_str), Some("installed" | "replayed" | "recoveredAfterUncertainResponse")) {
             return Ok(AttemptOutcome::Confirmed(value));
         }
     }
@@ -6350,6 +6361,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         // The room-key protocol of a private room (`roomkey.rs`).
         "room-key" => {
             let op = os_string(args.required("op")?, "room-key op")?;
+            if op == "recipient-record" {
+                let room = os_string(args.required("room-id")?, "room id")?;
+                let keys = os_string(args.required("keys-cell")?, "keys cell id")?;
+                let epoch = os_string(args.required("key-epoch")?, "member key epoch")?;
+                args.finish()?;
+                let declaration = roomkey::signed_recipient_descriptor(&workspace, &room, &keys, &epoch)?;
+                println!("{}", serde_json::to_string_pretty(&declaration).map_err(|error| error.to_string())?);
+                return Ok(());
+            }
             let name = os_string(args.required("name")?, "room name")?;
             let flag = |args: &mut Args, key: &str| -> Result<bool> {
                 match args.optional(key).as_deref() {
@@ -6392,14 +6412,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                             return Err("the invite request must delegate this room to this invitee".into());
                         }
                     }
-                    // The keys write (and, for a new member, the keys grant) lands
-                    // first: a delegation proposed before it would carry a stale
-                    // authority root.
+                    roomkey::invite_preflight(&root, &workspace, &name, &member_subject, &enc, i_know)?;
+                    // Current source membership must exist before guarded key
+                    // disclosure. Admit/recover the exact declared room grant,
+                    // then the keys phase takes fresh authority observations.
+                    if let Some(request) = request {
+                        roomkey::admit_invitation_grant(&root, &workspace, &proposal_id,
+                            &roomkey::request(&request)?)?;
+                    }
                     roomkey::invite(&root, &workspace, &name, &member_subject, &enc, past, i_know,
                         &format!("{proposal_id}-keys"))?;
-                    if let Some(request) = request {
-                        propose(&root, &workspace, &request, &proposal_id, None)?;
-                    }
                     Ok(())
                 }
                 "rotate" => {
@@ -6454,7 +6476,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     args.finish()?;
                     roomkey::rewrap(&root, &workspace, &name, &subject, &proposal_id)
                 }
-                _ => Err("room-key --op is found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
+                _ => Err("room-key --op is recipient-record, found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
             }
         }
         "submit" => {
@@ -6998,6 +7020,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn invocation_bend_preserves_bytes_and_refuses_mixed_or_noncanonical_claims() {
+        use serde_json::json;
+        let selected = super::invocation_bend(&json!({"bend":"00abff"})).unwrap();
+        let command = super::unsigned_invocation_command("7", "29", vec![], None,
+            selected, Some(json!({"route":"objectiveMethod","contextBytes":"cafe"})));
+        assert_eq!(command, json!({"subject":"7","nonce":"29","targets":[],"bend":"00abff",
+            "family":{"route":"objectiveMethod","contextBytes":"cafe"}}));
+        assert!(super::invocation_bend(&json!({"run":{},"bend":"00"})).is_err());
+        for bend in [json!(null), json!(0), json!(""), json!("0"), json!("AA"), json!("é"), json!("gg")] {
+            assert!(super::invocation_bend(&json!({"bend":bend})).is_err());
+        }
+        assert_eq!(super::invocation_bend(&json!({})).unwrap(), None);
+    }
+
+    #[test]
     fn invocation_family_is_preserved_in_actual_unsigned_command() {
         use serde_json::json;
         let targets = vec![json!({"target":"18446744073709551615","payload":{"type":"read"}})];
@@ -7006,11 +7043,11 @@ mod tests {
             let family = json!({"route":route,"contextBytes":"00abff"});
             let selected = super::invocation_family(&json!({"family":family})).unwrap();
             let command = super::unsigned_invocation_command("18446744073709551615", "29",
-                targets.clone(), Some(run.clone()), selected);
+                targets.clone(), Some(run.clone()), None, selected);
             assert_eq!(command, json!({"subject":"18446744073709551615","nonce":"29",
                 "targets":targets,"run":run,"family":family}));
         }
-        let command = super::unsigned_invocation_command("3", "31", targets.clone(), None,
+        let command = super::unsigned_invocation_command("3", "31", targets.clone(), None, None,
             super::invocation_family(&json!({})).unwrap());
         assert_eq!(command, json!({"subject":"3","nonce":"31","targets":targets}));
     }
@@ -7891,6 +7928,36 @@ mod tests {
         assert_eq!(chosen, base.join("g0002"));
         assert_eq!(observed.get(), 1);
         assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [91, 7]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_metadata_and_five_digit_order_never_fabricate_a_terminal_refusal() {
+        let (root, _, _) = generation_fixture("numeric-retry-order");
+        let attempt = root.join("create-x"); make_private_dir(&attempt).unwrap();
+        fs::write(attempt.join("call.bin"), b"original exact call").unwrap();
+        fs::write(attempt.join("outcome.json"), br#"{"type":"refused"}"#).unwrap();
+        fs::write(attempt.join("retry-9999.json"), br#"{"type":"refused"}"#).unwrap();
+        fs::write(attempt.join("retry-9999.transport.json"), br#"{"type":"transport-metadata"}"#).unwrap();
+        assert!(attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(attempt.join("retry-10000.json"), br#"{"type":"uncertain"}"#).unwrap();
+        // The newer uncertain physical attempt must outrank the older refusal,
+        // even though lexicographic ordering places 9999 after 10000.
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(attempt.join("retry-10000.transport.json"), br#"{"type":"refused"}"#).unwrap();
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovered_exact_readback_is_confirmed_despite_a_later_uncertain_lookup() {
+        let (root, _, _) = generation_fixture("recovered-retry");
+        let attempt = root.join("create-x"); make_private_dir(&attempt).unwrap();
+        fs::write(attempt.join("call.bin"), b"original exact call").unwrap();
+        fs::write(attempt.join("retry-10000.json"),
+            br#"{"type":"confirmed","confirmation":"recoveredAfterUncertainResponse","transactionId":"123"}"#).unwrap();
+        fs::write(attempt.join("retry-10001.json"), br#"{"type":"uncertain"}"#).unwrap();
+        assert!(matches!(retained_attempt_outcome(&attempt).unwrap(), AttemptOutcome::Confirmed(value) if value["transactionId"] == "123"));
         fs::remove_dir_all(root).unwrap();
     }
 

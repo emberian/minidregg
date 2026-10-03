@@ -18,8 +18,8 @@
 //!   with no truth it decides the timeout (upheld).
 //! * `settle` — the close money turn: the provider is paid price + bond (upheld),
 //!   the bond is split per the tariff (slashed), or the escrow returns (void). The
-//!   ingress is retained; settling again resubmits the same bytes and the Host
-//!   answers the original receipt.
+//!   ingress is retained; settling again looks up the original receipt or
+//!   resubmits those exact bytes when the native lookup answers absent.
 //! * `show` / `list` — the job's fields by name; the jobs this workspace knows in a room.
 //!
 //! Every write is an ordinary workspace proposal; every refusal is the Host's,
@@ -372,18 +372,143 @@ fn money(
         .map_err(|_| "job: workspace key must contain exactly 32 raw bytes")?;
     let signature = SigningKey::from_bytes(&seed).sign(&unhex(canonical)?).to_bytes();
     let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
-    crate::shell::session_fs::replace(&ws.root, &dir.join("ingress.bin"), &ingress)?;
+    retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)
 }
 
+fn submission_digest(ingress: &[u8]) -> String {
+    use sha2::Digest;
+    hex(&sha2::Sha256::digest(ingress))
+}
+
+/// Only fresh assembly establishes a complete modern custody generation.
+/// Recovery must never upgrade an older ingress whose original send was not
+/// recorded. A crash between these writes remains conservatively recover-only.
+fn retain_new_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<()> {
+    match fs::symlink_metadata(dir.join("ingress.bin")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.to_string()),
+        Ok(_) => return Err("job: original money ingress already retained; recover it instead".into()),
+    }
+    crate::shell::session_fs::replace(&ws.root, &dir.join("ingress.bin"), ingress)?;
+    let origin = json!({"type":"job-money-custody-origin-v1",
+        "ingressSha256":submission_digest(ingress)});
+    crate::shell::session_fs::replace(&ws.root, &dir.join("custody-origin.json"), origin.to_string().as_bytes())
+}
+
+/// Persist before the external call, including the crash-before-reply window.
+/// Each call gets a distinct record; later replies cannot fill an older gap.
+fn begin_money_submission(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<String> {
+    let id = nonce()?;
+    let started = json!({"type":"job-money-submit-started-v1",
+        "ingressSha256":submission_digest(ingress)});
+    crate::shell::session_fs::replace(&ws.root, &dir.join(format!("submit-{id}.started.json")),
+        started.to_string().as_bytes())?;
+    Ok(id)
+}
+
 fn submit_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<Value> {
+    let id = begin_money_submission(ws, dir, ingress)?;
     let outcome = inspect(ws, "outcome", &invoke(ws, 162, ingress)?)?;
-    let stem = format!("outcome-{}.json", nonce()?);
+    retain_money_outcome(ws, dir, outcome, Some(&id))
+}
+
+fn retain_money_outcome(ws: &Ws, dir: &Path, outcome: Value, submission: Option<&str>) -> Result<Value> {
+    let id = match submission { Some(id) => id.to_owned(), None => nonce()? };
+    let stem = format!("outcome-{id}.json");
     crate::shell::session_fs::replace(&ws.root, &dir.join(stem), outcome.to_string().as_bytes())?;
     if outcome.get("type").and_then(Value::as_str) == Some("confirmed") {
         Ok(outcome)
     } else {
-        Err(refusal_line(&outcome).unwrap_or_else(|| format!("job: money turn not confirmed: {outcome}")))
+        Err(refusal_line(&outcome)
+            .unwrap_or_else(|| format!("job: money turn not confirmed: {outcome}")))
+    }
+}
+
+/// Fresh planning requires a definitive native refusal for EVERY recorded send.
+/// A lost reply/crash gap cannot be erased by a later call's refusal. Legacy
+/// ingress without complete per-send custody is conservatively recover-only.
+fn settlement_needs_recovery(ws: &Ws, dir: &Path) -> Result<bool> {
+    let ingress = crate::shell::session_fs::read(&ws.root, &dir.join("ingress.bin"), 1 << 20)?;
+    let digest = submission_digest(&ingress);
+    let origin_path = dir.join("custody-origin.json");
+    match fs::symlink_metadata(&origin_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error.to_string()),
+        Ok(_) => (),
+    }
+    let origin: Value = serde_json::from_slice(&crate::shell::session_fs::read(&ws.root, &origin_path, 1 << 20)?)
+        .map_err(|error| error.to_string())?;
+    if origin["type"] != "job-money-custody-origin-v1" || origin["ingressSha256"] != digest {
+        return Err("job: custody origin does not bind this exact ingress".into());
+    }
+
+    let mut submissions = Vec::new();
+    let mut retained_nonrefusal = false;
+    for entry in fs::read_dir(dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with("submit-") && name.ends_with(".started.json") {
+            let id = name.strip_prefix("submit-").and_then(|rest| rest.strip_suffix(".started.json"))
+                .ok_or("job: invalid retained submission name")?;
+            // nonce() emits a canonical decimal u128, not a hex identifier.
+            // Roundtrip the spelling so aliases cannot pair different sends.
+            if id.parse::<u128>().ok().is_none_or(|value| value.to_string() != id) {
+                return Err("job: invalid retained submission name".into());
+            }
+            let bytes = crate::shell::session_fs::read(&ws.root, &entry.path(), 1 << 20)?;
+            let started: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+            if started["type"] != "job-money-submit-started-v1" || started["ingressSha256"] != digest {
+                return Err("job: retained submission does not bind this exact ingress".into());
+            }
+            submissions.push(id.to_owned());
+        } else if name.starts_with("outcome-") && name.ends_with(".json") {
+            let bytes = crate::shell::session_fs::read(&ws.root, &entry.path(), 1 << 20)?;
+            let value: Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("job: retained settlement outcome is invalid: {error}"))?;
+            if value.get("type").and_then(Value::as_str) != Some("refused") { retained_nonrefusal = true; }
+        }
+    }
+    if submissions.is_empty() || retained_nonrefusal { return Ok(true); }
+    for id in submissions {
+        let path = dir.join(format!("outcome-{id}.json"));
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+            Err(error) => return Err(error.to_string()),
+            Ok(_) => (),
+        }
+        let bytes = crate::shell::session_fs::read(&ws.root, &path, 1 << 20)?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        if value.get("type").and_then(Value::as_str) != Some("refused") { return Ok(true); }
+    }
+    Ok(false)
+}
+
+/// The Host's canonical decoder binds the retained bytes to this exact job and
+/// subject before lookup/resubmission; local directory names are only hints.
+fn settlement_identity(ws: &Ws, job: &str, decoded: &Value) -> Result<()> {
+    if decoded["type"] != "job-money-ingress-v1"
+        || decoded["command"]["type"] != "job-money-v2"
+        || decoded["command"]["subject"].as_str() != Some(ws.subject.as_str())
+        || decoded["command"]["job"].as_str() != Some(job)
+        || decoded["command"]["action"].as_str() != Some("3")
+    {
+        return Err("job: retained settlement does not name this subject/job/action".into());
+    }
+    Ok(())
+}
+
+fn recover_settlement(ws: &Ws, dir: &Path, job: &str) -> Result<(Value, bool)> {
+    let ingress = crate::shell::session_fs::read(&ws.root, &dir.join("ingress.bin"), 1 << 20)?;
+    settlement_identity(ws, job, &inspect(ws, "job-money-ingress", &ingress)?)?;
+    // Receipt-only lookup cannot create another effect. Absence permits only
+    // the exact original ingress, whose current admission/replay stays native.
+    let outcome = inspect(ws, "outcome", &invoke(ws, 163, &ingress)?)?;
+    if outcome.get("type").and_then(Value::as_str) == Some("absent") {
+        submit_ingress(ws, dir, &ingress).map(|value| (value, true))
+    } else {
+        retain_money_outcome(ws, dir, outcome, None).map(|value| (value, false))
     }
 }
 
@@ -752,27 +877,38 @@ fn settle(ws: &Ws, mut args: Args) -> Result<Value> {
     args.finish()?;
     let rec = record(ws, &name)?;
     let job = field(&rec, "job")?.to_owned();
-    // Settling again is the same turn: the retained ingress of the confirmed settle,
-    // resubmitted, answers the original receipt (replay), never a second payout. A
-    // refused attempt is kept for the record and a fresh one is made.
+    // Lost replies retain the same request just like confirmed receipts. Only
+    // definitely refused attempts may be replaced with a newly planned turn.
     let jobs = jobs_dir(ws)?;
     let mut tried: Vec<PathBuf> = fs::read_dir(&jobs)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{name}.settle-"))))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&format!("{name}.settle-")))
+        })
         .collect();
     tried.sort();
     for previous in &tried {
-        let confirmed = fs::read_dir(previous).map_err(|e| e.to_string())?.filter_map(|e| e.ok()).any(|e| {
-            fs::read(e.path())
-                .ok()
-                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-                .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("confirmed"))
-        });
-        if confirmed {
-            let ingress = fs::read(previous.join("ingress.bin")).map_err(|e| e.to_string())?;
-            let (outcome, latency) = timed("settle (resubmit)", || submit_ingress(ws, previous, &ingress))?;
-            return Ok(json!({"type":"job-settled","job":job,"resubmitted":true,"outcome":outcome,"latency":{"settle":latency}}));
+        let meta = fs::symlink_metadata(previous).map_err(|error| error.to_string())?;
+        if !meta.is_dir() {
+            return Err("job: retained settlement must be a real directory".into());
+        }
+        let ingress = previous.join("ingress.bin");
+        let retained = match fs::symlink_metadata(&ingress) {
+            Ok(meta) if meta.is_file() => true,
+            Ok(_) => return Err("job: retained settlement ingress must be a real file".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.to_string()),
+        };
+        if retained && settlement_needs_recovery(ws, previous)? {
+            let ((outcome, resubmitted), latency) = timed("settle (recover)", || {
+                recover_settlement(ws, previous, &job)
+            })?;
+            return Ok(
+                json!({"type":"job-settled","job":job,"recovered":true,"resubmitted":resubmitted,"outcome":outcome,"latency":{"settle":latency}}),
+            );
         }
     }
     let dir = jobs.join(format!("{name}.settle-{}", nonce()?));
@@ -780,10 +916,14 @@ fn settle(ws: &Ws, mut args: Args) -> Result<Value> {
     let cap = operation_capability(&reference)?;
     // Reads around the turn are for the report; the turn itself needs only the capability.
     let before = fields(ws, &name).unwrap_or_default();
-    let (outcome, latency) = timed("settle", || money(ws, &dir, &job, SETTLE, "0", "0", &cap, "0"))?;
+    let (outcome, latency) = timed("settle", || {
+        money(ws, &dir, &job, SETTLE, "0", "0", &cap, "0")
+    })?;
     let after = fields(ws, &name).unwrap_or_default();
-    Ok(json!({"type":"job-settled","job":job,"from":before.get(&STATE).and_then(|s| s.parse::<usize>().ok()).and_then(|s| STATES.get(s)),
-        "fields":named(&after),"outcome":outcome,"latency":{"settle":latency}}))
+    Ok(
+        json!({"type":"job-settled","job":job,"from":before.get(&STATE).and_then(|s| s.parse::<usize>().ok()).and_then(|s| STATES.get(s)),
+        "fields":named(&after),"outcome":outcome,"latency":{"settle":latency}}),
+    )
 }
 
 fn show(ws: &Ws, mut args: Args) -> Result<Value> {
@@ -846,6 +986,119 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+    #[test]
+    fn settlement_lost_reply_and_prior_uncertainty_keep_original_ingress() {
+        let root = std::env::temp_dir().join(format!("mini-job-recovery-{}", std::process::id()));
+        workspace::make_private_dir(&root).unwrap();
+        let dir = root.join("attempt");
+        workspace::make_private_dir(&dir).unwrap();
+        let ws = Ws {
+            root: root.clone(),
+            pin: json!({}),
+            host: "/unused".into(),
+            socket: "/unused".into(),
+            config: "/unused".into(),
+            key: "/unused".into(),
+            subject: "7".into(),
+        };
+        fs::write(dir.join("ingress.bin"), b"retained original ingress").unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        crate::shell::session_fs::replace(
+            &root,
+            &dir.join("outcome-1.json"),
+            br#"{"type":"refused"}"#,
+        )
+        .unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        crate::shell::session_fs::replace(
+            &root,
+            &dir.join("outcome-2.json"),
+            br#"{"type":"uncertain"}"#,
+        )
+        .unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        crate::shell::session_fs::replace(
+            &root,
+            &dir.join("outcome-3.json"),
+            br#"{"type":"refused"}"#,
+        )
+        .unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        assert_eq!(
+            fs::read(dir.join("ingress.bin")).unwrap(),
+            b"retained original ingress"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settlement_lost_send_gap_survives_later_exact_native_refusal() {
+        let root = std::env::temp_dir().join(format!("mini-job-send-gap-{}-{}", std::process::id(), nonce().unwrap()));
+        workspace::make_private_dir(&root).unwrap();
+        let dir = root.join("attempt");
+        workspace::make_private_dir(&dir).unwrap();
+        let ws = Ws { root:root.clone(), pin:json!({}), host:"/unused".into(), socket:"/unused".into(), config:"/unused".into(), key:"/unused".into(), subject:"7".into() };
+        let ingress = b"retained original ingress";
+        retain_new_ingress(&ws, &dir, ingress).unwrap();
+        assert!(retain_new_ingress(&ws, &dir, b"replacement").is_err());
+        let first = begin_money_submission(&ws, &dir, ingress).unwrap();
+        assert!(retain_money_outcome(&ws, &dir, json!({"type":"refused"}), Some(&first)).is_err());
+        assert!(!settlement_needs_recovery(&ws, &dir).unwrap());
+        let lost = begin_money_submission(&ws, &dir, ingress).unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        let later = begin_money_submission(&ws, &dir, ingress).unwrap();
+        assert!(retain_money_outcome(&ws, &dir, json!({"type":"refused"}), Some(&later)).is_err());
+        assert!(!dir.join(format!("outcome-{lost}.json")).exists());
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        crate::shell::session_fs::replace(&root, &dir.join("ingress.bin"), b"different request").unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settlement_legacy_unknown_is_not_upgraded_by_later_refused_resend() {
+        let root = std::env::temp_dir().join(format!("mini-job-legacy-gap-{}-{}", std::process::id(), nonce().unwrap()));
+        workspace::make_private_dir(&root).unwrap();
+        let dir = root.join("attempt");
+        workspace::make_private_dir(&dir).unwrap();
+        let ws = Ws { root:root.clone(), pin:json!({}), host:"/unused".into(), socket:"/unused".into(), config:"/unused".into(), key:"/unused".into(), subject:"7".into() };
+        let original = b"legacy original ingress after lost reply";
+        crate::shell::session_fs::replace(&root, &dir.join("ingress.bin"), original).unwrap();
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        // Native lookup absent permits only this original resend. Even its
+        // definitive refusal cannot resolve the unrecorded legacy send.
+        let resend = begin_money_submission(&ws, &dir, original).unwrap();
+        assert!(retain_money_outcome(&ws, &dir, json!({"type":"refused"}), Some(&resend)).is_err());
+        assert!(!dir.join("custody-origin.json").exists());
+        assert!(settlement_needs_recovery(&ws, &dir).unwrap());
+        assert_eq!(fs::read(dir.join("ingress.bin")).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settlement_canonical_identity_refuses_another_job_subject_or_action() {
+        let ws = Ws {
+            root: "/unused".into(),
+            pin: json!({}),
+            host: "/unused".into(),
+            socket: "/unused".into(),
+            config: "/unused".into(),
+            key: "/unused".into(),
+            subject: "7".into(),
+        };
+        let original = json!({"type":"job-money-ingress-v1","command":{"type":"job-money-v2","subject":"7","job":"42","action":"3"}});
+        settlement_identity(&ws, "42", &original).unwrap();
+        for (path, value) in [
+            ("/command/subject", "8"),
+            ("/command/job", "43"),
+            ("/command/action", "2"),
+            ("/type", "another ingress"),
+        ] {
+            let mut changed = original.clone();
+            *changed.pointer_mut(path).unwrap() = json!(value);
+            assert!(settlement_identity(&ws, "42", &changed).is_err(), "{path}");
+        }
+    }
     #[test]
     fn job_record_updates_are_atomic_and_symlinks_never_read_or_written() {
         use std::os::unix::fs::symlink;

@@ -1275,7 +1275,7 @@ fn serve_with_mode(
     let _guard = SocketGuard(socket, socket_metadata.dev(), socket_metadata.ino());
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
-    let mut start = || HostProcess::start_pinned(host, &pinned_config, &host_sha256);
+    let mut start = || HostProcess::start_pinned(host, &pinned_config, &host_sha256, &config_bytes);
     eprintln!("mini: serving {}", socket.display());
     if operator {
         return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, &mut start);
@@ -1298,48 +1298,69 @@ struct HostProcess {
     // Linux executes a sealed snapshot rather than reopening mutable bytes.
     // Retain it through the child's lifetime, including script interpreter startup.
     _image: Option<fs::File>,
+    _config_image: Option<fs::File>,
 }
 
 impl HostProcess {
-    /// Each restart must execute immutable bytes matching the advertised pin.
-    fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32]) -> Result<Self, String> {
+    /// Each restart must execute the advertised image and exact original settings.
+    fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
+        let config_image = Self::checked_config(config, expected_config)?;
         let image = Self::checked_image(host, expected)?;
-        Self::start_checked_image(host, config, image)
+        Self::start_checked_images(host, config, image, config_image)
+    }
+
+    fn checked_config(config: &Path, expected: &[u8]) -> Result<Option<fs::File>, String> {
+        if read_config(config)? != expected {
+            return Err("host config changed; refusing launch under the socket's original settings".into());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // Copy the original advertised bytes, rather than reopen the checked
+            // pathname. Later pathname changes cannot alter the child's settings.
+            return Self::sealed_snapshot(io::Cursor::new(expected), false).map(Some);
+        }
+        #[cfg(not(target_os = "linux"))]
+        Ok(None)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn sealed_snapshot<R: Read>(mut source: R, executable: bool) -> Result<fs::File, String> {
+        use std::os::fd::FromRawFd;
+        use std::io::{Seek, SeekFrom};
+        let base = libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING;
+        let name = if executable { c"mini-host" } else { c"mini-host-config" };
+        // Explicit execute/no-execute intent on new kernels; older kernels
+        // reject these flags with EINVAL and support the original memfd API.
+        let intent = if executable { 0x10 } else { 0x08 };
+        let mut fd = unsafe { libc::memfd_create(name.as_ptr(), base | intent) };
+        if fd < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
+            fd = unsafe { libc::memfd_create(name.as_ptr(), base) };
+        }
+        if fd < 0 { return Err(format!("cannot create immutable host snapshot: {}", io::Error::last_os_error())); }
+        let mut snapshot = unsafe { fs::File::from_raw_fd(fd) };
+        if unsafe { libc::fchmod(fd, if executable { 0o700 } else { 0o400 }) } != 0 {
+            return Err(format!("cannot protect host snapshot: {}", io::Error::last_os_error()));
+        }
+        io::copy(&mut source, &mut snapshot).map_err(|e| format!("cannot copy host snapshot: {e}"))?;
+        let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
+        if unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, seals) } != 0 {
+            return Err(format!("cannot seal host snapshot: {}", io::Error::last_os_error()));
+        }
+        snapshot.seek(SeekFrom::Start(0)).map_err(|e| format!("cannot read sealed host snapshot: {e}"))?;
+        Ok(snapshot)
     }
 
     fn checked_image(host: &Path, expected: &[u8; 32]) -> Result<fs::File, String> {
         let source = fs::File::open(host)
             .map_err(|e| format!("cannot open pinned host {}: {e}", host.display()))?;
-        if !source.metadata().map_err(|e| format!("cannot inspect pinned host: {e}"))?.is_file() {
+        let before = source.metadata().map_err(|e| format!("cannot inspect pinned host: {e}"))?;
+        if !before.is_file() {
             return Err("pinned host image must be a regular file".into());
         }
+        // Hash AFTER sealing, so an in-place writer racing the copy cannot
+        // change bytes between their verification and execution.
         #[cfg(target_os = "linux")]
-        let mut image = {
-            use std::os::fd::FromRawFd;
-            use std::io::{Seek, SeekFrom};
-            // Request an executable memfd explicitly on recent kernels. Older
-            // kernels reject MFD_EXEC (0x10); their original memfd is executable.
-            let base = libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING;
-            let mut fd = unsafe { libc::memfd_create(c"mini-host".as_ptr(), base | 0x10) };
-            if fd < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
-                fd = unsafe { libc::memfd_create(c"mini-host".as_ptr(), base) };
-            }
-            if fd < 0 { return Err(format!("cannot create immutable host image: {}", io::Error::last_os_error())); }
-            let mut snapshot = unsafe { fs::File::from_raw_fd(fd) };
-            if unsafe { libc::fchmod(fd, 0o700) } != 0 {
-                return Err(format!("cannot protect executable host image: {}", io::Error::last_os_error()));
-            }
-            io::copy(&mut { source }, &mut snapshot)
-                .map_err(|e| format!("cannot snapshot pinned host: {e}"))?;
-            let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
-            if unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, seals) } != 0 {
-                return Err(format!("cannot seal executable host image: {}", io::Error::last_os_error()));
-            }
-            // Hash AFTER sealing, so even an in-place writer racing the copy
-            // cannot change bytes between their verification and execution.
-            snapshot.seek(SeekFrom::Start(0)).map_err(|e| format!("cannot read sealed host image: {e}"))?;
-            snapshot
-        };
+        let mut image = Self::sealed_snapshot(source, true)?;
         #[cfg(not(target_os = "linux"))]
         let mut image = source;
         let mut hash = Sha256::new();
@@ -1350,6 +1371,15 @@ impl HostProcess {
             if count == 0 { break; }
             hash.update(&chunk[..count]);
         }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let after = image.metadata().map_err(|e| format!("cannot reinspect pinned host: {e}"))?;
+            let identity = |m: &fs::Metadata| (m.dev(), m.ino(), m.len(), m.mtime(),
+                m.mtime_nsec(), m.ctime(), m.ctime_nsec());
+            if identity(&before) != identity(&after) {
+                return Err("host image changed while checking its pin".into());
+            }
+        }
         let actual: [u8; 32] = hash.finalize().into();
         if &actual != expected {
             return Err("host image changed; refusing launch under the socket's original pin".into());
@@ -1357,17 +1387,23 @@ impl HostProcess {
         Ok(image)
     }
 
-    fn start_checked_image(host: &Path, config: &Path, image: fs::File) -> Result<Self, String> {
+    fn start_checked_images(host: &Path, config: &Path, image: fs::File, config_image: Option<fs::File>) -> Result<Self, String> {
         #[cfg(target_os = "linux")]
         let executable = std::path::PathBuf::from(format!(
             "/proc/{}/fd/{}", std::process::id(), image.as_raw_fd()));
         // Platforms without Linux seals retain a checked pathname boundary.
         #[cfg(not(target_os = "linux"))]
         let executable = host.to_path_buf();
+        #[cfg(target_os = "linux")]
+        let config_argument = std::path::PathBuf::from(format!("/proc/{}/fd/{}",
+            std::process::id(), config_image.as_ref().ok_or("missing immutable host config")?.as_raw_fd()));
+        #[cfg(not(target_os = "linux"))]
+        let config_argument = config.to_path_buf();
         let mut command = Command::new(executable);
-        command.arg(config).arg("stdio");
+        command.arg(config_argument).arg("stdio");
         let mut process = Self::start(&mut command, &host.display().to_string())?;
         process._image = Some(image);
+        process._config_image = config_image;
         Ok(process)
     }
 
@@ -1384,6 +1420,7 @@ impl HostProcess {
             input,
             output,
             _image: None,
+            _config_image: None,
         };
         set_nonblocking(&process.input).map_err(|e| format!("cannot bound host input pipe: {e}"))?;
         eprintln!("mini: host process {}", process.child.id());
@@ -1842,7 +1879,7 @@ mod tests {
         fs::write(&host, b"#!/bin/sh\nprintf original\n").unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let expected = host_image_sha256(&host).unwrap();
-        let mut first = HostProcess::start_pinned(&host, &config, &expected).unwrap();
+        let mut first = HostProcess::start_pinned(&host, &config, &expected, b"{}").unwrap();
         let mut reply = String::new();
         first.output.read_to_string(&mut reply).unwrap();
         assert!(first.child.wait().unwrap().success());
@@ -1852,15 +1889,48 @@ mod tests {
         fs::write(&staged, b"#!/bin/sh\nprintf replacement\n").unwrap();
         fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
         fs::rename(&staged, &host).unwrap();
-        let refused = HostProcess::start_pinned(&host, &config, &expected);
+        let refused = HostProcess::start_pinned(&host, &config, &expected, b"{}");
         assert!(matches!(refused, Err(ref error) if error.contains("original pin")));
         let upgraded = host_image_sha256(&host).unwrap();
-        let mut second = HostProcess::start_pinned(&host, &config, &upgraded).unwrap();
+        let mut second = HostProcess::start_pinned(&host, &config, &upgraded, b"{}").unwrap();
         let mut reply = String::new();
         second.output.read_to_string(&mut reply).unwrap();
         assert!(second.child.wait().unwrap().success());
         assert_eq!(reply, "replacement");
         drop(second);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sealed_config_survives_mutation_and_restart_refuses_changed_settings() {
+        use std::os::unix::fs::FileExt;
+        let directory = std::env::temp_dir().join(format!("mini-config-seal-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host");
+        let config = directory.join("config");
+        fs::write(&host, b"#!/bin/sh\ncat \"$1\"\n").unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&config, b"original settings").unwrap();
+        let expected = host_image_sha256(&host).unwrap();
+        let image = HostProcess::checked_image(&host, &expected).unwrap();
+        let config_image = HostProcess::checked_config(&config, b"original settings").unwrap();
+        let sealed = config_image.as_ref().unwrap();
+        assert_eq!(sealed.write_at(b"X", 0).unwrap_err().raw_os_error(), Some(libc::EPERM));
+        assert_eq!(sealed.set_len(1).unwrap_err().raw_os_error(), Some(libc::EPERM));
+        fs::write(&config, b"mutated settings").unwrap();
+        let replacement = directory.join("replacement");
+        fs::write(&replacement, b"replaced settings").unwrap();
+        fs::rename(&replacement, &config).unwrap();
+        let mut process = HostProcess::start_checked_images(&host, &config, image, config_image).unwrap();
+        let mut reply = String::new();
+        process.output.read_to_string(&mut reply).unwrap();
+        assert!(process.child.wait().unwrap().success());
+        assert_eq!(reply, "original settings");
+        drop(process);
+        assert!(matches!(HostProcess::start_pinned(&host, &config, &expected, b"original settings"),
+            Err(ref error) if error.contains("original settings")));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1891,7 +1961,7 @@ mod tests {
         let replacement = directory.join("replacement");
         fs::write(&replacement, b"#!/bin/sh\nprintf replaced\n").unwrap();
         fs::rename(&replacement, &host).unwrap();
-        let mut process = HostProcess::start_checked_image(&host, &config, image).unwrap();
+        let mut process = HostProcess::start_checked_images(&host, &config, image, HostProcess::checked_config(&config, b"{}").unwrap()).unwrap();
         let mut reply = String::new();
         process.output.read_to_string(&mut reply).unwrap();
         assert!(process.child.wait().unwrap().success());

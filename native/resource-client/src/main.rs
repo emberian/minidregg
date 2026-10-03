@@ -64,6 +64,7 @@ mod query_refusal;
 #[cfg(unix)]
 mod provider_continuity;
 mod replan;
+mod retry_evidence;
 #[cfg(unix)]
 mod proxy;
 #[cfg(unix)]
@@ -2372,14 +2373,7 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
 }
 
 fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    for index in 1..=9999 {
-        let binary = directory.join(format!("retry-{index:04}.bin"));
-        let json = directory.join(format!("retry-{index:04}.json"));
-        if !binary.exists() && !json.exists() {
-            return Ok((binary, json));
-        }
-    }
-    Err("attempt has exhausted retry evidence names".to_owned())
+    retry_evidence::next_paths(directory)
 }
 
 fn retry_with_upgrade(

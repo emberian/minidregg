@@ -152,12 +152,19 @@ partial computation may retain a resource indefinitely. A world protocol's
 terminal discharge obligation is a separate contract.
 
 A successful `Checked` value contains an actual typing derivation for the erased
-term and its use conditions. Typed initial states, heap operations, cache updates,
-scalar primitive returns and zero/successor branches have preservation results.
-The primitive and conditional cases also exclude wrong operands under their
-state-typing premises. Full preservation across every transition and global
-exclusion of wrong values or missing fields remain open. Capture restrictions are
-not yet a complete theorem of runtime custody conservation or terminal discharge.
+term and its use conditions. The
+[typed transition proofs](../Theory/ObjectiveBendDemandPreservation.lean) establish
+`typed_stepRaw_preserved` for every demand-machine constructor. Allocation
+extends the address assignment while preserving each existing address's type;
+lexical origins and continuation frames retain their quantity and shareability
+evidence, including captured closures, composition and cyclic `Fix`.
+
+For closed checked source, `checked_reachable_no_refusal` excludes wrong operands,
+missing fields and internal-reference refusals throughout raw-machine execution.
+`check_runBounded_no_refusal` connects actual checker success to the same erased
+term and bounded executor, for arbitrary tick, heap and stack limits. Evaluation
+may still diverge, encounter a blackhole or suspend for resources. These safety
+results do not establish runtime custody conservation or terminal discharge.
 
 Laws are propositions about behavior, including partial behavior. A total Lean
 proof can establish a relational law about a partial program's syntax without
@@ -192,14 +199,15 @@ not establish external contextual equivalence. The main source entry points are:
 | `reachable_no_internalRefusal` | Closed scoped executions cannot refuse for an unbound variable, missing cell or invalid update. Missing fields and wrong operands are different cases. |
 | `runBounded_natural_sound`, `runBounded_boolean_sound`, `runBounded_label_sound` | Any actual finished scalar run of closed source agrees with independent reference evaluation. |
 | `runBounded_value_sound`, `runBounded_observes_sound` | Finished values have a realized reference meaning; finished ground results have the corresponding reference observation. |
-| `typed_binary_right_preserved`, `typed_condition_preserved` | The actual scalar-primitive and zero/successor return transitions preserve state typing under their explicit premises, including the successor allocation. |
+| `typed_stepRaw_preserved` | Every raw-machine constructor preserves typed heap, control and continuation frames under its state-typing premises, with a monotonically extended address assignment. |
+| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | Closed checked erasures cannot reach raw refusals or return bounded-executor refusals, including wrong operands and missing fields. Divergence, blackholes and resource suspension remain possible. |
 | `adequate_trace_completion` | An existing terminating raw-machine trace supplies sufficient executor bounds. It does not establish termination of an arbitrary source program. |
 
 The [invariant proofs](../Theory/ObjectiveBendDemandInvariant.lean) support the
 soundness result; [typed transition proofs](../Theory/ObjectiveBendDemandPreservation.lean)
 address a separate safety obligation. Source-elaboration adequacy, completeness
 of the shared machine relative to reference evaluation, administrative progress,
-blackhole/divergence correspondence and all-step type preservation remain open.
+and blackhole/divergence correspondence remain open.
 In particular, reference termination has not yet been shown to guarantee machine
 termination with sufficient resources. The `Representation` structure in the
 reference semantics records the larger implementation contract; the completed
@@ -219,9 +227,12 @@ source. Its served preview runs a selected capture through server-pinned tools,
 the actual type checker and the same-term demand executor. Editing a module and
 capturing it again produces a new checked preview while retaining earlier preview
 history. Results, types and diagnostics retain their source and tooling bindings;
-reading a stored preview rechecks current document grants. This received route
-uses frozen wire-v1 tooling. The separately qualified wire-v2 command-line
-preview does not silently upgrade that served configuration.
+reading a stored preview rechecks current document grants. Studio now accepts
+explicit wire-v1 or wire-v2 preview selection within Objective source edition 1,
+using separate server-pinned configurations. Wire-v2 carries tagged arguments:
+Boolean `true` and String `"true"` retain their distinct types and results, and
+incompatible source or arguments are refused by the actual checker. Earlier
+captures and preview history keep their original tooling interpretation.
 Native storage has received governed source, pinned instance births and kind
 evolution with old instances retaining their old pin and state.
 

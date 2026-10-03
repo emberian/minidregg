@@ -248,6 +248,46 @@ fn v2_pin(
     Ok(value)
 }
 
+/// One version-aware physical pin contract for both ordinary startup and
+/// the final host-upgrade recheck. Older pins are not rewritten as newer ones.
+fn expected_pin(
+    retained: &Value,
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+) -> Result<Value> {
+    Ok(match retained.get("type").and_then(Value::as_str) {
+        Some("minidregg-b-consumer-worker-pin-v1") => pin_identity(host, config, socket, key)?,
+        Some("minidregg-b-consumer-worker-pin-v2") => {
+            let evidence_path = retained.get("upgradeEvidencePath").and_then(Value::as_str);
+            let evidence_sha = retained
+                .get("upgradeEvidenceSha256")
+                .and_then(Value::as_str);
+            if evidence_path.is_some() != evidence_sha.is_some() {
+                return Err("consumer host upgrade evidence is incomplete".into());
+            }
+            if let (Some(path), Some(sha)) = (evidence_path, evidence_sha) {
+                if !canonical_sha(sha) || file_digest(Path::new(path))? != sha {
+                    return Err("consumer host upgrade evidence changed".into());
+                }
+                let evidence = read_json(Path::new(path))?;
+                let old_pin_path = field(&evidence, "oldPinPath")?;
+                let old_pin_sha = field(&evidence, "oldPinSha256")?;
+                if evidence.get("type").and_then(Value::as_str)
+                    != Some("minidregg-b-consumer-host-upgrade-v1")
+                    || !canonical_sha(old_pin_sha)
+                    || file_digest(Path::new(old_pin_path))? != old_pin_sha
+                {
+                    return Err("consumer previous worker pin evidence changed".into());
+                }
+            }
+            v2_pin(host, config, socket, key, evidence_path, evidence_sha)?
+        }
+        _ => return Err("consumer worker pin has unsupported version".into()),
+    })
+}
+
 pub(super) fn pin(
     state_dir: &Path,
     host: &Path,
@@ -258,35 +298,7 @@ pub(super) fn pin(
     let path = state_dir.join("pin.json");
     if path.exists() {
         let retained = read_json(&path)?;
-        let expected = match retained.get("type").and_then(Value::as_str) {
-            Some("minidregg-b-consumer-worker-pin-v1") => pin_identity(host, config, socket, key)?,
-            Some("minidregg-b-consumer-worker-pin-v2") => {
-                let evidence_path = retained.get("upgradeEvidencePath").and_then(Value::as_str);
-                let evidence_sha = retained
-                    .get("upgradeEvidenceSha256")
-                    .and_then(Value::as_str);
-                if evidence_path.is_some() != evidence_sha.is_some() {
-                    return Err("consumer host upgrade evidence is incomplete".into());
-                }
-                if let (Some(path), Some(sha)) = (evidence_path, evidence_sha) {
-                    if !canonical_sha(sha) || file_digest(Path::new(path))? != sha {
-                        return Err("consumer host upgrade evidence changed".into());
-                    }
-                    let evidence = read_json(Path::new(path))?;
-                    let old_pin_path = field(&evidence, "oldPinPath")?;
-                    let old_pin_sha = field(&evidence, "oldPinSha256")?;
-                    if evidence.get("type").and_then(Value::as_str)
-                        != Some("minidregg-b-consumer-host-upgrade-v1")
-                        || !canonical_sha(old_pin_sha)
-                        || file_digest(Path::new(old_pin_path))? != old_pin_sha
-                    {
-                        return Err("consumer previous worker pin evidence changed".into());
-                    }
-                }
-                v2_pin(host, config, socket, key, evidence_path, evidence_sha)?
-            }
-            _ => return Err("consumer worker pin has unsupported version".into()),
-        };
+        let expected = expected_pin(&retained, host, config, socket, key)?;
         if retained != expected {
             return Err(
                 "consumer worker pin changed; retain old state for operator review".to_owned(),
@@ -620,7 +632,7 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
             "new host lookup does not match all four original confirmed receipt fields".into(),
         );
     }
-    if pin_identity(&old_host, &config, &socket, &key)? != old_pin
+    if expected_pin(&old_pin, &old_host, &config, &socket, &key)? != old_pin
         || file_digest(&old_host)? != old_sha
         || file_digest(&new_host)? != new_sha
         || file_digest(&upgrade_dir.join("known-outcome.bin"))? != known_sha
@@ -1528,6 +1540,104 @@ pub(super) fn run_locked_route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actual_upgrade_accepts_fresh_v2_and_legacy_v1_without_rebinding_call() {
+        use std::os::unix::fs::PermissionsExt;
+        // The stub supplies fixed receipt bytes only to exercise physical pin
+        // activation. This test does not establish native receipt semantics.
+        for legacy in [false, true] {
+            let root = env::temp_dir().join(format!(
+                "mini-upgrade-pin-{}-{}",
+                std::process::id(),
+                workspace::random_nonce().unwrap()
+            ));
+            private_dir(&root).unwrap();
+            let state_dir = root.join("state");
+            let socket_dir = root.join("service");
+            private_dir(&state_dir).unwrap();
+            private_dir(&socket_dir).unwrap();
+            let old_host = root.join("old-host");
+            let new_host = root.join("new-host");
+            let config = root.join("config.json");
+            let key = root.join("key");
+            let socket = socket_dir.join("host.sock");
+            let known = root.join("known-outcome.bin");
+            create_private(&old_host, b"old pinned image").unwrap();
+            create_private(&new_host, br#"#!/bin/sh
+if [ "$2" = lookup ]; then
+  printf '%s' '{"type":"confirmed","confirmation":"replayed","acceptedCount":"3","transactionId":"123","eventId":"456","worldRoot":"789"}' > "$4"
+else
+  cat "$4" > "$5"
+fi
+"#).unwrap();
+            fs::set_permissions(&new_host, fs::Permissions::from_mode(0o700)).unwrap();
+            create_private(&config, b"{}\n").unwrap();
+            create_private(&key, &[7; 32]).unwrap();
+            create_private(&known, br#"{"type":"confirmed","confirmation":"replayed","acceptedCount":"3","transactionId":"123","eventId":"456","worldRoot":"789"}"#).unwrap();
+            if legacy {
+                write_json_new(
+                    &state_dir.join("pin.json"),
+                    &pin_identity(&old_host, &config, &socket, &key).unwrap(),
+                )
+                .unwrap();
+            } else {
+                pin(&state_dir, &old_host, &config, &socket, &key).unwrap();
+                assert_eq!(
+                    read_json(&state_dir.join("pin.json")).unwrap()["type"],
+                    "minidregg-b-consumer-worker-pin-v2"
+                );
+            }
+            let pending = state_dir.join("pending");
+            let prepare = pending.join("prepare-00000002");
+            private_dir(&pending).unwrap();
+            private_dir(&prepare).unwrap();
+            create_private(&prepare.join("call.bin"), b"exact retained call").unwrap();
+            create_private(&prepare.join("config.json"), b"{}\n").unwrap();
+            write_json_new(&prepare.join("attempt.json"), &json!({"format":"minidregg-resource-client-attempt-v1", "operation":"submit",
+                "host":utf8_path(&old_host).unwrap(), "config":utf8_path(&prepare.join("config.json")).unwrap(), "socket":utf8_path(&socket).unwrap()})).unwrap();
+            let state = json!({"phase":"Sending","prepare":"prepare-00000002"});
+            save_state(&pending, &state).unwrap();
+            upgrade_host(UpgradeRequest {
+                old_host: &old_host,
+                new_host: &new_host,
+                config: &config,
+                socket: &socket,
+                key: &key,
+                state_dir: &state_dir,
+                known_outcome: &known,
+                old_sha: &file_digest(&old_host).unwrap(),
+                new_sha: &file_digest(&new_host).unwrap(),
+                known_sha: &file_digest(&known).unwrap(),
+            })
+            .unwrap();
+            assert_eq!(
+                fs::read(prepare.join("call.bin")).unwrap(),
+                b"exact retained call"
+            );
+            assert_eq!(read_json(&pending.join("state.json")).unwrap(), state);
+            pin(&state_dir, &new_host, &config, &socket, &key).unwrap();
+            assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
+                .unwrap()
+                .is_some());
+            let pin_value = read_json(&state_dir.join("pin.json")).unwrap();
+            let evidence = read_json(Path::new(
+                pin_value["upgradeEvidencePath"].as_str().unwrap(),
+            ))
+            .unwrap();
+            fs::write(
+                Path::new(evidence["oldPinPath"].as_str().unwrap()),
+                b"changed original pin",
+            )
+            .unwrap();
+            assert!(pin(&state_dir, &new_host, &config, &socket, &key).is_err());
+            assert_eq!(
+                fs::read(prepare.join("call.bin")).unwrap(),
+                b"exact retained call"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
 
     #[test]
     fn upgraded_pin_binds_pending_call_but_allows_next_fresh_wake() {

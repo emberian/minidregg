@@ -65,6 +65,13 @@ structure ClosureTyping (assumptions : Assumptions) (types : AddressTypes) (clos
   safe : safeUses context uses = true
   contextValid : validContext assumptions.shareableVariables context = true
 
+/-- Finite source conversion evidence is retained as a path rather than an
+assumed transitive subtype decision procedure. -/
+inductive ConversionPath (assumptions : Assumptions) : Ty → Ty → Prop where
+  | refl (type : Ty) : ConversionPath assumptions type type
+  | step {first middle last : Ty} : ConversionPath assumptions first middle →
+      sameType assumptions middle last = true → ConversionPath assumptions first last
+
 /-- The static capture proof and physical address environment travel together.
 An immutable runtime closure has no hidden exemption for affine captures. -/
 inductive ValueTyping (assumptions : Assumptions) (types : AddressTypes) : RuntimeValue → Ty → Prop where
@@ -83,8 +90,8 @@ inductive ValueTyping (assumptions : Assumptions) (types : AddressTypes) : Runti
   | record {fields : List (String × Address)} {row : Ty} :
       (∃ fuel, row.isRow assumptions.bounds fuel = true) →
       (∀ (fuel : Nat) (name : String) (member : Ty), row.lookup assumptions.bounds fuel name = some member →
-        ∃ address, fields.find? (fun field => field.1 == name) = some (name,address) ∧
-          types[address]? = some member) →
+        ∃ address actual, fields.find? (fun field => field.1 == name) = some (name,address) ∧
+          types[address]? = some actual ∧ ConversionPath assumptions actual member) →
       ValueTyping assumptions types (.record fields) row
   | specification {metadata extension : Address} {metadataType extensionType : Ty} :
       types[metadata]? = some metadataType → types[extension]? = some extensionType →

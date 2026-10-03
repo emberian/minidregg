@@ -153,7 +153,7 @@ fn checked_receipt(value: &Value) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("confirmed")
         || !matches!(
             value.get("confirmation").and_then(Value::as_str),
-            Some("installed" | "replayed")
+            Some("installed" | "recoveredAfterUncertainResponse" | "replayed")
         )
     {
         return Err("latest Mini result is not a confirmed receipt".into());
@@ -470,7 +470,7 @@ fn receive(config: &Value, state: &Path) -> Result<()> {
     }
     let poll = selected_poll(state)?;
     if recipient.exists() {
-        selected_release::lookup(&recipient, None)?;
+        selected_release::recover(&recipient, None)?;
     } else {
         selected_release::submit(
             &host(config)?,
@@ -612,7 +612,7 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
     let poll = transport_article(state)?;
     let recipient = state.join("recipient-attempt");
     if recipient.exists() {
-        selected_release::lookup(&recipient, None)?;
+        selected_release::recover(&recipient, None)?;
     } else {
         selected_release::submit(
             &host(config)?,
@@ -898,6 +898,29 @@ mod tests {
         ));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn recovered_original_receipt_still_binds_every_later_lookup() {
+        let state = scratch();
+        let attempt = state.join("recipient-attempt");
+        fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let recovered = json!({"type":"confirmed","confirmation":"recoveredAfterUncertainResponse",
+            "transactionId":"2","eventId":"3","acceptedCount":"4","worldRoot":"5"});
+        put_json(&attempt.join("request-0000.outcome.json"), &recovered).unwrap();
+        assert_eq!(recipient_receipt(&state).unwrap(), recovered);
+        let mut replay = recovered.clone();
+        replay["confirmation"] = json!("replayed");
+        put_json(&attempt.join("request-0001.outcome.json"), &replay).unwrap();
+        assert_eq!(recipient_receipt(&state).unwrap(), recovered);
+        for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+            let mut changed = replay.clone();
+            changed[key] = json!("99");
+            crate::shell::session_fs::replace(&state, &attempt.join("request-0001.outcome.json"),
+                changed.to_string().as_bytes()).unwrap();
+            assert!(recipient_receipt(&state).unwrap_err().contains("changed original"));
+        }
+        fs::remove_dir_all(state).unwrap();
     }
 
     #[test]

@@ -170,7 +170,7 @@ fn latest_lookup_absent(directory: &Path, attempt: &Attempt) -> Result<bool> {
     })
 }
 
-fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Result<()> {
+fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Result<Value> {
     let (marker_path, frame_path, outcome_path) = new_path(directory)?;
     // This marker precedes the call. If the reply is lost, no caller may infer
     // that Mini did not commit the exact ingress.
@@ -213,8 +213,8 @@ fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Res
     )?;
     print_json(&value)?;
     match value.get("type").and_then(Value::as_str) {
-        Some("confirmed") => Ok(()),
-        Some("absent") if operation == 21 => Ok(()),
+        Some("confirmed") => Ok(value),
+        Some("absent") if operation == 21 => Ok(value),
         Some(other) => Err(format!(
             "selected-release {stem} returned {other}; exact outcome retained"
         )),
@@ -262,7 +262,7 @@ pub(super) fn submit(
     create_private(&directory.join("attempt.json"), &manifest_bytes)?;
     sync_directory_ancestors(&directory)?;
     let attempt = retained(&directory)?;
-    invoke(&directory, &attempt, 20, "submit")
+    invoke(&directory, &attempt, 20, "submit").map(|_| ())
 }
 
 pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
@@ -271,7 +271,26 @@ pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result
     if let Some(socket) = override_socket {
         attempt.socket = absolute(socket)?;
     }
-    invoke(&directory, &attempt, 21, "lookup")
+    invoke(&directory, &attempt, 21, "lookup").map(|_| ())
+}
+
+/// Whole-action recovery consumes the existing source-authorized absent gate.
+/// A failed/uncertain lookup stops before dispatch; confirmed history is enough.
+/// Absence allows only the same retained ingress, never a newly planned intent.
+pub(super) fn recover(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
+    let directory = absolute(directory)?;
+    let mut attempt = retained(&directory)?;
+    if let Some(socket) = override_socket {
+        attempt.socket = absolute(socket)?;
+    }
+    let lookup = invoke(&directory, &attempt, 21, "lookup")?;
+    // invoke retains the exact reply frame and derives this outcome by the
+    // pinned Host's native decoder. Reuse that checked value immediately;
+    // cached presentation alone never authorizes a submit.
+    if lookup["type"] == "absent" {
+        invoke(&directory, &attempt, 20, "submit")?;
+    }
+    Ok(())
 }
 
 pub(super) fn retry_submit(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
@@ -283,7 +302,7 @@ pub(super) fn retry_submit(directory: &Path, override_socket: Option<&Path>) -> 
     if !latest_lookup_absent(&directory, &attempt)? {
         return Err("exact selected-release resubmit requires a retained absent lookup".into());
     }
-    invoke(&directory, &attempt, 20, "submit")
+    invoke(&directory, &attempt, 20, "submit").map(|_| ())
 }
 
 #[cfg(test)]
@@ -386,6 +405,24 @@ mod tests {
             assert!(retry_submit(&attempt, None)
                 .unwrap_err()
                 .contains("absent lookup"));
+            // The exchange recovery consumer may look up unknown effects,
+            // but losing that lookup reply must never trigger another submit.
+            fs::remove_file(&socket).unwrap();
+            let listener = UnixListener::bind(&socket).unwrap();
+            let lookup_peer = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut prefix = [0u8; 4];
+                stream.read_exact(&mut prefix).unwrap();
+                let mut request = vec![0; u32::from_le_bytes(prefix) as usize];
+                stream.read_exact(&mut request).unwrap();
+                assert!(request.ends_with(b"host-authored-exact-ingress"));
+            });
+            assert!(recover(&attempt, None).unwrap_err().contains("uncertain"));
+            lookup_peer.join().unwrap();
+            let marker: Value = serde_json::from_slice(&fs::read(attempt.join("request-0001.json")).unwrap()).unwrap();
+            assert_eq!(marker["operation"], 21);
+            assert!(!attempt.join("request-0002.json").exists());
+            assert_eq!(fs::read(attempt.join("ingress.bin")).unwrap(), b"host-authored-exact-ingress");
             fs::write(attempt.join("ingress.bin"), b"changed").unwrap();
             assert!(retained(&attempt)
                 .err()
