@@ -114,7 +114,7 @@ def enter(path):
         staging = root.parent/("."+root.name+"."+secrets.token_hex(8))
         staging.mkdir(mode=0o700); (staging/"hooks").mkdir(mode=0o700)
         save(staging/"input.json",c)
-        save(staging/"source-inputs.json",{str(HERE/n):sha(HERE/n) for n in ["app-document-provision.py","ws-continuity-fixture.py"]})
+        save(staging/"source-inputs.json",{str(p):sha(p) for p in [HERE/"app-document-provision.py",HERE/"ws-continuity-fixture.py",Path(f.step_ledger.__file__).resolve()]})
         save(staging/"fixture.json",value)
         os.rename(staging,root)
     x = DelegatedConnector(root/"fixture.json")

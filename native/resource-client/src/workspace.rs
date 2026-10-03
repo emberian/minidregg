@@ -1586,7 +1586,10 @@ fn transclude(
         .find(|entry| {
             entry.get("type").and_then(Value::as_str) == Some("run") && has(entry, from) && has(entry, to)
         })
-        .ok_or("no run of the source holds both endpoints")?;
+        .ok_or_else(|| format!(
+            "no run of the source holds both endpoints: a transclusion is cut from a published range; \
+             publish one first with `doc range {source} FROM TO`"
+        ))?;
     let atoms: Vec<&str> = run["atoms"]
         .as_array()
         .ok_or("run lacks atoms")?

@@ -5,6 +5,7 @@ prepare INPUT.json creates a NEW Store and running EtherCalc app. Every subseque
 command accepts the generated fixture.json. Input is documented beside this file.
 No command retries an uncertain write, deletes evidence, or changes an old fixture.
 """
+import importlib.util as _importlib_util
 import argparse
 import copy
 import hashlib
@@ -18,6 +19,10 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
+_ledger_spec = _importlib_util.spec_from_file_location(
+    "step_ledger", HERE.parent.parent / "native" / "resource-client" / "step_ledger.py")
+step_ledger = _importlib_util.module_from_spec(_ledger_spec)
+_ledger_spec.loader.exec_module(step_ledger)
 SCHEMA = "spk-ws-continuity-fixture-v1"
 
 
@@ -252,63 +257,33 @@ class Fixture:
     def step(self, name, action, reentrant=False, effect_only=False):
         """Enter one retained provisioning step; a completed step never repeats.
 
-        Each step holds at most one native effect. A reentrant step is one whose
-        native consumer owns its exact journal (it resumes or refuses by itself).
-        Any other interrupted step fences all later steps until its retained
-        attempt is settled from evidence; nothing is authored again by default.
+        The shared ledger (native/resource-client/step_ledger.py) owns the
+        rules: one native effect per step, reentrant steps resume through their
+        own native journal, any other interrupted step fences later steps until
+        settled from evidence.
         """
-        ledger = self.f.setdefault("steps", {"done": [], "pending": None, "settled": []})
-        if name in ledger["done"]:
-            return False
-        pending = ledger["pending"]
-        if pending is not None:
-            require(pending["name"] == name and pending["reentrant"] is True and reentrant,
-                    f"step {pending['name']} is unsettled; inspect {pending['evidence'][-1]} before {name}")
-            pending["evidence"].append(str(self.opdir))
-        else:
-            ledger["pending"] = {"name": name, "reentrant": bool(reentrant), "effectOnly": bool(effect_only), "evidence": [str(self.opdir)]}
-        self.write_state()
-        action()
-        ledger["done"].append(name)
-        ledger["pending"] = None
-        self.write_state()
-        return True
+        try:
+            return step_ledger.StepLedger(self.f, self.write_state).step(name, action, self.opdir, reentrant=reentrant, effect_only=effect_only)
+        except step_ledger.LedgerFenced as error:
+            raise RuntimeError(str(error)) from None
 
     def settle(self, name, disposition, evidence, reason):
         """Settle an interrupted step from its retained native evidence.
 
         `absent`: the named retained artifact establishes that the attempt made
-        no effect (a definite refusal, or a failure before any submission); the
-        step is authored afresh. `confirmed`: the retained outcome is a native
-        confirmation of a step that leaves no adapter-side result (a reservation
-        or grant); the step is complete. A possibly admitted effect with neither
-        artifact stays fenced for exact native recovery.
+        no effect; the step is authored afresh. `confirmed`: the retained
+        `outcome.json` is a native confirmation of an effect-only step.
         """
-        ledger = self.f.get("steps", {})
-        pending = ledger.get("pending")
-        require(pending is not None and pending["name"] == name, "no such unsettled step")
-        require(disposition in ("absent", "confirmed"), "settlement disposition must be absent or confirmed")
-        evidence = absolute(evidence)
-        require(evidence.is_file() and not evidence.is_symlink() and evidence.is_relative_to(self.root),
-                "settlement evidence must be a retained file under this evidence root")
-        require(any(evidence.is_relative_to(attempt) for attempt in pending["evidence"]),
-                "settlement evidence belongs to another step's attempts")
-        require(isinstance(reason, str) and 0 < len(reason) <= 400, "settlement reason required")
-        if disposition == "confirmed":
-            require(pending.get("effectOnly") is True, "this step leaves adapter results; a confirmed attempt needs exact continuation, not settlement")
-            outcome = load(evidence)
-            require(evidence.name == "outcome.json" and outcome.get("type") == "confirmed"
-                    and outcome.get("confirmation") in ("installed", "replayed"), "confirmed settlement requires the retained native confirmation")
-        record = {"type": "mini-spk-step-settlement-v1", "step": name, "disposition": disposition,
-                  "attempts": pending["evidence"], "evidence": str(evidence), "evidenceSha256": sha(evidence), "reason": reason}
-        path = self.fresh("settlement.json")
-        save(path, record)
-        ledger["settled"].append(str(path))
-        if disposition == "confirmed":
-            ledger["done"].append(name)
-        ledger["pending"] = None
-        self.write_state()
-        return record
+        def confirmed(path):
+            outcome = load(path)
+            return (path.name == "outcome.json" and outcome.get("type") == "confirmed"
+                    and outcome.get("confirmation") in ("installed", "replayed"))
+        def write_record(record):
+            path = self.fresh("settlement.json")
+            save(path, record)
+            return path
+        return step_ledger.StepLedger(self.f, self.write_state).settle(name, disposition, absolute(evidence), reason, self.root,
+                                    write_record, confirmed=confirmed, sha=sha)
 
     def run(self, args, okay=True, env=None, timeout=1800):
         prefix = self.fresh("command")

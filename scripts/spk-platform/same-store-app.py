@@ -224,7 +224,7 @@ def enter(path):
     staging=root.parent/('.'+root.name+'.'+secrets.token_hex(8))
     staging.mkdir(mode=0o700);(staging/'hooks').mkdir(mode=0o700)
     save(staging/'input.json',c);save(staging/'manifest.json',m)
-    save(staging/'source-inputs.json',{str(HERE/name):sha(HERE/name) for name in ['same-store-app.py','ws-continuity-fixture.py']})
+    save(staging/'source-inputs.json',{str(path):sha(path) for path in [HERE/'same-store-app.py',HERE/'ws-continuity-fixture.py',Path(f.step_ledger.__file__).resolve()]})
     value={'schema':f.SCHEMA,'root':str(root),'app':c['application']['app'],'application':c['application'],
         'authority':c['authority'],'keys':c['keys'],'artifacts':artifacts,'state':str(state),'profilePath':str(profile),
         'grainsRoot':c['grainsRoot'],'brokerSocket':c.get('brokerSocket','/run/mini-spk-broker.sock'),'candidateSource':m['sourceCommit'],

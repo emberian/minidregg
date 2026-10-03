@@ -448,7 +448,15 @@ class Journey:
                 self.context.pop("boundaryActor", None)
             nonowner = next(member for member in room["members"] if member != owner)
             self.shell(nonowner, key + "-no-control", f'law {p}-r{index}-unauthorized {room['memberNames'][nonowner]}/notes {{"type":"all","predicates":[]}}', 1, r"controlCapability")
+            # A transclusion's range is cut from a published run of the source
+            # (K-TRANSCLUDE; `doc range` = createRun). Appended lines are atoms
+            # in no run, so the source's owner publishes line 1 first. Line 1 is
+            # whichever concurrent write was admitted first, not a fixed writer.
+            source_line = first_line(self.shell(owner, key + "-source-read", f"doc show {name}/notes"))
+            self.shell(owner, key + "-range", f"doc range {name}/notes 1 1")
             self.shell(owner, key + "-transclusion", f"doc transclude {name}/tasks {name}/notes 1 1 snapshot")
+            hosted = self.shell(owner, key + "-transcluded-read", f"doc show {name}/tasks")
+            self.check(key + "-transcluded-text", source_line in hosted, "host shows the source's line 1 through the snapshot transclusion")
             self.shell(owner, key + "-law", f"inspect law {name}/notes")
             residents = [(iid, instance) for iid, instance in self.spec.get("residents", {}).items() if instance["room"] == key]
             for iid, instance in residents or [(None, {})]:
@@ -507,6 +515,15 @@ class Journey:
             self.check("growth-bar", growth.get("acceptedRecords", 0) >= 1000 and 0 <= growth.get("writeSeconds", -1) <= 5 and 0 <= growth.get("coldReopenSeconds", -1) <= 60, "1000 accepted records; write <=5s and cold reopen <=60s on this deployment")
         self.record({"id": "human-transcripts", "status": "pending-human", "environmental": True,
                      "detail": "scripted fixture sessions do not certify human onboarding"})
+
+
+def first_line(shown):
+    """Text of line 1 in `doc show` output (`  N  TEXT`)."""
+    for line in shown.splitlines():
+        match = re.fullmatch(r"\s*1\s{2}(.*)", line)
+        if match:
+            return match.group(1)
+    raise ValueError("source document has no line 1")
 
 
 def selected_spec(spec, row, index):
