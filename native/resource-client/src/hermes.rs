@@ -614,7 +614,7 @@ fn ask(session: &Session, room: Option<String>, text: String) -> Result<(), Done
         None => chat::current_room(session).map_err(err)?.name,
     };
     let h = room_hermes(session, &room)?.ok_or_else(|| usage(format!("there is no Hermes in {room} (its founder summons one)")))?;
-    let line = chat::Line::Say { room: Some(room), to: Some(h), re: None, text: chat::Text::Inline(text), via: None };
+    let line = chat::Line::Say { room: Some(room), to: Some(h), re: None, text: chat::Text::Inline(text), via: None, operation_record: None, expected_reply: None };
     match chat::run(session, line) {
         (0, _) => Ok(()),
         done => Err(done),

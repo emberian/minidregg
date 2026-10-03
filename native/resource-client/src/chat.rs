@@ -53,7 +53,7 @@
 //! (`payloadState`). Anything else prints `[payload unavailable]`.
 
 use crate::shell::{Session, Verb, EXIT_CLIENT, EXIT_OK, EXIT_REFUSED, EXIT_USAGE};
-use crate::workspace::{bounded_json, member, member_path, private_file, random_nonce};
+use crate::workspace::{self, bounded_json, member, member_path, private_file, random_nonce};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,7 +66,7 @@ use std::process::{Command, Stdio};
 
 /// The verbs this module adds to the shell (rows for `help`).
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "say", usage: "say [--to NAME] [--re N] [--in ROOM] TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to my stream in the current room (propose + submit)" },
+    Verb { name: "say", usage: "say [--to NAME] [--re N] [--in ROOM] [--operation-record ABS_PATH] TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to my stream in the current room (propose + submit)" },
     Verb { name: "tail", usage: "tail [-n N] [--since HEIGHT] [--follow] [--json] [--held] [--in ROOM]", operation: "a signed tail of every member stream in the current room, merged by (height, author, cell, sequence)" },
     Verb { name: "topic", usage: "topic [TEXT]", operation: "show the room topic, or append {\"type\":\"topic\"} (the founder's counts)" },
     Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
@@ -152,7 +152,7 @@ pub(crate) enum Text {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Line {
-    Say { room: Option<String>, to: Option<String>, re: Option<u64>, text: Text, via: Option<Via> },
+    Say { room: Option<String>, to: Option<String>, re: Option<u64>, text: Text, via: Option<Via>, operation_record: Option<PathBuf>, expected_reply: Option<(String, u64)> },
     Tail { room: Option<String>, count: usize, since: Option<u64>, follow: bool, json: bool, held: bool, entry: Option<(String, u64)>, discovery: Option<String> },
     Topic(Option<String>),
     Pin(u64),
@@ -270,6 +270,8 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
     let mut to = None;
     let mut re = None;
     let mut file = None;
+    let mut operation_record = None;
+    let (mut expected_cell, mut expected_sequence) = (None, None);
     let (mut network, mut id, mut name) = (None, None, None);
     while let Some((word, after)) = split(rest) {
         if !word.starts_with("--") {
@@ -283,6 +285,19 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
             }
             "--to" => to = Some(value.trim_start_matches('@').to_owned()),
             "--re" => re = Some(number(value, "--re")?),
+            "--expect-re-cell" => {
+                decimal(value, "--expect-re-cell")?;
+                if expected_cell.replace(value.to_owned()).is_some() { return Err("duplicate --expect-re-cell".into()); }
+            }
+            "--expect-re-sequence" => {
+                let sequence = number(value, "--expect-re-sequence")?;
+                if sequence == 0 || expected_sequence.replace(sequence).is_some() { return Err("invalid or duplicate --expect-re-sequence".into()); }
+            }
+            "--operation-record" => {
+                let path = PathBuf::from(value);
+                if !path.is_absolute() { return Err("--operation-record must be absolute".into()); }
+                operation_record = Some(path);
+            }
             "--file" => file = Some(value.to_owned()),
             "--via" => network = Some(value.to_owned()),
             "--via-id" => id = Some(value.to_owned()),
@@ -328,7 +343,12 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
             Text::Inline(text)
         }
     };
-    Ok(Line::Say { room, to, re, text, via })
+    let expected_reply = match (expected_cell, expected_sequence) {
+        (None,None) => None,
+        (Some(cell),Some(sequence)) if re.is_some() => Some((cell,sequence)),
+        _ => return Err("reply expectation requires --re, --expect-re-cell and --expect-re-sequence together".into()),
+    };
+    Ok(Line::Say { room, to, re, text, via, operation_record, expected_reply })
 }
 
 fn parse_tail(rest: &str) -> Result<Line, String> {
@@ -1444,6 +1464,10 @@ fn topic_field(topic: &str) -> String {
 /// One append to my stream in `room`. On `staleTarget` (my own earlier append
 /// moved my stream after the plan read it) plan once more from a fresh read.
 fn append(session: &Session, room: &Room, payload: Value, to: Option<String>, re: Option<(String, u64)>, topic: String) -> Result<Value, Done> {
+    append_recorded(session, room, payload, to, re, topic, None)
+}
+
+fn append_recorded(session: &Session, room: &Room, payload: Value, to: Option<String>, re: Option<(String, u64)>, topic: String, operation: Option<&Path>) -> Result<Value, Done> {
     let stream = room
         .stream
         .clone()
@@ -1466,6 +1490,9 @@ fn append(session: &Session, room: &Room, payload: Value, to: Option<String>, re
     }
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":stream,"payload":append}]});
+    if let Some(path) = operation {
+        return append_operation(session, path, &stream, &request, sealed.as_deref());
+    }
     let mut replanned = 0u64;
     loop {
         match propose_submit_in(session, "say", &request, sealed.as_deref()) {
@@ -1482,6 +1509,37 @@ fn append(session: &Session, room: &Room, payload: Value, to: Option<String>, re
     }
 }
 
+/// One caller-owned append. No second proposal, fresh challenge or text search
+/// is permitted once its durable operation record exists.
+fn append_operation(session: &Session, path: &Path, stream: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
+    let reference = workspace::reference(&session.workspace, stream).map_err(error)?;
+    let binding = json!({"request":request,"reference":reference,"privateRoom":sealed});
+    let (record, fresh) = crate::fleet::operation_record(&session.workspace, path, "workspace", binding).map_err(error)?;
+    if !fresh {
+        let recovered = crate::fleet::recover_operation(&session.workspace, path).map_err(error)?;
+        crate::print_json(&recovered).map_err(error)?;
+        if recovered["status"] != "confirmed" {
+            return Err(error("recorded append is not confirmed; exact recovery only"));
+        }
+        return Ok(json!({"outcome":recovered["outcome"],"operationRecord":path}));
+    }
+    let id = format!("operation-{}", workspace::member(&record, "nonce").map_err(error)?);
+    let request_path = session.home.join("requests").join(format!("{id}.json"));
+    private_dirs(&session.home.join("requests")).map_err(error)?;
+    private_file(&request_path, &serde_json::to_vec(request).map_err(error)?).map_err(error)?;
+    let mut flags = vec![("action", os("propose")), ("dir", os(&session.workspace)),
+        ("request", os(&request_path)), ("proposal-id", os(&id))];
+    if let Some(room) = sealed { flags.push(("private", os(room))); }
+    client("workspace", &flags)?;
+    client("workspace", &[("action", os("submit")), ("dir", os(&session.workspace)),
+        ("intent", os(session.workspace.join("proposals").join(&id).join("intent.json"))),
+        ("attempt", os(workspace::member(&record, "attempt").map_err(error)?))])?;
+    let recovered = crate::fleet::recover_operation(&session.workspace, path).map_err(error)?;
+    crate::print_json(&recovered).map_err(error)?;
+    if recovered["status"] != "confirmed" { return Err(error("append outcome remains uncertain")); }
+    Ok(json!({"id":id,"outcome":recovered["outcome"],"operationRecord":path}))
+}
+
 fn said(room: &Room, what: &str, result: &Value) {
     let tx = result.pointer("/outcome/transactionId").and_then(Value::as_str).unwrap_or("");
     let again = match (result["replanned"].as_u64().unwrap_or(0), result["resigned"].as_u64().unwrap_or(0)) {
@@ -1491,9 +1549,16 @@ fn said(room: &Room, what: &str, result: &Value) {
     println!("{what} in {} (transaction …{}{again})", room.name, &tx[tx.len().saturating_sub(10)..]);
 }
 
+fn require_reply_expectation(actual: Option<&(String,u64)>, expected: Option<&(String,u64)>) -> Result<(),String> {
+    if expected.is_some() && actual != expected {
+        return Err("reply entry changed: its current signed cell/sequence differs from the expected original request; nothing submitted".into());
+    }
+    Ok(())
+}
+
 fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
     match line {
-        Line::Say { room, to, re, text, via } => {
+        Line::Say { room, to, re, text, via, operation_record, expected_reply } => {
             let room = match room {
                 Some(name) => load_room(session, &name),
                 None => current_room(session),
@@ -1513,13 +1578,14 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             };
             let to = to.map(|t| resolve_member(session, &t)).transpose()?;
             let re = re.map(|n| entry_ref(session, &room, n)).transpose()?;
+            require_reply_expectation(re.as_ref(), expected_reply.as_ref()).map_err(error)?;
             let mut payload = json!({"type":"say","text":text});
             if let Some(v) = &via {
                 payload["via"] = json!(v.network);
                 payload["author"] = json!({"id":v.id,"name":v.name});
             }
             let topic = cached_topic(session, &room);
-            let result = append(session, &room, payload, to, re, topic)?;
+            let result = append_recorded(session, &room, payload, to, re, topic, operation_record.as_deref())?;
             said(&room, "said", &result);
             Ok(())
         }
@@ -2098,14 +2164,28 @@ mod tests {
     }
 
     #[test]
+    fn guarded_reply_refuses_renumbering_before_append() {
+        let expected=("16132236063334032269".to_owned(),1);
+        assert!(require_reply_expectation(Some(&expected),Some(&expected)).is_ok());
+        assert!(require_reply_expectation(Some(&("other".into(),1)),Some(&expected)).is_err());
+        assert!(require_reply_expectation(Some(&(expected.0.clone(),2)),Some(&expected)).is_err());
+        assert!(require_reply_expectation(None,Some(&expected)).is_err());
+        let parsed=plan("say --re 1 --expect-re-cell 16132236063334032269 --expect-re-sequence 1 hello").unwrap().unwrap();
+        assert!(matches!(parsed,Line::Say{expected_reply:Some(ref pair),..} if pair==&expected));
+        for line in ["say --re 1 --expect-re-cell 5 hi", "say --expect-re-cell 5 --expect-re-sequence 1 hi", "say --re 1 --expect-re-cell 5 --expect-re-sequence 0 hi"] {
+            assert!(plan(line).unwrap().is_err());
+        }
+    }
+
+    #[test]
     fn chat_verbs_take_the_rest_of_the_line_as_text() {
         assert_eq!(
             plan("say it's #1, isn't it").unwrap().unwrap(),
-            Line::Say { room: None, to: None, re: None, text: Text::Inline("it's #1, isn't it".into()), via: None }
+            Line::Say { room: None, to: None, re: None, text: Text::Inline("it's #1, isn't it".into()), via: None, operation_record: None, expected_reply: None }
         );
         assert_eq!(
             plan("say --to @bob --re 12 'yes, agreed'").unwrap().unwrap(),
-            Line::Say { room: None, to: Some("bob".into()), re: Some(12), text: Text::Inline("yes, agreed".into()), via: None }
+            Line::Say { room: None, to: Some("bob".into()), re: Some(12), text: Text::Inline("yes, agreed".into()), via: None, operation_record: None, expected_reply: None }
         );
         assert_eq!(
             plan("say --in commons --via discord --via-id 42 --via-name zed --file d-1.txt").unwrap().unwrap(),
@@ -2114,7 +2194,7 @@ mod tests {
                 to: None,
                 re: None,
                 text: Text::File("d-1.txt".into()),
-                via: Some(Via { network: "discord".into(), id: "42".into(), name: "zed".into() })
+                via: Some(Via { network: "discord".into(), id: "42".into(), name: "zed".into() }), operation_record: None, expected_reply: None
             }
         );
         assert!(plan("say").unwrap().is_err());
@@ -2275,5 +2355,21 @@ mod tests {
         assert_eq!(code, EXIT_REFUSED);
         assert!(text.starts_with("refused: law-denied: request/subject == 5\n"));
         assert_eq!(child_ending(Some(1), "mini: no such reference").1, "error: no such reference\n");
+    }
+}
+
+#[cfg(test)]
+mod exact_operation_parse_tests {
+    use super::*;
+    #[test]
+    fn exact_operation_say_accepts_file_and_requires_absolute_record() {
+        match plan("say --in commons --operation-record /private/g7-write.json --file answer.txt").unwrap().unwrap() {
+            Line::Say { operation_record, text, .. } => {
+                assert_eq!(operation_record, Some(PathBuf::from("/private/g7-write.json")));
+                assert_eq!(text, Text::File("answer.txt".into()));
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+        assert!(plan("say --operation-record relative.json hello").unwrap().is_err());
     }
 }

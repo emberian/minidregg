@@ -346,6 +346,138 @@ fn observation_stale() -> bool {
 /// How many times a turn is re-planned after the Host reports contention.
 const MAX_REPLANS: usize = 8;
 
+/// A caller operation is an immutable, fsynced pointer into the existing
+/// attempt store, not another submission journal. Creation wins exactly once.
+/// A second invocation may look up this attempt but must never submit again.
+pub(crate) fn operation_record(
+    root: &Path, path: &Path, kind: &str, binding: Value,
+) -> Result<(Value, bool)> {
+    let root = fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let path = absolute(path)?;
+    workspace::private_dir(path.parent().ok_or("operation record has no parent")?)?;
+    // Every verb that reaches an operation record loaded this workspace (and
+    // rechecked its key commitment) first; the record binds the same bytes.
+    let ws = workspace::load_retained(&root)?.snapshot().clone();
+    let config = fs::read(workspace::member_path(&ws, "config")?).map_err(|e| e.to_string())?;
+    let identity = json!({"workspace":root,"participant":ws,"configSha256":digest(&config)});
+    if path.exists() {
+        let value = workspace::bounded_json(&path)?;
+        validate_operation_binding(&value, kind, &identity, &binding)?;
+        return Ok((value, false));
+    }
+    let (attempt, nonce) = workspace::new_attempt(&root)?;
+    let value = json!({"type":"minidregg-exact-operation-v1","kind":kind,
+        "identity":identity,"binding":binding,"attempt":attempt,"nonce":nonce});
+    // create_new, file fsync and parent fsync: concurrent callers cannot both win.
+    workspace::private_file(&path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
+    sync_directory_ancestors(path.parent().ok_or("operation record has no parent")?)?;
+    Ok((value, true))
+}
+
+fn validate_operation_binding(value: &Value, kind: &str, identity: &Value, binding: &Value) -> Result<()> {
+    if value["type"] != "minidregg-exact-operation-v1" || value["kind"] != kind
+        || value["identity"] != *identity || value["binding"] != *binding {
+        return Err("operation record reuse differs in request, workspace, subject, authority or payer".into());
+    }
+    Ok(())
+}
+
+fn recovery_value(path: &Path, record: &Value, status: &str, outcome: Value) -> Value {
+    json!({"type":"minidregg-operation-recovery-v1","operationRecord":path,
+        "attempt":record["attempt"],"status":status,"outcome":outcome,
+        "requiresSubmitterStopped":status == "not-submitted"})
+}
+
+fn retained_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(true),
+        Ok(_) => Err(format!("{} is not a regular retained file", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn exact_status(outcome: &Value) -> &'static str {
+    if confirmed(outcome) && receipt_of(outcome).is_ok() { "confirmed" }
+    else if matches!(outcome.get("type").and_then(Value::as_str), Some("refused" | "contention")) { "refused" }
+    else { "uncertain" }
+}
+
+fn decided_outcome(path: &Path) -> Result<Option<Value>> {
+    if !retained_file(path)? { return Ok(None); }
+    let value = workspace::bounded_json(path)?;
+    Ok((exact_status(&value) != "uncertain").then_some(value))
+}
+
+/// Resume a balance-derived operation before reading a new balance. The
+/// caller's stable request context must still match; the original amount stays
+/// in the immutable binding and is never recomputed for an existing record.
+pub(crate) fn recover_bound_operation(root: &Path, path: &Path, context: &Value) -> Result<Option<Value>> {
+    if !retained_file(path)? { return Ok(None); }
+    let record = workspace::bounded_json(path)?;
+    if record["binding"]["context"] != *context {
+        return Err("operation record reuse differs in action, destination, room or account authority".into());
+    }
+    recover_operation(root, path).map(Some)
+}
+
+/// Read-only exact recovery. Absence of a retained signed call only proves
+/// no submission AFTER the caller has stopped/reaped the original submitter.
+/// A missing receipt never licenses a new payment or write.
+pub(crate) fn recover_operation(root: &Path, path: &Path) -> Result<Value> {
+    let record = workspace::bounded_json(path)?;
+    let kind = field(&record, "kind")?;
+    // Revalidate the pinned workspace/participant/config before contacting a host.
+    operation_record(root, path, kind, record["binding"].clone())?;
+    let attempt = PathBuf::from(field(&record, "attempt")?);
+    let attempts = fs::canonicalize(root.join("attempts")).map_err(|e| e.to_string())?;
+    if attempt.parent() != Some(attempts.as_path()) {
+        return Err("operation attempt does not belong to the pinned workspace".into());
+    }
+    if kind == "no-effect" {
+        let outcome = record["binding"].get("result").cloned()
+            .unwrap_or_else(|| json!({"paid":false,"price":"0"}));
+        return Ok(recovery_value(path, &record, "confirmed", outcome));
+    }
+    let present = match kind {
+        "fleet" => retained_file(&attempt.join("submit-marker.json"))?,
+        "workspace" => retained_file(&attempt.join("call.bin"))?,
+        _ => return Err("unknown exact operation kind".into()),
+    };
+    if !present {
+        return Ok(recovery_value(path, &record, "not-submitted", Value::Null));
+    }
+    let (outcome, submit_decision) = if kind == "fleet" {
+        let (_, ingress) = retained_ingress_at(root, &attempt)?;
+        // A received checked refusal/confirmation is already decisive. Otherwise
+        // op 99 asks only about the exact retained ingress, never the text/memo.
+        if let Some(value) = decided_outcome(&attempt.join("submit.json"))? { (value, true) }
+        else {
+            let agent = agent(root)?;
+            (lookup_exact(&agent, &attempt, &ingress).unwrap_or(Value::Null), false)
+        }
+    } else {
+        // recover uses lookup only, never retry/submit. Keep its signed call and
+        // outcomes in the original attempt rather than searching any room feed.
+        if let Some(value) = decided_outcome(&attempt.join("outcome.json"))? { (value, true) }
+        else if let Some(value) = workspace::accepted_outcome(&attempt)? { (value, false) }
+        else {
+            let _ = workspace::recover(root, &attempt);
+            let mut names = fs::read_dir(&attempt).map_err(|e| e.to_string())?
+                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .filter(|n| n.starts_with("retry-") && n.ends_with(".json")).collect::<Vec<_>>();
+            names.sort();
+            (names.last().map(|n| workspace::bounded_json(&attempt.join(n))).transpose()?.unwrap_or(Value::Null), false)
+        }
+    };
+    // A refusal of a lookup is not proof that the original submit was refused.
+    let status = match exact_status(&outcome) {
+        "refused" if !submit_decision => "uncertain",
+        status => status,
+    };
+    Ok(recovery_value(path, &record, status, outcome))
+}
+
 /// Plan, sign, assemble and submit one fleet turn in a new private attempt.
 /// The submit marker is durable before the one submission; after it, only the
 /// read-only exact lookup of the same ingress is ever sent. `Ok(None)` is a
@@ -359,8 +491,12 @@ fn attempt(
     transfer: &Value,
     publication: &Value,
     base: &str,
+    pinned: Option<&Value>,
 ) -> Result<(PathBuf, Option<(Value, Value)>)> {
-    let (directory, nonce) = workspace::new_attempt(&agent.root)?;
+    let (directory, nonce) = match pinned {
+        Some(record) => (PathBuf::from(field(record, "attempt")?), field(record, "nonce")?.to_owned()),
+        None => workspace::new_attempt(&agent.root)?,
+    };
     workspace::make_private_dir(&directory)?;
     let draft = json!({"subject":agent.subject,"payer":field(reference,"target")?,
         "spend":field(reference,"operationCapability")?,"nonce":nonce,"fee":"0",
@@ -477,7 +613,7 @@ pub(crate) fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value
     let (base, _) = tariff(agent)?;
     let mut superseded = Vec::new();
     for _ in 0..=MAX_REPLANS {
-        let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base)?;
+        let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base, None)?;
         let Some((plan_view, outcome)) = admitted else {
             eprintln!("fleet {verb}: superseded (stale plan or contention); re-planning against the new image");
             superseded.push(directory);
@@ -524,8 +660,12 @@ pub(crate) fn transfer_value(to: &str, amount: &str, asset: &str) -> Result<Valu
 /// The retained exact ingress of one of this workspace's attempts, checked
 /// against the digest its submit marker recorded before the one submission.
 fn retained_ingress(agent: &Agent, directory: &Path) -> Result<(PathBuf, Vec<u8>)> {
+    retained_ingress_at(&agent.root, directory)
+}
+
+fn retained_ingress_at(root: &Path, directory: &Path) -> Result<(PathBuf, Vec<u8>)> {
     let directory = absolute(directory)?;
-    let attempts = fs::canonicalize(agent.root.join("attempts")).map_err(|error| error.to_string())?;
+    let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     let canonical = fs::canonicalize(&directory).map_err(|error| error.to_string())?;
     if canonical.parent() != Some(attempts.as_path()) {
         return Err("fleet attempt must belong to this workspace".into());
@@ -729,6 +869,13 @@ pub(crate) fn pay_turn(
     asset: Option<&str>,
     publication: Option<(&str, &[u8])>,
 ) -> Result<Value> {
+    pay_turn_recorded(root, name, to, amount, asset, publication, None, Value::Null)
+}
+
+pub(crate) fn pay_turn_recorded(
+    root: &Path, name: &str, to: &str, amount: &str, asset: Option<&str>,
+    publication: Option<(&str, &[u8])>, operation: Option<&Path>, context: Value,
+) -> Result<Value> {
     let agent = agent(root)?;
     let reference = account(&agent, name)?;
     let asset = match asset {
@@ -746,7 +893,35 @@ pub(crate) fn pay_turn(
         None => Value::Null,
     };
     let verb = if publication.is_null() { "transfer" } else { "send" };
-    turn(&agent, &reference, verb, transfer, publication)
+    if let Some(path) = operation {
+        let binding = json!({"reference":reference,"verb":verb,"transfer":transfer,"publication":publication,"context":context});
+        let (record, fresh) = operation_record(root, path, "fleet", binding)?;
+        if !fresh {
+            let recovered = recover_operation(root, path)?;
+            print_json(&recovered)?;
+            if recovered["status"] != "confirmed" {
+                return Err("recorded payment is not confirmed; exact recovery only".into());
+            }
+            let directory = PathBuf::from(field(&record, "attempt")?);
+            if retained_file(&directory.join("result.json"))? {
+                return read_json(&directory.join("result.json"));
+            }
+            let plan = read_json(&directory.join("plan.json"))?;
+            return result(&directory, verb, &plan, &recovered["outcome"], &[]);
+        }
+        let base = tariff(&agent)?.0;
+        match attempt(&agent, &reference, verb, &transfer, &publication, &base, Some(&record)) {
+            Ok((directory, Some((plan, outcome)))) => {
+                let value = result(&directory, verb, &plan, &outcome, &[])?;
+                print_json(&value)?;
+                Ok(value)
+            }
+            Ok(_) => Err("recorded payment was superseded without admission; exact recovery only".into()),
+            Err(error) => Err(error),
+        }
+    } else {
+        turn(&agent, &reference, verb, transfer, publication)
+    }
 }
 
 /// The pinned tariff's per-turn fee (`tariffBase`).
@@ -1106,5 +1281,171 @@ mod tests {
         assert!(transfer_value("12", "0", "0").is_err());
         assert!(transfer_value("012", "5", "0").is_err());
         assert!(transfer_value("12", "5", "0").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod exact_operation_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("mini-exact-operation-{}-{}", std::process::id(), workspace::random_nonce().unwrap()));
+            workspace::make_private_dir(&root).unwrap();
+            for name in ["refs", "attempts", "sources", "proposals", "operations"] {
+                workspace::make_private_dir(&root.join(name)).unwrap();
+            }
+            workspace::private_file(&root.join("config.json"), b"{}").unwrap();
+            workspace::private_file(&root.join("workspace.json"), &serde_json::to_vec(&json!({
+                "type":"minidregg-participant-workspace-v1","subject":"7",
+                "host":root.join("host"),"config":root.join("config.json"),"key":root.join("key"),
+                "prerotation":false
+            })).unwrap()).unwrap();
+            Self(root)
+        }
+        fn record(&self, name: &str, kind: &str, binding: Value) -> (PathBuf, Value) {
+            let path = self.0.join("operations").join(name);
+            let (record, fresh) = operation_record(&self.0, &path, kind, binding).unwrap();
+            assert!(fresh);
+            (path, record)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+    fn receipt() -> Value {
+        json!({"type":"confirmed","confirmation":"replayed","transactionId":"31",
+            "eventId":"32","acceptedCount":"1","worldRoot":"33"})
+    }
+
+    #[test]
+    fn exact_operation_reuse_rejects_content_authority_and_payer_changes() {
+        let f = Fixture::new();
+        let binding = json!({"text":"same text","reference":{"target":"10","operationCapability":"11"},"payer":"12"});
+        let (path, record) = f.record("write", "workspace", binding.clone());
+        let (again, fresh) = operation_record(&f.0, &path, "workspace", binding.clone()).unwrap();
+        assert!(!fresh);
+        assert_eq!(record, again);
+        for changed in [
+            json!({"text":"different text","reference":{"target":"10","operationCapability":"11"},"payer":"12"}),
+            json!({"text":"same text","reference":{"target":"10","operationCapability":"99"},"payer":"12"}),
+            json!({"text":"same text","reference":{"target":"10","operationCapability":"11"},"payer":"99"}),
+        ] {
+            assert!(operation_record(&f.0, &path, "workspace", changed).is_err());
+        }
+        assert!(operation_record(&f.0, &path, "fleet", binding).is_err());
+        assert_eq!(workspace::bounded_json(&path).unwrap(), record);
+    }
+
+    #[test]
+    fn exact_operation_prior_same_text_receipt_does_not_confirm_new_write() {
+        let f = Fixture::new();
+        let binding = json!({"text":"same text","payer":"12"});
+        let (_, old) = f.record("old", "workspace", binding.clone());
+        let old_attempt = PathBuf::from(field(&old, "attempt").unwrap());
+        workspace::make_private_dir(&old_attempt).unwrap();
+        workspace::private_file(&old_attempt.join("call.bin"), b"old signed call").unwrap();
+        retain_json(&old_attempt.join("outcome.json"), &receipt()).unwrap();
+        let (path, new) = f.record("new", "workspace", binding);
+        let answer = recover_operation(&f.0, &path).unwrap();
+        assert_ne!(new["attempt"], old["attempt"]);
+        assert_eq!(answer["status"], "not-submitted");
+        assert_eq!(answer["requiresSubmitterStopped"], true);
+        assert!(answer["outcome"].is_null());
+    }
+
+    #[test]
+    fn exact_operation_payment_and_write_have_separate_submission_boundaries() {
+        let f = Fixture::new();
+        let (payment, p) = f.record("payment", "fleet", json!({"memo":"g7","payer":"12"}));
+        let payment_attempt = PathBuf::from(field(&p, "attempt").unwrap());
+        workspace::make_private_dir(&payment_attempt).unwrap();
+        // Even an unrelated workspace call file cannot mark a fleet submit.
+        workspace::private_file(&payment_attempt.join("call.bin"), b"not fleet ingress").unwrap();
+        assert_eq!(recover_operation(&f.0, &payment).unwrap()["status"], "not-submitted");
+        workspace::private_file(&payment_attempt.join("ingress.bin"), b"signed payment ingress").unwrap();
+        retain_json(&payment_attempt.join("submit-marker.json"), &json!({"status":"may-have-submitted","ingressSha256":digest(b"signed payment ingress")})).unwrap();
+        retain_json(&payment_attempt.join("submit.json"), &receipt()).unwrap();
+        assert_eq!(recover_operation(&f.0, &payment).unwrap()["status"], "confirmed");
+        let (write, _) = f.record("write", "workspace", json!({"text":"g7"}));
+        assert_eq!(recover_operation(&f.0, &write).unwrap()["status"], "not-submitted");
+    }
+
+    #[test]
+    fn exact_operation_lost_reply_recovers_only_retained_call_without_resubmit() {
+        let f = Fixture::new();
+        let host = f.0.join("host");
+        // The fake transport refuses every operation except lookup/inspect and
+        // verifies the exact original call; no feed or text matching is possible.
+        let script = r##"#!/bin/sh
+case "$2" in
+ lookup)
+  test "$(cat "$3")" = 'signed-call-for-g7' || exit 70
+  printf 'lookup\n' >> "$1.calls"
+  printf '%s' '{"type":"confirmed","confirmation":"replayed","transactionId":"31","eventId":"32","acceptedCount":"1","worldRoot":"33"}' > "$4" ;;
+ inspect) test "$3" = outcome || exit 71; cp "$4" "$5" ;;
+ *) exit 72 ;;
+esac
+"##;
+        workspace::private_file(&host, script.as_bytes()).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let (path, record) = f.record("lost-reply", "workspace", json!({"text":"repeated text"}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        workspace::private_file(&attempt.join("call.bin"), b"signed-call-for-g7").unwrap();
+        retain_json(&attempt.join("attempt.json"), &json!({"format":"minidregg-resource-client-attempt-v1",
+            "host":host,"config":f.0.join("config.json")})).unwrap();
+        let answer = recover_operation(&f.0, &path).unwrap();
+        assert_eq!(answer["status"], "confirmed");
+        assert_eq!(answer["outcome"], receipt());
+        assert_eq!(fs::read_to_string(f.0.join("config.json.calls")).unwrap(), "lookup\n");
+        assert_eq!(fs::read(attempt.join("call.bin")).unwrap(), b"signed-call-for-g7");
+        assert_eq!(recover_operation(&f.0, &path).unwrap()["status"], "confirmed");
+        // The retained exact receipt answers a second recovery without another RPC.
+        assert_eq!(fs::read_to_string(f.0.join("config.json.calls")).unwrap(), "lookup\n");
+    }
+
+    #[test]
+    fn exact_operation_lookup_refusal_does_not_decide_original_submission() {
+        let f = Fixture::new();
+        let (path, record) = f.record("lookup-refused", "workspace", json!({"text":"g8"}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        workspace::private_file(&attempt.join("call.bin"), b"signed call").unwrap();
+        let refused = json!({"type":"refused","reason":"lookup-not-authorized"});
+        // A prior lookup failed, and the next lookup is unavailable (no
+        // transport manifest). Neither says whether the original call landed.
+        retain_json(&attempt.join("retry-0001.json"), &refused).unwrap();
+        assert_eq!(recover_operation(&f.0, &path).unwrap()["status"], "uncertain");
+        // The same typed decision received from the original submit is decisive.
+        retain_json(&attempt.join("outcome.json"), &refused).unwrap();
+        assert_eq!(recover_operation(&f.0, &path).unwrap()["status"], "refused");
+    }
+
+    #[test]
+    fn exact_operation_return_reuses_fixed_amount_and_bound_destination() {
+        let f = Fixture::new();
+        let context = json!({"action":"return","account":{"target":"12","operationCapability":"13"},"to":"14","room":null});
+        let (path, record) = f.record("return", "fleet", json!({"context":context,"transfer":{"amount":"7","destination":"14"}}));
+        // No balance lookup or recalculation: the host need not even be running.
+        assert_eq!(recover_bound_operation(&f.0, &path, &context).unwrap().unwrap()["status"], "not-submitted");
+        assert_eq!(workspace::bounded_json(&path).unwrap(), record);
+        let mut changed = context.clone();
+        changed["to"] = json!("99");
+        assert!(recover_bound_operation(&f.0, &path, &changed).is_err());
+        let outcome = json!({"type":"minidregg-hermes-return-v1","returned":"0","reason":"balance-does-not-cover-fee"});
+        let (empty, _) = f.record("empty-return", "no-effect", json!({"context":context,"result":outcome}));
+        assert_eq!(recover_bound_operation(&f.0, &empty, &context).unwrap().unwrap()["outcome"], outcome);
+    }
+
+    #[test]
+    fn exact_operation_missing_or_malformed_receipt_stays_uncertain() {
+        assert_eq!(exact_status(&json!({"type":"confirmed"})), "uncertain");
+        assert_eq!(exact_status(&json!({"type":"confirmed","confirmation":"replayed"})), "uncertain");
+        assert_eq!(exact_status(&json!({"type":"absent"})), "uncertain");
+        assert_eq!(exact_status(&json!({"type":"unavailable"})), "uncertain");
+        assert_eq!(exact_status(&json!({"type":"refused","reason":"stale-root"})), "refused");
     }
 }

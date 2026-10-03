@@ -679,6 +679,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("dir")?))?;
     let ws = workspace::load(&root)?;
     match action.as_str() {
+        "lookup-operation" => {
+            let operation = path(args.required("operation-record")?);
+            args.finish()?;
+            print_json(&crate::fleet::recover_operation(&root, &operation)?)
+        }
         "balance" => {
             let account = opt(&mut args, "account")?;
             args.finish()?;
@@ -801,16 +806,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = text(args.required("room")?, "room")?;
             let account = text(args.required("account")?, "account")?;
             let memo = text(args.required("memo")?, "memo")?;
+            let operation = args.optional("operation-record").map(path);
             args.finish()?;
             let current = room(&root, &ws, &name)?;
             let price = current.get("hermes/turn").unwrap_or("0").to_owned();
             if price == "0" {
+                if let Some(path) = &operation {
+                    let reference = workspace::reference(&root, &account)?;
+                    crate::fleet::operation_record(&root, path, "no-effect",
+                        json!({"room":name,"roomTarget":current.target,"account":reference,"memo":memo,"price":"0"}))?;
+                }
                 print_json(&json!({"type":"minidregg-hermes-turn-v1","room":name,"price":"0","paid":false,
                     "note":"this room does not charge Hermes's turns (tariff hermes/turn is 0)"}))?;
                 return Ok(());
             }
             let till = current.need("till")?.to_owned();
-            let result = crate::fleet::pay_turn(&root, &account, &till, &price, None, Some((HERMES_TOPIC, memo.as_bytes())))?;
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &till, &price, None, Some((HERMES_TOPIC, memo.as_bytes())), operation.as_deref(), json!({"room":name,"roomTarget":current.target}))?;
             print_json(&json!({"type":"minidregg-hermes-turn-v1","room":name,"price":price,"paid":true,
                 "till":till,"fee":result["fee"],"transaction":result["receipt"]["transactionId"],
                 "sequence":result["publication"]["sequence"],"memo":memo}))
@@ -822,17 +833,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "return" => {
             let account = text(args.required("account")?, "account")?;
             let to = text(args.required("to")?, "to")?;
+            let operation = args.optional("operation-record").map(path);
+            let room = opt(&mut args, "room")?;
             args.finish()?;
             decimal(&to, "return account")?;
+            let reference = workspace::reference(&root, &account)?;
+            let context = json!({"action":"return","account":reference,"to":to,"room":room});
+            if let Some(path) = &operation {
+                if let Some(recovered) = crate::fleet::recover_bound_operation(&root, path, &context)? {
+                    print_json(&recovered)?;
+                    return if recovered["status"] == "confirmed" { Ok(()) }
+                        else { Err("recorded budget return is not confirmed; exact recovery only".into()) };
+                }
+            }
             let (balance, asset, height, target) = crate::fleet::account_balance(&root, &account)?;
             let fee = crate::fleet::tariff_base(&root)?;
             let (balance_n, fee_n) = (number(&balance, "balance")?, number(&fee, "fee")?);
             if balance_n <= fee_n {
-                return print_json(&json!({"type":"minidregg-hermes-return-v1","account":target,"balance":balance,
-                    "asset":asset,"height":height,"returned":"0","note":"the balance does not cover the fee"}));
+                let result = json!({"type":"minidregg-hermes-return-v1","account":target,"balance":balance,
+                    "asset":asset,"height":height,"returned":"0","to":to,"reason":"balance-does-not-cover-fee",
+                    "note":"the balance does not cover the fee"});
+                if let Some(path) = &operation {
+                    crate::fleet::operation_record(&root, path, "no-effect", json!({"context":context,"result":result}))?;
+                }
+                return print_json(&result);
             }
             let amount = (balance_n - fee_n).to_string();
-            let result = crate::fleet::pay_turn(&root, &account, &to, &amount, None, None)?;
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &to, &amount, Some(&asset), None,
+                operation.as_deref(), context)?;
             print_json(&json!({"type":"minidregg-hermes-return-v1","account":target,"balance":balance,
                 "asset":asset,"height":height,"returned":amount,"fee":result["fee"],"to":to,
                 "transaction":result["receipt"]["transactionId"]}))
