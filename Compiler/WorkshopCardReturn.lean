@@ -74,10 +74,10 @@ theorem decode_exact {result : Term} {card : Card} (h : decode result = some car
   | some found =>
     simp only [raw, Option.bind_some] at h
     split at h
-    · rename_i exact
+    · rename_i hExact
       have same := Option.some.inj h
       subst card
-      exact exact
+      exact hExact
     · cases h
 
 theorem decode_candidate_roundtrip (c : Candidate) : decodeCandidate (candidateTerm c) = some c := by
@@ -165,29 +165,40 @@ def execute (core : BendCoreAdmission.Checked) (classificationTicks steps : Nat)
     | none => none
     | some card => some ⟨result, count, trace, value, card, decoded⟩
 
-structure Materialized (core : BendCoreAdmission.Checked) (initial : Term)
-    (candidate : Candidate) (policy : List UInt8) (custody : Custody) where
-  evaluated : Evaluated core initial
+/-- Exact admitted source method and exact actual argument term. Selection of
+this entry from current immutable prototype/authority is the native binder's
+job; this structure cannot stand in for that admission. -/
+structure Invocation (core : BendCoreAdmission.Checked) (candidate : Candidate) where
+  method : BendCoreAdmission.Entry core
+  interfaceExact : method.definition.T =
+    .All .Q2 (.Ref "CatalogReview.Candidate") (.Ref "ReusableWorkshop.Card")
+def Invocation.initial {core : BendCoreAdmission.Checked} {candidate : Candidate}
+    (call : Invocation core candidate) : Term :=
+  .App .Q2 (.Ref call.method.name) (candidateTerm candidate)
+
+structure Materialized (core : BendCoreAdmission.Checked) (candidate : Candidate)
+    (call : Invocation core candidate) (policy : List UInt8) (custody : Custody) where
+  evaluated : Evaluated core call.initial
   binding : matches evaluated.card candidate policy = true
   slot : BendWorldPlan.ReturnSlot
   exact : slot = returnSlot core custody evaluated.card
 
-def materialize {core : BendCoreAdmission.Checked} {initial : Term}
-    (evaluated : Evaluated core initial) (candidate : Candidate)
-    (policy : List UInt8) (custody : Custody) : Option (Materialized core initial candidate policy custody) :=
+def materialize {core : BendCoreAdmission.Checked} {candidate : Candidate}
+    (call : Invocation core candidate) (evaluated : Evaluated core call.initial)
+    (policy : List UInt8) (custody : Custody) : Option (Materialized core candidate call policy custody) :=
   if binding : matches evaluated.card candidate policy = true then
     some ⟨evaluated, binding, returnSlot core custody evaluated.card, rfl⟩
   else none
 
-theorem materialized_payload_exact {core : BendCoreAdmission.Checked} {initial : Term}
-    {candidate : Candidate} {policy : List UInt8} {custody : Custody}
-    (m : Materialized core initial candidate policy custody) :
+theorem materialized_payload_exact {core : BendCoreAdmission.Checked}
+    {candidate : Candidate} {call : Invocation core candidate} {policy : List UInt8} {custody : Custody}
+    (m : Materialized core candidate call policy custody) :
     decodePayload m.slot.bytes = some m.evaluated.card := by
   rw [m.exact]
   exact payload_roundtrip m.evaluated.card
-theorem materialized_source_exact {core : BendCoreAdmission.Checked} {initial : Term}
-    {candidate : Candidate} {policy : List UInt8} {custody : Custody}
-    (m : Materialized core initial candidate policy custody) :
+theorem materialized_source_exact {core : BendCoreAdmission.Checked}
+    {candidate : Candidate} {call : Invocation core candidate} {policy : List UInt8} {custody : Custody}
+    (m : Materialized core candidate call policy custody) :
     cardTerm m.evaluated.card = m.evaluated.result := decode_exact m.evaluated.decoded
 
 #assert_axioms decode_exact

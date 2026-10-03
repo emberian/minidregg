@@ -90,6 +90,9 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
         match ← JointPromiseAuthorization.admit config.signature prepared shape selected source.promise with
         | .error reason => return .error s!"current install promise refused: {repr reason}"
         | .ok promised =>
+          match config.sourceGate none opened.durable.snapshot (promised.ordinary.dataIntent promised.shape) with
+          | .error _ => return .error "selected operation conflicts with a protected source facet"
+          | .ok () => pure ()
           let some (controlDomain,controlSemantics,controlSigned) := decodeSignedBytes source.controlSignedBytes
             | return .error "invalid signed control operation"
           if controlDomain != config.deployment.domain || controlSemantics != config.profile.semantics then

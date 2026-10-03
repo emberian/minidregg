@@ -61,6 +61,7 @@ import Kernel.CapabilityRenounce
 import Kernel.JointReserveIngress
 import Kernel.JointReceiver
 import Kernel.JointControlBootstrap
+import Kernel.JointControlBootstrapBundle
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -695,6 +696,9 @@ def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
 never a policy decision, signature Boolean, or arbitrary DataIntent handed in
 from outside. -/
 inductive NativeAdmission (config : Config) (opened : Opened config) : DataIntent rootBytes → Prop
+  | bootstrapBundle {source : JointControlBootstrapBundle.Source}
+      (accepted : JointControlBootstrapBundle.Accepted config opened source) :
+      NativeAdmission config opened accepted.intent
   | jointReserve (reserved : JointReceiverAdmission.Reserved config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable) :
       NativeAdmission config opened reserved.intent
@@ -937,6 +941,9 @@ structure Derived (config : Config) (opened : Opened config) where
       ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable //
       intent = reserved.intent} := none
   bootstrap : Option (JointControlBootstrap.Admission config opened intent) := none
+  bootstrapBundle : Option (Σ source : JointControlBootstrapBundle.Source,
+    { accepted : JointControlBootstrapBundle.Accepted config opened source //
+      intent = accepted.intent }) := none
 
 /-- Controller-only exception for a precisely rederived source-owned operation.
 Ordinary records continue through the centrally installed conflicting-write gate. -/
@@ -946,6 +953,11 @@ private def Derived.bootstrapAdmission {config : Config} {opened : Opened config
   | some admitted => some admitted
   | none => do
       let ordinary ← derived.ordinary
+      let prior ← opened.durable.image.accepted.getLast?
+      if prior.event.codecVersion != 61 then none else
+      let source ← JointControlBootstrapBundle.decodeSource prior.event.canonicalBytes
+      if source.initializerSignedBytes != (ordinary.accepted.dataIntent ordinary.shape).event.canonicalBytes
+        then none else
       let admitted ← JointControlBootstrap.admitInitialize ordinary.shape ordinary.accepted
       some (ordinary.intentExact.symm ▸ admitted)
 
@@ -955,9 +967,11 @@ def Derived.transport {config : Config} {opened : Opened config}
     (derived : Derived config opened) : DurableReceiverIO.Transport :=
   match derived.jointReservation with
   | some held => JointReceiver.reservedTransport config opened held.val
-  | none => match derived.bootstrapAdmission with
-    | some admitted => JointControlBootstrap.transport admitted
-    | none => config.transport
+  | none => match derived.bootstrapBundle with
+    | some bundle => JointControlBootstrapBundle.transport bundle.2.val
+    | none => match derived.bootstrapAdmission with
+      | some admitted => JointControlBootstrap.transport admitted
+      | none => config.transport
 
 theorem Derived.transport_systemCell {config : Config} {opened : Opened config}
     (derived : Derived config opened) : derived.transport.systemCell = some config.systemCell := by
@@ -966,7 +980,23 @@ theorem Derived.transport_systemCell {config : Config} {opened : Opened config}
   · exact Config.physicalTransport_systemCell config
   · split
     · exact Config.physicalTransport_systemCell config
-    · exact Config.transport_systemCell config
+    · split
+      · exact Config.physicalTransport_systemCell config
+      · exact Config.transport_systemCell config
+
+/-- The first bootstrap record retains exact independently current initializer
+permission and funding on its final predicted next prefix. -/
+def Derived.ofBootstrapBundle {config : Config} {opened : Opened config}
+    {source : JointControlBootstrapBundle.Source}
+    (accepted : JointControlBootstrapBundle.Accepted config opened source) :
+    Derived config opened :=
+  { intent := accepted.intent
+    admission := .bootstrapBundle accepted
+    issue := none
+    begin := none
+    beginV2 := none
+    claimV2 := none
+    bootstrapBundle := some ⟨source,accepted,rfl⟩ }
 
 /-- Fresh reserve admission is retained as executable proof data for source
 replay and one physical append; no raw event can construct this witness. -/
@@ -1637,6 +1667,10 @@ private def derive (config : Config) (opened : Opened config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if let some source := JointControlBootstrapBundle.decodeSource bytes then
+    match ← JointControlBootstrapBundle.admit config opened source with
+    | .error detail => return .error detail
+    | .ok accepted => return .ok (Derived.ofBootstrapBundle accepted)
   if (JointReserveIngress.decodeSource bytes).isSome then
     match ← JointReserveIngress.admit config opened bytes with
     | .error detail => return .error detail

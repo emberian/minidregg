@@ -125,6 +125,23 @@ def reopen (config : NativeConfig) (manifest : Manifest) (inventory : System.Fil
       return .ok ⟨inventory, exactInventory⟩
   catch _ => return .error "portable archive reopen uncertain or refused"
 
+/-- A newly created private quarantine file is reconstructed only after fresh
+readback. Existing files refuse; the native helper fsyncs file and parent and
+rechecks exact bytes. This exports no execution or worker activation permit. -/
+def exportQuarantined (config : NativeConfig) (manifest : Manifest)
+    (readback : Readback config manifest) (destination : System.FilePath) :
+    IO (Except String Unit) := do
+  match ← reopen config manifest readback.inventory readback.exactInventory with
+  | .error detail => return .error detail
+  | .ok _ => pure ()
+  try
+    run config #["restore-new", (config.root / "chunks").toString,
+      readback.inventory.toString, destination.toString] "retained\n"
+    if (← IO.FS.readBinFile destination).toList != PortableContinuationManifestCodec.encode manifest then
+      return .error "portable exported quarantine bytes differ"
+    return .ok ()
+  catch _ => return .error "portable quarantine export uncertain or refused"
+
 /-- Participant verification is only an independently pinned public commitment.
 The archive token makes the durability-before-ACK order structural in this API.
 It does not carry any source-authorized overwrite or transfer token. -/

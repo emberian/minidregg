@@ -24,6 +24,21 @@ def readRecord (pin : Pin) (bytes : List UInt8) : Option BendActivity.Record := 
   let payload ← ContentControlFrame.readPayload pin bytes
   BendActivity.decode payload
 
+inductive Phase | absent | bare | initialized deriving DecidableEq, BEq
+
+/-- Native content birth is neutral. Activity initialization is a second,
+protected current-authority operation, not an invented atomic birth+edit. -/
+def phase (pin : Pin) (bytes : List UInt8) : Option Phase := do
+  let image ← (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes
+  match image with
+  | .fresh => some .absent
+  | .retired => none
+  | .live packed => match packed with
+    | ⟨.content, content⟩ =>
+      if (readRecord pin bytes).isSome then some .initialized
+      else if CanonicalCellRegistry.UserShape .content content.logical then some .bare else none
+    | _ => none
+
 /-- Source pin plus exact predecessor Activity bytes form the claim identity;
 no hash injectivity is assumed and the bytes survive native replay equality. -/
 def claimBytes (pin : Pin) (before : BendActivity.Record) : List UInt8 :=
@@ -87,6 +102,35 @@ theorem checked_birth_actual {rootBytes : List UInt8 → Digest}
     (checked : CheckedBirth pin binding generation limits library entry snapshot intent) :
     BendActivity.start binding generation limits library entry = .ok checked.initial :=
   checked.actual
+
+/-- Actual ordinary content birth precedes this initializer. The protected
+bare phase contains no arbitrary machine checkpoint and can only install start. -/
+structure CheckedInitialize {rootBytes : List UInt8 → Digest}
+    (pin : Pin) (binding : List UInt8) (generation : Nat) (limits : Limits)
+    (library : Library) (entry : Nat)
+    (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes) where
+  private mk ::
+  initial : BendActivity.Record
+  bare : phase pin (snapshot.canonicalBytes pin.cell) = some .bare
+  actual : BendActivity.start binding generation limits library entry = .ok initial
+  post : ∃ write, write ∈ intent.writes ∧ write.cellId = pin.cell ∧
+    ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode initial)
+
+def checkInitialize {rootBytes : List UInt8 → Digest} (pin : Pin)
+    (binding : List UInt8) (generation : Nat) (limits : Limits)
+    (library : Library) (entry : Nat)
+    (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes) :
+    Option (CheckedInitialize pin binding generation limits library entry snapshot intent) := do
+  if bare : phase pin (snapshot.canonicalBytes pin.cell) = some .bare then
+    match actual : BendActivity.start binding generation limits library entry with
+    | .error _ => none
+    | .ok initial =>
+      if post : intent.writes.any (fun write => decide (write.cellId = pin.cell ∧
+          ContentControlFrame.readPayload pin write.canonicalPostBytes = some (BendActivity.encode initial))) then
+        some ⟨initial, bare, actual, by
+          simpa only [List.any_eq_true, decide_eq_true_eq] using post⟩
+      else none
+  else none
 
 /-- Exact state provenance, not a claim of native authority. A receiving adapter
 must pair this with actual current source admission and ordinary gates for all

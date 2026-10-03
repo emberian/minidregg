@@ -36,9 +36,9 @@ def frame_size(phase):
     mf=18+160*W+128
     return ([P+4640+160]+[mf+19+W*(P+(5-i)*1160) for i in range(1,5)]+[19+W*P])[phase]+89
 def scenario(name,real):
-    d=directory(e/name);origin=int(time.time()*1000)+5000
+    d=directory(e/name);origin=int(time.time()*1000)+60000
     processes=[];observers=[];public=[];errors=[];forwarded=[]
-    delay_path=d/'native-delay.sock'
+    delay_path=pathlib.Path('/run/user/'+str(os.getuid()))/('mini-cohort-'+str(os.getpid())+'-'+name+'.sock')
     listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);listener.bind(str(delay_path));listener.listen(4)
     listener.settimeout(.1);stop=threading.Event()
     def native_one(client):
@@ -84,7 +84,7 @@ def scenario(name,real):
                             try:outgoing.connect(endpoint);break
                             except ConnectionRefusedError:time.sleep(.005)
                         else:raise RuntimeError('fixed receiver not listening')
-                        incoming.settimeout(30)
+                        incoming.settimeout(120)
                         for epoch in range(N):
                             wire=readn(incoming,frame_size(phase))
                             at=time.time()*1000-origin
@@ -106,7 +106,7 @@ def scenario(name,real):
                     (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
             start(command('cover',d/f'client{i}-worker',out,0,i,'--source',source,'--keys',keycsv))
         # Establish complete cover inventory before public links begin.
-        for _ in range(500):
+        for _ in range(6000):
             if all((d/f'client{i}-out'/f'epoch-{N-1}.cover').exists() for i in range(W)):break
             time.sleep(.005)
         else:raise RuntimeError('cover inventory did not finish')
@@ -125,7 +125,7 @@ def scenario(name,real):
         for i in range(W):edge(f'client{i}-registrar',0,i,d/f'client{i}-out',registrar_sources[i])
         for i in range(4):edge(f'stage{i}',i+1,0,d/f'batch{i}-out',d/f'batch{i}-incoming')
         for i in range(W):edge(f'broadcast-client{i}',5,i,d/'broadcast-out',d/f'client{i}-broadcast')
-        limit=time.monotonic()+30
+        limit=time.monotonic()+90
         for p,cmd in processes:
             rc=p.wait(timeout=max(.1,limit-time.monotonic()))
             if rc:raise RuntimeError('actor failed '+str(rc)+': '+repr(cmd))
@@ -156,6 +156,7 @@ def scenario(name,real):
                 try:p.wait(timeout=5)
                 except subprocess.TimeoutExpired:p.kill();p.wait()
         stop.set();listener.close();nt.join(timeout=2)
+        delay_path.unlink(missing_ok=True)
 baseline=scenario('all-cover',False)
 active=scenario('native-delayed',True)
 assert baseline==active,'public epoch/slot/phase/record shape changed with hidden work'

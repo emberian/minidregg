@@ -8,6 +8,7 @@ Authored WIP; source opcode 61 and replay/ordered receiver joins are pending.
 import Kernel.JointControlBootstrap
 import Kernel.ResourceBirthReceiver
 import Compiler.Sp800185Cshake256
+import Theory.AssertAxioms
 namespace Minidregg.Kernel.JointControlBootstrapBundle
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -168,7 +169,8 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
 The actual source readback is still required before executing phase two. -/
 def transport {config : Config} {opened : Opened config} {source : Source}
     (accepted : Accepted config opened source) : DurableReceiverIO.Transport :=
-  { config.physicalTransport with sourceGate := fun snapshot proposed =>
+  { config.physicalTransport with sourceGate := fun snapshot proposed => do
+      config.otherFacetGate .joint snapshot proposed
       if DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent proposed) =
           DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent accepted.intent) ∧
           snapshot.canonicalBytes accepted.pin.cell =
@@ -189,4 +191,8 @@ theorem predicted_source_is_exact_first_record {config : Config} {opened : Opene
     {source : Source} (accepted : Accepted config opened source) :
     accepted.predicted.durable.image = opened.durable.image.append accepted.intent :=
   accepted.predictedExact
+
+#assert_axioms retained_initializer_current_permission
+#assert_axioms bare_phase_has_exact_funded_next
+#assert_axioms predicted_source_is_exact_first_record
 end Minidregg.Kernel.JointControlBootstrapBundle

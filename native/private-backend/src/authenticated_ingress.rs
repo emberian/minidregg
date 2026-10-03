@@ -310,10 +310,88 @@ pub struct Outcome {
     pub disposition: Disposition,
     pub outbox: Vec<u8>,
 }
-pub struct Receiver<M: Machine> {
+
+/// The chosen endpoint must be tied to the ACTUAL protocol machine and its
+/// exact generation-derived context; a generic caller-selected tag is not enough.
+pub trait IngressMachine: Machine {
+    fn validate_ingress_context(&self, context: &Context, n: usize) -> Result<()>;
+}
+impl IngressMachine for crate::acs_store::AcsMachine {
+    fn validate_ingress_context(&self, c: &Context, n: usize) -> Result<()> {
+        let s = &self.state;
+        let expected = crate::acs::Acs::new(c.recipient, n, s.f, &c.generation)?;
+        if c.protocol != Protocol::Acs
+            || s.me != c.recipient
+            || s.n != n
+            || s.context != expected.context
+        {
+            return Err(bad("ACS actual receiver binding"));
+        }
+        Ok(())
+    }
+}
+impl IngressMachine for crate::private_send_store::DeliveryMachine {
+    fn validate_ingress_context(&self, c: &Context, n: usize) -> Result<()> {
+        let s = &self.state;
+        let expected = crate::private_send::PrivateSend::new(
+            c.recipient,
+            s.dealer,
+            n,
+            s.f,
+            &c.generation,
+            s.length(),
+        )?;
+        if c.protocol != Protocol::PrivateSend
+            || s.me != c.recipient
+            || s.n != n
+            || s.context != expected.context
+        {
+            return Err(bad("private delivery actual receiver binding"));
+        }
+        Ok(())
+    }
+}
+impl IngressMachine for crate::acss_id_store::AcssMachine {
+    fn validate_ingress_context(&self, c: &Context, n: usize) -> Result<()> {
+        let s = &self.state;
+        let expected =
+            crate::acss_id::AcssId::new(c.recipient, s.dealer, n, s.f, &c.generation, s.count)?;
+        if c.protocol != Protocol::AcssId
+            || s.me != c.recipient
+            || s.n != n
+            || s.context != expected.context
+        {
+            return Err(bad("ACSS actual receiver binding"));
+        }
+        Ok(())
+    }
+}
+impl IngressMachine for crate::dzk_store::DzkMachine {
+    fn validate_ingress_context(&self, c: &Context, n: usize) -> Result<()> {
+        let s = &self.state;
+        let p = crate::dzk::Profile::new(
+            n,
+            s.profile.f,
+            s.profile.dealer,
+            &c.generation,
+            s.profile.count,
+            s.profile.degree,
+        )?;
+        if c.protocol != Protocol::Dzk
+            || s.me != c.recipient
+            || s.profile.n != n
+            || s.profile.context != p.context
+        {
+            return Err(bad("dZK actual receiver binding"));
+        }
+        Ok(())
+    }
+}
+
+pub struct Receiver<M: IngressMachine> {
     journal: Journal<AuthenticatedMachine<M>>,
 }
-impl<M: Machine> Receiver<M> {
+impl<M: IngressMachine> Receiver<M> {
     pub fn open(
         path: &Path,
         context: Context,
@@ -324,6 +402,7 @@ impl<M: Machine> Receiver<M> {
         if n == 0 || n > 16 || context.recipient as usize >= n || capacity == 0 {
             return Err(bad("receiver funded bounds"));
         }
+        inner.validate_ingress_context(&context, n)?;
         let mut identity = b"DREGG.PRIVATE.AUTH.RECEIVER\x01".to_vec();
         identity.push(context.protocol as u8);
         context.generation.put(&mut identity);
@@ -515,6 +594,31 @@ mod tests {
             .find(|p| p.to == 2 && matches!(&p.message.body, Body::Cipher(_)))
             .unwrap();
         let body = encode_message(&ciphertext.message);
+        let mut wrong = df.party.context.clone();
+        wrong.protocol = Protocol::Acs;
+        assert!(Receiver::open(
+            &path(),
+            wrong,
+            4,
+            8,
+            DeliveryMachine {
+                state: PrivateSend::new(2, 1, 4, 1, g, 64).unwrap()
+            }
+        )
+        .is_err());
+        let mut wrong = df.party.context.clone();
+        wrong.generation.command.push(0);
+        assert!(Receiver::open(
+            &path(),
+            wrong,
+            4,
+            8,
+            DeliveryMachine {
+                state: PrivateSend::new(2, 1, 4, 1, g, 64).unwrap()
+            }
+        )
+        .is_err());
+
         let mut receiver = Receiver::open(
             &path(),
             df.party.context.clone(),
@@ -589,6 +693,14 @@ mod tests {
             }
             self.value += u64::from_le_bytes(message.try_into().unwrap());
             Ok(self.value.to_le_bytes().to_vec())
+        }
+    }
+    impl IngressMachine for Counter {
+        fn validate_ingress_context(&self, c: &Context, n: usize) -> Result<()> {
+            if c.protocol != Protocol::Acs || c.recipient != 2 || n != 4 {
+                return Err(bad("counter actual receiver context"));
+            }
+            Ok(())
         }
     }
     fn path() -> std::path::PathBuf {

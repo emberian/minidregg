@@ -91,14 +91,12 @@ structure Admission (config : Config) (opened : Opened config)
   current : CurrentPermission config opened intent
   eligible : CurrentPermission.eligible pin current = true
 
+/-- A bare ordinary birth cannot promise recovery. Only the separately
+retained, funded BootstrapBundle opcode admits the first phase. -/
 def admitBirth {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
       opened.pins opened.durable (logicalHeight config opened.durable)) :
-    Option (Admission config opened (ResourceBirthReceiver.intent accepted)) := do
-  let some pin := config.jointControl | none
-  if pinned : config.jointControl = some pin then
-    if eligible : birthCheck pin accepted = true then some ⟨pin,pinned,.birth accepted,eligible⟩ else none
-  else none
+    Option (Admission config opened (ResourceBirthReceiver.intent accepted)) := none
 
 def admitInitialize {config : Config} {opened : Opened config} {command : Command} {signed : SignedCommand}
     {prepared : PreparedInvocation config.deployment config.profile
@@ -116,7 +114,8 @@ record. It retains the physical CAS/readback, budget preflight and tail law.
 No generic content insert, raw post or client-selected gate is accepted. -/
 def transport {config : Config} {opened : Opened config} {intent : DataIntent ResourceBirthCodec.rootBytes}
     (_admitted : Admission config opened intent) : DurableReceiverIO.Transport :=
-  { config.physicalTransport with sourceGate := fun snapshot proposed =>
+  { config.physicalTransport with sourceGate := fun snapshot proposed => do
+      config.otherFacetGate .joint snapshot proposed
       if DurableReceiverCodec.intentStream.encode (DurableReceiver.IntentRecord.ofIntent proposed) =
           DurableReceiverCodec.intentStream.encode (DurableReceiver.IntentRecord.ofIntent intent) ∧
           (match config.jointControl with

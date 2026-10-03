@@ -72,7 +72,7 @@ theorem wordExpr_cast {p : Nat} [Fact p.Prime] {Idx : Type}
     eval asg (wordExpr base indices) =
       (Bignum.denoteNat base (indices.map (fun i => (asg i).val)) : ZMod p) := by
   induction indices with
-  | nil => simp [wordExpr, Bignum.denoteNat, eval_cst]
+  | nil => simp [wordExpr, eval_cst]
   | cons i tail ih =>
     simp only [wordExpr, eval_add', eval_vr, eval_mul', eval_cst, ih,
       List.map_cons, Bignum.denoteNat_cons, Nat.cast_add, Nat.cast_mul,
@@ -98,9 +98,10 @@ theorem compiled_source_sound {p nVars width limbBits : Nat} [Fact p.Prime]
       Minidregg.Theory.BendTT.Typed book [] (BendSourceRepresentation.natTerm z) (.Ref "Nat") := by
   obtain ⟨_, noWrap, binding, exactDescriptor⟩ := compile_exact accepted
   obtain ⟨typedBinding, addBinding⟩ := bookBinding_sound binding
+  have emittedHolds : descriptorHolds (descriptor nPublic w) wv := exactDescriptor ▸ holds
   have relation := (AirBignum.emit_addGadget_iff Fin.val Fin.val_injective
     nPublic nVars (fun i => i.isLt) asg w).mp
-      ⟨wv, pinned, exactDescriptor ▸ holds⟩
+      ⟨wv, pinned, by simpa only [descriptor] using emittedHolds⟩
   obtain ⟨_, _, _, correct⟩ := AirBignum.addGadget_sound noWrap asg w relation
   dsimp only
   refine ⟨correct, ?_, BendSourceRepresentation.natTerm_typed book typedBinding _,
@@ -136,9 +137,10 @@ theorem compiled_result_bound {p nVars width limbBits : Nat} [Fact p.Prime]
     Bignum.denoteNat (2 ^ limbBits) (AirBignum.limbVals asg w.z) <
       (2 ^ limbBits) ^ width := by
   obtain ⟨_, noWrap, _, exactDescriptor⟩ := compile_exact accepted
+  have emittedHolds : descriptorHolds (descriptor nPublic w) wv := exactDescriptor ▸ holds
   have relation := (AirBignum.emit_addGadget_iff Fin.val Fin.val_injective
     nPublic nVars (fun i => i.isLt) asg w).mp
-      ⟨wv, pinned, exactDescriptor ▸ holds⟩
+      ⟨wv, pinned, by simpa only [descriptor] using emittedHolds⟩
   obtain ⟨_, _, canonical, _⟩ := AirBignum.addGadget_sound noWrap asg w relation
   have bound := Bignum.denoteNat_lt_pow (by positivity : 0 < 2 ^ limbBits)
     (AirBignum.limbVals asg w.z) canonical.1

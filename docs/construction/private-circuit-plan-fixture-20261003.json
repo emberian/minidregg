@@ -1,0 +1,12 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Host/PrivateCircuitPlanFixture.lean",
+      "sha256": "03384efab5bc026e016b42a280f9e8c7acc149058be5ef0406474253b9ccf8db",
+      "status": "AUTHORED_UNCOMPILED"
+    }
+  ],
+  "scope": "Public exactcodec interop fixture requested by real Rust fullbatch anchor consumer; no secret material or production state"
+}

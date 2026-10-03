@@ -60,7 +60,7 @@ def sealOne (source : BendWorldSource.Package) (earlier : List Sealed) (spec : S
 
 /-- A lawful open composition remains authorable. Closure of method interfaces
 is enforced later by the common linker/Construction, not by sealing source. -/
-def seal (source : BendWorldSource.Package) (specs : List Spec) : Except String (List Sealed) := do
+def sealSource (source : BendWorldSource.Package) (specs : List Spec) : Except String (List Sealed) := do
   let some root := specs.getLast? | throw "empty prototype source composition"
   if (ObjectiveBendOrder.check root specs).isNone then throw "unlawful authoring-local ancestry"
   let sealed ← specs.foldlM (fun earlier spec => do

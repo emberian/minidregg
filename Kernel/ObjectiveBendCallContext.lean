@@ -50,7 +50,7 @@ variable {F : Type} [Field F] [DecidableEq F]
   {ambient : Ambient} {durable : Durable} {command : Command}
 
 /-- Select the actual typed world carrier by source payload role. No cast from
-arbitrary content/scalar bytes to a world instance is permitted. -/
+arbitrary content/scalar bytes to a world object is permitted. -/
 def worldStore (target : Target) (store : Store target.layout) :
     Option (Store WorldKindCell.instanceLayout) := by
   cases target with
@@ -64,16 +64,16 @@ The default transaction codec, nonce/nullifier behavior and ordinary rights are
 unchanged. No injectivity of cryptographic hashing is claimed as a theorem. -/
 structure Binding (prepared : PreparedInvocation deployment profile ambient durable command)
     (request : Request) where
-  instance : ObjectiveBendInstance.Instance
+  object : ObjectiveBendInstance.Instance
   actions : List WorldKindInstance.Action
   world : command.targets[firstIndex prepared].payload = .world actions
   stateExact :
     (worldStore command.targets[firstIndex prepared]
       (prepared.targets (firstIndex prepared)).pre.logical).bind WorldKindCell.instanceAt =
-        some instance.value
+        some object.value
   selfExact : request.self = command.targets[firstIndex prepared].target
   selfRootExact : request.selfRoot = (prepared.targets (firstIndex prepared)).pre.root
-  prototypeExact : request.prototype = instance.source.construction.root.id
+  prototypeExact : request.prototype = object.source.construction.root.id
   nonceExact : command.nonce = (requestId command.subject request).value
   /-- This is an actual read, even for one-target methods. Write authority does
   not become read authority and cannot supply captured source state. -/
@@ -89,23 +89,23 @@ def bind (helpers : Minidregg.Theory.BendTT.Book)
     Except String (Binding prepared request) := do
   match world : command.targets[firstIndex prepared].payload with
   | .world actions =>
-    let some store := worldStore command.targets[firstIndex prepared]
-      (prepared.targets (firstIndex prepared)).pre.logical | throw "self is not native world carrier"
-    let instance ← ObjectiveBendInstanceLoader.load helpers store
-    if exactState : (worldStore command.targets[firstIndex prepared]
-        (prepared.targets (firstIndex prepared)).pre.logical).bind WorldKindCell.instanceAt =
-          some instance.value then
+    match actual : worldStore command.targets[firstIndex prepared]
+        (prepared.targets (firstIndex prepared)).pre.logical with
+    | none => throw "self is not native world carrier"
+    | some store =>
+      let loaded ← ObjectiveBendInstanceLoader.load helpers store
+      let object := loaded.object
       if exactSelf : request.self = command.targets[firstIndex prepared].target then
         if exactRoot : request.selfRoot = (prepared.targets (firstIndex prepared)).pre.root then
-          if exactPrototype : request.prototype = instance.source.construction.root.id then
+          if exactPrototype : request.prototype = object.source.construction.root.id then
             if exactNonce : command.nonce = (requestId command.subject request).value then
-              pure ⟨instance, actions, world, exactState, exactSelf, exactRoot,
-                exactPrototype, exactNonce, envelope, read⟩
+              pure ⟨object, actions, world,
+                by rw [actual]; exact loaded.native,
+                exactSelf, exactRoot, exactPrototype, exactNonce, envelope, read⟩
             else throw "OO request differs from signed command nonce"
           else throw "OO request differs from pinned prototype"
         else throw "OO request differs from authenticated self root"
       else throw "OO request differs from native self participant"
-    else throw "OO decoded state differs from actual self preimage"
   | _ => throw "OO self participant has wrong native payload role"
 
 /-- Each input is backed by its actual signed current read admission. -/
@@ -152,7 +152,7 @@ structure Demand (prepared : PreparedInvocation deployment profile ambient durab
   cursor : Nat
   required : Requirement
   selected : Selected
-  resolved : resolve binding.instance.source.construction.layers cursor required = some selected
+  resolved : resolve binding.object.source.construction.layers cursor required = some selected
   observations : List (Observation prepared)
 
 def Demand.self {prepared : PreparedInvocation deployment profile ambient durable command}
@@ -166,7 +166,7 @@ def Demand.coreEntry {prepared : PreparedInvocation deployment profile ambient d
 def Demand.super {prepared : PreparedInvocation deployment profile ambient durable command}
     {request : Request} {binding : Binding prepared request} (demand : Demand prepared request binding)
     (interface : Interface) (selected : Selected)
-    (resolved : resolve binding.instance.source.construction.layers demand.selected.provider
+    (resolved : resolve binding.object.source.construction.layers demand.selected.provider
       ⟨.priorSuper, interface⟩ = some selected) : Demand prepared request binding :=
   ⟨demand.selected.provider, ⟨.priorSuper, interface⟩, selected, resolved, demand.observations⟩
 
@@ -176,7 +176,7 @@ def begin (prepared : PreparedInvocation deployment profile ambient durable comm
     (request : Request) (binding : Binding prepared request) (interface : Interface)
     (selectorExact : interface.selector = request.selector)
     (observations : List (Observation prepared)) : Option (Demand prepared request binding) :=
-  match selected : resolve binding.instance.source.construction.layers 0 ⟨.finalSelf, interface⟩ with
+  match selected : resolve binding.object.source.construction.layers 0 ⟨.finalSelf, interface⟩ with
   | none => none
   | some provider => some ⟨0, ⟨.finalSelf, interface⟩, provider, selected, observations⟩
 
@@ -186,7 +186,7 @@ theorem same_instance_on_demand {prepared : PreparedInvocation deployment profil
 
 theorem selected_entry_exact {prepared : PreparedInvocation deployment profile ambient durable command}
     {request : Request} {binding : Binding prepared request} (demand : Demand prepared request binding) :
-    ObjectiveBendElaboration.reference binding.instance.source.construction.layers
+    ObjectiveBendElaboration.reference binding.object.source.construction.layers
       demand.cursor demand.required = some (.Ref demand.coreEntry) :=
   ObjectiveBendElaboration.reference_exact _ _ _ _ demand.resolved
 

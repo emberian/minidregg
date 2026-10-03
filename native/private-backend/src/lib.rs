@@ -20,3 +20,5 @@ pub mod dzk_store;
 pub mod acss_id;
 
 pub mod acss_id_store;
+
+pub mod circuit_batch;

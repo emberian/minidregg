@@ -56,6 +56,10 @@ pub struct PrivateSend {
     pub delivered: Option<Vec<u8>>,
 }
 impl PrivateSend {
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
     pub fn new(
         me: u16,
         dealer: u16,

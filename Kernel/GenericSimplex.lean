@@ -273,9 +273,9 @@ def start (c : Config) (self now : Nat) (offers : List Bytes := [])
 def drainOutbox (s : State) : List Message × State := (s.outbox, { s with outbox := [] })
 @[simp] theorem empty_block_valid (s : State) : validBlock s [] = true := by
   simp [validBlock, applicationHistory]
-theorem applicationHistory_preserves_prefix {a b : Block} (prefix : a.IsPrefix b) :
+theorem applicationHistory_preserves_prefix {a b : Block} (hprefix : a.IsPrefix b) :
     (applicationHistory a).IsPrefix (applicationHistory b) := by
-  obtain ⟨suffix,rfl⟩ := prefix
+  obtain ⟨suffix,rfl⟩ := hprefix
   simp [applicationHistory]
 
 theorem validBlock_same_application_history (s : State) (a b : Block)

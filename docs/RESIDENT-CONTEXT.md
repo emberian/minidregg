@@ -59,3 +59,21 @@ Whole-source-root invalidation is conservative; unrelated changes in the same
 cell can invalidate a summary. Embeds/opaque/unavailable rows have explicit
 coverage limits. These are honest integration boundaries, not permissions to
 use controller journals, ambient host observations, or a shadow memory store.
+
+## Explicit resident reviewed document action
+
+The additive `mini_doc_review` tool accepts only a selected context bundle and
+ordinary document targets/actions. The controller chooses the operation and
+proposal identities. Selected input files in existing HOME/requests are
+immutable per operation; different bytes or symlinks refuse. The existing room
+Attempt is retained before the write boundary, and normal hr-operation
+proposal/call.bin custody and exact lookup apply. No fleet record or parallel
+proposal store is introduced.
+
+Current pinned source reads determine reviewed line coordinates, atom records
+and native payload preimages. An earlier editor seen cache does not retarget
+this explicit path. All selected support roots join normal preparation and
+native landing guards; current laws and participant grants still decide.
+Ordinary `mini_doc_append` retains its separate single-document contract.
+The new action is authored WIP at this shipment and awaits scoped Rust/native
+receiving checks.

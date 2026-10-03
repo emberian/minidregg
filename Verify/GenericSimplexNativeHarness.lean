@@ -79,8 +79,8 @@ def selectiveCommitRecovery (binary : String) (original : Array Native) (c : Con
   match ← persist (storage nodes[2]!) c (← (storage nodes[2]!).read) (.tick 70) with
   | .durable _ => pure ()
   | _ => throw (IO.userError "C disable persistence")
-  let proposal : Message := ⟨1,1,.propose,some [[]]⟩
-  deliverTCP binary runtimes[0]! (← sealPacket nodes[1]! ⟨c,0,0,proposal⟩)
+  let proposal : Message := ⟨0,1,.propose,some [[]]⟩
+  deliverTCP binary runtimes[1]! (← sealPacket nodes[0]! ⟨c,1,0,proposal⟩)
   for receiver in [0,1,2] do
     for voter in [0,1,3] do
       if receiver != voter then

@@ -9,7 +9,7 @@ set_option autoImplicit false
 permissions before passing a descriptor to the independent storage helper. -/
 def writePrivate (path : System.FilePath) (bytes : ByteArray) : IO Unit := do
   IO.FS.writeBinFile path bytes
-  IO.FS.setAccessRights path {user := {read := true,write := true}}
+  IO.setAccessRights path {user := {read := true,write := true}}
 
 structure Native where
   binary : System.FilePath

@@ -7,6 +7,7 @@ import Compiler.NativeHostCodec
 import Compiler.GrainResourceBirthController
 
 import Compiler.JointControlFrame
+import Kernel.BendActivityControl
 import Compiler.GenericSimplexCodec
 namespace Minidregg.Kernel.NativeHost
 
@@ -69,6 +70,10 @@ structure Config where
   /-- Source-owned joint control resource. Enabling changes the runtime pin;
   the physical cell/atom/schema are not selected by a submitted operation. -/
   jointControl : Option JointControlFrame.Pin := none
+  /-- Separate source-owned Activity facet; no controller exception drops another gate. -/
+  activityControl : Option ContentControlFrame.Pin := none
+  /-- Live operator bound, excluded from source semantics and historical replay policy. -/
+  activityTickLimit : Nat := 100000
   /-- Common source-log epoch/roster/keys/base, pinned by deployment semantics.
   A certificate never supplies its own verification context. -/
   jointConsensus : Option GenericSimplexCodec.Context := none
@@ -104,8 +109,12 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
         bytesStream.encode key) ++
   (match config.jointControl with
   | none => []
-  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v1".toUTF8.toList ++
+  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v2".toUTF8.toList ++
       JointControlFrame.pinStream.encode pin) ++
+  (match config.activityControl with
+  | none => []
+  | some pin => "DREGG/NATIVE-HOST/ACTIVITY-CONTROL/v1".toUTF8.toList ++
+      ContentControlFrame.pinStream.encode pin) ++
   (match config.jointConsensus with
   | none => []
   | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v1".toUTF8.toList ++
@@ -114,7 +123,7 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
 /-- Disabling the new mode preserves the complete pre-existing parameter
 preimage, hence its legacy semantics/profile and genesis interpretation. -/
 theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
-    ({ config with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, jointConsensus := none } : Config).runtimeParameters =
+    ({ config with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, activityControl := none, jointConsensus := none } : Config).runtimeParameters =
       "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
@@ -147,18 +156,52 @@ def Config.logStart (config : Config) (seed : DurableReceiver.Seed) : Digest :=
 def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.CellId :=
   ⟨Minidregg.Kernel.SystemCell.physicalId config.deployment.domain⟩
 
-/-- The Store transport for this deployment: every new commit is judged by the
-tail law over this deployment's system cell. -/
+/-- Private receiving adapters select a facet only AFTER constructing their
+actual typed source-admission token. This discriminator is never decoded from
+network or client input; this helper alone grants no exception authority. -/
+inductive ControlFacet | joint | activity deriving DecidableEq
+
+/-- Whole-cell roots are shared protection coordinates. This first concrete
+composition requires separate physical cells; overlapping facets refuse all
+source transitions rather than allowing an exception to erase another law. -/
+def Config.controlLayoutValid (config : Config) : Bool :=
+  match config.jointControl, config.activityControl with
+  | some joint, some activity => decide (joint.cell ≠ activity.cell)
+  | _, _ => true
+
+/-- Total aggregation: a typed own-facet exception retains every OTHER facet.
+Ordinary receiving uses none and checks both laws. The caller must still check
+the precise private current-admitted own record and predecessor. -/
+def Config.sourceGate (config : Config) (own : Option ControlFacet)
+    {rootBytes : List UInt8 → Digest} (snapshot : DurableDataIntent.DataSnapshot rootBytes)
+    (intent : DurableDataIntent.DataIntent rootBytes) :
+    Except DurableDataIntent.RejectReason Unit := do
+  if !config.controlLayoutValid then throw (.durable .transactionConflict)
+  match config.jointControl with
+  | none => pure ()
+  | some pin =>
+      if own = some .joint then pure () else
+        match JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent with
+        | .ok () => pure ()
+        | .error _ => throw (.durable .transactionConflict)
+  match config.activityControl with
+  | none => pure ()
+  | some pin =>
+      if own = some .activity then pure () else
+        BendActivityControl.ordinaryGate pin snapshot intent
+
+def Config.otherFacetGate (config : Config) (own : ControlFacet)
+    {rootBytes : List UInt8 → Digest} (snapshot : DurableDataIntent.DataSnapshot rootBytes)
+    (intent : DurableDataIntent.DataIntent rootBytes) :
+    Except DurableDataIntent.RejectReason Unit :=
+  config.sourceGate (some own) snapshot intent
+
+/-- The Store transport keeps the actual system-cell tail law and checks every
+protected facet before physical append. -/
 def Config.physicalTransport (config : Config) : DurableReceiverIO.Transport :=
   let storage := { config.storage with anchorIdentity :=
     s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}" }
-  { storage.transport config.logStart config.systemCell with sourceGate := fun snapshot intent =>
-      match config.jointControl with
-      | none => .ok ()
-      | some pin =>
-          match JointControlFrame.ordinaryGate config.deployment.domain pin snapshot intent with
-          | .ok () => .ok ()
-          | .error _ => .error (.durable .transactionConflict) }
+  { storage.transport config.logStart config.systemCell with sourceGate := config.sourceGate none }
 
 /-- In an agreed domain the ordinary receiving loop must propose its source
 transition. It cannot secretly append an unordered local application record.

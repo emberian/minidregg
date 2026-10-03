@@ -1,4 +1,4 @@
-/- Actual finite Objective Bend instance loading. Canonical pin decoding alone
+/- Actual finite Objective Bend object loading. Canonical pin decoding alone
 never authorizes execution: this loader reflects every immutable partial,
 constructs lawful complete behavior, admits the exact linked Bend Book and
 matches its canonical bytes. The existing native world carrier retains state. -/
@@ -37,22 +37,28 @@ def loadPin (helpers : Book) (pin : Pin) : Except String (Loaded pin) := do
     if exactLayers : construction.layers = specs then
       if exactCore : pin.core = construction.core.bytes then
         if exactRoot : rootId pin = some construction.root.id then
-          pure ⟨construction, exactLayers ▸ reflected, exactRoot, exactCore⟩
+          pure ⟨construction, by simpa only [exactLayers] using reflected, exactRoot, exactCore⟩
         else throw "pinned root differs from constructed prototype"
       else throw "pinned core differs from actual constructed Book"
     else throw "constructed source layers differ from immutable closure"
 
-/-- Decodes the ACTUAL native instance carrier. The registry's authenticated
+structure LoadedStore (store : Minidregg.Theory.Store.Store WorldKindCell.instanceLayout) where
+  object : ObjectiveBendInstance.Instance
+  native : WorldKindCell.instanceAt store = some object.value
+
+/-- Decodes the ACTUAL native object carrier. The registry's authenticated
 materializer/root and current authority must be retained by the call binder;
 this pure loader does not turn caller bytes into an authenticated resource. -/
 def load (helpers : Book) (store : Minidregg.Theory.Store.Store WorldKindCell.instanceLayout) :
-    Except String ObjectiveBendInstance.Instance := do
-  let some value := WorldKindCell.instanceAt store | throw "invalid native world instance"
-  let some space := pinSpace value.descriptor | throw "missing semantic ROM prototype pin"
-  match pinned : at value space with
-  | none => throw "invalid canonical instance prototype pin"
-  | some pin =>
-    let source ← loadPin helpers pin
-    pure ⟨value, space, pin, pinned, source⟩
+    Except String (LoadedStore store) := do
+  match native : WorldKindCell.instanceAt store with
+  | none => throw "invalid native world object"
+  | some value =>
+    let some space := pinSpace value.descriptor | throw "missing semantic ROM prototype pin"
+    match pinned : pinAt value space with
+    | none => throw "invalid canonical object prototype pin"
+    | some pin =>
+      let source ← loadPin helpers pin
+      pure ⟨⟨value, space, pin, pinned, source⟩, native⟩
 
 end Minidregg.Kernel.ObjectiveBendInstanceLoader

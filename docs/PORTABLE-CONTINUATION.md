@@ -128,3 +128,27 @@ identity from certificate/evidence bytes. It proves one selected exact candidate
 names one complete core. This is not a proof of unique globally governed transfer:
 the existing joint/current-source reservation must actually select that candidate,
 retain historical liabilities, and authorize the child before physical activation.
+
+
+## Source-capsule and joint custody consumers (new WIP)
+
+`Host/PortableContinuationProbe.lean` reuses the existing pinned source capsule
+and actual old executable journal audit. Capture retains the whole canonical
+source image plus declared physical inventories and restores a new private
+quarantine file through the native helper. Reopening independently pins the
+retained inventory and re-audits the exact whole source cut. Existing files
+refuse overwrite. It does not claim physical inventory completeness or activate
+a worker. These new Lean paths are uncompiled pending the captain's assigned
+check; the existing native helper remains the exact five-pass r1 binary.
+
+`Compiler/PortableJointCustodyIO.lean` consumes the actual opaque joint Pending
+receipt: current source reservation, exact physical append/readback and checked
+ordered commit. It retains original and next WHOLE source images, full control
+pin/envelope, source reservation bytes and exact historical consensus context
+and commit. Its required artifact is derived from that retained receipt; a
+restore caller cannot replace this joint requirement with an empty list. Other
+service/provider/private obligations still come from their existing owners.
+The full old private allocation descriptor/immutable spent anchor and external
+uncertain dispatch join have no new generic transfer permission here. Actual
+worker-governance, old-worker fence and qualified successor rekey remain
+unfinished joins; reserveObject is not worker-transfer governance.

@@ -48,7 +48,8 @@ def reservedTransport (config : Config) (opened : Opened config)
     (r : Reserved config.deployment config.profile
       ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable) :
     DurableReceiverIO.Transport :=
-  { config.physicalTransport with sourceGate := fun snapshot intent =>
+  { config.physicalTransport with sourceGate := fun snapshot intent => do
+      config.otherFacetGate .joint snapshot intent
       if DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent intent) =
           DurableReceiverCodec.intentStream.encode (IntentRecord.ofIntent r.intent) ∧
           snapshot.canonicalBytes r.pin.cell = opened.durable.snapshot.canonicalBytes r.pin.cell then
@@ -83,6 +84,9 @@ def applyReserved (config : Config) (opened : Opened config) (expected : Context
     if expected.scope != digestStream.encode config.deployment.domain ||
         expected.epoch != r.source.promise.declaration.epoch then return .refused
     if config.jointControl != some r.pin then return .refused
+    match config.sourceGate none opened.durable.snapshot r.original with
+    | .error _ => return .refused
+    | .ok () => pure ()
     match ← DurableReceiverIO.receiveLoadedDetailed (reservedTransport config opened r)
         ResourceBirthCodec.rootBytes opened.durable r.intent with
     | .exact _ appended => return .pending ⟨contextPinned,ordered,appended⟩

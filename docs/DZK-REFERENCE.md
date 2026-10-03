@@ -122,8 +122,10 @@ The narrow command is:
 
     cargo nextest run --release --locked --lib -E 'test(/dzk/)'
 
-The first five selected tests passed using an independently frozen source copy
-and bounded Rust build seat. The expanded eight-test source additionally covers:
+All eight selected release tests passed on 2026-10-03 at 10:14:49 UTC using
+an independently frozen source copy and a bounded Persvati Rust build seat
+(8 GiB memory, two jobs, no swap). Fifty tests outside the explicit filter were
+skipped. The checks cover:
 
 - Every degree 0..3 and malformed shares, opening salts and final polynomial.
 - Actual compressed n=7,f=2 distribution with two parties withholding.
@@ -134,7 +136,17 @@ and bounded Rust build seat. The expanded eight-test source additionally covers:
 - Canonical wire framing and persisted recipient transfer/replay.
 - Retained dealer randomness/outboxes, changed inputs/identity and torn WAL.
 
-See the exact build receipt for the tested source hashes and final result.
+The tested source SHA256 pins are:
+
+- dzk.rs: dec6121611bd6b46681aad4a09dbbe0a7f953dc47e0bea8bad2d75c35641f4fe
+- dzk_store.rs: 418873e3bf95c1d09feaf2776ef8dc57f1acb44daeec84c999c31be5e3c10a7d
+
+The ACSS-Id consumer separately connects actual row delivery, typed per-column
+verification, authenticated complaint/opening requests, transferred proof points
+and public reconstruction. Its composite transition journal persists the entire
+recursive event/outbox before publication; standalone dZK WAL tests do not
+qualify that consumer join. The malformed-row and composite-store checks are
+pending at this document revision.
 ACSS-Id, triples, malicious multiplication and private evaluator installation are
 distinct consumers; this dZK module alone does not complete them.
 

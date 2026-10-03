@@ -67,7 +67,7 @@ def valueBytes {descriptor : Descriptor} (space : PinSpace descriptor)
     (value : (layout descriptor).Value space.space) : List UInt8 :=
   Eq.mp (by simp [layout, ScalarCodec.Value, space.bytes]) value
 
-def at (value : Kernel.WorldKindInstance.Instance) (space : PinSpace value.descriptor) : Option Pin :=
+def pinAt (value : Kernel.WorldKindInstance.Instance) (space : PinSpace value.descriptor) : Option Pin :=
   (value.store ⟨space.space, 0⟩).bind fun bytes => decode (valueBytes space bytes)
 
 /-- Birth initializes the pin at key zero alongside any member-authored state.
@@ -78,37 +78,37 @@ def initialize (descriptor : Descriptor) (valid : descriptor.Valid)
     Kernel.WorldKindInstance.Instance :=
   ⟨descriptor, valid, state.set ⟨space.space, 0⟩ (some (bytesValue space (encode pin)))⟩
 
-/-- Per-object construction retains the actual instance, decoded pin and full
+/-- Per-object construction retains the actual object, decoded pin and full
 source construction evidence. Its state is the existing typed store. -/
 structure Instance where
   value : Kernel.WorldKindInstance.Instance
   space : PinSpace value.descriptor
   pin : Pin
-  pinned : at value space = some pin
+  pinned : pinAt value space = some pin
   source : Loaded pin
 
-def Instance.native (instance : Instance) (kindRoot : Digest) :=
-  WorldKindCell.instanceOf kindRoot instance.value
+def Instance.native (object : Instance) (kindRoot : Digest) :=
+  WorldKindCell.instanceOf kindRoot object.value
 
 /-- A prepared native state mutation cannot replace the behavior pin. This
 follows from Store's ROM theorem for ALL well-formed heterogeneous descriptors,
-not from checking a particular generated instance. -/
+not from checking a particular generated object. -/
 theorem prepared_pin_preserved (value : Kernel.WorldKindInstance.Instance)
     (space : PinSpace value.descriptor) (prepared : Kernel.WorldKindInstance.Prepared value) :
-    at prepared.post space = at value space := by
-  unfold at
+    pinAt prepared.post space = pinAt value space := by
+  unfold pinAt
   rw [Kernel.WorldKindInstance.prepared_preserves_rom prepared
     ⟨space.space, 0⟩ space.immutable]
 
-def Instance.after (instance : Instance)
-    (prepared : Kernel.WorldKindInstance.Prepared instance.value) : Instance :=
-  { value := prepared.post, space := instance.space, pin := instance.pin
-    pinned := (prepared_pin_preserved instance.value instance.space prepared).trans instance.pinned
-    source := instance.source }
+def Instance.after (object : Instance)
+    (prepared : Kernel.WorldKindInstance.Prepared object.value) : Instance :=
+  { value := prepared.post, space := object.space, pin := object.pin
+    pinned := (prepared_pin_preserved object.value object.space prepared).trans object.pinned
+    source := object.source }
 
-theorem after_same_prototype (instance : Instance)
-    (prepared : Kernel.WorldKindInstance.Prepared instance.value) :
-    (instance.after prepared).pin = instance.pin := rfl
+theorem after_same_prototype (object : Instance)
+    (prepared : Kernel.WorldKindInstance.Prepared object.value) :
+    (object.after prepared).pin = object.pin := rfl
 
 theorem roundtrip (pin : Pin) : decode (encode pin) = some pin :=
   NockProgramCodec.framedDecode_encode frame pinStream pin

@@ -28,7 +28,7 @@ fn nonce() -> Result<u64> {
     File::open("/dev/urandom")?.read_exact(&mut b)?;
     Ok(u64::from_le_bytes(b))
 }
-fn snapshot(p: &Path, b: &[u8]) -> Result<()> {
+pub(crate) fn snapshot(p: &Path, b: &[u8]) -> Result<()> {
     let tmp = p.with_extension(format!("pending-{}-{}", std::process::id(), nonce()?));
     let mut f = create(&tmp)?;
     f.write_all(b)?;
@@ -36,7 +36,7 @@ fn snapshot(p: &Path, b: &[u8]) -> Result<()> {
     fs::rename(&tmp, p)?;
     parent_sync(p)
 }
-fn read_packet(s: &mut UnixStream) -> Result<Vec<u8>> {
+pub(crate) fn read_packet(s: &mut UnixStream) -> Result<Vec<u8>> {
     let mut l = [0; 4];
     s.read_exact(&mut l)?;
     let n = u32::from_le_bytes(l) as usize;
@@ -47,7 +47,7 @@ fn read_packet(s: &mut UnixStream) -> Result<Vec<u8>> {
     s.read_exact(&mut b)?;
     Ok(b)
 }
-fn write_packet(s: &mut UnixStream, b: &[u8]) -> Result<()> {
+pub(crate) fn write_packet(s: &mut UnixStream, b: &[u8]) -> Result<()> {
     if b.len() > MAX {
         return Err(bad("packet bound"));
     }
@@ -55,7 +55,7 @@ fn write_packet(s: &mut UnixStream, b: &[u8]) -> Result<()> {
     s.write_all(b)?;
     s.flush()
 }
-fn lock(p: &Path) -> Result<File> {
+pub(crate) fn lock(p: &Path) -> Result<File> {
     let f = OpenOptions::new()
         .read(true)
         .write(true)
@@ -184,7 +184,7 @@ pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
     let mut s = UnixStream::connect(socket)?;
     s.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     s.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
@@ -244,7 +244,7 @@ impl Pool {
             row_hashes,
         })
     }
-    fn row(&self, row: u64) -> Result<Vec<u8>> {
+    pub(crate) fn row(&self, row: u64) -> Result<Vec<u8>> {
         let i = usize::try_from(row).map_err(|_| bad("row overflow"))?;
         let h = self.row_hashes.get(i).ok_or_else(|| {
             Error::new(
@@ -255,6 +255,20 @@ impl Pool {
         let b = fs::read(self.root.join(format!("row-{row}")))?;
         if b.is_empty() || hash(&b) != *h {
             return Err(bad("physical row substitution"));
+        }
+        Ok(b)
+    }
+    pub(crate) fn row_fixed(&self, row: u64, length: usize) -> Result<Vec<u8>> {
+        let expected = self.row_commitment(row)?;
+        let mut file = File::open(self.root.join(format!("row-{row}")))?;
+        if length == 0 || length > MAX || file.metadata()?.len() != length as u64 {
+            return Err(bad("fixed physical row shape"));
+        }
+        let mut b = vec![0; length];
+        file.read_exact(&mut b)?;
+        let mut extra = [0; 1];
+        if file.read(&mut extra)? != 0 || hash(&b) != expected {
+            return Err(bad("physical row substitution/growth"));
         }
         Ok(b)
     }

@@ -91,9 +91,11 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
 /// command as the requested edit. A race after this read is refused by native
 /// current-base/authority admission. This function authors a proposal; it does
 /// not claim submit, installation, approval or autonomous model correctness.
+/// This explicit reviewed path resolves line coordinates from its own signed
+/// pinned source. Ordinary editor seen anchors and drafts remain unchanged.
 pub(crate) fn review(root:&Path,workspace:&Value,id:&str,base:&Value,request:&Value)->Result<Value> {
     let native_request=review_request(base,request,|name|reference(root,name))?;
-    propose_request(root,workspace,&native_request,id,None,false)
+    propose_request(root,workspace,&native_request,id,None,true)
 }
 fn review_request(base:&Value,request:&Value,lookup:impl Fn(&str)->Result<Value>)->Result<Value> {
     if base["type"]!="mini-context-bundle-v1" {

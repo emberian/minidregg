@@ -208,9 +208,15 @@ theorem doCommit_self (s : State) (number : Nat) (block : Block) :
 
 theorem doCommit_owned (s : State) (number : Nat) (block : Block)
     (owned : OwnedAudit s) : OwnedAudit (doCommit s number block) := by
-  unfold doCommit clear
+  have cleared := clear_owned s number (some block) owned
+  unfold doCommit
   dsimp only
-  split_ifs <;> simp_all [OwnedAudit,putView,eventOwner]
+  split_ifs <;> simp_all [OwnedAudit,putView,eventOwner,clear_self]
+  all_goals
+    intro event member
+    rcases member with old | same
+    · exact cleared event old
+    · subst event; rfl
 
 theorem doCommit_audit_prefix (s : State) (number : Nat) (block : Block) :
     s.audit <+: (doCommit s number block).audit := by

@@ -86,7 +86,7 @@ def main (args : List String) : IO Unit := do
     let localLayers ← match specs source with
       | .error e => throw (IO.userError e)
       | .ok layers => pure layers
-    let sealed ← match ObjectiveBendPersistence.seal package localLayers with
+    let sealed ← match ObjectiveBendPersistence.sealSource package localLayers with
       | .error e => throw (IO.userError e)
       | .ok sealed => pure sealed
     for partialArtifact in sealed do
