@@ -287,7 +287,16 @@ fn discovery_read(
 /// same-spelled private hint never changes the shared target.
 fn existing_authority(root: &Path, opened: &Value) -> Result<Value> {
     let mut result = opened.clone();
-    if let Some(local) = super::reference_for_target(root, member(opened, "target")?)? {
+    let target = member(opened, "target")?;
+    // The member named this exact reference for this exact target: its own
+    // grant is the authority. Another reference to the same cell (an older
+    // grant, revoked by a kick before a rejoin) must never replace it.
+    if let Some(name) = opened.get("name").and_then(Value::as_str) {
+        if super::local_reference(root, name).is_ok_and(|local| local["target"].as_str() == Some(target)) {
+            return Ok(result);
+        }
+    }
+    if let Some(local) = super::reference_for_target(root, target)? {
         if member(&local, "kind")? == member(opened, "kind")? {
             for field in [
                 "observeCapability",
@@ -969,5 +978,34 @@ mod tests {
         assert_eq!(opened["sharedName"]["fallback"], "private");
         assert!(check_opened(&opened, &at("99")).is_ok());
         assert!(check_opened(&opened, &at("100")).is_err());
+    }
+
+    /// After a kick and a rejoin a member holds two references to one room:
+    /// the old one (revoked grant) and the new one. Naming the new one uses
+    /// its own grant; a derived reference (the index) still borrows a direct
+    /// grant for its exact target.
+    #[test]
+    fn named_reference_keeps_its_own_grant_over_an_older_one_for_the_same_room() {
+        let root = std::env::temp_dir().join(format!("mini-shared-rejoin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        super::super::make_private_dir(&root).unwrap();
+        super::super::make_private_dir(&root.join("refs")).unwrap();
+        let write = |name: &str, target: &str, cap: &str| {
+            super::super::private_file(&root.join("refs").join(format!("{}.json", super::super::ref_file(name))),
+                &serde_json::to_vec(&json!({"type":"minidregg-participant-reference-v1","name":name,"kind":"object",
+                    "target":target,"observeCapability":cap,"operationCapability":cap,"controlCapability":null,
+                    "room":"member"})).unwrap()).unwrap();
+        };
+        write("lab", "10", "100");
+        write("lab-again", "10", "200");
+        write("index-direct", "11", "300");
+        let again = super::super::local_reference(&root, "lab-again").unwrap();
+        assert_eq!(existing_authority(&root, &again).unwrap()["observeCapability"], "200");
+        let old = super::super::local_reference(&root, "lab").unwrap();
+        assert_eq!(existing_authority(&root, &old).unwrap()["observeCapability"], "100");
+        let mut index = again.clone();
+        index["target"] = json!("11");
+        assert_eq!(existing_authority(&root, &index).unwrap()["observeCapability"], "300");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -448,7 +448,10 @@ class Scenario:
             # the new invitation is imported beside it, never over it.
             rejoined = room["alias"][:58] + "-again"
             self.join(self.ledger, key, room, who, "rejoin", alias=rejoined)
-            self.read(self.ledger, f"churn:{key}:rejoined-read", who, f"doc show {rejoined}/notes")
+            # Probe, not a gate: the sealed 2a075e68 client resolves a shared
+            # name through the member's first reference to the room (the
+            # revoked one), fixed on main by the shared-names authority change.
+            self.read(self.ledger, f"churn:{key}:rejoined-read", who, f"doc show {rejoined}/notes", fatal=False)
             self.read(self.ledger, f"churn:{key}:old-reference-still-revoked", who,
                       f"doc show {room['alias']}/notes", expect=REFUSED, refusal=r"no-grant|revoked|grant",
                       fatal=False)
@@ -569,7 +572,7 @@ class Scenario:
         for phase in self.p["phases"]:
             missing = [r for r in REQUIRES[phase]
                        if r in self.p["phases"] and not str(statuses.get(r, "")).startswith("pass")]
-            if str(statuses.get(phase, "")).startswith("pass"):
+            if str(statuses.get(phase, "")).startswith(("pass", "fail (probes)")):
                 continue
             if missing:
                 statuses[phase] = f"blocked: prerequisite {', '.join(missing)} has not passed"
@@ -591,9 +594,14 @@ class Scenario:
                     statuses[phase] = "stopped: " + str(error)
                     self.persist()
                     return self.report()
-                blocked = [r["id"] for r in self.state["rows"]
-                           if r.get("status") == "blocked" and r["id"].startswith(phase + ":")]
-                statuses[phase] = "pass" + (f"; blocked rows: {', '.join(blocked)}" if blocked else "")
+                mine = [r for r in self.state["rows"] if r["id"].startswith(phase + ":")
+                        or (phase == "churn" and (r["id"].startswith("lockout:") or ":rejoin:" in r["id"]))]
+                blocked = [r["id"] for r in mine if r.get("status") == "blocked"]
+                failed = sorted({r["id"] for r in mine if r.get("status") == "fail"})
+                if failed:
+                    statuses[phase] = "fail (probes): " + ", ".join(failed)
+                else:
+                    statuses[phase] = "pass" + (f"; blocked rows: {', '.join(blocked)}" if blocked else "")
             self.persist()
         return self.report()
 
@@ -678,7 +686,7 @@ def main(argv=None):
         parser.error("unknown command")
     print(json.dumps(result, indent=2))
     if words[0] == "run":
-        return 0 if all(v.startswith(("pass", "blocked", "unbuilt")) for v in result["phases"].values()) else 1
+        return 0 if all(v.startswith(("pass", "blocked", "unbuilt")) for v in result["phases"].values()) else 1  # probes count as failure
     return 0
 
 
