@@ -45,8 +45,8 @@ end Minidregg.Kernel.PolicyInstallReceiver
 
 namespace Minidregg.Kernel.DeclaredResourceController
 
-/-- After-core version9 adds explicit compute-funding payload tag6. The target
-nine-tuple and tags0–5 retain their order; core transaction8 refuses this gate. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [9]
+/-- Version10 adds authenticated whole-definition observe-only tag7 and exact
+canonical noun constructor output. Older receiving frames refuse reinterpretation. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [10]
 
 end Minidregg.Kernel.DeclaredResourceController

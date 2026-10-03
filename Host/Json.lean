@@ -1118,7 +1118,10 @@ private def worldKindJson (root : Digest) (store : Store.Store WorldKindCell.def
   pure <| .mkObj [("root", decimal root.value), ("worldKind", .mkObj
     [("descriptor", worldDescriptorJson value.descriptor),
      ("defaults", worldEntriesJson value.descriptor value.store),
-     ("methods", worldMethodsJson value)])]
+     ("methods", worldMethodsJson value),
+     ("definitionBytes", hexJson (WorldKindCell.definitionStream.encode definition)),
+     ("sampleSlots", .arr <| (WorldPrototypeConstruction.observeProject store).toArray.map fun slot =>
+       Lean.Json.arr #[.str slot.1, signedDecimal slot.2])])]
 
 private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell.instanceLayout) :
     Result Lean.Json := do
@@ -1172,7 +1175,10 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "read" =>
       let _ ← exactObject path ["type"] json
       pure .read
-  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, world, kindDefinition or computeFunding"
+  | "kindRead" =>
+      let _ ← exactObject path ["type"] json
+      pure .kindRead
+  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, world, kindDefinition or computeFunding"
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do
@@ -5154,6 +5160,26 @@ private def fleetCommandJson (command : FleetTurn.Command) : Lean.Json := .mkObj
 /-- Inspect bounded public host products. Header/envelope bytes remain exact hex. -/
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
+  | "world-prototype-output" => do
+      let noun ← match Noun.cue bytes with
+        | some noun => if Noun.jam noun = bytes then pure noun else failAt kind "noncanonical output jam"
+        | none => failAt kind "malformed output jam"
+      let value ← match noun with
+        | .cell (.cell key value) (.atom 0) =>
+            if key = NockProgramCell.cord "definition" then pure value
+            else failAt kind "expected sole definition output"
+        | _ => failAt kind "expected sole definition output"
+      let source ← match WorldPrototypeConstruction.bytesOfNoun value with
+        | some source => pure source
+        | none => failAt kind "expected canonical byte-list noun"
+      let definition ← decoded kind (ResourceBirthCodec.strictCodec WorldKindCell.definitionStream.toLawful) source
+      let instantiated ← match definition.instantiate with
+        | some instantiated => pure instantiated
+        | none => failAt kind "invalid descriptor/defaults"
+      pure <| .mkObj [("definition", .mkObj
+        [("descriptor", worldDescriptorJson instantiated.descriptor),
+         ("defaults", worldEntriesJson instantiated.descriptor instantiated.store)]),
+        ("definitionBytes", hexJson source)]
   | "predicate" => predicateJson <$> decoded "predicate"
       (ResourceBirthCodec.strictCodec NativeHostGenesis.predicateStream.toLawful) bytes
   | "observation-batch" => do

@@ -61,6 +61,8 @@ mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
+#[path = "world_prototype.rs"]
+mod world_prototype;
 
 #[path = "law_export.rs"]
 mod law_export;
@@ -2125,7 +2127,7 @@ fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value
 /// text line: a transclusion line is the source's lines, not this document's.
 fn line_atoms(document: &Value, name: &str, from: usize, to: usize) -> Result<Vec<String>> {
     let lines = live_lines(document)?;
-    if from > to || to > lines.len() {
+    if from == 0 || from > to || to > lines.len() {
         return Err(format!("{name} has {} lines; lines {from}..{to} are not a range of them", lines.len()));
     }
     lines[from - 1..to]
@@ -3004,7 +3006,7 @@ fn propose_summary_once(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                let read_only = payload.get("type").and_then(Value::as_str) == Some("read");
+                let read_only = matches!(payload.get("type").and_then(Value::as_str), Some("read" | "kindRead"));
                 let sealing = match if protected || read_only { None } else { sealing_room(private_room_name, root, &reference)? } {
                     // A cell that already holds sealed lines is a private room's,
                     // whatever this reference is called: refuse to write plaintext
@@ -3062,7 +3064,7 @@ fn propose_summary_once(
                     if sealing.is_some() {
                         return Err("--private seals content payloads only".into());
                     }
-                    json!({"type":"read"})
+                    json!({"type":member(payload,"type")?})
                 } else {
                     if payload_obj.len() != 2
                         || !payload_obj.contains_key("type")
@@ -6579,6 +6581,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let maximum = args.optional("max-compute-credits").map(|value|os_string(value,"maximum compute credits")).transpose()?;
             args.finish()?;
             world_kind::call(&root,&workspace,&id,&name,&method,funding.as_deref(),maximum.as_deref())
+        }
+        "kind-construct" => {
+            let name = os_string(args.required("name")?, "target kind name")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            let program = os_string(args.required("program")?, "constructor program ID")?;
+            let parents = path(args.required("parents")?);
+            args.finish()?;
+            world_prototype::construct(&root, &workspace, &id, &name, &program, &parents)
         }
         "kind-show" | "instance-show" => {
             let name = os_string(args.required("name")?, "resource name")?;

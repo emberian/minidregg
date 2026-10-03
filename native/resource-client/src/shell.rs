@@ -2037,6 +2037,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     Plan::Client { command:"workspace".into(), flags,
                         writes:vec![request_file(defpath,&definition),request_file(lawpath,&predicate)] }
                 }
+                Some("construct") => {
+                    arity(&w, 5, 5, u)?;
+                    workspace_name(&w[2], "proposal ID")?;
+                    ref_name(&w[3], "target kind name")?;
+                    decimal(&w[4], "constructor program ID")?;
+                    let parents=json_argument(session,&w[5],"ordered parent reference names")?;
+                    let parent_path=session.home.join("requests").join(format!("construct-{}.json",ref_file(&w[2])));
+                    Plan::Client {command:"workspace".into(),flags:vec![flag("action","kind-construct"),
+                        flag("dir",ws()),flag("proposal-id",&w[2]),flag("name",&w[3]),
+                        flag("program",&w[4]),flag("parents",parent_path.clone())],
+                        writes:vec![request_file(parent_path,&parents)]}
+                }
                 Some("revise") => {
                     arity(&w, 4, 4, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "kind name")?;
                     let definition = json_argument(session, &w[4], "kind definition")?;

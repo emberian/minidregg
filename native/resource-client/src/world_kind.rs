@@ -416,7 +416,7 @@ fn method_table(descriptor: &Value, table: &Value) -> Result<()> {
     Ok(())
 }
 
-fn method_operation(workspace: &Value, operation: u8, payload: &[u8]) -> Result<Value> {
+pub(super) fn method_operation(workspace: &Value, operation: u8, payload: &[u8]) -> Result<Value> {
     let frame = crate::session_invoke(&workspace_host(workspace)?,
         &member_path(workspace,"socket")?, &member_path(workspace,"config")?, operation, payload)?;
     match frame.split_first() {

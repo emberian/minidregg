@@ -140,6 +140,7 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
          ("expectedPayerBalance", signed funding.expectedPayerBalance),
          ("expectedBookRoot", number funding.expectedBookRoot.value)]
     | .read => .mkObj [("type", toJson "read")]
+    | .kindRead => .mkObj [("type", toJson "kindRead")]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]
 

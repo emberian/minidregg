@@ -290,6 +290,7 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
     | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
+    | kindRead => exact WorldPrototypeConstruction.observeProject_unjoint _
     | read => exact contentProject_unjoint _ _ _
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -795,7 +796,7 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
-    | kindDefinition _ => exact fun _ => .body
+    | kindDefinition _ | kindRead => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentField address.1
@@ -808,7 +809,7 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | computeFunding _ | read => exact fun _ _ => 0
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | read => exact fun _ _ => 0
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -822,7 +823,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
-    | world _ | kindDefinition _ | computeFunding _ => exact fun _ => false
+    | world _ | kindDefinition _ | kindRead | computeFunding _ => exact fun _ => false
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
@@ -855,6 +856,11 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) pre post
+    | kindRead =>
+      exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩)
+        (targetAmount ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩) pre post
     | read =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
@@ -1054,7 +1060,7 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient durabl
 /-- An observe-only read target is read, not written. -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .read | .computeFunding _ => true
+  | .read | .kindRead | .computeFunding _ => true
   | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the

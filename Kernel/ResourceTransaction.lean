@@ -6,6 +6,7 @@ import Compiler.NativeProtocolFrames
 import Kernel.DeclaredResourceScalar
 import Kernel.WorldKindProjection
 import Kernel.WorldKindMethods
+import Kernel.WorldPrototypeConstruction
 import Compiler.ObjectAudienceRoster
 import Kernel.ObjectAudience
 import Kernel.ContentResource
@@ -73,6 +74,8 @@ inductive Payload where
   transcluder's grant and the source's own policy at this height, and its
   loaded state is what the opening is checked against. -/
   | read
+  /-- Whole authenticated world-kind definition, observe-only. -/
+  | kindRead
   | computeFunding (funding : ComputeFunding)
   deriving DecidableEq
 
@@ -86,6 +89,7 @@ instance : Repr Payload where
     | .world actions => Repr.addAppParen ("Payload.world " ++ reprArg actions) prec
     | .kindDefinition definition => Repr.addAppParen ("Payload.kindDefinition " ++ reprArg definition) prec
     | .read => "Payload.read"
+    | .kindRead => "Payload.kindRead"
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
 
 structure Target where
@@ -146,6 +150,7 @@ def payloadStream : StreamCodec Payload where
     | .world actions => 4 :: (StreamCodec.list WorldKindInstance.actionStream).encode actions
     | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
     | .computeFunding funding => 6 :: computeFundingStream.encode funding
+    | .kindRead => [7]
   decodePrefix
     | 0 :: bytes => do
         let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
@@ -166,6 +171,7 @@ def payloadStream : StreamCodec Payload where
     | 6 :: bytes => do
         let (funding, rest) ← computeFundingStream.decodePrefix bytes
         some (.computeFunding funding, rest)
+    | 7 :: bytes => some (.kindRead, bytes)
     | _ => none
   decodePrefix_encode := by
     intro payload suffix
@@ -282,6 +288,16 @@ theorem v8_command_refused (payload : List UInt8) :
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
 
+/-- Prototype receiver v10 cannot reinterpret a numeric-only v9 command. -/
+theorem v9_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 9 :: payload) = none := by
+  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [9]
+  have lengthExact : commandFrame.length = oldFrame.length := by simp [commandFrame, oldFrame]
+  have different : oldFrame ≠ commandFrame := by decide +kernel
+  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
+    simp [rawCommandCodec, lengthExact, different]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+
 @[simp] theorem command_decode_encode (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode command
 
@@ -332,7 +348,7 @@ a stream append on an object, observe for an observe-only read target, the
 kind's ordinary write verb otherwise. -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
   | .object, .append _ => .appendObject
-  | kind, .read => observeVerb kind
+  | kind, .read | kind, .kindRead => observeVerb kind
   | kind, _ => ordinaryVerb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
@@ -442,7 +458,7 @@ def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload w
   | .content _ | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
-  | .kindDefinition _ => WorldKindCell.definitionLayout
+  | .kindDefinition _ | .kindRead => WorldKindCell.definitionLayout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
@@ -452,7 +468,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
     | content _ => exact HyperdocumentCell.contentMaterializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
-    | kindDefinition _ => exact WorldKindCell.definitionMaterializer
+    | kindDefinition _ | kindRead => exact WorldKindCell.definitionMaterializer
     | read => exact HyperdocumentCell.contentMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
@@ -472,7 +488,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
     | content _ => exact ⟨.content, cell⟩
     | append _ => exact ⟨.stream, cell⟩
     | world _ => exact ⟨.worldInstance, cell⟩
-    | kindDefinition _ => exact ⟨.worldKind, cell⟩
+    | kindDefinition _ | kindRead => exact ⟨.worldKind, cell⟩
     | read => exact ⟨.content, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
@@ -498,7 +514,7 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
           match cell with | ⟨.worldInstance, value⟩ => some value | _ => none
         else none
       else none
-    | kindDefinition _ => exact if kind = .object then
+    | kindDefinition _ | kindRead => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.worldKind, value⟩ => some value | _ => none
         else none
@@ -597,6 +613,17 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if root != pre.root then throw .staleTarget
         pure pre.logical
 
+    | kindRead => exact do
+        if kind != .object then throw .wrongRole
+        if version != 1 then throw .unsupportedVersion
+        if root != pre.root then throw .staleTarget
+        -- Partial grants never receive canonical hidden defaults.
+        if observe != some capability then throw .observationRequired
+        let some stored := CredentialAuthorityState.readCapability snapshot.cell .object capability
+          | throw .observationRejected
+        if stored.head.scope.fields.isSome then throw .fieldNotNamed
+        pure pre.logical
+
     | world actions => exact do
         if kind != .object then throw .wrongRole
         if version != 1 then throw .unsupportedVersion
@@ -639,7 +666,7 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | read | computeFunding _ => exact []
+    | read | kindRead | computeFunding _ => exact []
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
@@ -655,7 +682,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
     | scalar _ | computeFunding _ => exact none
     | content _ => exact none
     | world _ => exact none
-    | kindDefinition _ => exact none
+    | kindDefinition _ | kindRead => exact none
     | read => exact none
     | append request =>
         exact (StreamCell.headOf pre.logical).map fun head =>
@@ -694,7 +721,7 @@ def Target.contentStore? (target : Target) (cell : TargetCell target) :
     | content _ => exact some cell.logical
     | append _ => exact none
     | read => exact some cell.logical
-    | world _ | kindDefinition _ => exact none
+    | world _ | kindDefinition _ | kindRead => exact none
 
 structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -917,6 +944,7 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     | append request => exact streamSlots request before
     | world _ => exact WorldKindProjection.project subject before after
     | kindDefinition _ => exact WorldKindProjection.definitionProject before after
+    | kindRead => exact WorldPrototypeConstruction.observeProject before
     | read => exact ContentResource.project before after ⟨[]⟩
 
 /-- The participant slot a sample reads: target `i`'s projection of its loaded
@@ -974,8 +1002,12 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     cases payload with
     | scalar actions => exact actions.mapM (actionWrite i id)
     | world actions => exact WorldKindMethods.writes pre program i actions
-    | content _ | append _ | kindDefinition _ => exact none
-    | read => exact some []
+    | content content => exact some [⟨i, 0,
+        WorldPrototypeConstruction.bytesValue (ContentResource.commandStream.encode content)⟩]
+    | append request => exact some [⟨i, 0,
+        WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
+    | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
+    | read | kindRead => exact some []
     | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
 
 /-- Merely spelling a funding payload cannot remove it from run-effect

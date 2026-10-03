@@ -790,6 +790,7 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           | content _ => simp [append] at shown
           | world _ => simp [append] at shown
           | kindDefinition _ => simp [append] at shown
+          | kindRead => simp [append] at shown
           | read => simp [append] at shown
           | computeFunding _ => simp [append] at shown
           | append request =>
