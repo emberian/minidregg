@@ -1091,21 +1091,22 @@ first use and extended by re-admission afterwards (`NativeHostSession.walked`). 
 def sessionWalked (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHostSession.Walked config) := do
-  let current ← sessionCurrent config state
-  match ← NativeHostSession.walked config current with
+  let some prior ← state.get
+    | throw (IO.userError "native host session invalidated")
+  match ← NativeHostSession.refreshWalked config prior with
   | .error detail =>
       state.set none
       throw (IO.userError detail)
-  | .ok walked =>
-      state.set (some { current with walked := some walked })
+  | .ok (current, walked) =>
+      state.set (some current)
       return walked
 
 def sessionSetWalked {config : NativeHost.Config}
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target) :
-    IO Unit := do
+    {oldTarget : NativeHost.Durable} (old : NativeHostReplay.Verified config oldTarget)
+    (readback : NativeHostReplay.ExactReadback config old) : IO Unit := do
   if let some current ← state.get then
-    state.set (some { current with walked := some ⟨target, verified⟩ })
+    state.set (some (current.rememberReadback old readback))
 
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
@@ -1151,11 +1152,12 @@ def sessionConfirmed (config : NativeHost.Config)
 receipt; retain that verifier-minted tip for the next session request. -/
 def sessionExactConfirmed (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (kind : DurableReceiverIO.Confirmation) {target : NativeHost.Durable}
-    (verified : NativeHostReplay.Verified config target)
+    (kind : DurableReceiverIO.Confirmation) {oldTarget : NativeHost.Durable}
+    (old : NativeHostReplay.Verified config oldTarget)
+    (readback : NativeHostReplay.ExactReadback config old)
     (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
   if let some current ← state.get then
-    state.set (some { current with walked := some ⟨target, verified⟩ })
+    state.set (some (current.rememberReadback old readback))
   return .confirmed kind receipt
 
 /-- The special receiver accepts raw strict selected-release ingress, not a
@@ -1209,7 +1211,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     session.verified payload
   match result with
     | .confirmed confirmed =>
-        sessionSetWalked state confirmed.verified
+        sessionSetWalked state confirmed.old confirmed.readback
         return .confirmed confirmed.confirmation confirmed.receipt
     | .rejected _ =>
         return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
@@ -1279,7 +1281,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     session.verified payload
   match result with
   | .confirmed confirmed =>
-      sessionSetWalked state confirmed.verified
+      sessionSetWalked state confirmed.old confirmed.readback
       return .confirmed confirmed.confirmation confirmed.receipt
   | .rejected detail =>
       return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
@@ -1539,7 +1541,7 @@ def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     session.verified payload
   let outcome : NativeHostCodec.Outcome ← match result with
     | .confirmed confirmed => do
-        sessionSetWalked state confirmed.verified
+        sessionSetWalked state confirmed.old confirmed.readback
         pure (.confirmed confirmed.confirmation confirmed.receipt)
     | .historical receipt => pure (.confirmed .replayed receipt)
     | .rejected detail => pure (.refused .operationRejected "application-session-enrollment".toUTF8.toList
@@ -2113,7 +2115,7 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 34 committedBytes
       match handed with
-      | .ok _ => sessionSetWalked state permit.verified
+      | .ok _ => sessionSetWalked state permit.old permit.readback
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -2121,7 +2123,7 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       -- Exact durable receipt/cache recovery never authorizes another fd3 call.
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         .confirmed committed.confirmation committed.receipt
-      sessionSetWalked state committed.verified
+      sessionSetWalked state committed.old committed.readback
   | .historical receipt =>
       writeSessionFrame output 34 <| outcomeCodec.encode <| .confirmed .replayed receipt
   | .noRecordRefused refusal =>
@@ -2195,7 +2197,7 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 46 committedBytes
       match handed with
-      | .ok _ => sessionSetWalked state permit.verified
+      | .ok _ => sessionSetWalked state permit.old permit.readback
       | .error detail =>
           writeSessionFrame output 46 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -2203,7 +2205,7 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       -- Exact receipt recovery is not another physical agent dispatch permit.
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         .confirmed committed.confirmation committed.receipt
-      sessionSetWalked state committed.verified
+      sessionSetWalked state committed.old committed.readback
   | .rejected _ =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -2233,7 +2235,7 @@ def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 76 committedBytes
       match handed with
-      | .ok _ => sessionSetWalked state permit.verified
+      | .ok _ => sessionSetWalked state permit.old permit.readback
       | .error detail =>
           writeSessionFrame output 76 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -2275,17 +2277,17 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
             let handed ← reservation.withFreshTip fun committedBytes =>
               writeSessionFrame output 26 committedBytes
             match handed with
-            | .ok _ => sessionSetWalked state reservation.verified
+            | .ok _ => sessionSetWalked state reservation.old reservation.readback
             | .error detail =>
                 writeSessionFrame output 26 <| outcomeCodec.encode <|
                   NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
           else
-            sessionSetWalked state reservation.verified
+            sessionSetWalked state reservation.old reservation.readback
             writeSessionFrame output 26 <| outcomeCodec.encode <|
               NativeHost.publicSubmissionOutcome
                 (.confirmed .replayed reservation.receipt)
       | .recoveredAfterUncertainResponse | .replayed =>
-          sessionSetWalked state reservation.verified
+          sessionSetWalked state reservation.old reservation.readback
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
