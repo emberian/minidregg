@@ -1,0 +1,19 @@
+--- bendtt.lean
++++ bendtt-lean430.lean
+@@ -3444,14 +3444,14 @@
+   split
+   · rename_i h0
+     have ⟨_, g, v, c, s⟩ := pos_ok ho ha v2 y (ht hq) (List.contains_iff_mem.1 h0); cases g
+-    refine ⟨fun _ => ?_, nofun⟩; rw [ite_eq_left ⟨v, c⟩]
++    refine ⟨fun _ => ?_, nofun⟩; rw [if_pos ⟨v, c⟩]
+     exact (Nat.eq_or_lt_of_le s).imp (congrArg some) id
+   split; · simp
+   rename_i h0 h1
+   obtain ⟨π, m⟩ := List.exists_mem_of_ne_nil _ (by simpa using h1)
+   have ⟨_, g, v, c, s⟩ := pos_ok ho ha v2 y (ht hq) m
+   have := get_le g
+-  refine ⟨nofun, fun _ => ?_⟩; rw [ite_eq_left ⟨v, c⟩]
++  refine ⟨nofun, fun _ => ?_⟩; rw [if_pos ⟨v, c⟩]
+   cases π
+   · exact absurd (List.contains_iff_mem.2 m) h0
+   · simp at this; show _ < _; omega
