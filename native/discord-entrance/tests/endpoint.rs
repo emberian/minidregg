@@ -35,6 +35,7 @@ struct World {
     key: SigningKey,
     patches: mpsc::Receiver<(String, Value)>,
     sessions: PathBuf,
+    cfg: Config,
 }
 
 fn world(tag: &str) -> World {
@@ -85,11 +86,11 @@ fn world(tag: &str) -> World {
         sessions: Sessions { dir: root.join("sessions"), sponsor: "ember".into(), sponsor_workspace: p("sponsor-ws") },
         poster: Poster { curl: "/usr/bin/curl".into(), spool: root.join("spool"), max_time_s: 10 },
     };
-    let app = App::new(cfg).unwrap();
+    let app = App::new(cfg.clone()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     std::thread::spawn(move || app.serve(listener));
-    World { addr, key, patches, sessions: root.join("sessions") }
+    World { addr, key, patches, sessions: root.join("sessions"), cfg }
 }
 
 fn post(w: &World, body: &Value, corrupt: bool) -> (u16, String) {
@@ -126,7 +127,7 @@ fn content(resp: &str) -> String {
     let v: Value = serde_json::from_str(resp).unwrap();
     assert_eq!(v["type"], 4, "{resp}");
     assert_eq!(v["data"]["flags"], 64);
-    v["data"]["content"].as_str().unwrap().to_string()
+    v["data"]["content"].as_str().unwrap().split("\nCustody:").next().unwrap().to_string()
 }
 
 fn deferred_then_patch(w: &World, id: &str, resp: (u16, String)) -> String {
@@ -136,7 +137,7 @@ fn deferred_then_patch(w: &World, id: &str, resp: (u16, String)) -> String {
     let (route, body) = w.patches.recv_timeout(Duration::from_secs(20)).expect("no follow-up PATCH");
     assert_eq!(route, format!("PATCH /api/v10/webhooks/{APP}/tok-{id}/messages/@original"));
     assert_eq!(body["allowed_mentions"], json!({ "parse": [] }));
-    body["content"].as_str().unwrap().to_string()
+    body["content"].as_str().unwrap().split("\nCustody:").next().unwrap().to_string()
 }
 
 #[test]
@@ -162,9 +163,10 @@ fn a_rostered_line_runs_in_its_session_deferred_and_logged() {
         home.display()
     );
     assert_eq!(c, format!("```\n{expect}\n```"));
-    // The same signed body again is a replay.
+    // The same signed body returns retained output without re-execution.
     let (status, body) = post(&w, &command("1", FRIEND, "mini", Some("read 'a b' {\"x\":1}")), false);
-    assert_eq!((status, body.as_str()), (401, "replayed interaction"));
+    assert_eq!(status, 200);
+    assert_eq!(content(&body), c);
     // /mini-help is the shell's own `help`.
     let c = deferred_then_patch(&w, "2", post(&w, &command("2", FRIEND, "mini-help", None), false));
     assert!(c.contains("line=[help]"), "{c}");
@@ -216,4 +218,36 @@ fn a_roster_writable_by_others_answers_no_one() {
     std::fs::set_permissions(&roster, std::fs::Permissions::from_mode(0o666)).unwrap();
     let c = content(&post(&w, &command("20", FRIEND, "mini", Some("refs")), false).1);
     assert_eq!(c, "```\nerror: the Discord roster is unavailable on this box; nothing ran\n```");
+}
+
+fn signed(w:&World,v:&Value)->minidregg_discord_entrance::http::Request {
+    let body=v.to_string().into_bytes();let ts=now_s().to_string();let mut msg=ts.as_bytes().to_vec();msg.extend_from_slice(&body);
+    minidregg_discord_entrance::http::Request{method:"POST".into(),path:"/interactions".into(),query:String::new(),headers:vec![("x-signature-timestamp".into(),ts),("x-signature-ed25519".into(),hex_encode(&w.key.sign(&msg).to_bytes()))],body}
+}
+#[test]
+fn durable_restart_exact_binding_unknown_and_roster_revocation(){
+    let w=world("restart");let cmd=command("70",FRIEND,"mini",Some("read shared"));
+    let first=deferred_then_patch(&w,"70",post(&w,&cmd,false));
+    let restarted=App::new(w.cfg.clone()).unwrap();
+    let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert_eq!(content(&String::from_utf8(resp.body).unwrap()),first);
+    let (resp,job)=restarted.handle(&signed(&w,&command("70",FRIEND,"mini",Some("submit foreign"))),now_s());assert_eq!(resp.status,409);assert!(job.is_none());
+    // Persisted start is a transport unknown even when this test's worker never ran.
+    let path=w.sessions.join(".discord-custody/4242-70.json");let mut rec:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();rec["phase"]=json!("started");
+    minidregg_discord_entrance::custody::atomic_json(&path,&rec).unwrap();
+    let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("UNKNOWN"));
+    std::fs::write(&w.cfg.roster,json!({"version":1,"users":{}}).to_string()).unwrap();
+    let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("not on this Mini's roster"));
+    assert_eq!(std::fs::read_to_string(w.sessions.join("friend/discord.log")).unwrap().lines().count(),1);
+}
+#[test]
+fn accepted_before_deferral_is_recoverable_and_status_is_actor_bound(){
+    let w=world("accepted");let app=App::new(w.cfg.clone()).unwrap();let cmd=command("80",FRIEND,"mini",Some("read shared"));
+    let (_,job)=app.handle(&signed(&w,&cmd),now_s());assert!(job.is_some());drop(job);drop(app);
+    let app=App::new(w.cfg.clone()).unwrap();let (_,job)=app.handle(&signed(&w,&cmd),now_s());assert!(job.is_some());drop(job);
+    let mut status=command("81",FRIEND,"mini-status",None);status["data"]["options"]=json!([{"name":"target","value":"80","type":3}]);
+    let (resp,job)=app.handle(&signed(&w,&status),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("has not started"));
+    // A second rostered Discord user on the same hosted session still cannot inspect it.
+    std::fs::write(&w.cfg.roster,json!({"version":1,"users":{FRIEND:"friend",STRANGER:"friend"}}).to_string()).unwrap();
+    status["member"]["user"]["id"]=json!(STRANGER);
+    let (resp,_)=app.handle(&signed(&w,&status),now_s());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("no retained interaction"));
 }

@@ -17,5 +17,41 @@
     "name": "mini-help",
     "type": 1,
     "description": "List the mini shell verbs"
+  },
+  {
+    "name": "mini-world",
+    "description": "Explore your shared Mini resources, source and recovery actions",
+    "type": 1,
+    "options": [
+      {
+        "name": "target",
+        "description": "A held resource name, such as lab/notes",
+        "type": 3,
+        "required": false,
+        "max_length": 160
+      },
+      {
+        "name": "page",
+        "description": "Page of the authorized member projection",
+        "type": 4,
+        "required": false,
+        "min_value": 1,
+        "max_value": 10000
+      }
+    ]
+  },
+  {
+    "name": "mini-status",
+    "description": "Inspect retained command custody without rerunning it",
+    "type": 1,
+    "options": [
+      {
+        "name": "target",
+        "description": "Discord interaction ID",
+        "type": 3,
+        "required": true,
+        "max_length": 20
+      }
+    ]
   }
 ]

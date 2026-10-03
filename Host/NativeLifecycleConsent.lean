@@ -9,7 +9,6 @@ import Kernel.ApplicationDispatchAgentPaidAuthoring
 import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
 import Host.ApplicationAgentLifetimeGrantAuthoring
 import Host.ApplicationGrainSessionEnrollmentAuthoring
-import Host.NativeReserveBirthAuthoring
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationLifecycleLaunchBeginAuthoring
@@ -25,7 +24,7 @@ open Minidregg.Kernel Minidregg.Host
 set_option autoImplicit false
 
 def supported (operation : UInt8) : Bool :=
-  [32, 36, 48, 58, 74, 78, 80, 82, 201].contains operation
+  [32, 36, 48, 58, 74, 78, 80, 82].contains operation
 
 /-- Operator configuration may further restrict a request. It cannot supply
 consent: paid/reserve fixed selectors are retained in the exact LOCAL request.
@@ -76,8 +75,6 @@ def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
       let plan ← IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
         config verified request)
       pure (ApplicationGrainSessionEnrollmentAuthoring.planCodec.encode plan)
-    | 201 => IO.ofExcept (← NativeReserveBirthAuthoring.authorWireLoaded
-        config verified.opened request)
     | _ => throw (IO.userError "unsupported local lifecycle consent operation")
   unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
     throw (IO.userError "local specialized plan exceeds native frame bound")

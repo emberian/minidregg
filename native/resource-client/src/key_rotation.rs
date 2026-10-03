@@ -11,7 +11,8 @@ use crate::participant_enrollment::{json_private, key, member_path, pair};
 use crate::*;
 use ed25519_dalek::Signer;
 use serde_json::{json, Value};
-use std::os::unix::fs::DirBuilderExt;
+#[path = "key_rotation_custody.rs"]
+mod custody;
 
 pub(crate) const PREROTATION_NOTICE: &str = "\
 Your NEXT key is the only thing that can rotate this identity. If the daily key
@@ -27,7 +28,13 @@ Move it off (`--next-to` other media, or copy it home and delete it here).";
 
 /// One Host session call; a refusal frame is decoded by the Host's own
 /// `outcome` inspection and returned as the error text, by name.
-pub(crate) fn call(host: &Path, socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn call(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    operation: u8,
+    payload: &[u8],
+) -> Result<Vec<u8>> {
     let frame = session_invoke(host, socket, config, operation, payload)?;
     match frame.as_slice() {
         [byte @ (255 | 254), encoded @ ..] => {
@@ -58,14 +65,31 @@ fn author(host: &Path, socket: &Path, config: &Path, kind: &str, value: &Value) 
     call(host, socket, config, 7, &kind_payload(kind, &source)?)
 }
 
-fn inspect_bytes(host: &Path, socket: &Path, config: &Path, kind: &str, bytes: &[u8]) -> Result<Value> {
+fn inspect_bytes(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    kind: &str,
+    bytes: &[u8],
+) -> Result<Value> {
     let body = call(host, socket, config, 8, &kind_payload(kind, bytes)?)?;
     serde_json::from_slice(&body).map_err(|error| format!("invalid Host inspection: {error}"))
 }
 
 /// The Host's pre-rotation commitment to one public key (canonical decimal).
-pub(crate) fn next_key_digest(host: &Path, socket: &Path, config: &Path, public: &[u8; 32]) -> Result<String> {
-    let body = author(host, socket, config, "signing-key-next-digest", &json!({"publicKey":hex(public)}))?;
+pub(crate) fn next_key_digest(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    public: &[u8; 32],
+) -> Result<String> {
+    let body = author(
+        host,
+        socket,
+        config,
+        "signing-key-next-digest",
+        &json!({"publicKey":hex(public)}),
+    )?;
     let text = String::from_utf8(body).map_err(|_| "next-key digest is not UTF-8")?;
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err("next-key digest is not a canonical decimal".into());
@@ -73,7 +97,13 @@ pub(crate) fn next_key_digest(host: &Path, socket: &Path, config: &Path, public:
     Ok(text)
 }
 
-fn status(host: &Path, socket: &Path, config: &Path, subject: &str, public: &[u8; 32]) -> Result<Value> {
+fn status(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    subject: &str,
+    public: &[u8; 32],
+) -> Result<Value> {
     let query = serde_json::to_vec(&json!({"subject":subject,"publicKey":hex(public)}))
         .map_err(|error| error.to_string())?;
     let body = call(host, socket, config, 144, &query)?;
@@ -138,11 +168,19 @@ pub(crate) fn conventional_next_cosign(secret: &Path) -> PathBuf {
 
 /// The next key's co-signature over the pair (daily public key, next public key).
 pub(crate) fn cosign(public: &[u8; 32], next: &ed25519_dalek::SigningKey) -> [u8; 64] {
-    next.sign(&next_possession_frame(public, &next.verifying_key().to_bytes())).to_bytes()
+    next.sign(&next_possession_frame(
+        public,
+        &next.verifying_key().to_bytes(),
+    ))
+    .to_bytes()
 }
 
 /// A co-signature verifies under the next key over the client's frame.
-pub(crate) fn verify_cosign(public: &[u8; 32], next: &[u8; 32], signature: &[u8; 64]) -> Result<()> {
+pub(crate) fn verify_cosign(
+    public: &[u8; 32],
+    next: &[u8; 32],
+    signature: &[u8; 64],
+) -> Result<()> {
     ed25519_dalek::VerifyingKey::from_bytes(next)
         .map_err(|_| "the next public key is not a valid Ed25519 point")?
         .verify_strict(&next_possession_frame(public, next), &ed25519_dalek::Signature::from_bytes(signature))
@@ -157,8 +195,13 @@ pub(crate) fn host_next_possession_frame(
     public: &[u8; 32],
     next: &[u8; 32],
 ) -> Result<Vec<u8>> {
-    let frame = author(host, socket, config, "participant-key-enrollment-next-possession",
-        &json!({"publicKey":hex(public),"nextPublicKey":hex(next)}))?;
+    let frame = author(
+        host,
+        socket,
+        config,
+        "participant-key-enrollment-next-possession",
+        &json!({"publicKey":hex(public),"nextPublicKey":hex(next)}),
+    )?;
     if frame != next_possession_frame(public, next) {
         return Err("the Host's next-possession frame differs from this client's: refusing to co-sign or plan with it".into());
     }
@@ -225,7 +268,12 @@ pub(crate) fn public_file(path: &Path) -> Result<[u8; 32]> {
     fs::read(path)
         .map_err(|error| format!("cannot read public key {}: {error}", path.display()))?
         .try_into()
-        .map_err(|_| format!("public key {} must contain exactly 32 raw bytes", path.display()))
+        .map_err(|_| {
+            format!(
+                "public key {} must contain exactly 32 raw bytes",
+                path.display()
+            )
+        })
 }
 
 /// The public half of a secret key file's next key, by the keygen convention.
@@ -245,7 +293,10 @@ struct Workspace {
 
 fn workspace(root: &Path) -> Result<Workspace> {
     let pin = workspace::load_for_key_transition(root)?;
-    let socket = SOCKET.get().ok_or("workspace has no pinned key-transition socket")?.clone();
+    let socket = SOCKET
+        .get()
+        .ok_or("workspace has no pinned key-transition socket")?
+        .clone();
     Ok(Workspace {
         host: workspace::workspace_host(&pin)?,
         config: member_path(&pin, "config")?,
@@ -265,25 +316,6 @@ fn random_seed() -> Result<[u8; 32]> {
         .and_then(|mut source| source.read_exact(&mut seed))
         .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
     Ok(seed)
-}
-
-/// Replace `path` atomically with private `bytes`.
-fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut staged = path.as_os_str().to_owned();
-    staged.push(".rotating");
-    let staged = PathBuf::from(staged);
-    let _ = fs::remove_file(&staged);
-    create_private(&staged, bytes)?;
-    fs::rename(&staged, path).map_err(|error| format!("cannot install {}: {error}", path.display()))
-}
-
-fn replace_public(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut staged = path.as_os_str().to_owned();
-    staged.push(".rotating");
-    let staged = PathBuf::from(staged);
-    let _ = fs::remove_file(&staged);
-    create_public(&staged, bytes)?;
-    fs::rename(&staged, path).map_err(|error| format!("cannot install {}: {error}", path.display()))
 }
 
 /// The workspace subject's current key epoch, as the Host reports it.
@@ -310,17 +342,28 @@ pub(crate) fn key_status(mut args: Args) -> Result<()> {
     } else {
         let manifest = participant_enrollment::json_private(&root.join("workspace.json"))?;
         if let Some(text) = manifest.get("nextPublicKey").and_then(Value::as_str) {
-            Some(workspace::private::decode_hex(text)?.try_into().map_err(|_| "workspace nextPublicKey is not 32 bytes")?)
+            Some(
+                workspace::private::decode_hex(text)?
+                    .try_into()
+                    .map_err(|_| "workspace nextPublicKey is not 32 bytes")?,
+            )
         } else {
             let file = conventional_next_public(&ws.key);
-            if file.exists() { Some(public_file(&file)?) } else { None }
+            if file.exists() {
+                Some(public_file(&file)?)
+            } else {
+                None
+            }
         }
     };
     if let Some(next) = next_public {
         let next_view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &next)?;
         view["nextKeyMatchesCommitment"] = next_view["isCommittedNext"].clone();
     }
-    println!("{}", serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?
+    );
     Ok(())
 }
 
@@ -331,8 +374,10 @@ fn check_rotation_plan(view: &Value, command: &[u8], identity: Option<&Value>) -
         return Err("rotation plan names a different command".into());
     }
     if let Some(identity) = identity {
-        if view["type"] != "subject-key-rotation-plan-v1" || view["domain"] != identity["domain"]
-            || view["semantics"] != identity["semantics"] {
+        if view["type"] != "subject-key-rotation-plan-v1"
+            || view["domain"] != identity["domain"]
+            || view["semantics"] != identity["semantics"]
+        {
             return Err("rotation plan differs from locally pinned identity".into());
         }
         if view["possessionFrameValidated"] != true {
@@ -350,54 +395,196 @@ fn check_rotation_plan(view: &Value, command: &[u8], identity: Option<&Value>) -
 pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("workspace")?))?;
     let next_key = absolute(&path(args.required("next-key")?))?;
-    let next_to = args.optional("next-to").map(|value| absolute(&path(value))).transpose()?;
+    let next_to = args
+        .optional("next-to")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
     let named = args.optional("to-public-key").map(path);
+    let new_attempt = args
+        .optional("new-attempt")
+        .map(|v| {
+            v.into_string()
+                .map_err(|_| "--new-attempt must be ASCII".to_owned())
+        })
+        .transpose()?;
+    if let Some(id) = &new_attempt {
+        custody::stable_id(id)?;
+    }
     args.finish()?;
     workspace::private_dir(&root)?;
     let _transition = transport::service_lock(&root.join("key-transition.lock"))?;
     let ws = workspace(&root)?;
     let manifest = workspace::load_for_key_transition(&root)?;
     let identity = receipt_continuity::key_transition_identity_if_enabled(&root, &manifest)?;
-    let signer = key(&next_key)?;
-    let signer_public = signer.verifying_key().to_bytes();
-    let named_public = match &named {
-        Some(file) => public_file(file)?,
-        None => signer_public,
-    };
-    let view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &named_public)?;
-    let field = |name: &str| -> Result<String> {
-        view.get(name)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| format!("key status lacks {name}"))
-    };
-    let epoch: u64 = field("keyEpoch")?.parse().map_err(|_| "key status epoch is not decimal")?;
-    let key_id = field("keyId")?;
-    let new_epoch = epoch.checked_add(1).ok_or("key epoch overflow")?;
+    let destination = next_to.clone().unwrap_or_else(|| next_key.clone());
+    if next_key == ws.key || destination == ws.key {
+        return Err("NEXT and its destination must differ from the daily key".into());
+    }
     let attempts = root.join("attempts");
-    let attempt = attempts.join(format!("rotate-{new_epoch}"));
-    for directory in [&attempts, &attempt] {
-        match fs::DirBuilder::new().mode(0o700).create(directory) {
-            Ok(()) => (),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(error) => return Err(format!("cannot create {}: {error}", directory.display())),
+    custody::directory(&attempts)?;
+    let active_path = root.join("rotation-active.json");
+    let active = if active_path.exists() {
+        Some(custody::read(&active_path)?)
+    } else {
+        None
+    };
+    let active_id = active.as_ref().and_then(|v| v["attempt"].as_str());
+    let id = new_attempt.as_deref().or(active_id).unwrap_or("default");
+    custody::stable_id(id)?;
+    if let Some(prior_id) = active_id {
+        if prior_id != id {
+            let prior = custody::read(
+                &attempts
+                    .join(format!("rotate-{prior_id}"))
+                    .join("custody.json"),
+            )?;
+            if prior["phase"] != "completed" && prior["phase"] != "refused" {
+                return Err("retained rotation is unresolved; recover its original attempt before a new succession".into());
+            }
         }
     }
+    // Old pre-fix attempts cannot safely be interpreted as a fresh rotation.
+    // Preserve them and refuse rather than advance the Host epoch again.
+    if active.is_none() {
+        for entry in fs::read_dir(&attempts).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_name().to_string_lossy().starts_with("rotate-")
+                && entry.path().join("ingress.bin").exists()
+                && !entry.path().join("custody.json").exists()
+            {
+                return Err(format!("legacy retained rotation at {} requires original-ingress recovery; refusing fresh rotation",entry.path().display()));
+            }
+        }
+    }
+    let attempt = attempts.join(format!("rotate-{id}"));
+    custody::directory(&attempt)?;
     let _lock = transport::service_lock(&attempt.join("rotate.lock"))?;
+    let state_path = attempt.join("custody.json");
+    let binding = json!({"operation":id,"subject":ws.subject,"daily":ws.key,"next":next_key,"destination":destination,
+        "namedPublic":named.as_ref().map(|p|public_file(p).map(|v|hex(&v))).transpose()?,
+        "host":ws.host,"socket":ws.socket,"config":hex(&custody::bytes(&ws.config,transport::HOST_MAX_FRAME)?) });
+    let mut state = if state_path.exists() {
+        let prior = custody::read(&state_path)?;
+        if prior["binding"] != binding {
+            return Err(
+                "rotation attempt differs from retained original input or destination".into(),
+            );
+        }
+        prior
+    } else {
+        let signer = key(&next_key)?;
+        let signer_public = signer.verifying_key().to_bytes();
+        let named_public = match &named {
+            Some(p) => public_file(p)?,
+            None => signer_public,
+        };
+        let view = status(&ws.host, &ws.socket, &ws.config, &ws.subject, &named_public)?;
+        let epoch = view["keyEpoch"]
+            .as_str()
+            .ok_or("key status lacks keyEpoch")?
+            .parse::<u64>()
+            .map_err(|_| "key epoch is not decimal")?;
+        let new_epoch = epoch.checked_add(1).ok_or("key epoch overflow")?;
+        let key_id = view["keyId"].as_str().ok_or("key status lacks keyId")?;
+        custody::immutable(
+            &attempt.join("original-next.key"),
+            &custody::bytes(&next_key, 32)?,
+        )?;
+        custody::immutable(
+            &attempt.join("original-daily.key"),
+            &custody::bytes(&ws.key, 32)?,
+        )?;
+        let after = attempt.join("after-next.key");
+        if !after.exists() {
+            let mut seed = random_seed()?;
+            custody::immutable(&after, &seed)?;
+            seed.fill(0);
+        }
+        let prior_destination = if destination.exists() {
+            Some(hex(&custody::bytes(&destination, 32)?))
+        } else {
+            None
+        };
+        let public_path = conventional_next_public(&ws.key);
+        let prior_public = if public_path.exists() {
+            Some(hex(&fs::read(&public_path).map_err(|e| e.to_string())?))
+        } else {
+            None
+        };
+        let prepared = json!({"type":"minidregg-retained-rotation-v2","binding":binding,"phase":"preparing","epoch":epoch.to_string(),"newEpoch":new_epoch.to_string(),
+            "keyId":key_id,"signerPublic":hex(&signer_public),"namedPublic":hex(&named_public),"destinationPrior":prior_destination,"publicPrior":prior_public,"manifestPrior":manifest});
+        custody::publish(&state_path, &prepared, None)?;
+        prepared
+    };
+    let pointer = json!({"type":"minidregg-rotation-active-v1","attempt":id});
+    custody::publish(&active_path, &pointer, active.as_ref())?;
+    if attempt.join("result.json").exists() && state["phase"] == "installed" {
+        state = custody::phase(&state_path, &state, "completed")?;
+    }
+    if state["phase"] == "completed" {
+        let mut result = custody::read(&attempt.join("result.json"))?;
+        result["replayed"] = json!(true);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if state["phase"] == "refused" {
+        return Err("retained original rotation was explicitly refused; use --new-attempt ID to authorize another request".into());
+    }
+    let signer = key(&attempt.join("original-next.key"))?;
+    let signer_public = signer.verifying_key().to_bytes();
+    if Some(hex(&signer_public).as_str()) != state["signerPublic"].as_str() {
+        return Err("retained successor fingerprint changed".into());
+    }
+    let named_public: [u8; 32] = crate::decode_hex(
+        state["namedPublic"]
+            .as_str()
+            .ok_or("retained named public absent")?,
+    )?
+    .try_into()
+    .map_err(|_| "retained named public size")?;
+    let epoch = state["epoch"]
+        .as_str()
+        .ok_or("retained epoch absent")?
+        .parse::<u64>()
+        .map_err(|_| "retained epoch invalid")?;
+    let new_epoch = state["newEpoch"]
+        .as_str()
+        .ok_or("retained successor epoch absent")?
+        .parse::<u64>()
+        .map_err(|_| "retained successor epoch invalid")?;
+    let key_id = state["keyId"]
+        .as_str()
+        .ok_or("retained keyId absent")?
+        .to_owned();
     let ingress_path = attempt.join("ingress.bin");
     let after_path = attempt.join("after-next.key");
+    if state["phase"] == "preparing" && named.is_none() {
+        workspace::private::keyring_remember(&ws.key, &epoch.to_string())?;
+        custody::sync_parent(&workspace::private::enc_ring_path(&ws.key))?;
+    }
     if !ingress_path.exists() {
+        if state["phase"] != "preparing" {
+            return Err("retained admitted/uncertain ingress is absent; refusing reauthor".into());
+        }
         if !after_path.exists() {
-            let mut seed = random_seed()?;
-            create_private(&after_path, &seed)?;
-            seed.fill(0);
+            return Err("retained after-next secret is absent; refusing regeneration".into());
         }
         let after_public = key(&after_path)?.verifying_key().to_bytes();
         let digest = if let Some(identity) = &identity {
-            let input = serde_json::to_vec(&json!({"publicKey":hex(&after_public)})).map_err(|e| e.to_string())?;
-            let bytes = receipt_continuity::key_source(&root, &manifest, identity,
-                receipt_continuity::KeySourceOperation::NextKeyDigest, &input)?;
-            let digest = String::from_utf8(bytes).map_err(|_| "local next-key digest is not UTF-8")?;
+            let input = serde_json::to_vec(&json!({"publicKey":hex(&after_public)}))
+                .map_err(|e| e.to_string())?;
+            let bytes = receipt_continuity::key_source(
+                &root,
+                &manifest,
+                identity,
+                receipt_continuity::KeySourceOperation::NextKeyDigest,
+                &input,
+            )?;
+            let digest =
+                String::from_utf8(bytes).map_err(|_| "local next-key digest is not UTF-8")?;
             participant_enrollment::decimal(&digest, "local next-key digest")?;
             digest
         } else {
@@ -412,7 +599,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 .to_owned()
         } else {
             let nonce = participant_enrollment::nonce()?;
-            participant_enrollment::save_json(&request_path, &json!({"nonce":nonce}))?;
+            custody::publish(&request_path, &json!({"nonce":nonce}), None)?;
             nonce
         };
         let source = json!({"subject":ws.subject,"nonce":nonce,
@@ -421,18 +608,41 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 "activeFrom":"0","activeUntil":u64::MAX.to_string(),"nextKeyDigest":digest}});
         let command = if let Some(identity) = &identity {
             let input = serde_json::to_vec(&source).map_err(|e| e.to_string())?;
-            receipt_continuity::key_source(&root, &manifest, identity,
-                receipt_continuity::KeySourceOperation::RotationCommand, &input)?
+            receipt_continuity::key_source(
+                &root,
+                &manifest,
+                identity,
+                receipt_continuity::KeySourceOperation::RotationCommand,
+                &input,
+            )?
         } else {
-            author(&ws.host, &ws.socket, &ws.config, "subject-key-rotation", &source)?
+            author(
+                &ws.host,
+                &ws.socket,
+                &ws.config,
+                "subject-key-rotation",
+                &source,
+            )?
         };
         let plan = call(&ws.host, &ws.socket, &ws.config, 140, &command)?;
         let plan_view = if let Some(identity) = &identity {
-            let bytes = receipt_continuity::key_source(&root, &manifest, identity,
-                receipt_continuity::KeySourceOperation::RotationPlan, &plan)?;
-            serde_json::from_slice(&bytes).map_err(|e| format!("invalid local rotation inspection: {e}"))?
+            let bytes = receipt_continuity::key_source(
+                &root,
+                &manifest,
+                identity,
+                receipt_continuity::KeySourceOperation::RotationPlan,
+                &plan,
+            )?;
+            serde_json::from_slice(&bytes)
+                .map_err(|e| format!("invalid local rotation inspection: {e}"))?
         } else {
-            inspect_bytes(&ws.host, &ws.socket, &ws.config, "subject-key-rotation-plan", &plan)?
+            inspect_bytes(
+                &ws.host,
+                &ws.socket,
+                &ws.config,
+                "subject-key-rotation-plan",
+                &plan,
+            )?
         };
         check_rotation_plan(&plan_view, &command, identity.as_ref())?;
         let header = workspace::private::decode_hex(
@@ -442,58 +652,109 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 .ok_or("rotation plan lacks possession header")?,
         )?;
         let signature = signer.sign(&header).to_bytes();
-        let ingress = call(&ws.host, &ws.socket, &ws.config, 141, &pair(&plan, &signature)?)?;
-        create_private(&ingress_path, &ingress)?;
+        let ingress = call(
+            &ws.host,
+            &ws.socket,
+            &ws.config,
+            141,
+            &pair(&plan, &signature)?,
+        )?;
+        custody::immutable(&ingress_path, &ingress)?;
     }
-    let ingress = fs::read(&ingress_path).map_err(|error| format!("cannot read rotation ingress: {error}"))?;
-    // Before anything is overwritten: the encryption secret of the key being
-    // rotated away joins the keyring, so every room epoch wrapped to it stays
-    // openable (FIX-IDENTITY B). Idempotent; a retried rotation adds nothing.
-    if named.is_none() {
-        let epoch_text = epoch.to_string();
-        workspace::private::keyring_remember(&ws.key, &epoch_text)?;
+    let ingress = custody::bytes(&ingress_path, transport::HOST_MAX_FRAME)?;
+    if state["phase"] == "preparing" {
+        state["ingress"] = json!(hex(&ingress));
+        let prior = custody::read(&state_path)?;
+        state["phase"] = json!("prepared");
+        custody::publish(&state_path, &state, Some(&prior))?;
     }
-    let outcome = match call(&ws.host, &ws.socket, &ws.config, 142, &ingress) {
-        Ok(frame) => inspect_bytes(&ws.host, &ws.socket, &ws.config, "outcome", &frame)?,
-        Err(error) if error.starts_with("host refused") => return Err(error),
-        Err(_) => {
-            let frame = call(&ws.host, &ws.socket, &ws.config, 143, &ingress)?;
-            inspect_bytes(&ws.host, &ws.socket, &ws.config, "outcome", &frame)?
-        }
-    };
-    if outcome.get("type").and_then(Value::as_str) != Some("confirmed") {
-        note_host_decision(HostDecision::Outcome(outcome.clone()));
-        return Err("host refused rotate-key submit".into());
+    if state["ingress"].as_str() != Some(hex(&ingress).as_str()) {
+        return Err("retained rotation ingress changed".into());
     }
-    // Admitted: the next key is now the daily key. Install it in the workspace,
-    // put the key after it where the next key was (or --next-to), and keep
-    // nothing secret in the attempt.
-    if named.is_none() {
-        let next_secret = fs::read(&next_key).map_err(|error| format!("cannot read next key: {error}"))?;
-        replace_private(&ws.key, &next_secret)?;
-        let after_secret = fs::read(&after_path).map_err(|error| format!("cannot read key after next: {error}"))?;
-        let destination = next_to.clone().unwrap_or_else(|| next_key.clone());
-        replace_private(&destination, &after_secret)?;
-        let after_public = key(&destination)?.verifying_key().to_bytes();
-        replace_public(&conventional_next_public(&ws.key), &after_public)?;
-        if destination != next_key && next_to.is_some() {
-            fs::remove_file(&next_key).map_err(|error| format!("cannot remove used next key: {error}"))?;
-        }
-        fs::remove_file(&after_path).map_err(|error| format!("cannot remove staged key: {error}"))?;
-        // The workspace's commitment record follows the rotation: its next key
-        // is now the key after next.
-        workspace::record_next_public(&root, &after_public)?;
-        // Every private room this subject is in learns its new encryption key.
-        let rooms = workspace::roomkey::publish_rotation(&root, &new_epoch.to_string());
-        let result = json!({"type":"minidregg-key-rotation-result-v1","subject":ws.subject,
-            "keyEpoch":new_epoch.to_string(),"keyId":key_id,"publicKey":hex(&signer_public),
-            "nextKeyAt":destination,"outcome":outcome,"privateRooms":rooms});
-        participant_enrollment::save_json(&attempt.join("result.json"), &result)?;
-        eprintln!("{PREROTATION_NOTICE}");
-        println!("{}", serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?);
+    let ticket = receipt_continuity::begin_attempt(&attempt)?;
+    let recovered = state["phase"] != "prepared";
+    let outcome = if state["outcome"].is_object() {
+        state["outcome"].clone()
     } else {
-        println!("{}", serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?);
+        let frame = if state["phase"] == "prepared" {
+            // Durable responsibility precedes the only semantic submission.
+            state = custody::phase(&state_path, &state, "submitted")?;
+            match call(&ws.host, &ws.socket, &ws.config, 142, &ingress) {
+                Ok(frame) => frame,
+                Err(error) if error.starts_with("host refused") => {
+                    let _ = custody::phase(&state_path, &state, "refused")?;
+                    return Err(error);
+                }
+                Err(_) => call(&ws.host, &ws.socket, &ws.config, 143, &ingress)?,
+            }
+        } else {
+            // Even an absent/uncertain lookup cannot authorize a second effect.
+            call(&ws.host, &ws.socket, &ws.config, 143, &ingress)?
+        };
+        let outcome = inspect_bytes(&ws.host, &ws.socket, &ws.config, "outcome", &frame)?;
+        if outcome["type"] != "confirmed" {
+            note_host_decision(HostDecision::Outcome(outcome));
+            return Err(
+                "retained rotation remains unconfirmed; original lookup only, no resubmission"
+                    .into(),
+            );
+        }
+        let prior = state.clone();
+        state["outcome"] = outcome.clone();
+        state["phase"] = json!("confirmed");
+        custody::publish(&state_path, &state, Some(&prior))?;
+        outcome
+    };
+    receipt_continuity::finish_attempt(ticket, &outcome, recovered)?;
+    if named.is_none() {
+        let original_daily = custody::bytes(&attempt.join("original-daily.key"), 32)?;
+        let original_next = custody::bytes(&attempt.join("original-next.key"), 32)?;
+        let after = custody::bytes(&after_path, 32)?;
+        state = custody::phase(&state_path, &state, "installing")?;
+        custody::install(&ws.key, Some(&original_daily), &original_next)?;
+        let prior_destination = state["destinationPrior"]
+            .as_str()
+            .map(crate::decode_hex)
+            .transpose()?;
+        custody::install(&destination, prior_destination.as_deref(), &after)?;
+        let after_public = key(&after_path)?.verifying_key().to_bytes();
+        let prior_public = state["publicPrior"]
+            .as_str()
+            .map(crate::decode_hex)
+            .transpose()?;
+        custody::install(
+            &conventional_next_public(&ws.key),
+            prior_public.as_deref(),
+            &after_public,
+        )?;
+        let prior_manifest = state["manifestPrior"].clone();
+        let mut updated = prior_manifest.clone();
+        updated["prerotation"] = json!(true);
+        updated["nextPublicKey"] = json!(hex(&after_public));
+        custody::publish(
+            &root.join("workspace.json"),
+            &updated,
+            Some(&prior_manifest),
+        )?;
+        state = custody::phase(&state_path, &state, "installed")?;
     }
+    // Room publication is an independent fallible outcome; a refused recipient
+    // trust gate cannot cause a second native rotation or erase successor keys.
+    let rooms = if named.is_none() {
+        workspace::roomkey::publish_rotation(&root, &new_epoch.to_string())
+    } else {
+        json!(null)
+    };
+    let result = json!({"type":"minidregg-key-rotation-result-v2","attempt":id,"completed":true,"replayed":recovered,
+        "subject":ws.subject,"keyEpoch":new_epoch.to_string(),"keyId":key_id,"publicKey":hex(&signer_public),
+        "nextKeyAt":destination,"outcome":outcome,"privateRooms":rooms});
+    custody::publish(&attempt.join("result.json"), &result, None)?;
+    let _ = custody::phase(&state_path, &state, "completed")?;
+    eprintln!("{PREROTATION_NOTICE}");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -505,13 +766,24 @@ mod key_source_tests {
         let identity = json!({"domain":"1","semantics":"2"});
         let view = json!({"type":"subject-key-rotation-plan-v1","domain":"1","semantics":"2",
             "commandBytes":"0102","possessionFrameValidated":true});
-        check_rotation_plan(&view,&[1,2],Some(&identity)).unwrap();
-        for name in ["domain","semantics","commandBytes","possessionFrameValidated"] {
-            let mut wrong = view.clone(); wrong[name] = json!("different");
-            assert!(check_rotation_plan(&wrong,&[1,2],Some(&identity)).is_err());
+        check_rotation_plan(&view, &[1, 2], Some(&identity)).unwrap();
+        for name in [
+            "domain",
+            "semantics",
+            "commandBytes",
+            "possessionFrameValidated",
+        ] {
+            let mut wrong = view.clone();
+            wrong[name] = json!("different");
+            assert!(check_rotation_plan(&wrong, &[1, 2], Some(&identity)).is_err());
         }
-        let mut old = view.clone(); old.as_object_mut().unwrap().remove("possessionFrameValidated");
-        assert!(check_rotation_plan(&old,&[1,2],Some(&identity)).unwrap_err().contains("explicitly upgrade"));
-        check_rotation_plan(&old,&[1,2],None).unwrap();
+        let mut old = view.clone();
+        old.as_object_mut()
+            .unwrap()
+            .remove("possessionFrameValidated");
+        assert!(check_rotation_plan(&old, &[1, 2], Some(&identity))
+            .unwrap_err()
+            .contains("explicitly upgrade"));
+        check_rotation_plan(&old, &[1, 2], None).unwrap();
     }
 }

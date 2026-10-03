@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+
+record Ref:
+  resource: Nat
+  root: String
+
+record Write:
+  ref: Ref
+  field: Nat
+  before: Nat
+  after: Nat
+
+record Reads:
+  "0": Ref
+
+record Effects:
+  "0": Write
+
+record Plan:
+  reads: Reads
+  effects: Effects
+
+def advance(resource: Nat, field: Nat, before: Nat, root: String) -> Plan:
+  {reads: {"0": {resource: resource, root: root}}, effects: {"0": {ref: {resource: resource, root: root}, field: field, before: before, after: before + 1}}}

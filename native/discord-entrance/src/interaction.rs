@@ -2,8 +2,8 @@
 //!
 //! Only what the entrance uses is read: the type, the interaction id and token, the
 //! application id, the invoking user's id (`member.user.id` in a guild, `user.id` in a DM),
-//! the command name and its one string option `line`. Every response and follow-up is
-//! ephemeral (flag 64: only the invoking user sees their own session's output) and mentions
+//! the command name, shell `line`, navigation/status `target`, and navigation `page`. Every response and follow-up is
+//! ephemeral (flag 64: invoking-user visibility inside Discord, not secrecy from Discord) and mentions
 //! nobody (`allowed_mentions.parse = []`), so output text cannot ping a channel.
 
 use serde_json::{json, Value};
@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 pub const COMMAND_LINE: &str = "mini";
 /// `/mini-help`: the shell's own `help`.
 pub const COMMAND_HELP: &str = "mini-help";
+pub const COMMAND_WORLD: &str = "mini-world";
+pub const COMMAND_STATUS: &str = "mini-status";
 /// The name of `/mini`'s one string option.
 pub const OPTION_LINE: &str = "line";
 /// Discord's EPHEMERAL message flag.
@@ -32,6 +34,8 @@ pub struct Command {
     pub user_id: String,
     pub name: String,
     pub line: Option<String>,
+    pub target: Option<String>,
+    pub page: usize,
 }
 
 fn str_at<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -69,7 +73,11 @@ pub fn parse(body: &[u8]) -> Result<Interaction, String> {
                 .and_then(|o| o.get("value"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            Ok(Interaction::Command(Command { id, application_id, token, user_id, name, line }))
+            let options=v["data"]["options"].as_array();
+            let option=|name:&str| options.and_then(|opts|opts.iter().find(|o|o["name"]==name)).map(|o|&o["value"]);
+            let target=option("target").and_then(Value::as_str).map(str::to_owned);
+            let page=option("page").and_then(Value::as_u64).unwrap_or(1) as usize;
+            Ok(Interaction::Command(Command { id, application_id, token, user_id, name, line, target, page }))
         }
         other => Ok(Interaction::Unsupported(other)),
     }
@@ -128,6 +136,8 @@ mod tests {
                 user_id: "33".into(),
                 name: "mini".into(),
                 line: Some("read shared".into()),
+                target: None,
+                page: 1,
             })
         );
         let dm = br#"{"type":2,"id":"11","application_id":"22","token":"t","user":{"id":"44"},"data":{"name":"mini-help"}}"#;

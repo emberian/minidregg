@@ -270,6 +270,8 @@ pub(crate) fn grant_seal(directory: &Path, approval_json: &Path) -> Result<()> {
     let app_slot = retained
         .get("appSlot")
         .ok_or("agent lifetime grant plan lacks app signer")?;
+    crate::client_consent::operator_plan(&pinned.host, &pinned.config, PLAN_OPERATION,
+        &pinned.request, &pinned.plan)?;
     let slots = birth_slots
         .iter()
         .chain(std::iter::once(app_slot))

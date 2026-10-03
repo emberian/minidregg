@@ -1,0 +1,27 @@
+edition ObjectiveBend 1
+
+record Ref:
+  resource: Nat
+  root: String
+
+record Write:
+  ref: Ref
+  field: Nat
+  before: Nat
+  after: Nat
+
+record Reads:
+  "0": Ref
+
+record Effects:
+  "0": Write
+
+record Plan:
+  reads: Reads
+  effects: Effects
+
+def addCaptured(delta: Nat) -> Extension<Plan>:
+  extension(self: Plan, super: Plan) -> Plan: {reads: super.reads, effects: {"0": {ref: super.effects."0".ref, field: super.effects."0".field, before: super.effects."0".before, after: super.effects."0".after + delta}}}
+
+def advance(before: Nat, root: String) -> Plan:
+  fix(compose(addCaptured(1), addCaptured(2)), {reads: {"0": {resource: 1, root: root}}, effects: {"0": {ref: {resource: 1, root: root}, field: 0, before: before, after: before}}})

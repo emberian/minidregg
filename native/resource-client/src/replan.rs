@@ -136,6 +136,10 @@ pub(crate) fn replan<T>(
     let started = Instant::now();
     let mut superseded = Duration::ZERO;
     loop {
+        // A refusal authorizes recovery only for the attempt that produced it.
+        // The previous verdict remains available to callers until a new
+        // attempt starts, but cannot classify its local error or lost reply.
+        let _ = take_host_decision();
         let began = Instant::now();
         let error = match attempt() {
             Ok(value) => {
@@ -261,7 +265,7 @@ fn holds_accepted(directory: &Path) -> Result<bool> {
         let Ok(value) = serde_json::from_slice::<Value>(&bytes) else { continue };
         if value.get("type").and_then(Value::as_str) == Some("confirmed")
             && matches!(value.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed"))
+                Some("installed" | "recoveredAfterUncertainResponse" | "replayed"))
         {
             return Ok(true);
         }
@@ -481,6 +485,48 @@ mod tests {
         }
         let _ = take_host_decision();
         set_max(DEFAULT_MAX);
+    }
+
+    #[test]
+    fn prior_stale_refusal_cannot_classify_the_next_lost_reply() {
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let (result, calls, retired) = run(5, vec![Some(refused("stale-root")), None]);
+        assert_eq!(result, Err("client: no Host decision".into()));
+        assert_eq!((calls, retired), (2, 1));
+        assert!(take_host_decision().is_none());
+        set_max(DEFAULT_MAX);
+    }
+
+    #[test]
+    fn earlier_command_refusal_does_not_authorize_this_attempt() {
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        note_host_decision(refused("stale-root"));
+        let result: Result<()> = replan("local failure", || Err("key unavailable".into()),
+            stale_root, |_| panic!("a different command's refusal cannot retire this attempt"));
+        assert_eq!(result, Err("key unavailable".into()));
+        assert!(take_host_decision().is_none());
+    }
+
+    #[test]
+    fn successful_replan_does_not_leave_a_superseded_refusal() {
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let (result, calls, retired) = run(5, vec![Some(refused("stale-root"))]);
+        assert_eq!((result, calls, retired), (Ok(2), 2, 1));
+        assert!(take_host_decision().is_none());
+        set_max(DEFAULT_MAX);
+    }
+
+    #[test]
+    fn exact_readback_after_uncertain_cas_is_never_retired() {
+        let base = std::env::temp_dir().join(format!("recovered-replan-{}", std::process::id()));
+        private_dir(&base).unwrap();
+        fs::write(base.join("outcome.json"),
+            br#"{"type":"confirmed","confirmation":"recoveredAfterUncertainResponse"}"#).unwrap();
+        fs::write(base.join("call.bin"), b"exact accepted call").unwrap();
+        assert!(retire_attempt(&base, 1).is_err());
+        assert_eq!(fs::read(base.join("call.bin")).unwrap(), b"exact accepted call");
+        assert!(!base.join(REPLANNED).exists());
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

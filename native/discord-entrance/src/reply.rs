@@ -66,18 +66,22 @@ pub fn render(stdout: &str, ending: &Ending) -> String {
 
 /// `body` in a code block, cut to [`DISCORD_LIMIT`] characters with a note when it is long.
 pub fn code_block(body: &str) -> String {
+    code_block_limit(body, DISCORD_LIMIT)
+}
+
+pub fn code_block_limit(body: &str, limit: usize) -> String {
     // A literal ``` inside would close the block early; a zero-width space breaks it.
     let body = body.replace("```", "``\u{200b}`");
     let total = body.chars().count();
     let full = format!("```\n{body}\n```");
-    if full.chars().count() <= DISCORD_LIMIT {
+    if full.chars().count() <= limit {
         return full;
     }
     let note = |shown: usize| {
         format!("\n(truncated: {shown} of {total} characters shown; the whole output stays in the session)")
     };
     // `shown <= total`, so the note is at most as long as with `total`.
-    let budget = DISCORD_LIMIT - "```\n\n```".chars().count() - note(total).chars().count();
+    let budget = limit - "```\n\n```".chars().count() - note(total).chars().count();
     let shown: String = body.chars().take(budget).collect();
     let n = shown.chars().count();
     format!("```\n{shown}\n```{}", note(n))

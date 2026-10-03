@@ -269,9 +269,15 @@ impl Backend for Session {
         self.check_pins()?;
         match &self.endpoint {
             Endpoint::Socket(socket) => {
-                transport::invoke_pinned(socket, &self.config, &self.sha, operation, payload)
+                transport::invoke_pinned_with_local(&self.host, socket, &self.config, &self.sha, operation, payload)
             }
-            Endpoint::Bootstrap(_) => self.http(operation, payload),
+            Endpoint::Bootstrap(_) => {
+                let reply = self.http(operation, payload)?;
+                if crate::client_consent::plan_operation(operation) && reply.first() == Some(&operation) {
+                    crate::client_consent::operator_plan(&self.host, &self.config, operation, payload, &reply[1..])?;
+                }
+                Ok(reply)
+            },
         }
     }
     fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> Result<Value> {

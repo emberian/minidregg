@@ -214,6 +214,8 @@ pub(crate) fn lifetime_seal(directory: &Path, approval_json: &Path) -> Result<()
     {
         return Err("lifetime reserve approval differs from exact source plan".into());
     }
+    crate::client_consent::operator_plan(&pinned.host, &pinned.config, PLAN_OPERATION,
+        &pinned.request, &pinned.plan)?;
     let slots = retained
         .get("slots")
         .and_then(Value::as_array)

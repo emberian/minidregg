@@ -1060,6 +1060,18 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
     }
     let header = crate::client_consent::possession(Path::new(""), &directory.join("config.json"),
         &command, &subject, &signing, &candidate)?;
+    // This explicit action accepts the operator's offered command. Retain
+    // exactly what custody accepted before producing the possession signature.
+    let local = crate::client_consent::configured_record()?
+        .ok_or("possession requires independently retained local consent selection")?;
+    let local_config = Path::new(field(&local, "config")?);
+    let acceptance = json!({"type":"minidregg-participant-possession-acceptance-v1",
+        "origin":"operator-offered-command", "action":"possess",
+        "subject":subject,"publicKey":public_key,"commandHex":hex(&command),
+        "commandSha256":digest(&command),"possessionHeaderSha256":digest(&header),
+        "localConsent":local,"localConfigSha256":digest(&private_bytes(local_config,65_536)?) });
+    retain_exact(&directory.join("possession-acceptance.json"),
+        &serde_json::to_vec_pretty(&acceptance).map_err(|error|error.to_string())?)?;
     let signature = signing.sign(&header).to_bytes();
     create_private(output, &signature)?;
     sync_directory_ancestors(output.parent().ok_or("possession output lacks parent")?)?;
@@ -1865,7 +1877,7 @@ mod tests {
     }
 
     #[test]
-    fn possession_signs_only_its_own_key_at_the_named_home_subject() {
+    fn possession_checks_identity_and_refuses_noncanonical_offered_command() {
         let root = scratch("possess");
         let secret = [7u8; 32];
         create_private(&root.join("owner.key"), &secret).unwrap();
@@ -1884,18 +1896,18 @@ mod tests {
                 "possessionHeader":"0102"}),
         )
         .unwrap();
+        retain_exact(&root.join("command.bin"), &[0xab, 0xcd]).unwrap();
+        save_json(&root.join("config.json"), &json!({})).unwrap();
         let wrong_subject = possess_at(&root, &root.join("owner.key"), "8", &root.join("a.sig"));
         assert!(wrong_subject.unwrap_err().contains("does not name this key"));
         let wrong_key = possess_at(&root, &root.join("other.key"), "7", &root.join("b.sig"));
         assert!(wrong_key.unwrap_err().contains("does not name this key"));
         assert!(!root.join("a.sig").exists() && !root.join("b.sig").exists());
-        possess_at(&root, &root.join("owner.key"), "7", &root.join("c.sig")).unwrap();
-        let signature: [u8; 64] = fs::read(root.join("c.sig")).unwrap().try_into().unwrap();
-        SigningKey::from_bytes(&secret)
-            .verifying_key()
-            .verify(&[1, 2], &ed25519_dalek::Signature::from_bytes(&signature))
-            .unwrap();
+        // A matching key/subject and operator JSON do not authorize the raw
+        // two-byte header. A real canonical native command is required too.
         assert!(possess_at(&root, &root.join("owner.key"), "7", &root.join("c.sig")).is_err());
+        assert!(!root.join("c.sig").exists());
+        assert!(!root.join("possession-acceptance.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

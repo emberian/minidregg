@@ -201,6 +201,9 @@ fn seal(
     let config = directory.join("config.json");
     let plan_view = json_private(&directory.join("plan.json"))?;
     validate_plan(&plan_view, command, plan)?;
+    let signed = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
+    crate::client_consent::operator_plan(grant.host, &config, PLAN_OPERATION,
+        &pair(&signed, command)?, plan)?;
     let header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
     let signature = key(grant.sponsor_key)?.sign(&header).to_bytes();
     retain_exact(&directory.join("sponsor-signature.bin"), &signature)?;

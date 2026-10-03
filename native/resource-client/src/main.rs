@@ -451,11 +451,7 @@ fn session_invoke(
             return Err("selected Host image differs from durable worker pin".into());
         }
     }
-    let reply = transport::invoke_pinned(socket, config, &selected_sha, operation, payload)?;
-    if client_consent::plan_operation(operation) && reply.first()==Some(&operation) {
-        client_consent::operator_plan(host, config, operation, payload, &reply[1..])?;
-    }
-    Ok(reply)
+    transport::invoke_pinned_with_local(host, socket, config, &selected_sha, operation, payload)
 }
 
 #[cfg(unix)]

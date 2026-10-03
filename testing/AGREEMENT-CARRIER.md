@@ -51,3 +51,35 @@ that authenticates exact sets, and an honest receiver with private antirollback
 custody. Fixed shape alone is not an unlinkability proof. Execution endpoints
 still see the ordinary native request and result; adaptive corruption and key
 compromise across lifetimes require further construction.
+
+## Qualification cut, 2026-10-03
+
+The real four-store agreement first installed the original signed birth and
+recovered its receipt after a lost caller response. The carrier subsequently
+transported that **same original SignedCall**, using the existing native socket
+and production operator's replay branch. It did not create a second effect.
+
+The 32 KiB, 64-epoch comparison passed both the all-cover and actual source replay
+poles: 768 authenticated fixed TCP records per pole, 64 canonical broadcasts at
+all four audiences, one native source dispatch, and the exact source-produced
+`confirmed.replayed` outcome. Four independent native reader processes returned
+the same canonical receipt before and after, with accepted count one. A fresh
+scanner process reopened the retained final outcome without network or source
+dispatch. Wire lateness in the replay pole was at most 2.109 ms.
+
+Early epochs 0, 1, 3 and 7 returned actual durable transport custody status,
+without claiming a native verdict. The fresh-capability fetch at epoch 63 returned
+the exact native response. The native operator's observed call-to-output file
+interval was approximately 5.5 seconds, in addition to the declared two-second
+proxy delay and three-second custody hold. This qualification establishes eventual
+retained recovery within the complete public lifetime; it does not establish an
+early useful-result bound. Adding a fixed additional repair opportunity is a
+possible next latency improvement, while retaining exactly one source execution.
+
+Two preceding orchestration attempts are retained as refusers: the copied
+harness's wall and socket-idle horizons still assumed a 60-second startup, while
+this profile declared 120 seconds. The qualified harness extends those supervision
+horizons without moving the public origin or relaxing processing deadlines.
+These runs establish a source-replay/carrier-recovery intersection, not a first
+new effect admitted through the carrier, confidential computation, or a full
+unlinkability theorem.

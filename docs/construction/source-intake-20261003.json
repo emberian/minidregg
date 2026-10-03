@@ -1393,9 +1393,9 @@
     {
       "path": "native/resource-client/src/transport.rs",
       "owner": "joint_reserve_birth_authority",
-      "sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8",
+      "sha256": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e",
       "qualification": "Captain hunk integration; coherent compilation pending",
-      "candidateSha256": "4f4210eedb9bb08251d6f1bad3796756168acc37e56d2a72a104353ddd59fbeb"
+      "candidateSha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8"
     },
     {
       "path": "Kernel/ResidentContextProjection.lean",
@@ -3553,8 +3553,9 @@
     {
       "path": "Kernel/NativeHostReserveBirth.lean",
       "owner": "joint_reserve_birth_authority",
-      "sha256": "ff74573463de25641ced29df38f5de3fdec2a52ccdf1c21e7b66ddc6de10ded5",
-      "qualification": "source-only layer repair; pending warm consumer check"
+      "sha256": "ade52097d463a90003e5607265d2c62292f6b8a37745ca50492ab544b4147c9f",
+      "qualification": "Captain hunk integration; coherent compilation pending",
+      "candidateSha256": "ff74573463de25641ced29df38f5de3fdec2a52ccdf1c21e7b66ddc6de10ded5"
     },
     {
       "path": "Host/NativeReserveBirthAuthoring.lean",
@@ -4250,9 +4251,8 @@
     {
       "path": "native/resource-client/src/key_rotation.rs",
       "owner": "resume_private_construction",
-      "sha256": "20ff52cfc83e4da89abd329ba9835670ec1ae3d98d08080f582fafc7b3e2502a",
-      "qualification": "Captain hunk integration; coherent compilation pending",
-      "candidateSha256": "b6a4bcd91e654d26706b782fc509990c95891c9e958a3a36ac31f737d60272b2"
+      "sha256": "b6a4bcd91e654d26706b782fc509990c95891c9e958a3a36ac31f737d60272b2",
+      "qualification": "Owner actual lost-response native rotation seven checks PASS; coherent current-client composition pending"
     },
     {
       "path": "native/resource-client/src/key_rotation_custody.rs",
@@ -5053,8 +5053,8 @@
     {
       "path": "docs/OBJECTIVE-BEND.md",
       "owner": "mini_objective_bend_documentation",
-      "sha256": "47f89bff104e921bb3e2f20af0391be52c33f5b5c68c2610008368d6ee60e1ca",
-      "qualification": "Only Studio paragraph updated to actual received served wire1 capture/edit/check/preview/history/current-grant behavior; root requested and evidence inspected by root. Native new-edition effects remain open. Docs-only, no build."
+      "sha256": "c5a5de465822cc8e39758190f06312f36efd11264275160a8e192887cd4ed7c6",
+      "qualification": "Root-reviewed sole Objective guide r9; linked incoming source now present"
     },
     {
       "path": "Compiler/BendCommittedUnroll.lean",
@@ -5597,8 +5597,9 @@
     {
       "path": "native/fhe-bend/scripts/check-native-session.py",
       "owner": "homomorphic_bend_construction",
-      "sha256": "a8fbe859a56c88c7794971ed9a24c41a13c1b0489bab46e877d16e59cc16da9e",
-      "qualification": "syntax PASS; actual current native journey/refusers/retry UNEXECUTED pending matched Host/client/profile"
+      "sha256": "66bd59edb9bb0f0967f143b7998e31d92897549dc665ab10032353083422f0fe",
+      "qualification": "Captain hunk integration; coherent compilation pending",
+      "candidateSha256": "a8fbe859a56c88c7794971ed9a24c41a13c1b0489bab46e877d16e59cc16da9e"
     },
     {
       "path": "native/fhe-bend/check-artifact-driver.sh",
@@ -5639,8 +5640,9 @@
     {
       "path": "Host/NativeLifecycleConsent.lean",
       "owner": "scenario_consent_lifecycle",
-      "sha256": "5ccfc9ebc6edeba7469726476765be01676255fb9674a91c25f9605d5aa81c45",
-      "qualification": "WIP source-first sixteen actual planner adapters; namespace moved to Host preserving logic; qualified high import closure pending."
+      "sha256": "49c033a33e4232e17e8f785c817e53e66479ba4ff8e70ade2afde59da9931d46",
+      "qualification": "Captain hunk integration; coherent compilation pending",
+      "candidateSha256": "5ccfc9ebc6edeba7469726476765be01676255fb9674a91c25f9605d5aa81c45"
     },
     {
       "path": "Verify/BendUnrolledIR2Emit.lean",
@@ -5715,11 +5717,9 @@
     },
     {
       "path": "Host/Main.lean",
-      "owner": "captain reconciled authored shared hunks",
-      "sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224",
-      "qualification": "Captain hunk integration; coherent compilation pending",
-      "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
-      "candidateSha256": "b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0"
+      "owner": "takeover_kernel",
+      "sha256": "b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0",
+      "qualification": "Remove newly introduced old BendTT activation per explicit sole Objective instruction; successor gate not yet qualified"
     },
     {
       "path": "Kernel/NativeHostContext.lean",
@@ -5754,10 +5754,10 @@
     {
       "path": "native/resource-client/src/web.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
-      "sha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a",
+      "sha256": "715a8cfc8a8eea160889f148636d2b92aef3583ef3bdf4d07c1285c9d434d17d",
       "qualification": "Captain hunk integration; coherent compilation pending",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
-      "candidateSha256": "fca746c1b45594a915f8eb7f0494ddc2bd161d1cbfdd5daf714c9934df0960f7"
+      "candidateSha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a"
     },
     {
       "path": "native/resource-client/src/web_admission.rs",
@@ -5769,10 +5769,10 @@
     {
       "path": "native/resource-client/src/main.rs",
       "owner": "multiuser capacity / traffic reviewed shared hunks",
-      "sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f",
+      "sha256": "a4366a646640aa92f3f6759ec5b5d24958763c9bc07fafe57abbd4abeca0ed02",
       "qualification": "Captain hunk integration; coherent compilation pending",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort",
-      "candidateSha256": "931fa453dbed74edd461b94f677f0e682673623234aef0a140d9bfd1752d77c0"
+      "candidateSha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f"
     },
     {
       "path": "docs/NATIVE-MULTIUSER-CAPACITY.md",
@@ -5831,6 +5831,174 @@
       "sha256": "94dedd18f93493fc3a9b58e612487facc13dd986935526c26d532ad41e7c237f",
       "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending",
       "publicationStatus": "Shared source merged separately; qualification follows coherent receiving cohort"
+    },
+    {
+      "path": "native/discord-entrance/examples/fake-discord.rs",
+      "owner": "discord_world_integration",
+      "sha256": "5c8702d5e7a76d3b04ad55492db567a70ee56e68eb50f5673dacd0c85a11a837",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/bin/mini-discord-mirror.rs",
+      "owner": "discord_world_integration",
+      "sha256": "936a0e5307e24312ac433f8b0621f9190b91e43685e631c86b7e0518bc2c29ca",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/custody.rs",
+      "owner": "discord_world_integration",
+      "sha256": "47be693909176f968afa4da512b925c8eb7e7dada5f43dfcbfd08c5f3dc391d9",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/interaction.rs",
+      "owner": "discord_world_integration",
+      "sha256": "d7fbd077cf21c58f8beb2b81d6d72aeabe124cd232d3357db7a71d64eed70d33",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/lib.rs",
+      "owner": "discord_world_integration",
+      "sha256": "2209300e8e948d6982f3f3421096fec877cf6dc08e1dcfcea4a84c27f003d375",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/navigation.rs",
+      "owner": "discord_world_integration",
+      "sha256": "eaa07109bd678eccd51d84d3a968c7f8aaa070e16b9993df96a2cebf4959b02a",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/reply.rs",
+      "owner": "discord_world_integration",
+      "sha256": "96bb6f44bf9f45822f12c16529d1558f178ee1fe0a8e47fd788ecb00ca1e9cf6",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/server.rs",
+      "owner": "discord_world_integration",
+      "sha256": "4bcfbe93fc30c8ffae53059a699817861d47ce3fe4099617f0b67c8f28eecf05",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/src/session.rs",
+      "owner": "discord_world_integration",
+      "sha256": "046e6d2f7404c8155ae231fe7a7b7951db1b21e7b729d33ae03358ce88c00675",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/tests/endpoint.rs",
+      "owner": "discord_world_integration",
+      "sha256": "a1e9e24f40b78c13fee320d535ef8617b08389d67f298dfe25583c44ec3df0c5",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "native/discord-entrance/tests/native-world.py",
+      "owner": "discord_world_integration",
+      "sha256": "d506bbb6ab8976fba2c1e9991af24d74f5e87cd3c380f28f1ee7777a433c0db4",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "deploy/discord/README.md",
+      "owner": "discord_world_integration",
+      "sha256": "98d630a3e0236fbcbebc9bea66e923652de0575998b64d0c3f222a5ffa740125",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "deploy/discord/commands.json",
+      "owner": "discord_world_integration",
+      "sha256": "1d945e1a469bc2ece88275229c2d40308a467fe06f059d47fba7a0870fd97caf",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "docs/evidence/2026-10-03-discord-world/README.md",
+      "owner": "discord_world_integration",
+      "sha256": "5a46c0070027681b5b2af92239529da359cdb363a42ba6be24b97840d30f85a8",
+      "qualification": "30 focused Rust tests PASS tests-r2.log; actual ordinary native/fake-Discord receiving PASS native-resume-3.log; exact scope in evidence README"
+    },
+    {
+      "path": "Compiler/ObjectiveBendPlanAdapter.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "9c5ce128d7dbc0c111ac189ceb0a0fe22e496f3f89d559b27ffbe5d3e76cc744",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "Kernel/ObjectiveBendPreparedOutput.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "6e0e4015521b262ffad340ed7656ac854fc37525761f3b479a9cb9a47ebb1827",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "Theory/ObjectiveBendDemandData.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "d9394ba045bf1251c7dd390629b03c4fe4b134fe4358e6fbf3783ded3bfad913",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "Theory/ObjectiveBendDemandCapacity.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "af8b1c98a8624ec6fb93557af3e24577bc05640a0b2b1e817a354a93f6f3b462",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/ScalarHeterogeneousAdvance.obend",
+      "owner": "scenario_objective_world",
+      "sha256": "82f7e0160b5601b9c4337621b6bb8792b03b5c5e58f013922d258af47eda13e1",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/CheckObjectivePlan.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "94cd7a666c4133e943782f6d7cd71acf9a40ac991473d5d2ba3626c81f9ab976",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/CheckDemandData.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "d252d01db74982c8bc65ea080de05eadc017df9b5ace64eb5dd67f59f10096b6",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/CheckSourceObjectivePlan.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "18c8f5f0eb1c27a319343d1c9326a16df83d5f2b136697f95d824b77f68b232b",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/ScalarAdvance.obend",
+      "owner": "scenario_objective_world",
+      "sha256": "d191ec41761cf72b3e3d446dc0703246109a65877210cc283c5e51e5a315460e",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/ScalarNativeAdvance.obend",
+      "owner": "scenario_objective_world",
+      "sha256": "a970abd6c478ba9266916be0fa5b28acbd9dd5d1de1e225aa1e76883e266da6b",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/ScalarReusedAdvance.obend",
+      "owner": "scenario_objective_world",
+      "sha256": "98b552cf818f9fbaf935312748c97003dd4a35ad529237d5ee3b34bc3e2a4234",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/CheckGuardedSourceObjectivePlan.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "b403fa6b3500ef4950ba73dea761e2f4c514902f743705e6ba9b92a6eb18d070",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/CheckDemandCapacity.lean",
+      "owner": "scenario_objective_world",
+      "sha256": "fef44d4766a96629dae41f619f636fe1783f437b3bac0432f1332c3957dc300f",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "path": "tests/objective-bend-source/ScalarCapturedAdvance.obend",
+      "owner": "scenario_objective_world",
+      "sha256": "da18483354a019718e2875c6ca839106c57222df4440e50049f5d51a411435a8",
+      "qualification": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
     }
   ]
 }

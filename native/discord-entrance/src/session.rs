@@ -107,10 +107,19 @@ impl Deployment {
 fn capture<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<String> {
     std::thread::spawn(move || {
         let mut buf = Vec::new();
-        if let Some(r) = r {
-            let _ = r.take(MAX_CAPTURE as u64).read_to_end(&mut buf);
+        let mut truncated=false;
+        if let Some(mut r) = r {
+            let mut chunk=[0u8;8192];
+            loop {
+                match r.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {let keep=n.min(MAX_CAPTURE.saturating_sub(buf.len()));buf.extend_from_slice(&chunk[..keep]);truncated|=keep<n;}
+                }
+            }
         }
-        String::from_utf8_lossy(&buf).into_owned()
+        let mut text=String::from_utf8_lossy(&buf).into_owned();
+        if truncated{text.push_str("\n[entrance capture truncated at 1 MiB]\n");}
+        text
     })
 }
 

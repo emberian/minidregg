@@ -4,7 +4,9 @@
 //! gateway websocket, no long-lived connection). This crate is that endpoint. A Discord user
 //! is mapped by a root-owned roster to one Mini session NAME, and the slash command's one
 //! string option is handed, as one argument, to the same forced command the ssh entrance
-//! uses (`deploy/shell/mini-shell-ssh`, via `SSH_ORIGINAL_COMMAND`). The session's workspace
+//! uses (`deploy/shell/mini-shell-ssh`, via `SSH_ORIGINAL_COMMAND`). `/mini-world` renders
+//! the common native member projection; `/mini-status` retrieves actor-bound transport custody.
+//! The session's workspace
 //! and home are derived from NAME exactly as `render-authorized-keys.sh` derives them; the
 //! Discord user chooses neither. There is no second verb set: `mini shell` decides what the
 //! line means.
@@ -21,6 +23,8 @@
 //! * [`server`]: the endpoint itself: verify, answer PING, refuse early, defer, run, PATCH.
 
 pub mod curl;
+pub mod custody;
+pub mod navigation;
 pub mod http;
 pub mod interaction;
 pub mod reply;

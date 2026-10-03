@@ -6,6 +6,7 @@ namespace Minidregg.Kernel.NativeHostReserveBirth
 
 open Minidregg.Compiler
 open Minidregg.Compiler.NativeHostCodec
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.TypedAuthorization
@@ -30,6 +31,7 @@ theorem reserveGrant_for_birth (owner : AuthorityGrant) (identifier : Capability
     ReserveOwnerGrant (reserveGrant owner identifier) item := by
   unfold ReserveOwnerGrant AuthorityGrant.NativeForBirth
   simp [reserveGrant, native.1.1, native.1.2.2.1, native.1.2.2.2, native.2.2]
+  constructor <;> rfl
 
 def withReserveGrants
     (template : CanonicalRuntimeProfile.FactoryTemplate)

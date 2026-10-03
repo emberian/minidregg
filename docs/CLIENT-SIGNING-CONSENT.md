@@ -18,17 +18,19 @@ image pin. Private workspace and attempt manifests retain those local paths.
 
 Rust `client_consent` gates the initial intent signature, every observation
 signature and every ordinary transaction signature. Authoring, inspection,
-signature encoding and detached assembly use an independently selected local
-native image. Batch observations and enrollment's separate codec wrapper obey
+signature encoding and ordinary detached assembly use an independently selected
+local native image. Batch observations and enrollment's separate codec wrapper obey
 the same rule. Exact locally retained codec frames are compared with current
 local derivation before reuse.
 
 `Kernel.NativeSpecializedConsent` reconstructs the complete canonical plan using
 the production loaded planner, including the production encoder. The central
-Rust session router checks adapted plan responses before returning any bytes to
-a signing consumer. A failed check never falls back to the proposed plan. A
+Rust transport boundary checks adapted plan responses before returning any bytes
+to a signing consumer, including direct transport callers. The paid claim's HTTP
+path performs the same check. A failed check never falls back to the proposed plan. A
 retained unsigned plan also needs reconstruction before signing: the reserve
-seal and enrollment sponsor seal perform that check explicitly. Existing signed
+seal, lifetime reserve/grant seals, provisioning seal and enrollment sponsor seal
+perform that check explicitly. Existing signed
 ingress and uncertain submission outcomes remain retained for exact lookup or
 resubmission; they are not replaced by a new signing decision.
 
@@ -54,7 +56,8 @@ selected service domain and profile. The new local key and requested subject
 must match that command before signing. An operator-offered command is still an
 offer after it is saved locally. The possession action accepts that exact
 command, so the command and its service/profile selection must be retained and
-reviewable at the custody boundary. Sponsor enrollment consent additionally
+reviewable at the custody boundary. A private pre-sign acceptance record retains
+the exact offered command, selected local configuration and custody identity. Sponsor enrollment consent additionally
 requires current independently admitted source reconstruction.
 
 `Host.ClientConsentSession` adds the lifecycle adapters from

@@ -30,6 +30,7 @@ import Compiler.BendActivitySegment
 import Compiler.BendActivitySuspension
 import Compiler.BendActivityYield
 import Compiler.BendActivityYieldSource
+import Compiler.BendArtifactBinding
 import Compiler.BendClosureCompileIndexed
 import Compiler.BendClosureInitialize
 import Compiler.BendClosureInput
@@ -44,6 +45,7 @@ import Compiler.BendCommittedRunSound
 import Compiler.BendCommittedUnroll
 import Compiler.BendIndexedActivityProgram
 import Compiler.BendIndexedExecutionContext
+import Compiler.BendKeyRecord
 import Compiler.BendLogicMuxEntry
 import Compiler.BendLogicSignedSemantics
 import Compiler.BendMethodAttribution
@@ -83,6 +85,7 @@ import Compiler.NativeInvocationProfile
 import Compiler.NativeInvocationStatement
 import Compiler.ObjectiveBendLinkerRefinement
 import Compiler.ObjectiveBendPersistence
+import Compiler.ObjectiveBendPlanAdapter
 import Compiler.ObjectiveBendWorkshop
 import Compiler.ObliviousBuilderSemantics
 import Compiler.ObliviousCompositeSemantics
@@ -110,11 +113,19 @@ import Compiler.PrivateCircuitAllocationFast
 import Compiler.QualificationReport
 import Compiler.RoomKeyReleaseCodec
 import Compiler.WorkshopCardReturn
+import Host.BendFheArtifact
+import Host.BendOwnerManifestJson
 import Host.BendPackageInput
 import Host.BendProofWitness
+import Host.BendReceiving
+import Host.BendReturnReleaseAuthoring
+import Host.BendSessionCursor
+import Host.BendSessionDriver
+import Host.BendSessionDriverJson
 import Host.BendSurfaceJson
 import Host.CurrentRecipientVerifier
 import Host.JointBackendPartyWire
+import Host.NativeReserveBirthConsent
 import Host.ObjectiveBendSourceInspection
 import Host.PortableContinuationInspection
 import Host.RoomKeyReleaseAuthor
@@ -131,6 +142,7 @@ import Kernel.BendActivityRecovery
 import Kernel.BendActivityRoute
 import Kernel.BendActivityRoutePermit
 import Kernel.BendComputeCapacity
+import Kernel.BendKeyRegistration
 import Kernel.BendMoneyInput
 import Kernel.BendWorldMethod
 import Kernel.JointBackendPartyAdmission
@@ -144,6 +156,7 @@ import Kernel.JointSourcePrefixValidation
 import Kernel.NativeCurrentMemberKey
 import Kernel.NativeCurrentMemberKeyIO
 import Kernel.NativeCurrentSigningKey
+import Kernel.ObjectiveBendPreparedOutput
 import Kernel.PortableContinuationManifest
 import Kernel.PortableHomeCurrentGuard
 import Kernel.PortableHomeTransfer
@@ -219,6 +232,8 @@ import Theory.BendQuotientMasking
 import Theory.BendQuotientSelectors
 import Theory.BoundedNockMachine
 import Theory.ObjectiveBendDemandAdequacy
+import Theory.ObjectiveBendDemandCapacity
+import Theory.ObjectiveBendDemandData
 import Theory.ObjectiveBendDemandInvariant
 import Theory.ObjectiveBendDemandMachine
 import Theory.ObjectiveBendDemandPreservation

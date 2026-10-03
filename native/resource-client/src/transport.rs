@@ -882,7 +882,7 @@ pub fn invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
-    invoke_inner(socket, config, None, operation, payload)
+    invoke_inner(Path::new(""), socket, config, None, operation, payload)
 }
 
 /// An upgraded worker requires the executable image actually serving the
@@ -896,7 +896,25 @@ pub fn invoke_pinned(
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
-    invoke_inner(socket, config, Some(&expected), operation, payload)
+    invoke_inner(Path::new(""), socket, config, Some(&expected), operation, payload)
+}
+
+/// The main caller has an independently selected local Host; direct remote
+/// callers must instead select their local consent pins explicitly.
+pub(crate) fn invoke_pinned_with_local(
+    local_host: &Path, socket: &Path, config: &Path, expected_host_sha256: &str,
+    operation: u8, payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let expected = parse_host_sha256(expected_host_sha256)?;
+    invoke_inner(local_host, socket, config, Some(&expected), operation, payload)
+}
+
+fn check_signing_plan_reply(local_host: &Path, config: &Path, operation: u8,
+    payload: &[u8], reply: &[u8]) -> Result<(), String> {
+    if crate::client_consent::plan_operation(operation) && reply.first() == Some(&operation) {
+        crate::client_consent::operator_plan(local_host, config, operation, payload, &reply[1..])?;
+    }
+    Ok(())
 }
 
 /// Public read workflows use one absolute deadline across connect, write and read.
@@ -913,6 +931,7 @@ pub(crate) fn invoke_pinned_deadline(
     let Endpoint::Unix(socket) = endpoint(socket)? else {
         return Err("deadline invocation requires a local Unix socket".to_owned());
     };
+    let config_path = config;
     let config = read_config(config)?;
     let oversized = if operation == 153 {
         !carried_lookup_request(payload)
@@ -962,6 +981,7 @@ pub(crate) fn invoke_pinned_deadline(
             reply[0]
         ));
     }
+    check_signing_plan_reply(Path::new(""), config_path, operation, payload, &reply)?;
     Ok(reply)
 }
 
@@ -1086,12 +1106,14 @@ fn response_operation_matches(operation: u8, reply: &[u8]) -> bool {
 }
 
 fn invoke_inner(
+    local_host: &Path,
     socket: &Path,
     config: &Path,
     expected_host_sha256: Option<&[u8; 32]>,
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
+    let config_path = config;
     let config = read_config(config)?;
     let oversized = if operation == 153 {
         !carried_lookup_request(payload)
@@ -1131,6 +1153,7 @@ fn invoke_inner(
             reply[0]
         ));
     }
+    check_signing_plan_reply(local_host, config_path, operation, payload, &reply)?;
     Ok(reply)
 }
 
@@ -1252,11 +1275,7 @@ fn serve_with_mode(
     let _guard = SocketGuard(socket, socket_metadata.dev(), socket_metadata.ino());
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
-    let mut start = || {
-        let mut command = Command::new(host);
-        command.arg(&pinned_config).arg("stdio");
-        HostProcess::start(&mut command, &host.display().to_string())
-    };
+    let mut start = || HostProcess::start_pinned(host, &pinned_config, &host_sha256);
     eprintln!("mini: serving {}", socket.display());
     if operator {
         return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, &mut start);
@@ -1276,9 +1295,82 @@ struct HostProcess {
     child: std::process::Child,
     input: std::process::ChildStdin,
     output: std::process::ChildStdout,
+    // Linux executes a sealed snapshot rather than reopening mutable bytes.
+    // Retain it through the child's lifetime, including script interpreter startup.
+    _image: Option<fs::File>,
 }
 
 impl HostProcess {
+    /// Each restart must execute immutable bytes matching the advertised pin.
+    fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32]) -> Result<Self, String> {
+        let image = Self::checked_image(host, expected)?;
+        Self::start_checked_image(host, config, image)
+    }
+
+    fn checked_image(host: &Path, expected: &[u8; 32]) -> Result<fs::File, String> {
+        let source = fs::File::open(host)
+            .map_err(|e| format!("cannot open pinned host {}: {e}", host.display()))?;
+        if !source.metadata().map_err(|e| format!("cannot inspect pinned host: {e}"))?.is_file() {
+            return Err("pinned host image must be a regular file".into());
+        }
+        #[cfg(target_os = "linux")]
+        let mut image = {
+            use std::os::fd::FromRawFd;
+            use std::io::{Seek, SeekFrom};
+            // Request an executable memfd explicitly on recent kernels. Older
+            // kernels reject MFD_EXEC (0x10); their original memfd is executable.
+            let base = libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING;
+            let mut fd = unsafe { libc::memfd_create(c"mini-host".as_ptr(), base | 0x10) };
+            if fd < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
+                fd = unsafe { libc::memfd_create(c"mini-host".as_ptr(), base) };
+            }
+            if fd < 0 { return Err(format!("cannot create immutable host image: {}", io::Error::last_os_error())); }
+            let mut snapshot = unsafe { fs::File::from_raw_fd(fd) };
+            if unsafe { libc::fchmod(fd, 0o700) } != 0 {
+                return Err(format!("cannot protect executable host image: {}", io::Error::last_os_error()));
+            }
+            io::copy(&mut { source }, &mut snapshot)
+                .map_err(|e| format!("cannot snapshot pinned host: {e}"))?;
+            let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
+            if unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, seals) } != 0 {
+                return Err(format!("cannot seal executable host image: {}", io::Error::last_os_error()));
+            }
+            // Hash AFTER sealing, so even an in-place writer racing the copy
+            // cannot change bytes between their verification and execution.
+            snapshot.seek(SeekFrom::Start(0)).map_err(|e| format!("cannot read sealed host image: {e}"))?;
+            snapshot
+        };
+        #[cfg(not(target_os = "linux"))]
+        let mut image = source;
+        let mut hash = Sha256::new();
+        let mut chunk = [0u8; 64 * 1024];
+        loop {
+            let count = image.read(&mut chunk)
+                .map_err(|e| format!("cannot hash pinned host: {e}"))?;
+            if count == 0 { break; }
+            hash.update(&chunk[..count]);
+        }
+        let actual: [u8; 32] = hash.finalize().into();
+        if &actual != expected {
+            return Err("host image changed; refusing launch under the socket's original pin".into());
+        }
+        Ok(image)
+    }
+
+    fn start_checked_image(host: &Path, config: &Path, image: fs::File) -> Result<Self, String> {
+        #[cfg(target_os = "linux")]
+        let executable = std::path::PathBuf::from(format!(
+            "/proc/{}/fd/{}", std::process::id(), image.as_raw_fd()));
+        // Platforms without Linux seals retain a checked pathname boundary.
+        #[cfg(not(target_os = "linux"))]
+        let executable = host.to_path_buf();
+        let mut command = Command::new(executable);
+        command.arg(config).arg("stdio");
+        let mut process = Self::start(&mut command, &host.display().to_string())?;
+        process._image = Some(image);
+        Ok(process)
+    }
+
     fn start(command: &mut Command, name: &str) -> Result<Self, String> {
         let mut child = command
             .stdin(Stdio::piped())
@@ -1291,6 +1383,7 @@ impl HostProcess {
             child,
             input,
             output,
+            _image: None,
         };
         set_nonblocking(&process.input).map_err(|e| format!("cannot bound host input pipe: {e}"))?;
         eprintln!("mini: host process {}", process.child.id());
@@ -1734,6 +1827,78 @@ mod tests {
 
     use super::*;
     use std::thread;
+
+    #[test]
+    fn socket_restart_refuses_replaced_host_under_original_pin() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-host-pin-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host");
+        let config = directory.join("config");
+        fs::write(&config, b"{}").unwrap();
+        // The script interpreter reopens the descriptor path after exec. The
+        // retained image must survive that startup and the child's full life.
+        fs::write(&host, b"#!/bin/sh\nprintf original\n").unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let expected = host_image_sha256(&host).unwrap();
+        let mut first = HostProcess::start_pinned(&host, &config, &expected).unwrap();
+        let mut reply = String::new();
+        first.output.read_to_string(&mut reply).unwrap();
+        assert!(first.child.wait().unwrap().success());
+        assert_eq!(reply, "original");
+        drop(first);
+        let staged = directory.join("changed");
+        fs::write(&staged, b"#!/bin/sh\nprintf replacement\n").unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::rename(&staged, &host).unwrap();
+        let refused = HostProcess::start_pinned(&host, &config, &expected);
+        assert!(matches!(refused, Err(ref error) if error.contains("original pin")));
+        let upgraded = host_image_sha256(&host).unwrap();
+        let mut second = HostProcess::start_pinned(&host, &config, &upgraded).unwrap();
+        let mut reply = String::new();
+        second.output.read_to_string(&mut reply).unwrap();
+        assert!(second.child.wait().unwrap().success());
+        assert_eq!(reply, "replacement");
+        drop(second);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sealed_host_snapshot_survives_in_place_and_pathname_replacement() {
+        use std::os::unix::fs::FileExt;
+        let directory = std::env::temp_dir().join(format!(
+            "mini-host-seal-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host");
+        let config = directory.join("config");
+        fs::write(&config, b"{}").unwrap();
+        let original = b"#!/bin/sh\nprintf original\n";
+        fs::write(&host, original).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let expected = host_image_sha256(&host).unwrap();
+        let image = HostProcess::checked_image(&host, &expected).unwrap();
+        let seals = unsafe { libc::fcntl(image.as_raw_fd(), libc::F_GET_SEALS) };
+        assert_eq!(seals & (libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL),
+            libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL);
+        assert_eq!(image.write_at(b"X", 0).unwrap_err().raw_os_error(), Some(libc::EPERM));
+        assert_eq!(image.set_len(1).unwrap_err().raw_os_error(), Some(libc::EPERM));
+        // Both changes happen in the old hash/exec race window. Neither may
+        // alter the executable handed to this child or its script interpreter.
+        fs::write(&host, b"#!/bin/sh\nprintf mutated\n").unwrap();
+        let replacement = directory.join("replacement");
+        fs::write(&replacement, b"#!/bin/sh\nprintf replaced\n").unwrap();
+        fs::rename(&replacement, &host).unwrap();
+        let mut process = HostProcess::start_checked_image(&host, &config, image).unwrap();
+        let mut reply = String::new();
+        process.output.read_to_string(&mut reply).unwrap();
+        assert!(process.child.wait().unwrap().success());
+        assert_eq!(reply, "original");
+        drop(process);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn adoption_routes_bound_plan_and_two_role_signatures() {
@@ -2949,16 +3114,28 @@ done"#;
             assert!(invoke(&socket,&config,request[0],&[]).unwrap_err()
                 .contains("operation unavailable"));
             count += 1;
-            assert_eq!(invoke(&socket,&config,request[0],&request[1..]).unwrap(),
-                vec![request[0],count]);
+            let reply = invoke(&socket,&config,request[0],&request[1..]);
+            if crate::client_consent::plan_operation(request[0]) {
+                // Transport admission is not permission to sign the fake
+                // operator's one-byte plan: direct callers must check consent.
+                assert!(reply.is_err(), "direct plan caller bypassed local consent");
+            } else {
+                assert_eq!(reply.unwrap(), vec![request[0],count]);
+            }
         }
         let mut seal = claim_assembly(1,64);
         seal[0] = 118;
         for request in [vec![117,1],seal,vec![119,1],vec![120,1]] {
             assert!(public_envelope(&envelope(&request),b"config",false).is_err());
             count += 1;
-            assert_eq!(invoke(&socket,&config,request[0],&request[1..]).unwrap(),
-                vec![request[0],count]);
+            let reply = invoke(&socket,&config,request[0],&request[1..]);
+            if crate::client_consent::plan_operation(request[0]) {
+                // Transport admission is not permission to sign the fake
+                // operator's one-byte plan: direct callers must check consent.
+                assert!(reply.is_err(), "direct plan caller bypassed local consent");
+            } else {
+                assert_eq!(reply.unwrap(), vec![request[0],count]);
+            }
         }
         // A catalog route must not acquire permission merely by reaching the
         // union gate of the private Host.

@@ -512,18 +512,28 @@ pub(crate) fn render_fields(entries: &[Value], board: bool) -> String {
     fields.sort();
     let mut out = String::new();
     if board {
-        let value = |field: u128| fields.iter().find(|(f, _)| *f == field).map(|(_, v)| v.as_str());
+        // Field addresses are sparse u128 values. Visit only present state
+        // fields; scanning all task numbers up to the largest field would let
+        // a single high address stall every browser worker. Keep the first
+        // sorted value for duplicate addresses, as the prior lookup did.
+        let mut values = std::collections::BTreeMap::new();
+        for (field, value) in &fields {
+            values.entry(*field).or_insert(value.as_str());
+        }
         out.push_str("<section><h2>Tasks</h2>\n<table><tr><th>task</th><th>state</th><th>owner</th></tr>\n");
         let mut count = 0;
-        for n in 0..=(fields.last().map(|(f, _)| *f).unwrap_or(0) / 2) {
-            if let Some(state) = value(2 * n + 2) {
-                count += 1;
-                out.push_str(&format!(
-                    "<tr data-task=\"{n}\"><td>{n}</td><td>{}</td><td>{}</td></tr>\n",
-                    escape(state),
-                    escape(value(2 * n + 3).unwrap_or("(none)"))
-                ));
-            }
+        for (&field, &state) in &values {
+            if field < 2 || field % 2 != 0 { continue; }
+            let n = (field - 2) / 2;
+            // A state field is even, so its following owner field cannot
+            // overflow u128 (whose maximum is odd).
+            let owner = values.get(&(field + 1)).copied().unwrap_or("(none)");
+            count += 1;
+            out.push_str(&format!(
+                "<tr data-task=\"{n}\"><td>{n}</td><td>{}</td><td>{}</td></tr>\n",
+                escape(state),
+                escape(owner)
+            ));
         }
         out.push_str(&format!(
             "</table><p class=note>{count} task(s), read with the board layout (state = field 2n+2, owner = \
@@ -1011,6 +1021,30 @@ fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, sub
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_rendering_visits_sparse_state_fields_without_address_scan() {
+        let high_state = u128::MAX - 1;
+        let entries = vec![
+            serde_json::json!({"key":{"field":u128::MAX.to_string()},"value":"high owner"}),
+            serde_json::json!({"key":{"field":"3"},"value":"low owner"}),
+            serde_json::json!({"key":{"field":high_state.to_string()},"value":"high state"}),
+            serde_json::json!({"key":{"field":"2"},"value":"z duplicate"}),
+            serde_json::json!({"key":{"field":"2"},"value":"a state"}),
+            serde_json::json!({"key":{"field":"8"},"value":"unowned"}),
+            serde_json::json!({"key":{"field":"0"},"value":"metadata"}),
+        ];
+        let html = render_fields(&entries, true);
+        let low = "<tr data-task=\"0\"><td>0</td><td>a state</td><td>low owner</td></tr>";
+        let unowned = "<tr data-task=\"3\"><td>3</td><td>unowned</td><td>(none)</td></tr>";
+        let high = format!("<tr data-task=\"{}\"><td>{}</td><td>high state</td><td>high owner</td></tr>",
+            (high_state - 2) / 2, (high_state - 2) / 2);
+        assert!(html.find(low).unwrap() < html.find(unowned).unwrap());
+        assert!(html.find(unowned).unwrap() < html.find(&high).unwrap());
+        assert_eq!(html.matches("data-task=").count(), 3);
+        assert!(html.contains("3 task(s)"));
+        assert!(html.contains("data-fields=\"7\""));
+    }
     use serde_json::json;
 
     const FIELDS: &str = include_str!("web/fixtures/scalar-read.json");

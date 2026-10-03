@@ -1,19 +1,8 @@
-//! The interactions endpoint.
-//!
-//! `POST /interactions`: verify the signature (401 otherwise, which is also what Discord's
-//! own endpoint check sends a bad signature to find), answer PING, and for `/mini <line>` or
-//! `/mini-help`:
-//!
-//! 1. refuse a replayed interaction id (401) and a foreign application id (400);
-//! 2. resolve the Discord user through the roster to a session, or answer an `error:` line
-//!    that says ember must add them;
-//! 3. check the line (≤ 1000 characters, one line), or answer a `usage:` line;
-//! 4. answer DEFERRED (ephemeral) at once, and only after that response is written run the
-//!    line through the session's forced command, log `(user, line, ending)` to the session's
-//!    `discord.log`, and PATCH the output or the ending line into `@original`.
-//!
-//! Lines of one session run one at a time, in arrival order; at most `max_inflight` lines
-//! run at once across sessions.
+//! Signed Discord commands enter the same roster-bound Mini shell as SSH.
+//! Custody is synced before deferral and before execution. A completed duplicate
+//! returns retained output; an interrupted started command is UNKNOWN and never
+//! auto-runs again. Native `lookup`/operation recovery decides semantic outcomes.
+//! Session mutexes serialize execution (they do not guarantee arrival order).
 
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
@@ -21,7 +10,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde_json::Value;
+use serde_json::{json, Value};
+use crate::custody::Record;
 
 use crate::curl::Poster;
 use crate::http::{read_request, write_response, Request};
@@ -33,8 +23,6 @@ use crate::signature::Verifier;
 use crate::{env_required, env_u64, now_s};
 
 pub const DISCORD_API: &str = "https://discord.com/api/v10";
-/// How long an interaction id is remembered (Discord's interaction token lives 15 minutes).
-pub const SEEN_TTL_S: u64 = 900;
 pub const MAX_CONNECTIONS: usize = 64;
 pub const LOG_FILE: &str = "discord.log";
 
@@ -96,6 +84,8 @@ pub struct Job {
     token: String,
     session: Session,
     line: String,
+    record: Record,
+    world_page: Option<usize>,
 }
 
 pub struct Reply {
@@ -117,7 +107,6 @@ impl Reply {
 pub struct App {
     cfg: Config,
     verifier: Verifier,
-    seen: Mutex<HashMap<String, u64>>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     inflight: Arc<AtomicUsize>,
 }
@@ -136,7 +125,6 @@ impl App {
         Ok(Arc::new(App {
             cfg,
             verifier,
-            seen: Mutex::new(HashMap::new()),
             locks: Mutex::new(HashMap::new()),
             inflight: Arc::new(AtomicUsize::new(0)),
         }))
@@ -172,25 +160,23 @@ impl App {
         if cmd.application_id != self.cfg.application_id {
             return (Reply::text(400, "Bad Request", "interaction for another application"), None);
         }
-        if !interaction::is_token(&cmd.token) || !interaction::is_snowflake(&cmd.user_id) {
+        if !interaction::is_snowflake(&cmd.id) || !interaction::is_token(&cmd.token) || !interaction::is_snowflake(&cmd.user_id) {
             return (Reply::text(400, "Bad Request", "malformed interaction token or user id"), None);
-        }
-        {
-            let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
-            seen.retain(|_, t| now.saturating_sub(*t) <= SEEN_TTL_S);
-            if seen.insert(cmd.id.clone(), now).is_some() {
-                eprintln!("mini-discord: 401 replayed interaction {}", cmd.id);
-                return (Reply::text(401, "Unauthorized", "replayed interaction"), None);
-            }
         }
         let say = |ending: Ending| Reply::json(&interaction::message(&reply::code_block(&ending.line)));
 
+        let world_page = (cmd.name == interaction::COMMAND_WORLD).then_some(cmd.page);
         let line = match (cmd.name.as_str(), cmd.line) {
             (COMMAND_LINE, Some(l)) => l,
             (COMMAND_LINE, None) => {
                 return (say(Ending::entrance("usage", "/mini LINE: the line option is required")), None)
             }
             (COMMAND_HELP, _) => "help".to_string(),
+            (interaction::COMMAND_WORLD, _) => match crate::navigation::home_line(cmd.target.as_deref()) {
+                Ok(line) => line,
+                Err(e) => return (say(Ending::entrance("usage", &e)), None),
+            },
+            (interaction::COMMAND_STATUS, _) => String::new(),
             (other, _) => return (say(Ending::entrance("error", &format!("unknown command /{other}"))), None),
         };
 
@@ -216,6 +202,20 @@ impl App {
                 return (say(Ending::entrance("error", &e)), None);
             }
         };
+        let custody = self.cfg.sessions.dir.join(".discord-custody");
+        if cmd.name == interaction::COMMAND_STATUS {
+            let Some(id) = cmd.target.as_deref().filter(|id| interaction::is_snowflake(id)) else {
+                return (say(Ending::entrance("usage", "/mini-status target:INTERACTION-ID")), None);
+            };
+            let key = format!("{}-{id}", self.cfg.application_id);
+            // Reading an atomic retained record is safe while its worker owns the lease.
+            match crate::custody::read_json(&custody.join(format!("{key}.json"))) {
+                Ok(Some(v)) if v["binding"]["user"] == cmd.user_id && v["binding"]["session"] == session.name => {
+                    return (Reply::json(&interaction::message(&record_content(&v, id))), None);
+                }
+                _ => return (say(Ending::entrance("error", "no retained interaction for this user and session")), None),
+            }
+        }
         let refuse = |ending: Ending| {
             self.log(&session, now, &cmd.user_id, &cmd.id, &line, &ending, None);
             say(ending)
@@ -230,7 +230,24 @@ impl App {
             let text = format!("the Discord entrance is running {running} lines; nothing ran, try again shortly");
             return (refuse(Ending::entrance("error", &text)), None);
         }
-        let job = Job { user: cmd.user_id, interaction: cmd.id, token: cmd.token, session, line };
+        let key = format!("{}-{}", self.cfg.application_id, cmd.id);
+        let mut record = match Record::lock(&custody, &key) {
+            Ok(Some(record)) => record,
+            Ok(None) => return (say(Ending::entrance("undecided", &format!("interaction {} is already held by a worker; /mini-status target:{}", cmd.id, cmd.id))), None),
+            Err(e) => { eprintln!("mini-discord: custody unavailable: {e}"); return (say(Ending::entrance("error", "durable custody unavailable; nothing ran")), None); }
+        };
+        let binding=json!({"application":self.cfg.application_id,"user":cmd.user_id,"session":session.name,
+            "workspace":session.workspace,"home":session.home,"line":line,"worldPage":world_page});
+        if let Some(v)=&record.value {
+            if v["binding"] != binding {return (Reply::text(409,"Conflict","interaction id is bound to another request"),None)}
+            if v["phase"] != "accepted" {
+                return (Reply::json(&interaction::message(&record_content(v,&cmd.id))),None);
+            }
+        } else if let Err(e)=record.save(json!({"version":1,"binding":binding,"phase":"accepted","acceptedAt":now,"interaction":cmd.id})) {
+            eprintln!("mini-discord: custody save failed: {e}");
+            return (say(Ending::entrance("error","durable custody unavailable; nothing ran")),None);
+        }
+        let job = Job { user: cmd.user_id, interaction: cmd.id, token: cmd.token, session, line, record, world_page };
         (Reply::json(&interaction::deferred()), Some((job, guard)))
     }
 
@@ -244,24 +261,43 @@ impl App {
     }
 
     /// Run an accepted line and PATCH its answer into `@original`.
-    pub fn run_job(&self, job: Job, _inflight: Inflight) {
+    pub fn run_job(&self, mut job: Job, _inflight: Inflight) {
         let lock = {
             let mut locks = self.locks.lock().unwrap_or_else(|p| p.into_inner());
             locks.entry(job.session.name.clone()).or_default().clone()
         };
         let outcome = {
             let _one_at_a_time = lock.lock().unwrap_or_else(|p| p.into_inner());
+            // Recheck roster after waiting: removing/remapping a user stops queued work.
+            let allowed=Roster::load(&self.cfg.roster,self.cfg.roster_owner_uid)
+                .is_ok_and(|r|r.session_of(&job.user)==Some(job.session.name.as_str()));
+            if !allowed {return;}
+            let mut value=job.record.value.clone().expect("accepted record");
+            value["phase"]=json!("started");value["startedAt"]=json!(now_s());
+            if let Err(e)=job.record.save(value){eprintln!("mini-discord: cannot retain start: {e}");return;}
             self.cfg.deployment.run(&job.session, &job.line)
         };
         self.log(&job.session, now_s(), &job.user, &job.interaction, &job.line, &outcome.ending, outcome.exit);
-        let content = reply::render(&outcome.stdout, &outcome.ending);
+        let content = if let Some(page)=job.world_page.filter(|_|outcome.ending.word=="ok") {
+            crate::navigation::render(&outcome.stdout,page).unwrap_or_else(|e|reply::code_block(&format!("error: {e}")))
+        } else {reply::code_block_limit(if outcome.ending.word=="ok" {outcome.stdout.trim_end()} else {&outcome.ending.line},1850)};
+        let content=format!("{content}\nCustody: /mini-status target:{}",job.interaction);
+        let mut value=job.record.value.clone().expect("started record");
+        value["phase"]=json!("completed");value["finishedAt"]=json!(now_s());
+        value["content"]=json!(content);value["ending"]=json!(outcome.ending.word);
+        value["stdout"]=json!(outcome.stdout);value["stderr"]=json!(outcome.stderr);
+        value["exit"]=json!(outcome.exit);value["delivery"]=json!("pending");
+        if let Err(e)=job.record.save(value){eprintln!("mini-discord: cannot retain outcome: {e}; execution remains UNKNOWN");return;}
         let url = format!(
             "{}/webhooks/{}/{}/messages/@original",
             self.cfg.api_base, self.cfg.application_id, job.token
         );
         let body = interaction::followup(&content).to_string();
         match self.cfg.poster.send("PATCH", &url, body.as_bytes()) {
-            Ok(code) if (200..300).contains(&code) => {}
+            Ok(code) if (200..300).contains(&code) => {
+                let mut value=job.record.value.clone().unwrap();value["delivery"]=json!("confirmed");
+                if let Err(e)=job.record.save(value){eprintln!("mini-discord: delivery custody: {e}");}
+            }
             Ok(code) => eprintln!("mini-discord: follow-up for {} answered HTTP {code}", job.interaction),
             Err(e) => eprintln!("mini-discord: follow-up for {} failed: {e}", job.interaction),
         }
@@ -305,11 +341,20 @@ impl App {
                 continue;
             }
             let app = self.clone();
-            let open = open.clone();
+            let connection_slot = Inflight(open.clone());
             std::thread::spawn(move || {
+                // Release capacity on every return, including worker unwinding.
+                let _connection_slot = connection_slot;
                 app.connection(stream);
-                open.fetch_sub(1, Ordering::SeqCst);
             });
         }
+    }
+}
+
+fn record_content(v: &Value, id: &str) -> String {
+    match v["phase"].as_str() {
+        Some("completed") => v["content"].as_str().unwrap_or("retained output unavailable").to_owned(),
+        Some("accepted") => reply::code_block(&format!("accepted: interaction {id} has not started; retry the original signed interaction")),
+        _ => reply::code_block(&format!("undecided: interaction {id} started; execution may still be running or its outcome is UNKNOWN. It will not be replayed. Use /mini line:history and lookup ID for the native attempt; /mini-status target:{id} retains this custody.")),
     }
 }

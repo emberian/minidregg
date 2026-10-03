@@ -79,6 +79,8 @@ fn main() {
         ["interact", addr, secret, app, user, id, token, command, rest @ ..] => {
             let mut line: Option<String> = None;
             let mut corrupt = false;
+            let mut target: Option<String> = None;
+            let mut page: Option<u64> = None;
             let mut i = 0;
             while i < rest.len() {
                 match rest[i] {
@@ -91,6 +93,8 @@ fn main() {
                         line = Some(t.trim_end_matches('\n').to_string());
                         i += 1;
                     }
+                    "--target" if i + 1 < rest.len() => {target=Some(rest[i+1].to_string());i+=1;},
+                    "--page" if i + 1 < rest.len() => {page=Some(rest[i+1].parse().unwrap_or_else(|_|die("bad page")));i+=1;},
                     "--corrupt-signature" => corrupt = true,
                     other => die(format!("unknown option {other}")),
                 }
@@ -100,6 +104,8 @@ fn main() {
             if let Some(l) = line {
                 data["options"] = json!([{ "name": "line", "type": 3, "value": l }]);
             }
+            if let Some(t)=target {data["options"]=json!([{"name":"target","type":3,"value":t}]);}
+            if let Some(p)=page {if !data["options"].is_array(){data["options"]=json!([])}data["options"].as_array_mut().unwrap().push(json!({"name":"page","type":4,"value":p}));}
             let body = json!({
                 "type": 2,
                 "id": id,
@@ -153,10 +159,11 @@ fn main() {
                             continue;
                         }
                         let after = req.query.split('&').find_map(|kv| kv.strip_prefix("after=")).and_then(|a| a.parse::<u64>().ok()).unwrap_or(0);
+                        let before = req.query.split('&').find_map(|kv| kv.strip_prefix("before=")).and_then(|a| a.parse::<u64>().ok()).unwrap_or(u64::MAX);
                         let all = channel_read(dir);
                         let mut newer: Vec<serde_json::Value> = all
                             .into_iter()
-                            .filter(|m| m.get("id").and_then(|i| i.as_str()).and_then(|i| i.parse::<u64>().ok()).is_some_and(|i| i > after))
+                            .filter(|m| m.get("id").and_then(|i| i.as_str()).and_then(|i| i.parse::<u64>().ok()).is_some_and(|i| i > after && i < before))
                             .collect();
                         newer.reverse(); // Discord answers newest first
                         newer.truncate(50);
