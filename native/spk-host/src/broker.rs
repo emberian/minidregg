@@ -153,6 +153,9 @@ pub fn supervisor_unit(prefix: &str, store: &str, app: &str) -> String {
 pub struct BrokerConfig {
     pub protocol: String,
     pub grains_root: PathBuf,
+    /// Explicit physical package namespace; absent preserves the installed host default.
+    #[serde(default)]
+    pub spk_root: Option<PathBuf>,
     #[serde(default)]
     pub broker_socket: Option<PathBuf>,
     pub operator_user: String,
@@ -164,6 +167,82 @@ pub struct BrokerConfig {
     pub app_uids: Vec<u32>,
     #[serde(default)]
     pub resident_home_read_only_paths: Vec<PathBuf>,
+}
+
+fn spk_namespace_paths(root: Option<&Path>) -> io::Result<(PathBuf, PathBuf)> {
+    let Some(root) = root else {
+        return Ok((PathBuf::from(PACKAGE_STORE), PathBuf::from(INBOX)));
+    };
+    let text = root.to_str().ok_or_else(|| invalid("SPK root must be UTF-8"))?;
+    if !root.is_absolute() || text == "/" || text.ends_with('/')
+        || text.contains("//") || text.contains("/../") || text.contains("/./")
+        || text.ends_with("/..") || text.ends_with("/.")
+        || !text.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'/'|b'_'|b'-'|b'.')) {
+        return Err(invalid("SPK root must be a simple canonical absolute namespace"));
+    }
+    Ok((root.join("packages"),root.join("inbox")))
+}
+
+fn validate_spk_namespace(root: Option<&Path>) -> io::Result<()> {
+    let Some(root)=root else { return Ok(()); };
+    let (packages,inbox)=spk_namespace_paths(Some(root))?;
+    if fs::canonicalize(root)? != root {
+        return Err(invalid("SPK root traverses a symlink"));
+    }
+    for entry in root.ancestors() {
+        let metadata=fs::symlink_metadata(entry)?;
+        if !metadata.is_dir() || metadata.uid()!=0 || metadata.mode()&0o022!=0 {
+            return Err(invalid(format!("SPK root custody differs: {}",entry.display())));
+        }
+    }
+    for (path,mode) in [(root,0o755),(packages.as_path(),0o755),(inbox.as_path(),0o700)] {
+        let metadata=fs::symlink_metadata(path)?;
+        if !metadata.is_dir() || metadata.uid()!=0 || metadata.mode()&0o777!=mode {
+            return Err(invalid(format!("SPK namespace directory custody differs: {}",path.display())));
+        }
+    }
+    Ok(())
+}
+
+fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32) -> io::Result<Vec<String>> {
+    let (_,expected_inbox)=spk_namespace_paths(root)?;
+    if inbox.parent()!=Some(expected_inbox.as_path()) {
+        return Err(invalid("ingest package is outside selected SPK inbox"));
+    }
+    let mut args=Vec::new();
+    if let Some(root)=root {
+        args.extend(["--root".to_owned(),root.to_str().ok_or_else(||invalid("SPK root path"))?.to_owned()]);
+    }
+    args.extend([host.to_str().ok_or_else(||invalid("Host path"))?.to_owned(),host_sha.to_owned(),
+        inbox.to_str().ok_or_else(||invalid("inbox path"))?.to_owned(),uid.to_string()]);
+    Ok(args)
+}
+
+pub(crate) fn image_path_from_identity(identity: &Value, raw_sha256: &str) -> io::Result<PathBuf> {
+    if !hex64(raw_sha256) || identity.get("protocol").and_then(Value::as_str)!=Some("mini-spk-broker-identity-v1") {
+        return Err(invalid("package image requires typed broker identity and exact SHA-256"));
+    }
+    let package_store=match identity.get("packageStore") {
+        None=>PathBuf::from(PACKAGE_STORE), // Older brokers implement only this fixed physical namespace.
+        Some(Value::String(path))=>{
+            let path=PathBuf::from(path);
+            let root=path.parent().ok_or_else(||invalid("package store parent"))?;
+            let (expected,_)=spk_namespace_paths(Some(root))?;
+            if path!=expected { return Err(invalid("broker package store is outside selected SPK namespace")); }
+            path
+        },
+        _=>return Err(invalid("broker package store has wrong type")),
+    };
+    Ok(package_store.join(format!("sha256-{raw_sha256}")))
+}
+
+pub(crate) fn package_image_at(grains_root: &Path, socket: Option<&Path>, raw_sha256: &str) -> io::Result<PathBuf> {
+    let identity=call_at(grains_root,socket,&Request::Identify {})?;
+    if identity.get("grainsRoot").and_then(Value::as_str)!=grains_root.to_str()
+        || identity.get("brokerSocket").and_then(Value::as_str)!=socket_path(grains_root,socket)?.to_str() {
+        return Err(invalid("package namespace broker identity differs from selected installation"));
+    }
+    image_path_from_identity(&identity,raw_sha256)
 }
 
 struct Broker {
@@ -517,6 +596,7 @@ impl Broker {
         {
             return Err(invalid("broker config refused"));
         }
+        validate_spk_namespace(config.spk_root.as_deref())?;
         pinned_root_executable(&config.spk_host, Some(&config.spk_host_sha256))?;
         pinned_root_executable(&config.ingest_helper, None)?;
         pinned_root_executable(&config.volume_helper, None)?;
@@ -695,7 +775,8 @@ impl Broker {
     fn handle(&mut self, request: Request) -> io::Result<Value> {
         match request {
             Request::Identify {} => Ok(json!({"protocol":"mini-spk-broker-identity-v1",
-                "grainsRoot":self.root(),"brokerSocket":socket_path(self.root(), self.config.broker_socket.as_deref())?})),
+                "grainsRoot":self.root(),"brokerSocket":socket_path(self.root(), self.config.broker_socket.as_deref())?,
+                "packageStore":spk_namespace_paths(self.config.spk_root.as_deref())?.0})),
             Request::InitStore { store } => {
                 if !store_key(&store) {
                     return Err(invalid("store key refused"));
@@ -815,7 +896,8 @@ impl Broker {
                     return Err(invalid("package SHA-256 refused"));
                 }
                 let placement = self.placement(&store, &app)?;
-                let image = Path::new(PACKAGE_STORE).join(format!("sha256-{sha256}"));
+                let (package_store,private_inbox)=spk_namespace_paths(self.config.spk_root.as_deref())?;
+                let image = package_store.join(format!("sha256-{sha256}"));
                 if fs::symlink_metadata(&image).is_err() {
                     let package = format!("sha256-{sha256}");
                     let mut source = open_operator_file(
@@ -826,8 +908,8 @@ impl Broker {
                     if source.metadata()?.len() > 256 * 1024 * 1024 {
                         return Err(invalid("staged package exceeds bound"));
                     }
-                    let inbox = Path::new(INBOX).join(format!("grain-{sha256}.spk"));
-                    let temp = Path::new(INBOX).join(format!(".grain-{sha256}.broker"));
+                    let inbox = private_inbox.join(format!("grain-{sha256}.spk"));
+                    let temp = private_inbox.join(format!(".grain-{sha256}.broker"));
                     let _ = fs::remove_file(&temp);
                     let mut out = OpenOptions::new()
                         .write(true)
@@ -841,15 +923,10 @@ impl Broker {
                         return Err(invalid("staged package differs from its SHA-256"));
                     }
                     fs::rename(&temp, &inbox)?;
-                    helper(
-                        &self.config.ingest_helper,
-                        &[
-                            runtime.spk_host.to_str().ok_or_else(|| invalid("path"))?,
-                            &runtime.spk_host_sha256,
-                            inbox.to_str().ok_or_else(|| invalid("path"))?,
-                            &placement.app_uid.to_string(),
-                        ],
-                    )?;
+                    let arguments=ingest_arguments(self.config.spk_root.as_deref(),&runtime.spk_host,
+                        &runtime.spk_host_sha256,&inbox,placement.app_uid)?;
+                    let borrowed=arguments.iter().map(String::as_str).collect::<Vec<_>>();
+                    helper(&self.config.ingest_helper,&borrowed)?;
                 }
                 Ok(json!({"imageDir":image}))
             }
@@ -1363,6 +1440,52 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spk_namespace_default_preserves_existing_helper_protocol() {
+        let (packages,inbox)=spk_namespace_paths(None).unwrap();
+        assert_eq!(packages,Path::new(PACKAGE_STORE));
+        assert_eq!(inbox,Path::new(INBOX));
+        let args=ingest_arguments(None,Path::new("/root/candidate/spk-host"),"hash",
+            &inbox.join("grain-package.spk"),64010).unwrap();
+        assert_eq!(args,vec!["/root/candidate/spk-host","hash","/var/lib/minidregg/spk/inbox/grain-package.spk","64010"]);
+    }
+
+    #[test]
+    fn spk_namespace_explicit_root_binds_helper_and_both_paths() {
+        let root=Path::new("/var/lib/mini-bigstep-hbox-r2/spk");
+        let (packages,inbox)=spk_namespace_paths(Some(root)).unwrap();
+        assert_eq!(packages,root.join("packages"));
+        assert_eq!(inbox,root.join("inbox"));
+        let args=ingest_arguments(Some(root),Path::new("/root/candidate/spk-host"),"hash",
+            &inbox.join("grain-package.spk"),64010).unwrap();
+        assert_eq!(&args[..2],["--root","/var/lib/mini-bigstep-hbox-r2/spk"]);
+        assert_eq!(args[4],"/var/lib/mini-bigstep-hbox-r2/spk/inbox/grain-package.spk");
+        assert!(ingest_arguments(Some(root),Path::new("/root/spk-host"),"hash",
+            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010).is_err());
+    }
+
+    #[test]
+    fn spk_namespace_refuses_ambiguous_root_paths() {
+        for bad in ["/","relative","/var/lib/../spk","/var/lib/./spk","/var//lib/spk","/var/lib/spk/","/var/lib/spk/..","/var/lib/spk x"] {
+            assert!(spk_namespace_paths(Some(Path::new(bad))).is_err(),"{bad}");
+        }
+        assert!(validate_spk_namespace(Some(Path::new("/tmp"))).is_err());
+    }
+
+    #[test]
+    fn spk_namespace_identity_preserves_legacy_and_rejects_malformed_routes() {
+        let sha="a".repeat(64);
+        let old=json!({"protocol":"mini-spk-broker-identity-v1"});
+        assert_eq!(image_path_from_identity(&old,&sha).unwrap(),Path::new(PACKAGE_STORE).join(format!("sha256-{sha}")));
+        let current=json!({"protocol":"mini-spk-broker-identity-v1","packageStore":"/var/lib/mini-r2/spk/packages"});
+        assert_eq!(image_path_from_identity(&current,&sha).unwrap(),Path::new("/var/lib/mini-r2/spk/packages").join(format!("sha256-{sha}")));
+        for bad in [json!(null),json!("relative/packages"),json!("/var/lib/spk/not-packages"),json!("/var/lib/../spk/packages")] {
+            let mut value=old.clone();value["packageStore"]=bad;
+            assert!(image_path_from_identity(&value,&sha).is_err());
+        }
+        assert!(image_path_from_identity(&current,"../escape").is_err());
+    }
 
     #[test]
     fn protocol_refuses_unknown_verbs_and_fields() {

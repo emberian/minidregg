@@ -259,10 +259,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     let derived = derive(app, &placement.selector, &request)?;
     validate_export_scope(&request)?;
     let installed = crate::materialize::verify_installed_spk(
-        &PathBuf::from(format!(
-            "/var/lib/minidregg/spk/packages/sha256-{}",
-            placement.raw_sha256
-        )),
+        &crate::grain::placement_image_dir(&placement)?,
         placement.app_uid,
     )?;
     let bridge = minidregg_spk_rpc::decode_bridge_config(

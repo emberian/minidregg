@@ -5,10 +5,20 @@ set -euo pipefail
 umask 077
 
 usage() {
-  echo 'usage: spk-ingest HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2
+  echo 'usage: spk-ingest [--root SPK_ROOT] HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2
   exit 2
 }
 
+base=/var/lib/minidregg/spk
+isolated=0
+if [[ ${1:-} == --root ]]; then
+  (( $# == 6 )) || usage
+  base=$2
+  [[ $base =~ ^/[A-Za-z0-9_./-]+$ && $base != / && $base != */ && $base != */../* && $base != */./* && $base != */.. && $base != */. ]] || usage
+  [[ $(realpath -m -- "$base") == "$base" ]] || { echo 'SPK root must be canonical and not symlinked' >&2; exit 1; }
+  isolated=1
+  shift 2
+fi
 (( $# == 4 )) || usage
 host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
 [[ $expected_host_sha =~ ^[0-9a-f]{64}$ ]] || usage
@@ -16,7 +26,6 @@ host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
 (( EUID == 0 )) || { echo 'spk-ingest requires root' >&2; exit 1; }
 getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
 
-base=/var/lib/minidregg/spk
 inbox=$base/inbox
 store=$base/packages
 
@@ -31,9 +40,22 @@ safe_dir() {
   [[ $actual == "$mode" ]] || { echo "mode drift $path: $actual" >&2; exit 1; }
 }
 
-safe_dir /var 755
-safe_dir /var/lib 755
-safe_dir /var/lib/minidregg 755
+if (( isolated )); then
+  # Existing root custody is a prerequisite; never create arbitrary ancestors.
+  ancestor=$(dirname -- "$base")
+  [[ -d $ancestor ]] || { echo 'isolated SPK parent absent' >&2; exit 1; }
+  while :; do
+    [[ ! -L $ancestor && $(stat -c '%u' -- "$ancestor") == 0 ]] || { echo 'isolated SPK parent custody differs' >&2; exit 1; }
+    mode=$(stat -c '%a' -- "$ancestor")
+    (( (8#$mode & 8#022) == 0 )) || { echo 'isolated SPK parent writable' >&2; exit 1; }
+    [[ $ancestor == / ]] && break
+    ancestor=$(dirname -- "$ancestor")
+  done
+else
+  safe_dir /var 755
+  safe_dir /var/lib 755
+  safe_dir /var/lib/minidregg 755
+fi
 safe_dir "$base" 755
 safe_dir "$inbox" 700
 safe_dir "$store" 755

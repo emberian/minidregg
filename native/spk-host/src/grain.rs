@@ -389,6 +389,9 @@ pub(crate) struct Placement {
     protocol: String,
     pub(crate) selector: LifecycleSelector,
     pub(crate) raw_sha256: String,
+    /// Retained physical package namespace selected by the root broker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) image_dir: Option<PathBuf>,
     pub(crate) app_uid: u32,
     app_gid: u32,
     volume_resource: String,
@@ -451,6 +454,7 @@ fn place(
         protocol: "mini-spk-grain-placement-v2".into(),
         selector: selector.clone(),
         raw_sha256: raw_sha256.into(),
+        image_dir: Some(broker::package_image_at(&host.profile.grains_root,host.profile.broker_socket.as_deref(),raw_sha256)?),
         app_uid: reply_u32(&placed, "appUid")?,
         app_gid: reply_u32(&placed, "appGid")?,
         volume_resource: selector.app.clone(),
@@ -593,20 +597,29 @@ fn write_custody(host: &Host, selector: &LifecycleSelector) -> io::Result<Custod
     Ok(paths)
 }
 
-fn image_dir(raw_sha256: &str) -> PathBuf {
-    Path::new(PACKAGE_STORE).join(format!("sha256-{raw_sha256}"))
+pub(crate) fn placement_image_dir(placement: &Placement) -> io::Result<PathBuf> {
+    let image=placement.image_dir.clone().unwrap_or_else(||Path::new(PACKAGE_STORE).join(format!("sha256-{}",placement.raw_sha256)));
+    let parent=image.parent().and_then(Path::to_str).ok_or_else(||invalid("placement image namespace malformed"))?;
+    let identity=json!({"protocol":"mini-spk-broker-identity-v1","packageStore":parent});
+    if image!=broker::image_path_from_identity(&identity,&placement.raw_sha256)? {
+        return Err(invalid("placement image path differs from its exact package hash"));
+    }
+    Ok(image)
 }
 
 /// Root publishes one immutable image per signed-SPK hash, shared by every
 /// instance of that package; the broker runs the bounded ingest unit.
 fn ensure_image(host: &Host, placement: &Placement) -> io::Result<()> {
-    let image = image_dir(&placement.raw_sha256);
+    let image = placement_image_dir(placement)?;
     if !exists(&image)? {
-        broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Ingest {
+        let reply=broker::call_at(&host.profile.grains_root, host.profile.broker_socket.as_deref(), &Request::Ingest {
             store: host.store.clone(),
             app: placement.selector.app.clone(),
             sha256: placement.raw_sha256.clone(),
         })?;
+        if reply.get("imageDir").and_then(Value::as_str)!=image.to_str() {
+            return Err(invalid("broker ingest image differs from retained placement namespace"));
+        }
     }
     let installed = verify_installed_spk(&image, placement.app_uid)?;
     if installed.raw_sha256 != placement.raw_sha256 {
@@ -708,7 +721,7 @@ fn install(
         "protocol":"mini-spk-resident-install-v2",
         "journalDir":journal,
         "sourceSpk":staged,
-        "imageDir":image_dir(&raw_sha256),
+        "imageDir":placement_image_dir(&placement)?,
         "expectedRawSha256":raw_sha256,
         "appUid":placement.app_uid,
         "deploymentId":host.identity.deployment_id,
@@ -1497,6 +1510,36 @@ fn host_view(host: &Host) -> HostView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn package_placement() -> Placement {
+        Placement { protocol:"mini-spk-grain-placement-v2".into(),
+            selector:LifecycleSelector {app:"8502".into(),package_manifest:"8503".into(),snapshot_manifest:"8504".into(),
+                app_capability:"9502".into(),app_observe_capability:"9503".into(),package_capability:"9504".into(),package_observe_capability:"9505".into()},
+            raw_sha256:"a".repeat(64),image_dir:None,app_uid:64010,app_gid:64010,
+            volume_resource:"8502".into(),volume_mib:512,class:"S".into() }
+    }
+
+    #[test]
+    fn spk_namespace_placement_old_bytes_preserve_global_image() {
+        let old=package_placement();
+        let value=serde_json::to_value(&old).unwrap();
+        assert!(value.get("imageDir").is_none());
+        let decoded:Placement=serde_json::from_value(value).unwrap();
+        assert_eq!(placement_image_dir(&decoded).unwrap(),Path::new(PACKAGE_STORE).join(format!("sha256-{}",old.raw_sha256)));
+    }
+
+    #[test]
+    fn spk_namespace_placement_retains_exact_configured_image_for_route_and_restart() {
+        let mut placement=package_placement();
+        let image=Path::new("/var/lib/mini-r2/spk/packages").join(format!("sha256-{}",placement.raw_sha256));
+        placement.image_dir=Some(image.clone());
+        let decoded:Placement=serde_json::from_slice(&serde_json::to_vec(&placement).unwrap()).unwrap();
+        assert_eq!(placement_image_dir(&decoded).unwrap(),image);
+        placement.image_dir=Some(Path::new("/var/lib/mini-r2/spk/packages").join("sha256-other"));
+        assert!(placement_image_dir(&placement).is_err());
+        placement.image_dir=Some(PathBuf::from("/var/lib/../mini-r2/spk/packages/sha256-other"));
+        assert!(placement_image_dir(&placement).is_err());
+    }
 
     #[test]
     fn slot_tables_are_unique_role_index_pairs() {
