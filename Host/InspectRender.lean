@@ -421,6 +421,8 @@ private def draftLines : Draft → List String
             | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
             | .world actions => [s!"    world instance: {actions.length} guarded field actions"]
+            | .moneyConsent consent =>
+                [s!"    canonical Book batch: {(consent.batch.map fun batch => batch.operations.length).getD 0} operations carried; {consent.positions.length} signed source positions; {(consent.funding.map fun funding => funding.credits).getD 0} compute credits"]
             | .computeFunding funding =>
                 [s!"    funds compute with {funding.credits} credits of asset {funding.asset}; payer pre-balance {funding.expectedPayerBalance}, Book root {funding.expectedBookRoot.value}"]
             | .kindDefinition definition =>

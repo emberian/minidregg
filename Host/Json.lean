@@ -1141,6 +1141,85 @@ private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell
          Lean.Json.arr #[.str ("world/" ++ slot.1), signedDecimal slot.2])),
      ("methods", worldMethodsJson value)])]
 
+private def moneyOperation (path : String) (json : Lean.Json) :
+    Result Minidregg.Theory.CanonicalResourceKernel.Operation := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "transfer" | "fee" =>
+      let obj ← exactObject path ["type", "source", "destination", "asset", "amount"] json
+      let source ← nat (path ++ ".source") (← field path "source" obj)
+      let destination ← nat (path ++ ".destination") (← field path "destination" obj)
+      let asset ← nat (path ++ ".asset") (← field path "asset" obj)
+      let amount ← nat (path ++ ".amount") (← field path "amount" obj)
+      pure (if tag = "transfer" then .transfer source destination asset amount
+        else .fee source destination asset amount)
+  | "mint" =>
+      let obj ← exactObject path ["type", "asset", "destination", "amount"] json
+      pure (.mint (← nat (path ++ ".asset") (← field path "asset" obj))
+        (← nat (path ++ ".destination") (← field path "destination" obj))
+        (← nat (path ++ ".amount") (← field path "amount" obj)))
+  | "burn" =>
+      let obj ← exactObject path ["type", "source", "asset", "amount"] json
+      pure (.burn (← nat (path ++ ".source") (← field path "source" obj))
+        (← nat (path ++ ".asset") (← field path "asset" obj))
+        (← nat (path ++ ".amount") (← field path "amount" obj)))
+  | "lease" =>
+      let obj ← exactObject path
+        ["type", "leaseId", "holder", "lessor", "asset", "rate", "epochs", "startsAt"] json
+      pure (.lease (← nat (path ++ ".leaseId") (← field path "leaseId" obj))
+        (← nat (path ++ ".holder") (← field path "holder" obj))
+        (← nat (path ++ ".lessor") (← field path "lessor" obj))
+        (← nat (path ++ ".asset") (← field path "asset" obj))
+        (← nat (path ++ ".rate") (← field path "rate" obj))
+        (← nat (path ++ ".epochs") (← field path "epochs" obj))
+        (← nat (path ++ ".startsAt") (← field path "startsAt" obj)))
+  | _ => failAt (path ++ ".type") "expected transfer, mint, burn, fee or lease"
+
+private def moneyFunding (path : String) (json : Lean.Json) :
+    Result Minidregg.Kernel.ResourceMoneyWire.FundingConsent := do
+  let obj ← exactObject path ["asset", "credits", "expectedPayerBalance", "expectedBookRoot"] json
+  pure ⟨← nat (path ++ ".asset") (← field path "asset" obj),
+    ← nat (path ++ ".credits") (← field path "credits" obj),
+    ← int (path ++ ".expectedPayerBalance") (← field path "expectedPayerBalance" obj),
+    ⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩⟩
+
+private def moneyBatch (path : String) (json : Lean.Json) :
+    Result Minidregg.Kernel.ResourceMoneyWire.ApplicationBatch := do
+  let obj ← exactObject path ["expectedBookRoot", "operations"] json
+  pure ⟨⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩,
+    ← list (path ++ ".operations") moneyOperation (← field path "operations" obj)⟩
+
+private def moneyOperationJson : Minidregg.Theory.CanonicalResourceKernel.Operation → Lean.Json
+  | .transfer source destination asset amount => .mkObj
+      [("type", .str "transfer"), ("source", decimal source), ("destination", decimal destination),
+       ("asset", decimal asset), ("amount", decimal amount)]
+  | .fee source destination asset amount => .mkObj
+      [("type", .str "fee"), ("source", decimal source), ("destination", decimal destination),
+       ("asset", decimal asset), ("amount", decimal amount)]
+  | .mint asset destination amount => .mkObj
+      [("type", .str "mint"), ("asset", decimal asset), ("destination", decimal destination),
+       ("amount", decimal amount)]
+  | .burn source asset amount => .mkObj
+      [("type", .str "burn"), ("source", decimal source), ("asset", decimal asset),
+       ("amount", decimal amount)]
+  | .lease leaseId holder lessor asset rate epochs startsAt => .mkObj
+      [("type", .str "lease"), ("leaseId", decimal leaseId), ("holder", decimal holder),
+       ("lessor", decimal lessor), ("asset", decimal asset), ("rate", decimal rate),
+       ("epochs", decimal epochs), ("startsAt", decimal startsAt)]
+
+/-- Complete typed declaration view. Values become authoritative only through
+canonical native preparation, signatures, current law and joint admission. -/
+def moneyConsentJson (consent : Minidregg.Kernel.ResourceMoneyWire.Consent) : Lean.Json :=
+  .mkObj [("type", .str "moneyConsent"),
+    ("batch", (consent.batch.map fun batch => .mkObj
+      [("expectedBookRoot", decimal batch.expectedBookRoot.value),
+       ("operations", .arr (batch.operations.toArray.map moneyOperationJson))]).getD .null),
+    ("positions", .arr (consent.positions.toArray.map decimal)),
+    ("funding", (consent.funding.map fun funding => .mkObj
+      [("asset", decimal funding.asset), ("credits", decimal funding.credits),
+       ("expectedPayerBalance", signedDecimal funding.expectedPayerBalance),
+       ("expectedBookRoot", decimal funding.expectedBookRoot.value)]).getD .null)]
+
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
   let (tag, _) ← tagged path json
@@ -1167,6 +1246,12 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "kindDefinition" =>
       let obj ← exactObject path ["type", "definition"] json
       pure (.kindDefinition (← worldDefinition (path ++ ".definition") (← field path "definition" obj)))
+  | "moneyConsent" =>
+      let obj ← exactObject path ["type", "batch", "positions", "funding"] json
+      pure (.moneyConsent ⟨
+        ← optional (path ++ ".batch") moneyBatch (← field path "batch" obj),
+        ← list (path ++ ".positions") nat (← field path "positions" obj),
+        ← optional (path ++ ".funding") moneyFunding (← field path "funding" obj)⟩)
   | "computeFunding" =>
       let obj ← exactObject path ["type", "asset", "credits", "expectedPayerBalance", "expectedBookRoot"] json
       pure (.computeFunding ⟨← nat (path ++ ".asset") (← field path "asset" obj),
@@ -1179,7 +1264,7 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "kindRead" =>
       let _ ← exactObject path ["type"] json
       pure .kindRead
-  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, world, kindDefinition or computeFunding"
+  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, world, kindDefinition, moneyConsent or computeFunding"
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do

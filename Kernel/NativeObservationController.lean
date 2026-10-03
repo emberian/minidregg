@@ -793,6 +793,7 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           | kindRead => simp [append] at shown
           | read => simp [append] at shown
           | computeFunding _ => simp [append] at shown
+          | moneyConsent _ => simp [append] at shown
           | append request =>
             simp only [append] at shown
             by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest

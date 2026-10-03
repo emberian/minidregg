@@ -99,4 +99,16 @@ def assets (batch : ApplicationBatch) (entry : Entry) : List AssetId :=
   entry.consent.positions.filterMap fun position =>
     (batch.operations[position]?).map fun operation => operation.posting.asset
 
+/-- Reuse the production verb distinctions; ordinary payment authority does
+not issue an asset or destroy it. These are required from the SAME admitted
+account capability in addition to whole-command/current-law admission. -/
+def operationVerb : Operation → Verb .account
+  | .mint _ _ _ => .mintAsset
+  | .burn _ _ _ => .burnAsset
+  | _ => .transfer
+
+def verbs (batch : ApplicationBatch) (entry : Entry) : List (Verb .account) :=
+  (entry.consent.positions.filterMap fun position =>
+    (batch.operations[position]?).map operationVerb).eraseDups
+
 end Minidregg.Kernel.ResourceMoneyWire

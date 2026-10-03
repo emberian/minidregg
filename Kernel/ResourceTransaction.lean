@@ -16,6 +16,9 @@ import Kernel.Run
 import Kernel.NockDoor
 import Kernel.ClockCellDomain
 import Kernel.RunComputeBudgetDomain
+import Kernel.ResourceMoneyReceiver
+import Kernel.BendNativeRun
+import Kernel.ResourceObservationAdmission
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -42,22 +45,9 @@ abbrev Ambient := DeclaredResourceScalar.Ambient
 
 /-- Transaction9's explicit consent to a source-derived Book burn. Payer and
 capability are the containing signed account target, not duplicated here. -/
-structure ComputeFunding where
-  asset : Nat
-  credits : Nat
-  expectedPayerBalance : Int
-  expectedBookRoot : Digest
-  deriving DecidableEq, Repr
-
-def computeFundingStream : StreamCodec ComputeFunding :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product Minidregg.Compiler.IntStream.intStream digestStream)))
-    (fun funding => (funding.asset, funding.credits,
-      funding.expectedPayerBalance, funding.expectedBookRoot))
-    (fun (asset, credits, payer, bookRoot) => ⟨asset, credits, payer, bookRoot⟩)
-    (by intro funding; cases funding; rfl)
+abbrev ComputeFunding := ResourceMoneyWire.FundingConsent
+abbrev computeFundingStream := ResourceMoneyWire.fundingStream
+abbrev MoneyConsent := ResourceMoneyWire.Consent
 
 /-- A target's payload: declared scalar actions, a content command, or one
 stream append (the entry's bytes; the receiver derives its sequence position
@@ -77,6 +67,7 @@ inductive Payload where
   /-- Whole authenticated world-kind definition, observe-only. -/
   | kindRead
   | computeFunding (funding : ComputeFunding)
+  | moneyConsent (consent : MoneyConsent)
   deriving DecidableEq
 
 /-- A content command shows as its canonical command bytes. -/
@@ -91,6 +82,7 @@ instance : Repr Payload where
     | .read => "Payload.read"
     | .kindRead => "Payload.kindRead"
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
+    | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
 
 structure Target where
   kind : ResourceKind
@@ -122,6 +114,8 @@ structure Command where
   present, every write of every target must be a field write the re-executed
   program's product names (`Kernel.Run.checkRun`). -/
   run : Option Run.RunClaim := none
+  /-- Signed source execution; mutually exclusive with the historical Nock claim. -/
+  bend : Option BendExecutionClaim.Claim := none
   deriving DecidableEq, Repr
 
 def Command.TargetsValid (command : Command) : Prop :=
@@ -151,6 +145,7 @@ def payloadStream : StreamCodec Payload where
     | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
     | .computeFunding funding => 6 :: computeFundingStream.encode funding
     | .kindRead => [7]
+    | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
   decodePrefix
     | 0 :: bytes => do
         let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
@@ -172,6 +167,9 @@ def payloadStream : StreamCodec Payload where
         let (funding, rest) ← computeFundingStream.decodePrefix bytes
         some (.computeFunding funding, rest)
     | 7 :: bytes => some (.kindRead, bytes)
+    | 8 :: bytes => do
+        let (consent, rest) ← ResourceMoneyWire.consentStream.decodePrefix bytes
+        some (.moneyConsent consent, rest)
     | _ => none
   decodePrefix_encode := by
     intro payload suffix
@@ -204,24 +202,39 @@ def runClaimStream : StreamCodec Run.RunClaim :=
     (fun (program, sample, output, steps) => ⟨program, sample, output, steps⟩)
     (by intro claim; cases claim; rfl)
 
+/-- Keep transaction10 bytes identical for every historical Nock command. -/
+def legacyCommandStream : StreamCodec (SubjectId × Nat × List Target × Option Run.RunClaim) :=
+  StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.list targetStream) (StreamCodec.option runClaimStream)))
+
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
-    (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product (StreamCodec.list targetStream) (StreamCodec.option runClaimStream))))
-    (fun command => (command.subject, command.nonce, command.targets, command.run))
-    (fun (subject, nonce, targets, run) => ⟨subject, nonce, targets, run⟩)
-    (by intro command; cases command; rfl)
+    (StreamCodec.product legacyCommandStream (StreamCodec.option BendExecutionClaim.stream))
+    (fun c => ((c.subject,c.nonce,c.targets,c.run),c.bend))
+    (fun c => ⟨c.1.1,c.1.2.1,c.1.2.2.1,c.1.2.2.2,c.2⟩)
+    (by intro c; cases c; rfl)
+
+def bendCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [11]
 
 def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    commandStream.toLawful.decode (bytes.drop commandFrame.length) else none
+  encode command := match command.bend with
+    | none => commandFrame ++ legacyCommandStream.encode
+        (command.subject,command.nonce,command.targets,command.run)
+    | some _ => bendCommandFrame ++ commandStream.encode command
+  decode bytes :=
+    if bytes.take commandFrame.length = commandFrame then do
+      let c ← legacyCommandStream.toLawful.decode (bytes.drop commandFrame.length)
+      pure ⟨c.1,c.2.1,c.2.2.1,c.2.2.2,none⟩
+    else if bytes.take bendCommandFrame.length = bendCommandFrame then
+      commandStream.toLawful.decode (bytes.drop bendCommandFrame.length)
+    else none
   decode_encode := by
     intro command
-    have exact := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at exact
-    simp [exact]
+    cases command with
+    | mk subject nonce targets run bend =>
+      cases bend <;> simp [rawCommandCodec, commandStream, legacyCommandStream,
+        StreamCodec.decodePrefix_encode, StreamCodec.toLawful]
 
 def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
 
@@ -349,6 +362,7 @@ kind's ordinary write verb otherwise. -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
   | .object, .append _ => .appendObject
   | kind, .read | kind, .kindRead => observeVerb kind
+  | kind, .moneyConsent _ => ordinaryVerb kind
   | kind, _ => ordinaryVerb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
@@ -359,6 +373,8 @@ funding payload on any role except account. -/
 def requestCost (encodedCommand : List UInt8) (target : Target) : Nat :=
   match target.payload with
   | .computeFunding funding => funding.credits
+  | .moneyConsent consent => encodedCommand.length +
+      (consent.funding.map ResourceMoneyWire.FundingConsent.credits).getD 0
   | _ => encodedCommand.length
 
 /-- The original expression is retained as a specification for the optimized
@@ -433,11 +449,13 @@ inductive Reject where
   | signature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
+  | bendExecution
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   | worldKind | kindDefinition
   | computeFunding
   | computeBudget (reason : RunComputeBudgetDomain.Reject)
+  | money (reason : ResourceMoneyReceiver.Reject)
   | audience (reason : ObjectAudience.Reject)
   /-- CH-EPOCH: a channel record's append refused by the channel law, the clause named. -/
   | channel (reason : DomainEpoch.Refusal)
@@ -454,7 +472,7 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
 /-- The store layout of the target's role: a declared-effect cell for scalar
 actions, a hyperdocument content cell for content commands. -/
 def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .scalar _ | .computeFunding _ => EffectDeclaration.effectLayout
+  | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
   | .content _ | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
@@ -464,7 +482,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ => exact DeclaredEffectCell.materializer
+    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
     | content _ => exact HyperdocumentCell.contentMaterializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
@@ -484,7 +502,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
-    | computeFunding _ => exact ⟨.accountMetadata, cell⟩
+    | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | content _ => exact ⟨.content, cell⟩
     | append _ => exact ⟨.stream, cell⟩
     | world _ => exact ⟨.worldInstance, cell⟩
@@ -497,7 +515,7 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
-    | computeFunding _ => exact if kind = .account then
+    | computeFunding _ | moneyConsent _ => exact if kind = .account then
         CanonicalCellRegistry.selectDeclared deployment id .account cell else none
     | content _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
@@ -578,6 +596,12 @@ def computeTarget (snapshot : AuthoritySnapshot)
         | .ok prepared => .ok (Patch.run prepared.post
             (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
     | computeFunding _ => exact do
+        if kind != .account then throw .wrongRole
+        if version != 1 then throw .unsupportedVersion
+        if root != pre.root then throw .staleTarget
+        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
+        pure pre.logical
+    | moneyConsent _ => exact do
         if kind != .account then throw .wrongRole
         if version != 1 then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
@@ -666,7 +690,7 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | read | kindRead | computeFunding _ => exact []
+    | read | kindRead | computeFunding _ | moneyConsent _ => exact []
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
@@ -679,7 +703,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ => exact none
+    | scalar _ | computeFunding _ | moneyConsent _ => exact none
     | content _ => exact none
     | world _ => exact none
     | kindDefinition _ | kindRead => exact none
@@ -717,7 +741,7 @@ def Target.contentStore? (target : Target) (cell : TargetCell target) :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ => exact none
+    | scalar _ | computeFunding _ | moneyConsent _ => exact none
     | content _ => exact some cell.logical
     | append _ => exact none
     | read => exact some cell.logical
@@ -940,6 +964,9 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     cases payload with
     | scalar _ => exact DeclaredResourceProjection.project id before after
     | computeFunding funding => exact fundingProject funding
+    | moneyConsent consent => exact
+        [("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
+          (consent.funding.map fundingProject).getD []
     | content content => exact ContentResource.project before after content
     | append request => exact streamSlots request before
     | world _ => exact WorldKindProjection.project subject before after
@@ -1009,6 +1036,7 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
     | read | kindRead => exact some []
     | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
+    | moneyConsent _ => exact none -- Nock field-write output cannot certify canonical money.
 
 /-- Merely spelling a funding payload cannot remove it from run-effect
 checking. Only prepareCompute's validated index enables the system-leg route. -/
@@ -1118,13 +1146,39 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
             throw .computeFunding
           pure (some ⟨i.val, target.target, target.capability, consent.asset, consent.credits,
             consent.expectedPayerBalance, consent.expectedBookRoot⟩)
+      | .moneyConsent consent =>
+          match consent.funding with
+          | none => pure selected
+          | some funding =>
+            if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
+              throw .computeFunding
+            pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
+              funding.expectedPayerBalance, funding.expectedBookRoot⟩)
       | _ => pure selected) none
-  match command.run with
-  | none => if funding.isSome then throw .computeFunding else pure none
-  | some claim =>
+  match command.run, command.bend with
+  | none, none => if funding.isSome then throw .computeFunding else pure none
+  | some claim, none =>
       let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
         claim.steps funding).mapError Reject.computeBudget
       pure (some prepared)
+  | none, some claim =>
+      let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
+        claim.capacity.proofWork funding).mapError Reject.computeBudget
+      if prepared.credits != claim.capacity.feeDebit then throw .computeFunding
+      pure (some prepared)
+  | some _, some _ => throw .bendExecution
+
+/-- The account identity is taken only from the containing signed target. -/
+def moneyEntries (command : Command) : List ResourceMoneyWire.Entry :=
+  command.targets.filterMap fun target => match target.payload with
+    | .moneyConsent consent => some ⟨target.target, consent⟩
+    | _ => none
+
+def prepareMoney (deployment : Deployment) (physical : RunComputeBudgetDomain.Physical)
+    (command : Command)
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment physical command.subject)) :
+    Except Reject (Option (ResourceMoneyReceiver.Prepared deployment physical (moneyEntries command))) :=
+  (ResourceMoneyReceiver.prepare compute (moneyEntries command)).mapError Reject.money
 
 def computeFundingIndex {deployment : Deployment} {physical : RunComputeBudgetDomain.Physical}
     {subject : SubjectId} (compute : Option (RunComputeBudgetDomain.Prepared deployment physical subject)) :
@@ -1137,6 +1191,84 @@ def computeRunMatches {deployment : Deployment} {physical : RunComputeBudgetDoma
   | none, none => true
   | some compute, some run => decide (compute.steps = run.verdict.steps)
   | _, _ => false
+
+def computeExecutionMatches {deployment : Deployment} {physical : RunComputeBudgetDomain.Physical}
+    {subject : SubjectId} (command : Command)
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment physical subject))
+    (run : Option CheckedRun) : Bool :=
+  match command.bend with
+  | none => computeRunMatches compute run
+  | some claim => run.isNone && compute.any (fun funded =>
+      decide (funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit))
+
+/-- Native source input is constructed from the SAME current directory and
+read scopes as the signed transaction. It never accepts a sampled store from
+the client. Source/funding dependencies remain native read guards, even when
+excluded from the application-visible observation vector. -/
+def bendObservations {deployment : Deployment} {durable : Durable} (context : ResourceObservationAdmission.Context deployment durable)
+    (command : Command) (sourceIndex : Nat)
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)) :
+    Option (List BendNativeInput.Observation) := do
+  let indices := (List.finRange command.targets.length).filter fun i =>
+    i.val != sourceIndex &&
+      match command.targets[i].payload with | .computeFunding _ => false | _ => true
+  indices.mapM fun i => do
+    let target := command.targets[i]
+    let .present packed := context.directory.directory.slots target.target | none
+    let fields := ResourceObservationAdmission.readerFields context target.kind
+      (target.observeCapability.getD ⟨0⟩)
+    let narrowed := ResourceObservationAdmission.narrowPacked fields packed
+    let balances ← match compute with
+      | some funded => if target.kind = .account then
+          some (CanonicalAccountView.accountCut
+            (CanonicalResourceKernel.logicalBook funded.budget.book.post.logical) target.target)
+        else some []
+      | none => ResourceObservationAdmission.balances context target.kind target.target
+    pure ⟨target.target, target.expectedTargetRoot, packed.kind.tag.toNat,
+      (CanonicalCellRegistry.materializer narrowed.kind).codec.encode narrowed.payload.logical,
+      CanonicalAccountView.balanceStream.encode
+        (ResourceObservationAdmission.narrowBalances fields balances)⟩
+
+structure PreparedBend (command : Command) where
+  private mk ::
+  claim : BendExecutionClaim.Claim
+  claimExact : command.bend = some claim
+  artifact : BendWorldProgramCodec.Artifact
+  observations : List BendNativeInput.Observation
+  source : BendNativeRun.Checked artifact claim observations
+  workFits : source.source.sourceCount ≤ claim.capacity.proofWork
+
+/-- The complete source result is retained internally for the pinned typed
+Plan/Surface/Card decoder at actual native admission. No source count appears
+in signed public receipts, and no source diagnostic is returned here. -/
+def checkCommandBend {F : Type} [Field F] [DecidableEq F] {durable : Durable}
+    (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F)
+    (context : ResourceObservationAdmission.Context deployment durable)
+    (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)) :
+    Except Reject (Option (PreparedBend command)) := do
+  match selected : command.bend with
+  | none => pure none
+  | some claim =>
+    if command.run.isSome then throw .bendExecution
+    if BendNativeRun.evaluatorId ∈ profile.disabledEvaluators then throw .bendExecution
+    let some sourceIndex := if h : claim.sourceIndex < command.targets.length then
+        some (⟨claim.sourceIndex,h⟩ : Fin command.targets.length) else none
+      | throw .bendExecution
+    let target := command.targets[sourceIndex]
+    if target.payload != .read then throw .bendExecution
+    if ResourceObservationAdmission.readerFields context target.kind
+        (target.observeCapability.getD ⟨0⟩) != none then throw .bendExecution
+    let some store := target.contentStore? (materialize target.materializer (pre sourceIndex))
+      | throw .bendExecution
+    let some artifact := BendArtifactSource.lookup store ⟨claim.sourceAtom⟩ | throw .bendExecution
+    let some observations := bendObservations context command claim.sourceIndex compute
+      | throw .bendExecution
+    let source ← (BendNativeRun.check artifact claim observations).mapError (fun _ => Reject.bendExecution)
+    if work : source.source.sourceCount ≤ claim.capacity.proofWork then
+      pure (some ⟨claim,selected,artifact,observations,source,work⟩)
+    else throw .bendExecution
 
 structure PreparedInvocation {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -1156,11 +1288,16 @@ structure PreparedInvocation {F : Type} [Field F]
   marker : MarkerMode authority.snapshot profile.semantics command
   compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)
   computeChecked : prepareCompute deployment durable.snapshot clock.clock command = .ok compute
+  money : Option (ResourceMoneyReceiver.Prepared deployment durable.snapshot (moneyEntries command))
+  moneyChecked : prepareMoney deployment durable.snapshot command compute = .ok money
   /-- The re-executed run, when the command claims one. -/
   run : Option CheckedRun
   runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
-  computeRunExact : computeRunMatches compute run = true
+  bend : Option (PreparedBend command)
+  bendChecked : checkCommandBend deployment profile ⟨directory,authority⟩ command
+    (fun i => (targets i).pre.logical) compute = .ok bend
+  computeRunExact : computeExecutionMatches command compute run = true
 
 /-- The accounting plan's amount is tied to the actual accepted oracle count. -/
 theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
@@ -1171,7 +1308,9 @@ theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
     (run : CheckedRun) (hasCompute : prepared.compute = some compute)
     (hasRun : prepared.run = some run) : compute.steps = run.verdict.steps := by
   have exact := prepared.computeRunExact
-  simpa [hasCompute, hasRun, computeRunMatches] using exact
+  cases selected : command.bend with
+  | none => simpa [computeExecutionMatches, selected, hasCompute, hasRun, computeRunMatches] using exact
+  | some claim => simp [computeExecutionMatches, selected, hasCompute, hasRun, computeRunMatches] at exact
 
 /-- `prepare` over a directory the caller already holds for this image (the
 Host's `Opened.directory`), or `none` for an image whose directory does not load.
@@ -1197,10 +1336,17 @@ def prepareFrom {F : Type} [Field F] (deployment : Deployment)
               (fun i => (targets i).pre.logical) (computeFundingIndex compute) with
           | .error reason => .error reason
           | .ok run =>
-            if computeRunExact : computeRunMatches compute run = true then
-              .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
-                compute, computeChecked, run, checked, computeRunExact⟩
-            else .error .computeFunding
+            match bendChecked : checkCommandBend deployment profile ⟨directory,authority⟩ command
+                (fun i => (targets i).pre.logical) compute with
+            | .error reason => .error reason
+            | .ok bend =>
+              if computeRunExact : computeExecutionMatches command compute run = true then
+                match moneyChecked : prepareMoney deployment durable.snapshot command compute with
+                | .error reason => .error reason
+                | .ok money =>
+                  .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
+                    compute, computeChecked, money, moneyChecked, run, checked, bend, bendChecked, computeRunExact⟩
+              else .error .computeFunding
       else .error (.content .staleOpening)
     else .error .duplicateTargets
   else .error .emptyTargets

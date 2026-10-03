@@ -4,6 +4,7 @@ Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
+import Kernel.BendPreparedOutput
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
 import Compiler.WorldKindLawDependencies
@@ -12,6 +13,33 @@ import Compiler.ResourceAuthorityProjection
 import Kernel.JointSlots
 import Kernel.StreamWrite
 import Kernel.ConfidentialAudienceAdmission
+
+namespace Minidregg.Kernel.ResourceMoneyReceiver
+open Minidregg.Kernel.DeclaredResourceController
+open Minidregg.Kernel.ResourceMoneyWire
+variable {deployment : Deployment} {physical : Physical} {entries : List ResourceMoneyWire.Entry}
+
+theorem Prepared.accountSlots_unjoint (prepared : Prepared deployment physical entries)
+    (account : Nat) : JointSlots.Unjoint (prepared.accountSlots account) := by
+  intro pair member
+  obtain ⟨asset, _, member⟩ := List.mem_flatMap.mp member
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with rfl | rfl | rfl <;> simp [String.toList_append]
+
+theorem Prepared.positionSlots_unjoint (prepared : Prepared deployment physical entries)
+    (entry : Entry) : JointSlots.Unjoint (prepared.positionSlots entry) := by
+  intro pair member
+  obtain ⟨position, _, member⟩ := List.mem_flatMap.mp member
+  split at member
+  · cases member
+  · rcases List.mem_append.mp member with scalar | bytes
+    · simp only [List.mem_cons, List.not_mem_nil, or_false] at scalar
+      rcases scalar with rfl | rfl | rfl | rfl | rfl | rfl <;> simp [String.toList_append]
+    · exact JointSlots.bytesSlots_unjoint
+        ("money/position/" ++ toString position ++ "/operation/bytes") 'm'
+        (by simp [String.toList_append]) (by decide) 0 _ pair bytes
+
+end Minidregg.Kernel.ResourceMoneyReceiver
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -156,6 +184,12 @@ def runSlots : Option CheckedRun → List (String × Int)
        ("run/steps", Int.ofNat checked.verdict.steps),
        ("run/fuel", Int.ofNat checked.fuel)]
 
+def bendSlots : Option (PreparedBend command) → List (String × Int)
+  | none => []
+  | some checked =>
+    [(Minidregg.Pred.ranSlot (BendWorldProgramCodec.bendProgramId checked.artifact).value,1),
+     (Minidregg.Pred.evaluatorSlot BendNativeRun.evaluatorId.value,1)]
+
 /-- Physical selector input is derived from the authenticated directory. -/
 def storageKind (prepared : PreparedInvocation deployment profile ambient durable command)
     (incidence : Incidence command) : Nat :=
@@ -188,14 +222,25 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
-    runSlots prepared.run ++ computeSlots prepared
+    (runSlots prepared.run ++ bendSlots prepared.bend) ++ computeSlots prepared
+
+/-- Fixed before/application-before/after balances and per-position values
+come from the SAME actual admitted global Book batch, never account metadata. -/
+def moneyPolicySlots (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : List (String × Int) :=
+  match prepared.money, command.targets[i].payload with
+  | some money, .moneyConsent consent =>
+      money.accountSlots command.targets[i].target ++
+        money.positionSlots ⟨command.targets[i].target, consent⟩
+  | _, _ => []
 
 /-- Participant `i`'s own slots: exactly what a law on `i` reads locally. -/
 def participantSlots (prepared : PreparedInvocation deployment profile ambient durable command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : List (String × Int) :=
   bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
-    targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical (logical (some i))
+    (targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical (logical (some i)) ++
+      moneyPolicySlots prepared i)
 
 /-- Local names for the primary participant, then every participant under
 `joint/target/{id}/…` and again under `joint/index/{i}/…` (`jointSlots`). -/
@@ -286,6 +331,14 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
     cases payload with
     | scalar _ => exact scalarSlots_unjoint _ _
     | computeFunding funding => exact fundingProject_unjoint funding
+    | moneyConsent consent =>
+        apply unjoint_append
+        · intro p hp
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+          rcases hp with rfl | rfl <;> dsimp only <;> decide
+        · cases funding : consent.funding with
+          | none => intro p hp; cases hp
+          | some supplied => exact fundingProject_unjoint supplied
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
@@ -307,11 +360,26 @@ theorem runSlots_unjoint (run : Option CheckedRun) : Unjoint (runSlots run) := b
       · dsimp only; decide
       · dsimp only; decide
 
+theorem bendSlots_unjoint (run : Option (PreparedBend command)) : Unjoint (bendSlots run) := by
+  intro p hp
+  cases run with
+  | none => simp [bendSlots] at hp
+  | some checked =>
+    simp only [bendSlots, List.mem_cons, List.not_mem_nil, or_false] at hp
+    rcases hp with rfl | rfl
+    · simp [Minidregg.Pred.ranSlot, String.toList_append]
+    · simp [Minidregg.Pred.evaluatorSlot, String.toList_append]
+
 theorem participantSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : Unjoint (participantSlots prepared logical i) :=
   unjoint_append _ _ (bytesSlots_unjoint "resource/bytes" 'r' (by decide) (by decide) _ _)
-    (targetProjection_unjoint _ _ _ _)
+    (unjoint_append _ _ (targetProjection_unjoint _ _ _ _) (by
+      unfold moneyPolicySlots
+      split
+      · exact unjoint_append _ _ (ResourceMoneyReceiver.Prepared.accountSlots_unjoint _ _)
+          (ResourceMoneyReceiver.Prepared.positionSlots_unjoint _ _)
+      · intro p hp; cases hp))
 
 /-- The clock's common slots (`clock/now`, `clock/day`, `clock/slot`) are not joint keys. -/
 theorem clockSlots_unjoint (clock : Kernel.ClockCell.Clock) : Unjoint (Kernel.ClockCell.slots clock) := by
@@ -338,7 +406,7 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
           (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
             (clockSlots_unjoint _)) (requestSlots_unjoint _))
         (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
-      (runSlots_unjoint _))
+      (unjoint_append _ _ (runSlots_unjoint _) (bendSlots_unjoint _)))
     (computeSlots_unjoint prepared)
 
 /-- Every joint key is read from the joint block: nothing local or common can shadow it. -/
@@ -753,6 +821,22 @@ def readPreparation [DecidableEq F] (prepared : PreparedInvocation deployment pr
     (operationMarker prepared.authority.snapshot.domain profile.semantics command)
     (readCapability i) (commandCodec.encode command)
 
+/-- Every Book coordinate exposed to a foreign participant law is named by
+that account's actual current read capability, independently of debit consent. -/
+def moneyReadCovered (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Prop :=
+  match prepared.money, command.targets[i].payload with
+  | some money, .moneyConsent _ =>
+      ∀ asset ∈ money.roleAssets command.targets[i].target,
+        CellField.NamedBy (ResourceObservationAdmission.readerFields (readContext prepared)
+          command.targets[i].kind (readCapability i)) (.balance asset)
+  | _, _ => True
+
+instance moneyReadCoveredDecidable (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Decidable (moneyReadCovered prepared i) := by
+  unfold moneyReadCovered
+  split <;> infer_instance
+
 /-- A foreign-policy view requires an actual current read capability, a
 native signature bound to this exact joint request, and the resource's current
 observe policy. A mutation grant or the outer preparation flow is insufficient. -/
@@ -765,6 +849,7 @@ structure ReadLeg [DecidableEq F]
     (readCapability i) (commandCodec.encode command)
   preparedExact : readPreparation prepared i = .ok selected
   checked : ResourceObservationAdmission.Checked selected envelope
+  moneyCovered : moneyReadCovered prepared i
 
 def verifyRead [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -774,9 +859,11 @@ def verifyRead [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     match selected : readPreparation prepared i with
     | .error _ => return .error .observationRejected
     | .ok ready =>
-        match ← ResourceObservationAdmission.check native ready envelope with
-        | .error _ => return .error .observationRejected
-        | .ok checked => return .ok ⟨present, ready, selected, checked⟩
+        if moneyCovered : moneyReadCovered prepared i then
+          match ← ResourceObservationAdmission.check native ready envelope with
+          | .error _ => return .error .observationRejected
+          | .ok checked => return .ok ⟨present, ready, selected, checked, moneyCovered⟩
+        else return .error .observationRejected
   else return .error .observationRequired
 
 attribute [irreducible] portals
@@ -798,6 +885,7 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | world _ => exact fun _ => .body
     | kindDefinition _ | kindRead => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
+    | moneyConsent _ => exact fun _ => .body
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentField address.1
 
@@ -809,7 +897,7 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | read => exact fun _ _ => 0
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read => exact fun _ _ => 0
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -823,7 +911,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
-    | world _ | kindDefinition _ | kindRead | computeFunding _ => exact fun _ => false
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ => exact fun _ => false
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
@@ -835,6 +923,7 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
+    | moneyConsent _ => exact ⟨∅, fun _ => 0⟩ -- Real monetary footprint is legFullFootprint below.
     | computeFunding funding =>
         exact ⟨if funding.credits = 0 then ∅ else {.balance funding.asset},
           fun field => if field = .balance funding.asset then -(Int.ofNat funding.credits) else 0⟩
@@ -871,7 +960,7 @@ actual patch writes and exclude the hiding ratchet. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   match target.payload with
-  | .world _ | .computeFunding _ => targetFullFootprint target pre post
+  | .world _ | .computeFunding _ | .moneyConsent _ => targetFullFootprint target pre post
   | _ => ResourceObservationAdmission.footprintOf
       (ResourceObservationAdmission.changedWithin
         ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
@@ -888,27 +977,72 @@ theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
 
 /-- The footprint of one incidence: a target's write, or nothing for the
 authority read. -/
+def monetaryFootprint? (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Option Footprint :=
+  match prepared.money, command.targets[i].payload with
+  | some money, .moneyConsent consent => some (money.footprint ⟨command.targets[i].target, consent⟩)
+  | _, _ => none
+
+/-- Additional gross outgoing-value bound. The ordinary footprint remains
+actual net Book change and includes destination credits. -/
+def monetaryDebitFootprint? (prepared : PreparedInvocation deployment profile ambient durable command)
+    (incidence : Incidence command) : Option Footprint :=
+  match incidence with
+  | none => none
+  | some i => match prepared.money, command.targets[i].payload with
+      | some money, .moneyConsent consent =>
+          some (money.grossDebitFootprint ⟨command.targets[i].target, consent⟩)
+      | _, _ => none
+
+def monetaryVerbs? (prepared : PreparedInvocation deployment profile ambient durable command)
+    (incidence : Incidence command) : Option (List (Verb .account)) :=
+  match incidence with
+  | none => none
+  | some i => match prepared.money, command.targets[i].payload with
+      | some money, .moneyConsent consent =>
+          some (ResourceMoneyWire.verbs money.batch ⟨command.targets[i].target, consent⟩)
+      | _, _ => none
+
+/-- Additional verb scope on each consented operation. Mint/burn remain
+separate production authorities, never granted by transfer permission. -/
+def moneyVerbsCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest)) :
+    Option (List (Verb .account)) → Except Reject Unit
+  | none => .ok ()
+  | some required =>
+      match kind, capability with
+      | .account, some (cap, _) =>
+          if ∀ verb ∈ required, Verb.AllowedBy verb cap.scope.verbs then .ok ()
+          else .error .capabilityRejected
+      | _, _ => .error .capabilityRejected
+
+def legFullFootprint (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Footprint :=
+  (monetaryFootprint? prepared i).getD (targetFullFootprint command.targets[i]
+      (prepared.targets i).pre.logical (prepared.targets i).post)
+
+/-- Account balance scope uses actual net Book transitions. Other roles keep the
+existing sparse changed-within-patch computation and its exact whole-cell proof. -/
 def legFootprint (prepared : PreparedInvocation deployment profile ambient durable command) :
     Incidence command → Option Footprint
-  | some i => some (targetFootprint command.targets[i]
-      (targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
-        (prepared.targets i).pre)
-      (prepared.targets i).pre.logical (prepared.targets i).post)
+  | some i => some ((monetaryFootprint? prepared i).getD
+      (targetFootprint command.targets[i]
+        (targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+          (prepared.targets i).pre)
+        (prepared.targets i).pre.logical (prepared.targets i).post))
   | none => none
 
-/-- **The leg's footprint is exactly what the write changed, but the
-ratchet**: scanning the patch's write footprint finds every changed address of
-the target cell (`Patch.run_frame`), so it equals the whole-cell footprint over
-every address except the blinding the kernel advanced. -/
 theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    legFootprint prepared (some i) = some (targetFullFootprint command.targets[i]
-      (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  simp only [legFootprint]
-  rw [targetFootprint_exact]
-  intro address outside
-  rw [← (prepared.targets i).postExact]
-  exact (Patch.run_frame _ _ address outside).symm
+    legFootprint prepared (some i) = some (legFullFootprint prepared i) := by
+  cases monetary : monetaryFootprint? prepared i with
+  | some footprint => simp [legFootprint, legFullFootprint, monetary]
+  | none =>
+    simp only [legFootprint, legFullFootprint, monetary, Option.getD_none]
+    congr 1
+    apply targetFootprint_exact
+    intro address outside
+    rw [← (prepared.targets i).postExact]
+    exact (Patch.run_frame _ _ address outside).symm
 
 /-- The authorizing capability's scope against a leg's footprint. Refusals
 name the failed coordinate: a field the scope does not name, or a named field
@@ -958,6 +1092,10 @@ structure CheckedLeg [DecidableEq F]
   /-- The authorizing capability names every field the leg changed and bounds
   each change (K-FIELDS). -/
   fields : fieldsCheck authorization.evidence.capabilityValue (legFootprint prepared incidence) = .ok ()
+  moneyDebits : fieldsCheck authorization.evidence.capabilityValue
+    (monetaryDebitFootprint? prepared incidence) = .ok ()
+  moneyVerbs : moneyVerbsCheck authorization.evidence.capabilityValue
+    (monetaryVerbs? prepared incidence) = .ok ()
 
 def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -975,7 +1113,16 @@ def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.Native
             match covered : fieldsCheck authorization.evidence.capabilityValue
                 (legFootprint prepared incidence) with
             | .error reason => return .error reason
-            | .ok () => return .ok ⟨signature, exactWire, authorization, admitted, covered⟩
+            | .ok () =>
+                match grossCovered : fieldsCheck authorization.evidence.capabilityValue
+                    (monetaryDebitFootprint? prepared incidence) with
+                | .error reason => return .error reason
+                | .ok () =>
+                    match verbsCovered : moneyVerbsCheck authorization.evidence.capabilityValue
+                        (monetaryVerbs? prepared incidence) with
+                    | .error reason => return .error reason
+                    | .ok () => return .ok ⟨signature, exactWire, authorization, admitted,
+                        covered, grossCovered, verbsCovered⟩
       else return .error (.signature .sourceBinding)
 
 /-- **An accepted write leg's capability covers its fields.** The capability
@@ -986,8 +1133,7 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
     {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple (some i) envelope) :
     ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      cap.scope.FieldsCover (targetFullFootprint command.targets[i]
-        (prepared.targets i).pre.logical (prepared.targets i).post) := by
+      cap.scope.FieldsCover (legFullFootprint prepared i) := by
   have fields := leg.fields
   rw [legFootprint_exact] at fields
   exact fieldsCheck_ok fields
@@ -1060,7 +1206,7 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient durabl
 /-- An observe-only read target is read, not written. -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ => true
+  | .read | .kindRead | .computeFunding _ | .moneyConsent _ => true
   | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the
@@ -1081,7 +1227,11 @@ def ordinaryWrites (prepared : PreparedInvocation deployment profile ambient dur
 
 /-- Compute usage and actual Book debit settle in the same CAS as program effects. -/
 def computeWrites (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  prepared.compute.map RunComputeBudgetDomain.Prepared.writes |>.getD []
+  match prepared.money with
+  | none => prepared.compute.map RunComputeBudgetDomain.Prepared.writes |>.getD []
+  | some money =>
+      (prepared.compute.map fun accounting =>
+        [accounting.pay.write accounting.budget.quota.post]).getD [] ++ money.writes
 
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
   ordinaryWrites prepared ++ computeWrites prepared
@@ -1189,6 +1339,156 @@ def checkAudiences [DecidableEq F]
       else return .error (.audience .transition)
     else return .error .physicalPreparation
 
+def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  (List.finRange command.targets.length).map (fun i =>
+    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩) ++
+  (List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then some (targetReadGuard prepared i) else none
+
+/-- Full current/pinned source chains and structural kind bindings used by every
+incidence. An unavailable dependency is retained as failure, never silently
+converted to an admissible empty set. -/
+def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Option (List ReadGuard) := do
+  let groups ← ((List.finRange command.targets.length).map some ++ [none]).mapM fun incidence => do
+    let structural ← kindDependencies prepared incidence
+    let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
+      prepared.directory.directory profile.semantics (incidenceTarget command incidence).target
+      structural.additional
+    pure ((sources ++ structural.readGuards).map fun (cellId, root) => (⟨⟨cellId⟩, root⟩ : ReadGuard))
+  pure groups.flatten
+
+/-- The domain reads of every invocation: the authority cell and the clock. -/
+def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  prepared.authority.readGuards ++ [prepared.clock.readGuard] ++ (lawSourceGuards prepared).getD [] ++
+    (match prepared.money with
+     | some money => money.readGuards
+     | none => (prepared.compute.map RunComputeBudgetDomain.Prepared.readGuards).getD [])
+
+def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
+    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
+def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
+  ((writes prepared).map DataWrite.cellId).Nodup ∧
+    (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+    (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (lawSourceGuards prepared).isSome = true
+
+/- Construct the full target writes once for the five physical-shape clauses.
+The ordinary proposition below remains the receiver's authority condition;
+this Boolean is only an implementation of its decision procedure. -/
+def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient durable command) : Bool :=
+  let ws := writes prepared
+  let ids := ws.map DataWrite.cellId
+  let source := sourceGuards prepared
+  let guards := source ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ ids
+  decide ids.Nodup &&
+  decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
+  decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
+  decide (∀ guard ∈ source, guard.cellId ∉ ids) &&
+  decide (∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) &&
+  (lawSourceGuards prepared).isSome
+
+theorem physicalShapeCheck_iff
+    (prepared : PreparedInvocation deployment profile ambient durable command) :
+    physicalShapeCheck prepared = true ↔ PhysicalShape prepared := by
+  simp [physicalShapeCheck, PhysicalShape, readGuards, Bool.and_eq_true]
+  tauto
+
+instance physicalShapeDecidable (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Decidable (PhysicalShape prepared) :=
+  decidable_of_iff (physicalShapeCheck prepared = true)
+    (physicalShapeCheck_iff prepared)
+
+theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
+    ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
+  intro write member
+  rcases List.mem_append.mp member with ordinary | compute
+  · rcases List.mem_append.mp ordinary with target | entry
+    · obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp target
+      split at produced
+      · cases produced
+      · cases produced
+        rfl
+    · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
+      obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
+      exact StreamWrite.entryWrite_root appended
+  · cases monetary : prepared.money with
+    | none =>
+      cases bound : prepared.compute with
+      | none => simp [computeWrites, monetary, bound] at compute
+      | some budget =>
+        simp only [computeWrites, monetary, bound, Option.map_some, Option.getD_some] at compute
+        exact budget.writes_roots_bound write compute
+    | some money =>
+      simp only [computeWrites, monetary] at compute
+      rcases List.mem_append.mp compute with pay | financial
+      · cases bound : prepared.compute with
+        | none => simp [bound] at pay
+        | some budget =>
+          simp only [bound, Option.map_some, Option.getD_some, List.mem_singleton] at pay
+          subst write
+          rfl
+      · exact money.financial.writes_roots_bound write financial
+
+theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
+    (shape : PhysicalShape prepared) :
+    ∀ guard ∈ readGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
+  intro guard member
+  rcases List.mem_append.mp member with source | authority
+  · exact shape.2.2.2.1 guard source
+  · simpa using (List.mem_filter.mp authority).2
+
+/-- Every dependency of every retained holder remains a final read guard unless
+this very intent writes that cell under the identical old-root CAS. -/
+
+def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
+abbrev SignedIngress := Digest × Digest × SignedCommand
+
+def signedIngressStream : StreamCodec SignedIngress :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list bytesStream)
+        (StreamCodec.product (StreamCodec.list bytesStream) bytesStream)))))
+    (fun (domain, semantics, signed) =>
+      (domain, semantics, signed.commandBytes, signed.targetEnvelopes, signed.observeEnvelopes, signed.authorityEnvelope))
+    (fun (domain, semantics, command, targets, observe, authority) =>
+      (domain, semantics, ⟨command, targets, observe, authority⟩))
+    (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
+
+def signedIngressRawCodec : LawfulCodec SignedIngress where
+  encode ingress := signedIngressFrame ++ signedIngressStream.encode ingress
+  decode bytes := if bytes.take signedIngressFrame.length = signedIngressFrame then
+    signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
+  decode_encode := by
+    intro ingress
+    have exact := signedIngressStream.toLawful.decode_encode ingress
+    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at exact
+    simp [exact]
+
+def signedIngressCodec : LawfulCodec SignedIngress := ResourceBirthCodec.strictCodec signedIngressRawCodec
+
+def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
+  signedIngressCodec.encode (domain, semantics, signed)
+abbrev decodeSignedBytes := signedIngressCodec.decode
+
+theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCommand) :
+    decodeSignedBytes (signedBytes domain semantics signed) = some (domain, semantics, signed) :=
+  signedIngressCodec.decode_encode _
+theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
+    (decoded : decodeSignedBytes bytes = some ingress) : signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
+  ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
+
+
+/-- Complete guards before final execution/capacity admission. -/
+def admissionGuards (prepared : PreparedInvocation deployment profile ambient durable command)
+    (audience : AudienceChecks prepared) : List ReadGuard :=
+  readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
+    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
   private mk ::
@@ -1199,6 +1499,12 @@ structure AcceptedInvocation [DecidableEq F]
   observations : command.requiresObservation = true → (i : TargetIndex command) →
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   audience : AudienceChecks prepared
+  execution : Option (BendPreparedOutput.Admitted prepared
+    (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+    (writes prepared) (admissionGuards prepared audience))
+  executionChecked : BendPreparedOutput.admit prepared
+    (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+    (writes prepared) (admissionGuards prepared audience) = .ok execution
   tuple : PreparedTuple (plan prepared)
   checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
@@ -1247,8 +1553,14 @@ def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
                   | .ok authority =>
                     match ← checkAudiences prepared with
                     | .error reason => return .error reason
-                    | .ok audience => return .ok ⟨ingress, count, readCount, observations, audience, tuple,
-                        fun incidence => match incidence with | some i => targets i | none => authority⟩
+                    | .ok audience =>
+                      match executionChecked : BendPreparedOutput.admit prepared
+                          (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+                          (writes prepared) (admissionGuards prepared audience) with
+                      | .error reason => return .error reason
+                      | .ok execution => return .ok ⟨ingress, count, readCount, observations, audience,
+                          execution, executionChecked, tuple,
+                          fun incidence => match incidence with | some i => targets i | none => authority⟩
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
@@ -1346,97 +1658,6 @@ theorem AcceptedInvocation.policy_view_exact [DecidableEq F]
       accepted.apex accepted.evidence incidence)
 
 
-def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  (List.finRange command.targets.length).map (fun i =>
-    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩) ++
-  (List.finRange command.targets.length).filterMap fun i =>
-    if command.targets[i].isRead then some (targetReadGuard prepared i) else none
-
-/-- Full current/pinned source chains and structural kind bindings used by every
-incidence. An unavailable dependency is retained as failure, never silently
-converted to an admissible empty set. -/
-def lawSourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) :
-    Option (List ReadGuard) := do
-  let groups ← ((List.finRange command.targets.length).map some ++ [none]).mapM fun incidence => do
-    let structural ← kindDependencies prepared incidence
-    let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
-      prepared.directory.directory profile.semantics (incidenceTarget command incidence).target
-      structural.additional
-    pure ((sources ++ structural.readGuards).map fun (cellId, root) => (⟨⟨cellId⟩, root⟩ : ReadGuard))
-  pure groups.flatten
-
-/-- The domain reads of every invocation: the authority cell and the clock. -/
-def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  prepared.authority.readGuards ++ [prepared.clock.readGuard] ++ (lawSourceGuards prepared).getD [] ++
-    (prepared.compute.map RunComputeBudgetDomain.Prepared.readGuards).getD []
-
-def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
-
-def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
-  ((writes prepared).map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-    (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
-    (lawSourceGuards prepared).isSome = true
-
-/- Construct the full target writes once for the five physical-shape clauses.
-The ordinary proposition below remains the receiver's authority condition;
-this Boolean is only an implementation of its decision procedure. -/
-def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient durable command) : Bool :=
-  let ws := writes prepared
-  let ids := ws.map DataWrite.cellId
-  let source := sourceGuards prepared
-  let guards := source ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ ids
-  decide ids.Nodup &&
-  decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
-  decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
-  decide (∀ guard ∈ source, guard.cellId ∉ ids) &&
-  decide (∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) &&
-  (lawSourceGuards prepared).isSome
-
-theorem physicalShapeCheck_iff
-    (prepared : PreparedInvocation deployment profile ambient durable command) :
-    physicalShapeCheck prepared = true ↔ PhysicalShape prepared := by
-  simp [physicalShapeCheck, PhysicalShape, readGuards, Bool.and_eq_true]
-  tauto
-
-instance physicalShapeDecidable (prepared : PreparedInvocation deployment profile ambient durable command) :
-    Decidable (PhysicalShape prepared) :=
-  decidable_of_iff (physicalShapeCheck prepared = true)
-    (physicalShapeCheck_iff prepared)
-
-theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
-    ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
-  intro write member
-  rcases List.mem_append.mp member with ordinary | compute
-  · rcases List.mem_append.mp ordinary with target | entry
-    · obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp target
-      split at produced
-      · cases produced
-      · cases produced
-        rfl
-    · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
-      obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
-      exact StreamWrite.entryWrite_root appended
-  · cases bound : prepared.compute with
-    | none => simp [computeWrites, bound] at compute
-    | some budget =>
-      simp only [computeWrites, bound, Option.map_some, Option.getD_some] at compute
-      exact budget.writes_roots_bound write compute
-
-theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
-    (shape : PhysicalShape prepared) :
-    ∀ guard ∈ readGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
-  intro guard member
-  rcases List.mem_append.mp member with source | authority
-  · exact shape.2.2.2.1 guard source
-  · simpa using (List.mem_filter.mp authority).2
-
-/-- Every dependency of every retained holder remains a final read guard unless
-this very intent writes that cell under the identical old-root CAS. -/
 def AcceptedInvocation.readGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : List ReadGuard :=
@@ -1474,43 +1695,6 @@ theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
   · exact Or.inl (List.mem_append.mpr (Or.inr
       (List.mem_filter.mpr ⟨used, by simpa using written⟩)))
 
-def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
-abbrev SignedIngress := Digest × Digest × SignedCommand
-
-def signedIngressStream : StreamCodec SignedIngress :=
-  StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list bytesStream)
-        (StreamCodec.product (StreamCodec.list bytesStream) bytesStream)))))
-    (fun (domain, semantics, signed) =>
-      (domain, semantics, signed.commandBytes, signed.targetEnvelopes, signed.observeEnvelopes, signed.authorityEnvelope))
-    (fun (domain, semantics, command, targets, observe, authority) =>
-      (domain, semantics, ⟨command, targets, observe, authority⟩))
-    (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
-
-def signedIngressRawCodec : LawfulCodec SignedIngress where
-  encode ingress := signedIngressFrame ++ signedIngressStream.encode ingress
-  decode bytes := if bytes.take signedIngressFrame.length = signedIngressFrame then
-    signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have exact := signedIngressStream.toLawful.decode_encode ingress
-    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at exact
-    simp [exact]
-
-def signedIngressCodec : LawfulCodec SignedIngress := ResourceBirthCodec.strictCodec signedIngressRawCodec
-
-def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
-  signedIngressCodec.encode (domain, semantics, signed)
-abbrev decodeSignedBytes := signedIngressCodec.decode
-
-theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCommand) :
-    decodeSignedBytes (signedBytes domain semantics signed) = some (domain, semantics, signed) :=
-  signedIngressCodec.decode_encode _
-theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
-    (decoded : decodeSignedBytes bytes = some ingress) : signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
-  ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
-
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
 def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
@@ -1522,7 +1706,7 @@ def invocationEvent (domain semantics : Digest) (command : Command) (signed : Si
 def transactionId (domain semantics : Digest) (command : Command) : Digest :=
   ⟨operationMarker domain semantics command⟩
 
-def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient durable command)
+def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
     ResourceCost.Charge
   | .incidences => command.targets.length + 1
@@ -1532,6 +1716,14 @@ def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient d
   | .proofWork => (prepared.run.map fun checked => checked.verdict.steps).getD 0
   | .feeDebit => (prepared.compute.map RunComputeBudgetDomain.Prepared.credits).getD 0
   | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
+
+/-- Fixed public capacity is the actual admitted application charge. Exact
+private branch usage was checked against this envelope before Accepted existed. -/
+def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient durable command)
+    (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge :=
+  match prepared.bend with
+  | none => legacySourceChargeFrom prepared signed ws guards
+  | some checked => BendPrivateCapacity.charge checked.claim.capacity
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) : ResourceCost.Charge :=
@@ -1566,13 +1758,17 @@ its record writes: each non-read target plus its fresh stream append entry.
 Authority and observe-only targets are guards, neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared)
+    (historical : prepared.bend = none) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
         (List.finRange command.targets.length).filterMap (fun i =>
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
-  ⟨rfl, rfl⟩
+  by
+    constructor
+    · simp [AcceptedInvocation.dataIntent, sourceChargeFrom, historical, legacySourceChargeFrom]
+    · rfl
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}

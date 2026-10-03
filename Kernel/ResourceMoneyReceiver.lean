@@ -3,7 +3,7 @@ source plans. Entries are extracted from signed account targets by the parent
 receiver; its existing current capability/law/signature admission is mandatory.
 No accepted effect or durable receipt can be obtained from this token alone. -/
 import Kernel.ResourceMoneyWire
-import Kernel.JointSlots
+import Compiler.ResourceAuthorityProjection
 
 namespace Minidregg.Kernel.ResourceMoneyReceiver
 open Minidregg.Compiler
@@ -86,17 +86,6 @@ def Prepared.fundingAssets (prepared : Prepared deployment physical entries) (ac
   | none => []
   | some funding => if funding.payer = account then [funding.asset] else []
 
-/-- Scope bounds authorize every gross outgoing application debit plus the
-actual funding debit. A later credit never discounts reserved outgoing value. -/
-def Prepared.footprint (prepared : Prepared deployment physical entries) (entry : Entry) : Footprint :=
-  let assets := (ResourceMoneyWire.assets prepared.batch entry ++
-    prepared.fundingAssets entry.account).toFinset
-  { touched := assets.image CellField.balance
-    delta := fun field => match field with
-      | .balance asset => -(Int.ofNat (ResourceMoneyWire.debit prepared.batch entry asset +
-          prepared.fundingDebit entry.account asset))
-      | _ => 0 }
-
 /-- Only coordinates actually consumed by this account's source/destination
 roles enter its native policy view. Read capability narrowing is supplied by
 the parent observation admission, separately from this debit scope. -/
@@ -106,13 +95,35 @@ def Prepared.roleAssets (prepared : Prepared deployment physical entries) (accou
     if operation.posting.source = account ∨ operation.posting.destination = account then
       some operation.posting.asset else none) ++ prepared.fundingAssets account).eraseDups
 
+/-- Scope bounds authorize every gross outgoing application debit plus the
+actual funding debit. A later credit never discounts reserved outgoing value. -/
+def Prepared.grossDebitFootprint (prepared : Prepared deployment physical entries) (entry : Entry) : Footprint :=
+  let assets := (ResourceMoneyWire.assets prepared.batch entry ++
+    prepared.fundingAssets entry.account).toFinset
+  { touched := assets.image CellField.balance
+    delta := fun field => match field with
+      | .balance asset => -(Int.ofNat (ResourceMoneyWire.debit prepared.batch entry asset +
+          prepared.fundingDebit entry.account asset))
+      | _ => 0 }
+
+/-- Preserve the existing scope contract: these are actual committed net
+changes, including destination credits. Gross debit reservation is a separate
+additional check, never a replacement of this actual transition footprint. -/
+def Prepared.footprint (prepared : Prepared deployment physical entries) (entry : Entry) : Footprint :=
+  { touched := (prepared.roleAssets entry.account).toFinset.image CellField.balance
+    delta := fun field => match field with
+      | .balance asset =>
+          (logicalBook prepared.financial.post.logical).balance entry.account asset -
+            (logicalBook prepared.loaded.book.cell.logical).balance entry.account asset
+      | _ => 0 }
+
 def Prepared.accountSlots (prepared : Prepared deployment physical entries) (account : Nat) :
     List (String × Int) :=
   (prepared.roleAssets account).flatMap fun asset =>
-    let prefix := "money/balance/" ++ toString asset
-    [(prefix ++ "/before", (logicalBook prepared.loaded.book.cell.logical).balance account asset),
-     (prefix ++ "/application-before", prepared.financial.applicationPre.balance account asset),
-     (prefix ++ "/after", (logicalBook prepared.financial.post.logical).balance account asset)]
+    let slotStem := "money/balance/" ++ toString asset
+    [(slotStem ++ "/before", (logicalBook prepared.loaded.book.cell.logical).balance account asset),
+     (slotStem ++ "/application-before", prepared.financial.applicationPre.balance account asset),
+     (slotStem ++ "/after", (logicalBook prepared.financial.post.logical).balance account asset)]
 
 /-- Per-operation current-law inputs use the actual intermediate Book, not a
 caller-declared before/after number or an initial balance reused for every leg. -/
@@ -125,29 +136,15 @@ def Prepared.positionSlots (prepared : Prepared deployment physical entries) (en
       let before := applyOperations prepared.financial.applicationPre
         (prepared.batch.operations.take position)
       let after := operation.apply before
-      let prefix := "money/position/" ++ toString position
-      [(prefix ++ "/source", Int.ofNat operation.posting.source),
-       (prefix ++ "/destination", Int.ofNat operation.posting.destination),
-       (prefix ++ "/asset", Int.ofNat operation.posting.asset),
-       (prefix ++ "/amount", Int.ofNat operation.posting.amount),
-       (prefix ++ "/source/before", before.balance operation.posting.source operation.posting.asset),
-       (prefix ++ "/source/after", after.balance operation.posting.source operation.posting.asset)]
-
-theorem Prepared.accountSlots_unjoint (prepared : Prepared deployment physical entries)
-    (account : Nat) : JointSlots.Unjoint (prepared.accountSlots account) := by
-  intro pair member
-  obtain ⟨asset, _, member⟩ := List.mem_flatMap.mp member
-  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
-  rcases member with rfl | rfl | rfl <;> simp [String.toList_append]
-
-theorem Prepared.positionSlots_unjoint (prepared : Prepared deployment physical entries)
-    (entry : Entry) : JointSlots.Unjoint (prepared.positionSlots entry) := by
-  intro pair member
-  obtain ⟨position, _, member⟩ := List.mem_flatMap.mp member
-  split at member
-  · cases member
-  · simp only [List.mem_cons, List.not_mem_nil, or_false] at member
-    rcases member with rfl | rfl | rfl | rfl | rfl | rfl <;> simp [String.toList_append]
+      let slotStem := "money/position/" ++ toString position
+      [(slotStem ++ "/source", Int.ofNat operation.posting.source),
+       (slotStem ++ "/destination", Int.ofNat operation.posting.destination),
+       (slotStem ++ "/asset", Int.ofNat operation.posting.asset),
+       (slotStem ++ "/amount", Int.ofNat operation.posting.amount),
+       (slotStem ++ "/source/before", before.balance operation.posting.source operation.posting.asset),
+       (slotStem ++ "/source/after", after.balance operation.posting.source operation.posting.asset)] ++
+        ResourceAuthorityProjection.bytesSlots (slotStem ++ "/operation/bytes") 0
+          (CanonicalResourcePageMaterializer.operationStream.encode operation)
 
 theorem Prepared.conserves (prepared : Prepared deployment physical entries) (asset : AssetId) :
     (logicalBook prepared.financial.post.logical).totalAsset asset =

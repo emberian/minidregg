@@ -1910,12 +1910,6 @@
       "qualification": "WIP AUTHORED UNCOMPILED; 2module warm check queued afterstation"
     },
     {
-      "path": "docs/RESOURCE-MONEY-OPERATIONS.md",
-      "owner": "native_performance_construction-money",
-      "sha256": "602aa05e2ff907df126ff4772f48dff518d2ee6f0920308b3d7620d08d2110a1",
-      "qualification": "WIP AUTHORED UNCOMPILED; 2module warm check queued afterstation"
-    },
-    {
       "path": "native/private-backend/src/acss_id_store.rs",
       "owner": "private_backend_construction",
       "sha256": "ee0e7c09c33e840a1f14e0180ba5758adc68670460d815fd41f7feaea7fc3820",
@@ -2504,30 +2498,6 @@
       "qualification": "Four Python regressions PASS; read-only actual receiver457 source/373 scheduled/84 warm/76 external preflight PASS; not Lean/native qualification"
     },
     {
-      "path": "Kernel/ResourceMoneyWire.lean",
-      "owner": "native_performance_construction-money-receiver",
-      "sha256": "605f92e0f40f8dccfbaf7818b600b540d945d72679e772f686920b2f3c961843",
-      "qualification": "WIP AUTHORED UNCOMPILED native receiver; merge sharedhunks with worldBendrun beforecheck"
-    },
-    {
-      "path": "Kernel/ResourceMoneyReceiver.lean",
-      "owner": "native_performance_construction-money-receiver",
-      "sha256": "9bf2bdef1e9336751da06a8c58fcf3143d95e5200ed9fe7693e09abbca26595f",
-      "qualification": "WIP AUTHORED UNCOMPILED native receiver; merge sharedhunks with worldBendrun beforecheck"
-    },
-    {
-      "path": "Kernel/ResourceTransaction.lean",
-      "owner": "native_performance_construction-money-receiver",
-      "sha256": "51864e6d87b8053e56398c4d4c8d0d05924a8d807ffa20b585aa00d6b3b7c3a6",
-      "qualification": "WIP AUTHORED UNCOMPILED native receiver; merge sharedhunks with worldBendrun beforecheck"
-    },
-    {
-      "path": "Kernel/DeclaredResourceController.lean",
-      "owner": "native_performance_construction-money-receiver",
-      "sha256": "896e1ecc36081fb0c55c60f318e5e23e60e13060ea9cb14b92aaf7ff402d6de4",
-      "qualification": "WIP AUTHORED UNCOMPILED native receiver; merge sharedhunks with worldBendrun beforecheck"
-    },
-    {
       "path": "Theory/BendClosureReturnSteps.lean",
       "owner": "bend_controller_simulation",
       "sha256": "fb886e46bab36744d467737a3adcb78aeca7e0a4c90f0b8767ce420818b4e555",
@@ -2988,6 +2958,72 @@
       "owner": "multiuser capacity / traffic reviewed shared hunks",
       "sha256": "5014081e5d4106e35d102168b2db1269d3027b293b674a991f28043518d429bc",
       "qualification": "Capacity37 focused tests/release PASS; traffic9 focused tests/release PASS; combined native workload pending"
+    },
+    {
+      "path": "Kernel/ResourceTransaction.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "5a69f8ad16179770cabf1c34ce312f6773ed79cee40e3dfedca1c3708f8d087d",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Kernel/DeclaredResourceController.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "4e27b66f019cae628b5501acb8c499ff5fa205cc6f80b6338d4c9515e6fd620d",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Kernel/ResourceMoneyWire.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "f3ae691b6323e8ab6169613ea3b7f678f33a3b922901980166da74b9bfd5c4f1",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Kernel/ResourceMoneyReceiver.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "804bacb617e3b2cec0f501b7051848ede303b5d1c4e7f6dc37d4e6c09d8053e2",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Assurance/ResourceMoneyReceiverAudit.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "eb9c41fcc81972ac55e94e6206bfe7fb9c5a97ee4d14d0b9813ebc22de7fed80",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "docs/RESOURCE-MONEY-OPERATIONS.md",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "d1f1794c04be2c9c0d4be071019f58b9c7f147afdb3bd543fd62230f7b70df1f",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Host/Json.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "5bfb6c005c335e75cf5bc641e0394f588695e05b70c0e80206cad316e31ecbbe",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Host/FnInboxView.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "97218f84074322fe39b8cacb2f56781d46388f3a13edebfed8141fb82a415999",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Host/InspectRender.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "8a6dc1c66f7bdbe91bf13001e87f77cb71ffd9e151f84dd0096c4b378990a3ea",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Host/GrainOriginSource.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "9819ae9295d2ed80ad21ffcb5ef7ec003476a04facf58e0c8ef5ed2fa550f931",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+    },
+    {
+      "path": "Kernel/NativeObservationController.lean",
+      "owner": "world and money shared native cohort reviewed by integration captain",
+      "sha256": "94dedd18f93493fc3a9b58e612487facc13dd986935526c26d532ad41e7c237f",
+      "qualification": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
     }
   ]
 }
