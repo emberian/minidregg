@@ -375,3 +375,24 @@ response, not an app input. Carrying it beside the request, outside the signed
 list, is therefore the correct repair, and no kernel change is needed. The
 signed request admitted by the kernel is byte-identical to the same GET
 without capture.
+
+## Status after tonight's engineering lane
+
+- `fc1e98a9`: the spk-host browser repairs (capture intent outside the
+  signed list, RFC 9110 Accept, pre-commit projection, human fenced release,
+  bounded accept queue) and remedy 1(a), the Host image verified once per
+  inode with fd-bound exec.
+- `1f9ccc5a`: the client reductions from cause 5:
+  - shared name resolved once per `read`;
+  - `--in PARENT` resolved once;
+  - verifier `profile` identity cached per process;
+  - no second continuity pass for an attempt this process just finished.
+- Not yet measured end to end. The hbox world still runs the sealed
+  `2a075e68` binaries, and no app is installed there. The expected effects
+  (≈0.6 s less per app HTTP request; 24 fewer exchanges per shared `read`;
+  3–4 fewer Lean spawns per signed read) are inferred from the traced counts
+  and the per-unit measurements above.
+- Remedies 1(b), 1(c), 2, 3, 6 and 7 are Lean or protocol work and remain
+  proposals. Remedy 4 is Rust, but lives in
+  `native/credential-signature-verifier` and
+  `native/hyperdocument-link-sqlite-store`, outside this lane's files tonight.
