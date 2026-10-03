@@ -1,0 +1,19 @@
+Minidregg
+Copyright (C) 2026 Ember Richardson and contributors
+
+First-party source, proofs, documentation, and generated glue are licensed
+AGPL-3.0-or-later. See LICENSE.
+
+Portions of the design, theorem interfaces, constants, and generated-artifact
+lineage are downstream of or interoperable with Breadstuffs/Dregg2 work. Preserve
+the producer commits, source paths, artifact hashes, modification history, and
+attribution recorded in CROSS_REPO_CONTRACTS.md and the relevant source
+docstrings.
+
+Third-party dependencies and quotations retain their respective copyrights and
+licenses. This notice does not relicense third-party work.
+
+Historical note: earlier revisions of the two Hyperdocument native crate
+manifests declared MIT OR Apache-2.0. Existing grants for copies received under
+those terms are not withdrawn by the current AGPL-3.0-or-later selection. See
+LICENSING.md.
