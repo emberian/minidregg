@@ -94,7 +94,124 @@ fn record(state: &Path, request: &Request, status: &str, evidence: Value) -> Res
     retain_exact_private(&name,&serde_json::to_vec_pretty(&receipt).map_err(|e|e.to_string())?,1_048_576)?;
     File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
     println!("{receipt}");
-    Ok(())
+    owe(state,request,status,&terminal_text(status,&evidence))
+}
+
+fn terminal_text(status:&str,evidence:&Value)->String {
+    match (status,evidence["basis"].as_str()) {
+        ("cancelled",Some("author-withdrew"))=>"cancelled: you withdrew it before it started".into(),
+        ("cancelled",Some("source-assignment-replaced"))=>"cancelled: the room's Hermes assignment was replaced; ask again".into(),
+        ("cancelled",Some("source-assignment-dismissed"))=>"cancelled: Hermes was dismissed from this room".into(),
+        ("cancelled",Some("source-membership-revoked"))=>"cancelled: your room membership was revoked".into(),
+        ("refused",Some("bounded-admission"))=>"refused: Hermes's queue is full; ask again later".into(),
+        ("refused",Some(basis))=>format!("refused: {basis}"),
+        ("completed",_)=>"completed: replied".into(),
+        _=>status.into(),
+    }
+}
+
+// ---------------------------------------------------------------- notices
+//
+// Members see a request's state as typed request-status entries Hermes
+// publishes in its own stream, replying to the request: one at each
+// transition (queued, started, one terminal outcome), never a heartbeat.
+// They are paid through the same room-turn budget as replies. A notice that
+// cannot be afforded or is refused is skipped; publication never blocks or
+// replaces the request's terminal outcome, which is the retained record above.
+
+const MAX_NOTICES:usize=256;
+
+#[derive(Clone,Debug,Default,Serialize,Deserialize,PartialEq)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+pub(crate) struct Notice {
+    pub identity: Value,
+    pub author: String,
+    pub cell: String,
+    pub sequence: u64,
+    /// The request's feed number when it was observed (`say --re`), guarded
+    /// by its stable cell/sequence.
+    pub number: u64,
+    pub status: String,
+    pub text: String,
+    /// owed, published or skipped; `op` is set before any payment.
+    pub state: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub op: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub evidence: Option<Value>,
+}
+#[derive(Default,Serialize,Deserialize)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+pub(crate) struct Notices { next: u64, notices: Vec<Notice> }
+
+fn notices_path(state:&Path)->PathBuf { state.join("notices.json") }
+pub(crate) fn notices(state:&Path)->Result<Notices> {
+    let p=notices_path(state);
+    if !p.exists() { return Ok(Notices::default()); }
+    serde_json::from_slice(&bounded_regular_file(&p,MAX_STATE_BYTES)?).map_err(|e|format!("resident notices: {e}"))
+}
+/// The request states a notice may carry (the client's `say --status`).
+pub(crate) const STATUSES:&[&str]=&["queued","started","completed","refused","cancelled"];
+fn is_terminal(status:&str)->bool { matches!(status,"completed"|"refused"|"cancelled") }
+
+/// Owe one notice for a transition. Bounded per request by construction: one
+/// per status and one terminal. Retention is bounded; settled notices are
+/// pruned first, and a backlog of unsettled ones skips the new notice.
+fn owe(state:&Path,request:&Request,status:&str,text:&str)->Result<()> {
+    let (Some(author),Some(cell),Some(sequence),Some(number))=(request.entry["author"].as_str(),request.entry["cell"].as_str(),
+        request.entry["sequence"].as_u64(),request.entry["n"].as_u64()) else { return Ok(()) };
+    let mut all=notices(state)?;
+    if all.notices.iter().any(|n|n.identity==request.identity && (n.status==status || (is_terminal(status) && is_terminal(&n.status)))) {
+        return Ok(());
+    }
+    while all.notices.len()>=MAX_NOTICES {
+        match all.notices.iter().position(|n|n.state!="owed") { Some(i)=>{all.notices.remove(i);} None=>break }
+    }
+    let skipped=all.notices.len()>=MAX_NOTICES;
+    all.notices.push(Notice{identity:request.identity.clone(),author:author.into(),cell:cell.into(),sequence,number,
+        status:status.into(),text:text.into(),state:if skipped {"skipped".into()} else {"owed".into()},op:None,
+        evidence:skipped.then(||json!({"basis":"notice-backlog","maxNotices":MAX_NOTICES}))});
+    atomic_json(&notices_path(state),&all)
+}
+
+/// One publication step's outcome, decided by the exact operation record.
+pub(crate) enum Published { Done(Value), Skipped(Value), Uncertain(String) }
+
+/// Publish owed notices in order. `pay(op)` and `write(op, notice)` use the
+/// notice's exact operation record, so entering them again after a crash
+/// looks the operation up instead of paying or writing twice. An uncertain
+/// notice stays owed and is retried later; others still publish.
+pub(crate) fn publish_notices(state:&Path,mut pay:impl FnMut(&str)->Published,
+    mut write:impl FnMut(&str,&Notice)->Published)->Result<Vec<String>> {
+    let mut all=notices(state)?;
+    let mut uncertain=Vec::new();
+    for index in 0..all.notices.len() {
+        if all.notices[index].state!="owed" { continue; }
+        if all.notices[index].op.is_none() {
+            all.next+=1;
+            all.notices[index].op=Some(format!("rs{}",all.next));
+            atomic_json(&notices_path(state),&all)?; // durable identity before any payment
+        }
+        let op=all.notices[index].op.clone().unwrap();
+        let outcome=match pay(&op) {
+            Published::Done(_)=>write(&op,&all.notices[index]),
+            other=>other,
+        };
+        match outcome {
+            Published::Done(evidence)=>{all.notices[index].state="published".into();all.notices[index].evidence=Some(evidence);}
+            Published::Skipped(evidence)=>{all.notices[index].state="skipped".into();all.notices[index].evidence=Some(evidence);}
+            Published::Uncertain(reason)=>uncertain.push(format!("{op}: {reason}")),
+        }
+        atomic_json(&notices_path(state),&all)?;
+    }
+    Ok(uncertain)
+}
+
+/// The author's own `withdraw` entry replying to this request, addressed to
+/// the resident.
+fn withdrawal<'a>(entries:&'a [Value],request:&Request,subject:&str)->Option<&'a Value> {
+    entries.iter().find(|e| e["kind"]=="withdraw" && e["author"]==request.entry["author"] && e["to"]==subject
+        && e["reCell"]==request.entry["cell"] && e["reSequence"]==request.entry["sequence"])
 }
 fn terminal(state: &Path, request: &Request) -> Result<bool> {
     let id=digest(&request.identity)?;
@@ -161,6 +278,7 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
     for mut r in q.pending.drain(..) {
         if terminal(state,&r)? { continue; }
         if !eligible(&r.entry) {record(state,&r,"cancelled",json!({"basis":"source-membership-revoked"}))?;continue;}
+        if let Some(w)=withdrawal(entries,&r,subject) {record(state,&r,"cancelled",json!({"basis":"author-withdrew","withdraw":w}))?;continue;}
         if let Some(fresh)=entries.iter().find(|e|same_entry(e,&r.entry)) {r.entry=fresh.clone();}
         retained.push(r);
     }
@@ -170,6 +288,11 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
         else if !eligible(&r.entry) {
             if r.started.is_some() {return Err("started request author revoked; retained for exact recovery".into());}
             record(state,r,"cancelled",json!({"basis":"source-membership-revoked"}))?;q.selected=None;
+        }
+        // A withdraw cancels only a request that has not started; a started
+        // request ends only by pre-admission proof or native terminal receipt.
+        else if let (None,Some(w))=(&r.started,withdrawal(entries,r,subject)) {
+            record(state,r,"cancelled",json!({"basis":"author-withdrew","withdraw":w}))?;q.selected=None;
         }
         else if let Some(fresh)=entries.iter().find(|e|same_entry(e,&r.entry)) {r.entry=fresh.clone();}
         else if r.started.is_some() {return Err("started request source unreadable; exact recovery required".into());}
@@ -181,6 +304,7 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
         let r=request(binding,entry,subject)?;
         if terminal(state,&r)? || q.pending.iter().chain(q.selected.iter()).any(|p|p.identity==r.identity) {continue;}
         if !eligible(entry) {record(state,&r,"cancelled",json!({"basis":"source-membership-revoked"}))?;continue;}
+        if let Some(w)=withdrawal(entries,&r,subject) {record(state,&r,"cancelled",json!({"basis":"author-withdrew","withdraw":w}))?;continue;}
         let author_count=q.pending.iter().chain(q.selected.iter()).filter(|p|p.entry["author"]==entry["author"]).count();
         if author_count>=limits.per_author || q.pending.len()+usize::from(q.selected.is_some())>=limits.pending {
             record(state,&r,"refused",json!({"basis":"bounded-admission","maxPending":limits.pending,"maxPerAuthor":limits.per_author}))?;
@@ -189,6 +313,9 @@ pub(crate) fn select(prepared:&Value,state:&Path,limits:Limits)->Result<Option<V
             if serde_json::to_vec_pretty(&q).map_err(|e|e.to_string())?.len()>MAX_STATE_BYTES-METADATA_RESERVE {
                 let r=q.pending.pop().unwrap();
                 record(state,&r,"refused",json!({"basis":"bounded-custody-bytes","maxStateBytes":MAX_STATE_BYTES,"metadataReserve":METADATA_RESERVE}))?;
+            } else {
+                let queued=q.pending.last().unwrap().clone();
+                owe(state,&queued,"queued",&format!("queued: {} ahead of it",q.pending.len()-1+usize::from(q.selected.is_some())))?;
             }
         }
     }
@@ -268,7 +395,9 @@ pub(crate) fn started(state:&Path,prompt_id:&str,input:&str)->Result<()> {
     let mut q=open(state)?;
     if let Some(r)=q.selected.as_mut() {r.started=Some(json!({"residentPromptId":prompt_id,"inputSha256":input}));}
     else {return Err("resident prompt has no durably selected request".into());}
-    atomic_json(&path(state),&q)
+    atomic_json(&path(state),&q)?;
+    let selected=q.selected.as_ref().unwrap();
+    owe(state,selected,"started","started: Hermes is working on it")
 }
 pub(crate) fn dismiss(state:&Path)->Result<()> {
     let mut q=open(state)?;
@@ -443,4 +572,89 @@ mod tests {
         fs::remove_dir_all(state).unwrap();
     }
 
+
+    fn withdraw(author:&str,cell:&str,sequence:u64)->Value {
+        json!({"author":author,"cell":author,"sequence":99,"height":99,"n":99,"kind":"withdraw","to":"8","reCell":cell,"reSequence":sequence})
+    }
+    fn statuses(state:&Path)->Vec<(String,String)> {
+        notices(state).unwrap().notices.iter().map(|n|(n.author.clone(),n.status.clone())).collect()
+    }
+
+    /// A withdraw cancels the author's queued (or selected, unstarted)
+    /// request; another author's withdraw, or one for a started request,
+    /// changes nothing.
+    #[test]fn author_withdraw_cancels_only_its_own_unstarted_requests() {
+        let state=fixture("withdraw");
+        let mut p=prepared(vec![entry("20",1),entry("20",2),entry("21",3)]);
+        select(&p,&state,Limits::default()).unwrap();
+        assert_eq!(open(&state).unwrap().selected.unwrap().entry["sequence"],1);
+        // 21 withdrawing 20's request is not a withdrawal.
+        p["sourceRequests"]=json!([entry("20",1),entry("20",2),entry("21",3),withdraw("21","20",2)]);
+        select(&p,&state,Limits::default()).unwrap();
+        assert_eq!(open(&state).unwrap().pending.len(),2);
+        // 20 withdraws its queued #2 and its selected-but-unstarted #1.
+        p["sourceRequests"]=json!([entry("20",1),entry("20",2),entry("21",3),withdraw("20","20",2),withdraw("20","20",1)]);
+        let next=select(&p,&state,Limits::default()).unwrap().unwrap();
+        assert_eq!(next["recentMemberEntries"][0]["author"],"21");
+        let cancelled:Vec<_>=fs::read_dir(&state).unwrap().flatten().filter(|e|e.file_name().to_string_lossy().ends_with("-cancelled.json")).collect();
+        assert_eq!(cancelled.len(),2);
+        let record:Value=serde_json::from_slice(&fs::read(cancelled[0].path()).unwrap()).unwrap();
+        assert_eq!(record["evidence"]["basis"],"author-withdrew");assert_eq!(record["modelRequests"],0);
+        // Started: a withdraw never clears it.
+        started(&state,"prompt","input").unwrap();
+        p["sourceRequests"]=json!([entry("21",3),withdraw("21","21",3)]);
+        select(&p,&state,Limits::default()).unwrap();
+        let q=open(&state).unwrap();assert_eq!(q.selected.unwrap().entry["sequence"],3);
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// Transitions owe bounded notices (queued, started, one terminal), and
+    /// a replaced assignment tells each affected author instead of silently
+    /// dropping its queued request.
+    #[test]fn transitions_owe_one_notice_each_and_reassignment_tells_authors() {
+        let state=fixture("notices");
+        let mut p=prepared(vec![entry("20",1),entry("21",2)]);
+        select(&p,&state,Limits::default()).unwrap();
+        select(&p,&state,Limits::default()).unwrap();
+        assert_eq!(statuses(&state),[("20".into(),"queued".into()),("21".into(),"queued".into())]);
+        p["requestBinding"]["assignment"]=json!("2");
+        select(&p,&state,Limits::default()).unwrap();
+        let all=notices(&state).unwrap().notices;
+        let cancelled:Vec<_>=all.iter().filter(|n|n.status=="cancelled").collect();
+        assert_eq!(cancelled.len(),2);
+        assert!(cancelled.iter().all(|n|n.text.contains("assignment was replaced")));
+        // The re-admitted requests under the new assignment are new identities.
+        assert_eq!(all.iter().filter(|n|n.status=="queued").count(),4);
+        started(&state,"prompt","input").unwrap();
+        let q=open(&state).unwrap();let r=q.selected.clone().unwrap();
+        record(&state,&r,"completed",json!({})).unwrap();
+        record(&state,&r,"cancelled",json!({})).unwrap();
+        let mine:Vec<_>=notices(&state).unwrap().notices.into_iter().filter(|n|n.identity==r.identity).map(|n|n.status).collect();
+        assert_eq!(mine,["queued","started","completed"],"one terminal notice per request");
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// Publication: an unaffordable notice is skipped, an undecided one stays
+    /// owed with its exact operation and is retried with the same identity,
+    /// and none of it touches the request's own outcome.
+    #[test]fn notice_publication_skips_unaffordable_and_retries_undecided_with_same_operation() {
+        let state=fixture("publish");
+        let p=prepared(vec![entry("20",1),entry("21",2),entry("20",3)]);
+        select(&p,&state,Limits::default()).unwrap();
+        let before=fs::read(path(&state)).unwrap();
+        let mut paid=Vec::new();let mut written=Vec::new();
+        let uncertain=publish_notices(&state,|op|{paid.push(op.to_owned());match op {
+                "rs2"=>Published::Skipped(json!({"basis":"out of budget"})),
+                _=>Published::Done(json!({"paid":true}))}},
+            |op,n|{written.push((op.to_owned(),n.status.clone()));
+                if op=="rs3" {Published::Uncertain("lost reply".into())} else {Published::Done(json!({"said":op}))}}).unwrap();
+        assert_eq!(paid,["rs1","rs2","rs3"]);assert_eq!(uncertain,["rs3: lost reply"]);
+        let states:Vec<_>=notices(&state).unwrap().notices.iter().map(|n|(n.op.clone().unwrap(),n.state.clone())).collect();
+        assert_eq!(states,[("rs1".into(),"published".into()),("rs2".into(),"skipped".into()),("rs3".into(),"owed".into())]);
+        let mut again=Vec::new();
+        publish_notices(&state,|op|{again.push(op.to_owned());Published::Done(json!({}))},|_,_|Published::Done(json!({}))).unwrap();
+        assert_eq!(again,["rs3"],"only the undecided notice re-enters, with its retained operation");
+        assert_eq!(fs::read(path(&state)).unwrap(),before,"publication never changes request custody");
+        fs::remove_dir_all(state).unwrap();
+    }
 }

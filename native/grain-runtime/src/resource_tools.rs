@@ -1170,6 +1170,24 @@ impl RoomTools<'_> {
         Ok(json!({"resolution":"uncertain","basis":"lookup-inconclusive","proposal":id,"detail":run.ending()}))
     }
 
+    /// A source-only request-status entry (never a model tool): one typed
+    /// `say --status` replying to the request's feed number, guarded by its
+    /// stable cell/sequence, addressed to its author, under the exact write
+    /// record of operation `op`. Re-entering looks the record up.
+    pub fn write_status(&self, op: &str, notice: &crate::resident_requests::Notice) -> Result<Value> {
+        if !crate::resident_requests::STATUSES.contains(&notice.status.as_str()) || notice.text.is_empty()
+            || notice.number == 0 || notice.sequence == 0
+            || !notice.author.bytes().all(|b| b.is_ascii_digit()) || !notice.cell.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("request-status notice is malformed".into());
+        }
+        let file = self.request_file(&format!("{}.txt", Self::proposal(op)), &notice.text)?;
+        let line = format!("say --in {} --operation-record {} --to {} --re {} --expect-re-cell {} --expect-re-sequence {} --status {} --file {file}",
+            self.config.room, self.operation_record(op, "write")?.display(), notice.author, notice.number,
+            notice.cell, notice.sequence, notice.status);
+        let run = Self::ok_or_ending(self.line(&line)?)?;
+        Ok(json!({"said":run.stdout.trim()}))
+    }
+
     /// An unmetered notice in Hermes's stream (the one write that is not a
     /// turn: saying that the budget is spent).
     pub fn notice(&self, text: &str) -> Result<LineRun> {

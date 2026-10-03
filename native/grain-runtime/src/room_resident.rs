@@ -142,6 +142,11 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
     // Never let a previous completion stand in for this new unique prompt.
     journal.last_completion = None;
     atomic_json(state, journal)?;
+    // The author sees `started` before the model runs; the controller is idle
+    // until the command below, so Hermes's workspace has one writer.
+    if let Some(room) = config.tool_task.as_ref().and_then(|t| t.room.as_ref()) {
+        publish_notices(room, state.parent().ok_or("resident state parent absent")?);
+    }
     send(&mut socket, &command)?;
     loop {
         let frame = next_frame(&mut reader, attachment)?;
@@ -231,6 +236,34 @@ fn drain_preadmission_refusal(config:&Config,config_path:&Path,journal:&mut Resi
     Ok(true)
 }
 
+/// Publish owed request-status notices through the room-turn payment and the
+/// exact write record. Never an error for the driver: a notice that cannot be
+/// afforded is skipped, an undecided one is retried on a later pass, and no
+/// notice blocks or replaces a request's outcome.
+fn publish_notices(room: &resource_tools::RoomToolsConfig, state: &Path) {
+    let tools = resource_tools::RoomTools { config: room };
+    let decided = |result: Result<Value>, op: &str, effect: &str| -> resident_requests::Published {
+        match result {
+            Ok(value) => resident_requests::Published::Done(value),
+            Err(error) => match tools.lookup_operation(op, effect) {
+                Ok(lookup) if lookup["resolution"] == "performed" => resident_requests::Published::Done(lookup),
+                Ok(lookup) if lookup["resolution"] == "refused" =>
+                    resident_requests::Published::Skipped(json!({"error":error,"lookup":lookup})),
+                Ok(lookup) => resident_requests::Published::Uncertain(format!("{error}; {}", lookup["resolution"])),
+                Err(lookup) => resident_requests::Published::Uncertain(format!("{error}; lookup {lookup}")),
+            },
+        }
+    };
+    let outcome = resident_requests::publish_notices(state,
+        |op| decided(tools.pay(op, "mini_status"), op, "payment"),
+        |op, notice| decided(tools.write_status(op, notice), op, "write"));
+    match outcome {
+        Ok(uncertain) if uncertain.is_empty() => {}
+        Ok(uncertain) => println!("{}", json!({"type":"resident-notices-undecided","operations":uncertain})),
+        Err(error) => println!("{}", json!({"type":"resident-notices-unavailable","error":error})),
+    }
+}
+
 pub(crate) fn main(path: &Path) -> Result<()> {
     let bytes = bounded_regular_file(path, 65_536)?;
     let options: ResidentConfig = serde_json::from_slice(&bytes).map_err(|e| format!("resident config: {e}"))?;
@@ -267,6 +300,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+    publish_notices(&room, &options.state);
     while (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) || journal.return_pending {
         let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
         if prepared["dismissed"] == true {
@@ -290,6 +324,9 @@ pub(crate) fn main(path: &Path) -> Result<()> {
                 maintenance
             }
         };
+        // Queued, cancelled and refused notices from this selection go out
+        // before the prompt, so a waiting author sees its place first.
+        publish_notices(&room, &options.state);
         if prepared.get("selectedRequest").is_some() || resident_requests::maintenance_needed(&options.state,&maintenance_input)? {
             let prompt_bytes=format!("{ASSIGNMENT_PREFIX}{}",prompt_assignment(&prepared)).len();
             if prepared.get("selectedRequest").is_some() && prompt_bytes+256>16_384 {
@@ -303,6 +340,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
             println!("{}", json!({"type":"resident-completed","completed":resident_outcomes::qualified_count(&options.state,journal.completed)?,"recordedCompletions":journal.completed}));
             resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+            publish_notices(&room, &options.state);
             // Prompt count and final delivery are separate durable states.
         }
         if (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
