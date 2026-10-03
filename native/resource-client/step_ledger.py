@@ -32,8 +32,9 @@ class StepLedger:
         self.state = state
         self.persist = persist
         self.lock = lock or threading.RLock()
-        self.value = state.setdefault(key, {"done": [], "pending": None, "settled": []})
-        self.value.setdefault("settled", [])
+        with self.lock:
+            self.value = state.setdefault(key, {"done": [], "pending": None, "settled": []})
+            self.value.setdefault("settled", [])
 
     def done(self, name):
         return name in self.value["done"]

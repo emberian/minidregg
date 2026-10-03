@@ -490,8 +490,12 @@ class Scenario:
             room = self.p["rooms"][key]
             markers = {who: f"{self.p['op']}-{key}-{who} composed member text" for who in room["members"]}
 
+            # Every lane's ledger exists before any thread runs, so persisting
+            # the state never races a new lane's creation.
+            lanes = {who: self.lane(f"documents:{key}:{who}") for who in room["members"]}
+
             def write(who):
-                lane = self.lane(f"documents:{key}:{who}")
+                lane = lanes[who]
                 op = f"{self.p['op']}-{key}-w-{who}"
                 name = self.alias(key, who)
                 self.local(lane, f"documents:{key}:{who}:append", who,
@@ -596,8 +600,9 @@ class Scenario:
                     return self.report()
                 mine = [r for r in self.state["rows"] if r["id"].startswith(phase + ":")
                         or (phase == "churn" and (r["id"].startswith("lockout:") or ":rejoin:" in r["id"]))]
-                blocked = [r["id"] for r in mine if r.get("status") == "blocked"]
-                failed = sorted({r["id"] for r in mine if r.get("status") == "fail"})
+                latest = {r["id"]: r.get("status") for r in mine}  # a retried row's last outcome
+                blocked = [i for i, status in latest.items() if status == "blocked"]
+                failed = sorted(i for i, status in latest.items() if status == "fail")
                 if failed:
                     statuses[phase] = "fail (probes): " + ", ".join(failed)
                 else:
