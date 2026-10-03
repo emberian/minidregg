@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """Provision SPK apps in a supplied existing Mini world. Never initializes Store.
 All births/share/enrollment use supplied owner/member authority and pinned sockets.
+
+  same-store-app.py INPUT                       attach, or continue the same attachment
+  same-store-app.py status INPUT                retained step ledger; no native call
+  same-store-app.py settle INPUT STEP absent|confirmed EVIDENCE REASON
+  same-store-app.py adopt-adapter INPUT REASON  pin repaired adapter bytes for this root
+
+An attachment is a ledger of single-effect steps under one evidence root. A
+completed step never repeats. Install, lifecycle delegation and START re-enter
+their own native journals. Any other interrupted step fences the attachment
+until its retained attempt is settled from evidence.
 """
 import argparse
 import hashlib
@@ -9,6 +19,9 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
+import stat
+import subprocess
 import sys
 
 HERE=Path(__file__).resolve().parent
@@ -56,7 +69,8 @@ def validate(c):
         subjects.append(d['subject']);route_names.append(route_name(label))
     require(len(set(route_names))==len(route_names),'route name hash collision; choose distinct inventory keys')
     state=Path(c['grainsRoot'])/c['miniConfigSha256'][:16]/'host'/'apps'/app['app']
-    sockets=[state/'g1/checkpoint-control.sock',*[state/'routes'/name/'http.sock' for name in route_names]]
+    # INSTALL is generation 1 and each START takes the next; bound two digits.
+    sockets=[state/'g99/checkpoint-control.sock',*[state/'routes'/name/'http.sock' for name in route_names]]
     require(all(len(os.fsencode(path))<=107 for path in sockets),'Linux socket pathname exceeds bound; shorten grains root or app ID')
     require(len(set(resources))==len(resources) and len(set(capabilities))==len(capabilities),'resource or capability allocations overlap')
     require(decimal(a.get('creatorAccountCapability',a.get('ownerAccountCapability'))),'account capability invalid')
@@ -113,6 +127,13 @@ def delegate_lifecycle(x,c):
     x.f['lifecycleDelegation']={'request':delegation,'result':result,'selectorSha256':sha(selector)};x.write_state()
     return selector
 
+# The Host replays history inside INSTALL and START; these bound a hung helper,
+# not an ordinary slow one. An interrupted INSTALL preparation cannot be
+# repeated, so its bound is far above any measured run (1605 s on the first
+# shared host). START's own completion wait is 1800 s.
+INSTALL_TIMEOUT=4*3600
+START_TIMEOUT=1800+600
+
 def check_task_readiness(x):
     parent=x.query(x.creator,x.parent['task'],x.parent['observeCapability'])
     tool=x.query(x.creator,x.tool['task'],x.tool['observeCapability'])
@@ -121,12 +142,13 @@ def check_task_readiness(x):
     require(int(p['generation'])>0 and p['status'] in ['3','4'] and int(p['reserved'])>0,'birth parent is not reserved; prepare its ordinary owner task or recover exact retained attempt before attachment')
     require(int(t['generation'])>0 and t['status'] in ['1','2'] and t['reserved']=='0','birth tool is not attached and settled; prepare its ordinary owner task or recover exact retained attempt before attachment')
     x.f['taskReadiness']={'parent':str(parent['dir']),'tool':str(tool['dir'])};x.write_state()
-    return parent
+
+def app_reserve(x):
+    return int(x.authority['tariff']['base'])+3*int(x.authority['tariff']['perBirth'])
 
 def birth_app(x):
-    parent=check_task_readiness(x)
-    x.reserve(int(x.authority['tariff']['base'])+3*int(x.authority['tariff']['perBirth']))
-    observations=[x.query(x.creator,x.tool['task'],x.tool['observeCapability']),parent]
+    # The reservation is its own retained step; this authors exactly one birth.
+    observations=[x.query(x.creator,x.tool['task'],x.tool['observeCapability']),x.query(x.creator,x.parent['task'],x.parent['observeCapability'])]
     nonce=x.n()
     def witness(q,t):
         return dict(t,targetRoot=q['view']['cell']['root'],before={k:q['view']['cell']['grain'][k] for k in ['generation','status','remaining','reserved']})
@@ -146,55 +168,129 @@ def birth_app(x):
     x.f.update(applicationSource=str(author/'source.json'),applicationReceipt=str(attempt/'outcome.json'))
     x.write_state()
 
-def attach(path):
+def observe_world(x,c):
+    # Signed current observations bind the supplied world identity before writes.
+    q=x.query(x.creator,x.creator,x.accountcap,kind='account')
+    require(all(q['challenge'][k]==c['namespace'][k] for k in ['domain','semantics']),'signed source namespace differs from harness deployment')
+    room=x.query(x.owner,c['room']['target'],c['room']['capability'])
+    require(all(room['challenge'][k]==c['namespace'][k] for k in ['domain','semantics']),'room authority belongs to another namespace')
+    x.f['sourceObservation']={'namespace':q['challenge'],'namespaceEvidence':str(q['dir']),'room':{'target':c['room']['target'],'authorityEvidence':str(room['dir']),'challenge':room['challenge']}}
+    x.write_state()
+
+def runtime_ready(x):
+    # INSTALL and START load this profile and START refuses unless the root
+    # broker runs its exact pinned SPK runtime. Establish both before the first
+    # source write instead of after an app is born and installed.
+    profile=load(x.profile)
+    for role in ['bwrap','spkHost']:
+        meta=os.lstat(profile[role])
+        require(stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and not meta.st_mode&0o022 and sha(profile[role])==profile[role+'Sha256'],'native profile pins a '+role+' outside root custody')
+    _,out,_=x.run([x.m['spkHost']['path'],'grain','runtime-status',x.profile],timeout=120)
+    status=load(out)
+    require(status.get('protocol')=='mini-spk-runtime-status-v1' and status.get('brokerProtocol')=='mini-spk-broker-runtime-v1'
+        and status.get('store')==x.state.parent.name and status.get('state') in ('baseline','ready')
+        and status.get('spkHost')==profile['spkHost'] and status.get('spkHostSha256')==profile['spkHostSha256'],
+        'root broker runtime is not ready for this profile; no app was born')
+    x.f['runtimeStatus']=str(out);x.write_state()
+
+def install_app(x,c):
+    install=[x.m['spkHost']['path'],'grain','install',x.profile,x.f['applicationSource'],x.f['applicationReceipt'],c['spk'],'--class',c.get('sizeClass','S')]
+    if c.get('lifecycleDelegation') is not None:
+        selector=absolute(x.f['lifecycleDelegation']['result']['managementSelector'])
+        require(sha(selector)==x.f['lifecycleDelegation']['selectorSha256'],'retained lifecycle selector changed before installation')
+        install+=['--management-selector',selector]
+    x.run(install,timeout=INSTALL_TIMEOUT)
+
+def serving(x):
+    q=x.query(x.owner,x.app,x.appcap);require(f.entries(q['view'])['1']=='4','app is not source serving')
+    x.f['generation']=f.entries(q['view'])['0'];x.write_state()
+
+def enter(path):
+    """Bind a fresh evidence root to this exact input, or re-enter that root."""
     require(os.getuid()!=0,'run with Store operator authority')
     c=load(path);m,artifacts=validate(c)
-    root=absolute(c['root']);require(not root.exists() and not root.is_symlink(),'fresh attachment evidence root required')
-    f.protected_parent(root.parent)
+    root=absolute(c['root']);f.protected_parent(root.parent)
     # Validate native Store/profile provenance before creating any app or member.
     state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket','/run/mini-spk-broker.sock'),absolute(c['profileResult']),absolute(c['initStoreResult']))
     require(profile_value['miniOperatorSocket']==c['privateSocket'],'profile points at a different private Store owner')
     if c.get('lifecycleDelegation') is not None:require(c['lifecycleDelegation']['manager']==profile_value['managementSubject'],'lifecycle delegated manager differs from native profile')
     elif c['authority']['owner']!=profile_value['managementSubject']:raise RuntimeError('member-owned hosting requires explicit lifecycleDelegation before app birth')
-    root.mkdir(mode=0o700);(root/'hooks').mkdir(mode=0o700)
-    save(root/'input.json',c);save(root/'manifest.json',m)
-    save(root/'source-inputs.json',{str(HERE/name):sha(HERE/name) for name in ['same-store-app.py','ws-continuity-fixture.py']})
+    if root.exists() or root.is_symlink():
+        require(root.is_dir() and not root.is_symlink(),'attachment evidence root is not a directory')
+        f.protected_parent(root)
+        require(load(root/'input.json')==c and load(root/'manifest.json')==m,'retained attachment input differs; a changed attachment needs a fresh evidence root')
+        return c,root,f.Fixture(root/'fixture.json')
+    # Publish the bound root in one rename; a crash before it leaves no root.
+    staging=root.parent/('.'+root.name+'.'+secrets.token_hex(8))
+    staging.mkdir(mode=0o700);(staging/'hooks').mkdir(mode=0o700)
+    save(staging/'input.json',c);save(staging/'manifest.json',m)
+    save(staging/'source-inputs.json',{str(HERE/name):sha(HERE/name) for name in ['same-store-app.py','ws-continuity-fixture.py']})
     value={'schema':f.SCHEMA,'root':str(root),'app':c['application']['app'],'application':c['application'],
         'authority':c['authority'],'keys':c['keys'],'artifacts':artifacts,'state':str(state),'profilePath':str(profile),
         'grainsRoot':c['grainsRoot'],'brokerSocket':c.get('brokerSocket','/run/mini-spk-broker.sock'),'candidateSource':m['sourceCommit'],
         'attachment':{k:c[k] for k in ['workspace','miniConfig','miniConfigSha256','publicSocket','privateSocket','genesis','profileResult','initStoreResult']},
         'delegates':c['delegates'],'leaseSeconds':profile_value.get('wsAuthorityLeaseSeconds',120)}
-    save(root/'fixture.json',value);x=f.Fixture(root/'fixture.json')
-    # Signed current observations bind the supplied world identity before writes.
-    q=x.query(x.creator,x.creator,x.accountcap,kind='account')
-    require(all(q['challenge'][k]==c['namespace'][k] for k in ['domain','semantics']),'signed source namespace differs from harness deployment')
-    save(root/'source-namespace.json',q['challenge'])
-    room=x.query(x.owner,c['room']['target'],c['room']['capability'])
-    require(all(room['challenge'][k]==c['namespace'][k] for k in ['domain','semantics']),'room authority belongs to another namespace')
-    save(root/'source-room.json',{'target':c['room']['target'],'authorityEvidence':str(room['dir']),'challenge':room['challenge']})
-    birth_app(x)
-    install=[artifacts['spkHost']['path'],'grain','install',x.profile,x.f['applicationSource'],x.f['applicationReceipt'],c['spk'],'--class',c.get('sizeClass','S')]
-    if c.get('lifecycleDelegation') is not None:install+=['--management-selector',delegate_lifecycle(x,c)]
-    x.run(install)
+    save(staging/'fixture.json',value)
+    os.rename(staging,root)
+    return c,root,f.Fixture(root/'fixture.json')
+
+def attach(path):
+    c,root,x=enter(path)
+    retained=root/'attachment-result.json'
+    if retained.exists():return load(retained)
+    host=x.m['spkHost']['path']
+    x.step('observe-world',lambda:observe_world(x,c),reentrant=True)
+    x.step('runtime-ready',lambda:runtime_ready(x),reentrant=True)
+    x.step('task-readiness',lambda:check_task_readiness(x),reentrant=True)
+    x.step('app:reserve',lambda:x.reserve(app_reserve(x)),effect_only=True)
+    x.step('app:birth',lambda:birth_app(x))
+    if c.get('lifecycleDelegation') is not None:x.step('lifecycle',lambda:delegate_lifecycle(x,c),reentrant=True)
+    x.step('install',lambda:install_app(x,c),reentrant=True)
     for label,d in x.f['delegates'].items():
-        x.birth_session(d);x.delegate(x.app,x.appcap,d['appObserve'],d['subject']);x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject'])
-        x.issue(d);x.route(route_name(label),d);x.write_state()
-    x.run([artifacts['spkHost']['path'],'grain','start',x.profile,x.app])
-    for d in x.f['delegates'].values(): x.enroll(d);x.write_state()
-    q=x.query(x.owner,x.app,x.appcap);require(f.entries(q['view'])['1']=='4','app is not source serving')
-    x.f['generation']=f.entries(q['view'])['0'];x.write_state()
+        k='member:'+label+':'
+        x.step(k+'session-reserve',lambda:x.reserve(x.session_reserve()),effect_only=True)
+        x.step(k+'session',lambda d=d:x.birth_session(d,reserve=False))
+        x.step(k+'app-observe',lambda d=d:x.delegate(x.app,x.appcap,d['appObserve'],d['subject']),effect_only=True)
+        x.step(k+'package-observe',lambda d=d:x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject']),effect_only=True)
+        x.step(k+'ticket-reserve',lambda:x.reserve(3),effect_only=True)
+        x.step(k+'ticket',lambda d=d:x.issue(d,reserve=False,observe=False))
+        x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject']),effect_only=True)
+        x.step(k+'route',lambda label=label,d=d:x.route(route_name(label),d))
+    x.step('start',lambda:x.run([host,'grain','start',x.profile,x.app],timeout=START_TIMEOUT),reentrant=True)
+    for label,d in x.f['delegates'].items():
+        x.step('member:'+label+':enrollment',lambda d=d:x.enroll(d))
+    x.step('serving',lambda:serving(x),reentrant=True)
     result={'protocol':'mini-spk-same-store-attached-v1','appId':x.app,'fixture':str(x.path),'generation':x.f['generation'],
         'namespace':c['namespace'],'miniConfig':c['miniConfig'],'miniConfigSha256':c['miniConfigSha256'],
         'subjects':{label:d['subject'] for label,d in x.f['delegates'].items()},
         'inventory':{'app':x.app,'stateRoot':str(x.state),'profilePath':str(x.profile),'journalDir':str(x.state/f'apps/{x.app}/g{x.f["generation"]}'),
             'residentConfig':str(x.state/f'apps/{x.app}/g{x.f["generation"]}/resident.json'),'unit':f'mini-spk-a{x.app}-g{x.f["generation"]}.service',
             'delegates':x.f['delegates']},'receiving':'provisioned; actual shared editing/revoke/restart still required'}
-    save(root/'attachment-result.json',result);return result
+    save(retained,result);return result
+
+def retained_fixture(path):
+    c=load(path);root=absolute(c['root']);f.protected_parent(root)
+    require(load(root/'input.json')==c,'retained attachment input differs')
+    return root
+
+def status(path):
+    # Reads retained files only: no Fixture, no hook directory, no native call.
+    root=retained_fixture(path);value=load(root/'fixture.json')
+    ledger=value.get('steps',{'done':[],'pending':None,'settled':[]})
+    return {'protocol':'mini-spk-same-store-attach-status-v1','root':str(root),'app':value['app'],'done':ledger['done'],'pending':ledger['pending'],
+        'settled':ledger['settled'],'complete':(root/'attachment-result.json').exists()}
 
 def main():
-    os.umask(0o077);p=argparse.ArgumentParser(description=__doc__);p.add_argument('input');args=p.parse_args()
-    print(json.dumps(attach(args.input)))
+    os.umask(0o077);p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('words',nargs='+');words=p.parse_args().words
+    if words[0]=='status' and len(words)==2:result=status(words[1])
+    elif words[0]=='settle' and len(words)==6:
+        result=f.Fixture(retained_fixture(words[1])/'fixture.json').settle(words[2],words[3],words[4],words[5])
+    elif words[0]=='adopt-adapter' and len(words)==3:result=f.adopt_adapter(retained_fixture(words[1]),words[2])
+    elif len(words)==1:result=attach(words[0])
+    else:p.error('unknown command')
+    print(json.dumps(result))
 if __name__=='__main__':
     try: main()
-    except (RuntimeError,ValueError,KeyError,OSError) as error:
+    except (RuntimeError,ValueError,KeyError,OSError,subprocess.TimeoutExpired) as error:
         print('same-Store app: '+str(error),file=sys.stderr);sys.exit(1)

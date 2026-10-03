@@ -32,6 +32,30 @@ def save(path, value):
         f.write("\n")
 
 
+def confirmed_issue_receipt(attempt):
+    """Use the retained native confirmation; lookup remains explicit recovery.
+
+    Mini's own submit (or a later exact lookup) retains the confirmed outcome
+    and anchors it to the exact reply bytes. A second historical lookup after a
+    confirmed submit adds no evidence and can outlive its transport deadline.
+    """
+    attempt = Path(attempt)
+    anchor = load(attempt / "receipt-anchor.json")
+    source = anchor.get("source")
+    require(anchor.get("type") == "minidregg-grain-share-issue-receipt-anchor-v1" and isinstance(source, str)
+            and re.fullmatch(r"submit|lookup-[0-9]{4}", source) is not None,
+            "ticket receipt anchor is not a retained native confirmation")
+    outcome = load(attempt / (source + ".outcome.json"))
+    receipt = anchor.get("receipt", {})
+    require(outcome.get("type") == "confirmed" and outcome.get("confirmation") in ("installed", "replayed"),
+            "ticket issue is not natively confirmed; preserve exact recovery")
+    require(anchor.get("outcomeSha256") == sha(attempt / (source + ".outcome.bin")) and
+            set(receipt) == {"eventId", "transactionId", "acceptedCount", "worldRoot"} and
+            all(isinstance(outcome.get(k), str) and receipt[k] == outcome[k] for k in receipt),
+            "ticket confirmation differs from retained historical anchor")
+    return receipt
+
+
 def logged_run(args, prefix, *, env=None, timeout=1800):
     """Retain elapsed time and uncertainty even when a command times out."""
     save(str(prefix)+".argv.json",[str(x) for x in args])
@@ -116,6 +140,39 @@ def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-brok
     return state, profile_path, profile
 
 
+def adapter_pins(root):
+    """Retained adapter source pins: the original, then explicit successors.
+
+    A repaired adapter never silently continues an evidence root. Each
+    successor names the exact pin record it replaces and why.
+    """
+    previous = root / "source-inputs.json"
+    pins = load(previous)
+    for index in range(1, 100):
+        successor = root / f"source-inputs-successor-{index:02d}.json"
+        if not successor.exists():
+            return pins, previous, index
+        record = load(successor)
+        require(record.get("type") == "mini-spk-adapter-successor-v1" and record.get("previousSha256") == sha(previous)
+                and isinstance(record.get("reason"), str) and record["reason"] and isinstance(record.get("sources"), dict)
+                and set(record["sources"]) == set(pins), "adapter successor record differs from its retained lineage")
+        pins, previous = record["sources"], successor
+    raise RuntimeError("adapter successor records exhausted")
+
+
+def adopt_adapter(root, reason):
+    """Pin the adapter's current bytes as an explicit successor for this root."""
+    root = absolute(root)
+    protected_parent(root)
+    pins, previous, index = adapter_pins(root)
+    require(isinstance(reason, str) and 0 < len(reason) <= 400, "adapter successor reason required")
+    current = {source: sha(source) for source in pins}
+    require(current != pins, "adapter bytes are unchanged; no successor needed")
+    record = {"type": "mini-spk-adapter-successor-v1", "previousSha256": sha(previous), "sources": current, "reason": reason}
+    save(root / f"source-inputs-successor-{index:02d}.json", record)
+    return record
+
+
 def check_registration(reply, request, delegate):
     fields = {"protocol","registrationNonceHex","routeIndex","app","appGeneration","session",
               "sessionGeneration","subject","ticketResource","sessionFingerprintHex","admittedHeight","admittedWorldRoot"}
@@ -139,8 +196,8 @@ class Fixture:
         require(self.f["schema"] == SCHEMA, "wrong fixture schema")
         self.root = absolute(self.f["root"])
         protected_parent(self.root)
-        for source, expected in load(self.root / "source-inputs.json").items():
-            require(sha(source) == expected, "fixture adapter source changed after preparation")
+        for source, expected in adapter_pins(self.root)[0].items():
+            require(sha(source) == expected, "fixture adapter source changed after preparation; adopt it explicitly or restore it")
         attached = self.f.get("attachment", {})
         self.wr = absolute(attached["workspace"]) if attached else self.root / "store/base/workroom"
         self.config = absolute(attached["miniConfig"]) if attached else self.wr / "deployment/pinned-config.json"
@@ -178,6 +235,9 @@ class Fixture:
         self.opdir = self.root / "hooks" / (str(time.time_ns()) + "-" + secrets.token_hex(4))
         self.opdir.mkdir(mode=0o700)
         self.serial = 0
+        # Ordinary participants hold every signed permission; a caller that
+        # enrolls a narrower signed role selects it before issue/enroll.
+        self.role_basis = {"type": "allAccess"}
         # Nonces are independently random and are retained before each submission.
         self.nonce = secrets.randbits(112)
 
@@ -188,6 +248,67 @@ class Fixture:
     def fresh(self, name):
         self.serial += 1
         return self.opdir / f"{self.serial:03d}-{name}"
+
+    def step(self, name, action, reentrant=False, effect_only=False):
+        """Enter one retained provisioning step; a completed step never repeats.
+
+        Each step holds at most one native effect. A reentrant step is one whose
+        native consumer owns its exact journal (it resumes or refuses by itself).
+        Any other interrupted step fences all later steps until its retained
+        attempt is settled from evidence; nothing is authored again by default.
+        """
+        ledger = self.f.setdefault("steps", {"done": [], "pending": None, "settled": []})
+        if name in ledger["done"]:
+            return False
+        pending = ledger["pending"]
+        if pending is not None:
+            require(pending["name"] == name and pending["reentrant"] is True and reentrant,
+                    f"step {pending['name']} is unsettled; inspect {pending['evidence'][-1]} before {name}")
+            pending["evidence"].append(str(self.opdir))
+        else:
+            ledger["pending"] = {"name": name, "reentrant": bool(reentrant), "effectOnly": bool(effect_only), "evidence": [str(self.opdir)]}
+        self.write_state()
+        action()
+        ledger["done"].append(name)
+        ledger["pending"] = None
+        self.write_state()
+        return True
+
+    def settle(self, name, disposition, evidence, reason):
+        """Settle an interrupted step from its retained native evidence.
+
+        `absent`: the named retained artifact establishes that the attempt made
+        no effect (a definite refusal, or a failure before any submission); the
+        step is authored afresh. `confirmed`: the retained outcome is a native
+        confirmation of a step that leaves no adapter-side result (a reservation
+        or grant); the step is complete. A possibly admitted effect with neither
+        artifact stays fenced for exact native recovery.
+        """
+        ledger = self.f.get("steps", {})
+        pending = ledger.get("pending")
+        require(pending is not None and pending["name"] == name, "no such unsettled step")
+        require(disposition in ("absent", "confirmed"), "settlement disposition must be absent or confirmed")
+        evidence = absolute(evidence)
+        require(evidence.is_file() and not evidence.is_symlink() and evidence.is_relative_to(self.root),
+                "settlement evidence must be a retained file under this evidence root")
+        require(any(evidence.is_relative_to(attempt) for attempt in pending["evidence"]),
+                "settlement evidence belongs to another step's attempts")
+        require(isinstance(reason, str) and 0 < len(reason) <= 400, "settlement reason required")
+        if disposition == "confirmed":
+            require(pending.get("effectOnly") is True, "this step leaves adapter results; a confirmed attempt needs exact continuation, not settlement")
+            outcome = load(evidence)
+            require(evidence.name == "outcome.json" and outcome.get("type") == "confirmed"
+                    and outcome.get("confirmation") in ("installed", "replayed"), "confirmed settlement requires the retained native confirmation")
+        record = {"type": "mini-spk-step-settlement-v1", "step": name, "disposition": disposition,
+                  "attempts": pending["evidence"], "evidence": str(evidence), "evidenceSha256": sha(evidence), "reason": reason}
+        path = self.fresh("settlement.json")
+        save(path, record)
+        ledger["settled"].append(str(path))
+        if disposition == "confirmed":
+            ledger["done"].append(name)
+        ledger["pending"] = None
+        self.write_state()
+        return record
 
     def run(self, args, okay=True, env=None, timeout=1800):
         prefix = self.fresh("command")
@@ -245,15 +366,19 @@ class Fixture:
             "operation": {"type": "reserve", "amount": str(amount)}, "publications": []},
             "grants": [grant(self.tool["task"],cap) for cap in dict.fromkeys([self.tool["capability"],self.tool["observeCapability"]])], "intentNonce": n}, self.creator, "grain-intent")
 
-    def birth_session(self, d):
-        self.reserve(int(self.authority["tariff"]["base"])+2*int(self.authority["tariff"]["perBirth"]))
+    def session_reserve(self):
+        return int(self.authority["tariff"]["base"])+2*int(self.authority["tariff"]["perBirth"])
+
+    def birth_session(self, d, reserve=True):
+        if reserve:
+            self.reserve(self.session_reserve())
         tool, parent = self.query(self.creator, self.tool["task"], self.tool["observeCapability"]), self.query(self.creator, self.parent["task"], self.parent["observeCapability"])
         n = self.n()
         spec = {"genesis": load(self.genesis),
                 "template": self.authority["template"],
                 "creator": self.creator, "nonce": n, "sourceCapabilities": [self.accountcap], "funding": [], "feePayer": self.creator,
                 "session": {"app": self.app, "session": d["session"], "descriptor": d.get("descriptor",str(int(d["session"])+1)),
-                  "participant": d["subject"], "kind": "web", "sessionOwnerCapability": d["cap"],
+                  "participant": d["subject"], "kind": d.get("sessionKind", "web"), "sessionOwnerCapability": d["cap"],
                   "sessionControlCapability": d.get("sessionControlCapability",str(int(d["cap"])+1)),
                   "descriptorOwnerCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)),
                   "descriptorControlCapability": d.get("descriptorControlCapability",str(int(d["cap"])+3))}}
@@ -302,21 +427,23 @@ class Fixture:
                 "headerSha256": hashlib.sha256(bytes.fromhex(slot[header])).hexdigest(), "keyPath": str(key)})
         save(out, dict(base, signers=signers))
 
-    def issue(self, d):
+    def issue(self, d, reserve=True, observe=True):
+        kind = d.get("sessionKind", "web")
         schema = load(self.pkg / "schema-inspection.json")
         descriptor = load(self.pkg / "descriptor-inspection.json")
-        interface = next(i for i in descriptor["interfaces"] if i["kind"] == "web")
+        interface = next(i for i in descriptor["interfaces"] if i["kind"] == kind)
         q = self.query(self.owner, self.app, self.appcap)
         launch = load(self.state / f"apps/{self.app}/install/launch-descriptor/launch-inspection.json")
-        self.reserve(3)
-        ceiling = {"basis": {"type": "allAccess"}, "added": [], "removed": [],
+        if reserve:
+            self.reserve(3)
+        ceiling = {"basis": self.role_basis, "added": [], "removed": [],
                    "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]}
         spec = {"ticket": {"resource": d["ticket"], "scope": {"app": self.app,
                     "packageVersion": entries(q["view"])["2"], "packageRoot": launch["root"],
                     "interfaceId": interface["id"], "interfaceVersion": interface["version"],
                     "interfaceRoot": interface["root"], "schemaRoot": schema["root"], "schemaVersion": schema["version"]},
                 "participant": {"session": d["session"], "descriptorResource": d.get("descriptor",str(int(d["session"])+1)),
-                    "kind": "web", "subject": d["subject"], "origin": {"type": "human"},
+                    "kind": kind, "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
                     "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n()},
                 "issuer": self.owner, "appDelegateCapability": self.appcap,
@@ -333,18 +460,22 @@ class Fixture:
         base.update({k: inspected[k] for k in ["payer","funding","sourceCapabilities","tool","parent"]})
         self.approve(preview / "plan-inspected.json", "header", base, approval)
         self.mini("grain-share-issue-prepare", "--request", request, "--approval", approval, "--dir", issue, operator=True)
+        # The exact attempt is named before its one submission, so an
+        # interrupted issue is recovered by lookup of this directory only.
+        d["issueAttempt"] = str(issue)
+        self.write_state()
         self.run([self.m["mini"]["path"], "grain-share-issue-submit", "--socket", self.osock, "--attempt", issue])
-        self.run([self.m["mini"]["path"], "grain-share-issue-lookup", "--socket", self.osock, "--attempt", issue])
-        require((issue / "receipt-anchor.json").is_file(), "ticket receipt absent")
+        confirmed_issue_receipt(issue)
         d["issue"] = str(issue)
-        self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"])
+        if observe:
+            self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"])
 
     def enroll(self, d):
         schema = load(self.pkg / "schema-inspection.json")
-        count = int(load(Path(d["issue"]) / "receipt-anchor.json")["receipt"]["acceptedCount"])
+        count = int(confirmed_issue_receipt(d["issue"])["acceptedCount"])
         request, attempt, approval = (self.fresh(x) for x in ["enrollment-request.json","enrollment","enrollment-approval.json"])
         save(request, {"issueIndex": str(count - 1), "ticketResource": d["ticket"], "packageManifest": self.package_manifest,
-            "role": {"basis": {"type": "allAccess"}, "added": [], "removed": [], "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]},
+            "role": {"basis": self.role_basis, "added": [], "removed": [], "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]},
             "descriptorCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)), "sessionObserveCapability": d["cap"],
             "descriptorObserveCapability": d.get("descriptorOwnerCapability",str(int(d["cap"])+2)), "manifestObserveCapability": d["pkgObserve"], "nonce": self.n()})
         self.run([self.m["mini"]["path"], "session-enrollment-plan", "--host", self.m["host"]["path"], "--config", self.config,
