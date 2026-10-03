@@ -7,6 +7,7 @@
 # updated 2026-10-01: braid-compute merge (INTEGRATOR-3): the Host now runs K-EVAL (Compiler.Evaluator, Kernel.Run/NockEntry/Door replace Kernel.NockRun), K-ORDER over ZMod 2^127-1 (Compiler.Mersenne127, PredOrderWide, PredRangeLeaf), K-FIELD-CLOSURE (Kernel.FieldClosure), the job law (Kernel.Job over Kernel.LawView), C14 certify and the tail bound (Kernel.CertifyReceiver, SystemCell, SystemCellDomain, TailBound) and the NC shapes (Theory.Eval, Theory.NockCost.Shape, Kernel.NockProgramCell.Sample)  [counts: Minidregg 0 1, Theory 53 94, Kernel 243 311, Pred 4 8, Effects 0 3, Compiler 81 161, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-02: Rooms convergence: inspection and law-sat queries, committed-clock room birth gate, stream writes, prerotation and renunciation are now deployed  [counts: Minidregg 0 1, Theory 55 96, Kernel 247 318, Pred 6 10, Effects 0 3, Compiler 81 161, Selvage 12 151, Assurance 0 129, Host 50 60, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-02: Join current paid v2, source compute funding, law composition, private objects and existing carry consumers into the shared Host  [counts: Minidregg 0 1, Theory 60 102, Kernel 300 375, Pred 6 10, Effects 0 3, Compiler 108 190, Selvage 12 151, Assurance 0 132, Host 59 72, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
+# updated 2026-10-03: Host.ApplicationDispatchReady enters the Host closure: app readiness ops 193/194 (host-next merge) dispatch through it  [counts: Minidregg 0 1, Theory 60 102, Kernel 300 376, Pred 6 10, Effects 0 3, Compiler 108 190, Selvage 12 151, Assurance 0 132, Host 60 74, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -124,6 +125,7 @@ Host.ApplicationCurrentBirthAuthoring
 Host.ApplicationDispatchAgentInspection
 Host.ApplicationDispatchAgentPaidInspection
 Host.ApplicationDispatchInspection
+Host.ApplicationDispatchReady
 Host.ApplicationGrainSessionEnrollmentAuthoring
 Host.ApplicationGrainSessionEnrollmentInspection
 Host.ApplicationLifecycleBeginOperator
