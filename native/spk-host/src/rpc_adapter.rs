@@ -389,6 +389,39 @@ impl PrequeueGuard<'_> {
     }
 }
 
+impl PrequeueGuard<'_> {
+    /// The streamed counterpart of `dispatch`: the worker's reply is the
+    /// release ACK for this exact coordinate.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn open_web_socket(
+        self,
+        binding: SessionBinding,
+        open: WebSocketOpen,
+        client: UnixStream,
+        accept: String,
+        limits: Limits,
+        slot: Slot,
+        lease: StreamLease,
+        renewal: StreamRenewal,
+        label: String,
+        timeout: Duration,
+    ) -> Result<(), CancellableFailure> {
+        self.driver.open_web_socket_fenced(
+            self.identity,
+            binding,
+            open,
+            client,
+            accept,
+            limits,
+            slot,
+            lease,
+            renewal,
+            label,
+            timeout,
+        )
+    }
+}
+
 impl CancellableFailure {
     fn no_enqueue(error: io::Error, identity: DispatchIdentity) -> Self {
         Self {
@@ -904,9 +937,18 @@ impl RpcDriver {
     /// the 101 to `client` and owns it: its frames flow on the worker's
     /// LocalSet until either side closes, and nothing further reaches Mini.
     /// The slot holds the grain's concurrency place until then.
+    ///
+    /// A worker reply, success or refusal, is its release ACK: the command
+    /// has left the worker and its app-side session was evicted on failure,
+    /// so a refused open (an app that declines the upgrade answers with an
+    /// RPC exception through sandstorm-http-bridge) carries a released fence
+    /// for this exact journal coordinate, as a released cancellable dispatch
+    /// does. Only a missing ACK (deadline or worker exit) poisons the driver
+    /// and returns no fence.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn open_web_socket(
+    fn open_web_socket_fenced(
         &mut self,
+        identity: DispatchIdentity,
         binding: SessionBinding,
         open: WebSocketOpen,
         client: UnixStream,
@@ -917,13 +959,25 @@ impl RpcDriver {
         renewal: StreamRenewal,
         label: String,
         timeout: Duration,
-    ) -> io::Result<()> {
-        let deadline = self.check_bound(timeout)?;
-        if binding.app != self.app || binding.process_generation != self.generation {
-            return Err(invalid("SPK WebSocket open identity refused"));
+    ) -> Result<(), CancellableFailure> {
+        let deadline = self
+            .check_bound(timeout)
+            .map_err(|error| CancellableFailure::no_enqueue(error, identity.clone()))?;
+        if binding.app != self.app
+            || binding.process_generation != self.generation
+            || binding.app != identity.app
+            || binding.process_generation != identity.app_generation
+            || binding.session_resource.to_string() != identity.session_resource
+        {
+            return Err(CancellableFailure::no_enqueue(
+                invalid("SPK WebSocket open identity refused"),
+                identity,
+            ));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
-        lease.check()?;
+        lease
+            .check()
+            .map_err(|error| CancellableFailure::no_enqueue(error, identity.clone()))?;
         self.leases.register(&binding, &lease);
         self.sender
             .try_send(Command::OpenWebSocket {
@@ -939,22 +993,27 @@ impl RpcDriver {
                 deadline,
                 reply: reply_tx,
             })
-            .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
-        self.receive_released(reply_rx, deadline)
+            .map_err(|_| {
+                CancellableFailure::no_enqueue(
+                    invalid("SPK RPC worker queue unavailable"),
+                    identity.clone(),
+                )
+            })?;
+        match self.receive_acked(reply_rx, deadline) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(CancellableFailure::released(error, identity)),
+            Err(error) => Err(CancellableFailure::unreleased(error)),
+        }
     }
 
-    /// A worker reply, success or refusal, is its release ACK: the command
-    /// has left the worker and its app-side session was evicted on failure,
-    /// so a refused open (an app that declines the upgrade answers with an
-    /// RPC exception through sandstorm-http-bridge) stays one-shot uncertain
-    /// in its own journal record without fencing the generation's other
-    /// participants, as a released cancellable dispatch does. Only a missing
-    /// ACK (deadline or worker exit) poisons the driver.
-    fn receive_released<T>(
+    /// The worker's reply, success or refusal, is its release ACK (inner
+    /// result). Only a missing ACK (deadline or worker exit) poisons the
+    /// driver (outer error).
+    fn receive_acked<T>(
         &mut self,
         reply: sync_mpsc::Receiver<io::Result<T>>,
         deadline: Instant,
-    ) -> io::Result<T> {
+    ) -> io::Result<io::Result<T>> {
         let left = match remaining(deadline) {
             Ok(left) => left,
             Err(error) => {
@@ -963,7 +1022,7 @@ impl RpcDriver {
             }
         };
         match reply.recv_timeout(left) {
-            Ok(result) => result,
+            Ok(result) => Ok(result),
             Err(sync_mpsc::RecvTimeoutError::Timeout) => {
                 self.uncertain = true;
                 Err(io::Error::new(
@@ -979,6 +1038,15 @@ impl RpcDriver {
                 ))
             }
         }
+    }
+
+    #[cfg(test)]
+    fn receive_released<T>(
+        &mut self,
+        reply: sync_mpsc::Receiver<io::Result<T>>,
+        deadline: Instant,
+    ) -> io::Result<T> {
+        self.receive_acked(reply, deadline).and_then(|result| result)
     }
 
     /// Internal fixture/operations diagnostic; it conveys no authority.
@@ -1300,6 +1368,89 @@ mod tests {
                 ..original.key()
             }
         );
+    }
+
+    fn open_inputs() -> (WebSocketOpen, UnixStream, Limits, Slot, StreamLease, StreamRenewal) {
+        let (client, _peer) = UnixStream::pair().unwrap();
+        let limits = Limits {
+            class: "S",
+            max_open: 4,
+            bytes_per_minute: 1_000_000,
+        };
+        let slot = crate::web_socket::OpenSockets::default()
+            .reserve(&limits)
+            .unwrap();
+        let lease = StreamLease::begin(Duration::from_secs(60)).unwrap();
+        (
+            WebSocketOpen {
+                path_and_query: "live".into(),
+                context: minidregg_spk_rpc::RequestContext::default(),
+                protocols: vec![],
+            },
+            client,
+            limits,
+            slot,
+            lease,
+            Box::pin(async {}),
+        )
+    }
+
+    /// A human WebSocket open gets the same exact fence as a cancellable
+    /// dispatch: a worker reply (here the bridge is gone) releases this
+    /// coordinate without poisoning the shared driver; a refusal before the
+    /// queue is a never-enqueued fence.
+    #[test]
+    fn human_websocket_open_returns_released_or_unqueued_fence() {
+        let (supervisor, app) = UnixStream::pair().unwrap();
+        drop(app);
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let (open, client, limits, slot, lease, renewal) = open_inputs();
+        let failure = driver
+            .prepare_cancellable(dispatch_identity())
+            .unwrap()
+            .open_web_socket(
+                binding(),
+                open,
+                client,
+                "accept".into(),
+                limits,
+                slot,
+                lease,
+                renewal,
+                "op 17".into(),
+                Duration::from_secs(2),
+            )
+            .unwrap_err();
+        let (_, fence) = failure.into_parts();
+        let fence = fence.expect("worker reply is a release ACK");
+        assert!(fence.worker_released());
+        assert!(fence.matches_and_consume(&dispatch_identity()));
+        assert!(!driver.uncertain);
+
+        let mut other = dispatch_identity();
+        other.session_resource = "6209".into();
+        let (open, client, limits, slot, lease, renewal) = open_inputs();
+        let failure = driver
+            .prepare_cancellable(other.clone())
+            .unwrap()
+            .open_web_socket(
+                binding(),
+                open,
+                client,
+                "accept".into(),
+                limits,
+                slot,
+                lease,
+                renewal,
+                "op 18".into(),
+                Duration::from_secs(2),
+            )
+            .unwrap_err();
+        let (_, fence) = failure.into_parts();
+        let fence = fence.expect("identity refusal is before the queue");
+        assert!(!fence.worker_released());
+        assert!(fence.matches_and_consume(&other));
+        assert!(!driver.uncertain);
     }
 
     #[test]

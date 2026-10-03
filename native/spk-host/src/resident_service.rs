@@ -1638,7 +1638,13 @@ fn deliver_request(
         _ => return Err(invalid("WebSocket handshake and stream disagree")),
     };
     let http = project_request(&request, kind, api_path)?;
-    human.deliver_once(policy, &http, attempt_parent, upgrade)
+    human.deliver_once(
+        policy,
+        &http,
+        request.export_capture.as_deref(),
+        attempt_parent,
+        upgrade,
+    )
 }
 
 fn project_request<'a>(

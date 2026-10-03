@@ -18,22 +18,27 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Reject an unsupported export request before any Mini or physical call.
+/// `capture` is the entrance's `x-mini-export-capture` value, which the
+/// entrance keeps out of the Mini-signed header list; a capture header that
+/// reached the signed list anyway is refused here, never signed.
 pub(crate) fn requested(
     policy: &CustodianPolicy,
     http: &HttpProjection<'_>,
+    capture: Option<&str>,
 ) -> io::Result<Option<String>> {
-    let headers: Vec<_> = http
+    if http
         .ordered_headers
         .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case(CAPTURE_HEADER))
-        .collect();
-    if headers.is_empty() && !policy.export_capture {
+        .any(|(name, _)| name.eq_ignore_ascii_case(CAPTURE_HEADER))
+    {
+        return Err(invalid("export capture intent is not a Mini-signed header"));
+    }
+    if capture.is_none() && !policy.export_capture {
         return Ok(None);
     }
     if !policy.export_capture
         || (policy.fixed_session_kind == crate::http_entrance::EntranceKind::Api)
             != matches!(http.route, crate::dispatch_inspection::Route::Api { .. })
-        || headers.len() != 1
         || http.method != "GET"
         || !http.body.is_empty()
         || http
@@ -49,7 +54,7 @@ pub(crate) fn requested(
             "export capture differs from its fixed sheet CSV route",
         ));
     }
-    let id = &headers[0].1;
+    let id = capture.ok_or_else(|| invalid("export capture route requires a capture identity"))?;
     if id.len() != 32
         || !id
             .bytes()
@@ -140,48 +145,84 @@ mod tests {
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
         };
-        let headers = vec![(CAPTURE_HEADER.to_owned(), "a".repeat(32))];
+        let id = "a".repeat(32);
+        let capture = Some(id.as_str());
         let mut h = HttpProjection {
             method: "GET",
             path_and_query: "survey/csv",
-            ordered_headers: &headers,
+            ordered_headers: &[],
             body: &[],
             route: crate::dispatch_inspection::Route::Api { signed_path: "/_/" },
         };
-        assert!(requested(&p, &h).is_err());
+        assert!(requested(&p, &h, capture).is_err());
         p.export_capture = true;
         let another = HttpProjection {
             path_and_query: "other/csv",
             ..h
         };
-        assert!(requested(&p, &another).is_err());
-        assert_eq!(requested(&p, &h).unwrap(), Some("a".repeat(32)));
+        assert!(requested(&p, &another, capture).is_err());
+        assert_eq!(requested(&p, &h, capture).unwrap(), Some(id.clone()));
         for method in ["HEAD", "POST", "WEBSOCKET"] {
             h.method = method;
-            assert!(requested(&p, &h).is_err());
+            assert!(requested(&p, &h, capture).is_err());
         }
         h.method = "GET";
         h.body = b"x";
-        assert!(requested(&p, &h).is_err());
+        assert!(requested(&p, &h, capture).is_err());
         h.body = &[];
         h.route = crate::dispatch_inspection::Route::Browser;
-        assert!(requested(&p, &h).is_err());
+        assert!(requested(&p, &h, capture).is_err());
         h.route = crate::dispatch_inspection::Route::Api { signed_path: "/_/" };
-        let duplicate = vec![headers[0].clone(), headers[0].clone()];
-        h.ordered_headers = &duplicate;
-        assert!(requested(&p, &h).is_err());
-        h.ordered_headers = &headers;
+        let short = "a".repeat(31);
+        assert!(requested(&p, &h, Some(short.as_str())).is_err());
+        let upper = "A".repeat(32);
+        assert!(requested(&p, &h, Some(upper.as_str())).is_err());
         h.route = crate::dispatch_inspection::Route::Browser;
         h.path_and_query = "_/survey/csv";
         p.fixed_session_kind = crate::http_entrance::EntranceKind::Browser;
-        assert_eq!(requested(&p, &h).unwrap(), Some("a".repeat(32)));
+        assert_eq!(requested(&p, &h, capture).unwrap(), Some(id.clone()));
         h.path_and_query = "_/survey/csv?format=other";
-        assert!(requested(&p, &h).is_err());
+        assert!(requested(&p, &h, capture).is_err());
         h.path_and_query = "_/survey/csv";
-        h.ordered_headers = &[];
-        assert!(requested(&p, &h).is_err());
+        assert!(requested(&p, &h, None).is_err());
         p.export_capture = false;
-        assert_eq!(requested(&p, &h).unwrap(), None);
+        assert_eq!(requested(&p, &h, None).unwrap(), None);
+    }
+
+    /// The capture intent never travels in the Mini-signed header list: the
+    /// kernel admits only ordinary app headers, so a signed capture header
+    /// would make every capture inadmissible.
+    #[test]
+    fn capture_intent_is_refused_inside_the_signed_header_list() {
+        let p = CustodianPolicy {
+            expected_host: "app.example".into(),
+            fixed_app: "7".into(),
+            fixed_subject: "8".into(),
+            fixed_session: "9".into(),
+            fixed_ticket: "10".into(),
+            fixed_session_kind: crate::http_entrance::EntranceKind::Browser,
+            export_capture: true,
+            export_capture_path: Some("_/sheet/csv".into()),
+            browser_token_sha256: [0; 32],
+            bootstrap_token_sha256: [0; 32],
+            api_token_sha256: [0; 32],
+        };
+        let id = "b".repeat(32);
+        let signed = vec![(CAPTURE_HEADER.to_owned(), id.clone())];
+        let h = HttpProjection {
+            method: "GET",
+            path_and_query: "_/sheet/csv",
+            ordered_headers: &signed,
+            body: &[],
+            route: crate::dispatch_inspection::Route::Browser,
+        };
+        assert!(requested(&p, &h, Some(id.as_str())).is_err());
+        assert!(requested(&p, &h, None).is_err());
+        let clean = HttpProjection {
+            ordered_headers: &[],
+            ..h
+        };
+        assert_eq!(requested(&p, &clean, Some(id.as_str())).unwrap(), Some(id));
     }
     #[test]
     fn receipt_cannot_be_supplied_by_app_or_non_success_body() {

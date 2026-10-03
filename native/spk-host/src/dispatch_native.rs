@@ -220,6 +220,117 @@ fn read_exact_deadline(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImageFingerprint {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mode: u32,
+    uid: u32,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+}
+
+impl ImageFingerprint {
+    fn of(meta: &fs::Metadata) -> Self {
+        Self {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.size(),
+            mode: meta.mode(),
+            uid: meta.uid(),
+            mtime: (meta.mtime(), meta.mtime_nsec()),
+            ctime: (meta.ctime(), meta.ctime_nsec()),
+        }
+    }
+}
+
+struct VerifiedImage {
+    path: PathBuf,
+    sha256: String,
+    file: std::sync::Arc<File>,
+    fingerprint: ImageFingerprint,
+}
+
+/// Holds the verified descriptor open for as long as the caller may execute
+/// it; the `/proc/self/fd` path is valid only while this value lives.
+pub(crate) struct VerifiedExecutable(std::sync::Arc<File>);
+
+impl VerifiedExecutable {
+    pub(crate) fn path(&self) -> PathBuf {
+        use std::os::fd::AsRawFd;
+        PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()))
+    }
+}
+
+static VERIFIED_IMAGES: std::sync::Mutex<Vec<VerifiedImage>> = std::sync::Mutex::new(Vec::new());
+
+fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
+    let meta = fs::symlink_metadata(path)?;
+    if !path.is_absolute() || !meta.is_file() || meta.permissions().mode() & 0o022 != 0 {
+        return Err(invalid("selected Mini Host image identity refused"));
+    }
+    Ok(meta)
+}
+
+/// Returns the retained descriptor of exactly the verified inode.
+fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
+    verified_image_hashing(path, expected_sha256).map(|(image, _)| image)
+}
+
+/// As `verified_image`, also saying whether this call hashed the bytes.
+fn verified_image_hashing(
+    path: &Path,
+    expected_sha256: &str,
+) -> io::Result<(VerifiedExecutable, bool)> {
+    let named = ImageFingerprint::of(&image_path_metadata(path)?);
+    let mut cache = VERIFIED_IMAGES
+        .lock()
+        .map_err(|_| invalid("Mini Host image cache poisoned"))?;
+    if let Some(entry) = cache
+        .iter()
+        .find(|entry| entry.path == path && entry.sha256 == expected_sha256)
+    {
+        if entry.fingerprint == named
+            && ImageFingerprint::of(&entry.file.metadata()?) == entry.fingerprint
+        {
+            return Ok((VerifiedExecutable(std::sync::Arc::clone(&entry.file)), false));
+        }
+    }
+    cache.retain(|entry| entry.path != path);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    let opened = ImageFingerprint::of(&file.metadata()?);
+    if opened != named {
+        return Err(invalid("selected Mini Host image changed while opened"));
+    }
+    let mut digest = Sha256::new();
+    let mut chunk = vec![0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&chunk[..count]);
+    }
+    if ImageFingerprint::of(&file.metadata()?) != opened {
+        return Err(invalid("selected Mini Host image changed while hashed"));
+    }
+    if expected_sha256 != hex(&digest.finalize()) {
+        return Err(invalid("selected Mini Host SHA-256 drift"));
+    }
+    let file = std::sync::Arc::new(file);
+    cache.push(VerifiedImage {
+        path: path.to_path_buf(),
+        sha256: expected_sha256.to_owned(),
+        file: std::sync::Arc::clone(&file),
+        fingerprint: opened,
+    });
+    Ok((VerifiedExecutable(file), true))
+}
+
 /// The socket belongs to the separately started operator broker, never a
 /// tenant frontend. Version 2 pins the exact Host ELF and full config bytes.
 #[derive(Clone)]
@@ -258,23 +369,7 @@ impl PrivateOperator {
     }
 
     fn check_pin(&self) -> io::Result<Vec<u8>> {
-        let host = fs::symlink_metadata(&self.host)?;
-        if !self.host.is_absolute() || !host.is_file() || host.permissions().mode() & 0o022 != 0 {
-            return Err(invalid("selected Mini Host image identity refused"));
-        }
-        let mut reader = File::open(&self.host)?;
-        let mut digest = Sha256::new();
-        let mut chunk = [0u8; 64 * 1024];
-        loop {
-            let count = reader.read(&mut chunk)?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&chunk[..count]);
-        }
-        if self.host_sha256 != hex(&digest.finalize()) {
-            return Err(invalid("selected Mini Host SHA-256 drift"));
-        }
+        self.verified_host()?;
         let config = read_bounded(&self.config, MAX_CONFIG)?;
         if self.config_sha256 != hex(&Sha256::digest(&config)) {
             return Err(invalid("selected Mini Host config SHA-256 drift"));
@@ -292,6 +387,15 @@ impl PrivateOperator {
             return Err(invalid("Mini operator socket identity refused"));
         }
         Ok(config)
+    }
+
+    /// The pinned Host image, verified once per inode. The first use hashes
+    /// the bytes of an opened descriptor; later uses re-check that the path
+    /// still names that inode and that neither has changed size, mode, owner,
+    /// mtime or ctime, re-hashing on any difference. Helpers execute the
+    /// verified descriptor itself, so the bytes run are the bytes hashed.
+    fn verified_host(&self) -> io::Result<VerifiedExecutable> {
+        verified_image(&self.host, &self.host_sha256)
     }
 
     pub(crate) fn tool(
@@ -319,6 +423,7 @@ impl PrivateOperator {
         deadline: Instant,
     ) -> io::Result<Vec<u8>> {
         let _ = self.check_pin()?;
+        let executable = self.verified_host()?;
         let cap = match command {
             "author" => MAX_AUTHOR_JSON,
             "inspect" => (HOST_MAX_FRAME - 1) as u64,
@@ -341,7 +446,7 @@ impl PrivateOperator {
         {
             return Err(invalid("Mini Host helper input identity or size refused"));
         }
-        let mut process = Command::new(&self.host);
+        let mut process = Command::new(executable.path());
         process.arg(&self.config).arg(command);
         if command == "profile" {
             let output_file = OpenOptions::new()
@@ -654,16 +759,47 @@ pub(crate) struct CommittedDispatch {
 
 pub(crate) struct RecordedDispatch {
     pub identity: DispatchIdentity,
+    pub matched: MatchedInspection,
     active_marker: PathBuf,
     active_bytes: Vec<u8>,
 }
 
 impl RecordedDispatch {
+    #[cfg(test)]
+    pub(crate) fn test_new(
+        identity: DispatchIdentity,
+        matched: MatchedInspection,
+        active_marker: PathBuf,
+        active_bytes: Vec<u8>,
+    ) -> Self {
+        Self {
+            identity,
+            matched,
+            active_marker,
+            active_bytes,
+        }
+    }
+
     /// Only a definite RPC result while the same app generation is Running
     /// releases the global native-submit marker. Timeout, EOF, or a concurrent
     /// fence leaves both physical and native attempt records for audit.
     pub(crate) fn finish(self, journal: &Journal, delivered: bool) -> io::Result<()> {
         journal.finish_dispatch(&self.identity, delivered)?;
+        retire_active_marker(&self.active_marker, &self.active_bytes)
+    }
+
+    /// The worker fence proves this exact command is no longer held (or was
+    /// never enqueued). The journal keeps its operation terminally Uncertain
+    /// and never dispatchable again; the native outcome itself was definite
+    /// (committed and inspected) before DeliveryRequested, so once the journal
+    /// has taken that custody the generation-wide native marker is retired
+    /// with the shared slot. Without a matching fence nothing is released.
+    pub(crate) fn release_uncertain(
+        self,
+        journal: &Journal,
+        fence: crate::rpc_adapter::DispatchFence,
+    ) -> io::Result<()> {
+        journal.finish_dispatch_uncertain_released(&self.identity, fence)?;
         retire_active_marker(&self.active_marker, &self.active_bytes)
     }
 }
@@ -687,19 +823,20 @@ impl CommittedDispatch {
             .ok_or_else(|| invalid("app unit invocation absent"))?;
         let identity = DispatchIdentity {
             permit_sha256: hex(&Sha256::digest(&self.payload)),
-            request_digest: self.matched.physical_request_digest,
+            request_digest: self.matched.physical_request_digest.clone(),
             app: self.matched.app,
             app_generation: self.matched.app_generation,
             invocation_id: invocation_id.to_owned(),
-            operation_id: self.matched.operation_id,
-            session_resource: self.matched.session_resource,
-            session_generation: self.matched.session_generation,
-            dispatch_transaction: self.matched.dispatch_transaction,
-            dispatch_event: self.matched.dispatch_event,
+            operation_id: self.matched.operation_id.clone(),
+            session_resource: self.matched.session_resource.clone(),
+            session_generation: self.matched.session_generation.clone(),
+            dispatch_transaction: self.matched.dispatch_transaction.clone(),
+            dispatch_event: self.matched.dispatch_event.clone(),
         };
         journal.request_dispatch(identity.clone(), &self.payload)?;
         Ok(RecordedDispatch {
             identity,
+            matched: self.matched,
             active_marker: self.active_marker,
             active_bytes: self.active_bytes,
         })
@@ -1757,6 +1894,47 @@ mod tests {
         frame.extend_from_slice(NO_RECORD_REFUSAL);
         frame
     }
+    /// The 159 MB Host image is hashed once per inode, not before every
+    /// helper and socket call; any change to the named file re-hashes and a
+    /// changed image refuses. Helpers run the verified descriptor itself.
+    #[test]
+    fn host_image_hashed_once_per_inode_and_rehashed_on_any_change() {
+        let root = BoundFixture::new();
+        let host = root.0.join("host-image");
+        fs::copy("/usr/bin/true", &host).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();
+        let sha = hex(&Sha256::digest(fs::read(&host).unwrap()));
+        let (image, hashed) = verified_image_hashing(&host, &sha).unwrap();
+        assert!(hashed);
+        assert!(Command::new(image.path()).status().unwrap().success());
+        let (_, hashed) = verified_image_hashing(&host, &sha).unwrap();
+        assert!(!hashed);
+        // Same bytes under a new inode: verified again, then cached again.
+        let replacement = root.0.join("host-image.new");
+        fs::copy("/usr/bin/true", &replacement).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&replacement, &host).unwrap();
+        let (_, hashed) = verified_image_hashing(&host, &sha).unwrap();
+        assert!(hashed);
+        let (_, hashed) = verified_image_hashing(&host, &sha).unwrap();
+        assert!(!hashed);
+        // An in-place change moves size/mtime/ctime and refuses on re-hash.
+        OpenOptions::new()
+            .append(true)
+            .open(&host)
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
+        assert!(verified_image_hashing(&host, &sha).is_err());
+        // The image held by an earlier caller still runs the verified bytes.
+        assert!(Command::new(image.path()).status().unwrap().success());
+        let link = root.0.join("host-link");
+        std::os::unix::fs::symlink(&host, &link).unwrap();
+        assert!(verified_image_hashing(&link, &sha).is_err());
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(verified_image_hashing(&host, &sha).is_err());
+    }
+
     #[test]
     fn bound_dispatch_private_transport_accepts_only_defined_cross_opcode_replies() {
         let root = BoundFixture::new();

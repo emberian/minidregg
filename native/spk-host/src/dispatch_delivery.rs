@@ -16,6 +16,8 @@ use crate::web_socket::{cap_refusal, Limits, OpenSockets, StreamLease};
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 const MAX_APP_RESPONSE: usize = 8 * 1024 * 1024;
@@ -62,14 +64,19 @@ pub(crate) struct UpgradeRequest {
 }
 
 impl ResidentHuman<'_> {
+    /// `export_capture` is the entrance's capture intent, carried beside the
+    /// request rather than in its Mini-signed header list: the kernel admits
+    /// only ordinary app headers, and capture is host/TLS custody of the
+    /// response, never an app-visible input.
     pub(crate) fn deliver_once(
         &mut self,
         policy: &CustodianPolicy,
         http: &HttpProjection<'_>,
+        export_capture: Option<&str>,
         attempt_parent: &Path,
         upgrade: Option<UpgradeRequest>,
     ) -> io::Result<Vec<u8>> {
-        let export_capture = crate::export_receipt::requested(policy, http)?;
+        let export_capture = crate::export_receipt::requested(policy, http, export_capture)?;
         let kind = match http.route {
             crate::dispatch_inspection::Route::Browser => EntranceKind::Browser,
             crate::dispatch_inspection::Route::Api { .. } => EntranceKind::Api,
@@ -82,6 +89,18 @@ impl ResidentHuman<'_> {
         {
             return Err(invalid("HTTP entrance differs from fixed Mini custody"));
         }
+        let base_path = format!("https://{}", policy.expected_host);
+        // Everything the WebSession projection takes from the request itself
+        // is checked here, before an operation number, Store record or
+        // generation-wide marker can exist. A refusal leaves no evidence and
+        // fences nobody.
+        crate::dispatch_web_input::preflight_web_input(
+            http,
+            self.display_name,
+            self.preferred_handle,
+            &base_path,
+            upgrade.is_some(),
+        )?;
         // The running claim/descriptor gate belongs to the resident supervisor;
         // this immediate check is the physical unit fence before a new Mini call.
         self.journal
@@ -160,7 +179,20 @@ impl ResidentHuman<'_> {
                 error
             }
         })?;
-        let m = &committed.matched;
+        // From DeliveryRequested on, the journal holds this exact operation.
+        // Every later outcome either finishes it Delivered, releases the
+        // shared slot with a worker fence (the operation stays terminally
+        // Uncertain), or, without a fence, keeps every marker for audit.
+        let recorded = committed.record_delivery_requested(self.journal)?;
+        let uncertain = |error: io::Error| io::Error::new(io::ErrorKind::Interrupted, error);
+        let prequeue = match self.rpc.prepare_cancellable(recorded.identity.clone()) {
+            Ok(prequeue) => prequeue,
+            Err(error) => {
+                let _ = recorded.finish(self.journal, false);
+                return Err(uncertain(error));
+            }
+        };
+        let m = &recorded.matched;
         let current_binding = ContinuityBinding {
             domain: self.continuity_namespace.0.clone(),
             semantics: self.continuity_namespace.1.clone(),
@@ -183,136 +215,177 @@ impl ResidentHuman<'_> {
                 },
             )
         });
-        let base_path = format!("https://{}", policy.expected_host);
-        // Projected before the durable DeliveryRequested, exactly as a GET.
-        let mut physical = match (&upgrade, slot) {
-            (None, _) => Physical::Exchange(physical_web_input(
-                &committed.matched,
-                http,
-                self.display_name,
-                self.preferred_handle,
-                &base_path,
-            )?),
-            (Some(_), Some(slot)) => Physical::Open(
-                physical_open_input(
-                    &committed.matched,
+        // Any refusal from here until the worker queue is a proven
+        // never-enqueued command: release with the prequeue fence.
+        let projected = (|| {
+            if !route_matches {
+                // Mini committed a valid current dispatch, but this immutable
+                // route belongs to a different enrollment.
+                return Err(invalid("dispatch differs from immutable route admission"));
+            }
+            self.journal
+                .read()?
+                .ok_or_else(|| invalid("app journal absent"))?
+                .verify_running_instance()?;
+            let physical = match (&upgrade, slot) {
+                (None, _) => Physical::Exchange(physical_web_input(
+                    m,
                     http,
                     self.display_name,
                     self.preferred_handle,
                     &base_path,
-                )?,
-                slot,
-            ),
-            (Some(_), None) => return Err(invalid("WebSocket slot absent")),
+                )?),
+                (Some(_), Some(slot)) => Physical::Open(
+                    physical_open_input(
+                        m,
+                        http,
+                        self.display_name,
+                        self.preferred_handle,
+                        &base_path,
+                    )?,
+                    slot,
+                ),
+                (Some(_), None) => return Err(invalid("WebSocket slot absent")),
+            };
+            Ok(match physical {
+                Physical::Exchange(mut input) => {
+                    input.binding.ticket_resource = Some(self.custody.ticket_resource.clone());
+                    Physical::Exchange(input)
+                }
+                Physical::Open(mut input, slot) => {
+                    input.binding.ticket_resource = Some(self.custody.ticket_resource.clone());
+                    Physical::Open(input, slot)
+                }
+            })
+        })();
+        let physical = match projected {
+            Ok(physical) => physical,
+            Err(error) => {
+                let fence = prequeue.abort_no_enqueue();
+                let _ = recorded.release_uncertain(self.journal, fence);
+                return Err(error);
+            }
         };
-        match &mut physical {
-            Physical::Exchange(input) => {
-                input.binding.ticket_resource = Some(self.custody.ticket_resource.clone())
+        match (physical, upgrade) {
+            (Physical::Exchange(physical), None) => {
+                let head = http.method == "HEAD";
+                #[cfg(feature = "integration-qualification")]
+                crate::dispatch_native::qualification::delivery_event(&attempt_dir, None)?;
+                let response = prequeue.dispatch(
+                    physical.binding,
+                    physical.request,
+                    MAX_APP_RESPONSE,
+                    APP_CALL_TIME,
+                    Arc::new(AtomicBool::new(false)),
+                );
+                #[cfg(feature = "integration-qualification")]
+                crate::dispatch_native::qualification::delivery_event(
+                    &attempt_dir,
+                    Some(response.is_ok()),
+                )?;
+                let (reply, fence) = match response {
+                    Ok(delivered) => delivered,
+                    Err(failure) => {
+                        let (error, fence) = failure.into_parts();
+                        match fence {
+                            Some(fence) => {
+                                let _ = recorded.release_uncertain(self.journal, fence);
+                            }
+                            None => {
+                                let _ = recorded.finish(self.journal, false);
+                            }
+                        }
+                        return Err(uncertain(error));
+                    }
+                };
+                let origin = format!("https://{}", policy.expected_host);
+                let serialized = http_response::serialize_for_origin(&reply, head, Some(&origin))
+                    .and_then(|bytes| match &export_capture {
+                        Some(capture) => crate::export_receipt::prepare(
+                            bytes,
+                            capture,
+                            self.custody,
+                            &recorded.identity,
+                            http,
+                        ),
+                        None => Ok(bytes),
+                    });
+                match serialized {
+                    Ok(bytes) => {
+                        recorded.finish(self.journal, true)?;
+                        Ok(bytes)
+                    }
+                    Err(error) => {
+                        // The worker completed the command, but no response
+                        // can be certified: release the slot, keep the
+                        // operation Uncertain and nonreplayable.
+                        let _ = recorded.release_uncertain(self.journal, fence);
+                        Err(uncertain(error))
+                    }
+                }
             }
-            Physical::Open(input, _) => {
-                input.binding.ticket_resource = Some(self.custody.ticket_resource.clone())
-            }
-        }
-        let recorded = committed.record_delivery_requested(self.journal)?;
-        if !route_matches {
-            // Mini committed a valid current dispatch, but this immutable route
-            // belongs to a different enrollment. Refuse fd3 delivery and retire
-            // the exact marker so unrelated participants keep making progress.
-            let _ = recorded.finish(self.journal, false);
-            return Err(invalid("dispatch differs from immutable route admission"));
-        }
-        if self
-            .journal
-            .read()?
-            .ok_or_else(|| invalid("app journal absent"))?
-            .verify_running_instance()
-            .is_err()
-        {
-            let _ = recorded.finish(self.journal, false);
-            return Err(invalid("app unit drift after durable DeliveryRequested"));
-        }
-        let physical = match (physical, upgrade) {
-            (Physical::Exchange(physical), None) => physical,
             (Physical::Open(physical, slot), Some(upgrade)) => {
                 // The worker calls `openWebSocket`, writes the 101 and owns
                 // the client stream. The record finishes delivered once the
                 // app accepted the open; frames and the close never return
                 // here and write nothing to Mini.
-                // Lease setup failure after admission must finish this exact
-                // journal record, not leave the generation's active marker.
-                let opened = (|| {
+                let bound = (|| {
                     let lease = lease.ok_or_else(|| invalid("WebSocket lease absent"))?;
                     let (binding, tip) =
                         continuity.ok_or_else(|| invalid("continuity binding absent"))?;
                     lease.bind_continuity(binding, tip)?;
-                    let renewal = Box::pin(renew_stream(
-                        lease.clone(),
-                        ContinuityCustody {
-                            operator: self.operator.clone(),
-                            custody: self.custody.clone(),
-                            attempt_parent: attempt_parent.to_path_buf(),
-                        },
-                    ));
-                    self.rpc.open_web_socket(
-                        physical.binding,
-                        physical.open,
-                        upgrade.client,
-                        upgrade.accept,
-                        self.limits,
-                        slot,
-                        lease,
-                        renewal,
-                        format!("op {operation_id}"),
-                        APP_CALL_TIME,
-                    )
+                    Ok::<_, io::Error>(lease)
                 })();
-                return match opened {
+                let lease = match bound {
+                    Ok(lease) => lease,
+                    Err(error) => {
+                        let fence = prequeue.abort_no_enqueue();
+                        let _ = recorded.release_uncertain(self.journal, fence);
+                        return Err(uncertain(error));
+                    }
+                };
+                let renewal = Box::pin(renew_stream(
+                    lease.clone(),
+                    ContinuityCustody {
+                        operator: self.operator.clone(),
+                        custody: self.custody.clone(),
+                        attempt_parent: attempt_parent.to_path_buf(),
+                    },
+                ));
+                match prequeue.open_web_socket(
+                    physical.binding,
+                    physical.open,
+                    upgrade.client,
+                    upgrade.accept,
+                    self.limits,
+                    slot,
+                    lease,
+                    renewal,
+                    format!("op {operation_id}"),
+                    APP_CALL_TIME,
+                ) {
                     Ok(()) => {
                         recorded.finish(self.journal, true)?;
                         Ok(Vec::new())
                     }
-                    Err(error) => {
-                        let _ = recorded.finish(self.journal, false);
-                        Err(io::Error::new(io::ErrorKind::Interrupted, error))
+                    Err(failure) => {
+                        let (error, fence) = failure.into_parts();
+                        match fence {
+                            Some(fence) => {
+                                let _ = recorded.release_uncertain(self.journal, fence);
+                            }
+                            None => {
+                                let _ = recorded.finish(self.journal, false);
+                            }
+                        }
+                        Err(uncertain(error))
                     }
-                };
+                }
             }
-            _ => {
-                let _ = recorded.finish(self.journal, false);
-                return Err(invalid(
-                    "dispatch projection differs from the entrance request",
-                ));
-            }
-        };
-        let head = http.method == "HEAD";
-        #[cfg(feature = "integration-qualification")]
-        crate::dispatch_native::qualification::delivery_event(&attempt_dir, None)?;
-        let response = self.rpc.dispatch(
-            physical.binding,
-            physical.request,
-            MAX_APP_RESPONSE,
-            APP_CALL_TIME,
-        );
-        #[cfg(feature = "integration-qualification")]
-        crate::dispatch_native::qualification::delivery_event(
-            &attempt_dir,
-            Some(response.is_ok()),
-        )?;
-        let origin = format!("https://{}", policy.expected_host);
-        let serialized = response
-            .and_then(|reply| http_response::serialize_for_origin(&reply, head, Some(&origin)))
-            .and_then(|bytes| match &export_capture {
-                Some(capture) => crate::export_receipt::prepare(bytes, capture, self.custody, &recorded.identity, http),
-                None => Ok(bytes),
-            });
-        match serialized {
-            Ok(bytes) => {
-                recorded.finish(self.journal, true)?;
-                Ok(bytes)
-            }
-            Err(error) => {
-                let _ = recorded.finish(self.journal, false);
-                Err(io::Error::new(io::ErrorKind::Interrupted, error))
+            (physical, _) => {
+                drop(physical);
+                // The projection above matched the entrance's upgrade state.
+                Err(invalid("dispatch projection differs from the entrance request"))
             }
         }
     }

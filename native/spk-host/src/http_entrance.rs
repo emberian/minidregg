@@ -80,6 +80,10 @@ pub(crate) struct ReceivedRequest {
     #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
     pub path_and_query: String,
     pub ordinary_headers: Vec<(String, String)>,
+    /// `x-mini-export-capture`: entrance-level capture intent. It is kept
+    /// out of `ordinary_headers`, which become the Mini-signed header list
+    /// the kernel admits only for ordinary app header names.
+    pub export_capture: Option<String>,
     pub body: Vec<u8>,
     host: String,
     origin: Option<String>,
@@ -474,6 +478,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     let mut websocket_protocol = None;
     let mut body_len = None;
     let mut ordinary_headers = Vec::new();
+    let mut export_capture = None;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -529,9 +534,8 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             name if name.starts_with("x-sandstorm-") => {
                 return Err(refuse("caller-supplied Sandstorm header"));
             }
-            name if allowed_ordinary_header(name) || name == "x-mini-export-capture" => {
-                ordinary_headers.push((name.to_owned(), value))
-            }
+            crate::export_receipt::CAPTURE_HEADER => export_capture = Some(value),
+            name if allowed_ordinary_header(name) => ordinary_headers.push((name.to_owned(), value)),
             _ => {} // Browser/proxy metadata is never forwarded to Mini or the app.
         }
     }
@@ -582,6 +586,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             method,
             path_and_query: target[1..].to_owned(),
             ordinary_headers,
+            export_capture,
             body: Vec::new(),
             host,
             origin,
@@ -736,6 +741,80 @@ impl CustodianPolicy {
 const MAX_PENDING_REQUESTS: usize = 16;
 const MAX_PENDING_PER_SUBJECT: usize = 2;
 const QUEUE_DEADLINE: Duration = Duration::from_secs(30);
+/// Accepted connections not yet given a reader slot. They hold only a file
+/// descriptor; nothing is read, parsed or sent to Mini until a slot frees.
+/// A browser opens six connections per origin, so a principal's extra
+/// connections wait here (bounded per principal and overall) instead of
+/// being refused at accept.
+const MAX_WAITING_CONNECTIONS: usize = 64;
+const MAX_WAITING_PER_SUBJECT: usize = 16;
+
+struct WaitingConnection {
+    index: usize,
+    stream: UnixStream,
+    policy: CustodianPolicy,
+    directory: Option<PathBuf>,
+    accepted_at: Instant,
+}
+
+/// Bounded admission at accept: reserve a reader slot now, or wait for one.
+/// Returns the stream to refuse when both the slot and the wait are full.
+fn admit_or_wait(
+    admission: &Arc<Mutex<Admission>>,
+    waiting: &mut VecDeque<WaitingConnection>,
+    connection: WaitingConnection,
+) -> io::Result<Result<Option<(WaitingConnection, AdmissionGuard)>, UnixStream>> {
+    let subject_waiting = waiting
+        .iter()
+        .filter(|queued| queued.policy.fixed_subject == connection.policy.fixed_subject)
+        .count();
+    // A principal with connections already waiting keeps arrival order.
+    if subject_waiting == 0 {
+        if let Some(guard) = AdmissionGuard::reserve(admission, &connection.policy.fixed_subject)? {
+            return Ok(Ok(Some((connection, guard))));
+        }
+    }
+    if waiting.len() >= MAX_WAITING_CONNECTIONS || subject_waiting >= MAX_WAITING_PER_SUBJECT {
+        return Ok(Err(connection.stream));
+    }
+    waiting.push_back(connection);
+    Ok(Ok(None))
+}
+
+/// Give freed reader slots to waiting connections in arrival order (each
+/// principal's own order is preserved), and answer `busy` to any connection
+/// whose wait reached the queue deadline. Returns the promoted connections
+/// and the expired streams.
+#[allow(clippy::type_complexity)]
+fn promote_waiting(
+    admission: &Arc<Mutex<Admission>>,
+    waiting: &mut VecDeque<WaitingConnection>,
+    now: Instant,
+) -> io::Result<(Vec<(WaitingConnection, AdmissionGuard)>, Vec<UnixStream>)> {
+    let mut promoted = Vec::new();
+    let mut expired = Vec::new();
+    let mut blocked: HashSet<String> = HashSet::new();
+    let mut kept = VecDeque::with_capacity(waiting.len());
+    while let Some(connection) = waiting.pop_front() {
+        if now.saturating_duration_since(connection.accepted_at) >= QUEUE_DEADLINE {
+            expired.push(connection.stream);
+            continue;
+        }
+        if blocked.contains(&connection.policy.fixed_subject) {
+            kept.push_back(connection);
+            continue;
+        }
+        match AdmissionGuard::reserve(admission, &connection.policy.fixed_subject)? {
+            Some(guard) => promoted.push((connection, guard)),
+            None => {
+                blocked.insert(connection.policy.fixed_subject.clone());
+                kept.push_back(connection);
+            }
+        }
+    }
+    *waiting = kept;
+    Ok((promoted, expired))
+}
 
 #[derive(Default)]
 struct Admission {
@@ -894,6 +973,61 @@ impl PrivateHttpEntrance {
         let admission = Arc::new(Mutex::new(Admission::default()));
         let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
         let mut pending: VecDeque<ParsedRequest> = VecDeque::new();
+        let mut waiting: VecDeque<WaitingConnection> = VecDeque::new();
+        let spawn_reader = |connection: WaitingConnection, guard: AdmissionGuard| {
+            let WaitingConnection {
+                index,
+                stream,
+                policy,
+                directory,
+                accepted_at,
+            } = connection;
+            let sender = sender.clone();
+            let mut guard = Some(guard);
+            std::thread::Builder::new()
+                .name("mini-spk-http-reader".into())
+                .spawn(move || {
+                    // Parsing/bootstrap never calls Mini. A held or malformed
+                    // reader occupies its own bounded slot, not the dispatch loop.
+                    let _ = handle_stream_with(
+                        stream,
+                        &policy,
+                        directory.as_deref(),
+                        &mut |request, kind, policy| {
+                            let response_stream = request
+                                .response_stream
+                                .as_ref()
+                                .ok_or_else(|| refuse("queued response stream absent"))?
+                                .try_clone()?;
+                            let queued = ParsedRequest {
+                                index,
+                                request,
+                                kind,
+                                policy: policy.clone(),
+                                stream: response_stream,
+                                queued_at: accepted_at,
+                                _guard: guard
+                                    .take()
+                                    .ok_or_else(|| refuse("reader queued twice"))?,
+                            };
+                            sender
+                                .send(queued)
+                                .map_err(|_| refuse("resident dispatch loop ended"))?;
+                            // Ownership of the response passed to the dispatch loop.
+                            Ok(Vec::new())
+                        },
+                    );
+                })
+                .map(|_| ())
+        };
+        let refuse_busy = |stream: UnixStream| {
+            std::thread::Builder::new()
+                .name("mini-spk-http-busy".into())
+                .spawn(move || {
+                    let _ = write_response_bounded(&stream, &admission_response(Method::Get, "busy"));
+                })
+                .map(|_| ())
+        };
         let mut served: HashMap<String, u64> = HashMap::new();
         let mut clock = 0_u64;
         let mut next_route = 0_usize;
@@ -923,13 +1057,20 @@ impl PrivateHttpEntrance {
             }
             // Readers notify through the bounded channel. Poll at a short bound
             // while they exist, and block normally when the app is idle.
+            let (promoted, expired) = promote_waiting(&admission, &mut waiting, Instant::now())?;
+            for (connection, guard) in promoted {
+                spawn_reader(connection, guard)?;
+            }
+            for stream in expired {
+                refuse_busy(stream)?;
+            }
             let active = admission
                 .lock()
                 .map_err(|_| refuse("admission lock poisoned"))?
                 .total;
             let timeout = if !pending.is_empty() {
                 0
-            } else if active > 0 {
+            } else if active > 0 || !waiting.is_empty() {
                 20
             } else {
                 -1
@@ -955,54 +1096,22 @@ impl PrivateHttpEntrance {
                     continue;
                 }
                 let entrance = &entrances[index];
-                let (mut stream, _) = entrance.listener.accept()?;
+                let (stream, _) = entrance.listener.accept()?;
                 if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) {
                     continue;
                 }
-                let policy = entrance.policy.clone();
-                let mut guard = match AdmissionGuard::reserve(&admission, &policy.fixed_subject)? {
-                    Some(guard) => Some(guard),
-                    None => {
-                        let _ = stream.write_all(&admission_response(Method::Get, "busy"));
-                        continue;
-                    }
+                let connection = WaitingConnection {
+                    index,
+                    stream,
+                    policy: entrance.policy.clone(),
+                    directory: entrance.socket.parent().map(Path::to_path_buf),
+                    accepted_at: Instant::now(),
                 };
-                let directory = entrance.socket.parent().map(Path::to_path_buf);
-                let sender = sender.clone();
-                std::thread::Builder::new()
-                    .name("mini-spk-http-reader".into())
-                    .spawn(move || {
-                        // Parsing/bootstrap never calls Mini. A held or malformed
-                        // reader occupies its own bounded slot, not the dispatch loop.
-                        let _ = handle_stream_with(
-                            stream,
-                            &policy,
-                            directory.as_deref(),
-                            &mut |request, kind, policy| {
-                                let response_stream = request
-                                    .response_stream
-                                    .as_ref()
-                                    .ok_or_else(|| refuse("queued response stream absent"))?
-                                    .try_clone()?;
-                                let queued = ParsedRequest {
-                                    index,
-                                    request,
-                                    kind,
-                                    policy: policy.clone(),
-                                    stream: response_stream,
-                                    queued_at: Instant::now(),
-                                    _guard: guard
-                                        .take()
-                                        .ok_or_else(|| refuse("reader queued twice"))?,
-                                };
-                                sender
-                                    .send(queued)
-                                    .map_err(|_| refuse("resident dispatch loop ended"))?;
-                                // Ownership of the response passed to the dispatch loop.
-                                Ok(Vec::new())
-                            },
-                        );
-                    })?;
+                match admit_or_wait(&admission, &mut waiting, connection)? {
+                    Ok(Some((connection, guard))) => spawn_reader(connection, guard)?,
+                    Ok(None) => {}
+                    Err(stream) => refuse_busy(stream)?,
+                }
             }
             next_route = (next_route + 1) % entrances.len();
             pending.extend(receiver.try_iter());
@@ -1391,6 +1500,128 @@ mod tests {
         served.insert("b".into(), 5);
         assert_eq!(fair_pending_index(&pending, &served), Some(3));
     }
+    fn waiting(subject: &str, index: usize, accepted_at: Instant) -> WaitingConnection {
+        let (stream, _) = UnixStream::pair().unwrap();
+        let mut policy = policy();
+        policy.fixed_subject = subject.into();
+        WaitingConnection {
+            index,
+            stream,
+            policy,
+            directory: None,
+            accepted_at,
+        }
+    }
+
+    /// A principal's third connection is not refused at accept: it waits,
+    /// is promoted in arrival order when a slot frees, and is refused only
+    /// past the queue deadline or the bounded wait.
+    #[test]
+    fn third_principal_connection_waits_for_a_slot_instead_of_busy() {
+        let admission = Arc::new(Mutex::new(Admission::default()));
+        let mut queue = VecDeque::new();
+        let now = Instant::now();
+        let mut guards = Vec::new();
+        for index in 0..MAX_PENDING_PER_SUBJECT {
+            match admit_or_wait(&admission, &mut queue, waiting("a", index, now)).unwrap() {
+                Ok(Some((_, guard))) => guards.push(guard),
+                _ => panic!("free slot must admit at once"),
+            }
+        }
+        for index in 10..14 {
+            assert!(matches!(
+                admit_or_wait(&admission, &mut queue, waiting("a", index, now)).unwrap(),
+                Ok(None)
+            ));
+        }
+        assert_eq!(queue.len(), 4);
+        // Another principal is not held behind a's waiters.
+        let other = admit_or_wait(&admission, &mut queue, waiting("b", 99, now)).unwrap();
+        assert!(matches!(other, Ok(Some(_))));
+        drop(other);
+        let (promoted, expired) = promote_waiting(&admission, &mut queue, now).unwrap();
+        assert!(promoted.is_empty() && expired.is_empty());
+        drop(guards.pop());
+        let (promoted, expired) = promote_waiting(&admission, &mut queue, now).unwrap();
+        assert!(expired.is_empty());
+        assert_eq!(
+            promoted.iter().map(|(c, _)| c.index).collect::<Vec<_>>(),
+            [10]
+        );
+        // A new connection of `a` keeps arrival order behind its waiters
+        // even if a slot happens to be free.
+        drop(promoted);
+        assert!(matches!(
+            admit_or_wait(&admission, &mut queue, waiting("a", 20, now)).unwrap(),
+            Ok(None)
+        ));
+        let (promoted, _) = promote_waiting(&admission, &mut queue, now).unwrap();
+        assert_eq!(
+            promoted.iter().map(|(c, _)| c.index).collect::<Vec<_>>(),
+            [11]
+        );
+        drop(promoted);
+        let late = now + QUEUE_DEADLINE;
+        drop(guards);
+        let (promoted, expired) = promote_waiting(&admission, &mut queue, late).unwrap();
+        assert!(promoted.is_empty());
+        assert_eq!(expired.len(), 3);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn waiting_connections_are_bounded_per_principal_and_overall() {
+        let admission = Arc::new(Mutex::new(Admission::default()));
+        let mut queue = VecDeque::new();
+        let now = Instant::now();
+        let mut held = Vec::new();
+        for index in 0..MAX_PENDING_PER_SUBJECT {
+            if let Ok(Some(admitted)) =
+                admit_or_wait(&admission, &mut queue, waiting("a", index, now)).unwrap()
+            {
+                held.push(admitted);
+            }
+        }
+        for index in 0..MAX_WAITING_PER_SUBJECT {
+            assert!(matches!(
+                admit_or_wait(&admission, &mut queue, waiting("a", 100 + index, now)).unwrap(),
+                Ok(None)
+            ));
+        }
+        assert!(admit_or_wait(&admission, &mut queue, waiting("a", 999, now))
+            .unwrap()
+            .is_err());
+        let mut subject = 0;
+        while queue.len() < MAX_WAITING_CONNECTIONS {
+            subject += 1;
+            let name = format!("s{subject}");
+            for index in 0..MAX_PENDING_PER_SUBJECT {
+                if let Ok(Some(admitted)) =
+                    admit_or_wait(&admission, &mut queue, waiting(&name, index, now)).unwrap()
+                {
+                    held.push(admitted);
+                }
+            }
+            for index in 0..MAX_WAITING_PER_SUBJECT {
+                if queue.len() == MAX_WAITING_CONNECTIONS {
+                    break;
+                }
+                let _ = admit_or_wait(&admission, &mut queue, waiting(&name, index, now)).unwrap();
+            }
+        }
+        let fresh = format!("s{}", subject + 1);
+        for index in 0..MAX_PENDING_PER_SUBJECT {
+            if let Ok(Some(admitted)) =
+                admit_or_wait(&admission, &mut queue, waiting(&fresh, index, now)).unwrap()
+            {
+                held.push(admitted);
+            }
+        }
+        assert!(admit_or_wait(&admission, &mut queue, waiting(&fresh, 7, now))
+            .unwrap()
+            .is_err());
+    }
+
     #[test]
     fn held_reader_does_not_block_another_members_dispatch() {
         let nonce = SystemTime::now()

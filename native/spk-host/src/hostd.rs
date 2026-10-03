@@ -2176,6 +2176,114 @@ mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
+    fn human_matched() -> crate::dispatch_inspection::MatchedInspection {
+        crate::dispatch_inspection::MatchedInspection {
+            app: 91,
+            app_generation: 2,
+            session_resource: "6208".into(),
+            session_generation: "0".into(),
+            subject: "9".into(),
+            operation_id: "0".into(),
+            physical_request_digest: "9".repeat(64),
+            dispatch_transaction: "2".repeat(64),
+            dispatch_event: "3".repeat(64),
+            session_fingerprint: [42; 32],
+            principal: [0xaa; 32],
+            before_world_root: "111".into(),
+            after_world_root: "222".into(),
+            accepted_count: "12".into(),
+            effective_bits: vec![true],
+            app_path_and_query: "".into(),
+            method: "GET".into(),
+        }
+    }
+
+    /// The human path after DeliveryRequested: a worker fence releases the
+    /// shared slot and the generation-wide native marker, the operation
+    /// stays terminally Uncertain and is never dispatchable again, and the
+    /// next participant proceeds.
+    #[test]
+    fn human_post_commit_failure_releases_slot_and_native_marker_with_fence() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('9');
+        let native = path.join("native-dispatch-active.json");
+        fs::write(&native, b"native submit marker").unwrap();
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let fence = driver
+            .prepare_cancellable(first.clone())
+            .unwrap()
+            .abort_no_enqueue();
+        crate::dispatch_native::RecordedDispatch::test_new(
+            first.clone(),
+            human_matched(),
+            native.clone(),
+            b"native submit marker".to_vec(),
+        )
+        .release_uncertain(&journal, fence)
+        .unwrap();
+        assert!(!native.exists());
+        assert!(!journal.active_dispatch_path().exists());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        assert!(journal
+            .request_dispatch(first, committed_permit())
+            .is_err());
+        let mut second = dispatch_identity('1');
+        second.session_resource = "6209".into();
+        journal
+            .request_dispatch(second.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&second, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    /// Without a matching worker fence nothing is released: a lost ACK or a
+    /// fence for another coordinate keeps both markers for exact audit.
+    #[test]
+    fn human_failure_without_matching_fence_keeps_every_marker() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('9');
+        let native = path.join("native-dispatch-active.json");
+        fs::write(&native, b"native submit marker").unwrap();
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        let mut other = dispatch_identity('1');
+        other.session_resource = "6209".into();
+        let wrong = DispatchFence::test_worker_released_for(other);
+        assert!(crate::dispatch_native::RecordedDispatch::test_new(
+            first.clone(),
+            human_matched(),
+            native.clone(),
+            b"native submit marker".to_vec(),
+        )
+        .release_uncertain(&journal, wrong)
+        .is_err());
+        assert!(native.exists());
+        assert!(journal.active_dispatch_path().exists());
+        assert!(crate::dispatch_native::RecordedDispatch::test_new(
+            first.clone(),
+            human_matched(),
+            native.clone(),
+            b"native submit marker".to_vec(),
+        )
+        .finish(&journal, false)
+        .is_err());
+        assert!(native.exists());
+        assert!(journal.active_dispatch_path().exists());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn real_prequeue_guard_releases_only_its_unqueued_operation() {
         let (path, journal, _) = running_journal();

@@ -17,37 +17,62 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
+fn qvalue(decimal: &str) -> io::Result<u16> {
+    let (whole, fractional) = decimal.split_once('.').unwrap_or((decimal, ""));
+    if !matches!(whole, "0" | "1")
+        || fractional.len() > 3
+        || !fractional.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(invalid("invalid HTTP quality"));
+    }
+    let fraction = format!("{fractional:0<3}")
+        .parse::<u16>()
+        .map_err(|_| invalid("invalid HTTP quality"))?;
+    let q = whole.parse::<u16>().unwrap() * 1000 + fraction;
+    if q > 1000 {
+        return Err(invalid("HTTP quality exceeds one"));
+    }
+    Ok(q)
+}
+
+/// RFC 9110 weighted list: `range *( ";" parameter ) [ ";" "q=" qvalue ]`.
+/// Media-range parameters such as `v=b3` (Chromium's signed-exchange offer)
+/// are part of the value and stay in the WebSession name, so the bridge
+/// reconstructs exactly the signed range; only the weight becomes the number.
+/// A parameter after the weight is outside the grammar and refuses.
 fn quality_list(value: &str) -> io::Result<Vec<(String, u16)>> {
     let mut result = Vec::new();
     for part in value.split(',') {
-        let part = part.trim();
-        let (name, quality) = if let Some((name, suffix)) = part.split_once(';') {
-            let decimal = suffix
-                .trim()
-                .strip_prefix("q=")
-                .ok_or_else(|| invalid("unsupported HTTP quality parameter"))?;
-            let (whole, fractional) = decimal.split_once('.').unwrap_or((decimal, ""));
-            if !matches!(whole, "0" | "1")
-                || fractional.len() > 3
-                || !fractional.bytes().all(|b| b.is_ascii_digit())
+        let mut pieces = part.split(';');
+        let range = pieces.next().unwrap_or("").trim();
+        let mut name = range.to_owned();
+        let mut quality = None;
+        for parameter in pieces {
+            let parameter = parameter.trim();
+            if quality.is_some() {
+                return Err(invalid("HTTP parameter after quality weight"));
+            }
+            let (key, argument) = parameter
+                .split_once('=')
+                .ok_or_else(|| invalid("malformed HTTP media parameter"))?;
+            if key.is_empty()
+                || argument.is_empty()
+                || key.trim() != key
+                || argument.trim() != argument
             {
-                return Err(invalid("invalid HTTP quality"));
+                return Err(invalid("malformed HTTP media parameter"));
             }
-            let fraction = format!("{fractional:0<3}")
-                .parse::<u16>()
-                .map_err(|_| invalid("invalid HTTP quality"))?;
-            let q = whole.parse::<u16>().unwrap() * 1000 + fraction;
-            if q > 1000 {
-                return Err(invalid("HTTP quality exceeds one"));
+            if key.eq_ignore_ascii_case("q") {
+                quality = Some(qvalue(argument)?);
+            } else {
+                name.push(';');
+                name.push_str(parameter);
             }
-            (name.trim(), q)
-        } else {
-            (part, 1000)
-        };
-        if name.is_empty() || name.len() > 8192 || name.contains(['\r', '\n', '\0']) {
+        }
+        if range.is_empty() || name.len() > 8192 || name.contains(['\r', '\n', '\0']) {
             return Err(invalid("invalid HTTP weighted value"));
         }
-        result.push((name.to_owned(), quality));
+        result.push((name, quality.unwrap_or(1000)));
         if result.len() > 128 {
             return Err(invalid("too many HTTP weighted values"));
         }
@@ -195,15 +220,8 @@ pub(crate) fn physical_web_input(
     })
 }
 
-#[allow(clippy::type_complexity)]
-fn project(
-    matched: &MatchedInspection,
-    http: &HttpProjection<'_>,
-    display_name: &str,
-    preferred_handle: &str,
-    base_path: &str,
-) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
-    let call = match matched.method.as_str() {
+fn call_for(method: &str) -> io::Result<Call> {
+    Ok(match method {
         "GET" => Call::Exchange(Method::Get),
         "HEAD" => Call::Exchange(Method::Head),
         "POST" => Call::Exchange(Method::Post),
@@ -212,7 +230,94 @@ fn project(
         "DELETE" => Call::Exchange(Method::Delete),
         STREAMED_OPEN_METHOD => Call::Open,
         _ => return Err(invalid("Mini method unavailable to WebSession")),
-    };
+    })
+}
+
+/// The WebSession projection of everything the entrance request alone
+/// determines. It is a pure function of the request, so running it before
+/// any Mini authoring refuses an unprojectable request while no Store record,
+/// operation number or generation-wide marker exists. The committed record
+/// is projected again by `project` from the same bytes afterwards.
+pub(crate) fn preflight_web_input(
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+    upgrade: bool,
+) -> io::Result<()> {
+    let call = call_for(http.method)?;
+    if matches!(call, Call::Open) != upgrade {
+        return Err(invalid("entrance upgrade differs from WebSession call"));
+    }
+    project_http(&call, http, display_name, preferred_handle, base_path).map(|_| ())
+}
+
+struct HttpParts {
+    context: RequestContext,
+    body: Option<Body>,
+    protocols: Option<Vec<String>>,
+    kind: SessionKind,
+    base_path: String,
+    user_agent: Option<String>,
+}
+
+#[allow(clippy::type_complexity)]
+fn project(
+    matched: &MatchedInspection,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
+    let call = call_for(matched.method.as_str())?;
+    let HttpParts {
+        context,
+        body,
+        protocols,
+        kind,
+        base_path,
+        user_agent,
+    } = project_http(&call, http, display_name, preferred_handle, base_path)?;
+    Ok((
+        SessionBinding {
+            app: matched.app,
+            process_generation: matched.app_generation,
+            session_resource: matched
+                .session_resource
+                .parse()
+                .map_err(|_| invalid("Mini session resource exceeds physical host range"))?,
+            subject: matched
+                .subject
+                .parse()
+                .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
+            projection_fingerprint: matched.session_fingerprint,
+            ticket_resource: None,
+            kind,
+            params: SessionParameters {
+                identity_id: matched.principal,
+                display_name: display_name.to_owned(),
+                preferred_handle: preferred_handle.to_owned(),
+                permissions: matched.effective_bits.clone(),
+                tab_id: Vec::new(),
+                base_path,
+                user_agent: user_agent.unwrap_or_else(|| "Mini SPK Host".to_owned()),
+                acceptable_languages: Vec::new(),
+            },
+        },
+        call,
+        context,
+        body,
+        protocols.unwrap_or_default(),
+    ))
+}
+
+fn project_http(
+    call: &Call,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<HttpParts> {
     let mut protocols = None;
     if display_name.len() > 1024
         || preferred_handle.len() > 256
@@ -311,37 +416,14 @@ fn project(
         }
         Route::Api { .. } => (SessionKind::Api, String::new()),
     };
-    Ok((
-        SessionBinding {
-            app: matched.app,
-            process_generation: matched.app_generation,
-            session_resource: matched
-                .session_resource
-                .parse()
-                .map_err(|_| invalid("Mini session resource exceeds physical host range"))?,
-            subject: matched
-                .subject
-                .parse()
-                .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
-            projection_fingerprint: matched.session_fingerprint,
-            ticket_resource: None,
-            kind,
-            params: SessionParameters {
-                identity_id: matched.principal,
-                display_name: display_name.to_owned(),
-                preferred_handle: preferred_handle.to_owned(),
-                permissions: matched.effective_bits.clone(),
-                tab_id: Vec::new(),
-                base_path,
-                user_agent: user_agent.unwrap_or("Mini SPK Host").to_owned(),
-                acceptable_languages: Vec::new(),
-            },
-        },
-        call,
+    Ok(HttpParts {
         context,
         body,
-        protocols.unwrap_or_default(),
-    ))
+        protocols,
+        kind,
+        base_path,
+        user_agent: user_agent.map(str::to_owned),
+    })
 }
 
 #[cfg(test)]
@@ -563,5 +645,98 @@ mod tests {
         let get_http = HttpProjection { method: "GET", ..http };
         assert!(physical_open_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
         assert!(physical_web_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
+    }
+    /// Chromium's navigation Accept carries `v=b3` before its weight. The
+    /// range keeps its parameter (the bridge rebuilds exactly the signed
+    /// range) and only the weight becomes the WebSession number.
+    #[test]
+    fn chromium_navigation_accept_keeps_media_parameters() {
+        let chromium = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+        let parsed = quality_list(chromium).unwrap();
+        assert_eq!(parsed.len(), 8);
+        assert_eq!(parsed[2], ("application/xml".into(), 900));
+        assert_eq!(parsed[6], ("*/*".into(), 800));
+        assert_eq!(parsed[7], ("application/signed-exchange;v=b3".into(), 700));
+        assert_eq!(quality_list("text/plain;Q=0.5").unwrap(), [("text/plain".into(), 500)]);
+        assert_eq!(
+            quality_list("text/html;level=1").unwrap(),
+            [("text/html;level=1".into(), 1000)]
+        );
+        for refused in [
+            "text/html;q=0.5;level=1",
+            "text/html;q=0.5;q=0.4",
+            "text/html;q=2",
+            "text/html;q=0.1234",
+            "text/html;level",
+            "text/html;=1",
+            ";q=0.5",
+            "text/html,,text/plain",
+        ] {
+            assert!(quality_list(refused).is_err(), "{refused}");
+        }
+        let headers = vec![("accept".to_owned(), chromium.to_owned())];
+        let http = HttpProjection {
+            method: "GET",
+            path_and_query: "",
+            ordered_headers: &headers,
+            body: b"",
+            route: Route::Browser,
+        };
+        let mut source = matched();
+        source.method = "GET".into();
+        let projected =
+            physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test")
+                .unwrap();
+        assert_eq!(projected.request.context.accept.len(), 8);
+    }
+
+    /// The pre-commit preflight is the same projection as the committed one:
+    /// whatever it admits projects after commit, and whatever it refuses is
+    /// refused before any Mini authoring or generation-wide marker exists.
+    #[test]
+    fn preflight_refuses_unprojectable_request_before_any_mini_call() {
+        let origin = "https://friend.example.test";
+        let good = vec![
+            ("accept".to_owned(), "text/html;q=0.9".to_owned()),
+            ("user-agent".to_owned(), "Browser/1".to_owned()),
+        ];
+        let http = HttpProjection {
+            method: "GET",
+            path_and_query: "sheet",
+            ordered_headers: &good,
+            body: b"",
+            route: Route::Browser,
+        };
+        preflight_web_input(&http, "Friend", "friend", origin, false).unwrap();
+        let mut source = matched();
+        source.method = "GET".into();
+        physical_web_input(&source, &http, "Friend", "friend", origin).unwrap();
+        assert!(preflight_web_input(&http, "Friend", "friend", origin, true).is_err());
+        let unmapped = vec![("x-mini-export-capture".to_owned(), "a".repeat(32))];
+        let refused = HttpProjection {
+            ordered_headers: &unmapped,
+            ..http
+        };
+        assert!(preflight_web_input(&refused, "Friend", "friend", origin, false).is_err());
+        let bad_accept = vec![("accept".to_owned(), "text/html;q=0.5;level=1".to_owned())];
+        let refused = HttpProjection {
+            ordered_headers: &bad_accept,
+            ..http
+        };
+        assert!(preflight_web_input(&refused, "Friend", "friend", origin, false).is_err());
+        let refused = HttpProjection {
+            body: b"x",
+            ..http
+        };
+        assert!(preflight_web_input(&refused, "Friend", "friend", origin, false).is_err());
+        assert!(preflight_web_input(&http, "Friend", "friend", "/", false).is_err());
+        let protocols = vec![("sec-websocket-protocol".to_owned(), "chat".to_owned())];
+        let open = HttpProjection {
+            method: STREAMED_OPEN_METHOD,
+            ordered_headers: &protocols,
+            ..http
+        };
+        preflight_web_input(&open, "Friend", "friend", origin, true).unwrap();
+        assert!(preflight_web_input(&open, "Friend", "friend", origin, false).is_err());
     }
 }
