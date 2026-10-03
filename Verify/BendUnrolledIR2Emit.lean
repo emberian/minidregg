@@ -6,7 +6,7 @@ import Compiler.EmitSystemFast
 /- Actual admitted Lab yes → full controller → two raw ticks → shared DAG →
 emitted arithmetic descriptor. All fixture data are public. This is a native
 backend qualification consumer, not private world proof admission. -/
-namespace Minidregg.Verify.BendUnrolledIR2Emit
+namespace Minidregg.Host.BendUnrolledIR2Emit
 open Compiler Theory
 open ObliviousNetwork ObliviousUnroll BendClosureMachine
 open Assurance.BendObliviousMinimal
@@ -48,8 +48,8 @@ def emitFixture (directory : System.FilePath) : IO Unit := do
   IO.FS.writeFile (directory / "wrong-output.csv") (BendProofWitness.csv wrongOutput)
   IO.println s!"ACTUAL source-admitted full controller: ticks={ticks} inputs={network.inputCount} gates={network.gates.size} arithmeticWires={descriptor.nWires} publicPins={publicValues.size}; decoded Lab yes/count0"
 
-end Minidregg.Verify.BendUnrolledIR2Emit
+end Minidregg.Host.BendUnrolledIR2Emit
 
 def main (args : List String) : IO Unit := do
   let [directory] := args | throw (IO.userError "usage: BendUnrolledIR2Emit fixture-directory")
-  Minidregg.Verify.BendUnrolledIR2Emit.emitFixture directory
+  Minidregg.Host.BendUnrolledIR2Emit.emitFixture directory

@@ -1,0 +1,13 @@
+{
+  "schema": "dregg.objective-bend.package-input.v1",
+  "edition": "objective-bend-1",
+  "modules": [
+    {
+      "name": "GenericExtension",
+      "sourcePath": "tests/objective-bend-source/GenericExtension.obend",
+      "imports": []
+    }
+  ],
+  "entryModule": "0",
+  "entryDefinition": "reuseCaptured"
+}

@@ -183,16 +183,21 @@ bytes or absent external burn anchor refuse. This is honest crash storage and
 actual original creation, not arbitrary checkpoint reachability, source current
 activation, privateRecovery or independent malicious-storage integrity.
 
-New r23 SOURCE WIP: reserve_many canonical binding retains ordered full public
+The r23/r24 atomic batch and multi-inventory consumer passed5/5 at14:00:52UTC:
+9418-row single durable record0.069s, two independently generated King stocks
+through actual AND, complete multi-stock burn before incomplete input, and
+affected original field WAL recovery. No full-controller execution follows.
+
+New r23 source: reserve_many canonical binding retains ordered full public
 inventories plus actual original seed reservation IDs; seed/pool/tuple aliases
 and crossed holder/access structures refuse before getters. All selected rows
 from all inventories are atomically anchor-reserved before the first accepted
 input/tuple getter. Unselected tails remain unused. The new anchor batch request
 preserves old single-row journal bytes/history while eliminating whole-journal
 append/fsync for every row. Full-sized batch, multi-stock actual protocol and
-incomplete-input refusal checks are authored but not yet run.
+incomplete-input refusal checks now passed in that focused tranche.
 
-Current runnable Network bound remains8192 gates and public row bound65536;
+New public Network codec bound is65536 gates and public row bound65536;
 per-inventory King capacity32. The actual admitted smallest controller is13237
 gates/4709AND, two raw ticks require9418AND baseline, so this profile does NOT
 yet run that controller. Full unroll adds counted input/handled/release gates.
@@ -203,3 +208,54 @@ claiming useful full-controller latency. Native source205 original-prefix
 authority and sealed recipient route still refuse until their actual producer
 is joined. Shared Boolean outputs are recipient-local shares, never an audience
 release or successor privateRecovery grant.
+
+
+Dependency-layer consumer actual6/6PASS14:23:01UTC: real3AND/1wave,
+corrupt early full-vector waits for late honest support, pending vectorWAL
+recovery, old sequentialWAL2 and native fullPlan/schedule interop.
+ a closed runtime family shares the
+original initialization/event/outbox WAL between sequential and layer engines,
+with separate file/wire/context domains. LayerEngine accepts only a pristine
+fully burned actual Engine. It groups ANDs by public dependency depth, fixed
+1024 maximum per vector, and reconstructs ONE degree-f vector polynomial with
+n-f matching authenticated holders over ALL components. Exact canonical
+gate-index tuple positions remain unchanged. It never opens a per-component
+subset chosen from different faulty points. Output shares remain endpoint-local.
+
+Actual Lean-produced public synthetic 142645-byte Plan fixture is included for
+wire/schedule conformance, not checked stock authority. Its one-step Network
+has13237gates/4709AND/29layers/max565, publicTicks2/9418rows. It is distinct from
+the26477-gate cumulative-handled two-tick unroll (9420AND/58layers/max658).
+Counted bitness prefix for44inputs adds44AND/89gates, so full private graph
+requires9464tuples, at least296 stocks of32 (eight unused tails). Initializer/
+fresh source release predicates may add further counted operations; no hidden
+operation is treated as free. Native funded packet/WAL lifetime and active
+output/recovery/GOD/security proof obligations remain open.
+
+
+New private_output/private_output_store source is WIP, NOT YET RUN. It consumes
+typed completed LayerEngine shares only after a stable output-to-recipient row
+is reserved/fsynced/read back. It uses n actual PrivSend instances; only one
+fixed selected party can reconstruct the output using n-f matching degree-f
+vectors. Malformed corrupt sender plaintext is retained/rejected without
+rolling back completed honest delivery prefixes. Wrong recipient requests/
+transfers refuse. Original local shares/descriptor/context/anchor and actual OS
+key polynomials/ciphertext recursive outbox are durable before publication;
+restart retains the exact original ciphertext and result.
+
+The public arithmetic_reference two-bit addition program has four qualified
+input bits, three result bits (sum low/high/carry), eight total AND rows incl
+input qualification, and one fixed public network. It is a reference arithmetic
+program, not new Objective source/type/demand compiler adequacy. A peer-owned
+Lean addition generator remains WIP; source-origin interoperability is pending.
+New tests cover1+2,3+1,3+3 private result and pending/completed recovery, plus one
+malformed corrupt sender disappearing while remaining honest holders deliver.
+They are pending until an actual guarded run.
+
+Protocol5 requires explicit source enrollment. OutputMachine receiver binding
+does not grant output delivery: honest request_delivery still requires fresh
+current source ReleaseAdmission, exact audience/descriptor and allAppliedReady.
+That native producer remains unjoined/denied. The plaintext recipient-result
+adapter is NOT successor resharing. Coherent fresh holder-private successor
+polynomials/randomness, cumulative exposure/fencing, active MPC/GOD and current
+audience output law remain concrete construction work, not Ready labels.

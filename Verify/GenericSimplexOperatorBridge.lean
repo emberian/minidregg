@@ -18,6 +18,23 @@ def retainedPayload (replicas : Array Replica) (ingress : Bytes) : Option Bytes 
         some (DurableCheckpointCodec.recordFrame.encode record)
       else none
 
+/-- Recover an offered complete source record from the actual durable engine
+journal. Only exact canonical source-record bytes containing this original
+signed ingress qualify. This is pending work, never an installed receipt. -/
+def retainedOfferedPayload (replicas : Array Replica) (ingress : Bytes) :
+    IO (Option Bytes) := do
+  for replica in replicas do
+    let p := replica.participant
+    let some (_, state) := Minidregg.Compiler.GenericSimplexIO.restore
+        p.runtime.context (← (Minidregg.Compiler.GenericSimplexNative.storage p.runtime.native).read)
+      | throw (IO.userError "pending recovery journal refused")
+    for payload in state.offers do
+      if let some record := DurableCheckpointCodec.recordFrame.decode payload then
+        if DurableCheckpointCodec.recordFrame.encode record == payload &&
+            record.event.canonicalBytes == ingress then
+          return some payload
+  return none
+
 /-- Completion compares the exact source prefix through this call. Later
 independent agreed records may already have reached only some replicas. -/
 def receiptPrefix (replica : Replica) (ingress : Bytes) : Option (List Bytes) := do
@@ -51,7 +68,8 @@ def submit (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) :
         "operator participants differ in consensus context"
     let ingress ← IO.ofExcept (sourceIngressOfCall first.config callBytes)
     let previous := retainedPayload current ingress
-    let finished ← match previous with
+    let pending ← if previous.isSome then pure none else retainedOfferedPayload current ingress
+    let finished ← match previous.orElse (fun _ => pending) with
       | some payload => drive fuel current payload []
       | none => runCall fuel current callBytes
     let some first := finished[0]? | throw (IO.userError "missing finished source participant")

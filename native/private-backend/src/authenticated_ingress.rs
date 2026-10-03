@@ -23,6 +23,7 @@ pub enum Protocol {
     AcssId = 2,
     Dzk = 3,
     FieldNetwork = 4,
+    PrivateOutput = 5,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Context {
@@ -71,6 +72,7 @@ impl CommitteeParty {
             2 => Protocol::AcssId,
             3 => Protocol::Dzk,
             4 => Protocol::FieldNetwork,
+            5 => Protocol::PrivateOutput,
             _ => return Err(bad("protocol tag")),
         };
         let g = c.bytes()?;

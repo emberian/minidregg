@@ -5,6 +5,9 @@ import json
 import os
 from pathlib import Path
 import struct
+import select
+import signal
+import time
 import subprocess
 import tempfile
 
@@ -12,8 +15,12 @@ MAX_FRAME = 12_102_760
 
 def exact(stream, count):
     result = bytearray()
+    deadline = time.monotonic() + 30
     while len(result) < count:
-        chunk = stream.read(count - len(result))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([stream], [], [], remaining)[0]:
+            raise RuntimeError("reader response exceeded probe deadline")
+        chunk = os.read(stream.fileno(), count - len(result))
         if not chunk:
             raise RuntimeError("reader closed before complete response")
         result.extend(chunk)
@@ -32,7 +39,8 @@ def probe(reader, config_path, expected_semantics):
     config = json.loads(config_path.read_text())
     with tempfile.TemporaryFile() as errors:
         child = subprocess.Popen([reader, str(config_path), "stdio"],
-                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors)
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
+                                 start_new_session=True)
         try:
             operation, payload = exchange(child, 0)
             assert operation == 0
@@ -55,7 +63,7 @@ def probe(reader, config_path, expected_semantics):
             return profile["runtimeParameters"]
         finally:
             if child.poll() is None:
-                child.kill()
+                os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
 def mismatch_refuses(reader, config_path):
     source = json.loads(config_path.read_text())

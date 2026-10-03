@@ -1117,18 +1117,18 @@ impl Broker {
                 let text = format!(
                     "# rendered by mini-spk-broker store={store} app={app} generation={generation}\n\
                      [Unit]\nDescription=Mini SPK resident app {app} generation {generation} store {store}\n\
-                     OnFailure={supervisor}\n\n[Service]\nType=exec\nUser={user}\nGroup={group}\n\
+                     OnFailure={supervisor}\n\n[Service]\nType=exec\nUser=root\nGroup=root\n\
                      Slice={slice}\n\
-                     Environment=MINI_SPK_APP_UID={uid} MINI_SPK_APP_GID={gid} \
+                     Environment=MINI_SPK_APP_UID={uid} MINI_SPK_APP_GID={gid} MINI_SPK_OPERATOR_UID={operator_uid} MINI_SPK_OPERATOR_GID={operator_gid} \
                      MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_BROKER_SOCKET={broker_socket}\n\
-                     ExecStart={spk} resident-run {config}\n\
-                     AmbientCapabilities=CAP_SETUID CAP_SETGID\n\
-                     CapabilityBoundingSet=CAP_SETUID CAP_SETGID\nNoNewPrivileges=yes\n\
+                     ExecStart={spk} resident-bootstrap {config}\n\
+                     AmbientCapabilities=\n\
+                     CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP\nNoNewPrivileges=yes\n\
                      KillMode=control-group\nUMask=0077\nProtectSystem=strict\n\
                      ReadWritePaths={root}/{store} {root}/vars/{name}\nProtectHome=yes\nPrivateTmp=yes\n",
                     supervisor = supervisor_unit(prefix, &store, &app),
-                    user = self.config.operator_user,
-                    group = self.operator_gid,
+                    operator_uid = self.operator_uid,
+                    operator_gid = self.operator_gid,
                     slice = app_slice(prefix, &store, &app),
                     uid = placement.app_uid,
                     gid = placement.app_gid,

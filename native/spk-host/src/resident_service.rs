@@ -862,8 +862,9 @@ impl ResidentConfig {
 /// stopped unit is installed from operator-reviewed pins; HTTP has no path to
 /// choose a package, task UID, Mini signer, command, or app generation.
 /// The resident never runs as root. Its unit (rendered by the root broker)
-/// names the app UID/GID, grains root and Store; the setid bound is installed
-/// before the operator-written config is read, and the config must agree.
+/// names the app UID/GID, grains root and Store. The trusted bootstrap has
+/// already dropped both parsers to zero capabilities before this config is
+/// read; its app identity must agree with the native source-bound launch.
 struct ResidentBound {
     app_uid: u32,
     app_gid: u32,
@@ -967,8 +968,8 @@ fn load_fixed_entrances(
 }
 
 pub fn run(config_path: &Path) -> io::Result<()> {
+    crate::resident_privilege::require_parser()?;
     let bound = ResidentBound::from_unit_environment()?;
-    crate::setid_bound::install(bound.app_uid, bound.app_gid)?;
     let mut config = ResidentConfig::load(config_path)?;
     bound.validate(&config)?;
     crate::checkpoint_control::refuse_retained_pause(&config.journal_dir)?;

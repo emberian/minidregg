@@ -1,0 +1,8 @@
+edition ObjectiveBend 1
+
+record Ordinal:
+  "0": Nat
+  "\u0031": Nat
+
+def selected(seed: Nat) -> Nat:
+  {"0": seed, "1": seed + 1n}."1"

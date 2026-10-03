@@ -6,7 +6,7 @@ the pending record, not the later application write or an external provider call
 -/
 import Kernel.BendActivityIngress
 import Compiler.BendActivitySuspension
-import Compiler.BendActivityNonce
+import Compiler.BendActivityDispatchContext
 
 namespace Minidregg.Kernel.BendActivityPendingAdmission
 open Minidregg.Theory
@@ -57,19 +57,12 @@ def nonce (action : Action) : Nat :=
   (Sp800185Cshake256.hash "DREGG/BEND/ACTIVITY-PENDING-ACTION/v1".toUTF8.toList
     (actionStream.encode {action with controlSignedBytes := []})).digest.value
 
-/-- This signature namespace is reserved by the explicit Activity receiving
-edition. Both signatures are excluded to avoid self-referential command bytes;
-the exact source pin, phase, bounds and response ABI remain signed. Ordinary
-entry points must reject it even through alternate native wrappers. -/
-def applicationNonce (pin : ContentControlFrame.Pin) (action : Action) : Nat :=
-  BendActivityNonce.make
-    (Sp800185Cshake256.hash "DREGG/BEND/ACTIVITY-APPLICATION-ACTION/v1".toUTF8.toList
-      (ContentControlFrame.pinStream.encode pin ++ actionStream.encode
-        {action with applicationSignedBytes := [], controlSignedBytes := []})).digest.value
-
-theorem applicationNonce_marked (pin : ContentControlFrame.Pin) (action : Action) :
-    BendActivityNonce.marked (applicationNonce pin action) = true :=
-  BendActivityNonce.make_marked _
+/-- Exact explicit route context; no nonce interval is reserved. The pending
+ordinal is the actual successor phase, while the complete preparation parameters
+remain signed without recursively including either signature. -/
+def applicationContext (pin : ContentControlFrame.Pin) (action : Action) : List UInt8 :=
+  BendActivityDispatchContext.encode ⟨pin,action.generation,action.ordinal + 1,
+    actionStream.encode {action with applicationSignedBytes := [], controlSignedBytes := []}⟩
 
 def overhead (action : Action) : Charge
   | .turnBytes => (encode action).length
@@ -139,7 +132,7 @@ def construct {config : Config} {opened : Opened config}
     (program : BendActivityProgram.Prepared action.program)
     (application : Application config.deployment.domain config.profile.semantics action.applicationSignedBytes)
     (control : BendActivityIngress.Current config opened) : Option (Admitted config opened) := do
-  if application.command.nonce != applicationNonce pin action ||
+  if application.command.family != some ⟨.activityDispatch,applicationContext pin action⟩ ||
       control.command.subject != pin.owner || control.command.nonce != nonce action ||
       control.command.targets.length != 1 ||
       !control.command.targets.all (fun target => decide (target.kind = .object ∧ target.target = pin.cell.value)) then none else do
@@ -258,7 +251,7 @@ def receive (config : Config) (opened : Opened config) (bytes : List UInt8) : IO
           | .ordinary result => return .ordinary result
 
 #assert_axioms parseApplication
-#assert_axioms applicationNonce_marked
+#assert_axioms applicationContext
 #assert_axioms transport_other_facets
 #assert_axioms receive
 #assert_axioms construct

@@ -163,14 +163,43 @@ def serve(profile, source, destination):
                 reader.wait()
 
 
+def private_config_bytes(path):
+    # The native client pins configuration to a private socket-adjacent copy.
+    # Read by descriptor; never follow a substituted link or block on a FIFO.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or info.st_mode & 0o077
+                or not 0 < info.st_size <= 1024 * 1024):
+            raise RuntimeError("client configuration must be a bounded owner-private regular file")
+        value = stream.read(1024 * 1024 + 1)
+        after = os.fstat(stream.fileno())
+        if (len(value) != info.st_size or info.st_size != after.st_size
+                or info.st_mtime_ns != after.st_mtime_ns
+                or info.st_ctime_ns != after.st_ctime_ns):
+            raise RuntimeError("client configuration changed during verification")
+        return value
+
+
+def check_client_arguments(profile, arguments):
+    pinned = command(profile["clientArguments"], "clientArguments")
+    if len(pinned) != 2 or pinned[1] != "stdio":
+        raise RuntimeError("bridge requires the pinned CONFIG stdio client profile")
+    if len(arguments) != 2 or arguments[1] != "stdio":
+        raise RuntimeError("client launch arguments differ from the pinned bridge profile")
+    if private_config_bytes(arguments[0]) != private_config_bytes(pinned[0]):
+        raise RuntimeError("client configuration differs from the pinned bridge profile")
+    # Supplied path is never passed to the reader: readerCommand stays pinned.
+
+
 def main():
     path = os.environ.get("MINI_AGREEMENT_BRIDGE_CONFIG")
     if not path:
         raise RuntimeError("MINI_AGREEMENT_BRIDGE_CONFIG is required")
     with open(path, encoding="utf-8") as stream:
         profile = json.load(stream)
-    if sys.argv[1:] != profile["clientArguments"]:
-        raise RuntimeError("client launch arguments differ from the pinned bridge profile")
+    check_client_arguments(profile, sys.argv[1:])
     serve(profile, sys.stdin.buffer, sys.stdout.buffer)
 
 

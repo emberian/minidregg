@@ -34,6 +34,12 @@ const signature=(raw:string,line:Line):Signature=>{
  if(!m)fail(line,"expected method signature");
  try{return {name:m[1],parameters:splitParameters(m[2]),resultType:m[3]??"_",span:span(line)};}catch(e){fail(line,String(e));}
 };
+const fieldName=(text:string):string=>{
+ if(/^[A-Za-z_]\w*$/.test(text))return text;
+ if(text.startsWith('"')){const value=JSON.parse(text);if(typeof value==="string")return value;}
+ throw new Error("expected identifier or quoted string field name");
+};
+
 export function expression(text:string,sourceSpan:Span):Expr{
  const tokens:{text:string,start:number,end:number}[]=[];let at=0;
  while(at<text.length){
@@ -60,7 +66,7 @@ export function expression(text:string,sourceSpan:Span):Expr{
     {kind:"extension-value",parameters,targetType:resultType,body:closureBody,span:range};
   }else if(first.text==="{"){
    const fields:{name:string,value:Expr}[]=[];
-   if(tokens[cursor]?.text!=="}")while(true){const key=take();if(!/^[A-Za-z_]\w*$/.test(key.text))throw new Error("expected record field");take(":");fields.push({name:key.text,value:parse()});if(tokens[cursor]?.text!==",")break;take(",");}
+   if(tokens[cursor]?.text!=="}")while(true){const key=take();const name=fieldName(key.text);take(":");fields.push({name,value:parse()});if(tokens[cursor]?.text!==",")break;take(",");}
    const end=take("}");result={kind:"record",fields,span:location(first.start,end.end)};
   }else if(first.text==="("){
    if(tokens[cursor]?.text===")"){const end=take(")");result={kind:"unit",span:location(first.start,end.end)};}
@@ -72,8 +78,8 @@ export function expression(text:string,sourceSpan:Span):Expr{
   else throw new Error("expected expression atom");
   while(cursor<tokens.length){
    const next=tokens[cursor].text;
-   if(next==="."){take(".");const field=take();if(!/^[A-Za-z_]\w*$/.test(field.text))throw new Error("expected member name");
-    result={kind:"member",target:result,name:field.text,span:{...result.span,end:location(field.start,field.end).end}};continue;}
+   if(next==="."){take(".");const field=take();const name=fieldName(field.text);
+    result={kind:"member",target:result,name,span:{...result.span,end:location(field.start,field.end).end}};continue;}
    if(next==="("){take("(");const args:Expr[]=[];if(tokens[cursor]?.text!==")"){while(true){args.push(parse());if(tokens[cursor]?.text!==",")break;take(",");}}
     const close=take(")");const range={...result.span,end:location(close.start,close.end).end};
     if(result.kind==="var"&&result.name==="compose")result={kind:"compose",specifications:args,span:range};
@@ -137,7 +143,7 @@ export function parseObjective(source:string){
   const extension=/^extension\s+([A-Za-z_]\w*)\((.*)\)\s*->\s*(.+):$/.exec(line.text);
   if(extension){declarations.push({kind:"extension",name:extension[1],parameters:splitParameters(extension[2]),targetType:extension[3],body:body(line.indent),span:span(line)});continue;}
   const record=/^record\s+([A-Za-z_]\w*):$/.exec(line.text);
-  if(record){const methods:Signature[]=[],fields:{name:string,type:string,span:Span}[]=[];while(cursor<lines.length&&lines[cursor].indent>0){const method=lines[cursor++];const field=/^([A-Za-z_]\w*):\s*(.+)$/.exec(method.text);if(field)fields.push({name:field[1],type:field[2],span:span(method)});else methods.push(signature(method.text,method));}
+  if(record){const methods:Signature[]=[],fields:{name:string,type:string,span:Span}[]=[];while(cursor<lines.length&&lines[cursor].indent>0){const method=lines[cursor++];const field=/^([A-Za-z_]\w*|"(?:[^"\\]|\\.)*"):\s*(.+)$/.exec(method.text);if(field)fields.push({name:fieldName(field[1]),type:field[2],span:span(method)});else methods.push(signature(method.text,method));}
    declarations.push({kind:"record",name:record[1],methods,fields,span:span(line)});continue;}
   if(line.text.startsWith("def ")&&line.text.endsWith(":")){declarations.push({kind:"function",signature:signature(line.text.slice(4,-1),line),body:body(line.indent),span:span(line)});continue;}
   fail(line,"unsupported Objective Bend declaration");

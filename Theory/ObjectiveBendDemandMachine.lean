@@ -15,6 +15,7 @@ abbrev Environment := List Address
 inductive RuntimeValue where
   | closure (body : Term) (environment : Environment)
   | natural (value : Nat)
+  | boolean (value : Bool)
   | label (value : String)
   | record (fields : List (String × Address))
   | specification (metadata extension : Address)
@@ -67,9 +68,11 @@ def allocateFields (heap : Array Cell) (environment : Environment)
     (prior.1.push (.suspended ⟨field.2,environment⟩),(field.1,prior.1.size)::prior.2)) (heap,[])
   (pair.1,pair.2.reverse)
 def valueTerm : RuntimeValue → Option Term
-  | .natural n => some (.nat n) | .label name => some (.label name) | _ => none
+  | .natural n => some (.nat n) | .boolean value => some (.boolean value)
+  | .label name => some (.label name) | _ => none
 def scalarValue : Term → Option RuntimeValue
-  | .nat n => some (.natural n) | .label name => some (.label name) | _ => none
+  | .nat n => some (.natural n) | .boolean value => some (.boolean value)
+  | .label name => some (.label name) | _ => none
 
 def stepRaw (state : State) : State :=
   match state.control with
@@ -86,6 +89,7 @@ def stepRaw (state : State) : State :=
       | none => {state with control:=.refused .unbound}
     | .lam body => {state with control:=.returned (.closure body environment)}
     | .nat n => {state with control:=.returned (.natural n)}
+    | .boolean value => {state with control:=.returned (.boolean value)}
     | .label name => {state with control:=.returned (.label name)}
     | .app function argument => {state with control:=.evaluate function environment, stack:=.argument argument environment::state.stack}
     | .mix lower upper => {state with control:=.evaluate (mixBody lower upper) environment}

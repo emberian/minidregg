@@ -634,6 +634,36 @@ pub(crate) fn live_cover(
     packet.extend_from_slice(&route);
     Ok(packet)
 }
+/// Non-authoritative final broadcast cover. Every slot uses a freshly generated
+/// discarded capability; no enrolled client can open a result or receipt.
+/// One immutable batch is shared by ALL audience links for this epoch.
+pub(crate) fn live_broadcast_cover(epoch: u64, width: usize, payload: usize) -> Result<Vec<u8>> {
+    let p = Profile {
+        epoch,
+        width,
+        payload,
+    };
+    p.check()?;
+    let mut slots = Vec::with_capacity(width);
+    for _ in 0..width {
+        slots.push(reply(&p, random()?, random()?, &[])?);
+    }
+    batch(&p, LAYERS, &slots)
+}
+pub(crate) fn live_validate_broadcast(
+    epoch: u64,
+    width: usize,
+    payload: usize,
+    bytes: &[u8],
+) -> Result<()> {
+    let p = Profile {
+        epoch,
+        width,
+        payload,
+    };
+    p.check()?;
+    unbatch(&p, LAYERS, bytes).map(|_| ())
+}
 pub(crate) fn live_offer(
     epoch: u64,
     width: usize,
@@ -1268,6 +1298,27 @@ mod tests {
             })
             .collect();
         (secrets, publics)
+    }
+    #[test]
+    fn scheduled_broadcast_cover_is_exact_batch_without_client_receipt_or_native_job() {
+        let p = Profile {
+            epoch: 3,
+            width: 4,
+            payload: 4096,
+        };
+        let cover = live_broadcast_cover(p.epoch, p.width, p.payload).unwrap();
+        live_validate_broadcast(p.epoch, p.width, p.payload, &cover).unwrap();
+        let packets = unbatch(&p, LAYERS, &cover).unwrap();
+        assert_eq!(packets.len(), 4);
+        for packet in packets {
+            assert!(open_reply(&p, [7; 16], [8; 32], &packet).is_err());
+        }
+        assert!(live_validate_broadcast(4, p.width, p.payload, &cover).is_err());
+        assert!(live_validate_broadcast(3, 2, p.payload, &cover).is_err());
+        assert_ne!(
+            cover,
+            live_broadcast_cover(p.epoch, p.width, p.payload).unwrap()
+        );
     }
     #[test]
     fn shared_crypto_preserves_maximum_profile_through_all_layers() {

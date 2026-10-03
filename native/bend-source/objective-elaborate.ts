@@ -15,6 +15,7 @@ const get=(target:Core,name:string)=>term("get",{target,name});
 const sha=(bytes:Uint8Array|string)=>createHash("sha256").update(bytes).digest("hex");
 const failure=(node:any,message:string):never=>{throw {schema:"dregg.bend.compiler-diagnostic.v1",stage:"objective-core-elaboration",message,span:node?.span??null};};
 const duplicate=(names:string[])=>new Set(names).size!==names.length;
+const binderHints=new WeakMap<Core,any>();
 export function elaborate(modules:any[],entryModule:number,entryDefinition:string,args:any[]){
  const globals=new Set<string>();
  for(const m of modules)for(const d of m.ast.declarations)if(d.kind!=="record"){
@@ -25,16 +26,19 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   const key=m.name+"."+name;if(globals.has(key))return get(term("bound",{index:env.indexOf("$globals")}),key);
   return failure(node,"unbound source variable "+name);
  };
- const abstract=(parameters:any[],env:string[],lower:(next:string[])=>Core,node:any):Core=>{
+ const abstract=(parameters:any[],env:string[],lower:(next:string[])=>Core,node:any,resultType?:string,moduleName?:string):Core=>{
   if(duplicate(parameters.map(p=>p.name)))failure(node,"duplicate lexical parameter");
   let value=lower([...parameters.map(p=>p.name).reverse(),...env]);
-  for(let i=parameters.length-1;i>=0;i--)value=lam(value);return value;
+  for(let i=parameters.length-1;i>=0;i--){
+   value=lam(value);
+   if(resultType)binderHints.set(value,{parameter:parameters[i],remaining:parameters.slice(i+1),resultType,moduleName,node});
+  }return value;
  };
  const expression=(e:any,env:string[],m:any):Core=>{
   switch(e.kind){
    case "var":return lookup(e.name,env,m,e);
    case "nat":return nat(e.value);
-   case "bool":return label(e.value?"true":"false");
+   case "bool":return term("boolean",{value:e.value});
    case "string":return label(e.value);
    case "unit":return record([]);
    case "member":{
@@ -49,7 +53,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
     return record(e.fields.map((f:any)=>({name:f.name,value:expression(f.value,env,m)})));
    case "extend":if(duplicate(e.fields.map((f:any)=>f.name)))failure(e,"duplicate provided field");
     return term("extend",{inherited:expression(e.inherited,env,m),fields:e.fields.map((f:any)=>({name:f.name,value:expression(f.value,env,m)}))});
-   case "lambda":case "extension-value":return abstract(e.parameters,env,next=>expression(e.body,next,m),e);
+   case "lambda":case "extension-value":return abstract(e.parameters,env,next=>expression(e.body,next,m),e,e.targetType??e.resultType,m.name);
    case "binary":{
     const primitive={"+":"add","*":"multiply","==":"equal","&&":"conjunction"}[e.op];
     if(!primitive)failure(e,"unsupported primitive "+e.op);
@@ -98,8 +102,8 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  for(const m of modules)for(const d of m.ast.declarations){
   const outer=["$seed","$globals"];let value:Core;
   if(d.kind==="record")continue;
-  if(d.kind==="function")value=abstract(d.signature.parameters,outer,next=>body(d.body,next,m),d);
-  else if(d.kind==="extension")value=abstract(d.parameters,outer,next=>body(d.body,next,m),d);
+  if(d.kind==="function")value=abstract(d.signature.parameters,outer,next=>body(d.body,next,m),d,d.kind==="function"?d.signature.resultType:d.targetType,m.name);
+  else if(d.kind==="extension")value=abstract(d.parameters,outer,next=>body(d.body,next,m),d,d.kind==="function"?d.signature.resultType:d.targetType,m.name);
   else if(d.kind==="spec"){
    if(duplicate(d.methods.map((x:any)=>x.name)))failure(d,"duplicate provided method");
    const next=["super","self",...outer];
@@ -121,50 +125,117 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  let selected=get(root,entry.name+"."+entryDefinition);
  const argument=(a:any):Core=>{
   if(typeof a==="string"&&/^(0|[1-9][0-9]*)$/.test(a))return nat(a);
-  if(typeof a==="boolean")return label(a?"true":"false");
+  if(typeof a==="boolean")return term("boolean",{value:a});
   if(a&&typeof a==="object"&&!Array.isArray(a))return record(Object.entries(a).map(([name,value])=>({name,value:argument(value)})));
   return failure(null,"runtime arguments are canonical decimal Nat strings, Bool or records");
  };
  for(const arg of args)selected=app(selected,argument(arg));
- return {schema:"dregg.objective-bend.core.v1",edition:"objective-bend-1",term:selected,
+ return {schema:"dregg.objective-bend.core.v2",edition:"objective-bend-1",term:selected,
    sourceEntry:entry.name+"."+entryDefinition,sourceModules:modules.map(m=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256})),
    declarationASTs:modules.map(m=>m.ast),status:"elaborated executable term; new typing and demand adequacy unqualified"};
 }
-// First connected annotation cut: exact literal declarations (including source
-// inference holes) plus the generated shared global knot. Other bodies return
-// an explicit unsupported typing diagnostic; their executable core stays retained.
+// Source annotations are proposals. The Lean checker must construct a derivation
+// for the exact emitted term; these helpers never mint a typing receipt.
 export function literalAnnotations(output:any){
+ try {
+ const empty={tag:"emptyRow"},variable={tag:"variable",index:"0"};
+ const arrow=(domain:any,codomain:any,parameter="unrestricted")=>({tag:"arrow",reuse:"reusable",parameter,domain,codomain});
+ const records=new Map<string,any>();
+ for(const [i,ast] of output.declarationASTs.entries())for(const d of ast.declarations)
+  if(d.kind==="record")records.set(output.sourceModules[i].name+"."+d.name,d);
+ const qty=(p:any)=>{
+  if(p.quantity==="default"||p.quantity==="copy"||!p.quantity)return "unrestricted";
+  if(p.quantity==="dead")return "erased";
+  if(["affine","linear","unrestricted","erased"].includes(p.quantity))return p.quantity;
+  throw Error("unsupported source quantity "+p.quantity);
+ };
+ const type=(name:string,moduleName:string,seen:string[]=[]):any=>{
+  if(name==="Nat")return {tag:"natural"};if(name==="Bool")return {tag:"boolean"};if(name==="String")return {tag:"label"};
+  const ext=/^Extension<(.+)>$/.exec(name);if(ext){const target=type(ext[1],moduleName,seen);return arrow(target,arrow(target,target));}
+  const key=moduleName+"."+name;
+  if(seen.includes(key))throw Error("recursive row annotation requires explicit future-row binder: "+key);
+  const d=records.get(key);if(!d)throw Error("unsupported source type "+name);
+  const fields=[...d.fields.map((f:any)=>({name:f.name,type:type(f.type,moduleName,[...seen,key])})),
+   ...d.methods.map((f:any)=>({name:f.name,type:signature(f.parameters,f.resultType,moduleName,[...seen,key])}))];
+  let row:any=empty;for(const f of fields.reverse())row={tag:"field",name:f.name,member:f.type,tail:row};return row;
+ };
+ const signature=(ps:any[],result:string,moduleName:string,seen:string[]=[]):any=>{
+  let t=type(result,moduleName,seen);for(const p of ps.slice().reverse())t=arrow(type(p.type,moduleName,seen),t,qty(p));return t;
+ };
+ const inferredDeclarations=new Map<any,string>();
+ const inferExpression=(e:any,parameters:any[]):string=>{
+  if(e.kind==="nat")return "Nat";if(e.kind==="bool")return "Bool";if(e.kind==="string")return "String";
+  if(e.kind==="var")return parameters.find(p=>p.name===e.name)?.type??"_";
+  if(e.kind==="binary"){
+   const left=inferExpression(e.left,parameters),right=inferExpression(e.right,parameters);
+   if(["+","*","=="].includes(e.op)&&left==="Nat"&&right==="Nat")return e.op==="=="?"Bool":"Nat";
+   if(e.op==="&&"&&left==="Bool"&&right==="Bool")return "Bool";
+  }return "_";
+ };
+ const inferBody=(body:any,parameters:any[]):string=>{
+  if(body.kind==="expression")return inferExpression(body.expression,parameters);
+  if(body.kind==="match"){
+   const results=body.branches.map((branch:any)=>inferBody(branch.body,branch.pattern.kind==="succ"?
+    [{name:branch.pattern.binder,type:"Nat"},...parameters]:parameters));
+   if(results.length&&results.every((t:string)=>t===results[0]))return results[0];
+  }return "_";
+ };
  const fields:any[]=[];
- for(const [index,ast] of output.declarationASTs.entries())for(const d of ast.declarations){
+ for(const [i,ast] of output.declarationASTs.entries())for(const d of ast.declarations){
   if(d.kind==="record")continue;
-  if(d.kind!=="function"||d.signature.parameters.length||d.body.kind!=="expression")
-   return {status:"unsupported",message:"typing bridge currently covers zero-argument literal declarations"};
-  const e=d.body.expression;
-  const type=e.kind==="nat"?{tag:"natural"}:e.kind==="bool"?{tag:"boolean"}:e.kind==="string"?{tag:"label"}:null;
-  if(!type)return {status:"unsupported",message:"nonliteral declaration requires further source annotation inference"};
-  const declared=d.signature.resultType;
-  if(declared!=="_"&&declared!==(e.kind==="nat"?"Nat":e.kind==="bool"?"Bool":"String"))
-   return {status:"refused",message:"literal result differs from authored result type",span:d.signature.span};
-  fields.push({name:output.sourceModules[index].name+"."+d.signature.name,type});
+  if(!["function","extension"].includes(d.kind))throw Error("specification annotations and law discharge remain unsupported");
+  const moduleName=output.sourceModules[i].name,ps=d.kind==="function"?d.signature.parameters:d.parameters;
+  let result=d.kind==="function"?d.signature.resultType:d.targetType;
+  if(result==="_"){
+   result=inferBody(d.body,ps);
+   if(result==="_")throw Error("result inference requires actual checker support for this body");
+   inferredDeclarations.set(d,result);
+  }
+  fields.push({name:moduleName+"."+(d.name??d.signature.name),type:signature(ps,result,moduleName)});
  }
- let global:any={tag:"emptyRow"};for(const field of fields.slice().reverse())global={tag:"field",name:field.name,member:field.type,tail:global};
- const variable={tag:"variable",index:"0"},empty={tag:"emptyRow"};
- let cursor=output.term,path:number[]=[];
- while(cursor.tag==="app"){cursor=cursor.fn;path.push(0);}
- if(cursor.tag!=="get"||cursor.target.tag!=="fix")return {status:"unsupported",message:"typing bridge expects exact generated entry projection"};
- path.push(0,0);
+ let global:any=empty;for(const f of fields.slice().reverse())global={tag:"field",name:f.name,member:f.type,tail:global};
+ const annotations:any[]=[];
+ const visit=(t:Core,path:number[])=>{
+  if(t.tag==="lam"){
+   const hint=binderHints.get(t);
+   if(hint){
+    let result=hint.resultType;
+    if(result==="_")result=inferredDeclarations.get(hint.node)??"_";
+    annotations.push({path:path.map(String),domain:type(hint.parameter.type,hint.moduleName),
+     codomain:signature(hint.remaining,result,hint.moduleName),parameter:qty(hint.parameter),reuse:"reusable"});
+   }
+   visit(t.body,[...path,0]);return;
+  }
+  const sub=(name:string,index:number)=>visit(t[name],[...path,index]);
+  if(t.tag==="app"){sub("fn",0);sub("arg",1);}else if(t.tag==="fix"){sub("spec",0);sub("seed",1);}
+  else if(t.tag==="mix"){sub("lower",0);sub("upper",1);}else if(t.tag==="binary"){sub("left",0);sub("right",1);}
+  else if(t.tag==="prototype"){sub("spec",0);sub("target",1);}else if(t.tag==="specification"){sub("metadata",0);sub("extension",1);}
+  else if(["reflect","metadata","project"].includes(t.tag))sub("value",0);
+  else if(t.tag==="get")sub("target",0);
+  else if(t.tag==="ifZero"){sub("value",0);sub("zero",1);sub("successor",2);}
+  else if(t.tag==="record")t.fields.forEach((f:any,i:number)=>visit(f.value,[...path,i]));
+  else if(t.tag==="extend"){sub("inherited",0);t.fields.forEach((f:any,i:number)=>visit(f.value,[...path,1,i]));}
+ };
+ visit(output.term,[]);
+ const find=(t:Core,path:number[]):number[]|null=>{
+  if(t.tag==="get"&&t.target.tag==="fix")return [...path,0,0];
+  if(t.tag==="app")return find(t.fn,[...path,0]);if(t.tag==="get")return find(t.target,[...path,0]);return null;
+ };
+ const path=find(output.term,[]);if(!path)throw Error("typing bridge expects exact generated global knot");
  const annotation=(path:number[],domain:any,codomain:any)=>({path:path.map(String),domain,codomain,parameter:"unrestricted",reuse:"reusable"});
- const arrow={tag:"arrow",reuse:"reusable",parameter:"unrestricted",domain:empty,codomain:variable};
- return {schema:"dregg.objective-bend.typed-core.v1",term:output.term,annotations:[annotation(path,variable,arrow),annotation([...path,0],empty,variable)],
+ annotations.push(annotation(path,variable,arrow(empty,variable)),annotation([...path,0],empty,variable));
+ return {schema:"dregg.objective-bend.typed-core.v2",term:output.term,annotations,
   bounds:[{index:"0",type:global}],shareableVariables:["0"],fuel:"4096",context:[],
   sourceEntry:output.sourceEntry,sourceModules:output.sourceModules,
   status:"exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"};
+ }catch(e){return {status:"unsupported",message:e instanceof Error?e.message:String(e)};}
 }
 
 export function lean(t:Core):string{
  const go=lean,q=JSON.stringify,fields=(fs:any[])=>`[${fs.map(f=>`(${q(f.name)}, ${go(f.value)})`).join(", ")}]`;
  switch(t.tag){
  case "bound":return `(Term.bound ${t.index})`;case "nat":return `(Term.nat ${t.value})`;case "label":return `(Term.label ${q(t.value)})`;
+ case "boolean":return `(Term.boolean ${t.value?"true":"false"})`;
  case "lam":return `(Term.lam ${go(t.body)})`;case "app":return `(Term.app ${go(t.fn)} ${go(t.arg)})`;
  case "fix":return `(Term.fix ${go(t.spec)} ${go(t.seed)})`;case "mix":return `(Term.mix ${go(t.lower)} ${go(t.upper)})`;
  case "specification":return `(Term.specification ${go(t.metadata)} ${go(t.extension)})`;
@@ -226,6 +297,7 @@ def measured : Nat → State → List Nat → Outcome × List Nat
     | other => (other,entered)
 def resultJson : RuntimeValue → Json
   | .natural value => Json.mkObj [("tag",toJson "natural"),("value",toJson (toString value))]
+  | .boolean value => Json.mkObj [("tag",toJson "boolean"),("value",toJson value)]
   | .label value => Json.mkObj [("tag",toJson "label"),("value",toJson value)]
   | .closure _ _ => Json.mkObj [("tag",toJson "closure"),("status",toJson "unforced body")]
   | .record fields => Json.mkObj [("tag",toJson "record"),("fields",toJson (fields.map Prod.fst))]
@@ -247,7 +319,7 @@ def main : IO Unit := do
     | _ => prior) ([] : List Nat)
   let demands := addresses.map fun address => Json.mkObj
     [("address",toJson (toString address)),("firstEntries",toJson (toString ((entered.filter (· == address)).length)))]
-  IO.println ((Json.mkObj [("schema",toJson "dregg.objective-bend.reference-result.v1"),
+  IO.println ((Json.mkObj [("schema",toJson "dregg.objective-bend.reference-result.v2"),
     ("sourceEntry",toJson ${JSON.stringify(output.sourceEntry)}),("edition",toJson "objective-bend-1"),
     ("status",toJson status),("result",value),("diagnostic",diagnostic),
     ("heap",toJson (toString state.heap.size)),("stack",toJson (toString state.stack.length)),

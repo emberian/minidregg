@@ -5,9 +5,29 @@ use super::*;
 pub(crate) struct VerifiedCurrentRecipient {
     signing_public: [u8; 32],
     epoch: u32,
-    pub(crate) custody_point: Value,
+    custody_point: Value,
+    exact_query: Vec<u8>,
+    exact_record: Vec<u8>,
+    source_identity: Value,
+    key_id: String,
 }
 impl VerifiedCurrentRecipient {
+    pub(crate) fn custody_point(&self) -> &Value {
+        &self.custody_point
+    }
+    pub(crate) fn exact_query(&self) -> &[u8] {
+        &self.exact_query
+    }
+    pub(crate) fn exact_record(&self) -> &[u8] {
+        &self.exact_record
+    }
+    pub(crate) fn source_identity(&self) -> &Value {
+        &self.source_identity
+    }
+    pub(crate) fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
     pub(crate) fn signing_public(&self) -> [u8; 32] {
         self.signing_public
     }
@@ -73,6 +93,10 @@ fn check_readback(
         signing_public: public,
         epoch,
         custody_point: point.json(),
+        exact_query: query.to_vec(),
+        exact_record: payload.to_vec(),
+        source_identity: settings.identity.clone(),
+        key_id: text(view, "keyID")?.to_owned(),
     })
 }
 /// The caller supplies only scope and exact member-signed record. The point is

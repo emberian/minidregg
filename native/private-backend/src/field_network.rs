@@ -180,7 +180,7 @@ pub fn binding_many(
     }
     Ok(b)
 }
-fn bit_prefix(network: &Network) -> Result<Vec<usize>> {
+pub(crate) fn bit_prefix(network: &Network) -> Result<Vec<usize>> {
     let n = network.input_count as usize;
     if n == 0 || network.gates.first() != Some(&Op::Constant(true)) {
         return Err(bad("missing counted input bit prefix"));
@@ -222,15 +222,15 @@ pub struct Send {
     pub to: u16,
     pub message: Message,
 }
-fn values(phase: &PhaseMessage) -> &[u8] {
+pub(crate) fn values(phase: &PhaseMessage) -> &[u8] {
     match phase {
         PhaseMessage::Init(b) | PhaseMessage::Echo(b) | PhaseMessage::Ready(b) => b,
     }
 }
-fn field_bytes(v: &[Field]) -> Vec<u8> {
+pub(crate) fn field_bytes(v: &[Field]) -> Vec<u8> {
     v.iter().flat_map(|x| x.0.to_le_bytes()).collect()
 }
-fn fields(b: &[u8], count: usize) -> Result<Vec<Field>> {
+pub(crate) fn fields(b: &[u8], count: usize) -> Result<Vec<Field>> {
     if b.len() != count * 16 {
         return Err(bad("field opening shape"));
     }
@@ -426,6 +426,10 @@ impl Engine {
             output: None,
             failure: None,
         })
+    }
+    pub(crate) fn pristine_material(&self) -> Result<(&[Field], &[(Field, Field, Field)])> {
+        self.initial_bytes()?;
+        Ok((&self.wires, &self.triples))
     }
     pub fn context(&self) -> [u8; 32] {
         self.context
@@ -820,7 +824,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
 pub(crate) mod tests {
     use super::*;
     use std::collections::VecDeque;
-    fn g() -> Generation {
+    pub(crate) fn g() -> Generation {
         Generation {
             invocation: Nat::new(800),
             command: vec![1],
@@ -829,7 +833,7 @@ pub(crate) mod tests {
             configuration: Nat::new(7),
         }
     }
-    fn inputs(x: Field, y: Field) -> Vec<Vec<InputRef>> {
+    pub(crate) fn inputs(x: Field, y: Field) -> Vec<Vec<InputRef>> {
         let generation = g();
         let mut ns = (0..4)
             .map(|me| AcssId::new(me, 0, 4, 1, &generation, 2).unwrap())

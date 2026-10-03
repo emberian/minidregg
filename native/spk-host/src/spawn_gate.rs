@@ -96,6 +96,22 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// The gate clears supplementary groups before execveat. Check the execute
+/// class of that exact UID/GID, rather than accepting any inode execute bit.
+/// The kernel still checks ACLs and LSM policy at the final exec boundary.
+fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> bool {
+    let bit = if owner == uid { 0o100 } else if group == gid { 0o010 } else { 0o001 };
+    mode & bit != 0
+}
+
+/// Refuse an unexecutable pinned launcher before consuming a native START
+/// claim. Repeat the same check at the actual one-shot spawn boundary.
+pub(crate) fn preflight(spec: &SpawnSpec) -> io::Result<()> {
+    validate(spec, false)?;
+    let _executable = pinned_executable(spec)?;
+    Ok(())
+}
+
 fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     let parent = spec
         .program
@@ -124,11 +140,11 @@ fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     if !meta.is_file()
         || meta.uid() == spec.app_uid
         || meta.mode() & 0o022 != 0
-        || meta.mode() & 0o111 == 0
+        || !execute_mode_permits(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
         || meta.len() > MAX_ELF_BYTES
     {
         return Err(invalid(
-            "launch executable is writable, untrusted or oversized",
+            "launch executable is writable, untrusted, unexecutable after identity drop or oversized",
         ));
     }
     let mut hash = Sha256::new();
@@ -242,9 +258,9 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         fail(write_fd);
     }
     if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
-        // Root (the audit harness) or the de-rooted resident, which holds
-        // exactly CAP_SETUID/CAP_SETGID, bounded by `setid_bound` to this
-        // UID/GID pair.
+        // Only the root audit harness switches here. The production app
+        // worker has already assumed this exact identity, cleared every
+        // capability/group and checked no_new_privs before parsing.
         if libc::setgroups(0, std::ptr::null()) != 0
             || libc::setresgid(spec.app_gid, spec.app_gid, spec.app_gid) != 0
             || libc::setresuid(spec.app_uid, spec.app_uid, spec.app_uid) != 0
@@ -326,21 +342,32 @@ fn abort_handshake(pid: libc::pid_t, error: io::Error) -> io::Error {
 pub(crate) struct BoundedChild {
     pid: libc::pid_t,
     reaped: bool,
+    remote: Option<crate::resident_privilege::Client>,
 }
 
 impl BoundedChild {
+    pub(crate) fn remote(pid: libc::pid_t, client: crate::resident_privilege::Client) -> Self {
+        Self {pid, reaped:false, remote:Some(client)}
+    }
+    pub(crate) fn try_wait(&mut self) -> io::Result<Option<i32>> {
+        if self.reaped || self.remote.is_some() { return Err(invalid("direct child already reaped or remote")); }
+        let mut status=0;
+        let result=unsafe {libc::waitpid(self.pid, &mut status, libc::WNOHANG)};
+        if result==self.pid {self.reaped=true; Ok(Some(status))}
+        else if result==0 {Ok(None)} else {Err(io::Error::last_os_error())}
+    }
     pub fn pid(&self) -> u32 {
         self.pid as u32
     }
     pub fn kill_and_reap(&mut self) -> bool {
         if !self.reaped {
-            self.reaped = kill_reap(self.pid);
+            self.reaped = if let Some(client)=&mut self.remote {client.kill_and_reap(self.pid as u32).unwrap_or(false)} else {kill_reap(self.pid)};
         }
         self.reaped
     }
     pub fn wait(&mut self) -> io::Result<i32> {
         if !self.reaped {
-            let status = wait_reap(self.pid)?;
+            let status = if let Some(client)=&mut self.remote {client.wait(self.pid as u32)?} else {wait_reap(self.pid)?};
             self.reaped = true;
             return Ok(status);
         }
@@ -449,7 +476,7 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
                 if reaped < 0 {
                     return Err(abort_handshake(pid, io::Error::last_os_error()));
                 }
-                return Ok(BoundedChild { pid, reaped: false });
+                return Ok(BoundedChild { pid, reaped: false, remote:None });
             }
             return Err(abort_handshake(pid, invalid("partial exec status")));
         }
@@ -470,10 +497,22 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     }
 }
 
+pub(crate) fn spawn_as_self(spec: &SpawnSpec) -> io::Result<BoundedChild> {
+    crate::resident_privilege::require_app_identity(spec.app_uid,spec.app_gid)?;
+    spawn_inner(spec,false)
+}
+
+#[cfg(test)]
+pub(crate) fn spawn_privilege_audit(spec: &SpawnSpec) -> io::Result<BoundedChild> {
+    crate::resident_privilege::require_app_identity(spec.app_uid,spec.app_gid)?;
+    spawn_inner(spec,true)
+}
+
 pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
-    if unsafe { libc::geteuid() } != 0 && !crate::setid_bound::holds_setid_capabilities()? {
+    if let Some(child)=crate::resident_privilege::launch(spec)? {return Ok(child)}
+    if unsafe { libc::geteuid() } != 0 {
         return Err(invalid(
-            "production SPK gate needs root or CAP_SETUID+CAP_SETGID bounded to the app UID",
+            "production SPK gate requires trusted bootstrap channel",
         ));
     }
     spawn_inner(spec, false)
@@ -500,6 +539,19 @@ mod tests {
 
     fn harmless_elf() -> PathBuf {
         std::fs::canonicalize("/usr/bin/sleep").unwrap()
+    }
+
+    #[test]
+    fn launch_mode_uses_exact_post_drop_identity_without_operator_groups() {
+        // The observed root:hbox 0750 launcher opens as the operator but may
+        // not execute as app64010 after setgroups(0) and setresgid/setresuid.
+        assert!(!execute_mode_permits(0, 1000, 0o750, 64010, 64010));
+        assert!(execute_mode_permits(0, 64010, 0o754, 64010, 64010));
+        assert!(!execute_mode_permits(0, 64010, 0o754, 64011, 64011));
+        assert!(execute_mode_permits(0, 0, 0o755, 64010, 64010));
+        // Unix owner/group classes take precedence over other execute bits.
+        assert!(!execute_mode_permits(64010, 0, 0o655, 64010, 64010));
+        assert!(!execute_mode_permits(0, 64010, 0o705, 64010, 64010));
     }
 
     #[test]

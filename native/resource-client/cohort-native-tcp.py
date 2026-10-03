@@ -9,12 +9,14 @@ parser.add_argument('--native-socket',required=True)
 parser.add_argument('--evidence',required=True,type=pathlib.Path)
 parser.add_argument('--epochs',type=int,default=64)
 parser.add_argument('--processing-slots',type=int,default=2)
+parser.add_argument('--native-workload',choices=['single','every-eight'],default='single')
 a=parser.parse_args()
 mini=a.mini;fixture=a.fixture;e=a.evidence;e.mkdir(mode=0o700)
 log=(e/'receiving.log').open('wb',buffering=0)
 request=(fixture/'request.native').read_bytes();expected=(fixture/'expected-transport-outcome.bin').read_bytes()
 native=a.native_socket
 N=a.epochs;P=4096;W=4;T=1000;G=a.processing_slots
+job_epochs=list(range(0,N,8)) if a.native_workload=='every-eight' else [0]
 if N<12 or N>256 or N%4 or G<1 or G>32:
     raise SystemExit('public test profile requires12..256 epochs divisibleby4 and1..32 processing slots')
 generation=os.urandom(16).hex()
@@ -136,10 +138,12 @@ def scenario(name,real):
         for i in range(W):
             source=directory(d/f'client{i}-source');out=directory(d/f'client{i}-out')
             if real and i<2:
-                ident=os.urandom(16);cap=os.urandom(32)
-                (source/'epoch-0.intent').write_bytes(b'\x01'+ident+cap+request)
-                for epoch in (3,7,N-1):
-                    (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
+                for begin in job_epochs:
+                    ident=os.urandom(16);cap=os.urandom(32)
+                    (source/f'epoch-{begin}.intent').write_bytes(b'\x01'+ident+cap+request)
+                    repairs=(begin+3,begin+7) if a.native_workload=='every-eight' else (3,7,N-1)
+                    for epoch in set(repairs):
+                        (source/f'epoch-{epoch}.intent').write_bytes(b'\x02'+ident+b'\x00'+hashlib.sha256(request).digest()+cap+os.urandom(32))
             start(command('cover',d/f'client{i}-worker',out,0,i,'--source',source,'--keys',keycsv))
         # Establish complete cover inventory before public links begin.
         # This is public profile admission, before any cohort connection. Use
@@ -175,13 +179,21 @@ def scenario(name,real):
         for i in range(W):
             for epoch in range(N):
                 record=(d/f'client{i}-broadcast'/f'epoch-{epoch}.record').read_bytes();assert len(record)==5+19+W*P and record[0]==1,'missing valid broadcast'
+        for epoch in range(N):
+            copies=[(d/f'client{i}-broadcast'/f'epoch-{epoch}.record').read_bytes() for i in range(W)]
+            assert all(v==copies[0] for v in copies),'audience saw differing shared broadcasts'
         if real:
-            assert len(forwarded)==2,'second semantic dispatch occurred'
+            assert len(forwarded)==2*len(job_epochs),'missing or second semantic dispatch occurred'
             for i in range(2):
-                first=(d/f'client{i}-opened'/'epoch-0.payload').read_bytes()
-                n=struct.unpack('<I',first[:4])[0];assert n==len(first)-4 and first[4]==3,'not physical continuation'
-                last=(d/f'client{i}-opened'/f'epoch-{N-1}.payload').read_bytes()
-                n=struct.unpack('<I',last[:4])[0];assert n==len(last)-4 and last[4:]==expected,'not exact source frame'
+                for begin in job_epochs:
+                    first=(d/f'client{i}-opened'/f'epoch-{begin}.payload').read_bytes()
+                    if first:
+                        n=struct.unpack('<I',first[:4])[0];assert n==len(first)-4 and first[4] in (0,3),'not physical continuation/exact reply'
+                        if first[4]==0:assert first[4:]==expected
+                    # Empty is physical response uncertainty/cover, never Native Pending.
+                    finish=begin+7 if a.native_workload=='every-eight' else N-1
+                    last=(d/f'client{i}-opened'/f'epoch-{finish}.payload').read_bytes()
+                    n=struct.unpack('<I',last[:4])[0];assert n==len(last)-4 and last[4:]==expected,'not exact source frame'
         else:assert not forwarded
         public.sort(key=lambda v:(v['phase'],v['slot'],v['epoch']))
         (d/'public-wire-observation.json').write_text(json.dumps(public,indent=2))
@@ -215,7 +227,8 @@ def scenario(name,real):
             'records_observed':len(public),'records_expected':12*N,
             'min_wire_lateness_ms':min(latencies) if latencies else None,
             'max_wire_lateness_ms':max(latencies) if latencies else None,
-            'durable_produced_epoch_counts':counts,'valid_delivered_broadcast_epochs':valid_delivery,'actual_source_submissions':len(forwarded),
+            'durable_produced_epoch_counts':counts,'valid_delivered_broadcast_epochs':valid_delivery,'native_workload':a.native_workload,'source_jobs_expected':2*len(job_epochs) if real else 0,'exact_native_final_outcomes': [((d/f'client{i}-opened'/f'epoch-{N-1}.payload').read_bytes()[4:]==expected if (d/f'client{i}-opened'/f'epoch-{N-1}.payload').exists() else False) for i in range(2)] if real else [],
+                     'actual_source_submissions':len(forwarded),
             'errors':errors},indent=2))
 # Historical lookup is read-only; preserve BOTH poles even if processing
 # refutes baseline. An unsuccessful pole never becomes a qualified comparison.

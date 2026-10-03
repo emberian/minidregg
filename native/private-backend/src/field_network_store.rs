@@ -16,20 +16,113 @@ use std::{
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
-#[derive(Clone)]
-pub struct FieldMachine {
-    pub state: Engine,
+mod runtime_seal {
+    pub trait Sealed {}
+    impl Sealed for super::Engine {}
+    impl Sealed for crate::field_network_layers::LayerEngine {}
 }
-fn outbox(ps: &[Send]) -> Vec<u8> {
+/// Closed runtime family, not a callback-based cryptographic qualification.
+pub trait FieldRuntime: runtime_seal::Sealed + Clone {
+    fn plan(&self) -> &Plan;
+    fn holder(&self) -> u16;
+    fn roster(&self) -> (usize, usize);
+    fn initial_bytes(&self) -> Result<Vec<u8>>;
+    fn restore_initial(b: &[u8], p: &Plan, h: u16, anchor: &Path) -> Result<Self>;
+    fn start(&mut self) -> Result<Vec<Send>>;
+    fn receive(&mut self, sender: u16, m: Message) -> Result<Vec<Send>>;
+    fn encode_message(m: &Message) -> Vec<u8>;
+    fn decode_message(b: &[u8]) -> Result<Message>;
+    fn wal_domain() -> &'static [u8];
+    fn file_domain() -> &'static [u8];
+}
+impl FieldRuntime for Engine {
+    fn plan(&self) -> &Plan {
+        Engine::plan(self)
+    }
+    fn holder(&self) -> u16 {
+        Engine::holder(self)
+    }
+    fn roster(&self) -> (usize, usize) {
+        Engine::roster(self)
+    }
+    fn initial_bytes(&self) -> Result<Vec<u8>> {
+        Engine::initial_bytes(self)
+    }
+    fn restore_initial(b: &[u8], p: &Plan, h: u16, a: &Path) -> Result<Self> {
+        Engine::restore_initial(b, p, h, a)
+    }
+    fn start(&mut self) -> Result<Vec<Send>> {
+        Engine::start(self)
+    }
+    fn receive(&mut self, s: u16, m: Message) -> Result<Vec<Send>> {
+        Engine::receive(self, s, m)
+    }
+    fn encode_message(m: &Message) -> Vec<u8> {
+        field_network::encode_message(m)
+    }
+    fn decode_message(b: &[u8]) -> Result<Message> {
+        field_network::decode_message(b)
+    }
+    fn wal_domain() -> &'static [u8] {
+        b"DREGG.PRIVATE.FIELD.PARTY.WAL\x01"
+    }
+    fn file_domain() -> &'static [u8] {
+        b"DREGG.PRIVATE.FIELD.INIT.FILE\x01"
+    }
+}
+impl FieldRuntime for crate::field_network_layers::LayerEngine {
+    fn plan(&self) -> &Plan {
+        Self::plan(self)
+    }
+    fn holder(&self) -> u16 {
+        Self::holder(self)
+    }
+    fn roster(&self) -> (usize, usize) {
+        Self::roster(self)
+    }
+    fn initial_bytes(&self) -> Result<Vec<u8>> {
+        Self::initial_bytes(self)
+    }
+    fn restore_initial(b: &[u8], p: &Plan, h: u16, a: &Path) -> Result<Self> {
+        Self::restore_initial(b, p, h, a)
+    }
+    fn start(&mut self) -> Result<Vec<Send>> {
+        Self::start(self)
+    }
+    fn receive(&mut self, s: u16, m: Message) -> Result<Vec<Send>> {
+        Self::receive(self, s, m)
+    }
+    fn encode_message(m: &Message) -> Vec<u8> {
+        crate::field_network_layers::encode_message(m)
+    }
+    fn decode_message(b: &[u8]) -> Result<Message> {
+        crate::field_network_layers::decode_message(b)
+    }
+    fn wal_domain() -> &'static [u8] {
+        b"DREGG.PRIVATE.FIELD.LAYERS.PARTY.WAL\x01"
+    }
+    fn file_domain() -> &'static [u8] {
+        b"DREGG.PRIVATE.FIELD.LAYERS.INIT.FILE\x01"
+    }
+}
+#[derive(Clone)]
+pub struct RuntimeMachine<R: FieldRuntime> {
+    pub state: R,
+}
+pub type FieldMachine = RuntimeMachine<Engine>;
+fn outbox<R: FieldRuntime>(ps: &[Send]) -> Vec<u8> {
     let mut b = vec![];
     Nat::new(ps.len() as u64).put(&mut b);
     for p in ps {
         b.extend(p.to.to_le_bytes());
-        bytes(&field_network::encode_message(&p.message), &mut b);
+        bytes(&R::encode_message(&p.message), &mut b);
     }
     b
 }
 pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
+    decode_outbox_for::<Engine>(b, n)
+}
+fn decode_outbox_for<R: FieldRuntime>(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
     let mut ds = vec![];
     loop {
@@ -53,16 +146,16 @@ pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
         }
         ps.push(Send {
             to,
-            message: field_network::decode_message(&c.bytes()?)?,
+            message: R::decode_message(&c.bytes()?)?,
         });
     }
     c.finish()?;
-    if outbox(&ps) != b {
+    if outbox::<R>(&ps) != b {
         return Err(bad("field outbox canonical"));
     }
     Ok(ps)
 }
-impl Machine for FieldMachine {
+impl<R: FieldRuntime> Machine for RuntimeMachine<R> {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
         let mut c = Cursor::new(event)?;
         let out = match c.byte()? {
@@ -72,16 +165,16 @@ impl Machine for FieldMachine {
             }
             2 => {
                 let sender = c.u16()?;
-                let m = field_network::decode_message(&c.bytes()?)?;
+                let m = R::decode_message(&c.bytes()?)?;
                 c.finish()?;
                 self.state.receive(sender, m)?
             }
             _ => return Err(bad("field event tag")),
         };
-        Ok(outbox(&out))
+        Ok(outbox::<R>(&out))
     }
 }
-impl crate::authenticated_ingress::IngressMachine for FieldMachine {
+impl<R: FieldRuntime> crate::authenticated_ingress::IngressMachine for RuntimeMachine<R> {
     fn validate_ingress_context(
         &self,
         c: &crate::authenticated_ingress::Context,
@@ -97,30 +190,32 @@ impl crate::authenticated_ingress::IngressMachine for FieldMachine {
         Ok(())
     }
 }
-pub struct Store {
-    journal: Journal<FieldMachine>,
+pub struct RuntimeStore<R: FieldRuntime> {
+    journal: Journal<RuntimeMachine<R>>,
     _initial_lock: File,
     n: usize,
 }
+pub type Store = RuntimeStore<Engine>;
+pub type LayerStore = RuntimeStore<crate::field_network_layers::LayerEngine>;
 fn initial_path(path: &Path) -> PathBuf {
     path.with_extension("initial")
 }
-fn identity(initial: &[u8]) -> Vec<u8> {
-    let mut b = b"DREGG.PRIVATE.FIELD.PARTY.WAL\x01".to_vec();
+fn identity<R: FieldRuntime>(initial: &[u8]) -> Vec<u8> {
+    let mut b = R::wal_domain().to_vec();
     b.extend(custody::hash(initial));
     b
 }
-impl Store {
+impl<R: FieldRuntime> RuntimeStore<R> {
     /// Takes an actual fully burned/typed Engine. Original private initialization
     /// is fsynced before any protocol effect/outbox is returned. Existing files
     /// refuse; crash recovery uses reopen rather than regenerating material.
-    pub fn create(path: &Path, state: Engine) -> Result<Self> {
+    pub fn create(path: &Path, state: R) -> Result<Self> {
         let guard = custody::lock(&path.with_extension("initial.lock"))?;
         if path.exists() {
             return Err(bad("field WAL already exists; recover original"));
         }
         let initial = state.initial_bytes()?;
-        let mut framed = b"DREGG.PRIVATE.FIELD.INIT.FILE\x01".to_vec();
+        let mut framed = R::file_domain().to_vec();
         bytes(&initial, &mut framed);
         framed.extend(custody::hash(&framed));
         if framed.len() > crate::codec::MAX {
@@ -144,7 +239,7 @@ impl Store {
             return Err(bad("field initial durable readback"));
         }
         let n = state.roster().0;
-        let journal = Journal::open(path, &identity(&initial), FieldMachine { state })?;
+        let journal = Journal::open(path, &identity::<R>(&initial), RuntimeMachine { state })?;
         Ok(Self {
             journal,
             _initial_lock: guard,
@@ -167,38 +262,38 @@ impl Store {
             return Err(bad("field initial checksum"));
         }
         let mut c = Cursor::new(&framed[..end])?;
-        let tag = b"DREGG.PRIVATE.FIELD.INIT.FILE\x01";
+        let tag = R::file_domain();
         if c.take(tag.len())? != tag {
             return Err(bad("field initial file frame"));
         }
         let initial = c.bytes()?;
         c.finish()?;
-        let state = Engine::restore_initial(&initial, expected_plan, holder, anchor)?;
+        let state = R::restore_initial(&initial, expected_plan, holder, anchor)?;
         let n = state.roster().0;
         Ok(Self {
-            journal: Journal::open(path, &identity(&initial), FieldMachine { state })?,
+            journal: Journal::open(path, &identity::<R>(&initial), RuntimeMachine { state })?,
             _initial_lock: guard,
             n,
         })
     }
-    pub fn state(&self) -> &Engine {
+    pub fn state(&self) -> &R {
         &self.journal.state().state
     }
     pub fn start(&mut self) -> Result<Vec<Send>> {
-        decode_outbox(&self.journal.append(&[0])?, self.n)
+        decode_outbox_for::<R>(&self.journal.append(&[0])?, self.n)
     }
     /// Sender has already passed the actual original-prefix endpoint authority.
     /// This low-level store does not implement that authority by accepting u16.
     pub fn receive(&mut self, sender: u16, m: &Message) -> Result<Vec<Send>> {
         let mut e = vec![2];
         e.extend(sender.to_le_bytes());
-        bytes(&field_network::encode_message(m), &mut e);
-        decode_outbox(&self.journal.append(&e)?, self.n)
+        bytes(&R::encode_message(m), &mut e);
+        decode_outbox_for::<R>(&self.journal.append(&e)?, self.n)
     }
     pub fn replay_outboxes(&self) -> Result<Vec<Send>> {
         let mut ps = vec![];
         for b in self.journal.replay_outboxes() {
-            ps.extend(decode_outbox(b, self.n)?);
+            ps.extend(decode_outbox_for::<R>(b, self.n)?);
         }
         Ok(ps)
     }

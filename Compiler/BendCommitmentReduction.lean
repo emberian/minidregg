@@ -61,6 +61,51 @@ def inputCollision (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
     leftInput rightInput different
   simpa only [project] using congrArg Public.inputCommitment samePublic
 
+/-- Different complete Results include any changed program, invocation,
+execution context, ordered effects or return. The canonical decoder supplies
+injectivity of the MESSAGE encoding, never of the compressing digest. -/
+def statementCollision (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
+    (leftResult rightResult : BendInvocation.Result)
+    (leftInput rightInput : List UInt8) (leftCoins rightCoins : Coins)
+    (different : leftResult ≠ rightResult)
+    (samePublic : project policy artifact leftResult leftInput leftCoins =
+      project policy artifact rightResult rightInput rightCoins) :
+    Collision "DREGG.BEND.STATEMENT-COMMIT/v1" := by
+  have distinctBytes : BendInvocation.encode leftResult ≠ BendInvocation.encode rightResult := by
+    intro same
+    have decoded := congrArg BendInvocation.decode same
+    exact different (by simpa only [BendInvocation.roundtrip, Option.some.injEq] using decoded)
+  apply collisionOfDifferentPayload _ (expectedContext policy artifact leftResult)
+    (expectedContext policy artifact rightResult) leftCoins.statement rightCoins.statement
+    (BendInvocation.encode leftResult) (BendInvocation.encode rightResult) distinctBytes
+  simpa only [project] using congrArg Public.statementCommitment samePublic
+
+inductive OpeningEquivocation where
+  | input : Collision "DREGG.BEND.INPUT-COMMIT/v1" → OpeningEquivocation
+  | statement : Collision "DREGG.BEND.STATEMENT-COMMIT/v1" → OpeningEquivocation
+
+/-- Two exact accepted opening relations for one public statement with
+inconsistent source inputs or complete Results construct a hash collision.
+This supplies a useful cryptographic reduction boundary without pretending
+that a computational collision-resistance assumption is logical injectivity. -/
+noncomputable def openingEquivocation
+    (policy : Policy) (artifact : BendWorldProgramCodec.Artifact)
+    (leftResult rightResult : BendInvocation.Result)
+    (leftInput rightInput : List UInt8) (leftCoins rightCoins : Coins)
+    (statement : Public)
+    (leftOpen : Opens policy artifact leftResult leftInput leftCoins statement)
+    (rightOpen : Opens policy artifact rightResult rightInput rightCoins statement)
+    (different : leftResult ≠ rightResult ∨ leftInput ≠ rightInput) : OpeningEquivocation := by
+  have samePublic := leftOpen.2.2.2.symm.trans rightOpen.2.2.2
+  classical
+  by_cases resultChanged : leftResult = rightResult
+  · exact .input (inputCollision policy artifact leftResult rightResult leftInput rightInput
+      leftCoins rightCoins (different.resolve_left (by simpa using resultChanged)) samePublic)
+  · exact .statement (statementCollision policy artifact leftResult rightResult leftInput rightInput
+      leftCoins rightCoins resultChanged samePublic)
+
+#assert_axioms statementCollision
+#assert_axioms openingEquivocation
 #assert_axioms preimage_injective
 #assert_axioms collisionOfDifferentPayload
 #assert_axioms inputCollision

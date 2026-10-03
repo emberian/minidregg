@@ -36,7 +36,11 @@ module consumed by both Main and this reader, instead of growing two copies.
 
 Qualification: all thirteen reader r2 producer modules compile to oleans and C against the
 immutable receiver373 plus NativeHost7 cohort. The immutable reader-pass-r2/COHORT.json records
-the exact source/C/olean pins. Native reader linking and first actual signed
-four-store source action remain separate pending checks. No deployed independent
+the exact source/C/olean pins. Native reader linking passed. Actual four-store profile/seed probes, wrong-pin
+refusal, direct-reader mutation refusal and operator current-key checks for both
+enrolled subjects passed. The first actual signed four-store source action remains
+a separate pending check. No deployed independent
 four-node network, private custody completion, or indefinite archive lifetime
 claim follows from this local operator.
+
+The read-only four-process recovery probe is testing/probe-source-agreement-readback.py READER STATUS_JSON ORIGINAL_CALL [--expect confirmed|absent] [--accepted-count N]. It sends only native lookup and outcome-inspection requests, compares all four exact canonical native outcomes, and never proposes or installs a transition. The actual pending-call baseline returned identical typed absent from four independently launched native readers; confirmed/restart completion is a separate runtime check.

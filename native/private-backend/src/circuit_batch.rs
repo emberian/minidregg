@@ -48,7 +48,7 @@ impl Plan {
         out
     }
     pub fn validate(&self) -> Result<()> {
-        if self.network.gates.len() > 8192
+        if self.network.gates.len() > 65536
             || self.network.input_count > 65536
             || self.public_ticks > 4096
             || self.rows.len() > 65536
@@ -124,7 +124,7 @@ impl Plan {
         let generation = Generation::get(&mut r)?;
         let input_count = r.nat()?.value()?;
         let gate_count = r.count()?;
-        if gate_count > 8192 {
+        if gate_count > 65536 {
             return Err(bad("gate count bound"));
         }
         let mut gates = vec![];

@@ -66,7 +66,7 @@ structure Admitted {config : Config} {opened : Opened config} {action : Action}
   private mk ::
   application : BendActivityIngress.Current config opened
   routePermit : BendActivityRoutePermit.Permit opened.durable.snapshot origin.pending.pin
-    application.command.nonce
+    (statement config.deployment.domain config.profile.semantics application.command)
     (signedBytes config.deployment.domain config.profile.semantics application.signed)
   signatureExact : signedBytes config.deployment.domain config.profile.semantics application.signed =
     origin.pending.action.applicationSignedBytes
@@ -99,7 +99,7 @@ def construct {config : Config} {opened : Opened config} {action : Action}
        some (BendActivity.encode origin.pending.pending.record) then
     if guardReadOnly : origin.pending.pin.cell ∉ application.intent.writes.map DataWrite.cellId then
       let routePermit ← BendActivityRoutePermit.admit opened.durable.snapshot origin.pending.pin
-        application.command.nonce (signedBytes config.deployment.domain config.profile.semantics application.signed)
+        (statement config.deployment.domain config.profile.semantics application.command) (signedBytes config.deployment.domain config.profile.semantics application.signed)
       let guards := phaseGuard origin :: application.intent.readGuards
       let .ok (some output) := BendPreparedOutput.admit application.prepared
         (signedBytes config.deployment.domain config.profile.semantics application.signed)

@@ -7,6 +7,7 @@ controller must retain this exact physical guard in its final admitted intent.
 import Kernel.BendActivity
 import Compiler.ContentControlFrame
 import Compiler.NativeInvocationStatement
+import Compiler.BendActivityDispatchContext
 
 namespace Minidregg.Kernel.BendActivityRoutePermit
 open Minidregg.Theory.TypedAuthorization
@@ -25,6 +26,11 @@ structure Permit {rootBytes : List UInt8 → Digest}
   pendingExact : record.pending = some pending
   applicationExact : pending.applicationSignedBytes = ingressBytes
   dispatchRoute : statement.route = .activityDispatch
+  context : BendActivityDispatchContext.Context
+  contextExact : BendActivityDispatchContext.decode statement.contextBytes = some context
+  pinExact : ContentControlFrame.pinStream.encode context.pin = ContentControlFrame.pinStream.encode pin
+  generationExact : context.generation = record.checkpoint.generation
+  ordinalExact : context.pendingOrdinal = record.ordinal
 
 def admit {rootBytes : List UInt8 → Digest} (snapshot : DataSnapshot rootBytes)
     (pin : ContentControlFrame.Pin) (statement : NativeInvocationStatement.Statement) (ingressBytes : List UInt8) :
@@ -38,7 +44,17 @@ def admit {rootBytes : List UInt8 → Digest} (snapshot : DataSnapshot rootBytes
     | some pending =>
       if applicationExact : pending.applicationSignedBytes = ingressBytes then
         if dispatchRoute : statement.route = .activityDispatch then
-          some ⟨record,pending,current,pendingExact,applicationExact,dispatchRoute⟩
+          match contextExact : BendActivityDispatchContext.decode statement.contextBytes with
+          | none => none
+          | some context =>
+            if pinExact : ContentControlFrame.pinStream.encode context.pin = ContentControlFrame.pinStream.encode pin then
+              if generationExact : context.generation = record.checkpoint.generation then
+                if ordinalExact : context.pendingOrdinal = record.ordinal then
+                  some ⟨record,pending,current,pendingExact,applicationExact,dispatchRoute,
+                    context,contextExact,pinExact,generationExact,ordinalExact⟩
+                else none
+              else none
+            else none
         else none
       else none
   else none

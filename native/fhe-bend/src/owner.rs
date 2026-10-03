@@ -8,7 +8,7 @@ use fhe_traits::{FheDecoder, FheDecrypter, FheEncoder, FheEncrypter, Serialize};
 use minidregg_fhe_bend::{
     artifact_arity, artifact_profile, canonical, ciphertext, digest, ensure, hex, params, read,
     unhex, validate_artifact, Completion, Context, OwnerPublicMaterial, Request, Result,
-    TRANSFORMER,
+    TRANSFORMER, T,
 };
 use std::{
     env, fs,
@@ -70,6 +70,33 @@ fn main() -> Result<()> {
     let profile = artifact_profile(&plan)?;
     let is_natural = profile == minidregg_fhe_bend::natural::PROFILE;
     let is_mux = !is_natural && arity == 3;
+    if is_natural {
+        // Refusers mutate the ACTUAL compiler artifact, not a handwritten
+        // positive fixture. These exercise bounded physical grammar only;
+        // native source equality is checked independently by ArtifactBinding.
+        for (field, value) in [
+            ("inputBits", serde_json::json!(0)),
+            ("outputBits", serde_json::json!(1)),
+            ("plaintextModulus", serde_json::json!(T + 1)),
+            ("outputMax", serde_json::json!(T)),
+        ] {
+            let mut altered = plan.clone();
+            altered[field] = value;
+            ensure(minidregg_fhe_bend::natural::validate(&altered).is_err(),
+                "altered natural domain/codec admitted")?;
+        }
+        let mut nonlinear = plan.clone();
+        if let Some(gate) = nonlinear["constructiveIntegerOutput"]["gates"]
+            .as_array_mut().and_then(|g| g.first_mut()) {
+            gate["op"] = serde_json::json!("mul");
+            ensure(minidregg_fhe_bend::natural::validate(&nonlinear).is_err(),
+                "nonlinear gate admitted in add-only noise profile")?;
+        }
+        let caps = minidregg_fhe_bend::natural::caps(&plan)?;
+        ensure(minidregg_fhe_bend::natural::source_value(&plan, &caps).is_err(),
+            "exclusive plaintext input caps lost")?;
+        println!("FHE-BEND-NATURAL-DOMAIN: actual compiler artifact domain/codec/nonlinear/cap refusers PASS");
+    }
     // Same public4096-slot capacity and same owner/audience. Three private
     // mux inputs enumerate all eight environments in the first eight slots.
     let mut slots = vec![vec![0u64; 4096]; arity];

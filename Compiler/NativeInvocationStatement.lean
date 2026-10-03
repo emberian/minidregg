@@ -17,6 +17,8 @@ inductive Route
   | ordinary
   | objectiveMethod
   | activityDispatch
+  | roomRelease
+  | roomPublish
   deriving DecidableEq, BEq, Repr
 
 def routeStream : StreamCodec Route where
@@ -24,12 +26,28 @@ def routeStream : StreamCodec Route where
     | .ordinary => [0]
     | .objectiveMethod => [1]
     | .activityDispatch => [2]
+    | .roomRelease => [3]
+    | .roomPublish => [4]
   decodePrefix
     | 0 :: rest => some (.ordinary,rest)
     | 1 :: rest => some (.objectiveMethod,rest)
     | 2 :: rest => some (.activityDispatch,rest)
+    | 3 :: rest => some (.roomRelease,rest)
+    | 4 :: rest => some (.roomPublish,rest)
     | _ => none
   decodePrefix_encode := by intro route suffix; cases route <;> rfl
+
+/-- The command carries only route/context. Domain, semantics and complete body
+are derived by the actual receiver, preventing recursive or substituted bodies. -/
+structure Family where
+  route : Route
+  contextBytes : List UInt8
+  deriving DecidableEq, Repr
+
+def familyStream : StreamCodec Family :=
+  StreamCodec.xmap (StreamCodec.product routeStream bytesStream)
+    (fun family => (family.route,family.contextBytes))
+    (fun (route,context) => ⟨route,context⟩) (by intro family; cases family; rfl)
 
 structure Statement where
   domain : Digest

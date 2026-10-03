@@ -244,7 +244,7 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }
     if request.method == "POST" {
         let parts: Vec<_> = segments.iter().map(String::as_str).collect();
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "prototype"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "prototype" | "preview"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -595,7 +595,7 @@ impl Site {
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
                     ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
                     ["studio","new"] => studio::post(self,None,"new",&body),
-                    ["studio",id,action @ ("manifest" | "snapshot" | "compose" | "fork" | "prototype")] => studio::post(self,Some(id),action,&body),
+                    ["studio",id,action @ ("manifest" | "snapshot" | "compose" | "fork" | "prototype" | "preview")] => studio::post(self,Some(id),action,&body),
                     ["new-document",id] => create::post(self,id,&body,"create"),
                     ["new-document",id,op] => create::post(self,id,&body,op),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
@@ -627,6 +627,7 @@ impl Site {
             ["studio",id,"module",index,"fresh"] => studio::module(self,id,index,true),
             ["studio",id,"draft",submission] => studio::submitted(self,id,submission),
             ["studio",id,"snapshot",snapshot] => studio::captured(self,id,snapshot),
+            ["studio",id,"snapshot",snapshot,"preview",run] => studio::preview(self,id,snapshot,run),
             ["studio",id,"history",revision] => studio::history(self,id,revision),
             ["new-document"] => create::open(self,None,None),
             ["new-document",id] => create::open(self,Some(id),None),

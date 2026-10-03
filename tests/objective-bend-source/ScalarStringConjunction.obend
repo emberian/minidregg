@@ -1,0 +1,4 @@
+edition ObjectiveBend 1
+
+def wrong() -> Bool:
+  "true" && "false"

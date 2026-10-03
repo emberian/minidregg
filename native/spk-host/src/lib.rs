@@ -96,6 +96,8 @@ mod resident_launch;
 #[cfg(target_os = "linux")]
 pub mod resident_service;
 #[cfg(target_os = "linux")]
+pub mod resident_privilege;
+#[cfg(target_os = "linux")]
 mod rpc_adapter;
 #[cfg(target_os = "linux")]
 pub mod sandbox;

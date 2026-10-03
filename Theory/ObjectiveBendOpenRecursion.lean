@@ -1,4 +1,5 @@
 /- Reference runtime core for Objective Bend's own language edition.
+Core scalar edition 2 distinguishes Booleans from arbitrary String labels.
 Weak-head call-by-name gives an independent partial meaning to lazy mix/fix.
 A sharing implementation must prove representation adequacy; this reference
 relation does not claim a heap machine, type safety, termination, proof
@@ -24,6 +25,7 @@ inductive Term where
   | metadata (specification : Term)
   | project (prototype : Term)
   | nat (value : Nat)
+  | boolean (value : Bool)
   | label (value : String)
   | binary (primitive : Primitive) (left right : Term)
   | extend (inherited : Term) (fields : List (String × Term))
@@ -47,6 +49,7 @@ def Term.rename (rename : Nat → Nat) : Term → Term
   | .metadata spec => .metadata (spec.rename rename)
   | .project target => .project (target.rename rename)
   | .nat value => .nat value
+  | .boolean value => .boolean value
   | .label value => .label value
   | .binary primitive left right => .binary primitive (left.rename rename) (right.rename rename)
   | .extend inherited fields => .extend (inherited.rename rename)
@@ -85,6 +88,7 @@ def Term.substitute (substitution : Nat → Term) : Term → Term
   | .metadata spec => .metadata (spec.substitute substitution)
   | .project target => .project (target.substitute substitution)
   | .nat value => .nat value
+  | .boolean value => .boolean value
   | .label value => .label value
   | .binary primitive left right => .binary primitive (left.substitute substitution) (right.substitute substitution)
   | .extend inherited fields => .extend (inherited.substitute substitution)
@@ -119,6 +123,7 @@ def mixBody (lower upper : Term) : Term :=
 inductive Value : Term → Prop where
   | function (body : Term) : Value (.lam body)
   | natural (n : Nat) : Value (.nat n)
+  | boolean (value : Bool) : Value (.boolean value)
   | label (name : String) : Value (.label name)
   | record (fields : List (String × Term)) : Value (.record fields)
   | specification (metadata extension : Term) : Value (.specification metadata extension)
@@ -132,12 +137,20 @@ def extendFields (inherited fields : List (String × Term)) : List (String × Te
 def primitiveResult : Primitive → Term → Term → Option Term
   | .add, .nat a, .nat b => some (.nat (a + b))
   | .multiply, .nat a, .nat b => some (.nat (a * b))
-  | .equal, .nat a, .nat b => some (.label (if a = b then "true" else "false"))
-  | .conjunction, .label "true", .label "true" => some (.label "true")
-  | .conjunction, .label "true", .label "false" => some (.label "false")
-  | .conjunction, .label "false", .label "true" => some (.label "false")
-  | .conjunction, .label "false", .label "false" => some (.label "false")
+  | .equal, .nat a, .nat b => some (.boolean (a == b))
+  | .conjunction, .boolean a, .boolean b => some (.boolean (a && b))
   | _, _, _ => none
+
+/-- All String labels, including true/false, are excluded from Boolean operations. -/
+theorem conjunction_labels_refused (left right : String) :
+    primitiveResult .conjunction (.label left) (.label right) = none := rfl
+
+theorem conjunction_boolean_exact (left right : Bool) :
+    primitiveResult .conjunction (.boolean left) (.boolean right) =
+      some (.boolean (left && right)) := rfl
+
+theorem equality_boolean_exact (left right : Nat) :
+    primitiveResult .equal (.nat left) (.nat right) = some (.boolean (left == right)) := rfl
 
 inductive Step : Term → Term → Prop where
   | beta (body argument : Term) : Step (.app (.lam body) argument) (instantiate body argument)
@@ -195,10 +208,12 @@ must inhabit all fields before any adequacy claim is made. -/
 separate relation and is not syntactic equality of residual lambda bodies. -/
 inductive Observation where
   | natural (value : Nat)
+  | boolean (value : Bool)
   | label (value : String)
   deriving Repr, DecidableEq
 inductive Observes : Term → Observation → Prop where
   | natural (value : Nat) : Observes (.nat value) (.natural value)
+  | boolean (value : Bool) : Observes (.boolean value) (.boolean value)
   | label (value : String) : Observes (.label value) (.label value)
 
 inductive Transition (State : Type) where

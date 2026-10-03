@@ -128,8 +128,10 @@ bound (distinct from the crypto helper frame limit). The owner supplies
 - `attempts`: existing owner-private directory for retained exact signed calls.
 - `fuel` and `timeoutSeconds`: finite positive operator service bounds.
 
-Only opcode 2 takes the agreement route. Opcodes 0, 1, 3 through 11 use the
-matching Host's existing read, lookup, preparation and authoring handlers. Every
+Only opcode 2 takes the agreement route. Opcodes 0, 1, 3 through 11, 91 and 144 use the
+matching Host's existing read, lookup, preparation and authoring handlers.
+Opcode91 retains the signed current factory-observation birth gate; opcode144
+performs the actual current signing-key status check. Every
 other opcode fails closed; it cannot fall through to another mutation family.
 The matched Host must use the actual same consensus-profile genesis and source
 store. This wrapper does not authorize changing an existing world's profile.
@@ -143,8 +145,10 @@ existing source receipt and agreement evidence.
 Current qualification: seven Python framing/file/process-boundary checks pass,
 including an actual child timeout with no redispatch. The Lean operator bridge, exact-prefix completion refinement and native
 call-family guard compile against the passing source consumer and frozen receiver
-cohort. The matched Host/client integration and first actual source action have
-not run.
+cohort. The matched standalone reader and operator have run against the actual four
+source stores: profile/seed agreement, wrong-pin rejection, refusal of direct
+reader submission and both enrolled current signing keys passed. The first
+actual signed source action remains pending.
 This local four-participant driver does not claim four independent processes or
 failure domains. Operator service fuel is not a source-funded recovery grant.
 

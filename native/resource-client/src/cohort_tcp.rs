@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const DOMAIN: &[u8] = b"Mini/PQ-cohort/fixed-link/v1";
+const DOMAIN: &[u8] = b"Mini/PQ-cohort/fixed-link/v2";
 const HEADER: usize = 4 + 32 + 8;
 const OVERHEAD: usize = HEADER + 24 + 16;
 
@@ -319,11 +319,26 @@ fn send(
             read_private(&path, p.capacity() + 5 + OVERHEAD)?
         } else {
             let mut plain = vec![0; p.capacity() + 5];
-            if p.purpose == 0 {
-                let cover =
-                    read_private(&source.join(format!("epoch-{epoch}.cover")), p.capacity())?;
+            if p.purpose == 0 || p.purpose == 5 {
+                let cover_path = source.join(format!("epoch-{epoch}.cover"));
+                // Final dummy inventory is a fixed public-capacity producer,
+                // independent of real custody/native work. Admit it completely
+                // before this link's original first send, never move the clock.
+                if p.purpose == 5 {
+                    let cutoff = p
+                        .when(start)?
+                        .checked_sub(p.tick)
+                        .ok_or("broadcast inventory cutoff")?;
+                    while !cover_path.exists() && now_ms()? < cutoff {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                let cover = read_private(&cover_path, p.capacity())?;
                 if cover.len() != p.capacity() {
                     return Err("complete enrolled cover inventory required".into());
+                }
+                if p.purpose == 5 {
+                    crate::pq_mailbox::live_validate_broadcast(epoch, p.width, p.payload, &cover)?;
                 }
                 plain[0] = 1;
                 plain[1..5].copy_from_slice(&(cover.len() as u32).to_le_bytes());
@@ -739,6 +754,24 @@ fn worker(
             let path = output.join(format!("epoch-{epoch}.cover"));
             if !path.exists() {
                 persist(&path, &pq::live_cover(epoch, p.width, p.payload, &keys)?)?;
+            }
+        }
+    }
+    if action == "mailbox" {
+        // Shared final audience cover is provisioned before ANY private offer or
+        // fetch. It has no client-openable receipt and never claims admission.
+        // All four links use these SAME exact immutable batch bytes.
+        for epoch in start..p.first + p.epochs {
+            let path = output.join(format!("epoch-{epoch}.cover"));
+            if path.exists() {
+                pq::live_validate_broadcast(
+                    epoch,
+                    p.width,
+                    p.payload,
+                    &read_private(&path, p.capacity())?,
+                )?;
+            } else {
+                persist(&path, &pq::live_broadcast_cover(epoch, p.width, p.payload)?)?;
             }
         }
     }
@@ -1181,6 +1214,47 @@ mod tests {
             vec![3; p.capacity()]
         );
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scheduled_broadcast_uses_shared_cover_when_actual_source_output_is_not_ready() {
+        let source = temp();
+        let root = temp();
+        let mut p = profile();
+        p.purpose = 5;
+        p.origin = now_ms().unwrap() + 100;
+        p.epochs = 1;
+        let cover = crate::pq_mailbox::live_broadcast_cover(0, p.width, p.payload).unwrap();
+        persist(&source.join("epoch-0.cover"), &cover).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let q = p.clone();
+        let observed = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut b = vec![0; q.capacity() + 5 + OVERHEAD];
+            stream.read_exact(&mut b).unwrap();
+            b
+        });
+        send(
+            TcpStream::connect(address).unwrap(),
+            &root,
+            &source,
+            &p,
+            &[7; 32],
+            0,
+        )
+        .unwrap();
+        let wire = observed.join().unwrap();
+        let plain = open(&p, &[7; 32], 0, &wire).unwrap();
+        assert_eq!(plain[0], 1);
+        assert_eq!(&plain[5..], &cover);
+        assert!(!source.join("epoch-0.payload").exists());
+        assert!(
+            crate::pq_mailbox::live_scan(&temp(), 0, p.width, p.payload, &cover)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(source).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn enrolled_contribution_selects_cover_even_without_ready_real_work() {

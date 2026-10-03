@@ -86,9 +86,13 @@ fn render(site: &Site, value: &Value, message: &str) -> Page {
                     }
                 }
                 body.push_str(&format!("</ul><a href=\"{base}/snapshot/{}\">Inspect retained source roots</a></details>",escape(c["id"].as_str().unwrap_or(""))));
+                body.push_str(&preview_form(site,id,c["id"].as_str().unwrap_or("")));
             }
             body.push_str("</section>");
         }
+    }
+    if studio::preview_available() {
+        body=body.replace("Compiler preview is unavailable. Your source documents and composition draft remain editable.","Run a retained source capture below to inspect its type, result or source diagnostics.").replace("data-preview-state=unavailable","data-preview-state=ready");
     }
     Page {
         status: 200,
@@ -182,6 +186,13 @@ pub(super) fn captured(site: &Site, id: &str, snapshot: &str) -> Page {
                 }
             }
             body.push_str("</ul><p>Compiler preview and publication are unavailable. This retained source capture has not installed a program or changed a prototype.</p>");
+            body.push_str(&preview_form(site,id,snapshot));
+            if studio::preview_available() {body=body.replace("Compiler preview and publication are unavailable.","Run this capture with the selected source edition below. Native publication remains unavailable.");}
+            match studio::source_preview_runs(&site.root,&site.workspace,id,snapshot) {
+                Ok(runs) if !runs.is_empty()=>{body.push_str("<section><h2>Retained previews</h2><ul>");for run in runs {body.push_str(&format!("<li><a href=\"{}/studio/{}/snapshot/{}/preview/{}\">{} — {}</a></li>",site.base(),escape(id),escape(snapshot),escape(run["run"].as_str().unwrap_or("")),escape(run["run"].as_str().unwrap_or("")),escape(run["status"].as_str().unwrap_or("started"))));}body.push_str("</ul></section>");},
+                Err(e)=>body.push_str(&format!("<p>Preview history unavailable: {}</p>",escape(&e))),
+                _=>{},
+            }
             Page {
                 status: 200,
                 title: "Source snapshot".into(),
@@ -240,6 +251,13 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
     let Some(id) = id else {
         return simple(400, "Source workspace", "package identity required");
     };
+    if action == "preview" {
+        if fields.len()!=2 || !fields.contains_key("snapshot") || !fields.contains_key("edition") {return simple(400,"Source preview","expected retained snapshot and explicit edition");}
+        return match studio::source_preview(&site.root,&site.workspace,id,&fields["snapshot"],&fields["edition"]) {
+            Ok(value)=>preview_render(site,id,&fields["snapshot"],&value),
+            Err(e)=>failure_page("Source preview",&e),
+        };
+    }
     if action == "fork" {
         if fields.len() != 2 || !fields.contains_key("revision") || !fields.contains_key("title") {
             return simple(400, "Fork composition", "expected revision and title");
@@ -331,4 +349,23 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
             page
         }
     }
+}
+
+fn preview_form(site:&Site,id:&str,snapshot:&str)->String {
+    if !studio::preview_available() {return String::new();}
+    format!("<form method=post action=\"{}/studio/{}/preview\"><input type=hidden name=snapshot value=\"{}\"><label>Source edition<select name=edition><option value=objective-bend-1>Objective Bend 1</option></select></label><button>Typecheck and run captured source</button><p>Pure preview of this saved source revision, with bounded execution. Native actions require a separate governed operation.</p></form>",site.base(),escape(id),escape(snapshot))
+}
+pub(super) fn preview(site:&Site,id:&str,snapshot:&str,run:&str)->Page {
+    match studio::source_preview_result(&site.root,&site.workspace,id,snapshot,run) {Ok(value)=>preview_render(site,id,snapshot,&value),Err(e)=>failure_page("Source preview",&e)}
+}
+fn preview_render(site:&Site,id:&str,snapshot:&str,value:&Value)->Page {
+    let status=value["status"].as_str().unwrap_or("unavailable");
+    let output=&value["result"];
+    let mut body=format!("<p><a href=\"{}/studio/{}\">Source package</a> | <a href=\"{}/studio/{}/snapshot/{}\">Captured source revisions</a></p><p role=status data-preview-status=\"{}\">Objective Bend 1 preview: {}.</p><p>This result belongs to the retained source capture. It does not publish code or authorize a native action.</p>",site.base(),escape(id),site.base(),escape(id),escape(snapshot),escape(status),escape(status));
+    if let Some(run)=value["run"].as_str(){body.push_str(&format!("<p><a href=\"{}/studio/{}/snapshot/{}/preview/{}\">Permalink to this preview</a></p>",site.base(),escape(id),escape(snapshot),escape(run)));}
+    if output["preview"].is_object() {body.push_str(&format!("<section><h2>Typed result and execution</h2><pre>{}</pre></section>",escape(&serde_json::to_string_pretty(&output["preview"]).unwrap_or_default())));}
+    let diagnostic=if output["diagnostic"].is_null(){&value["diagnostic"]}else{&output["diagnostic"]};
+    if !diagnostic.is_null(){body.push_str(&format!("<section><h2>Source diagnostics</h2><pre>{}</pre></section>",escape(&serde_json::to_string_pretty(diagnostic).unwrap_or_default())));}
+    body.push_str(&format!("<details><summary>Exact source, edition and compiler bindings</summary><pre>{}</pre></details>",escape(&serde_json::to_string_pretty(&serde_json::json!({"sourceRequestSha256":value["sourceRequestSha256"],"sourceHashes":value["sourceHashes"],"edition":value["edition"],"toolingSha256":value["toolingSha256"],"resultBinding":output["binding"]})).unwrap_or_default())));
+    Page {status:200,title:"Source preview".into(),stamp:Stamp::None,body}
 }

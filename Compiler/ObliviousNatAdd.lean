@@ -19,11 +19,11 @@ structure AddedBit where
 /-- Two AND and three XOR gates. Carry terms are disjoint, so the last XOR
 is their exact disjunction, including the all-three-inputs true case. -/
 def fullAdder (left right carry : Nat) : Builder AddedBit := do
-  let different ← emit (.xor left right)
-  let sum ← emit (.xor different carry)
-  let both ← emit (.and left right)
-  let passing ← emit (.and different carry)
-  let carry ← emit (.xor both passing)
+  let different ← ObliviousNetwork.emit (.xor left right)
+  let sum ← ObliviousNetwork.emit (.xor different carry)
+  let both ← ObliviousNetwork.emit (.and left right)
+  let passing ← ObliviousNetwork.emit (.and different carry)
+  let carry ← ObliviousNetwork.emit (.xor both passing)
   pure ⟨sum,carry⟩
 
 def sumBit (left right carry : Bool) : Bool := xor (xor left right) carry
@@ -75,7 +75,7 @@ bits first, then every carry witness. Input-bit protocol qualification is owned
 by the backend and must be composed/reserved before any secret input is read. -/
 def network {n : Nat} (plan : Plan n) : Network :=
   let build : Builder Unit := do
-    let zero ← emit (.constant false)
+    let zero ← ObliviousNetwork.emit (.constant false)
     let arguments : Fin n → Word plan.outputBits := fun index =>
       Vector.ofFn fun bit => if bit.val < plan.inputBits then
         index.val * plan.inputBits + bit.val else zero
@@ -87,7 +87,7 @@ def network {n : Nat} (plan : Plan n) : Network :=
 carry appended as the highest bit. This does not replace source Plan binding. -/
 def additionNetwork (width : Nat) : Network :=
   let build : Builder Unit := do
-    let zero ← emit (.constant false)
+    let zero ← ObliviousNetwork.emit (.constant false)
     let (carry,sum) ← ripple zero (inputs width 0) (inputs width width)
     modify fun graph => {graph with outputs := sum.toArray.push carry}
   (build.run {inputCount := 2 * width}).2

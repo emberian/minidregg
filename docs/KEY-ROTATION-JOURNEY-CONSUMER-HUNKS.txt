@@ -1,0 +1,11 @@
+Retained default rotate-key replay is sticky, not implicit succession.
+Apply ONLY exact existing command replacements; preserve all concurrent journey work.
+Final native/resource-client/journey.d/jrot.sh:
+run frot2 "$MINI" rotate-key --workspace "$FW" --next-key "$D/offline/friend.next"
+=> append --new-attempt succession-2
+run trot2 "$MINI" rotate-key --workspace "$AW" --next-key "$D/stolen.key" --to-public-key "$D/friend.key.next.pub"
+=> append --new-attempt thief-possession (prior distinct attempt is refused)
+Final native/resource-client/journey.d/jpay-v2.sh:
+rotation_d=mini("rotate-key","--workspace",controller_workspace,"--next-key",path("after-next.key"))
+=> rotation_d=mini("rotate-key","--workspace",controller_workspace,"--next-key",path("after-next.key"),"--new-attempt","controller-d")
+Source authored; both shell bash -n PASS; actual native receiving not run.

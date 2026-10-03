@@ -70,6 +70,45 @@ class NativeFrameBoundary(unittest.TestCase):
             self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"retained-after-timeout")
             self.assertFalse((tickets[0] / "outcome.bin").exists())
 
+    def test_private_identical_client_config_copy(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            original, copy = root / "original.json", root / "socket.config"
+            for path in (original, copy):
+                path.write_bytes(b'{"exact":"profile"}')
+                path.chmod(0o600)
+            profile = {"clientArguments": [str(original), "stdio"]}
+            bridge.check_client_arguments(profile, [str(copy), "stdio"])
+            bridge.check_client_arguments(profile, [str(original), "stdio"])
+            copy.write_bytes(b'{"other":"profile"}')
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                bridge.check_client_arguments(profile, [str(copy), "stdio"])
+            for args in ([str(original)], [str(original), "stdio", "extra"],
+                         [str(original), "serve"]):
+                with self.assertRaises(RuntimeError):
+                    bridge.check_client_arguments(profile, args)
+
+    def test_client_config_copy_rejects_public_link_and_fifo(self):
+        with tempfile.TemporaryDirectory() as name:
+            import os
+            root = Path(name)
+            original, copy = root / "original.json", root / "copy"
+            original.write_bytes(b"pinned")
+            original.chmod(0o600)
+            profile = {"clientArguments": [str(original), "stdio"]}
+            copy.write_bytes(b"pinned")
+            copy.chmod(0o644)
+            with self.assertRaises(RuntimeError):
+                bridge.check_client_arguments(profile, [str(copy), "stdio"])
+            link = root / "link"
+            link.symlink_to(original)
+            with self.assertRaises(OSError):
+                bridge.check_client_arguments(profile, [str(link), "stdio"])
+            fifo = root / "fifo"
+            os.mkfifo(fifo, 0o600)
+            with self.assertRaises(RuntimeError):
+                bridge.check_client_arguments(profile, [str(fifo), "stdio"])
+
     def test_outcome_rejects_public_and_linked_files(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

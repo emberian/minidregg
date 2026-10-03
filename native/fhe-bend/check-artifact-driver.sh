@@ -8,7 +8,7 @@ python3 - "$task_output" /tank/dregg-build/codex-bend-binding-20261003/olean /ho
 import sys
 from pathlib import Path
 out=Path(sys.argv[1])
-owned={'Host/BendFheArtifact.olean','Host/BendFheArtifactCheck.olean','Host/BendSessionDriver.olean','Host/BendSessionCursor.olean','Host/BendSessionDriverJson.olean'}
+owned={'Host/BendOwnerManifestJson.olean','Host/BendFheArtifact.olean','Host/BendFheArtifactCheck.olean','Host/BendSessionDriver.olean','Host/BendSessionCursor.olean','Host/BendSessionDriverJson.olean'}
 for root in map(Path,sys.argv[2:]):
  for source in root.rglob('*.olean'):
   relative=source.relative_to(root)
@@ -22,7 +22,7 @@ for task_package in "$task_common"/.lake/packages/*; do export LEAN_PATH="$LEAN_
 export LEAN_NUM_THREADS=2
 cd "$task_source"
 task_lean=/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0/bin/lean
-for task_module in Host/BendFheArtifact Host/BendFheArtifactCheck Host/BendSessionDriver Host/BendSessionCursor Host/BendSessionDriverJson; do
+for task_module in Host/BendOwnerManifestJson Host/BendFheArtifact Host/BendFheArtifactCheck Host/BendSessionDriver Host/BendSessionCursor Host/BendSessionDriverJson; do
  mkdir -p "$task_output/$(dirname "$task_module")"
  "$task_lean" -j 2 "$task_module.lean" -o "$task_output/$task_module.olean"
  printf 'BEND-FHE ARTIFACT/DRIVER PASS %s\n' "$task_module"
