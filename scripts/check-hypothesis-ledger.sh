@@ -33,11 +33,26 @@ trap 'rm -rf "$tmp"' EXIT
 
 run() { # run <file> <log>; prints the exit status, never fails the script
   set +e
-  lake env lean "$1" >"$2" 2>&1
+  # Give scratch copies an explicit package root while retaining the project
+  # toolchain and imported environment selected by lake env.
+  lake env lean --root="$(dirname "$1")" "$1" >"$2" 2>&1
   local status=$?
   set -e
   echo "$status"
 }
+
+# Report a failed prerequisite as such; it is not an instrument refutation.
+if ! lake env lean --deps "$ledger" >"$tmp/dependencies.log" 2>&1; then
+  echo "hypothesis-ledger: dependency preflight FAILED; instrument not run" >&2
+  cat "$tmp/dependencies.log" >&2
+  exit 2
+fi
+while IFS= read -r dependency; do
+  if [[ "$dependency" == *.olean && ! -f "$dependency" ]]; then
+    echo "hypothesis-ledger: compiled dependency absent: $dependency; instrument not run" >&2
+    exit 2
+  fi
+done < "$tmp/dependencies.log"
 
 self_test=1
 [ "${1:-}" = "--no-self-test" ] && self_test=0

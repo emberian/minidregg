@@ -114,6 +114,7 @@ import Kernel.JointProtectedGateProofs
 import Kernel.JointReservationFunding
 import Kernel.JointSimplexBinding
 import Kernel.JointSourcePrefixValidation
+import Kernel.NativeClientConsent
 import Kernel.PortableContinuationManifest
 import Kernel.PortableHomeTransfer
 import Kernel.PortableHomeTransferAdmission

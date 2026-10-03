@@ -18,21 +18,37 @@
 
 use super::{Annotation, Body, Deco, Rendered, RenderedLine};
 
-/// A body may hold a newline; a rendered line may not.
+/// Document data is never terminal control syntax. Keep controls visible,
+/// including both ESC-prefixed sequences and single-codepoint C1 controls.
+/// Line separators are supplied by the renderer, never by document content.
 fn one_line(text: &str) -> String {
-    text.replace('\n', "␤").replace('\r', "␍")
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\n' => out.push('␤'),
+            '\r' => out.push('␍'),
+            c if c.is_ascii_control() => {
+                out.push(if c == '\u{7f}' { '␡' } else {
+                    char::from_u32(0x2400 + c as u32).expect("ASCII control picture")
+                });
+            }
+            c if c.is_control() => out.extend(c.escape_unicode()),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 pub fn decorate(body: &str, decos: &[Deco]) -> String {
     let strike = |stale: bool, decorated: String| if stale { format!("~~{decorated}~~") } else { decorated };
-    let mut text = body.to_owned();
+    let mut text = one_line(body);
     for deco in decos {
         text = match deco {
             Deco::Code { stale } => strike(*stale, format!("`{text}`")),
             Deco::Italic { stale } => strike(*stale, format!("_{text}_")),
             Deco::Bold { stale } => strike(*stale, format!("**{text}**")),
             Deco::Link { target, stale } => {
-                strike(*stale, format!("[{text}](→ {})", target.as_deref().unwrap_or("?")))
+                strike(*stale, format!("[{text}](→ {})", one_line(target.as_deref().unwrap_or("?"))))
             }
             Deco::Heading { level, stale } => {
                 let hashes = "#".repeat(*level);
@@ -50,7 +66,7 @@ pub fn decorate(body: &str, decos: &[Deco]) -> String {
 /// One row's text with its marks (an embed: its header), no number, no
 /// annotation: the `rendered` field of `--format json`.
 pub fn line_notation(line: &RenderedLine) -> String {
-    let decorated = decorate(&one_line(&line.plain()), &line.decos);
+    let decorated = decorate(&line.plain(), &line.decos);
     if line.struck() {
         format!("~~{decorated}~~")
     } else {
@@ -97,7 +113,9 @@ pub fn document(rendered: &Rendered) -> String {
             out.push(annotation(&indent, a));
         }
     }
-    let mut text = out.join("\n");
+    // Apply the same boundary to metadata (shared names, annotation authors,
+    // key-wrapping descriptions) as to payloads and transclusions.
+    let mut text = out.iter().map(|line| one_line(line)).collect::<Vec<_>>().join("\n");
     text.push('\n');
     text
 }
@@ -114,4 +132,60 @@ pub fn outline(rendered: &Rendered) -> String {
         ));
     }
     text
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    const ATTACK: &str = "\u{1b}]52;c;c2VjcmV0\u{7}\u{9b}2J\u{8}\t\r\n";
+
+    #[test]
+    fn every_unicode_control_is_visible_without_terminal_control_bytes() {
+        let controls: String = (0..=0x10ffff).filter_map(char::from_u32)
+            .filter(|c| c.is_control()).collect();
+        let rendered = one_line(&controls);
+        assert!(!rendered.chars().any(char::is_control));
+        assert!(rendered.contains('␛'));
+        assert!(rendered.contains("\\u{9b}"));
+        assert_eq!(one_line("λ café 🐴\n\r"), "λ café 🐴␤␍");
+        assert_eq!(one_line(&rendered), rendered);
+    }
+
+    #[test]
+    fn decorations_cannot_restore_terminal_sequences_via_link_names() {
+        let rendered = decorate(ATTACK, &[Deco::Link {
+            target: Some(ATTACK.into()), stale: false,
+        }, Deco::Bold { stale: false }]);
+        assert!(!rendered.chars().any(char::is_control));
+        assert!(rendered.contains("**[␛]52;"));
+    }
+
+    #[test]
+    fn document_metadata_annotations_and_outline_are_terminal_safe() {
+        use super::super::{OutlineEntry, Rendered};
+        let annotation = Annotation {
+            id: "1".into(), author: ATTACK.into(), fresh: true,
+            body: ATTACK.into(), key_wrapping: Some(ATTACK.into()),
+        };
+        let rendered = Rendered {
+            shared_names: Vec::new(), root: serde_json::Value::Null,
+            root_revision: serde_json::Value::Null,
+            lines: vec![RenderedLine {
+                row: serde_json::Value::Null, line: Some(1), depth: 1,
+                body: Body::Text { bytes: ATTACK.as_bytes().to_vec(), struck: false },
+                decos: vec![Deco::Link { target: Some(ATTACK.into()), stale: false }],
+                annotations: vec![annotation.clone()],
+            }],
+            document_annotations: vec![annotation],
+            outline: vec![OutlineEntry { line: 1, level: 1, text: ATTACK.into() }],
+            backlinks: Vec::new(),
+        };
+        for output in [document(&rendered), outline(&rendered)] {
+            assert!(output.chars().all(|c| c == '\n' || !c.is_control()), "{output:?}");
+        }
+        assert_eq!(document(&rendered).lines().count(), 3);
+        // Raw document bytes remain exact; this is a presentation boundary.
+        assert_eq!(rendered.raw(), [ATTACK.as_bytes(), b"\n"].concat());
+    }
 }

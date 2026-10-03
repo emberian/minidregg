@@ -6754,6 +6754,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.NativeClientConsent",
+      "path": "Kernel/NativeClientConsent.lean",
+      "sha256": "d6aaed259ef24e0cc3147bfd31cfd1bc7bde63e89d0ed0242f36931840bc3979",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.NativeHistorySelection",
       "path": "Kernel/NativeHistorySelection.lean",
       "sha256": "98b29a9da47eac5075aa4b98f50b60abb99dc7d7db6f0d7aa9c5c1358b60731d",
@@ -7834,7 +7841,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "d645d70955942510afa3e5ad4577f5be7347bb5846cf8676929b8ff68bde18c7",
+      "sha256": "6f6266a62fe151bdb590d27f4e31bcd0282ba91e92f0f7b7235c39349974238d",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },

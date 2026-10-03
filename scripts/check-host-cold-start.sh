@@ -17,12 +17,22 @@
 set -euo pipefail
 export LC_ALL=C
 host=${1:?usage: check-host-cold-start.sh HOST}
+[[ -f "$host" && -x "$host" ]] || { echo "check-host-cold-start: Host executable absent or not executable: $host" >&2; exit 2; }
 max_rss_kb=${HOST_INIT_MAX_RSS_KB:-160000}
 max_cpu_s=${HOST_INIT_MAX_CPU_S:-1.5}
 [[ -x /usr/bin/time ]] || { echo "check-host-cold-start: needs GNU time at /usr/bin/time" >&2; exit 2; }
 report=$(mktemp)
-trap 'rm -f "$report"' EXIT
-/usr/bin/time -o "$report" -f '%U %S %M %e' "$host" >/dev/null 2>&1 || true
+output=$(mktemp)
+trap 'rm -f "$report" "$output"' EXIT
+status=0
+/usr/bin/time -o "$report" -f '%U %S %M %e' "$host" >"$output" 2>&1 || status=$?
+# Main deliberately returns 1 for the no-argument usage request. An exec
+# failure, signal, or unrelated error must not become a cheap startup PASS.
+if [[ "$status" != 1 ]] || ! grep -q 'minidregg-host:' "$output" || ! grep -q 'minidregg-host CONFIG' "$output"; then
+  echo "check-host-cold-start: Host did not complete its no-argument usage path (exit $status)" >&2
+  cat "$output" >&2
+  exit 2
+fi
 read -r user sys rss wall < <(tail -1 "$report")
 [[ "$rss" =~ ^[0-9]+$ ]] || { echo "check-host-cold-start: no measurement for $host" >&2; cat "$report" >&2; exit 2; }
 cpu=$(awk -v u="$user" -v s="$sys" 'BEGIN { printf "%.2f", u + s }')

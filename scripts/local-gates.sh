@@ -7,10 +7,9 @@
 #   host-operations request-byte allocations match Host receivers and socket routes; mutation checks
 #   hygiene        no bare `#print axioms`, no project `axiom`; Assurance/SheetLaw.lean
 #                  §2 is the embed of the MUD sheet JSON (scripts/gen-sheetlaw.py --check)
-#   lake-build     lake build every lean_lib + every lean_exe in lakefile.toml (Minidregg,
-#                  AxiomCensus, minidregg-host, nock-eval, ...): every library module elaborates, every
-#                  pinned axiom footprint is compared, the tree-wide #assert_axioms_tree
-#                  runs, and the Host executable links
+#   lake-build     builds declared qualification libraries and executables; ResearchWip
+#                  is an explicit opt-in source target. Successful builds compare their
+#                  pinned axiom footprints and link the declared executables.
 #   cold-start     the native Host starts without doing work (scripts/check-host-cold-start.sh:
 #                  peak RSS and CPU of a bare start; a computable nullary def in a module
 #                  the Host links runs at every Host start)
@@ -20,7 +19,7 @@
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
-#   build-closure  every tracked library module is reachable from what lake-build builds
+#   build-closure  source classification/target coverage and gate regression tests
 #   host-closure   the import closure of Host.Main equals scripts/gates/host-closure.pin
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
 #   exports        every @[export] is called from native/ or allowlisted with a reason
@@ -38,9 +37,8 @@ export PATH=$HOME/.elan/bin:$PATH
 lake=${LAKE:-lake}
 logdir=$repo_root/build-logs/local-gates
 mkdir -p "$logdir"
-# lake-build builds EVERY lean_lib and lean_exe the lakefile declares (the umbrella,
-# AxiomCensus, any other root library, the executables), read from the lakefile so a
-# new root library cannot be left out of the gate.
+# Read target declarations so newly added qualification libraries enter the gate.
+# ResearchWip is classified source awaiting qualification and remains opt-in.
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
@@ -63,7 +61,7 @@ g_drift() {
   echo "drift: the build changed no tracked file"
 }
 g_prover-glue()   { bash scripts/check-prover-glue.sh; }
-g_build-closure() { bash scripts/check-build-closure.sh; }
+g_build-closure() { bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }

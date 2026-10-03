@@ -29,9 +29,18 @@ for file in "${files[@]}"; do
 done
 # Build the emitters' dependencies (not the emitters' own outputs into the tree:
 # lake may rebuild them here, which is what the build does anyway).
-lake build "${modules[@]//\//.}" >/dev/null
+# Build imported libraries, leaving emitter elaboration to the scratch cwd.
+mapfile -t dependencies < <(python3 - "${modules[@]}" <<'PYDEPS'
+import re, sys
+print("\n".join(sorted({m for p in sys.argv[1:] for m in
+    re.findall(r"^import\s+(\S+)", open(p + ".lean").read(), re.M)})))
+PYDEPS
+)
+lake build "${dependencies[@]}" >/dev/null
 for module in "${modules[@]}"; do
-  (cd "$tmp" && lake -d "$root" env lean "$root/$module.lean" >/dev/null)
+  # Resolve elan/Lake in the project before switching cwd. Lean keeps the
+  # source package root while #eval writes only in the scratch directory.
+  lake env bash -c 'cd "$1"; exec lean --root="$2" "$3"' _ "$tmp" "$root" "$root/$module.lean" >/dev/null
 done
 status=0
 for file in "${files[@]}"; do
