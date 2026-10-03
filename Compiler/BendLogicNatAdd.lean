@@ -126,9 +126,43 @@ theorem compiled_output_cast {p nVars width limbBits : Nat} [Fact p.Prime]
   simpa [AirBignum.limbVals, List.map_ofFn, Nat.cast_add] using
     congrArg (fun n : Nat => (n : ZMod p)) correct.symm
 
+/-- Range checks bound the exact integer result by the declared limb capacity. -/
+theorem compiled_result_bound {p nVars width limbBits : Nat} [Fact p.Prime]
+    {nPublic : Nat} {book : BBook}
+    {w : AirBignum.AddWires (Fin nVars) width limbBits}
+    {d : ConstraintDescriptor (ZMod p)} (accepted : compile nPublic book w = some d)
+    (asg : Fin nVars → ZMod p) (wv : Nat → ZMod p)
+    (pinned : ∀ i, wv i.val = asg i) (holds : descriptorHolds d wv) :
+    Bignum.denoteNat (2 ^ limbBits) (AirBignum.limbVals asg w.z) <
+      (2 ^ limbBits) ^ width := by
+  obtain ⟨_, noWrap, _, exactDescriptor⟩ := compile_exact accepted
+  have relation := (AirBignum.emit_addGadget_iff Fin.val Fin.val_injective
+    nPublic nVars (fun i => i.isLt) asg w).mp
+      ⟨wv, pinned, exactDescriptor ▸ holds⟩
+  obtain ⟨_, _, canonical, _⟩ := AirBignum.addGadget_sound noWrap asg w relation
+  have bound := Bignum.denoteNat_lt_pow (by positivity : 0 < 2 ^ limbBits)
+    (AirBignum.limbVals asg w.z) canonical.1
+  simpa [canonical.2] using bound
+
+/-- Explicit whole-value bound permits a scalar field decoder to recover the
+integer result. This is separate from the per-limb soundness condition. -/
+theorem compiled_output_exact_val {p nVars width limbBits : Nat} [Fact p.Prime]
+    {nPublic : Nat} {book : BBook}
+    {w : AirBignum.AddWires (Fin nVars) width limbBits}
+    {d : ConstraintDescriptor (ZMod p)} (accepted : compile nPublic book w = some d)
+    (asg : Fin nVars → ZMod p) (wv : Nat → ZMod p)
+    (pinned : ∀ i, wv i.val = asg i) (holds : descriptorHolds d wv)
+    (wholeBound : Bignum.denoteNat (2 ^ limbBits) (AirBignum.limbVals asg w.z) < p) :
+    (eval asg (outputExpr w)).val =
+      Bignum.denoteNat (2 ^ limbBits) (AirBignum.limbVals asg w.z) := by
+  rw [compiled_output_cast accepted asg wv pinned holds]
+  exact ZMod.val_cast_of_lt wholeBound
+
 #assert_axioms bookBinding_sound
 #assert_axioms compile_exact
 #assert_axioms wordExpr_cast
 #assert_axioms compiled_source_sound
 #assert_axioms compiled_output_cast
+#assert_axioms compiled_result_bound
+#assert_axioms compiled_output_exact_val
 end Minidregg.Compiler.BendLogicNatAdd

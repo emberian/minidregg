@@ -20,6 +20,8 @@ const INGRESS: &[u8] = b"DREGG.PRIVATE.INGRESS\x01";
 pub enum Protocol {
     Acs = 0,
     PrivateSend = 1,
+    AcssId = 2,
+    Dzk = 3,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Context {
@@ -65,6 +67,8 @@ impl CommitteeParty {
         let protocol = match c.byte()? {
             0 => Protocol::Acs,
             1 => Protocol::PrivateSend,
+            2 => Protocol::AcssId,
+            3 => Protocol::Dzk,
             _ => return Err(bad("protocol tag")),
         };
         let g = c.bytes()?;

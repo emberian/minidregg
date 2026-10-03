@@ -181,8 +181,8 @@ ROOT DECISION / NEXT CONCRETE INTEGRATION
 Recommended: one source-owned Activity artifact kind with canonical checkpoint,
 pinned execution context, current generation and typed pending Plan/result slots.
 Reuse existing content/resource admission and private custody, making snapshot
-policy/control verbs explicit. Root should assign the exact native activity
-coordinate/receipt integration to world+captain; no user design approval is needed
+policy/control verbs explicit. The graded-execution owner now owns the actual Activity phase/native integration,
+with world supplying typed Plan/current admission and captain shared Config integration; no user design approval is needed
 for this routine additive choice. Do not scatter a new saga format into every app.
 First acceptance: actual activity saved mid-control, admitted and read back through
 Mini, restarted in a new process, finishes exact result/count; stale worker/context
@@ -196,7 +196,36 @@ CodeRefinement + controller-owned heap/environment uniqueness PASS
 controller-denotation-check-01.log. Simulation context/helper tranche PASS.
 Continuation codec/Host/SourceJoin remains awaiting its own check.
 
-PENDING MACHINE EVOLUTION: composition is considering explicit reverseArguments/
-installArguments microsteps to replace walk-leaf O(A) push/reversal. Continuation
-codec must append exact tags and pin changed evaluator identity before integration;
-no currently qualified persisted wire is being silently migrated.
+MACHINE EVOLUTION: reverseArguments/installArguments microsteps v2 passed in the
+controller lane. The codec now retains both controls with tags 10/11 and pins
+DREGG.BEND.CLOSURE-MACHINE/microsteps-v2; no qualified old wire is silently migrated.
+
+ACTIVITY CONSTRUCTION UPDATE (source-first WIP, qualification pending)
+Kernel/BendActivity retains canonical whole checkpoint, ordinal, pure segment and
+prior source counts, pending exact native IntentRecord/response ABI and outcome.
+advance computes actual run from the retained predecessor; it cannot tick through
+a pending effect. resumeProposal uses the actual typed finite-enum heap injection
+into captured Q1 continuation and starts a new pure segment. Raw receipt bytes are
+not an authorized outcome; native receiving must supply that missing evidence.
+
+Kernel/BendActivityControl exports the protected-cell ordinary gate. CheckedBirth
+requires exact fresh lifecycle bytes and actual Machine.start; CheckedAdvance
+recomputes actual run from exact source context/generation/ordinal, checks the
+exact proposed payload and carries a native StableNullifier for the predecessor.
+The proposed installer theorem uses the actual DataSnapshot.install consumption
+rule to exclude NEW admission of the spent claim. Existing same-id retries retain
+the original outcome through the existing durable protocol. These modules are
+authored, uncompiled, and not wired to current source admission yet.
+
+Compiler/BendActivityYield reads actual completed Row.pair Q1 PlanData/continuation
+and uses the proof-producing heap decoder plus world BendPlanLowering.lower. It
+retains exact source Denotes for both pointers, the captured continuation pointer,
+and the general pair denotation. BoundCommand consumes actual matchesCommand and
+exposes exact ordered native payloads. This is a public/reference extractor, not
+a private trace guarantee or a reachability/typing/authority certificate.
+
+Remaining concrete join: source-selected protected facets must compose, and an
+Activity exemption must preserve all other facets. Exact current native command
+admission, funding, Appended readback, shared dispatch/outcome identity and worker
+fence must consume the same predecessor. Source authority alone cannot bless a
+forged checkpoint. No second application journal is introduced.

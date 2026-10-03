@@ -80,7 +80,7 @@ def main (args : List String) : IO Unit := do
   let [directory] := args | throw (IO.userError "usage: BendTraceIR2Emit output-directory")
   let output : System.FilePath := directory
   IO.FS.createDirAll output
-  IO.FS.writeFile (output / "descriptor.json") ((lower fixtureDescriptor).toJson.compress ++ "\n")
+  IO.FS.writeFile (output / "descriptor.json") ((lower fixtureDescriptor).toWire ++ "\n")
   IO.FS.writeFile (output / "trace.csv")
     (csvNat (wireValues true))
   IO.FS.writeFile (output / "alternate-trace.csv")

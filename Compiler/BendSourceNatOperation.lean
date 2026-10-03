@@ -39,7 +39,8 @@ theorem source_natAdd_normalizes (bk : Book)
     Normalizes bk (natAddCall a b) (natTerm (a + b)) := by
   induction a with
   | zero =>
-    exact Relation.ReflTransGen.single (Eval.call binding (values_add bk 0 b) (add_zero_walk bk b))
+    simpa only [Nat.zero_add] using
+      Relation.ReflTransGen.single (Eval.call binding (values_add bk 0 b) (add_zero_walk bk b))
   | succ a ih =>
     have lifted : Normalizes bk (succTerm (natAddCall a b)) (succTerm (natTerm (a + b))) :=
       Relation.ReflTransGen.lift succTerm

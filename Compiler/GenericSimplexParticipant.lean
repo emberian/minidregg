@@ -93,6 +93,16 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
     | .conflict => return (p,.error "engine journal changed; retry admission")
     | .uncertain => return (p,.error "engine append uncertain; recover journal before retry")
 
+/-- Ordinary propose/await consumer: return only the receipt recomputed by the
+native verified source history for the exact complete proposal bytes. A protocol
+commit, send, pending offer or local transport acknowledgement yields nothing. -/
+def completedReceipt {config : SourceConfig} (p : Participant config) (payload : Bytes) :
+    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
+  let index ← (Minidregg.Kernel.JointReceiver.sourcePrefix
+    p.source.verified.opened.durable).zipIdx.findSome? (fun (record,index) =>
+      if record == payload then some index else none)
+  p.source.verified.receipts[index]?
+
 /-- One flat fanout slot. Skipping self also consumes a slot, keeping service
 finite independently of committee size. -/
 def packetAt {config : SourceConfig} (p : Participant config) (state : State)
@@ -136,6 +146,19 @@ def certificateCandidates (journal : Journal) (state : State) : List (Nat × Blo
   ((state.views.filterMap fun view => view.sentCommit.map (fun block => (view.number,block))) ++
     journal.commitWitnesses.map (fun w => (w.view,w.block))).eraseDups
 
+/-- Recover the actual authoritative source after a lost append reply or CAS
+conflict. Every retained ingress is re-admitted at its original prefix; no engine
+flag or stale in-memory Source is promoted into a readback receipt. -/
+def reloadSource {config : SourceConfig} (p : Participant config) :
+    IO (Participant config × String) := do
+  match ← Minidregg.Compiler.DurableReceiverIO.load config.physicalTransport
+      Minidregg.Compiler.ResourceBirthCodec.rootBytes with
+  | .error detail => return (p,"source reload: " ++ detail)
+  | .ok target =>
+    match ← Minidregg.Kernel.NativeHostReplay.verifyLoaded config target with
+    | .error failure => return (p,"source replay: " ++ failure.detail)
+    | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
+
 /-- A descendant certificate installs only the next actual record, by fresh
 native derivation and the existing ordered physical CAS/readback receiver. The
 same full certificate can then catch up another record in a later service slice.
@@ -155,7 +178,7 @@ def applyNext {config : SourceConfig} (p : Participant config)
     let verified := receipt.verified
     return ({p with source := ⟨_,verified⟩},"applied")
   | .refused detail => return (p,detail)
-  | .ordinary _ => return (p,"source append unresolved; reload actual source before retry")
+  | .ordinary _ => reloadSource p
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do

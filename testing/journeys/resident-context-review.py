@@ -28,7 +28,7 @@ def main():
         fd=os.open(out,os.O_RDONLY|os.O_DIRECTORY)
         try:os.fsync(fd)
         finally:os.close(fd)
-    def shell(label,line,effect=False,refusal=False):
+    def shell(label,line,effect=False,refusal=False,native_refusal=False):
         prior=state['steps'].get(label)
         if prior and prior['phase']=='done':return prior['stdout']
         if prior:raise RuntimeError('uncertain prior '+label+' retained; inspect/recover exact native attempt before resuming')
@@ -41,7 +41,17 @@ def main():
         (out/(label+'.stderr')).write_text(r.stderr)
         state['steps'][label].update(returncode=r.returncode,stdout=r.stdout,
             stdoutSHA256=hashlib.sha256(r.stdout.encode()).hexdigest())
-        if refusal:
+        if native_refusal:
+            # This proposal was authored while its base was current. Require
+            # actual post-authoring native rejection, not the earlier client gate.
+            try:outcome=json.loads(r.stdout)
+            except json.JSONDecodeError:raise RuntimeError('native refusal omitted retained outcome JSON')
+            if r.returncode!=3 or outcome.get('type')!='refused':
+                raise RuntimeError('expected typed native current-base refusal, got '+str(r.returncode))
+            if outcome.get('reason') not in ('operation-rejected','stale-root'):
+                raise RuntimeError('native refusal did not identify expected guarded-source failure: '+str(outcome))
+            state['steps'][label]['refusalBoundary']='typed-native-post-authoring'
+        elif refusal:
             # A pinned-current-base check may refuse before proposal authoring
             # (client error1); typed native refusal3 is separately recognizable.
             early='the pinned document changed before proposal authoring' in (r.stdout+r.stderr)
@@ -83,6 +93,13 @@ def main():
     old=command_file('context-old',bundle(first,initial,derived))
     request=command_file('proposal',{'type':'minidregg-workspace-proposal-v1','action':'invoke',
         'targets':[{'name':target,'payload':{'type':'document','actions':[{'type':'append','text':'review-landed'}]}}]})
+    # Author a separate exact proposal before any source change. This tests
+    # the native guard at landing, beyond the client pre-authoring stale gate.
+    race_request=command_file('proposal-race',{'type':'minidregg-workspace-proposal-v1','action':'invoke',
+        'targets':[{'name':target,'payload':{'type':'document','actions':[{'type':'append','text':'stale-race-must-not-land'}]}}]})
+    race_proposal=a.prefix+'-race'
+    race_plan=json.loads(shell('review-before-race','doc review '+race_proposal+' @'+old+' @'+race_request))
+    if race_plan.get('effect')!='none':raise RuntimeError('prepared race incorrectly claims effect landing')
     # Actual admitted source edit, then structural reorder, each with signed reads.
     shell('source-seen','doc show '+source)
     shell('source-edit','doc edit '+a.prefix+'-edit '+source+' 1 changed-evidence',effect=True)
@@ -90,6 +107,17 @@ def main():
     shell('source-move','doc move '+source+' 2 1',effect=True)
     after=context('source-after-move',source)
     if after['sourceRoot']==first['sourceRoot']:raise RuntimeError('source edit/move failed to change context dependency')
+    texts=[row.get('text') for row in after['rows']]
+    if texts!=['additional-evidence','changed-evidence']:
+        raise RuntimeError('native document placement did not govern selected inference order: '+str(texts))
+    if after['rows'][0].get('predecessor') is not None:
+        raise RuntimeError('first projected row has an invented predecessor')
+    if after['rows'][1].get('predecessor')!=after['rows'][0]['element']:
+        raise RuntimeError('projected placement dependency differs from actual selected order')
+    shell('submit-stale-race','submit '+race_proposal,effect=True,native_refusal=True)
+    refused_readback=shell('readback-refused-race','doc show '+target)
+    if 'stale-race-must-not-land' in refused_readback:
+        raise RuntimeError('stale support proposal landed an output')
     invalid=context('summary-invalidated',memory)
     if not any(r.get('summary',{}).get('status')=='invalidated' and 'text' not in r for r in invalid['rows']):
         raise RuntimeError('stale derived memory entered inference context')
@@ -116,7 +144,7 @@ def main():
     cold=context('cold-projection',source)
     def semantic(v):return {k:x for k,x in v.items() if k not in ('observedHeight','readAuthorityRoot')}
     if semantic(cold)!=semantic(after):raise RuntimeError('same signed source yielded different semantic projection')
-    state['result']={'status':'PASS','scope':'actual-native-document-context-summary-edit-placement-current-base-review-submit-recover-readback',
+    state['result']={'status':'PASS','scope':'actual-native-document-context-summary-edit-placement-preauthoring-and-native-landing-refusal-review-submit-recover-readback',
         'residentStartedRecovery':'not exercised; existing request custody tests remain separate',
         'crossRoomMove':'not exercised','BendAuthoredSelector':'not exercised'}
     retain()

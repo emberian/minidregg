@@ -102,6 +102,32 @@ def Plan.toJson (plan : Plan BabyBear) : Json := Json.mkObj
    ("constraints", .arr (plan.constraints.map RowConstraint.toJson).toArray),
    ("hash_sites", .arr #[]), ("ranges", .arr #[])]
 
+/-- Bread's current nested-object reader is order-sensitive. Lean.Json uses
+sorted object keys, so its `compress` output is NOT the wire ABI. This printer
+retains the parser's explicit constructor-field order. All dynamic leaves are
+canonical natural numerals, never interpolated unescaped source strings. -/
+def RowExpr.toWire {p : Nat} [NeZero p] : RowExpr (ZMod p) → String
+  | .constant value => "{\"t\":\"const\",\"v\":" ++ toString value.val ++ "}"
+  | .loc column => "{\"t\":\"loc\",\"c\":" ++ toString column ++ "}"
+  | .add left right => "{\"t\":\"add\",\"l\":" ++ left.toWire ++
+      ",\"r\":" ++ right.toWire ++ "}"
+  | .mul left right => "{\"t\":\"mul\",\"l\":" ++ left.toWire ++
+      ",\"r\":" ++ right.toWire ++ "}"
+
+def RowConstraint.toWire {p : Nat} [NeZero p] : RowConstraint (ZMod p) → String
+  | .zero expression => "{\"t\":\"window_gate\",\"on_transition\":false,\"body\":" ++
+      expression.toWire ++ "}"
+  | .pi column index => "{\"t\":\"pi_binding\",\"row\":\"first\",\"col\":" ++
+      toString column ++ ",\"pi_index\":" ++ toString index ++ "}"
+
+def Plan.toWire (plan : Plan BabyBear) : String :=
+  "{\"name\":\"mini-bend-bounded-trace-ir2-v1\",\"ir\":2,\"trace_width\":" ++
+  toString plan.width ++ ",\"public_input_count\":" ++ toString plan.publicCount ++
+  ",\"challenges\":0,\"tables\":[{\"id\":0,\"name\":\"main\",\"arity\":" ++
+  toString plan.width ++ ",\"sem\":\"main\"}],\"constraints\":[" ++
+  String.intercalate "," (plan.constraints.map RowConstraint.toWire) ++
+  "],\"hash_sites\":[],\"ranges\":[]}"
+
 #assert_axioms wireExpr_correct
 #assert_axioms gateExpr_correct
 #assert_axioms lower_correct

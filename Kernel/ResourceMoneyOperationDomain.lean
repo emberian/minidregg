@@ -204,6 +204,65 @@ def Prepared.checkSamples (prepared : Prepared book expectedOriginalRoot funding
     else throw .samplesRefused
   else throw .duplicateSampleCoordinate
 
+/-- Sampling precedes source execution. Bind the exact original Book and
+validated funding prefix without requiring application operations first. -/
+structure SampledFunding {deployment : Deployment} {physical : Physical}
+    (book : LoadedBook deployment physical) (expectedRoot : Digest)
+    (funding : RunComputeBudget.PreparedBook book.cell) (samples : List Sample) where
+  private mk ::
+  rootExact : expectedRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment)
+  originalLaw : CanonicalCellRegistry.CellLaw deployment deployment.resourceBookId
+    ⟨.resourceBook, book.cell⟩
+  distinct : (samples.map fun sample => (sample.account, sample.asset)).Nodup
+  exact : SamplesExact (logicalBook funding.post.logical) samples
+
+def sampleFunding {deployment : Deployment} {physical : Physical}
+    (book : LoadedBook deployment physical) (expectedRoot : Digest)
+    (funding : RunComputeBudget.PreparedBook book.cell) (samples : List Sample) :
+    Except Reject (SampledFunding book expectedRoot funding samples) := do
+  if exactRoot : expectedRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment) then
+    if law : CanonicalCellRegistry.CellLaw deployment deployment.resourceBookId
+        ⟨.resourceBook, book.cell⟩ then
+      if distinct : (samples.map fun sample => (sample.account, sample.asset)).Nodup then
+        if exact : SamplesExact (logicalBook funding.post.logical) samples then
+          pure ⟨exactRoot, law, distinct, exact⟩
+        else throw .samplesRefused
+      else throw .duplicateSampleCoordinate
+    else throw .originalBookLaw
+  else throw .staleBookRoot
+
+theorem stale_root_refused (suppliedRoot : Digest)
+    (stale : suppliedRoot ≠ physical.model.roots (RunComputeBudgetDomain.bookId deployment)) :
+    prepareFrom book suppliedRoot funding operations = .error .staleBookRoot := by
+  simp [prepareFrom, stale]
+
+/-- A prepared token cannot certify a missing account or caller-spoofed balance.
+This follows from the same post-funding sample used by source execution. -/
+theorem CheckedSamples.balance_exact
+    {prepared : Prepared book expectedOriginalRoot funding operations} {samples : List Sample}
+    (checked : CheckedSamples prepared samples) (sample : Sample) (member : sample ∈ samples) :
+    prepared.applicationPre.balance sample.account sample.asset = Int.ofNat sample.balance :=
+  (checked.exact sample member).2
+
+theorem CheckedSamples.account_present
+    {prepared : Prepared book expectedOriginalRoot funding operations} {samples : List Sample}
+    (checked : CheckedSamples prepared samples) (sample : Sample) (member : sample ∈ samples) :
+    sample.account ∈ prepared.applicationPre.accounts := (checked.exact sample member).1
+
+/-- Every application debit is checked after funding AND all earlier source
+operations. Repeating a solvent initial snapshot cannot admit a later overdraft. -/
+theorem Prepared.source_solvent_at
+    (prepared : Prepared book expectedOriginalRoot funding operations)
+    (prior suffix : List Operation) (operation : Operation)
+    (position : operations = prior ++ operation :: suffix)
+    (notMint : operation.isIssuerMint ≠ true) :
+    Int.ofNat operation.posting.amount ≤
+      (applyOperations prepared.applicationPre prior).balance
+        operation.posting.source operation.posting.asset := by
+  have ordered := prepared.applicationAdmitted
+  rw [position, operationsAdmitted_append] at ordered
+  exact ordered.2.1.sourceSolvent.resolve_left notMint
+
 /-- The parent uses this list instead of accounting.writes: usage is retained,
 and the funding Book post is replaced by the ONE funding+application Book post.
 The source invocation effects must join this in the same selected DataIntent. -/

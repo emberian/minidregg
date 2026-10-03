@@ -33,6 +33,14 @@ def wordConShape (width : Nat) : BTerm := .Sig .Q1 (.Enu ["WCon"])
 def wordConFields (width : Nat) : BTerm := .Sig .Q1 (.Ref "Bool")
   (.Sig .Q1 (wordType width) (.Enu ["()"] ))
 
+private theorem natTerm_closed (n : Nat) : Minidregg.Theory.BendTT.Term.Closed (natTerm n) := by
+  induction n with
+  | zero => intro σ; rfl
+  | succ n ih => intro σ; simp only [natTerm, Term.sub]; rw [ih σ]
+
+@[simp] private theorem natTerm_sub (σ : Subst) (n : Nat) : Term.sub σ (natTerm n) = natTerm n := natTerm_closed n σ
+@[simp] private theorem natTerm_ren (r : Nat → Nat) (n : Nat) : Term.ren r (natTerm n) = natTerm n := closed_ren (natTerm_closed n)
+
 private theorem wordNil_closed : Minidregg.Theory.BendTT.Term.Closed wordNilDef.v := by intro σ; rfl
 private theorem wordNilArms_closed : Minidregg.Theory.BendTT.Term.Closed wordNilArmsDef.v := by intro σ; rfl
 private theorem wordCon_closed : Minidregg.Theory.BendTT.Term.Closed wordConDef.v := by intro σ; rfl
@@ -53,13 +61,15 @@ private theorem wordType_succ (bk : Book) (binding : WordBookBinding bk) (width 
 
 private theorem wordCon_unfold (bk : Book) (binding : WordBookBinding bk) (width : Nat) :
     Pars bk (wordConType width) (wordConShape width) := by
-  exact .step (.app (.delta binding.conType wordCon_closed) (par_refl _))
-    (.step (.beta (par_refl _) (par_refl _)) .refl)
+  simpa [wordConType, wordConShape, Term.inst, Term.sub, Subst.one, Subst.up, Subst.lift, natTerm_sub, natTerm_ren, closed_ren (natTerm_closed width)] using
+    Pars.step (.app (.delta binding.conType wordCon_closed) (par_refl (natTerm width)))
+    (.step (.beta (par_refl _) (par_refl (natTerm width))) .refl)
 private theorem wordConFields_unfold (bk : Book) (binding : WordBookBinding bk) (width : Nat) :
     Pars bk (.App .Q1 (.App .Q0 (.Ref "Word.Con.arms") (natTerm width)) (.Lab "WCon"))
       (wordConFields width) := by
-  exact .step (.app (.app (.delta binding.conArms wordConArms_closed) (par_refl _)) .lab)
-    (.step (.app (.beta (par_refl _) (par_refl _)) .lab)
+  simpa [wordConFields, wordType, Term.inst, Term.sub, Subst.one, Subst.up, Subst.lift, natTerm_sub, natTerm_ren, closed_ren (natTerm_closed width)] using
+    Pars.step (.app (.app (.delta binding.conArms wordConArms_closed) (par_refl (natTerm width))) .lab)
+    (.step (.app (.beta (par_refl _) (par_refl (natTerm width))) .lab)
       (.step (.hit (par_refl _)) .refl))
 
 /-- General source Word(n) constructor typing, with actual source Nat index and
@@ -89,9 +99,9 @@ theorem wordTerm_typed (bk : Book) (boolBinding : BoolBookBinding bk)
         · exact Typed.lab (by simp)
         · apply Typed.conv (U := wordConFields bits.length)
           · exact Typed.tup (boolTerm_typed bk boolBinding b)
-              (Typed.tup ih (Typed.lab (by simp)))
+              (Typed.tup (by simpa [wordType, Term.inst, Term.sub, Subst.one, natTerm_sub] using ih) (Typed.lab (by simp)))
           · exact Or.inl ⟨wordConFields bits.length, .refl,
-              wordConFields_unfold bk binding bits.length⟩
+              by simpa [Term.inst, Term.sub, Subst.one, natTerm_sub] using wordConFields_unfold bk binding bits.length⟩
       · exact Or.inl ⟨wordConShape bits.length, .refl, wordCon_unfold bk binding bits.length⟩
     · exact Or.inl ⟨wordConType bits.length, .refl, wordType_succ bk binding bits.length⟩
 

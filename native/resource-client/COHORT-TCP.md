@@ -75,3 +75,21 @@ belong in the source packet. Independent-host deployment, trusted initial clock/
 resource qualification, public rekey/lifecycle service, source-endpoint ABI,
 private execution/custody composition and a full observation-game proof remain
 required. Source-visible Pending is leakage only where explicitly declared.
+
+## Incremental emission repair
+
+Sender now loads durable encrypted fallback inventory before the public lifetime;
+client fallbacks are valid registered cover contributions, later stages use padded
+physical unavailable records. A separate worker persists exact ready wires. The
+clocked network loop only reads in-memory buffers and writes the socket; no fsync,
+native execution, packet sealing or private producer runs on that loop. Lifetime
+inventory is publicly bounded64MiB (ready buffers may temporarily add a matching
+amount). A fixed25ms operating-system scheduling allowance applies to every slot
+with minimum public tick100ms; exceeding it declares a fault with no catch-up.
+This is an explicit scheduling premise, not a native worst-case time certificate.
+Repeated historical slots are never emitted on resume. Persisted source/capability/
+custody state remains authority; ready/fallback files are not delivery receipts.
+
+Five focused cohort tests PASS after repair (781 skipped,0.807s). Release rebuild
+and actual sustained1s matched TCP/native receiving qualification are pending at
+this incremental publication. Earlier failed evidence is preserved separately.

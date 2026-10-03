@@ -34,10 +34,11 @@ theorem decodeByteNats_sound (t : BTerm) (ns : List Nat)
   cases hn : decodeNatList t with
   | none => simp [hn] at h
   | some xs =>
-    simp only [hn, Option.bind_some] at h
+    simp only [hn, Option.bind, bind, pure] at h
     split at h
     · rename_i hb
-      cases h
+      have heq := Option.some.inj h
+      subst ns
       refine ⟨decodeNatList_sound t xs hn, ?_⟩
       simpa only [List.all_eq_true, decide_eq_true_eq] using hb
     · cases h

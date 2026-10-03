@@ -101,3 +101,24 @@ settlement source and proves the four operation/two return result above, for
 arbitrary native root, subjects, audiences and key epoch. The numeric example
 is distinct from the general conservation theorem. Its sealed source check
 passes; actual Book/native qualification remains separately recorded.
+
+## Shared account roles
+
+SharedBookSettlement allows multiple orders to debit one funding coordinate.
+It deduplicates exact account/asset/balance role copies into one sample table,
+rejects inconsistent balances, aggregates worst-case price*quantity reservation
+budgets and checks aggregate backing. Every reservation ID remains unique.
+Its per-order result distinguishes reservedBudget and unspentBudget from the
+whole account balance. This does not itself perform a refund.
+
+The native sampleFunding API must authenticate the deduplicated table BEFORE
+source execution. Source input role projections then bind to that table. Do not
+first trust input copies and treat the source output table as authentic after
+the calculation. The prepared money API still owns current authority, exact
+fee-adjusted balances and sequential solvency.
+
+SharedSettlementDemonstration evaluates two orders sharing one account: funding
+35 supports reservation budgets20+15; actual payments12+9 leave14. A copied
+funding balance20 is insufficient despite each order being individually backed,
+and inconsistent copies35/36 refuse. These named source laws await source/core
+qualification when published; they do not replace native receiving refusers.

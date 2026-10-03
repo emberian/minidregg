@@ -1,0 +1,12 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendInvocationAdmission.lean",
+      "sha256": "ac2a0a5b6273a16cc0408b5a86e5db2121c4db63fa04b51dd5f3e479bb37a96a",
+      "status": "AUTHORED_UNCOMPILED"
+    }
+  ],
+  "scope": "Actual unchangedBook invocation check -> Typed/Closed/Live and upstream halts; native receiving binds exactinput/currentauthority/outputcodec separately"
+}

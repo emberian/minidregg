@@ -970,4 +970,63 @@ mod tests {
             )
             .is_err());
     }
+    #[test]
+    fn corrupt_dealer_changed_row_identified_and_reconstruction_survives_local_abort() {
+        let mut ns = (0..4)
+            .map(|i| AcssId::new(i, 0, 4, 1, &generation(), 2).unwrap())
+            .collect::<Vec<_>>();
+        let mut out = ns[0].dealer(&polys(), [19; 32]).unwrap();
+        // Corrupt dealer reliably disperses one immutable WRONG row ciphertext
+        // while the same dealer's column dZK commitments remain coherent.
+        for p in &mut out {
+            if let Body::Row { holder: 1, message } = &mut p.message.body {
+                if let private_send::Body::Cipher(PhaseMessage::Init(cipher)) = &mut message.body {
+                    cipher[0] ^= 1;
+                }
+            }
+        }
+        let mut q = out.into_iter().map(|p| (0, p)).collect::<VecDeque<_>>();
+        drain(&mut ns, &mut q, None);
+        assert!(matches!(
+            ns[1].local_sharing(),
+            Some(LocalSharing::Rejected(_))
+        ));
+        for i in [2, 3] {
+            assert!(matches!(
+                ns[i].local_sharing(),
+                Some(LocalSharing::Accepted(_))
+            ));
+        }
+        for i in [1, 2] {
+            q.extend(
+                ns[i]
+                    .request_open(1)
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drain(&mut ns, &mut q, None);
+        for n in &ns {
+            assert_eq!(n.accusation(1).unwrap().fault(), FaultParty::Dealer(0));
+        }
+        // Abort at holder1 does not discard the f+1 honest retained supports.
+        // Dealer0 disappears; holders2,3 alone transfer authenticated proof points.
+        for i in [1, 2, 3] {
+            q.extend(
+                ns[i]
+                    .request_public_reconstruction()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drain(&mut ns, &mut q, Some(0));
+        for n in &ns[1..] {
+            assert_eq!(
+                n.public_reconstruction().unwrap().secrets(),
+                [Field(42), Field(91)]
+            );
+        }
+    }
 }

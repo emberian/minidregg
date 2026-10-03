@@ -25,6 +25,17 @@ public reproduction dependency. Where full runtime evidence has not been
 published, the row is a scoped recorded result, not an independently reproducible
 public deployment claim. Source pointers let readers inspect the actual contract.
 
+## Published source cohort
+
+Commit `2ebce376f656331fe8d049fb4dbec958bf6d08a6` publishes the additive
+language, backend and documentation source cohort, including authored WIP.
+The public Workshop raw source, checked static core Book, linker and Run/Export
+drivers are present at the paths in the developer guide. Documentation links,
+driver arguments and the core Book hash were rechecked against this source.
+This publication did not rebuild or requalify the native Host. Checked owner
+results below retain their exact earlier scope; newer authored persistence,
+refinement, runtime and protocol joins do not become checked merely by landing.
+
 ## Recorded qualification and open join
 
 | Area | Recorded result | Boundary still requiring construction or qualification |

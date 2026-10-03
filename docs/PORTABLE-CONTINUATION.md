@@ -87,3 +87,44 @@ journal replay still materialize the whole journal, and logical BFT messages may
 carry full ancestry. Bounded logical transfer/MAC processing and streaming replay
 remain agreement-consumer joins. Safe checkpoints must retain all old-view and
 outstanding obligations under actual proofs. This module grants no pruning.
+
+## Concrete Activity and uncertain-call consumer
+
+The Activity owner supplies the prepared `mini-context-bundle-v1` projection:
+source/root, ordered atom id/revision/parent/predecessor/payloadDigest and summary
+support. The existing room-resident assignment fingerprint retains that exact
+bundle. Observation height/worldRoot may be display provenance; they do not
+replace the ordered source binding.
+
+Portable restore preserves the existing entire controller directory and resident
+request custody, including the exact prepared context for an already-started
+provider call. It never recomputes a pending completion's context or summaries.
+New preparation re-reads current signed documents/current authority and applies
+the Activity owner's summary invalidation. A repaired old prepared projection
+cannot become a fresh current-source authorization merely because its bytes
+were recovered intact.
+
+Actual current service source a593 is still completing SPK app INSTALL/START and
+controller registration before its generated full backup inventory is final.
+Activity source packets are separate WIP; that adapter is not in a593's current
+native artifact. The whole-home receiving test must therefore await finalized
+actual inventories and matched native roles. The standalone archive five-pass
+result is not evidence that this combined consumer has already run.
+
+## Existing source worker fencing seam
+
+`ApplicationLifecycleClaimReceiver.Reservation.withFreshTip` and its v2/v3
+successors require actual exact post-CAS readback and a fresh matching physical
+tip before handoff. `ApplicationLifecycleResidentProfile` binds the signed SPK
+image and process identity. A v3 STOP advances the operation generation while
+fencing the already-running START generation. These are existing one-source
+lifecycle mechanisms; restoration must join them rather than create a portable
+owner bypass. Their point-in-time guards alone do not cancel an already sent
+external request. Such a request's exact identity/hold/outbox/completion remains
+protected until the actual provider/delivery reconciliation receiver settles it.
+
+The successor candidate codec separates source-selected complete successor
+identity from certificate/evidence bytes. It proves one selected exact candidate
+names one complete core. This is not a proof of unique globally governed transfer:
+the existing joint/current-source reservation must actually select that candidate,
+retain historical liabilities, and authorize the child before physical activation.

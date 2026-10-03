@@ -62,10 +62,11 @@ theorem decodeWordAtWidth_sound (width : Nat) (t : BTerm) (n : Nat)
   cases hb : decodeWord t with
   | none => simp [hb] at h
   | some bits =>
-    simp only [hb, Option.bind_some] at h
+    simp only [hb, Option.bind, bind] at h
     split at h
     · rename_i hw
-      cases h
+      have heq := Option.some.inj h
+      subst n
       exact ⟨bits, ⟨decodeWord_sound t bits hb, hw⟩, rfl,
         hw ▸ wordValue_bound bits⟩
     · cases h

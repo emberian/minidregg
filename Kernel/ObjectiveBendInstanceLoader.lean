@@ -13,10 +13,9 @@ open Minidregg.Theory.BendTT
 set_option autoImplicit false
 
 def pinSpace (descriptor : Descriptor) : Option (PinSpace descriptor) := do
-  let index ← (List.finRange descriptor.fields.length).find? fun index =>
-    decide ((descriptor.fields.get index).codec = .bytes ∧
-      (descriptor.fields.get index).discipline = .rom ∧
-      (descriptor.fields.get index).meaning = pinMeaning)
+  let candidates := (List.finRange descriptor.fields.length).filter fun index =>
+    (descriptor.fields.get index).meaning == pinMeaning
+  let [index] := candidates | none
   if bytes : (descriptor.fields.get index).codec = .bytes then
     if immutable : (descriptor.fields.get index).discipline = .rom then
       if meaning : (descriptor.fields.get index).meaning = pinMeaning then

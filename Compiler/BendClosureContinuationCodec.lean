@@ -276,12 +276,12 @@ def encodeContext (context : ExecutionContext) : List UInt8 :=
 
 theorem context_bytes_injective {left right : ExecutionContext}
     (same : encodeContext left = encodeContext right) : left = right := by
-  have equality := congrArg executionContextStream.toLawful.decode same
-  have leftRound := executionContextStream.toLawful.decode_encode left
-  have rightRound := executionContextStream.toLawful.decode_encode right
-  change executionContextStream.toLawful.decode (executionContextStream.encode left) = executionContextStream.toLawful.decode (executionContextStream.encode right) at equality
-  rw [leftRound, rightRound] at equality
-  exact Option.some.inj equality
+  have equality := congrArg
+    (fun bytes => executionContextStream.decodePrefix (bytes ++ [])) same
+  change executionContextStream.decodePrefix (executionContextStream.encode left ++ []) =
+    executionContextStream.decodePrefix (executionContextStream.encode right ++ []) at equality
+  rw [executionContextStream.decodePrefix_encode, executionContextStream.decodePrefix_encode] at equality
+  exact congrArg Prod.fst (Option.some.inj equality)
 
 /-- Exact context bytes must bind admitted Book/library, numeric/evaluator and
 cost versions, bounds and activity identity. A current native receiver supplies

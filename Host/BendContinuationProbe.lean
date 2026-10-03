@@ -15,8 +15,7 @@ private def bounds : Limits :=
   {heap := {slots := 32, wordBits := 8, fits := by decide}, frames := 16, arguments := 16}
 
 private def library : Library :=
-  {program := {code := #[.lab 0, .var 0, .lam .Q1 1, .app .Q1 2 0],
-    names := #["continued"], enumerations := #[]}, definitions := #[]}
+  {program := {code := #[.lab 0, .var 0, .lam .Q1 1, .app .Q1 2 0], names := #["continued"], enumerations := #[]}, definitions := #[]}
 
 private def context : List UInt8 :=
   encodeContext (executionContext "continuation-probe/source-v1/activity-0".toUTF8.toList

@@ -18,3 +18,5 @@ pub mod authenticated_ingress;
 pub mod dzk;
 pub mod dzk_store;
 pub mod acss_id;
+
+pub mod acss_id_store;

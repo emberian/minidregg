@@ -26,12 +26,14 @@ const dependencies:Record<string,Dep[]>={
  CanonicalBookSettlement:[base,math,seller],
  CanonicalUniformSettlement:[base,math,["Uniform","./UniformProRata.bend","UniformProRata"],
    ["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
- CollectiveDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]]
+ CollectiveDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
+ SharedBookSettlement:[base,math,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"]],
+ SharedSettlementDemonstration:[base,seller,["Book","./CanonicalBookSettlement.bend","CanonicalBookSettlement"],["Shared","./SharedBookSettlement.bend","SharedBookSettlement"]]
 };
 const entries:Record<string,string>={
  MarketMath:"divide",CollectiveAdoption:"prepare_install",SingleSellerAllocation:"allocate",
  UniformProRata:"allocate",SingleSellerSettlement:"settle",SingleSellerTransfers:"settle",
- CanonicalBookSettlement:"settle",CanonicalUniformSettlement:"settle",CollectiveDemonstration:"input"
+ CanonicalBookSettlement:"settle",CanonicalUniformSettlement:"settle",CollectiveDemonstration:"input",SharedBookSettlement:"settle",SharedSettlementDemonstration:"input"
 };
 const results=[];
 for(const [name,entryDefinition] of Object.entries(entries)){

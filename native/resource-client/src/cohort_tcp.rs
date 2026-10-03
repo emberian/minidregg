@@ -8,7 +8,6 @@ use chacha20poly1305::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -47,7 +46,7 @@ impl Profile {
     fn check(&self) -> Result<()> {
         if !(2..=64).contains(&self.width)
             || !(1024..=262144).contains(&self.payload)
-            || !(10..=60000).contains(&self.tick)
+            || !(100..=60000).contains(&self.tick)
             || self.purpose > 5
             || !(1..=4096).contains(&self.epochs)
             || self.slot as usize >= self.width
@@ -224,7 +223,7 @@ fn open(p: &Profile, key: &[u8; 32], epoch: u64, wire: &[u8]) -> Result<Vec<u8>>
     }
     Ok(plain)
 }
-fn adopt(root: &Path, output: &Path, p: &Profile, epoch: u64, plain: &[u8]) -> Result<()> {
+fn adopt(root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) -> Result<()> {
     // Whole exact authenticated record is durable before any consumer sees it.
     exact(root, &format!("epoch-{epoch}.received"), plain)?;
     if plain[0] == 1 {
@@ -292,7 +291,7 @@ fn send(
     let key = *key;
     thread::spawn(move || {
         for epoch in start..profile.first + profile.epochs {
-            let prepared = (|| {
+            let prepared: Result<Vec<u8>> = (|| {
                 let when = profile
                     .when(epoch)?
                     .checked_sub(profile.tick / 2)
@@ -757,6 +756,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     fn profile() -> Profile {
         Profile {
             generation: [8; 16],

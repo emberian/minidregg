@@ -92,4 +92,24 @@ def initializationCommand (owner : SubjectId) (nonce cell : Nat)
     .content ⟨[.createAtom atom (.inlineObject schema) payload]⟩, none, none, none⟩]
   run := none
 
+/-- Prepare the second record against the exact source-derived birth successor.
+This predicts no physical success and retains no future admission token: the
+assembled signed invocation must be admitted again after birth CAS/readback. -/
+def initializerPlanAfterBirth (config : NativeHost.Config)
+    (opened : NativeHost.Opened config)
+    (accepted : AcceptedBirth config.profile config.deployment opened.pins opened.durable
+      (NativeHost.logicalHeight config opened.durable))
+    (command : ResourceTransaction.Command) : Except String NativeHostCodec.SigningPlan := do
+  let intent := ResourceBirthReceiver.intent accepted
+  let loaded := opened.durable
+  match DurableCheckpoint.prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
+      loaded.withinLog loaded.resumed intent with
+  | .inr _ => throw "birth successor refused by the durable executor"
+  | .inl ready =>
+      let _ ← (loaded.judge config.transport intent).mapError
+        (fun reason => s!"birth successor tail law: {repr reason}")
+      let predicted ← NativeHost.validateLoadedFrom config opened (loaded.extend ready)
+      NativeHost.prepareLoaded config predicted
+        (.invoke (DeclaredResourceController.commandCodec.encode command))
+
 end Minidregg.Verify.ResourceReserveBirthFixture
