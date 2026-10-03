@@ -1,0 +1,19 @@
+import Kernel.GenericSimplex
+import Kernel.GenericSimplexQuorum
+import Kernel.JointSimplexBinding
+import Kernel.JointControlCell
+import Theory.AssertAxioms
+#assert_axioms Minidregg.Kernel.GenericSimplex.empty_block_valid
+#assert_axioms Minidregg.Kernel.GenericSimplex.disabled_cannot_cast_vote
+#assert_axioms Minidregg.Kernel.GenericSimplex.voted_cannot_cast_again
+#assert_axioms Minidregg.Kernel.GenericSimplexQuorum.honest_intersection
+#assert_axioms Minidregg.Kernel.JointSimplexBinding.exactCandidate_injective
+#assert_axioms Minidregg.Kernel.JointControlCell.admitted_preserves_bytes
+#assert_axioms Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.signers_distinct
+#assert_axioms Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.quorum_size
+#assert_axioms Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.signers_members
+
+#assert_axioms Minidregg.Kernel.GenericSimplex.validBlock_same_application_history
+#assert_axioms Minidregg.Kernel.GenericSimplex.validBlock_append_inert
+
+#assert_axioms Minidregg.Kernel.GenericSimplex.applicationHistory_preserves_prefix

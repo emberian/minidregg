@@ -1,0 +1,11 @@
+[package]
+name = "bend-proof-entropy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rand = "=0.10.3"
+getrandom = "=0.3.4"
+
+[workspace]

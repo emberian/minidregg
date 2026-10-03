@@ -1,0 +1,8 @@
+SourceBool.not : ∀x0 : Bool -> Bool =
+  λ{(,): λ{.False: λ{(): (.True, ()); λ{}}; λ{.True: λ{(): (.False, ()); λ{}}; λ{}}}}
+
+Bool.arms : ∀x0 : <False, True> -> *2 =
+  λ{.False: <()>; λ{.True: <()>; λ{}}}
+
+Bool : *2 =
+  Σx0 : <False, True> -> (Bool.arms x0)

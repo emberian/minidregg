@@ -1,0 +1,27 @@
+{
+  "status": "scoped-seven-lean-modules-pass",
+  "upstream": "947db722640c86247849343657bf2f7ef01cb7f1",
+  "miniToolchain": "leanprover/lean4:v4.30.0",
+  "commonImportSource": "66042a8c",
+  "proofSourceOleans": "/tank/dregg-build/codex-private-lifecycle-20261003/olean",
+  "log": "/home/hbox/workbox/codex-bend-world-20261003/check-08.log",
+  "claims": {
+    "publication": "ordinary governed native source storage and current observed lookup",
+    "compilerCorrespondence": false,
+    "registeredBendEvaluator": false,
+    "nativeHostRoute": false,
+    "privateChargingNativeRule": false
+  },
+  "files": {
+    "Compiler/BendWorldSource.lean": "0ee9feacd0af7633d461386b06c0753eb0e30481a51097242048f206c11d9089",
+    "Compiler/BendWorldProgramCodec.lean": "13cdffa3b9ac3fffd2de468e61e99afeb349098f011cb534b30c3a428e58b7d7",
+    "Compiler/BendCoreAdmission.lean": "bcf2a10a9841767b4cba1db89ffef8fd9eeb92b2b6ac053494cfe42e8281c9b8",
+    "Compiler/BendWorldPlan.lean": "8629a9b3fc135eca71b64cc83c2f45b8eada0ad5a7edcc313a36093b3fbca856",
+    "Compiler/BendPrivateCapacity.lean": "83b1f1c428635e8a46eb79a6bde80b671840971edd2bcd35f57575d2c8823e49",
+    "Kernel/BendWorldMethod.lean": "48ee568cdd55232d2f9e70f799a9bf48b62c93e0560271060e6f3651fdb7ce33",
+    "Kernel/BendSourcePublication.lean": "557cfeea88955a692f86d4d3f84247ac910cf4c3abeffbb9b3718c4bcd6f13af",
+    "native/bend-source/sealed.ts": "1bb35b2fa84bef7e197262716f5b698d4b9855ba8e73b3998ff40a3b1049ea78",
+    "upstream-source-pins.json": "da6468d39a308a6be968a4923b2936dbf9b80bf56dac60486b90e8f577316417",
+    "check.sh": "e6fc7d71da85515ecbd05342f818ba394b1bac0e24290bedf5baac99461e51ba"
+  }
+}

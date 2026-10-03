@@ -1,0 +1,23 @@
+Station shared-consequence source — source-only checkpoint 2026-10-03
+
+SharedConsequences, EngineeringStation and synthetic Receiving Books passed the
+actual BendTT Book.check (117/123/134 definitions) before the canonical scalar
+adapter join. Source/module manifests for NativePlans, NativeMethods and
+NativeReceiving pass the sealed source checker. Their new Book.check and actual
+source-machine/ABI receiving check remain pending. See testing/StationSourcePlanReceiving.lean.
+
+The bounded scripted resident provider has six passing boundary tests. It has
+not yet run through native resident delivery on a dedicated supplied world.
+There are no native installation, hosted GM, deployment or paid-model claims.
+
+Dependencies: exact shared examples/objective-bend-world/WorldPlanScalar.bend
+source SHA256 1dfc1f4ae6f27268b291c03ffb7fe485fec49f8df18f0757a555fd618e489c30;
+Compiler.BendScalarPlanAdapter, Compiler.BendCoreAdmission, Theory.BendLiveMachine
+and the pinned sealed Bend parser/emitter. Constructor qualification and root
+codec are part of the admitted ABI, not assumptions about generic labels/raw32.
+
+Next receiving: evaluate actual NativeReceiving Book entries with the admitted
+WorldPlanScalar ABI, decode exact take/move/refusal values, then bind real current
+inputs/capabilities/source export and install through ordinary native admission.
+Property resource law must forbid bypassing this route with raw owner writes.
+Helper definitions are never independently granted method exports.

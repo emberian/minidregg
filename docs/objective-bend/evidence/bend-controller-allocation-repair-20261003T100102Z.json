@@ -1,0 +1,11 @@
+{
+  "owner": "bend_controller_simulation",
+  "files": [
+    {
+      "path": "Theory/BendClosureAllocation.lean",
+      "base_sha256": "d4a5ef9aac55b4b9fa4b47882336a5c31531eccf590a93064e50e691317ace6f",
+      "sha256": "4ec6d9a34fb904517cd43f48cafadb8ce7411ab7eadd47d3777b52c83f415953",
+      "status": "AUTHORED two tactic repairs after first narrow check; all other declaration bodies passed, whole module not yet green"
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "owner": "astra_consensus_composition",
+  "createdUTC": "2026-10-03T09:56:36.121775+00:00",
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "policy": "source-only early capture for captain reconciliation and main push; no qualification wait; no Git by lane",
+  "machineSemanticVersion": "microsteps-v2",
+  "dependencies": [
+    "Existing Mini source at base plus captain unified source changes",
+    "Theory/BendClosureReification and CodeRefinement are graded-owned: their owner exports them",
+    "Theory/BendClosureSimulation/Denotation/Allocation are simulation-owned: their owner exports them",
+    "Compiler/BendClosureContinuationCodec is graded-owned and v2 tags10/11 must be joined before resume consumer",
+    "Theory/BendBookTransport exact source copied into linker lane for forthcoming check"
+  ],
+  "claims": [
+    "Source/live upstream theorem audits PASS standard three axioms",
+    "Independent closure controller and actual source compiler runtime checks PASS with explicit compiled trust",
+    "No complete controller-to-source simulation or private runtime backend qualification claimed",
+    "Private plan canonical encoding does not grant source authority or release material",
+    "Private inputs must not be compiled as secret literals into public ROM"
+  ],
+  "evidenceNames": [
+    "bend-closure-producer-v2-01.log",
+    "bend-closure-producer-v2-02.log",
+    "bend-network-first-02.log"
+  ],
+  "files": [
+    {
+      "path": "Kernel/PrivateSuccessorCustody.lean",
+      "sha256": "30d403ba71c88378e1845fe6eda96579c6ca907bba6dc627365b93a22db8efb0",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Compiler/PrivateSuccessorCustodyCodec.lean",
+      "sha256": "f8e2f7235a70cc3d93550a6b2f183093442b7a06ae897e7f16549de8eb918700",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Compiler/ObliviousEvaluator.lean",
+      "sha256": "6f4cc9de182ae3482e9a8e714857601575c546006d1cc6f35124516f8a2a7529",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Assurance/PrivateEvaluatorCustodyJoin.lean",
+      "sha256": "6491af11c0ce15b1970064390f740b7d9e4186e45a6783a72b39085aafd77689",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Assurance/PrivateEvaluatorCustodyChecks.lean",
+      "sha256": "017df30b485b23de01c455143367c45366f11fd8bc84b0de71dddb8331ebe9d2",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Theory/BendTTSource.lean",
+      "sha256": "7b221b208344c69cef7962bdab264d0abf9528637ff55e2cf69787da4f753e38",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Theory/BendLiveMachine.lean",
+      "sha256": "f7b994796365f09eb24b860997369aa33f6e578140ed051127b5c1ac35600c88",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Assurance/BendSourceAudit.lean",
+      "sha256": "2bbc97e1e6c4bd522efb5f35581b594e7c1b80e4167d06d3aad213898397a92c",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Assurance/BendLiveChecks.lean",
+      "sha256": "078e637a13008dce1c00ba141f22edbedb410fbe6187b2b11df8806b7bdc9ce9",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Theory/BendClosureArena.lean",
+      "sha256": "aada01d7e1ec561cbf9ea03f2aadcccce8c4000a5e2d4305239b8f434bb6dad4",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Theory/BendClosureMachine.lean",
+      "sha256": "ed5f565803c84043f64f7e07c88f26e4a7d086078ff0bd43ea6b78acdaeb3194",
+      "status": "PASS coherent v2 producer batch; checks explicitly compiled-trust audited; full controller simulation pending"
+    },
+    {
+      "path": "Theory/BendClosureDecode.lean",
+      "sha256": "d06d7d28393fd25f7d18524caabf73e595dfa1b7671be699cb225eba9341340e",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Theory/AssertCompiled.lean",
+      "sha256": "21e458c1d5d33ebe0ba335457387d83220da5889d17872ece14fd9fbceb48b49",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "Assurance/BendClosureChecks.lean",
+      "sha256": "bcf378d14b2590e8da28b9a125cb52c2999ae033ee99036595c0b37ce3cc1598",
+      "status": "PASS coherent v2 producer batch; checks explicitly compiled-trust audited; full controller simulation pending"
+    },
+    {
+      "path": "Compiler/BendClosureCompile.lean",
+      "sha256": "c834471e911221da1d485eba9614fb88211bde5fbef5d80053c9774ff3a6a6bf",
+      "status": "PASS coherent v2 producer batch; checks explicitly compiled-trust audited; full controller simulation pending"
+    },
+    {
+      "path": "Assurance/BendClosureCompileChecks.lean",
+      "sha256": "08a474f8589d296cc394ec85727814daa0c22b34ca67f8202fdf9e6d64b4f220",
+      "status": "PASS coherent v2 producer batch; checks explicitly compiled-trust audited; full controller simulation pending"
+    },
+    {
+      "path": "Compiler/ObliviousGate.lean",
+      "sha256": "79305af6cb9c66149e213e882c1371f9648406f6e537de5eb954ba180c48fb5e",
+      "status": "PASS first generic circuit dependency batch; whole controller lowering and DAG-to-memory general refinement pending"
+    },
+    {
+      "path": "Compiler/ObliviousNetwork.lean",
+      "sha256": "9a423469f968c376a4b92092b4decbbb7e1ddfa4f55e4297e564541483febe4f",
+      "status": "PASS first generic circuit dependency batch; whole controller lowering and DAG-to-memory general refinement pending"
+    },
+    {
+      "path": "Assurance/ObliviousNetworkChecks.lean",
+      "sha256": "1c786c559959e36b1ca4ce8082d3aa4ddb714700b04bd4590d2acd924824cbca",
+      "status": "first check failed because kernel decide could not reduce; not semantic refutation; owner will convert execution cases to explicitly audited compiled trust"
+    },
+    {
+      "path": "Compiler/PrivateCircuitAllocation.lean",
+      "sha256": "c2fdf2112ecea78b6515fce4eeffe6e0f28912595b00b9a74887c488d2d0263a",
+      "status": "authored uncompiled; BookTransport separate linker check queued"
+    },
+    {
+      "path": "Theory/BendBookTransport.lean",
+      "sha256": "0c5b858b17431527933c976f97f92460b99d351f61ca5bcc101fcd49073a468a",
+      "status": "authored uncompiled; BookTransport separate linker check queued"
+    },
+    {
+      "path": "Theory/BoundedNockMachine.lean",
+      "sha256": "24f9c49e3df50580a2845d1b43622d91493a2e71b65980c217dedaf0b7353b28",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Compiler/BoundedNockEntry.lean",
+      "sha256": "307f06128a6c0ff0a4d5f30fdc0c6718527e7ee879b6cb87bffaca65745e729b",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Compiler/BoundedNockCircuit.lean",
+      "sha256": "8cddd60a6a81a347cd8256dbb3827d184b8fa0541ea465f6c8cf29bb8f7ce811",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Compiler/BoundedNockNetwork.lean",
+      "sha256": "ff60742c5269b38252e3fd746c067f8f76e64666d2a0ed72dceb545126308dee",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Assurance/BoundedNockChecks.lean",
+      "sha256": "3be9dae450d3958f465a4596fbc58a4294f67bd08ce0b31d3d6b6ffb1d35db74",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Assurance/BoundedNockNetworkChecks.lean",
+      "sha256": "3ae9bac712d928b6ec24219792cb4876d4c9c9d12015b9adef0c59ac8a8b5d28",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "Assurance/BoundedNockRefinement.lean",
+      "sha256": "7df67414f79093a60a5a7458a0b130069ef79c66bd535890e4f61724127939ed",
+      "status": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+    },
+    {
+      "path": "vendor/bend/LICENSE",
+      "sha256": "0beb288abd3d067e231f3fbe7df1f8ee37344061fc67f22018150a19e4b26c35",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "vendor/bend/PROVENANCE.json",
+      "sha256": "7a9b05c60b029a279eb1a868ec8184a64be5c452eef3e69f78b3c04b0528b4bb",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "vendor/bend/bendtt.lean",
+      "sha256": "e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    },
+    {
+      "path": "vendor/bend/lean430.patch",
+      "sha256": "2be5838a1a4b761a7cedace64edc42d79ba2635d3aad106f0b6b6290fc8e6a83",
+      "status": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
+    }
+  ]
+}

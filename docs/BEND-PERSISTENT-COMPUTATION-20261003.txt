@@ -1,0 +1,202 @@
+OBJECTIVE BEND — PERSISTENT COMPUTATION CONSTRUCTION, 2026-10-03
+Owner: graded_execution_architecture. Actual source and proof status below.
+
+DECISION AND PURPOSE
+Persist the actual running Bend activity, not just its user data or an app-specific
+saga description. The existing Mini native transactional store is the persistence
+implementation. Program authors should receive generated continuation capture,
+retry and post-durability machinery, while still specifying meaningful atomic
+sections, effects, domains and authority. Do not replace the store or pretend that
+domain-crossing consistency follows from local checkpointing.
+
+Read primary local sources:
+ /Users/ember/dev/fareoo/sources/fci2017.md (full article)
+ /Users/ember/dev/fareoo/sources/persist-model.md (main concept sections)
+FCI's observability concerns recovering an abstract computation from an interrupted
+concrete implementation through bounded administrative synchronization; a category
+of state transitions alone is not a construction. The persistence model explicitly
+permits transactional storage underneath while moving persistence coordination
+out of ordinary application code. It preserves control stacks and lexical/effect
+contexts, separates persistence from publication, and requires durable barriers
+and idempotent messages for interactions with persistent peers.
+
+ACTUAL SOURCE, AUTHORED UNCOMPILED
+hbox:/tank/dregg-build/codex-private-lifecycle-20261003/src/
+ Compiler/BendClosureContinuationCodec.lean
+ Host/BendContinuationProbe.lean
+ Assurance/BendContinuationSourceJoin.lean (actual StateDenotes/DataCacheSound transfer)
+No second evaluator, service journal, private protocol, or source mutation outside
+owned new files. Captain scoped check requested; no independent build launched.
+
+The codec consumes actual Theory/BendClosureMachine.State and its step/run:
+ - Heap.rows and used frontier, including unused rows exactly.
+ - Data cache, without upgrading any flag to a semantic Data theorem.
+ - Entire continuation Frame stack, including Q0 retained positions.
+ - All Control cases: evaluate, lookup and LookupResume, returned, apply,
+   unspine, walk, classify, complete, refused with exact finite Failure.
+ - Original call/spine references and pending argument arrays.
+ - Exact sourceSteps; no resetting count at pause or substituting checkpoint cost.
+
+ExecutionContext binds exact operational tables and bounds: every one of the
+18 Code constructors, names, enumeration lists, ordered definition table, heap
+slots/wordBits, frame and argument caps, plus native source-selected activity/
+policy bytes. Context identity uses canonical exact bytes, not a hash-injectivity
+assumption. The source-selected binding must cover admitted Book/version, activity
+and domain identity, evaluator/numeric/cost ABI, input/support manifest and current
+custody policy. Encoding these bytes does not admit their authority.
+
+Checkpoint carries contextBytes, generation and State. Framed canonical decode
+requires complete consumption and byte-for-byte re-encoding. Restore first caps
+input byte length, then checks exact expected context and expected generation.
+Expected values come from a current source-owned coordinate/anchor, not from the
+untrusted checkpoint itself. Version1 wire unknown-tag/default aliases are refused
+by canonical re-encoding. Finite byte cap is not yet a formally bounded parser-
+allocation theorem; native framing must cap buffers before parsing too.
+
+General authored proofs (not yet qualified): code/row/frame/control roundtrip;
+context_bytes_injective; decode_encode; decode_canonical; encode_injective;
+restore_encode; restore_preserves; serialized_resume_exact for ANY actual state
+and two tick budgets, via the actual Machine.run_add theorem. Restore preservation
+transports an already-established invariant over the complete state; it does not
+invent Reachable, source simulation, authority or privacy from arbitrary bytes.
+
+Actual consumer: Host.BendContinuationProbe, separate save and resume OS processes.
+A source-independent checkpoint library captures the beta activity mid-execution;
+resume validates exact restored State, continued result/count and uninterrupted
+run equality, and refuses changed context, generation, trailing bytes and cap.
+The fixture uses a seven-tick cut that exercises an administrative lookup state;
+additional cuts cover active stack and terminal padding. The host's plain file
+write is a process-restart demonstration, NOT fsync/power-loss or native admission.
+It is intentionally separate from the general all-state codec/resume theorems.
+
+OBSERVATION AND SAFE POINTS
+At the explicit pure reference-machine boundary every State is a complete concrete
+checkpoint: suspend performs no source transition and needs no I/O. The source
+interpretation is richer than a source expression: runtime frames omit some dead
+motives, so Simulation.StateDenotes uses relational ghost contexts and exact Book.
+The controller proof owner supplies StateDenotes + source Trace + ReadyPointer +
+DataCacheSound/reachability. Restoring equal actual State preserves those facts.
+Refused states need the separately retained pre-failure source prefix; absence of
+StateDenotes for refused does not justify inventing a residual source term.
+
+A native CPU interrupted inside the implementation of step is NOT automatically
+at that boundary. Proposed concrete worker protocol keeps a strongly held,
+immutable published input-State and constructs a private successor; only a
+completed pure step is published. An observation request can select the last
+published State without waiting for external I/O or completing source evaluation.
+Any discarded unpublished pure work is recomputable and has no external effects.
+The implementation must establish object lifetime/refcount aliasing, publication
+ordering, bounded administrative access, and absence of effectful callbacks inside
+step. These obligations are OPEN: a Lean value and run_add are not a proof about
+native CPU registers, allocator interruption, fsync, or another language runtime.
+
+Further source-level observation at a desired abstraction boundary uses the
+controller simulation invariant, not a runtime source oracle. Bounded stuttering
+and adequate capacity establish how much administrative work is necessary. A
+pause request may not wait until a whole long source computation terminates.
+
+EFFECT CONTINUATIONS: NEXT JOIN, NOT CLAIMED COMPLETE
+Generated activity state should hold one of: computing exact machine state;
+prepared typed Plan and exact continuation; awaiting its native admitted outcome;
+ready to continue with the independently typed result; terminal/refused. This is
+one activity record in Mini's store. There must be no second private app journal.
+
+1. Compile source effect suspension into an explicit finite continuation/context.
+   Proposed source ABI is an affine pair of typed Plan data and captured
+   continuation closure, using actual Row.pair/closure/env. The result injection
+   codec must prove typed bounded Data reification before applying that closure;
+   the current Plan bytes ABI alone does not encode this continuation. Exact
+   generation consumption must prevent duplicate scheduling after retry/restore.
+   Retain exact current input/support manifest and Plan/Return ABI. Current pure
+   closure machine has no arbitrary host effect primitive; do not pretend it does.
+2. Native source admission commits checkpoint + exact Plan intent identity +
+   pending outcome/continuation and supporting reservations atomically. A Plan
+   is still checked against current capabilities/policies/fees/read guards.
+3. Only after actual durable source record/readback may the dispatcher expose an
+   effect or send a message. Merely accepting transport custody is not this barrier.
+4. Retry the same exact intent/dispatch identity; retain uncertainty after an
+   ambiguous external effect. Resolve using authoritative native lookup/outcome,
+   never bounded-feed absence or a new request with a fresh identity.
+5. Persist the acknowledged result and new continuation before retiring old
+   obligations. Release independent private results only to currently authorized
+   audiences. Restoration does not resurrect revoked authority.
+
+Captured provider context is immutable for an already-started invocation. Future
+inference reloads current signed projections; source edit/move/revoke invalidates
+dependent summaries. The resident context owner is supplying exact support manifests.
+A legacy SPK app process remains a transient/external adapter: its pending request
+and dispatch journal do not capture its stack/heap/OS context. It needs its own
+restartable protocol or actual execution-context capture to join this guarantee.
+
+CURRENT CONSUMER/OWNER CONNECTIONS
+- bend_controller_simulation: StateDenotes, continuation plug, source Trace/count,
+  ReadyPointer/DataCacheSound, semantic preservation. Owns heap uniqueness now.
+- astra_consensus_composition: actual bounded machine and code/heap decode.
+- graded_execution_architecture: canonical checkpoint/exact resume, code-table
+  completeness/uniqueness repair, lifecycle contract and restart consumer.
+- bend_world_language: actual typed Plan/Return/charge/effect suspension ABI and
+  source-owned activity coordinate, current source admission/release adapter.
+- takeover_kernel: common native receiver and admitted durable readback join.
+- bread_systems_archaeology: PortableContinuationManifest includes whole exact
+  DurableReceiver.Image + sourceIdentity/native canonical prefix + exact selected
+  artifact inventory + generation/predecessor custody pin. Machine checkpoint is
+  one source-owned artifact, never a replacement for the world image.
+- native_performance_construction: AsyncDispatch.offer persists exact transport
+  request/recovery/class reservation before Accepted; separate native semantic
+  receipt required. Fetch never redispatches; ambiguous claim/no-reply is Uncertain.
+- takeover_service: providerHold/residentCompletion/residentDelivery and original
+  native attempts; private journal is not member authority. Existing SPK dispatch
+  app/gen/session/op/transaction/event/requestDigest/permit identity retained.
+
+METACONTROL AND MIGRATION
+Inspection, suspend/resume scheduling, cancellation, checkpoint export and changing
+implementation are separate capabilities from ordinary object methods. Authority
+to invoke a method does not entail authority to dump its private heap. Current
+source access/release must govern snapshot inspection and portable artifact export.
+Metacontroller actions retain their own audit identity and limits; an object may
+expose explicitly delegated inspection without surrendering mutation authority.
+
+Version1 resumes the SAME exact operational context and generation. No metadata
+flag permits native->FHE, MPC->clear, or arbitrary code migration. A change requires
+an actual state translation preserving the source residual/continuation semantics,
+authorized effects, leakage/custody, resource contract and pending obligations.
+For the same semantics different implementation, old/new source interpretations
+must meet at an admitted safe point; for evolution changing desired behavior, a
+separate authorized migration law names the permitted change. Source rows, method
+identity and persistent activity identity must not be conflated.
+
+Retained old checkpoint execution must be fenced by current native generation/
+worker custody. Canonical bytes and generation equality alone cannot stop two
+workers: restore is deliberately pure and repeatable. The actual Activity phase
+CAS must consume exact predecessor+generation, and both continuation advance and
+post-durability dispatch authorization must bind the same consumed transition and
+intent ID. External peers still need deduplication/uncertainty handling. Domain transfer
+requires actual source decision/private qualification/old-worker fence; portable
+manifest readiness is not an execution permit. Cross-domain effects still consume
+the real agreement/reservation construction. Resource refusal preserves state and
+repair capacity; storage GC must preserve all pending messages/claims and retained
+continuation dependencies, not merely the most recent user-visible document.
+
+ROOT DECISION / NEXT CONCRETE INTEGRATION
+Recommended: one source-owned Activity artifact kind with canonical checkpoint,
+pinned execution context, current generation and typed pending Plan/result slots.
+Reuse existing content/resource admission and private custody, making snapshot
+policy/control verbs explicit. Root should assign the exact native activity
+coordinate/receipt integration to world+captain; no user design approval is needed
+for this routine additive choice. Do not scatter a new saga format into every app.
+First acceptance: actual activity saved mid-control, admitted and read back through
+Mini, restarted in a new process, finishes exact result/count; stale worker/context
+and unauthorized checkpoint export refused. Then one source-authored external
+effect continues after durable outcome with lost-reply retry and no duplicate act.
+This extends pure-turn termination into persistent reactive activity; it does not
+claim that a resident's entire interactive lifetime must terminate.
+
+RELATED PROOF STATUS: Arena/Reification PASS check04, Machine/Decode PASS check05;
+CodeRefinement + controller-owned heap/environment uniqueness PASS
+controller-denotation-check-01.log. Simulation context/helper tranche PASS.
+Continuation codec/Host/SourceJoin remains awaiting its own check.
+
+PENDING MACHINE EVOLUTION: composition is considering explicit reverseArguments/
+installArguments microsteps to replace walk-leaf O(A) push/reversal. Continuation
+codec must append exact tags and pin changed evaluator identity before integration;
+no currently qualified persisted wire is being silently migrated.

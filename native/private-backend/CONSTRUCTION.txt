@@ -1,0 +1,69 @@
+Private backend construction (source packet, 2026-10-03)
+
+This additive standalone Rust crate implements crash-durable physical correlation
+allocation, repaired V2 asynchronous key sharing, coin-free IndexGather/ICG/VABA/ACS,
+strict transport codecs, and recipient-private delivery. It is a precursor to
+malicious private computation. No implementation here makes Qualified=True.
+
+The latest delivery tranche passed eight focused release nextest tests; previous
+tranches passed ten ACS and fourteen repaired key-sharing/gather checks. Physical
+subprocess crash cuts previously checked anchor-before-release, local snapshot
+rollback, restart, one-use rows and substituted-row refusal. Reference GF128
+arithmetic is variable-time. Security profile is static cumulative f<n/3, private
+authenticated reliable channels, honest crash storage and SHA256 classical ROM.
+It does not inherit a PQ/QROM or full malicious AMPC theorem.
+
+Compiler/PrivateBackendBoundary and Compiler/PrivateAllocationReceipt compiled.
+Four Compiler/PrivateBackendBoundaryFixture frames matched Rust exact bytes:
+empty journal, request, allocated journal, physical receipt. Native natural
+digests remain arbitrary width. The bounded original-prefix source projection
+compiled but its independent fifth interoperability fixture is still pending.
+Raw receipt decoding does not verify a protected anchor or source authority.
+A source promise additionally requires actual qualified successor recovery.
+
+authenticated_ingress.rs is authored WIP; its four focused tests are queued,
+not run at this packet freeze. It has one canonical enrolled-party envelope
+and private WAL receiver: sender comes from current source manifest selection
+and existing native credential admission, never shuffled mix-slot identity.
+SourcePartyAuthority is an explicit external native receiver join, not a caller
+permission flag. Test HMAC credentials are synthetic fixtures only.
+DREGG.PRIVATE.AUTH packet capacity is 131072; separately approved
+DREGG.PRIVATE.INGRESS carrier is at most 131100. Public traffic uses P262144.
+Ordinary Host public_envelope/exchange_unix does not dispatch this new route.
+The source-native admission owner must implement current enrolled subject,
+capability, purpose-specific request/header verification on one actual snapshot.
+
+Exact duplicates return the saved protocol outbox without reapplication.
+Fresh randomized credentials may authenticate the same semantic packet;
+conflicting sequence/body or stale current authority is refused.
+Replay markers, protocol transition and outbox persist in one WAL record.
+WAL checksum is for honest crash integrity, not malicious disk authenticity.
+Future-view WouldBlock requires reliable retention/retry, not silent dropping.
+Full 16MiB WAL/outbox frames are local, never transport payloads.
+
+Fixed circuit capacity must reserve and burn all planned tick/gate correlations
+before any secret material release, including ticks after private halt/refusal.
+Current physical reserve is per-row; full batch API is remaining construction.
+Coherent AVSS/ACSS-Id, real distributed proof/triple checking, authenticated Boolean
+wires and holder-private output remain necessary. Native descriptor, source
+maintenance budgets, protected anchor and canonical common qualified generation
+evidence must join before terminal source YES. A replica-local anchor receipt
+cannot become replicated custody evidence by encoding it.
+
+Printed/code adapter corrections are explicit: VABA key availability means
+completed sharing, not external validity; vote proposal values must be backed by
+validated prevote values, not membership among broadcaster IDs. Source tests
+close specific failure traces but do not prove the paper theorem for all schedules.
+
+Primary constructions:
+https://eprint.iacr.org/2024/677.pdf
+https://eprint.iacr.org/2024/1666.pdf
+The stock raw binary_ba implementation at b22a6a631effec1c6a875d4d52113f295bdc37b5
+is not imported: unauthenticated first-threshold interpolation, zero-based points
+vs one-based producer shares, and silent finite-stock stopping prevent qualification.
+
+Use scoped cargo nextest --offline --locked --release -j2 with the designated
+resource wrapper and isolated target. Do not run all historical tests repeatedly.
+The host-specific check-boundary.sh needs pinned Lean4.30 and existing warm source
+dependencies; it must not trigger a dependency rebuild. No keys, actual journals,
+private report/transcript, caches, artifacts or build outputs belong to this packet.

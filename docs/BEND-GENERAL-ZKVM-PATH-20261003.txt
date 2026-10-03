@@ -1,0 +1,255 @@
+GENERAL BEND TRACE PROOF PATH — staged construction, 2026-10-03
+Owner: Codex bend_semantics_audit. This is a status/contract record, not a
+claim that general Bend proof admission is complete.
+
+DESTINATION AND NONOVERLAPPING OWNERSHIP
+All admitted Bend programs within an explicitly authorized finite profile must
+use one live semantics for native execution, oblivious evaluation, general
+trace proving and fixed-program specialization. Astra owns the exact source
+machine and closure arena/controller; Sol owns fixed-program specialization.
+This lane owns source Trace endpoint reasoning, general circuit constraints,
+actual proof producer/verifier integration and qualification of its randomness.
+World-language owns canonical admitted artifacts and native receiver binding.
+Existing reexecution admission remains in force until the final join is proved
+and reviewed. Neither descriptor metadata nor a successful source check is a
+proof of a computation.
+
+EXACT SEMANTIC ANCHOR
+Pinned Bend revision: 947db722640c86247849343657bf2f7ef01cb7f1.
+Source SHA256 e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce.
+See BEND-SEMANTICS-AUDIT-20261003.txt for the full source audit and premises.
+Execution anchor is live Eval/Walk, NOT checker WNF or generated JS/C behavior.
+Astra's namespace-only Lean4.30 port uses two explicit ite lemma adaptations;
+definitions/theorem statements remain pinned. Its source theorem/axiom probe
+and 11 named kernel-decided executor checks have passed, reported by owner.
+That checked result establishes the imported theory, not upstream elaboration,
+compiler, native handlers or an arithmetized closure machine.
+
+Stable module namespaces and paths:
+  Minidregg.Theory.BendTT (Theory/BendTTSource.lean)
+  Minidregg.Theory.BendLiveMachine (Theory/BendLiveMachine.lean)
+  hbox:/tank/dregg-build/codex-private-lifecycle-20261003/src
+
+Trace book count initial final records actual Eval edges. Execution.complete
+also contains Value final; refusal contains a genuine prefix and a reason,
+never a committable result. The classifier uses structural source Terms and
+bounded recursive classification. It is not yet the fixed arena or circuit.
+Astra reserves Theory/BendClosureArena.lean and Compiler/BendClosureNetwork.lean.
+
+THIS LANE'S CURRENT STAGING
+Local: /Users/ember/workbox/bend-zkvm-20261003
+Hbox: /home/hbox/workbox/codex-bend-trace-20261003
+Mini source copied independently from captain common66042a8c, no hardlinks,
+no shared upstream/source edits. Root owns integration/Git.
+
+1. src/Theory/BendExecutionTrace.lean
+   Trace append; Trace -> Pars under Book.Closed; typed endpoint under
+   Book.WellTyped + Book.Closed + initial Typed; closed/live endpoint under
+   Book.Live + initial Closed + Live; complete typed endpoint; Value cannot
+   take an Eval step. These are general source facts. No trace/heap decoder or
+   circuit/PCS theorem is asserted. Staged, awaiting allocated Lean check.
+
+2. src/Compiler/BendTraceConstraints.lean
+   Consumes Astra's actual ObliviousNetwork.Op constant/xor/and DAG. Lowers
+   AND to ab and XOR to a+b-2ab through Mini's existing Air constructors.
+   Emits one Booleanity constraint per original and intermediate wire and a
+   generated gate equation at inputCount+gateIndex. General proposed theorems
+   relate arbitrary assignments to the exact Boolean/gate equations. Source
+   program/ROM boundary and DAG valid/SSA shape remain separate obligations.
+   Need complete theorem relating forced arbitrary wires to Network.evaluate;
+   not enough to validate only generated honest witnesses. Staged, unchecked.
+
+3. src/Compiler/BendTraceIR2.lean
+   Lowers Mini ConstraintDescriptor to the actual Bread IR2 local-row subset:
+   one local equation per add/mul gate, all zero roots, and pi_binding at first
+   row for EVERY public prefix column. Defines/equates the row relation with
+   descriptorHolds plus public pinning for arbitrary assignments. Serializes
+   BabyBear constants canonically, no other field under this ABI. One wide
+   row can describe an entire unrolled bounded controller trace; this is not
+   a claim of an efficient multirow general machine. Staged, unchecked.
+
+4. native/bend-proof-entropy
+   Tiny compiled crate pinned rand0.10.3/getrandom0.3.4, own Cargo.lock/target.
+   ProofRng seeds StdRng from 32 OS bytes; construction returns entropy failure.
+   Clone shares Arc<Mutex<StdRng>> so streams advance rather than duplicate.
+   P3 requires Clone+Rng+Send, not CryptoRng; wrapper additionally implements
+   TryCryptoRng. Inherited process identity refuses before locking (fork must
+   create fresh config); poison refuses. Public API exposes no seeded fallback.
+   Three release nextest tests PASSED on hbox: successive clone segments,
+   cross-thread continuation, stale process identity refusal. This is an RNG
+   conformance repair, not a proof of ZK. Test-only fixed seeds are private.
+   Log: hbox:/home/hbox/workbox/codex-bend-trace-20261003/entropy-check.log
+   1.83s compilation, 0.006s tests, 8GiB/2CPU cgroup, jobs2. Slot released.
+
+5. native/bend-ir2-proof/src/{config,main}.rs
+   Offline harness staged; NOT compiled/linked or an admission endpoint.
+   Consumes Lean-generated descriptor/public/witness, authors no Rust AIR.
+   Actual producer: descriptor_ir2::prove_vm_descriptor2_for_config.
+   Actual independent verifier: verify_vm_descriptor2_with_config.
+   Canonical BabyBear input check; exact vector length; proof trailing bytes
+   rejected. Config uses source IR2 FRI constants, eight-element leaf salts,
+   independent initial seeds for value/challenge/codeword channels, clone-safe
+   RNG. New explicit experimental profile string; no blanket hiding claim.
+   Need isolated Bread dependency snapshot and bounded captain allocation.
+
+ACTUAL BACKEND / TRUST MAP
+Mini Compiler/Air -> AirFlatten -> Emit -> EmitShare -> EmitSerialize has
+useful general faithfulness theorems. Emit's historical native reader was
+removed. Current Mini prover kernels are unverified candidate computations;
+Lean owns checks. Ext6GateProofController/Deployment are not a ready native
+PCS/verifier: their proof encodings use noncomputable Countable machinery.
+They must not be presented as an already deployable proof backend.
+
+Bread circuit/src/descriptor_ir2.rs supplies the real API above. Its generic
+functions support a caller-selected hiding config and reconstruct verifier
+AIR from the supplied descriptor. The verifier pins range table heights,
+including hiding-height adjustment. The existing direct_logic_dregg_workloads
+benchmark demonstrates consumption of actual Lean-emitted JSON/rows/public
+values, useful for conformance plumbing only. Its old domain/soundness floor
+is NOT a newly qualified 124/128-bit deployment guarantee.
+
+P3 pin 82cfad73cd734d37a0d51953094f970c531817ec; Bread workspace additionally
+patches fri and challenger. Qualify EXACT vendored copies when building.
+Never silently substitute crates.io P3 or omit the patches.
+
+ENTROPY FINDING AND ITS LIMIT
+Bread circuit/src/stark_zk.rs uses SmallRng in both hiding MMCS and hiding FRI.
+OS seeding does not turn that generator into a CSPRNG. At this P3 revision,
+MerkleTreeHidingMmcs::clone and HidingFriPcs::clone duplicate the RNG state.
+The configuration itself clones value MMCS for challenge MMCS, so overlapping
+streams are a concrete API/configuration concern. This is a source finding,
+not a demonstrated attack against a deployed proof.
+
+P3's hiding MMCS documentation requires a seeded CSPRNG and enough salt
+entropy; the generic trait bounds do not enforce either. rand0.10 StdRng
+is cryptographic but intentionally not Clone, so a rename alone does not
+satisfy the consumer. Shared advancing state addresses that API boundary.
+Independent channels plus clone sharing avoid deterministic state copying.
+Eight uniform BabyBear salts provide ~247.3 raw bits; this does not imply a
+128-bit quantum or composition guarantee. The original four provide ~123.6
+raw bits, not128. Poseidon2 capacity, exposed openings, random-codeword count,
+proof count, adaptive use, statistical masking and full FRI/PCS reduction
+remain distinct. The harness uses IR2 log_blowup6/queries19/queryPoW16,
+extension degree exported by actual source; no heuristic bits sum is a proof.
+
+ALL-PROGRAM CLOSURE REQUIREMENTS / NEXT FALSIFIERS
+A. Exact byte decoder and admitted Book/entry identify source Terms; parser
+   transcript includes all elaboration restrictions. Immutable public code/
+   ROM, arithmetic/float/FFI profile and effect codecs are bound.
+B. Closure/code/environment/value/continuation arena encodings are canonical,
+   bounded, tag/range checked; invalid pointer cannot default to slot zero.
+   Closure application, underapplication/case walks, Q0 erasure, Q1 linear use,
+   Q2 Data checks, rewrite evidence and opaque model semantics are covered.
+C. Each fixed physical controller tick either stutters with a named invariant,
+   makes source Eval/Walk progress, or reaches a terminal refusal. Completion
+   must carry a source Value; no forged done bit. Exhaustion cannot release.
+   Finite source termination does not provide a fixed capacity or circuit size.
+D. Circuit forced-wire relation proves the SAME controller's next state for
+   arbitrary assignments. Honest-witness generation is insufficient. Pin
+   start state/ROM, continuity, terminal result and all padding. A generic
+   boolean gate network is not yet a Bend controller.
+E. Bind expected descriptor/verification profile and exact public vector
+   independently at receiver. Bind semanticId/artifactId, entry, contextual
+   authority, input/result/effects commitments, fixed authorized charge and
+   private attempt/generation. Never let proof-carried metadata choose these.
+   Full digest bytes use canonical byte/limb representation with range checks;
+   do not fold a256-bit identifier into one31-bit BabyBear element.
+F. Physical ticks/steps and private intermediate states stay private by default.
+   Charge uses a separately versioned public fixed-capacity tariff. Compiler
+   erasure and traversal are not source Eval step-count preserving.
+G. Prove/verify actual emitted relation under repaired exact config. Reject
+   mutated original input, gate output, result, effect, charge, program/ROM,
+   generation and profile; refuse unknown/oversized bounds. Then establish
+   native parser/serializer conformance and qualify backend soundness/hiding.
+   Offline success remains experimental until receiver admission is joined.
+
+Immediate useful falsifiers: compile the3 staged Lean modules on the existing
+source/Mathlib oleans; prove gate forcing matches actual Network.evaluate;
+run actual generic IR2 hiding prove+verify on a Lean-emitted complete descriptor
+with public tamper rejection. No literal-case demo is general zkVM completion.
+
+OBJECTIVE BEND EXTENSION (latest human destination)
+Partial prototypes, modules, required/provided methods, final-self/super and
+method closures must elaborate with a justified semantics into the admitted
+Book/entry used by this proof path. Merely attaching parent names/method hashes
+to an artifact does not establish dispatch behavior. Dispatch dependencies,
+composition conflict resolution, default/override selection and exact closure
+instantiation belong to the semantic identity and refinement. New unrestricted
+recursion or unrestricted copied closures would require new source semantics
+and proofs, not reuse of the upstream termination statement.
+Each pure closed/live method invocation may use upstream Eval/Walk. Persistent
+reactive object/mailbox/resident lifetime belongs to world transition/history
+semantics, including authority, continuation custody, effect install/release
+and migration. It is not claimed to terminate because a single Bend invocation
+does. Shared owner coordination: world-language + member_oo + composition.
+
+SHORT-TRACE MASKING FALSIFIER / CONFORMANCE REPAIR
+Further actual-code reading found a masking obligation independent of RNG:
+IR2 passes a one-row main trace unchanged; its minimum-eight-row helper is for
+auxiliary tables, not the main trace. HidingFriPcs appends one independent random
+row per one real row. BatchSTARK then exposes each trace column at extension-
+field zeta. For a one-row trace the committed column is a degree<2 base-field
+polynomial a+bX. For non-base zeta, the public opening a+b*zeta uniquely reveals
+a and b (1,zeta are base-field-linearly independent), hence the original row.
+This is a source-level disclosure argument, not yet a captured live proof.
+It survives replacing SmallRng with a CSPRNG or adding more Merkle salts.
+
+Added native integration test short_trace_disclosure.rs: it directly invokes
+the raw backend with the actual emitted one-row algebra fixture, verifies the
+proof, replays the public transcript and attempts recovery of every main trace
+column from public extension-field openings. The test is staged/uncompiled;
+no source/API exploit result is claimed yet. It never disarms a shared guard.
+
+The experimental CLI now repeats the local row to a FIXED public height256,
+and the verifier requires exactly one instance at extended log-height9. It
+restricts descriptors to main-only local gates plus canonical first-row public
+pins; no lookup/challenge/auxiliary secret tables. This excludes the immediate
+degree-one case, but height256 is an experimental bound, NOT a qualified full
+zero-knowledge budget. Query arity/count, OOD extension coordinates, quotient
+randomization and the actual transcript still require a composition analysis.
+Public conformance fixtures remain appropriate; private admission remains off.
+
+The source-cited primary paper is Habock and Al Kindi, A note on adding zero-
+knowledge to STARKs, https://eprint.iacr.org/2024/1037.pdf (2025-02-20 revision).
+Its analysis makes the randomization budget depend on extension-field and FRI
+queries and treats quotient splitting separately. It is not a theorem about
+this exact Rust deployment. The implementation's masking machinery and paper
+assumptions must be connected explicitly.
+
+The first proposed serializer was also corrected before compilation: current
+Bread IR2 requires the `challenges` key. Some older checked-in direct-logic
+fixture JSON lacks it; that benchmark is a useful historical plumbing pattern,
+not current-head running evidence. Current staged writer emits challenges0,
+hash_sites[],ranges[] explicitly. This is why actual parser conformance matters.
+
+ADDITIONAL SOURCE/CONSTRAINT PROOF STAGING
+BendExecutionTrace.source_completion derives existence of a finite source
+Trace ending in Value from upstream halts, progress and subject reduction.
+It deliberately does not imply classifier completeness or a numerical bound.
+BendTraceConstraints now includes BooleanGraph uniqueness under actual Network
+validity/backward references and equal inputs, descriptor_forces via existing
+Emit/flattenSystem_forces, and ir2_forces preserving every public pin. These
+remain uncompiled until captain grants the queued Lean seat.
+Host/BendTraceIR2Emit.lean emits actual transformed Mini range-gadget descriptor,
+canonical trace/public values and a tampered public vector. Named kernel
+conformance facts are staged; it is not a Bend-program demonstration.
+
+FROZEN FIRST-BATCH HANDOFF
+Four staged Lean files are frozen for captain's first source check. The fixture
+now adds one independent private Boolean to the range gadget, and emits two
+satisfying witnesses with identical public13 but different private column5.
+The raw-backend regression verifies both proofs and recovers the first one's
+private column from public openings. Until compiled and run, this is a concrete
+staged falsifier, not a captured exploit result.
+
+Root has assigned a separate bend_controller_simulation owner to the actual
+closure/source refinement module. Source audit hazards and reusable Trace API
+were handed over. General arithmetization/proof/backend ownership remains here.
+A local IR2 prover sees its witness; hiding from a verifier does not establish
+input privacy from the prover or malicious distributed execution. This boundary
+has been shared with the private-backend owner.
+
+2026-10-03 09:56 UTC qualification update
+----------------------------------------
+Actual Lean4.30 source checks PASS: Theory/BendExecutionTrace and Compiler/BendTraceIR2, all named standard-axiom assertions. Host/BendTraceIR2Emit finite witness assertions also PASS; --run hit180s after descriptor emission. Latest host source caches all26 witness values and adds wireValues_correct against the actual emitted gate fold (that new cache lemma not yet compiled). Compiler/BendTraceConstraints remains uncompiled awaiting owner ObliviousNetwork dependencies.
+Actual Persvati cargo check --tests PASS after explicit BabyBear basis-slice types; standalone resolved lock SHA25643c1a9e1484ddd9645a5215a85aaad10cc5d651efe97532a2aa7245c2dd9d926. Exact Bread semantics retained with isolated root membership narrowed only to circuit/dregg-dsl/dregg-codec. P3 revision82cfad73 and both pinned vendor patches retained. No proof/disclosure run yet.

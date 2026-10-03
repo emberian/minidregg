@@ -1,0 +1,18 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "parentPacketSHA256": "aea2ef9024c20ed4f39cbd9bdeffd36df7e25b3729cbd69db98fae0809e27cbb",
+  "owner": "astra_consensus_composition",
+  "change": "Explicit compiled-trust conformance checks after kernel reduction stalled; Plan includes general complete schedule/zip-length obligations; no missing proof admitted",
+  "files": [
+    {
+      "path": "Assurance/ObliviousNetworkChecks.lean",
+      "sha256": "b13f97bcb4d452a1dafb25991c06f95cfa686cd80bfdc8640ff94147b471c405",
+      "status": "authored/uncompiled; new-only warm check queued"
+    },
+    {
+      "path": "Compiler/PrivateCircuitAllocation.lean",
+      "sha256": "c2fdf2112ecea78b6515fce4eeffe6e0f28912595b00b9a74887c488d2d0263a",
+      "status": "authored/uncompiled; new-only warm check queued"
+    }
+  ]
+}

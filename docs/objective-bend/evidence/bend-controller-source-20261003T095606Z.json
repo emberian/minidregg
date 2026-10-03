@@ -1,0 +1,43 @@
+{
+  "owner": "bend_controller_simulation",
+  "created_utc": "20261003T095606Z",
+  "intended_destination": "Mini main, repository-relative Theory/*.lean",
+  "base": "Additive owner modules; captain must reconcile against current common MAIN. No git accessed by subagent. No existing common file overwritten in this lane.",
+  "semantic_status": "Partial controller proof construction; full per-step invariant, run success/value and refusal/source-prefix theorem remain OPEN. Representation/context/selected step laws are not full refinement.",
+  "dependencies": [
+    "Theory/BendClosureMachine v2 reverseArguments/installArguments (composition reports PASS)",
+    "Theory/BendClosureArena",
+    "Theory/BendClosureReification PASS",
+    "Theory/BendClosureCodeRefinement PASS",
+    "Theory/BendClosureResponse (graded; authored)",
+    "Theory/BendLiveMachine",
+    "Theory/BendTTSource pin947db722"
+  ],
+  "files": [
+    {
+      "path": "Theory/BendClosureSimulation.lean",
+      "sha256": "d6652daaa8e983c61738c54640f6c59674c0d389515e2b932e2d3224484d92bf",
+      "status": "AUTHORED v2 extension; v1 PASS check02, current v2 source awaiting recheck"
+    },
+    {
+      "path": "Theory/BendClosureDenotation.lean",
+      "sha256": "ea6d480a69ee6cbc275b9f66f3bf3f36c36dd008b6962116e6d78570d7224943",
+      "status": "PASS controller-denotation-check-01; exact current source qualified"
+    },
+    {
+      "path": "Theory/BendClosureControlSteps.lean",
+      "sha256": "09c899d4e28e9ab5782a39c218a2ef7e9180b51ce4dff9256f6e8940f7ce15ab",
+      "status": "AUTHORED UNCOMPILED"
+    },
+    {
+      "path": "Theory/BendClosureAllocation.lean",
+      "sha256": "d4a5ef9aac55b4b9fa4b47882336a5c31531eccf590a93064e50e691317ace6f",
+      "status": "AUTHORED UNCOMPILED"
+    },
+    {
+      "path": "Theory/BendClosureResponseTyping.lean",
+      "sha256": "8a72f06e685482338a98ba37f8cb57e0f2b4a6e7a6eb168cc2bd6cb86e192834",
+      "status": "AUTHORED UNCOMPILED; depends on graded Response source"
+    }
+  ]
+}

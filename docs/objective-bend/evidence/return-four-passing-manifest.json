@@ -1,0 +1,15 @@
+{
+  "status": "scoped-four-lean-modules-pass",
+  "log": "/home/hbox/workbox/codex-bend-world-20261003/check-next-03.log",
+  "dependencyBundleSHA256": "66ef117d775726d58d55d80a40c314459dc7f03afdb713326cc192f46955ec4a",
+  "dependencyNote": "Plan kindRead exclusion subsequently authored as a separate uncompiled delta; archived first7 exact dependency remains checked",
+  "toolchain": "leanprover/lean4:v4.30.0",
+  "files": {
+    "Compiler/BendInvocation.lean": "4f8cad525bdb46fb59171655d0d76f3f17fec29dec8f2987f98e1c1370b2cbce",
+    "Compiler/BendMethodAttribution.lean": "c8ecb264028ddaa8e529c605436f7e6c1a77f2a57606f6f799a0111b265f6bdd",
+    "Kernel/BendOpaqueResultReceiver.lean": "a54c361e464348ef99cb1903997c66c4f44cba0e970f3a028578160b25a4f312",
+    "Kernel/BendReturnRelease.lean": "59ad245f898b5ad94d454b7c50214097aa247c4b4bcaff20da80fa27ad8e2c67",
+    "check-next.sh": "a873784dcc88497b7309588cee49688d3e55dbf7f2022deba8ec437654bb9a56"
+  },
+  "nativeStatus": "ordinary opaque storage uses current nativefamily; newreturn release requires original-prefix NativeHostReplay+Hostroute nextcohort before hosted append; no FHE plaintext/crypto/input/fixedfee claims"
+}

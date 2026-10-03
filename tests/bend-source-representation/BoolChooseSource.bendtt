@@ -1,0 +1,8 @@
+SourceBool.choose : ∀x0 : Bool -> ∀x1 : Bool -> ∀x2 : Bool -> Bool =
+  λ{(,): λ{.False: λ{(): λx0 => λx1 => x1; λ{}}; λ{.True: λ{(): λx0 => λx1 => x0; λ{}}; λ{}}}}
+
+Bool.arms : ∀x0 : <False, True> -> *2 =
+  λ{.False: <()>; λ{.True: <()>; λ{}}}
+
+Bool : *2 =
+  Σx0 : <False, True> -> (Bool.arms x0)

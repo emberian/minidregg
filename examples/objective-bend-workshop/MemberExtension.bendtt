@@ -1,0 +1,257 @@
+Nat.arms : ∀x0 : <Zero, Succ> -> *2 =
+  λ{.Zero: <()>; λ{.Succ: Σx0 : Nat -> <()>; λ{}}}
+
+Nat : *2 =
+  Σx0 : <Zero, Succ> -> (Nat.arms x0)
+
+List.q0.arms : ∀-x0 : *1 -> ∀x1 : <Nil, Con> -> *1 =
+  λ-x0 => λ{.Nil: <()>; λ{.Con: Σx1 : x0 -> Σx2 : (List.q0 -x0) -> <()>; λ{}}}
+
+List.q0 : ∀-x0 : *1 -> *1 =
+  λ-x0 => Σx1 : <Nil, Con> -> (List.q0.arms -x0 x1)
+
+List.q1.arms : ∀-x0 : *1 -> ∀x1 : <Nil, Con> -> *1 =
+  λ-x0 => λ{.Nil: <()>; λ{.Con: Σx1 : x0 -> Σx2 : (List.q1 -x0) -> <()>; λ{}}}
+
+List.q1 : ∀-x0 : *1 -> *1 =
+  λ-x0 => Σx1 : <Nil, Con> -> (List.q1.arms -x0 x1)
+
+List.q2.arms : ∀-x0 : *2 -> ∀x1 : <Nil, Con> -> *2 =
+  λ-x0 => λ{.Nil: <()>; λ{.Con: Σx1 : x0 -> Σx2 : (List.q2 -x0) -> <()>; λ{}}}
+
+List.q2 : ∀-x0 : *2 -> *2 =
+  λ-x0 => Σx1 : <Nil, Con> -> (List.q2.arms -x0 x1)
+
+Bool.arms : ∀x0 : <False, True> -> *2 =
+  λ{.False: <()>; λ{.True: <()>; λ{}}}
+
+Bool : *2 =
+  Σx0 : <False, True> -> (Bool.arms x0)
+
+Empty.arms : ∀x0 : <> -> *2 =
+  λ{}
+
+Empty : *2 =
+  Σx0 : <> -> (Empty.arms x0)
+
+Empty.efq : ∀x0 : Empty -> <> =
+  λ{(,): λ{}}
+
+Unit.arms : ∀x0 : <Unit> -> *2 =
+  λ{.Unit: <()>; λ{}}
+
+Unit : *2 =
+  Σx0 : <Unit> -> (Unit.arms x0)
+
+Empty.absurd : ∀-x0 : *1 -> ∀x1 : Empty -> x0 =
+  λ-x0 => λ{(,): λ{}}
+
+Sigma.q00.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q00 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q00.arms -x0 -x1 x2)
+
+Sigma.q01.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q01 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q01.arms -x0 -x1 x2)
+
+Sigma.q02.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *2 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q02 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *2 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q02.arms -x0 -x1 x2)
+
+Sigma.q10.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q10 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q10.arms -x0 -x1 x2)
+
+Sigma.q11.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q11 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q11.arms -x0 -x1 x2)
+
+Sigma.q12.arms : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *2 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q12 : ∀-x0 : *1 -> ∀-x1 : ∀-x1 : x0 -> *2 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q12.arms -x0 -x1 x2)
+
+Sigma.q20.arms : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q20 : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q20.arms -x0 -x1 x2)
+
+Sigma.q21.arms : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *1 -> ∀x2 : <Tuple> -> *1 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q21 : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *1 -> *1 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q21.arms -x0 -x1 x2)
+
+Sigma.q22.arms : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *2 -> ∀x2 : <Tuple> -> *2 =
+  λ-x0 => λ-x1 => λ{.Tuple: Σx2 : x0 -> Σx3 : (x1 -x2) -> <()>; λ{}}
+
+Sigma.q22 : ∀-x0 : *2 -> ∀-x1 : ∀-x1 : x0 -> *2 -> *2 =
+  λ-x0 => λ-x1 => Σx2 : <Tuple> -> (Sigma.q22.arms -x0 -x1 x2)
+
+Pair : ∀-x0 : *1 -> ∀-x1 : *1 -> *1 =
+  λ-x0 => λ-x1 => (Sigma.q11 -x0 -λ-x2 => x1)
+
+Nat.eq : ∀x0 : Nat -> ∀x1 : Nat -> Bool =
+  λ{(,): λ{.Zero: λ{(): λ{(,): λ{.Zero: λ{(): (.True, ()); λ{}}; λ{.Succ: λ{(,): λx0 => λ{(): (.False, ()); λ{}}}; λ{}}}}; λ{}}; λ{.Succ: λ{(,): λx0 => λ{(): λ{(,): λ{.Zero: λ{(): (.False, ()); λ{}}; λ{.Succ: λ{(,): λx1 => λ{(): (Nat.eq x0 x1); λ{}}}; λ{}}}}; λ{}}}; λ{}}}}
+
+Bool.and : ∀x0 : Bool -> ∀x1 : Bool -> Bool =
+  λ{(,): λ{.False: λ{(): λx0 => (.False, ()); λ{}}; λ{.True: λ{(): λx0 => x0; λ{}}; λ{}}}}
+
+Bytes.eq : ∀x0 : (List.q2 -Nat) -> ∀x1 : (List.q2 -Nat) -> Bool =
+  λ{(,): λ{.Nil: λ{(): λ{(,): λ{.Nil: λ{(): (.True, ()); λ{}}; λ{.Con: λ{(,): λx0 => λ{(,): λx1 => λ{(): (.False, ()); λ{}}}}; λ{}}}}; λ{}}; λ{.Con: λ{(,): λx0 => λ{(,): λx1 => λ{(): λ{(,): λ{.Nil: λ{(): (.False, ()); λ{}}; λ{.Con: λ{(,): λx2 => λ{(,): λx3 => λ{(): (Bool.and (Nat.eq x0 x2) (Bytes.eq x1 x3)); λ{}}}}; λ{}}}}; λ{}}}}; λ{}}}}
+
+Truth : ∀x0 : Bool -> *2 =
+  λ{(,): λ{.False: λ{(): Empty; λ{}}; λ{.True: λ{(): Unit; λ{}}; λ{}}}}
+
+Bool.and_left : ∀+x0 : Bool -> ∀+x1 : Bool -> ∀x2 : (Truth (Bool.and x0 x1)) -> (Truth x0) =
+  λ{(,): λ{.False: λ{(): λ+x0 => λx1 => (Empty.absurd -(Truth (.False, ())) x1); λ{}}; λ{.True: λ{(): λ+x0 => λx1 => (.Unit, ()); λ{}}; λ{}}}}
+
+Bool.and_right : ∀+x0 : Bool -> ∀+x1 : Bool -> ∀x2 : (Truth (Bool.and x0 x1)) -> (Truth x1) =
+  λ{(,): λ{.False: λ{(): λ+x0 => λx1 => (Empty.absurd -(Truth x0) x1); λ{}}; λ{.True: λ{(): λ+x0 => λx1 => x1; λ{}}; λ{}}}}
+
+Nat.eq_sound : ∀+x0 : Nat -> ∀+x1 : Nat -> ∀x2 : (Truth (Nat.eq x0 x1)) -> {x0 == x1 : Nat} =
+  λ{(,): λ{.Zero: λ{(): λ{(,): λ{.Zero: λ{(): λx0 => {==}; λ{}}; λ{.Succ: λ{(,): λ+x0 => λ{(): λx1 => (Empty.absurd -{(.Zero, ()) == (.Succ, (x0, ())) : Nat} x1); λ{}}}; λ{}}}}; λ{}}; λ{.Succ: λ{(,): λ+x0 => λ{(): λ{(,): λ{.Zero: λ{(): λx1 => (Empty.absurd -{(.Succ, (x0, ())) == (.Zero, ()) : Nat} x1); λ{}}; λ{.Succ: λ{(,): λ+x1 => λ{(): λx2 => %(Nat.eq_sound +x0 +x1 x2) : x3, x4 => {(.Succ, (x0, ())) == (.Succ, (x3, ())) : Nat}; {==}; λ{}}}; λ{}}}}; λ{}}}; λ{}}}}
+
+Bytes.eq_sound : ∀+x0 : (List.q2 -Nat) -> ∀+x1 : (List.q2 -Nat) -> ∀+x2 : (Truth (Bytes.eq x0 x1)) -> {x0 == x1 : (List.q2 -Nat)} =
+  λ{(,): λ{.Nil: λ{(): λ{(,): λ{.Nil: λ{(): λ+x0 => {==}; λ{}}; λ{.Con: λ{(,): λ+x0 => λ{(,): λ+x1 => λ{(): λ+x2 => (Empty.absurd -{(.Nil, ()) == (.Con, (x0, (x1, ()))) : (List.q2 -Nat)} x2); λ{}}}}; λ{}}}}; λ{}}; λ{.Con: λ{(,): λ+x0 => λ{(,): λ+x1 => λ{(): λ{(,): λ{.Nil: λ{(): λ+x2 => (Empty.absurd -{(.Con, (x0, (x1, ()))) == (.Nil, ()) : (List.q2 -Nat)} x2); λ{}}; λ{.Con: λ{(,): λ+x2 => λ{(,): λ+x3 => λ{(): λ+x4 => %(Nat.eq_sound +x0 +x2 (Bool.and_left +(Nat.eq x0 x2) +(Bytes.eq x1 x3) x4)) : x5, x6 => {(.Con, (x0, (x1, ()))) == (.Con, (x5, (x3, ()))) : (List.q2 -Nat)}; %(Bytes.eq_sound +x1 +x3 +(Bool.and_right +(Nat.eq x0 x2) +(Bytes.eq x1 x3) x4)) : x5, x6 => {(.Con, (x0, (x1, ()))) == (.Con, (x0, (x5, ()))) : (List.q2 -Nat)}; {==}; λ{}}}}; λ{}}}}; λ{}}}}; λ{}}}}
+
+CatalogReview.Candidate.arms : ∀x0 : <CatalogReview.Candidate> -> *2 =
+  λ{.CatalogReview.Candidate: Σx0 : (List.q2 -Nat) -> Σx1 : (List.q2 -Nat) -> Σx2 : Nat -> <()>; λ{}}
+
+CatalogReview.Candidate : *2 =
+  Σx0 : <CatalogReview.Candidate> -> (CatalogReview.Candidate.arms x0)
+
+CatalogReview.Recommendation.arms : ∀x0 : <CatalogReview.Recommendation> -> *2 =
+  λ{.CatalogReview.Recommendation: Σx0 : CatalogReview.Candidate -> Σx1 : (List.q2 -Nat) -> Σx2 : Bool -> <()>; λ{}}
+
+CatalogReview.Recommendation : *2 =
+  Σx0 : <CatalogReview.Recommendation> -> (CatalogReview.Recommendation.arms x0)
+
+CatalogReview.Decision.arms : ∀x0 : <CatalogReview.Decision> -> *2 =
+  λ{.CatalogReview.Decision: Σx0 : CatalogReview.Candidate -> Σx1 : (List.q2 -Nat) -> Σx2 : Bool -> <()>; λ{}}
+
+CatalogReview.Decision : *2 =
+  Σx0 : <CatalogReview.Decision> -> (CatalogReview.Decision.arms x0)
+
+CatalogReview.Adoption.arms : ∀x0 : <CatalogReview.Hold, CatalogReview.Propose> -> *2 =
+  λ{.CatalogReview.Hold: <()>; λ{.CatalogReview.Propose: Σx0 : CatalogReview.Candidate -> Σx1 : CatalogReview.Candidate -> Σx2 : (List.q2 -Nat) -> <()>; λ{}}}
+
+CatalogReview.Adoption : *2 =
+  Σx0 : <CatalogReview.Hold, CatalogReview.Propose> -> (CatalogReview.Adoption.arms x0)
+
+CatalogReview.candidate_eq : ∀x0 : CatalogReview.Candidate -> ∀x1 : CatalogReview.Candidate -> Bool =
+  λ{(,): λ{.CatalogReview.Candidate: λ{(,): λx0 => λ{(,): λx1 => λ{(,): λx2 => λ{(): λ{(,): λ{.CatalogReview.Candidate: λ{(,): λx3 => λ{(,): λx4 => λ{(,): λx5 => λ{(): (Bool.and (Bytes.eq x0 x3) (Bool.and (Bytes.eq x1 x4) (Nat.eq x2 x5))); λ{}}}}}; λ{}}}; λ{}}}}}; λ{}}}
+
+CatalogReview.candidate_eq_sound : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : CatalogReview.Candidate -> ∀+x2 : (Truth (CatalogReview.candidate_eq x0 x1)) -> {x0 == x1 : CatalogReview.Candidate} =
+  λ{(,): λ{.CatalogReview.Candidate: λ{(,): λ+x0 => λ{(,): λ+x1 => λ{(,): λ+x2 => λ{(): λ{(,): λ{.CatalogReview.Candidate: λ{(,): λ+x3 => λ{(,): λ+x4 => λ{(,): λ+x5 => λ{(): λ+x6 => !+x7 = (Bool.and_right +(Bytes.eq x0 x3) +(Bool.and (Bytes.eq x1 x4) (Nat.eq x2 x5)) x6); %(Bytes.eq_sound +x0 +x3 +(Bool.and_left +(Bytes.eq x0 x3) +(Bool.and (Bytes.eq x1 x4) (Nat.eq x2 x5)) x6)) : x8, x9 => {(.CatalogReview.Candidate, (x0, (x1, (x2, ())))) == (.CatalogReview.Candidate, (x8, (x4, (x5, ())))) : CatalogReview.Candidate}; %(Bytes.eq_sound +x1 +x4 +(Bool.and_left +(Bytes.eq x1 x4) +(Nat.eq x2 x5) x7)) : x8, x9 => {(.CatalogReview.Candidate, (x0, (x1, (x2, ())))) == (.CatalogReview.Candidate, (x0, (x8, (x5, ())))) : CatalogReview.Candidate}; %(Nat.eq_sound +x2 +x5 (Bool.and_right +(Bytes.eq x1 x4) +(Nat.eq x2 x5) x7)) : x8, x9 => {(.CatalogReview.Candidate, (x0, (x1, (x2, ())))) == (.CatalogReview.Candidate, (x0, (x1, (x8, ())))) : CatalogReview.Candidate}; {==}; λ{}}}}}; λ{}}}; λ{}}}}}; λ{}}}
+
+CatalogReview.eligible : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : (List.q2 -Nat) -> ∀x2 : CatalogReview.Recommendation -> ∀x3 : CatalogReview.Decision -> Bool =
+  λ+x0 => λ+x1 => λ{(,): λ{.CatalogReview.Recommendation: λ{(,): λx2 => λ{(,): λx3 => λ{(,): λx4 => λ{(): λ{(,): λ{.CatalogReview.Decision: λ{(,): λx5 => λ{(,): λx6 => λ{(,): λx7 => λ{(): (Bool.and x4 (Bool.and x7 (Bool.and (CatalogReview.candidate_eq x0 x2) (Bool.and (CatalogReview.candidate_eq x0 x5) (Bool.and (Bytes.eq x1 x3) (Bytes.eq x1 x6)))))); λ{}}}}}; λ{}}}; λ{}}}}}; λ{}}}
+
+CatalogReview.PolicyBinding : ∀-x0 : CatalogReview.Candidate -> ∀-x1 : (List.q2 -Nat) -> ∀x2 : CatalogReview.Recommendation -> ∀x3 : CatalogReview.Decision -> *1 =
+  λ-x0 => λ-x1 => λ{(,): λ{.CatalogReview.Recommendation: λ{(,): λx2 => λ{(,): λx3 => λ{(,): λx4 => λ{(): λ{(,): λ{.CatalogReview.Decision: λ{(,): λx5 => λ{(,): λx6 => λ{(,): λx7 => λ{(): (Pair -{x0 == x2 : CatalogReview.Candidate} -(Pair -{x0 == x5 : CatalogReview.Candidate} -(Pair -{x1 == x3 : (List.q2 -Nat)} -{x1 == x6 : (List.q2 -Nat)}))); λ{}}}}}; λ{}}}; λ{}}}}}; λ{}}}
+
+CatalogReview.eligibility_binding : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : (List.q2 -Nat) -> ∀+x2 : CatalogReview.Recommendation -> ∀+x3 : CatalogReview.Decision -> ∀+x4 : (Truth (CatalogReview.eligible +x0 +x1 x2 x3)) -> (CatalogReview.PolicyBinding -x0 -x1 x2 x3) =
+  λ+x0 => λ+x1 => λ{(,): λ{.CatalogReview.Recommendation: λ{(,): λ+x2 => λ{(,): λ+x3 => λ{(,): λ+x4 => λ{(): λ{(,): λ{.CatalogReview.Decision: λ{(,): λ+x5 => λ{(,): λ+x6 => λ{(,): λ+x7 => λ{(): λ+x8 => !+x9 = (Bytes.eq x1 x3); !+x10 = (Bytes.eq x1 x6); !+x11 = (CatalogReview.candidate_eq x0 x2); !+x12 = (CatalogReview.candidate_eq x0 x5); !+x13 = (Bool.and_right +x4 +(Bool.and x7 (Bool.and x11 (Bool.and x12 (Bool.and x9 x10)))) x8); !+x14 = (Bool.and_right +x7 +(Bool.and x11 (Bool.and x12 (Bool.and x9 x10))) x13); !+x15 = (Bool.and_right +x11 +(Bool.and x12 (Bool.and x9 x10)) x14); !+x16 = (Bool.and_right +x12 +(Bool.and x9 x10) x15); (.Tuple, ((CatalogReview.candidate_eq_sound +x0 +x2 +(Bool.and_left +x11 +(Bool.and x12 (Bool.and x9 x10)) x14)), ((.Tuple, ((CatalogReview.candidate_eq_sound +x0 +x5 +(Bool.and_left +x12 +(Bool.and x9 x10) x15)), ((.Tuple, ((Bytes.eq_sound +x1 +x3 +(Bool.and_left +x9 +x10 x16)), ((Bytes.eq_sound +x1 +x6 +(Bool.and_right +x9 +x10 x16)), ()))), ()))), ()))); λ{}}}}}; λ{}}}; λ{}}}}}; λ{}}}
+
+CatalogReview.choose : ∀x0 : CatalogReview.Candidate -> ∀x1 : CatalogReview.Candidate -> ∀x2 : (List.q2 -Nat) -> ∀x3 : Bool -> CatalogReview.Adoption =
+  λx0 => λx1 => λx2 => λ{(,): λ{.False: λ{(): (.CatalogReview.Hold, ()); λ{}}; λ{.True: λ{(): (.CatalogReview.Propose, (x0, (x1, (x2, ())))); λ{}}; λ{}}}}
+
+CatalogReview.prepare : ∀x0 : CatalogReview.Candidate -> ∀+x1 : CatalogReview.Candidate -> ∀+x2 : (List.q2 -Nat) -> ∀x3 : CatalogReview.Recommendation -> ∀x4 : CatalogReview.Decision -> CatalogReview.Adoption =
+  λx0 => λ+x1 => λ+x2 => λx3 => λx4 => (CatalogReview.choose x0 x1 x2 (CatalogReview.eligible +x1 +x2 x3 x4))
+
+CatalogReview.ExactProposal : ∀-x0 : CatalogReview.Candidate -> ∀-x1 : CatalogReview.Candidate -> ∀-x2 : (List.q2 -Nat) -> ∀x3 : CatalogReview.Adoption -> *1 =
+  λ-x0 => λ-x1 => λ-x2 => λ{(,): λ{.CatalogReview.Hold: λ{(): Unit; λ{}}; λ{.CatalogReview.Propose: λ{(,): λx3 => λ{(,): λx4 => λ{(,): λx5 => λ{(): (Pair -{x3 == x0 : CatalogReview.Candidate} -(Pair -{x4 == x1 : CatalogReview.Candidate} -{x5 == x2 : (List.q2 -Nat)})); λ{}}}}}; λ{}}}}
+
+CatalogReview.proposal_exact : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : CatalogReview.Candidate -> ∀+x2 : (List.q2 -Nat) -> ∀x3 : Bool -> (CatalogReview.ExactProposal -x0 -x1 -x2 (CatalogReview.choose x0 x1 x2 x3)) =
+  λ+x0 => λ+x1 => λ+x2 => λ{(,): λ{.False: λ{(): (.Unit, ()); λ{}}; λ{.True: λ{(): (.Tuple, ({==}, ((.Tuple, ({==}, ({==}, ()))), ()))); λ{}}; λ{}}}}
+
+CatalogReview.prepared_exact : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : CatalogReview.Candidate -> ∀+x2 : (List.q2 -Nat) -> ∀x3 : CatalogReview.Recommendation -> ∀x4 : CatalogReview.Decision -> (CatalogReview.ExactProposal -x0 -x1 -x2 (CatalogReview.prepare x0 +x1 +x2 x3 x4)) =
+  λ+x0 => λ+x1 => λ+x2 => λx3 => λx4 => (CatalogReview.proposal_exact +x0 +x1 +x2 (CatalogReview.eligible +x1 +x2 x3 x4))
+
+CatalogReview.unready_never_proposes : ∀x0 : CatalogReview.Candidate -> ∀x1 : CatalogReview.Candidate -> ∀x2 : (List.q2 -Nat) -> ∀x3 : CatalogReview.Candidate -> ∀x4 : (List.q2 -Nat) -> ∀x5 : CatalogReview.Candidate -> ∀x6 : (List.q2 -Nat) -> ∀x7 : Bool -> {(CatalogReview.prepare x0 +x1 +x2 (.CatalogReview.Recommendation, (x3, (x4, ((.False, ()), ())))) (.CatalogReview.Decision, (x5, (x6, (x7, ()))))) == (.CatalogReview.Hold, ()) : CatalogReview.Adoption} =
+  λx0 => λx1 => λx2 => λx3 => λx4 => λx5 => λx6 => λx7 => {==}
+
+ReusableWorkshop.Catalog.arms : ∀x0 : <ReusableWorkshop.EmptyCatalog, ReusableWorkshop.CatalogRow> -> *2 =
+  λ{.ReusableWorkshop.EmptyCatalog: <()>; λ{.ReusableWorkshop.CatalogRow: Σx0 : CatalogReview.Candidate -> Σx1 : (List.q2 -Nat) -> Σx2 : ReusableWorkshop.Catalog -> <()>; λ{}}}
+
+ReusableWorkshop.Catalog : *2 =
+  Σx0 : <ReusableWorkshop.EmptyCatalog, ReusableWorkshop.CatalogRow> -> (ReusableWorkshop.Catalog.arms x0)
+
+ReusableWorkshop.Lookup.arms : ∀x0 : <ReusableWorkshop.Missing, ReusableWorkshop.Found> -> *2 =
+  λ{.ReusableWorkshop.Missing: <()>; λ{.ReusableWorkshop.Found: Σx0 : CatalogReview.Candidate -> Σx1 : (List.q2 -Nat) -> <()>; λ{}}}
+
+ReusableWorkshop.Lookup : *2 =
+  Σx0 : <ReusableWorkshop.Missing, ReusableWorkshop.Found> -> (ReusableWorkshop.Lookup.arms x0)
+
+ReusableWorkshop.catalog_lookup.fin : ∀x0 : CatalogReview.Candidate -> ∀x1 : (List.q2 -Nat) -> ∀x2 : ReusableWorkshop.Lookup -> ∀x3 : Bool -> ReusableWorkshop.Lookup =
+  λx0 => λx1 => λx2 => λ{(,): λ{.False: λ{(): x2; λ{}}; λ{.True: λ{(): (.ReusableWorkshop.Found, (x0, (x1, ()))); λ{}}; λ{}}}}
+
+ReusableWorkshop.catalog_lookup : ∀+x0 : CatalogReview.Candidate -> ∀x1 : ReusableWorkshop.Catalog -> ReusableWorkshop.Lookup =
+  λ+x0 => λ{(,): λ{.ReusableWorkshop.EmptyCatalog: λ{(): (.ReusableWorkshop.Missing, ()); λ{}}; λ{.ReusableWorkshop.CatalogRow: λ{(,): λ+x1 => λ{(,): λx2 => λ{(,): λx3 => λ{(): (ReusableWorkshop.catalog_lookup.fin x1 x2 (ReusableWorkshop.catalog_lookup +x0 x3) (CatalogReview.candidate_eq x0 x1)); λ{}}}}}; λ{}}}}
+
+ReusableWorkshop.catalog : ∀x0 : ReusableWorkshop.Catalog -> ∀+x1 : CatalogReview.Candidate -> ReusableWorkshop.Lookup =
+  λx0 => λ+x1 => (ReusableWorkshop.catalog_lookup +x1 x0)
+
+ReusableWorkshop.review.fin : ∀+x0 : CatalogReview.Candidate -> ∀x1 : (List.q2 -Nat) -> ∀x2 : ReusableWorkshop.Lookup -> CatalogReview.Recommendation =
+  λ+x0 => λ+x1 => λ{(,): λ{.ReusableWorkshop.Missing: λ{(): (.CatalogReview.Recommendation, (x0, (x1, ((.False, ()), ())))); λ{}}; λ{.ReusableWorkshop.Found: λ{(,): λx2 => λ{(,): λx3 => λ{(): (.CatalogReview.Recommendation, (x0, (x1, ((CatalogReview.candidate_eq x0 x2), ())))); λ{}}}}; λ{}}}}
+
+ReusableWorkshop.review : ∀x0 : ∀+x0 : CatalogReview.Candidate -> ReusableWorkshop.Lookup -> ∀+x1 : CatalogReview.Candidate -> ∀x2 : (List.q2 -Nat) -> CatalogReview.Recommendation =
+  λx0 => λ+x1 => λx2 => (ReusableWorkshop.review.fin +x1 x2 (x0 +x1))
+
+ReusableWorkshop.review_with_policy : ∀x0 : (List.q2 -Nat) -> ∀x1 : ∀+x1 : CatalogReview.Candidate -> ReusableWorkshop.Lookup -> ∀+x2 : CatalogReview.Candidate -> CatalogReview.Recommendation =
+  λx0 => λx1 => λ+x2 => (ReusableWorkshop.review λ+x3 => (x1 +x3) +x2 x0)
+
+ReusableWorkshop.strengthen : ∀x0 : CatalogReview.Recommendation -> ∀x1 : Bool -> CatalogReview.Recommendation =
+  λ{(,): λ{.CatalogReview.Recommendation: λ{(,): λx0 => λ{(,): λx1 => λ{(,): λx2 => λ{(): λx3 => (.CatalogReview.Recommendation, (x0, (x1, ((Bool.and x2 x3), ())))); λ{}}}}}; λ{}}}
+
+ReusableWorkshop.audited_review : ∀x0 : ∀+x0 : CatalogReview.Candidate -> CatalogReview.Recommendation -> ∀x1 : ∀+x1 : CatalogReview.Candidate -> Bool -> ∀+x2 : CatalogReview.Candidate -> CatalogReview.Recommendation =
+  λx0 => λx1 => λ+x2 => (ReusableWorkshop.strengthen (x0 +x2) (x1 +x2))
+
+ReusableWorkshop.Card.arms : ∀x0 : <ReusableWorkshop.Card> -> *2 =
+  λ{.ReusableWorkshop.Card: Σx0 : CatalogReview.Candidate -> Σx1 : (List.q2 -Nat) -> Σx2 : CatalogReview.Recommendation -> <()>; λ{}}
+
+ReusableWorkshop.Card : *2 =
+  Σx0 : <ReusableWorkshop.Card> -> (ReusableWorkshop.Card.arms x0)
+
+ReusableWorkshop.presentation : ∀x0 : ∀+x0 : CatalogReview.Candidate -> CatalogReview.Recommendation -> ∀+x1 : CatalogReview.Candidate -> ∀x2 : (List.q2 -Nat) -> ReusableWorkshop.Card =
+  λx0 => λ+x1 => λx2 => (.ReusableWorkshop.Card, (x1, (x2, ((x0 +x1), ()))))
+
+ReusableWorkshop.presentation_with_label : ∀x0 : (List.q2 -Nat) -> ∀x1 : ∀+x1 : CatalogReview.Candidate -> CatalogReview.Recommendation -> ∀+x2 : CatalogReview.Candidate -> ReusableWorkshop.Card =
+  λx0 => λx1 => λ+x2 => (ReusableWorkshop.presentation λ+x3 => (x1 +x3) +x2 x0)
+
+ReusableWorkshop.audit_source_exact : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : (List.q2 -Nat) -> ∀+x2 : Bool -> ∀+x3 : Bool -> {(ReusableWorkshop.strengthen (.CatalogReview.Recommendation, (x0, (x1, (x2, ())))) x3) == (.CatalogReview.Recommendation, (x0, (x1, ((Bool.and x2 x3), ())))) : CatalogReview.Recommendation} =
+  λ+x0 => λ+x1 => λ+x2 => λ+x3 => {==}
+
+ReusableWorkshop.denied_review_stays_denied : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : (List.q2 -Nat) -> ∀x2 : Bool -> {(ReusableWorkshop.strengthen (.CatalogReview.Recommendation, (x0, (x1, ((.False, ()), ())))) x2) == (.CatalogReview.Recommendation, (x0, (x1, ((.False, ()), ())))) : CatalogReview.Recommendation} =
+  λ+x0 => λ+x1 => λx2 => {==}
+
+ReusableWorkshop.failed_audit_denies : ∀+x0 : CatalogReview.Candidate -> ∀+x1 : (List.q2 -Nat) -> ∀+x2 : Bool -> {(ReusableWorkshop.strengthen (.CatalogReview.Recommendation, (x0, (x1, (x2, ())))) (.False, ())) == (.CatalogReview.Recommendation, (x0, (x1, ((.False, ()), ())))) : CatalogReview.Recommendation} =
+  λ+x0 => λ+x1 => λ{(,): λ{.False: λ{(): {==}; λ{}}; λ{.True: λ{(): {==}; λ{}}; λ{}}}}
+
+MemberExtension.audit : ∀+x0 : CatalogReview.Candidate -> Bool =
+  λ{(,): λ{.CatalogReview.Candidate: λ{(,): λ+x0 => λ{(,): λ+x1 => λ{(,): λ{(,): λ{.Zero: λ{(): λ{(): (.False, ()); λ{}}; λ{}}; λ{.Succ: λ{(,): λ+x2 => λ{(): λ{(): (.True, ()); λ{}}; λ{}}}; λ{}}}}}}}; λ{}}}
+
+MemberExtension.focused_review : ∀x0 : ∀+x0 : CatalogReview.Candidate -> CatalogReview.Recommendation -> ∀x1 : ∀+x1 : CatalogReview.Candidate -> Bool -> ∀+x2 : CatalogReview.Candidate -> CatalogReview.Recommendation =
+  λx0 => λx1 => λ+x2 => (ReusableWorkshop.audited_review λ+x3 => (x0 +x3) λ+x3 => (x1 +x3) +x2)
+
+MemberExtension.alternate_presentation : ∀x0 : ∀+x0 : CatalogReview.Candidate -> CatalogReview.Recommendation -> ∀+x1 : CatalogReview.Candidate -> ReusableWorkshop.Card =
+  λx0 => λ+x1 => (ReusableWorkshop.presentation λ+x2 => (x0 +x2) +x1 (.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Con, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Succ, ((.Zero, ()), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ())), ((.Nil, ()), ()))), ()))), ()))), ()))), ()))), ()))), ()))), ()))))
+
+MemberExtension.zero_revision_denied : ∀x0 : (List.q2 -Nat) -> ∀x1 : (List.q2 -Nat) -> {(MemberExtension.audit +(.CatalogReview.Candidate, (x0, (x1, ((.Zero, ()), ()))))) == (.False, ()) : Bool} =
+  λx0 => λx1 => {==}
+
+MemberExtension.positive_revision_allowed : ∀x0 : (List.q2 -Nat) -> ∀x1 : (List.q2 -Nat) -> ∀x2 : Nat -> {(MemberExtension.audit +(.CatalogReview.Candidate, (x0, (x1, ((.Succ, (x2, ())), ()))))) == (.True, ()) : Bool} =
+  λx0 => λx1 => λx2 => {==}

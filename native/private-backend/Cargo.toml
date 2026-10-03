@@ -1,0 +1,10 @@
+[package]
+name = "mini-private-backend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-or-later"
+[dependencies]
+sha2 = "=0.10.9"
+libc = "=0.2.189"
+[workspace]

@@ -1,0 +1,12 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendClosurePacking.lean",
+      "sha256": "60c3df44f28360acda689264c97487466b301c8bc26cdc383391b93223234a0d",
+      "status": "AUTHORED_UNCOMPILED"
+    }
+  ],
+  "scope": "Actual Row fixed layout 3tag+2quantity+2width bits; bounded pack/unpack and unpack fits general proofs; no whole controller/circuit claim"
+}

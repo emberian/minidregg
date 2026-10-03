@@ -1,0 +1,39 @@
+{
+  "upstream": "bendlang/bend",
+  "commit": "947db722640c86247849343657bf2f7ef01cb7f1",
+  "algorithm": "sha256",
+  "role_order": [
+    "checker",
+    "elaborator",
+    "kernel",
+    "compiler",
+    "base"
+  ],
+  "components": [
+    {
+      "role": "checker",
+      "path": "bend2/bend.ts",
+      "sha256": "7deae3693eb896f33c73867081b99d2c6f3ed3b57e77e55eb5f6260840dd0e63"
+    },
+    {
+      "role": "elaborator",
+      "path": "bend2/safe.ts",
+      "sha256": "54cb3a534ab7cc9ee313bf6383b3948ccdcac022469b3020e00745bbfe6f7e04"
+    },
+    {
+      "role": "kernel",
+      "path": "bend2/bendtt.lean",
+      "sha256": "e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce"
+    },
+    {
+      "role": "compiler",
+      "path": "bend2/comp.ts",
+      "sha256": "453e5452f7d5ea1d501b29ce2332623c3f9f4c9e89f407352209716d31638c89"
+    },
+    {
+      "role": "base",
+      "path": "bend2/base.bend",
+      "sha256": "c742fae9c49b14f0cc9128429a2c6109364c8a933a142f2c90b9f2e5fd976661"
+    }
+  ]
+}

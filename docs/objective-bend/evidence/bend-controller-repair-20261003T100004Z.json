@@ -1,0 +1,11 @@
+{
+  "owner": "bend_controller_simulation",
+  "files": [
+    {
+      "path": "Theory/BendClosureControlSteps.lean",
+      "base_sha256": "09c899d4e28e9ab5782a39c218a2ef7e9180b51ce4dff9256f6e8940f7ce15ab",
+      "sha256": "1a67d8b2759907ece38084ca4df1f33f548ffbc72139be4e3cd16ebdd169a8bb",
+      "status": "AUTHORED repair after check01: explicit ghost-context parameters; not rechecked"
+    }
+  ]
+}

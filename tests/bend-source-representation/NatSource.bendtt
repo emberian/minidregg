@@ -1,0 +1,11 @@
+Nat.add : ∀x0 : Nat -> ∀x1 : Nat -> Nat =
+  λ{(,): λ{.Zero: λ{(): λx0 => x0; λ{}}; λ{.Succ: λ{(,): λx0 => λ{(): λx1 => (.Succ, ((Nat.add x0 x1), ())); λ{}}}; λ{}}}}
+
+SourceNat.zeroAdd : ∀x0 : Nat -> Nat =
+  λx0 => (Nat.add (.Zero, ()) x0)
+
+Nat.arms : ∀x0 : <Zero, Succ> -> *2 =
+  λ{.Zero: <()>; λ{.Succ: Σx0 : Nat -> <()>; λ{}}}
+
+Nat : *2 =
+  Σx0 : <Zero, Succ> -> (Nat.arms x0)

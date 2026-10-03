@@ -1,0 +1,413 @@
+BEND SEMANTICS AUDIT — 2026-10-03
+Author: Codex, bend_semantics_audit lane
+
+Decision
+========
+
+Use the pinned BendTT Eval/Walk calculus as the reference for a shared Bend
+execution core. Defunctionalize its closures, environments, case-tree walks,
+and continuations once; connect native execution, oblivious execution, zkVM
+execution, and fixed-program circuits to that same core by refinement.
+
+This is a credible semantic foundation for making Bend the default world
+language. It is not already a proof of the source elaborator, optimized C/JS
+compiler, FFI, consensus, MPC privacy, or a reusable arithmetic circuit. Existing
+Nock compatibility can remain a separate accepted language without becoming
+the intermediate language for Bend.
+
+The upstream Lean file states and supplies proofs of a substantial, precisely
+scoped result: an accepted BendTT book is typed and live; live evaluation of
+closed live terms terminates; no accepted definition's type converts to Empty.
+Do not strengthen this into “every accepted source program compiles correctly”
+or “all Bend runtimes have identical bit-level behavior.”
+
+Evidence and limits
+===================
+
+Requested source:
+https://github.com/bendlang/bend/blob/947db722640c86247849343657bf2f7ef01cb7f1/bend2/bendtt.lean
+Checkout inspected: /Users/ember/dev/bend (read-only throughout this lane).
+Revision pin supplied by captain: 947db722640c86247849343657bf2f7ef01cb7f1.
+Read all 3,892 lines of bendtt.lean, all 1,548 lines of safe.ts, and the relevant
+compiler/evaluator/CLI/primitive/effect paths identified below. No Git operation,
+local compilation, upstream edit, or cluster build was performed by this lane.
+The report is a source audit, not an assertion that the supplied proof scripts
+have passed a fresh Lean build. Source hashes measured during this audit:
+
+bend2/bendtt.lean e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce
+bend2/bend.ts     7deae3693eb896f33c73867081b99d2c6f3ed3b57e77e55eb5f6260840dd0e63
+bend2/safe.ts     54cb3a534ab7cc9ee313bf6383b3948ccdcac022469b3020e00745bbfe6f7e04
+bend2/comp.ts     453e5452f7d5ea1d501b29ce2332623c3f9f4c9e89f407352209716d31638c89
+bend2/base.bend   c742fae9c49b14f0cc9128429a2c6109364c8a933a142f2c90b9f2e5fd976661
+bend2/main.ts     c48a0274e661a3e529933550752578768e8f029219d814073fbf86537271d475
+
+All line references below are to these files at these hashes. “Proved” in the
+claim inventory describes the provided theorem term/proof structure; fresh
+kernel verification remains the build step described at the end.
+
+1. Exact claim inventory and premises
+====================================
+
+bendtt.lean:1532 Claim.consistent; theorem consistent:3881:
+  For every bk, k, d, if Book.check bk = .ok () and Book.get bk k = some d,
+  then NOT Conv bk d.T (Enu []).
+  This excludes a checked definition whose type is Empty even up to conversion.
+  It does not quantify over arbitrary source programs, compiled artifacts,
+  external implementations, effects, or a host's interpretation of primitives.
+
+bendtt.lean:1537 Claim.sound; theorem book_check:2211:
+  Book.check bk = .ok () -> Book.WellTyped bk AND Book.Live bk.
+  WellTyped means each retrieved definition's type has kind Type, its body has
+  that type, and its body is closed. Live means body closedness and successful
+  Term.tree at the definition's book index. This theorem actually connects the
+  executable checker to the declarative predicates, rather than merely proving
+  a metatheory for a detached syntax.
+
+bendtt.lean:1541 Claim.confluent; theorem confluent:1782:
+  Any two Pars reductions from one term have a common Pars reduct, for every
+  book. Delta is permitted only for closed definition bodies. The complete
+  development/triangle/strip proof is independent of checking/termination.
+  Conversion is joinability; no normalization of all types is required.
+
+bendtt.lean:1545 Claim.sr; theorem sr:2316:
+  Book.WellTyped bk -> Typed bk Gamma t T -> Par bk t u -> Typed bk Gamma u T.
+  It includes dead parts and open contexts. This is typing preservation, not
+  preservation of live usage under arbitrary substitution/reduction. The latter
+  is deliberately restricted to closed live evaluation in the termination path.
+
+bendtt.lean:1549 Claim.progress; theorem progress:2673:
+  Book.WellTyped bk -> Book.Live bk -> Typed bk [] t T ->
+  Value bk t OR exists u, Eval bk t u.
+  It does not itself supply termination or a bound. No separate Term.Live
+  premise is needed for one-step progress; the book's live condition supplies
+  total case-tree walks.
+
+bendtt.lean:1554 Claim.halts; theorem halts:3871:
+  Book.Live bk -> Term.Closed t -> Term.Live bk t ->
+  Acc (fun u t => Eval bk t u) t.
+  This is accessibility/strong termination of the specified live evaluation
+  relation. It needs no typing premise because Eval explicitly guards copying
+  and matching. An untyped term may still be stuck. Combine with typing and
+  progress to obtain a value. This is not a numerical runtime/gas/heap bound,
+  not strong normalization under lambdas, and not halting of FFI/IO handlers.
+
+bendtt.lean:1559 Claim.empty; theorem empty:2708:
+  Book.WellTyped bk -> Value bk t -> NOT Typed bk [] t (Enu []).
+
+Assembly: consistent obtains WellTyped/Live from book_check, applies halts to
+Ref k, and accessibility-inducts using progress, empty, sr, and eval_pars. The
+file does not merely postulate these named claims. Its final theorems have
+proof bodies. Nevertheless absence of sorry/axiom strings is not build evidence
+or an axiom report; use Lean's kernel and #print axioms on these exact names.
+
+Additional bridges worth preserving:
+  wnf_pars:1899 — executable wnf/run/fire/val results are Pars reductions under
+    Sees ck bk (lookup agrees up to opacity and bodies are closed).
+  conv_sound:1973 — any true result at any fuel establishes Conv under Sees.
+  fits_sound:1986, chk:2136 — successful fits/check/infer land in declarative
+    rules after the let-context substitution Ctx.drop.
+  canon_data:2540 — a typed closed value whose type has kind Data is Data.
+  eval_pars:2386 — Eval steps are Pars reductions under Book.Closed.
+  eval_decreases:3865 — on closed live terms in a live book, Eval preserves
+    closedness/liveness and strictly decreases Measure.lt.
+
+2. Quantities, erasure, recursion, and opacity
+============================================
+
+Q0 is erased/no live use; Q1 permits AT MOST one live use; Q2 permits arbitrarily
+many live uses, restricted to a Data domain. Q2 does not mean “two uses.”
+Quan.allows:167 and Term.uses:1141 make this literal. A match sums both arms'
+uses in the kernel. Source compiler usage analysis instead takes max across
+arms (comp.ts:784); safe.ts:681 constructs convoys and can promote Data binders
+to Q2 to obtain a kernel-acceptable tree. That is a real elaboration step.
+
+Data:1449 contains labels, Rfl, and pairs whose live components are Data. It
+contains no live lambda or call. The runtime relation demands Data before a Q2
+substitution, preventing a duplicated call/redex from defeating the measure.
+“No calls in Data” concerns a normalized Data value, not all expressions of a
+Data type. Such expressions may compute first. Data is not a secrecy label;
+Q0 is not encryption; Q1 is not host authorization.
+
+Dead syntax: annotations' types; type constructors' contents; equality endpoints
+and carrier; rewrite motive; Q0 application arguments, first tuple fields, and
+let values. Runtime Eval does not run these. It retains them in the mathematical
+Term syntax/substitution. A compact erased representation is an additional
+implementation with a proof obligation, not defined by this file.
+
+Rwt is exceptional enough to name: its EVIDENCE e is live, the motive P is dead,
+and f is live (uses:1162, live:1244, Eval.rwt/cast:1522). Eval first evaluates e
+to Rfl and only then casts to f. Do not erase e in a purported literal Eval
+interpreter without a refinement/erasure theorem.
+
+Type : Type is intentional. Dead/type regions may be non-normalizing and may
+contain a paradoxical inhabitant. The theorem is about closed live code, not
+an unrestricted consistent Type:Type calculus. Types are used to rule out
+stuck live results; the termination measure ignores them.
+
+Structural recursion: Term.called:1209 permits earlier definitions or self
+calls whose live arguments compare lexicographically smaller under the case
+tree's tagged columns/paths. Dead columns compare equal and are skipped.
+Term.pos reconstructs a column/piece using tagged variables, encountered labels,
+and live pairs; it does not accept an arbitrary semantically decreasing term.
+The proof uses def index plus padded column sizes, ordered lexicographically,
+then the Dershowitz–Manna multiset extension over call/redex labels. Fewer labels
+or smaller calls give well-foundedness, not a tractable bound on resources.
+Mutual recursion is not a kernel rule. safe.ts:1079/1171 groups certain source
+cycles under a selector and then submits the transformed book to the same check.
+
+Opaque definitions: Def.o:94 suppresses checker WNF unfolding. Def.check:1279
+checks an opaque body's model with EVERY definition made transparent; ordinary
+definitions check with the original opacity flags. The declarative Par/Eval
+relations ignore o and unfold the model. Thus the proof interprets opaque
+names through checked models, while conversion presented to ordinary users
+does not reveal their implementations. Opaque does not mean private, and a
+model is not evidence that a foreign implementation refines it.
+
+3. Three different evaluation layers
+===================================
+
+(a) Source bend.ts term_wnf:2788 is a partial, shared weak-head machine. Its
+share cells avoid repeated evaluation; it does not have the kernel's 400M fuel
+bound. term_snf recursively normalizes. term_compare:3057 first tries with an
+empty/rigid book, then retries with definitions available. It includes eta and
+source kind/quantity/residual subtyping. The rigid-first fallback is not a
+runtime exhaustion fallback, and is not the kernel's equality algorithm.
+
+(b) Lean executable checker wnf/run/fire/val:781–879 is fuelled. A call unfolds
+only after its case tree walks fully; a stuck or underapplied call remains a
+call. Q2 is normalized when cl=true; open checking stays lazy. Each operation
+returns leftover fuel. FUEL:145 is 400,000,000; this is not a global bound on
+checking an entire book. Check/infer and multiple fits/wnf calls use separate
+budgets. At zero wnf returns its residual, run returns none, and conv returns
+false. Ctx.need distinguishes failed equality with zero fuel from mismatch.
+Successful conv is sound even if earlier reduction stopped partway, because
+the returned terms are genuine reducts. Exhaustion never licenses acceptance
+by an arbitrary “assume equal” fallback. No completeness theorem promises all
+valid definitional equalities are decided within the budget.
+
+(c) Declarative runtime Eval/Walk:1458–1525 is live call-by-value. Q1 as well as
+Q2 live arguments/let values/tuple fields evaluate before substitution. Walk
+does not recursively step substituted code; it walks the definition's case
+tree. A call needing more arguments is a Value. Opacity is ignored. This is
+the relation whose termination/progress theorem is available and therefore
+the appropriate target of the shared execution-machine refinement.
+
+wnf_pars and eval_pars relate (b) and (c) to declarative reduction, but they do
+not prove that their execution traces, steps, costs, or resource failures are
+identical. Reusing checker WNF as the runtime would change evaluation strategy.
+
+4. Source elaboration and the actual CLI trust chain
+===================================================
+
+safe.ts reads checked Def.e annotations, translates datatypes into labeled Sigma
+chains, eta-expands functions, specializes quantity/template/kind parameters,
+rewrites some recursion patterns, and emits BendTT text. It relies on source
+checker operations while constructing output. The kernel independently checks
+the resulting book, so an elaborator bug cannot by itself make an ill-typed
+BendTT book accepted by a correct checker. It can still translate the WRONG
+program or statement. No source-to-kernel meaning-preservation theorem exists
+in this file or in the audited safe.ts path.
+
+safe_book:175/safe_pass:192 emit non-Base roots and their dependencies. Unsupported
+items and items naming them are removed, with an out-of-scope report. Runtime
+dependent kinds, nonliteral quantity arguments, holes, unsafe definitions,
+certain specialization cycles, and unsupported mutual recursion can be rejected.
+safe_check:1545 requires an EMPTY out-of-scope list and kernel acceptance.
+safe_emit:1537 writes a potentially PARTIAL output and returns diagnostics.
+main.ts:358–370 prints these diagnostics when emitting .bendtt; mere existence
+of an emitted file is not evidence the entire source program was verified.
+
+Bodyless laws/native/foreign definitions: def_emit:356 calls model:494. Models
+are searched by finite depth/fuel for an inhabitant (Unit for a kind, constants,
+constructors, projections, reflexivity when conversion succeeds). The result
+is marked opaque and rechecked. Root specialization may introduce opaque
+constants at parameter types (root_cols:237). These constructions give a
+consistent interpretation if accepted; they do not recover an external
+implementation, prove its termination, or prove universal source semantics.
+MODEL_FUEL = 2^22, initial MODEL_DEPTH = 8. Failure is out of scope; a candidate
+found in a cut search may be used but still must pass the kernel.
+
+Important public-CLI qualification: main.ts cli_verdict:715 calls
+book_promises:737 BEFORE safe_check. It rejects non-Base definitions relying
+on unsafe or custom foreign code through types/bodies/constructor fields.
+Unsafe defs are bad regardless of Base; foreign defs marked Base are explicitly
+exempt. It is therefore wrong to say public --verdict blindly accepts arbitrary
+custom FFI. It is equally wrong to say --verdict verifies Base FFI behavior.
+Calling safe_check/safe_emit directly is not the same policy as cli_verdict.
+
+kernel_bin:1475 uses $BENDTT if supplied; otherwise a source-hash-keyed binary
+cache in ~/.bend/bendtt/<16 hex chars>. It prefers Lean v4.34.0 tools at the
+named elan path, falling back to tools on PATH, and compiles Lean -> C -> native.
+kernel_check:1525 checks a fresh private file, exit zero, and the exact success
+line. Runtime uses LEAN_STACK_SIZE_KB=4194304 (4 GiB stack allowance, not a
+proof or memory budget). A supplied/cached binary is an operational trust
+boundary; bind its digest/version to the deployment manifest. The theorem
+about Book.check plus native CLI execution still trusts Lean extraction/codegen,
+C compilation, runtime, OS, and parser/file binding. sub_subz:405 is a proved
+@[csimp] replacement, not an unproved optimization axiom.
+
+5. Compiler/runtime gaps with concrete distinguishing probes
+============================================================
+
+The optimized compiler consumes SOURCE checked books, not BendTT text
+(comp.ts:2748 compile_book and :3191 js_lib). It includes closure conversion,
+ANF, native representations, borrowing/ownership inference, tail loops, parallel
+forks, arrays/atomics, native intrinsics, and effect sources. No checked-book
+to C/JS/Metal/CUDA observational-equivalence theorem is supplied here. The
+file's initial warning about expected compiler bugs is consistent with this
+boundary, but the boundary follows from the code/theorems, not that warning.
+
+Confirmed source-level mismatches / missing bridges:
+
+* Proof erasure: comp.ts term_kids:749 keeps only Rwt.f; ty_peel:863 and
+  anf:1942 discard the evidence. Eval evaluates e. A nontrivial closed equality
+  proof followed by a constant produces different step counts. For checked
+  pure code, eventual result equivalence is plausible and worth proving, but
+  “same step semantics” is false without an erasure/stuttering relation.
+
+* Dead-result optimization: let_live:668 uses actual body uses, dropping even
+  a live Q1/Q2 let value if unused. Eval still evaluates any live let value.
+  Probe a costly, terminating unused Data computation: same intended value,
+  different semantic cost. Do not price consensus gas by native instruction
+  counts or transfer an Eval step limit to optimized execution without a map.
+
+* Nat: Lean's encoded constructors have no numeric cap; comp.ts nat_chk:349/448
+  fail-stops above 2^48-1, and native nat_mul checks overflow. A structural Nat
+  calculation crossing that boundary refutes unrestricted total compiled
+  equivalence. Separately nat_host:455 accepts host integers up to 2^53; audit
+  ingress/domain bounds before claiming all host Nat values obey the 48-bit
+  execution profile. This is a concrete source discrepancy, not a tested bug
+  assertion about every host call.
+
+* F32: C stores bits, JS uses Number/Float32Array. The existing upstream
+  tests/compile/f32_table_nan_bits.bend explicitly explains that JS quiets NaNs
+  and compares both sides after converting through F32 so its expected result
+  agrees with C. A direct bits(as_f32(2139095041)) round trip, with a dynamic
+  input/table index to prevent folding, is the stronger cross-backend probe.
+  Test signed zero, signaling/quiet NaNs and payloads, infinities, division,
+  rounding, and transcendentals separately. Host math libraries/JS Math are not
+  a platform-independent arithmetic specification. Canonicalization or exact
+  software arithmetic needs to be part of the consensus profile.
+
+* FOLD_FUEL=8192 (comp.ts:119/emit_fold:2293) limits compiler unrolling and falls
+  back to emitted calls. It is neither BendTT equality fuel nor runtime gas.
+
+* FFI/effects: base.bend:149 defines IO by continuation passing; IO.print:160,
+  IO.random_u32:201, IO.now:213, files/sockets/processes etc. import backend
+  sources. comp.ts effect_srcs/js_lib/compile_book embed those sources. A typed
+  opaque model of IO says nothing about randomness, clocks, ordering, network
+  results, host side effects, authorization, or external process termination.
+
+* Entry/export shape: .mjs exports different roots from a compiled main;
+  compiled printing refuses functions, Type, and erased/dependent fields
+  (show_main:1848). A source evaluator's printable result and a native CLI's
+  accepted entry set are not identical APIs.
+
+These are specific semantic boundaries and distinguishing probes. This lane
+did not execute the probes, assert a fresh C/JS test result, or claim an
+inconsistency in the kernel. Build these cases in scratch/isolation, never by
+disarming or modifying an upstream/shared checker.
+
+6. Reusable core and proof obligations
+=====================================
+
+Preserve the exact pinned Term/Book/Typed/Eval/Walk and proofs in an isolated
+namespace/vendor module, with source digest/license and any compatibility
+patch recorded. The composition lane owns that import. Keep it separate from
+both the user-facing source compiler and the finite machine implementation.
+
+Implement one closure/environment/continuation machine for the LIVE semantics.
+Its state must represent checked program identity, code locations, environments,
+closures, tuple/label/proof values, argument spines, case-tree continuation,
+heap/stack, and explicit status. Types/dead syntax may remain in a checked
+artifact or code table without being evaluated. A proof relation decodes a
+machine state into the reference term/evaluation context; sharing Q2 values
+must preserve Data/no-affine-resource ownership. Preserve Rwt evidence first;
+derive its optimized erasure only after proving the relation needed to remove it.
+
+Prove the following composition, rather than separate unrelated runtimes:
+
+  A. Accepted entry/input implies a closed typed live reference term in the
+     accepted book. Book.check alone does not validate arbitrary injected
+     machine states, host closures, or serialized input values.
+  B. Machine-step soundness into zero-or-more Eval/administrative steps,
+     preservation of the decoding invariant, and progress/completeness for
+     supported inputs. State which steps are administrative and prove final
+     observations agree. Prove deterministic observations or a deterministic
+     machine schedule; confluence alone is not a concrete evaluator API.
+  C. A public resource profile bounds input size, heap, stack, integer widths,
+     and transition count. OutOfFuel/OutOfMemory/Invalid are explicit absorbing
+     outcomes and cannot be mistaken for successful execution. Halts does not
+     manufacture these bounds. Never accept a partial result on exhaustion.
+  D. Encode the SAME bounded machine-step function into a total Boolean/field
+     circuit, prove evaluation agrees for every well-formed encoded state,
+     and constrain bit/range/tag/address conditions. A host-supplied trace is
+     only a witness; the constraints must enforce every transition and status.
+  E. Oblivious execution uses fixed public schedules/memory accesses (e.g.
+     scanned selection or the existing verified oblivious memory abstraction),
+     padded trace length, and explicit disclosure. Semantic equivalence does
+     not imply noninterference, MPC simulation security, or BFT agreement.
+  F. A fixed Bend program specializes code/program identity while leaving input
+     and allowed state variable. Compile once per (program hash, semantic
+     profile, bounds, primitive registry/version), reuse the circuit/VK across
+     all allowed inputs. Prove specialization preserves the generic machine's
+     result, plus arithmetization soundness and completeness. Witness generation
+     is not circuit compilation. Termination permits neither unlimited-input
+     finite circuits nor “free” dynamic allocation/recursion.
+  G. Native execution can first use this same machine directly. The existing
+     optimized C/JS compiler is an additional refinement target; its unknown
+     correctness must not be silently inherited by the zk/oblivious core.
+
+Effects should be explicit requests/responses of the world substrate, with
+typed payloads, capability checks, deterministic handlers where required, and
+committed inputs/results. Register primitive implementations with their actual
+relation/model and domain constraints. Pure Bend code may construct an effect
+request without thereby performing a host effect. Source module/package names,
+content digests, bounds, primitive versions, and handler profile belong in the
+accepted artifact identity. Accepting unbound foreign imports or quietly using
+host IO would abandon the common semantics.
+
+7. Controlled build/verification plan
+===================================
+
+No global Lean toolchain migration. Mini's inspected lean-toolchain is 4.30.0;
+upstream safe.ts requests 4.34.0. A failed 4.30 elaboration is first a port
+compatibility result, not evidence the theorem is false. Conversely source
+proofs cannot be treated as compiled until their exact environment checks them.
+
+Coordinate the hbox single-Lean seat through takeover_kernel; do not compete
+with its common 546-module build. The composition lane is preparing the vendor
+import and owns that build request. Suggested finite sequence when available:
+
+1. In a scratch output directory, compile the namespace-only vendor with Mini's
+   pinned 4.30 and capture complete diagnostics. Namespace placement must include
+   generated tactic macros/names correctly. Do not edit upstream bend.ts or the
+   upstream checkout. Preserve import provenance and license.
+2. If it fails, classify actual parser/library/tactic errors. Check the original
+   unchanged source under isolated 4.34 when available, also through the captain;
+   do not replace Mini's toolchain. A small compatibility patch can be reviewed
+   separately from semantic changes. Recheck all final theorem terms after any
+   patch; replacing them with assumptions is not a port.
+3. In a wrapper, #print axioms book_check, confluent, sr, progress, halts, empty,
+   consistent (qualified for the vendor namespace). Save the exact output and
+   compiler version/digests. Expected ordinary kernel axioms, if any, must be
+   recorded, not guessed from text search. Audit any sorryAx/custom/compiler
+   axiom rather than accepting a clean-looking source.
+4. Build the CLI only if needed to run a small acceptance corpus. Avoid invoking
+   --verdict locally: it auto-builds Lean/C when its cache is missing. Bind BENDTT
+   to the captain-built binary for controlled checks. Include a valid affine
+   function, rejected Q0 live use, rejected Q1 double use, Q2 Data duplication,
+   rejected Q2 function-domain use, accepted strict self-descent, rejected same-
+   size self recursion, opaque model case, and nontrivial live rewrite evidence.
+   Name facts/theorems for Lean checks; do not introduce #guard demonstrations.
+5. For the next implementation step, test/refine one composed path from checked
+   elaborated book + canonical input through shared machine to existing circuit
+   evaluation. Include closures, tagged pairs/matches, partial applications,
+   recursion, Q0 erasure, Q2 shared data, and fuel exhaustion. Pin exact source
+   and output bytes. Broaden tests only for a demonstrated unresolved boundary.
+
+The useful claim after stages 1–3 is “the pinned BendTT checker metatheory is
+kernel-verified in this environment.” After stages A–F it can become “these
+native/oblivious/zk/fixed-program paths refine one accepted Bend semantics under
+this explicit resource/effect profile.” These are distinct milestones with a
+direct path between them.

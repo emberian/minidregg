@@ -1,0 +1,12 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "status": "authored uncompiled helper exposure over previously PASS Op DAG",
+  "change": "Network.evaluateWires exposes literal existing fold; evaluate keeps identical validation/output. Requested by actual trace constraints owner; no new evaluator.",
+  "files": [
+    {
+      "path": "Compiler/ObliviousNetwork.lean",
+      "sha256": "6a322ddaaf611e085a23677f02af1a843adb7489b1f6babdeaefbe72bf4b7b18"
+    }
+  ]
+}

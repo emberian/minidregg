@@ -1,0 +1,12 @@
+{
+  "base": "e851920e92fe0a3c52ffd266715b4796e8eff47e",
+  "owner": "astra_consensus_composition",
+  "files": [
+    {
+      "path": "Compiler/BendClosureInput.lean",
+      "sha256": "f9fbf6c8b02e2c0041573fd950d8d73059f01360a482548ef23747e0b8f416e3",
+      "status": "AUTHORED_UNCOMPILED"
+    }
+  ],
+  "scope": "Actual bounded clear heap loader over fixed code ROM; exact source-data reification; explicit missingliteral/capacity/validation refusal; not private loading protocol or malicious input qualification"
+}

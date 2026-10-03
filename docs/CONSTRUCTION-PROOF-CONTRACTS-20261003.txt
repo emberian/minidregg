@@ -1,0 +1,355 @@
+OBJECTIVE BEND: CONSTRUCTION PROOF CONTRACTS — 2026-10-03
+Owner: graded_execution_architecture; builders and proof owners listed below.
+This is a live proof-work map, not a certification or a new execution taxonomy.
+Destination: Objective Bend integrates object/module composition, partial specs,
+reflective source and persistent identity with Bend semantics and admitted world
+operations. Native, oblivious, proof-producing and homomorphic routes must refine
+that program, not replace it with unrelated object metadata or a second semantics.
+
+EVIDENCE RULE
+A claim has six parts: implementation function; specification; universally
+quantified theorem; explicit premises/axioms; actual consuming path; remaining
+implementation join. Keep these evidence kinds separate:
+ S = checked semantic theorem over the stated model and all its quantified inputs.
+ C = cryptographic theorem/model and concrete assumptions/parameters.
+ R = refinement from the actual implementation to S/C (often still missing).
+ V = executions, mutation refusals, crash/adversarial validation.
+ A passed compilation, example, syntax lint or standard axiom set cannot replace
+ S/R. A conditional theorem whose premise is the desired security property does
+ not construct that property. A finite Bool theorem proved by constructor cases
+ IS general over that finite domain; a successful Bool example alone is not.
+
+CURRENT SOURCE AND CHECK ANCHORS
+Common source: hbox:/home/hbox/workbox/codex-unified-integration-20261003/src.
+Member OO reports integrated cace986a and full548 PASS; subsequent edits remain
+individually qualified. Do not infer new lane compilation from the common green.
+Private live machine: /tank/dregg-build/codex-private-lifecycle-20261003/src;
+ bend-live-check-02.log and check-06.log pass live-source/custody claims.
+Literal compiler: /home/hbox/workbox/codex-bend-logic-20261003/src;
+ check-09.log PASS, actual artifact SHA256
+ 9ca8ad25b18baa14cf4d738d84c88001ffec79bff0aa02988d14f52f3dc049e2.
+Native BFV: /home/hbox/workbox/codex-homomorphic-bend-20261003/src;
+ check-literal-01.log, run-literal-01/evidence-sha256.txt (owner-qualified).
+Agreement: /home/hbox/workbox/codex-agreement-20261003/src.
+Receiver: /home/hbox/workbox/codex-joint-receiver-20261003/src.
+World/source: /home/hbox/workbox/codex-bend-world-20261003/src.
+General trace: /home/hbox/workbox/codex-bend-trace-20261003/src.
+Physical private backend: /home/hbox/workbox/codex-private-backend-20261003;
+ MANIFEST-r2.json supersedes vulnerable r1 ASKS share handling.
+All paths in this block are on hbox. Owner status and direct source inspection
+are distinguished below; no new builds were launched by this proof-map owner.
+
+1. OBJECTIVE BEND ELABORATION, OO COMPOSITION, EVOLUTION
+Implementation: WorldKindInstance.lower/lowerAll/prepare; WorldKindMethods
+resolution; WorldPrototypeConstruction encoding; actual r5 operational object
+bundle. Existing compiled S: prepared_preserves_descriptor/rom,
+byteNoun_injective, definition_sample_decodes, definitionNoun_injective,
+observeProject_unjoint. These establish stated representation/frame facts.
+WorldPrototypeConstructionChecks includes named decided byte-copy Nock cases;
+those are V, not general OO linearization/construction correctness.
+
+Missing S/R, owned member_oo_construction with bend_world_language:
+ - Partial-spec/module elaboration produces an exact typed Bend Book/entry or
+   explicit rejection; all unresolved requirements survive until discharged.
+ - Final-self lookup and prior-super prefix dispatch select the correct
+   provision/source/environment and retain the same final-self handle.
+ - Composition dependency certificate contains every graph/source/state edge
+   actually used; no method-selected authority disappears in elaboration.
+ - Elaboration preserves source typing and live evaluation, including identity,
+   dispatch precedence, diamond/repeated providers, and explicit overrides.
+ - Reflective source retrieval returns exact admitted version; persistent object
+   identity and source version differ deliberately. Evolution proves compatibility
+   or explicit migration, with current authorization and revoked handles checked.
+New member OO authored UNCOMPILED ObjectiveBendComposition/Elaboration:
+finalSelf_cursor_independent, priorSuper_is_prefix, same_final_self,
+dispatched_source, reference_exact, rewrite_identity, constructed_method_exact.
+Types/bodies are actual BendTT.Term. Construction requires lawful parent closure/
+order, discharged requirements, Data captures, actual BendCoreAdmission.Checked
+and exact Book.get for every emitted method. This is a semantic certificate
+contract, not yet a constructive frontend: canonical partial-source loader, finite
+graph validator, generated complete Book+certificate and native Objective consumer
+remain required. No general surface parser/type-elaboration refinement asserted.
+Actual ordinary native receiving now owner-reported PASS primary51 plus stale/
+narrow refusals; that does not qualify the new Objective source tranche.
+Falsifiers: same method name in two ancestors; final-self called from super;
+source changed after planning; schema change with stale persistent handle.
+
+2. TYPED PLAN, HOST EFFECTS, CURRENT AUTHORITY AND ATOMIC INSTALL
+Implementation: WorldMethodTrace.ofAccepted extracts the actual accepted
+candidate, readGuards, controller writes and native checkedRun; compiled S
+read_dependency_retained/write_dependency_retained/every_participant_retained/
+run_retained. This preserves an already accepted execution, not arbitrary Plan
+soundness. PrivateWorldIR.lower_native_exact joins actual programSampleRead and
+ObliviousEvaluator.runWorld to exact native outcome/count under full coverage,
+projection and width/row bounds. It is a real input-lowering join, not a full
+private interpreter theorem.
+Core S: EffectDeclaration.applyPatch_frame/evaluate_frame/
+check_rejected_no_patch/AuthorizedEffect.frame;
+DurableDataIntent.install_model, canonicalBytes/coherent,
+stale_read_guard_rejected. These do not alone prove physical WAL atomicity.
+
+Owned world next join: elaborated typed Plan -> ordered native Payload + separate
+result ABI; returned slots do not become host effects. Pure computation has no
+ambient Base/FFI authority. Receiver checks the current capability/audience,
+source/effect ABI, policy roots and budget even when computation began earlier.
+BendWorldMethod.SourceLink/ofAccepted/complete_trace_retained/
+exact_program_retained retain provenance, not compiler equivalence or admission
+of a new evaluator. Current registry remains Nock-only until actual extension.
+
+Owned joint_receiver_construction authored, UNCOMPILED at this snapshot:
+TypedAuthorization.reserve* distinctions and reserveVerb_allowed_iff_mem;
+JointPromiseAuthorization.admit retains ordinary source admission plus separate
+current reserve authority; JointReceiverAdmission.buildReserve returns actual
+source-admitted one-DataIntent control edit with exact candidate/image/epoch/
+generation; reserve_retains_dependencies/reserve_has_one_control_commit.
+Missing general join: every ordinary/maintenance transition passes shared
+sourceGate; a finite history preserves promised bytes/roots, fresh nullifiers
+and full funding; deferred install + Applied marker + lock removal is one
+physical compare-and-swap. Source Appended readback precedes sourceYES export.
+A consensus COMMIT is not sourceApplied, nor a permit to bypass these checks.
+
+3. BEND SOURCE -> BOUNDED MACHINE -> NETWORK -> BACKEND
+Pinned upstream Bend: 947db722640c86247849343657bf2f7ef01cb7f1.
+Compiled S in namespaced BendTTSource: book_check, confluent, sr, progress,
+halts, empty, consistent, audited standard [propext, Classical.choice, Quot.sound].
+Their source language premises/scope remain intact; none is the runtime proof.
+Pure typed-program termination does not assert that a persistent reactive world
+agent ends its lifetime; each admitted turn has its own execution contract.
+BendLiveMachine.stepChecked returns actual Value or Eval evidence;
+executeChecked returns exact source Trace+Value, or a true-prefix refusal.
+walkChecked_source projects retained evidence. No general adequate-fuel
+completeness, bounded heap simulation, or obliviousness follows from this.
+
+Actual bounded construction owned astra_consensus_composition:
+BendClosureArena has immutable closure/env/pair/application rows, full 18-source
+constructor CodeDenotes, mutually defined Denotes/EnvironmentDenotes, checked
+allocate. BendClosureMachine.step/run has bounded heap, frames and argument
+spine, no source-evaluation oracle. Authored UNCOMPILED at this snapshot.
+Q0 binders occupy environment positions; cached Data is computed at allocation.
+An arbitrary closure denotation is NOT a Value theorem.
+
+Owned concrete proof contribution in the same lane:
+Theory/BendClosureReification.lean, authored and captain-check requested:
+ Denotes.extends, EnvironmentDenotes.extends (mutual induction over actual
+ reification); Entry.extend/extend_pointer; fill_read/fill_size;
+ append_extends; append_reads_new; allocate_shape; allocate_extends.
+Qualified captain evidence: Arena+Reification PASS bend-closure-check-04.log;
+Machine+Decode PASS bend-closure-check-05.log. CodeRefinement all-term completeness/functional uniqueness PASS
+controller-denotation-check-01.log. Same batch controller-owned heap/environment
+Denotation.functional theorems PASS; Simulation context/helper tranche also PASS.
+Whole controller simulation remains open.
+These checked lemmas establish general exact row/term/substitution preservation,
+not complete controller-to-source simulation.
+
+Additional delegated actual publication decoder proof, qualified PASS:
+Theory/BendClosureCodeRefinement.lean defines all-constructor codeDepth;
+decodeCode_complete recovers every CodeDenotes term at any adequate fuel;
+CodeDenotes.functional follows from the deterministic decoder at shared max
+depth; decodeCode_exact_source joins any successful decode to the publication
+certificate. This is finite source-table reification, not evaluator completeness.
+
+Next central S: define continuation/control plug and invariant retaining exact
+CodeDenotes, reification, well-formed stack, Value/Data cache facts and library
+Book relation. Each reachable microstep preserves plug or performs source Eval;
+stuttering needs a well-founded microstep rank for completeness. Count Eval steps
+only; public physical capacity has separate cost. Refusal must expose a valid
+source prefix or a separately specified bounded-machine outcome, never success.
+Then compose finite run simulation and exact complete outcome/value theorem.
+ObliviousGate/Network full-scan read/write constructions need actual controller
+lowering, bounded indices and gate-evaluation correspondence. Network scheduling
+and masking are separate from semantic simulation.
+
+General proof route owned bend_semantics_audit:
+BendExecutionTrace append/parallel/typed/closed_live/value_cannot_step;
+BendTraceConstraints opExpr_correct, gateConstraint_correct/bits,
+constraints_correct characterize arbitrary Bool wire/gate assignments.
+Authored awaiting qualification. New descriptor_forces/ir2_forces and SSA
+BooleanGraph uniqueness address actual emitted wires, lowered IR2 row relations
+and public pins; native verifier -> row relation remains an explicit backend
+soundness obligation. Still need controller
+network -> source Trace, descriptor -> actual IR2 serialization refinement and
+backend soundness instantiation. Native Bread consumer is
+prove_vm_descriptor2_for_config / verify_vm_descriptor2_with_config in
+circuit/src/descriptor_ir2.rs. Mini Ext6 proof controller is nonexecuting.
+FRI parameters are not qualified128; entropy fix's 3 narrow passes do not prove
+whole backend hiding. Preserve exact native reexecution admission until replaced
+by an actually justified consumer.
+
+4. FIXED EXACT CIRCUIT, NUMERIC DOMAINS AND FHE
+Compiled S in BendLogicCase: outputExpr_correct, constraints_correct,
+descriptor_correct, wrong_output_refused for every Plan and input/output Bool,
+including arbitrary auxiliary assignment. BendLogicSpecialization proves
+source_typed/closed/live/source_normalizes and descriptor source sound/complete
+for the exact admitted enum source construction; BendLogicTrace connects actual
+source Trace. This is a complete finite fragment, not arbitrary Objective Bend.
+BendLogicBFVPlain.modulus_prime, plaintext_output_exact/descriptor_exact checked
+for prime1032193. These concern plaintext Field arithmetic, NOT ciphertexts.
+
+Actual Host emitter uses the SAME outputExpr+flatten at Rat and BabyBear; native
+validate_artifact compares signed gate projection and expected compiler hash.
+Qualified PASS check-mux-04.log: BendLogicSignedSemantics proves literal/mux integer
+correctness and every intermediate bound, same-field Int-cast evaluation, and
+literal_flat_layout/mux_flat_layout for every Field F. This addresses the finite
+fragment origin/shape seam, not arbitrary AST lowering or native Rust refinement.
+Same batch DynamicMux source typed/live/closed/source_trace and arbitrary descriptor
+soundness PASS; MuxEntry.compile_exact/compiled_entry_trace_sound connect actual
+Book.get/T/v/transparent premises to source Walk/Eval.call count1. Actual parsed
+Book.check objective.choose exercised all8 Ref-call inputs/count1; inline4/5
+counts remain distinct. Artifact
+ddc1747b6a233ff49eb337dd8f05cc8b7539bbbf660a67f678218a1d8d9f3ac7
+was handed to native FHE; this is not the general world-governance frontend proof.
+Remaining general S/R: integer-coefficient expression/flatten projection commutes
+with the target ring homomorphism. Do not posit a total Rat -> finite-field
+homomorphism: prove denominator-one fragment or explicit valid denominators.
+No proof transfers to composite Z_t merely by calling it Field; CKKS approximate
+arithmetic requires an error relation and cannot silently supply exact equality.
+
+Native FHE evaluate/check perform real BFV negate+plain-add at depth0; independent
+child reexecution compares exact Completion/canonical ciphertext. Actual source
+artifact above now ran with 4096 slots, owner-only decode, altered-binding/
+canonical-ciphertext/PowerBasis refusal checks PASS. V plus a real source-to-
+plaintext S join; Rust transformation/codec refinement and BFV noise correctness
+remain missing R/C. Physical run currently one negation plan; all four Plans
+are covered by the source theorem, not four physical circuit demonstrations.
+Key resident in parent only; this is ephemeral conformance custody, not durable
+product release. No arbitrary public decrypt endpoint was added.
+
+Owned homomorphic_bend_construction next: signed projection bridge; native gate
+and canonical serialization refinement; parameter-bound BFV ring/sampling/noise
+correctness (or explicitly consumed published theorem), then ct*ct mux/relin.
+New dynamic profile tracks lifetime ciphertext depth across repeated state use:
+a depth1 plan applied to depth1 inputs produces depth2, not depth1. Authored
+plan-depth1-lifetime2 profile admits 0->1 and 1->2 and refuses further unrefreshed
+depth2 inputs; dynamic source-artifact/native qualification remains pending.
+input_depths require authenticated lineage/provenance or proof; an unchecked
+client depth declaration is not a noise certificate. Key epoch binds canonical
+relinearization key as well as parameters/public key. Need lifetime query/failure
+envelope and eventual refresh/rekey semantics; no universal noise bound claimed.
+Honest owner-generated Bool/key/sampling is a stated premise; a signature/tag
+cannot prove plaintext bitness. Threshold epochs, malicious input proofs and
+production current receiving/release require their own actual constructions.
+Parameter-picker names containing 128 are not security estimates/proofs.
+
+5. PRIVATE OBSERVATION, COST, CUSTODY AND MALICIOUS MPC
+Compiled generic PrivacyProfile.compose_noninterference concerns exact stated
+observer relation, not a simulator for physical network/crypto execution.
+Concrete falsifier: Plan(false,false) has equal allowed output false but source
+steps 1 vs 2. Public exact charge/refund reveals the input even with a fixed
+BFV graph. Public Request.canonical_charge must consume a new versioned native
+fixed-capacity tariff/envelope, or remain in an appropriately private ledger.
+Do not falsify source RunClaim.steps or equate BFV gate cost with source count.
+The first native BFV conformance uses zero fees, not a platform tariff theorem.
+
+Required S/C/R join: for related secrets and equal permitted public history,
+the ENTIRE observable execution has the specified relation/distribution:
+program identity, publication hashes, accesses, output/error shape, fees/refunds,
+retry/refusal, transport, timeout, recovery and release. Fixed graph alone does
+not hide secret method selection; universal/padded authorized graph needed.
+Finite bounds must be public and enforced, including refused outcomes.
+No full private Bend runtime theorem exists yet.
+
+Compiled custody S: PrivateSuccessorCustody.reserve/burn never reassign a spent
+pool row; NativeBinding/ofAccepted_bound/native_successor_rebinds/
+native_binding_survives/native_successor_fields bind exact accepted IntentRecord
+and retain writes, read guards, nullifiers, charge/event. Qualified carries a
+privateRecovery predicate and proof as premise: this is not recovery construction.
+
+Physical backend owner private_backend_construction: ASKS V2 freezes accepted
+share before RA Echo; Rust focused14 PASS, previous23 crash/recovery/refill tests.
+Model static n=3f+1, n<=16, authenticated PRIVATE reliable pairwise channels,
+SHA256 random-oracle conjecture, variable-time GF128 reference. No PQ/mobile
+corruption theorem. No complete malicious MPC gate/AVSS/private output consumer.
+New r3 native VABA+IndexACS/canonical wire/generic WAL/ACS driver has focused
+10 PASS,28 unchanged skipped; tar hash
+1731878242722387b7f586868b49eec01d1d15b1cb7ba905cdb0ca2373016108.
+No mechanized security theorem follows. If accepted_share is factored into a
+FrozenShare primitive, prove actual reachable Rust update/call-site refinement
+to its Lean history model; Some-never-changes in an unrelated model is insufficient.
+Compiler.PrivateBackendBoundary byte injectivity/exact successor/relabel claims
+are authored uncompiled, not proofs of the Rust implementation.
+
+Next mechanized invariant over actual ASKS transitions: accepted_share never
+changes after Echo, remains matched to immutable RBC commitment. Causal RA1
+completion -> f+1 honest frozen supporting shares -> reconstruction availability.
+Then distinct-point degree<=f interpolation and full commitment consistency
+establish common result (or specified common zero), separately from hash collision
+assumptions. GF128 operations, serialization and WAL/restart require refinement.
+Corruption/security simulation, adaptive schedules and share erasure do not
+follow from deterministic agreement or reconstruction tests.
+
+6. AGREEMENT SAFETY, CONDITIONAL LIVENESS, RECOVERY
+Compiled S: JointInvocationCandidate injective codec and native projection;
+JointDecisionRecovery commit/abort exclusive, decided preservation, lastYES needs
+all otherYES+retained job, Trace.preserves_decided/abort_stable_under_trace;
+JointReservation install preserves held bytes/roots for gated ordinary commits;
+NativeJointAgreement replay/persist-beforeemit seam. These consume FINALIZED
+FACTS, so none is a consensus proof.
+
+Authored second tranche UNCOMPILED at last owner report: actual GenericSimplex
+start/step/pump old-view executable loop; local vote-once/disabled-no-vote;
+GenericSimplexQuorum.honest_intersection at n3f+1; GenericSimplexIO.VerifiedCommit
+roster/count/distinct proofs; exactCandidate binding. Actual signature verification
+and reachable provenance are not consequences of quorum cardinality.
+
+Assigned proof split (not missing ownership): astra_consensus_frontier owns local
+executable extraction/preservation; astra_adversarial_architecture owns global
+reachable-event proof, not consensus imported as a free hypothesis.
+New authored global tranche: GenericSimplexVAInvariant and
+GeneralSimplexReachability prove READY causal origin and conditional prefix
+consequences; actual Network.Reachable uses start/step. The crucial
+Reachable -> AuditRefinement bridge is explicitly OPEN (frontier local extraction);
+refined_engine_commits_compatible is therefore conditional, not completed
+executable consensus safety. r2 core+global VA+Reachability+Local modules now
+compile and axiom-audit PASS; exact snapshot in codex-simplex-proof-20261003/
+pass-r2/SHA256SUMS. Local extraction and export attribution remain open.
+Next chain: durable SentHistory survives drain/restart -> authenticated delivery
+from honest identity references prior durable emission -> per-view COMMIT locks
+exclude other candidates/votes -> honest quorum intersection + finite READY causal
+origins -> VA consistency -> prepared support -> outer prefix safety. Defensive
+failed flag on conflicting commit does not prove conflict unreachable.
+Input.checked/common source validity must bind exact virtual ancestor replay;
+sourceApplied exports require receiver's actual Appended readback.
+Liveness separately states post-GST delivery bound, timeout>=7Delta, fair tick/
+continuation, common valid source availability, finite verification/recovery and
+sufficient retained resources. A safe terminal prefix says nothing about progress.
+Native r1 harness now owner-reported PASS for four logical nodes over actual
+TCP/HMAC/MLDSA/CAS lost-reply paths (ENGINE-MANIFEST in agreement lane). r2
+State.audit records chronological actual events, authored compilation pending.
+LocalFaithful -> actual-step extraction remains open. Historical source validation
+must fairly serve exact-prefix availability. MAX_FRAME16MiB also bounds full
+durable journal reads; retained full history/context per CAS has no GC or
+reconfiguration proof. A passing finite trace does not prove indefinite funded
+lifecycle. These schedules are V, valuable falsifiers, not this theorem.
+
+IMMEDIATE PROOF JOINS AND OWNERS
+1. Closure controller -> exact source Eval/Trace: composition; this owner supplies
+   actual arena extension lemmas. Then semantics auditor connects network/AIR.
+2. Objective Bend elaboration/dispatch -> typed source + complete dependencies:
+   member OO/world. This is the language integration, not a metadata sidecar.
+3. Authenticated reachable agreement -> prefix safety: adversarial/frontier;
+   receiver joins persisted consensus decision to actual source-applied effect.
+4. Typed Plan -> current admitted atomic effect/result release: world/receiver.
+5. Complete private history incl fee/refusal/recovery: privacy/world/backend;
+   presently a demonstrated counterexample prevents broad private-runtime claim.
+6. FHE signed-domain/Rust/noise and ASKS frozen-support/security refinements:
+   homomorphic builder, logic compiler, private backend. These are distinct joins.
+
+RESUME / REVIEW CHECKLIST
+This owner edits only the named proof-contract document and the delegated new
+BendClosureReification and BendClosureCodeRefinement modules, not other owners' source. No builds/commits run.
+Read current captain verdict before changing any UNCOMPILED status. Claims are
+attached to functions and exact consumer, not aggregate theorem or pass counts.
+Next: fix captain feedback on arena lemmas; add exact newly allocated row theorem
+if needed; use those lemmas in controller simulation. Update this map with actual
+Objective Bend elaboration interfaces as owners author them. Root owns integration.
+
+PERSISTENT COMPUTATION ADDITION (ACTIVE CONSTRUCTION)
+See BEND-PERSISTENT-COMPUTATION-20261003.txt. Root expanded this owner into actual
+first-class activity persistence. New Compiler/BendClosureContinuationCodec and
+Host/BendContinuationProbe are frozen, authored UNCOMPILED, captain scope queued.
+All actual State fields and exact operational context are encoded canonically;
+general same-context serialized_resume_exact consumes actual Machine.run_add.
+Two-process save/resume consumer exercises mid-lookup state and exact result/count;
+current native admission, durable barrier, worker fence and export authority remain
+explicit joins with world/captain/portable/service owners. This is not a claim that
+all native CPU registers or legacy SPK process context are captured.

@@ -1,0 +1,11 @@
+{
+  "baseSourceSHA256": "1754c2c41f6b7c88d3f373c30835b7c4c3aab9c060977eb3f9dc3e14042c16d5",
+  "newSourceSHA256": "a58378ee369f5fdf5e663fe2c218fed37dd3ecbb32a22625a3197635c42d1056",
+  "status": "authored-uncompiled-nextcohort-only",
+  "source": "common66042a8c read-only",
+  "changes": [
+    "one family import",
+    "NativeAdmission proof constructor indexes exact Accepted.intent",
+    "derive re-admits original ingress at original prefix; noCAS/replayshortcut"
+  ]
+}
