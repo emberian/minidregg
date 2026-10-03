@@ -288,10 +288,9 @@ pub(super) fn create(
     } else {
         "world-kind"
     };
-    if let Some(room) = room {
-        if reference(root, room)?.get("private").is_some() {
-            return Err("world kinds do not yet support private room payload sealing".into());
-        }
+    let room_reference = room.map(|room| reference(root, room)).transpose()?;
+    if room_reference.as_ref().is_some_and(|resolved| resolved.get("private").is_some()) {
+        return Err("world kinds do not yet support private room payload sealing".into());
     }
     let (source, receipt, reservation) = birth(
         root,
@@ -303,7 +302,7 @@ pub(super) fn create(
             owner: member(workspace, "subject")?,
             predicate: &predicate,
             funding: None,
-            room,
+            room: room_reference.as_ref(),
             program: None,
             fields: None,
             world: Some(data),

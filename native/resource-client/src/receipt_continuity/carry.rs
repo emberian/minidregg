@@ -1557,6 +1557,7 @@ pub(crate) fn retry_lookup(attempt: &Path, mode: &str, direct: bool) -> Result<O
             root: root.to_path_buf(),
             workspace,
             ticket: Some(ticket),
+            attempt: canonical_attempt(&attempt)?,
         }),
         &outcome,
         true,

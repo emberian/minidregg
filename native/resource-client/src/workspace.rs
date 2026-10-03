@@ -1018,7 +1018,23 @@ pub(crate) fn read(
     window: Option<(&str, &str)>,
     ephemeral: bool,
 ) -> Result<()> {
-    let reference = reference(root, resource_name)?;
+    read_reference(root, workspace, &reference(root, resource_name)?, resource_name, view, window, ephemeral)
+}
+
+/// `read` with a reference this action already resolved. A shared name's
+/// resolution is itself a signed discovery; resolving it a second time in the
+/// same action repeats that whole exchange sequence for nothing, and the read
+/// below re-checks the room's index pointer in its own coherent batch.
+pub(crate) fn read_reference(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    resource_name: &str,
+    view: &str,
+    window: Option<(&str, &str)>,
+    ephemeral: bool,
+) -> Result<()> {
+    let reference = reference.clone();
     if reference.get("sharedName").is_some() {
         return read_opened(root,workspace,&reference,resource_name,view,window,ephemeral);
     }
@@ -3903,6 +3919,13 @@ pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome>
 }
 
 pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+    // A submit in this same process already recorded this exact confirmed
+    // point (e.g. `birth` reading back the attempt it just submitted).
+    if let AttemptOutcome::Confirmed(value) = retained_attempt_outcome(attempt)? {
+        if receipt_continuity::finished_in_process(attempt, &value)? {
+            return Ok(Some(value));
+        }
+    }
     let continuity = receipt_continuity::begin_attempt(attempt)?;
     match retained_attempt_outcome(attempt)? {
         AttemptOutcome::Confirmed(value) => {
@@ -4048,9 +4071,10 @@ struct BirthShape<'a> {
     owner: &'a str,
     predicate: &'a Value,
     funding: Option<&'a str>,
-    /// `--in ROOM`: the workspace reference name of the room the resource is
-    /// born in (its parent cell); `None` births at the root.
-    room: Option<&'a str>,
+    /// `--in ROOM`: the room the resource is born in (its parent cell), as
+    /// the reference this action already resolved; `None` births at the root.
+    /// A shared room name is resolved once per action, not again here.
+    room: Option<&'a Value>,
     /// `storage: "nock"`: the program's canonical DREGG/PROGRAM/v1 record bytes (hex)
     /// from the Host's own nock-check verdict and, when admissible, its cell id.
     /// A program is born at its content address, so no target is reserved.
@@ -4305,8 +4329,7 @@ fn birth(
     // birth gate requires it to cover the room with `place` (or `mutate`), held
     // by the creator, and the room's law to accept the placement.
     let room = match shape.room {
-        Some(room_name) => {
-            let room_ref = reference(root, room_name)?;
+        Some(room_ref) => {
             let placement = room_ref
                 .get("operationCapability")
                 .and_then(Value::as_str)
@@ -4679,13 +4702,14 @@ fn create_with_template(
         }
         roomkey::keys_name(name_value)?;
     }
+    let parent_reference = room.map(|parent| reference(root, parent)).transpose()?;
     // A cell born in a private room is sealed under it by default.
-    let sealed_in = match room {
-        Some(parent) => reference(root, parent)?
+    let sealed_in = match (room, &parent_reference) {
+        (Some(parent), Some(resolved)) => resolved
             .get("private")
             .is_some()
             .then(|| parent.to_owned()),
-        None => None,
+        _ => None,
     };
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
     // canonical DREGG/PROGRAM/v1 record bytes and, when admissible, its cell id.
@@ -4719,7 +4743,7 @@ fn create_with_template(
             owner: &subject,
             predicate: &predicate,
             funding: None,
-            room,
+            room: parent_reference.as_ref(),
             program: program.clone(),
             fields,
             world: None,
@@ -6131,14 +6155,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             }
             // A cell born in a private room is read through its room's keys,
             // as `tail` does (AUDIT-ROOMS, client defect 2).
+            let resolved = reference(&root, &name)?;
             if action == "read" {
-                if let Some(room) = sealed_room(&root, &reference(&root, &name)?) {
+                if let Some(room) = sealed_room(&root, &resolved) {
                     return read_private(&root, &workspace, &name, &room);
                 }
             }
-            read(
+            read_reference(
                 &root,
                 &workspace,
+                &resolved,
                 &name,
                 if action == "describe" {
                     "policy"

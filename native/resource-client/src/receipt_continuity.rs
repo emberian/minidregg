@@ -295,11 +295,42 @@ impl Settings {
         if crate::host_image_sha256(&self.verifier)? != self.verifier_sha256 {
             return Err(fail("local verifier image changed"));
         }
-        if local_identity(&self.verifier, config)? != self.identity {
+        if checked_identity(&self.verifier, &self.verifier_sha256, config)? != self.identity {
             return Err(fail("configured deployment identity changed"));
         }
         Ok(())
     }
+}
+
+/// `profile` is a pure function of the verifier image and the config bytes.
+/// Within one process, an identical (image SHA-256, config bytes) pair
+/// reuses the identity the verifier already printed instead of spawning the
+/// Lean verifier again for every check of every hop. A changed image or a
+/// changed config byte misses the cache and runs `profile` again.
+static PROFILED: std::sync::Mutex<Vec<(PathBuf, String, Vec<u8>, Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Result<Value> {
+    let bytes = fs::read(config).map_err(fail)?;
+    if let Some((_, _, _, identity)) = PROFILED
+        .lock()
+        .map_err(|_| fail("verifier profile cache poisoned"))?
+        .iter()
+        .find(|(path, sha, seen, _)| path == verifier && sha == verifier_sha256 && *seen == bytes)
+    {
+        return Ok(identity.clone());
+    }
+    let identity = local_identity(verifier, config)?;
+    // The verifier read the config itself; keep the entry only if the bytes
+    // it could have read are still the bytes this key names.
+    if fs::read(config).map_err(fail)? == bytes {
+        let mut cache = PROFILED
+            .lock()
+            .map_err(|_| fail("verifier profile cache poisoned"))?;
+        cache.retain(|(path, _, _, _)| path != verifier);
+        cache.push((verifier.to_path_buf(), verifier_sha256.to_owned(), bytes, identity.clone()));
+    }
+    Ok(identity)
 }
 fn local_identity(verifier: &Path, config: &Path) -> Result<Value> {
     let output = Command::new(verifier)
@@ -748,6 +779,33 @@ pub(crate) struct AttemptTicket {
     root: PathBuf,
     workspace: Value,
     ticket: Option<Ticket>,
+    attempt: PathBuf,
+}
+
+/// Attempts whose confirmed outcome this process already carried through
+/// `finish_attempt`, with that exact outcome. Recording the same confirmed
+/// point again in the same process would repeat the lock, verifier checks
+/// and fsyncs for an anchor that is already durable.
+static FINISHED_ATTEMPTS: std::sync::Mutex<Vec<(PathBuf, Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// The attempt path with its parent canonicalized, as `begin_attempt` names it.
+fn canonical_attempt(attempt: &Path) -> Result<PathBuf> {
+    let attempt = crate::absolute(attempt)?;
+    let parent = attempt.parent().ok_or_else(|| fail("attempt has no parent"))?;
+    let name = attempt.file_name().ok_or_else(|| fail("attempt has no name"))?;
+    Ok(fs::canonicalize(parent).map_err(fail)?.join(name))
+}
+
+/// Whether this process already finished continuity for exactly this
+/// confirmed outcome of this attempt.
+pub(crate) fn finished_in_process(attempt: &Path, outcome: &Value) -> Result<bool> {
+    let attempt = canonical_attempt(attempt)?;
+    Ok(FINISHED_ATTEMPTS
+        .lock()
+        .map_err(|_| fail("finished attempt record poisoned"))?
+        .iter()
+        .any(|(path, value)| *path == attempt && value == outcome))
 }
 /// Shared submit/retry seam: only direct workspace attempts opt into workspace
 /// custody. Standalone clients retain their existing exact-retry behavior.
@@ -797,6 +855,7 @@ pub(crate) fn begin_attempt(attempt: &Path) -> Result<Option<AttemptTicket>> {
         root,
         workspace,
         ticket,
+        attempt: parent.join(attempt.file_name().ok_or_else(|| fail("attempt has no name"))?),
     }))
 }
 pub(crate) fn finish_attempt(
@@ -833,6 +892,10 @@ pub(crate) fn finish_attempt(
                 )
             },
         )?;
+        FINISHED_ATTEMPTS
+            .lock()
+            .map_err(|_| fail("finished attempt record poisoned"))?
+            .push((attempt.attempt, outcome.clone()));
         Ok(())
     })();
     result.map_err(|error: String| format!("{error}; receipt acknowledgment refused, but mutation may already be accepted; retain the exact attempt and recover by lookup"))
@@ -1343,5 +1406,56 @@ mod tests {
             assert!(child.wait().unwrap().success());
         }
         assert_eq!(anchor(&root.0, &ticket.settings).unwrap(), point(9));
+    }
+
+    /// The verifier's `profile` runs once per (image SHA-256, config bytes)
+    /// in a process, not once per check; any config byte change runs it again.
+    #[test]
+    fn verifier_profile_runs_once_per_image_and_config_bytes() {
+        let root = Temp::new();
+        let count = root.0.join("count");
+        let verifier = root.0.join("verifier");
+        fs::write(
+            &verifier,
+            format!(
+                "#!/bin/sh\necho x >> {}\nprintf '{{\"domain\":\"7\",\"semantics\":\"8\",\"expectedSeed\":\"9\"}}'\n",
+                count.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&verifier, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = root.0.join("config.json");
+        fs::write(&config, b"{\"a\":1}").unwrap();
+        let runs = || fs::read_to_string(&count).map(|t| t.lines().count()).unwrap_or(0);
+        let first = checked_identity(&verifier, "sha-a", &config).unwrap();
+        assert_eq!(first["domain"], "7");
+        assert_eq!(checked_identity(&verifier, "sha-a", &config).unwrap(), first);
+        assert_eq!(runs(), 1);
+        fs::write(&config, b"{\"a\":2}").unwrap();
+        checked_identity(&verifier, "sha-a", &config).unwrap();
+        assert_eq!(runs(), 2);
+        checked_identity(&verifier, "sha-b", &config).unwrap();
+        assert_eq!(runs(), 3);
+        checked_identity(&verifier, "sha-b", &config).unwrap();
+        assert_eq!(runs(), 3);
+    }
+
+    #[test]
+    fn finished_attempt_is_recognised_only_for_its_exact_outcome() {
+        let root = Temp::new();
+        let attempt = root.0.join("attempts").join("a1");
+        fs::create_dir_all(&attempt).unwrap();
+        let outcome = json!({"type":"confirmed","acceptedCount":"5","worldRoot":"6"});
+        assert!(!finished_in_process(&attempt, &outcome).unwrap());
+        FINISHED_ATTEMPTS
+            .lock()
+            .unwrap()
+            .push((canonical_attempt(&attempt).unwrap(), outcome.clone()));
+        assert!(finished_in_process(&attempt, &outcome).unwrap());
+        let other = json!({"type":"confirmed","acceptedCount":"5","worldRoot":"7"});
+        assert!(!finished_in_process(&attempt, &other).unwrap());
+        let sibling = root.0.join("attempts").join("a2");
+        fs::create_dir_all(&sibling).unwrap();
+        assert!(!finished_in_process(&sibling, &outcome).unwrap());
     }
 }
