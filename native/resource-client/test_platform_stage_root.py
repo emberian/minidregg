@@ -74,3 +74,21 @@ class RootStageTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,"original bytes differ"):
                 stage.metadata_variant(value,Path("/family"),Path("/frame/candidate"),staged,{})
             self.assertEqual(component.read_text(),"{}")
+
+    def test_internal_fixture_directory_link_allowed_without_alias_writes(self):
+        stream=io.BytesIO()
+        with tarfile.open(fileobj=stream,mode="w") as archive:
+            target=tarfile.TarInfo("fixture/a");target.type=tarfile.DIRTYPE;archive.addfile(target)
+            archive.addfile(tarfile.TarInfo("fixture/a/head.json"))
+            link=tarfile.TarInfo("fixture/b");link.type=tarfile.SYMTYPE;link.linkname="a";archive.addfile(link)
+        stream.seek(0)
+        with tarfile.open(fileobj=stream) as archive:self.assertEqual(len(stage.safe_archive(archive)),3)
+    def test_member_traversing_directory_link_refused(self):
+        stream=io.BytesIO()
+        with tarfile.open(fileobj=stream,mode="w") as archive:
+            target=tarfile.TarInfo("fixture/a");target.type=tarfile.DIRTYPE;archive.addfile(target)
+            link=tarfile.TarInfo("fixture/b");link.type=tarfile.SYMTYPE;link.linkname="a";archive.addfile(link)
+            archive.addfile(tarfile.TarInfo("fixture/b/overwrite.json"))
+        stream.seek(0)
+        with tarfile.open(fileobj=stream) as archive:
+            with self.assertRaisesRegex(RuntimeError,"member traverses a link"):stage.safe_archive(archive)

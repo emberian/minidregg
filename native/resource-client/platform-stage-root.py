@@ -77,15 +77,18 @@ def safe_archive(archive):
     members=archive.getmembers()
     names={member.name:member for member in members}
     need(len(names)==len(members),"source archive contains duplicate paths")
+    links={Path(m.name) for m in members if m.issym()}
     for member in members:
         p=Path(member.name)
         need(not p.is_absolute() and ".." not in p.parts and member.name not in ("","."),"source archive path escapes")
+        need(not any(parent in links for parent in p.parents),"source archive member traverses a link")
         if member.issym():
-            # Git contains an intentional relative fixture link. Preserve only
-            # direct links to regular archive members, never directory/link chains.
+            # Git contains intentional relative file and directory fixture links.
+            # No archived write may traverse a link or target a link chain.
             target=posixpath.normpath(posixpath.join(posixpath.dirname(member.name),member.linkname))
             need(not Path(member.linkname).is_absolute() and not target.startswith("../")
-                 and target in names and names[target].isfile(),"source archive contains unsafe link or special file")
+                 and target in names and (names[target].isfile() or names[target].isdir())
+                 and not any(parent in links for parent in Path(target).parents),"source archive contains unsafe link or special file")
         else:
             need(member.isfile() or member.isdir(),"source archive contains unsafe link or special file")
         need(".git" not in p.parts and "target" not in p.parts,"source archive contains mutable build/Git state")
