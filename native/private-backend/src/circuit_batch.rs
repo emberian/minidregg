@@ -33,17 +33,26 @@ pub struct Plan {
 }
 impl Plan {
     pub fn assignments(&self) -> Vec<(u64, usize, &Correlation)> {
+        // Material indices depend only on AND gates; each public tick repeats
+        // their order. Walk that order once rather than rescanning all gates
+        // for every tick, including ticks with no available material.
+        let and_gates: Vec<usize> = self
+            .network
+            .gates
+            .iter()
+            .enumerate()
+            .filter_map(|(gate, op)| matches!(op, Op::And(..)).then_some(gate))
+            .collect();
         let mut out = vec![];
-        let mut i = 0;
-        for tick in 0..self.public_ticks {
-            for (gate, op) in self.network.gates.iter().enumerate() {
-                if matches!(op, Op::And(..)) {
-                    if let Some(row) = self.rows.get(i) {
-                        out.push((tick, gate, row));
-                    }
-                    i += 1;
-                }
+        if and_gates.is_empty() {
+            return out;
+        }
+        for (i, row) in self.rows.iter().enumerate() {
+            let tick = (i / and_gates.len()) as u64;
+            if tick >= self.public_ticks {
+                break;
             }
+            out.push((tick, and_gates[i % and_gates.len()], row));
         }
         out
     }
@@ -217,8 +226,8 @@ pub fn reserve_plan_release(
     }
     let _guard = custody::lock(&local.with_extension("reservation.lock"))?;
     let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    let mut prospective = before.clone();
-    // Validate ALL profile/stock/alias/spent checks before consuming any rows.
+    // Validate ALL pool/stock checks before one complete reservation. The
+    // prospective journal binds every new row and every retained allocation.
     for id in &plan.rows {
         if id.pool != pool.id || id.row.value()? as u128 >= pool.len() as u128 {
             return Err(Error::new(
@@ -226,41 +235,33 @@ pub fn reserve_plan_release(
                 "plan pool/stock mismatch",
             ));
         }
-        prospective = prospective.reserve(id.clone(), plan.generation.clone(), Purpose::Triple)?;
     }
-    let mut confirmed = before.clone();
-    for id in &plan.rows {
-        let mut req = vec![1];
-        req.extend(crate::codec::request(id, &plan.generation, Purpose::Triple));
+    let confirmed = if plan.rows.is_empty() {
+        // XOR-only plans have no reservation; the empty batch codec correctly
+        // refuses empty requests, so retain the ordinary snapshot/readback.
+        before
+    } else {
+        let prospective =
+            before.reserve_batch(&plan.rows, plan.generation.clone(), Purpose::Triple)?;
+        let mut req = vec![2];
+        req.extend(crate::codec::batch_request(
+            &plan.rows,
+            &plan.generation,
+            Purpose::Triple,
+        ));
         let next = Journal::decode(&custody::rpc(anchor, &req)?)?;
-        if !next.extends(&confirmed)
-            || !confirmed
-                .allocations
-                .iter()
-                .all(|a| next.allocations.contains(a))
-            || !next.allocations.iter().any(|a| {
-                a.id == *id
-                    && a.generation == plan.generation
-                    && a.purpose == Purpose::Triple
-                    && !a.consumed
-            })
-        {
+        if !next.extends(&prospective) || !next.preserves_allocations(&prospective) {
             return Err(bad("batch allocation binding/retention"));
         }
-        confirmed = next;
-    }
+        next
+    };
     // The fixed public prefix is complete before snapshot or FIRST secret row.
     custody::snapshot(local, &confirmed.encode())?;
     if std::fs::read(local)? != confirmed.encode() {
         return Err(bad("batch snapshot readback"));
     }
     let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    if !latest.extends(&confirmed)
-        || !confirmed
-            .allocations
-            .iter()
-            .all(|a| latest.allocations.contains(a))
-    {
+    if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
         return Err(bad("batch anchor regression"));
     }
     let mut material = vec![];
@@ -306,6 +307,62 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+    #[test]
+    fn assignments_preserve_reference_order_including_partial_plans() {
+        fn reference(p: &Plan) -> Vec<(u64, usize, &Correlation)> {
+            let mut out = vec![];
+            let mut i = 0;
+            for tick in 0..p.public_ticks {
+                for (gate, op) in p.network.gates.iter().enumerate() {
+                    if matches!(op, Op::And(..)) {
+                        if let Some(row) = p.rows.get(i) {
+                            out.push((tick, gate, row));
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            out
+        }
+        for mask in 0..32 {
+            for ticks in 0..5 {
+                for rows in 0..24 {
+                    let mut p = plan();
+                    p.network.gates = (0..5)
+                        .map(|i| {
+                            if mask & (1 << i) != 0 {
+                                Op::And(0, 1)
+                            } else {
+                                Op::Xor(0, 1)
+                            }
+                        })
+                        .collect();
+                    p.public_ticks = ticks;
+                    p.rows = (0..rows)
+                        .map(|row| Correlation {
+                            pool: Nat::new(42),
+                            row: Nat::new(row),
+                        })
+                        .collect();
+                    assert_eq!(p.assignments(), reference(&p));
+                }
+            }
+        }
+    }
+    #[test]
+    fn xor_only_maximum_profile_needs_no_material_assignments() {
+        let mut p = plan();
+        p.network.gates = vec![Op::Xor(0, 1); 65536];
+        p.public_ticks = 4096;
+        p.rows.clear();
+        p.validate().unwrap();
+        assert!(p.assignments().is_empty());
+        // This public method also remains total when an unvalidated plan
+        // has no AND gates and an arbitrary tick count or extraneous rows.
+        p.public_ticks = u64::MAX;
+        p.rows = plan().rows;
+        assert!(p.assignments().is_empty());
     }
     #[test]
     fn actual_native_plan_fixture_byte_identity_and_schedule() {
@@ -386,6 +443,133 @@ mod tests {
         assert!(Plan::decode(&trailing).is_err());
         assert_eq!(p.generation.command, vec![3]); // plan lives separately from accepted native command
     }
+    fn batch_scratch() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "mini-batch-boundary-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        root
+    }
+    #[test]
+    fn lost_whole_batch_reply_burns_all_rows_and_exact_retry_refuses() {
+        use std::{fs, os::unix::net::UnixListener, thread};
+        let root = batch_scratch();
+        let pool = Pool::provision(&root.join("pool"), &[vec![1; 4], vec![2; 4]]).unwrap();
+        let sock = root.join("anchor.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let authority = root.join("authority");
+        let anchor_root = authority.clone();
+        let h = thread::spawn(move || {
+            let mut a = custody::Anchor::open(&anchor_root).unwrap();
+            for turn in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = custody::read_packet(&mut stream).unwrap();
+                assert_eq!(request[0], if turn == 1 { 2 } else { 0 });
+                let out = a.handle(&request).unwrap();
+                if turn == 1 {
+                    continue;
+                } // persisted, reply deliberately lost
+                let mut reply = vec![0];
+                reply.extend(out);
+                custody::write_packet(&mut stream, &reply).unwrap();
+            }
+            a.journal.clone()
+        });
+        let mut p = plan();
+        for row in &mut p.rows {
+            row.pool = pool.id.clone();
+        }
+        let snapshot = root.join("snapshot");
+        assert!(reserve_plan_release(&p, &pool, &sock, &snapshot, 4).is_err());
+        assert!(!snapshot.exists());
+        let error = reserve_plan_release(&p, &pool, &sock, &snapshot, 4)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+        assert!(!snapshot.exists());
+        let retained = h.join().unwrap();
+        assert_eq!(retained.spent.len(), 2);
+        let reopened = custody::Anchor::open(&authority).unwrap();
+        assert_eq!(reopened.journal, retained); // complete batch accepted on replay
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn whole_batch_exact_binding_rejects_changed_generation_before_snapshot() {
+        use std::{fs, os::unix::net::UnixListener, thread};
+        let root = batch_scratch();
+        let pool = Pool::provision(&root.join("pool"), &[vec![1; 4], vec![2; 4]]).unwrap();
+        let sock = root.join("anchor.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let anchor_root = root.join("authority");
+        let h = thread::spawn(move || {
+            let mut a = custody::Anchor::open(&anchor_root).unwrap();
+            for turn in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = custody::read_packet(&mut stream).unwrap();
+                let out = a.handle(&request).unwrap();
+                let out = if turn == 1 {
+                    assert_eq!(request[0], 2);
+                    let mut wrong = Journal::decode(&out).unwrap();
+                    wrong.allocations[0].generation.attempt = Nat::new(999);
+                    wrong.encode()
+                } else {
+                    out
+                };
+                let mut reply = vec![0];
+                reply.extend(out);
+                custody::write_packet(&mut stream, &reply).unwrap();
+            }
+            a.journal.clone()
+        });
+        let mut p = plan();
+        for row in &mut p.rows {
+            row.pool = pool.id.clone();
+        }
+        let snapshot = root.join("snapshot");
+        let error = reserve_plan_release(&p, &pool, &sock, &snapshot, 4)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("binding/retention"));
+        assert!(!snapshot.exists());
+        assert_eq!(h.join().unwrap().spent.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn empty_circuit_plan_reads_back_without_empty_reservation() {
+        use std::{fs, os::unix::net::UnixListener, thread};
+        let root = batch_scratch();
+        let pool = Pool::provision(&root.join("pool"), &[vec![1; 4]]).unwrap();
+        let sock = root.join("anchor.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let anchor_root = root.join("authority");
+        let h = thread::spawn(move || {
+            let mut a = custody::Anchor::open(&anchor_root).unwrap();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = custody::read_packet(&mut stream).unwrap();
+                assert_eq!(request, vec![0]);
+                let mut reply = vec![0];
+                reply.extend(a.handle(&request).unwrap());
+                custody::write_packet(&mut stream, &reply).unwrap();
+            }
+        });
+        let mut p = plan();
+        p.network.gates = vec![Op::Xor(0, 1)];
+        p.network.outputs = vec![2];
+        p.rows.clear();
+        let batch = reserve_plan_release(&p, &pool, &sock, &root.join("snapshot"), 4).unwrap();
+        assert!(batch.anchored_journal().spent.is_empty());
+        assert_eq!(batch.plan_bytes(), p.encode());
+        assert!(batch.into_material().is_empty());
+        h.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn complete_public_batch_burns_before_any_shape_failure_and_retry_refuses() {
         use std::{
@@ -413,18 +597,11 @@ mod tests {
         let anchor_root = root.join("authority");
         let h = thread::spawn(move || {
             let mut a = custody::Anchor::open(&anchor_root).unwrap();
-            // Four actual fixed batch RPCs: snapshot, reserve0,reserve1,readback.
-            for _ in 0..4 {
+            // Three actual fixed batch RPCs: snapshot, whole reserve, readback.
+            for _ in 0..3 {
                 let (mut s, _) = listener.accept().unwrap();
                 let b = custody::read_packet(&mut s).unwrap();
-                let out = match b[0] {
-                    0 => a.journal.encode(),
-                    1 => {
-                        let (id, g, p) = crate::codec::parse_request(&b[1..]).unwrap();
-                        a.reserve(id, g, p).unwrap()
-                    }
-                    _ => panic!("rpc"),
-                };
+                let out = a.handle(&b).unwrap();
                 let mut reply = vec![0];
                 reply.extend(out);
                 custody::write_packet(&mut s, &reply).unwrap();
