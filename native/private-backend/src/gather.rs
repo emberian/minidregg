@@ -46,6 +46,11 @@ pub struct Gather {
     acks: Set,
     accepted: Set,
     pub output: Option<Set>,
+    /// Test instrument for the adversarial harness (vaba/byz_targeted.rs): lowers the
+    /// ACK quorum by this many, so a targeted adversary can be shown to bite. Production
+    /// is always 0; nothing outside `cfg(test)` can name or set it.
+    #[cfg(test)]
+    pub(crate) ack_slack: usize,
 }
 impl Gather {
     pub fn new(me: u16, n: usize, f: usize) -> Result<Self> {
@@ -65,7 +70,20 @@ impl Gather {
             acks: Set::new(),
             accepted: Set::new(),
             output: None,
+            #[cfg(test)]
+            ack_slack: 0,
         })
+    }
+    /// ACKs of the party's own INFORM needed before it sends PREPARE: n-f. Binding core
+    /// (Lemma 4.2) rests on it: the first honest PREPARE has n-f ACKs, hence f+1 honest
+    /// ackers, each of whose later PREPARE contains the first sender's INFORM set, and any
+    /// n-f accepted PREPAREs meet those f+1 (n-f + f+1 > n).
+    fn ack_quorum(&self) -> usize {
+        #[cfg(test)]
+        let slack = self.ack_slack;
+        #[cfg(not(test))]
+        let slack = 0;
+        self.n - self.f - slack
     }
     fn all(&self, body: IgBody) -> Vec<(u16, IgBody)> {
         (0..self.n).map(|i| (i as u16, body.clone())).collect()
@@ -114,7 +132,7 @@ impl Gather {
                 out.push((*j, IgBody::Ack));
             }
         }
-        if self.inform_sent && self.acks.len() >= self.n - self.f && !self.prepare_sent {
+        if self.inform_sent && self.acks.len() >= self.ack_quorum() && !self.prepare_sent {
             self.prepare_sent = true;
             out.extend(self.all(IgBody::Prepare(self.valid.clone())));
         }

@@ -111,9 +111,38 @@ inherit all paper theorem statements. Executed evidence for both repairs is the
 seeded Byzantine harness in src/vaba/byz.rs (n=4 f=1 and n=7 f=2, VABA and ACS,
 equivocation, forged votes, replay, fuzz, adversarial leader choice, view
 change): the literal printed predicates stall schedules the repaired ones
-decide, and stay safe. Lemma 4.5's cover Y must be the union of honest locally
-validated sets, not of IGValid (a fault-free schedule escapes the latter).
-The Gather ACK quorum is not pinned by any adversary in that harness. The pinned raw binary_ba b22a6a... is not
+decide, and stay safe.
+
+NOTE (ePrint 2024/677 Lemma 4.5, Algorithm 4, PDF p.8, eq. (3)): the printed
+cover set Y := union over honest i of IGValid_i, "at the time when the first
+honest party outputs from the index gather", is mis-defined. Definition 4.3
+(p.7) asks for "a locally validated set of parties Y", and the proof argues
+exactly that: at the first output at least n-2t honest parties have withdrawn,
+so a party j that no honest party has locally validated yet can receive at most
+t honest RA_j inputs (the t that have not withdrawn), too few for RA_j to
+output 1 (RA integrity). That shows X_k lies inside the union of the honest
+LOCALLY VALIDATED sets (Valid_i, the ICG input), not inside the union of IGValid_i
+(the set of j whose RA_j has already OUTPUT 1 at i), which is smaller: f+1 honest
+parties may have input 1 for j while RA_j has not yet delivered anywhere, and an
+honest PREPARE sent after the first output (T_m = IGValid_m then) may carry j into
+a later honest output. Corrected definition:
+    Y := union over honest i of Valid_i, at the first honest ICG output.
+Executed witness: a fault-free n=4 schedule whose honest output contains an index
+in no honest IGValid at that instant, test
+vaba::byz::pinned::icg_cover_is_union_of_locally_validated_not_of_igvalid
+(pinned seed 100458; `literal_cover_escapes` in the report). The corrected Y
+is checked as BINDING COVER on every sweep run. Not yet
+reported to the authors (cv task 01a10694-76ce).
+Same family, Lemma 4.2 (p.7): the statement says the core is S_i for the first
+honest party "to output"; the proof (and the harness) uses the first honest party
+to SEND PREPARE. The proof is right, the statement should say PREPARE.
+
+The Gather ACK quorum n-f is pinned by a constructed adversary, not by volume:
+src/vaba/byz_targeted.rs, byz_gather_n7_ack_quorum_targeted_core (real code) and
+byz_gather_n7_lowered_ack_quorum_splits_core (the same schedule against Gather
+with the quorum lowered by one and by two: three honest outputs whose
+intersection is {3,4,5,6}, 4 < n-f). A mutant of gather.rs lowering the quorum
+turns the first test red. The pinned raw binary_ba b22a6a... is not
 imported: raw first-threshold interpolation, zero-based evaluation mismatch and
 silent finite coin stock do not qualify malicious common coin/BA.
 

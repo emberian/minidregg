@@ -616,6 +616,8 @@ fn rank(context: [u8; 32], j: u16, keys: &Set, asks: &[Asks]) -> [u8; 32] {
 #[cfg(test)]
 mod byz;
 #[cfg(test)]
+mod byz_targeted;
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::VecDeque;
