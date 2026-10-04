@@ -743,20 +743,10 @@ pub(crate) fn live_fetch(
 // Only private preparation/drain workers use this bounded wait. Clocked
 // emission never acquires this lock and always retains its fixed cover.
 fn live_cap_lock(root: &Path) -> Result<transport::ServiceLock> {
-    let path = root.join("service.lock");
-    let until = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        match transport::service_lock(&path) {
-            Ok(lock) => return Ok(lock),
-            Err(error)
-                if error.starts_with("another service owns ")
-                    && std::time::Instant::now() < until =>
-            {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Err(error) => return Err(error),
-        }
-    }
+    transport::service_lock_waiting(
+        &root.join("service.lock"),
+        mini_sdk::lock::Wait::Poll { tries: 2000, interval: Duration::from_millis(1) },
+    )
 }
 pub(crate) fn live_save_cap(
     root: &Path,

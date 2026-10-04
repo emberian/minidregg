@@ -3,11 +3,11 @@
 pub(crate) mod carry;
 use crate::{workspace, Result, SOCKET};
 use mini_sdk::durable::{Perm, Stage};
+use mini_sdk::lock::{Create, Lease, LockError, Wait};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,7 +30,6 @@ const DIRECTORY_FLAG: i32 = 0x100000;
 const DIRECTORY_FLAG: i32 = 0x10000;
 unsafe extern "C" {
     fn geteuid() -> u32;
-    fn flock(fd: i32, operation: i32) -> i32;
 }
 
 fn fail(error: impl std::fmt::Display) -> String {
@@ -174,33 +173,22 @@ fn read_json_mode(path: &Path, custody: bool) -> Result<Value> {
 fn create_file(path: &Path, bytes: &[u8]) -> Result<()> {
     crate::create_private(path, bytes).map_err(fail)
 }
-fn lock(root: &Path) -> Result<File> {
+fn lock(root: &Path) -> Result<Lease> {
     lock_named(root, "lock")
 }
-fn lock_named(root: &Path, name: &str) -> Result<File> {
+fn lock_named(root: &Path, name: &str) -> Result<Lease> {
     let _directory = directory(root)?;
-    let path = root.join(name);
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(NOFOLLOW)
-        .open(&path)
-        .map_err(fail)?;
-    private_metadata(&file, false)?;
     // Separate open descriptions also serialize threads in this process.
-    for _ in 0..100 {
-        if unsafe { flock(file.as_raw_fd(), 2 | 4) } == 0 {
-            return Ok(file);
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::WouldBlock {
-            return Err(fail(error));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    Err(fail("another completion owns the anchor; retry this read"))
+    Lease::acquire(
+        &root.join(name),
+        Create::Yes,
+        Wait::Poll { tries: 100, interval: std::time::Duration::from_millis(50) },
+    )
+    .map_err(|error| match error {
+        LockError::Busy => fail("another completion owns the anchor; retry this read"),
+        LockError::Unsafe => fail("custody path must be owner-private, regular, and unlinked elsewhere"),
+        LockError::Io(error) => fail(error),
+    })
 }
 fn save_with(
     root: &Path,

@@ -3,8 +3,8 @@
 //! intent from a closed session and never retransmits an uncertain mutation.
 use super::agent_reserve::{bounded, digest, field, private_bytes, private_socket, retain_json};
 use super::*;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use mini_sdk::lock::{Create, Lease, LockError, Wait};
+use std::os::unix::fs::DirBuilderExt;
 
 const FORMAT: &str = "minidregg-session-reenroll-v1";
 const LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
@@ -129,28 +129,12 @@ fn check_keys(value: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn lock(directory: &Path) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(directory.join("lock"))
-        .map_err(|e| e.to_string())?;
-    let metadata = file.metadata().map_err(|e| e.to_string())?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err("reenrollment lock is not an owner-private single-link regular file".into());
-    }
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err("reenrollment attempt is already running".into());
-    }
-    Ok(file)
+fn lock(directory: &Path) -> Result<Lease> {
+    Lease::acquire(&directory.join("lock"), Create::Yes, Wait::No).map_err(|error| match error {
+        LockError::Busy => "reenrollment attempt is already running".to_owned(),
+        LockError::Unsafe => "reenrollment lock is not an owner-private single-link regular file".to_owned(),
+        LockError::Io(error) => error.to_string(),
+    })
 }
 fn retained_identity(value: &Value, directory: &Path) -> Result<(Value, Value)> {
     let original = read(&directory.join("contract.json"))?;

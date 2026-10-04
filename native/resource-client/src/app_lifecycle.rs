@@ -2,7 +2,7 @@
 //! Discovery and retained local phases are not authority. Source admission
 //! checks each installed law and manager child capability at physical BEGIN.
 use super::*;
-use std::os::fd::AsRawFd;
+use mini_sdk::lock::{Create, Lease, LockError, Wait};
 
 struct QuietReplies(bool);
 impl Drop for QuietReplies {
@@ -35,31 +35,16 @@ fn directory(path: &Path) -> Result<()> {
     }
 }
 
-fn lock(path: &Path) -> Result<File> {
-    request_lock(path, true)
+fn lock(path: &Path) -> Result<Lease> {
+    request_lock(path, Create::Yes)
 }
 
-fn request_lock(path: &Path, create: bool) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(create)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-        .map_err(|e| e.to_string())?;
-    let meta = file.metadata().map_err(|e| e.to_string())?;
-    if !meta.is_file()
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.mode() & 0o077 != 0
-        || meta.nlink() != 1
-    {
-        return Err("lifecycle lock has unsafe custody".into());
-    }
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err("lifecycle request busy; retain and retry the same request ID".into());
-    }
-    Ok(file)
+fn request_lock(path: &Path, create: Create) -> Result<Lease> {
+    Lease::acquire(path, create, Wait::No).map_err(|error| match error {
+        LockError::Busy => "lifecycle request busy; retain and retry the same request ID".to_owned(),
+        LockError::Unsafe => "lifecycle lock has unsafe custody".to_owned(),
+        LockError::Io(error) => error.to_string(),
+    })
 }
 
 fn declaration(workspace: &Value, refs: &[Value; 3], manager: &str) -> Result<Value> {
@@ -320,7 +305,7 @@ pub(crate) fn retained_status(root: &Path, workspace: &Value, id: &str) -> Resul
     private_dir(&base)?;
     let state = base.join(id);
     private_dir(&state)?;
-    let _guard = request_lock(&state.join(".lock"), false)?;
+    let _guard = request_lock(&state.join(".lock"), Create::No)?;
     let decl = bounded_json(&state.join("declaration.json"))?;
     let refs: [Value;3] = decl["references"].as_array().ok_or("lifecycle references absent")?
         .clone().try_into().map_err(|_| "lifecycle requires three references")?;

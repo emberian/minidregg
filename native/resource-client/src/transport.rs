@@ -1,10 +1,9 @@
 //! Bounded framing shared by the local socket and the Lean host's stdio service.
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -13,6 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::serve_queue::{self, fair_queue, TrySendError};
+use mini_sdk::lock::{Create, Lease, LockError, Wait};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
@@ -696,68 +696,24 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     fn fcntl(fd: i32, command: i32, ...) -> i32;
-    fn flock(fd: i32, operation: i32) -> i32;
 }
 
-/// Logical process ownership, independent of descriptor aliases inherited
-/// transiently by a concurrent child between fork and exec.
-#[derive(Debug)]
-pub(crate) struct ServiceLock {
-    file: fs::File,
-    owner_pid: libc::pid_t,
-}
-impl ServiceLock {
-    pub(crate) fn release(&self) {
-        // A child dropping inherited scope must not unlock the parent.
-        if unsafe { libc::getpid() } == self.owner_pid {
-            unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN); }
-        }
-    }
-}
-impl Drop for ServiceLock {
-    fn drop(&mut self) { self.release(); }
-}
+/// The crate's one advisory lock (`mini_sdk::lock::Lease`): logical process ownership,
+/// independent of descriptor aliases inherited transiently by a concurrent child between
+/// fork and exec.
+pub(crate) type ServiceLock = Lease;
+
 pub(crate) fn service_lock(path: &Path) -> Result<ServiceLock, String> {
-    let file = match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("cannot open service lock {}: {error}", path.display()))?,
-        Err(error) => {
-            return Err(format!(
-                "cannot create service lock {}: {error}",
-                path.display()
-            ))
-        }
-    };
-    let named = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect service lock {}: {error}", path.display()))?;
-    let opened = file
-        .metadata()
-        .map_err(|error| format!("cannot inspect opened service lock: {error}"))?;
-    if !named.file_type().is_file()
-        || named.uid() != effective_uid()
-        || named.mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("service lock is not an owner-private regular file".to_owned());
-    }
-    const LOCK_EX: i32 = 2;
-    const LOCK_NB: i32 = 4;
-    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } < 0 {
-        return Err(format!(
-            "another service owns {}: {}",
-            path.display(),
-            io::Error::last_os_error()
-        ));
-    }
-    Ok(ServiceLock { file, owner_pid: unsafe { libc::getpid() } })
+    service_lock_waiting(path, Wait::No)
+}
+
+/// [`service_lock`], polling a busy lock for the given bound before refusing.
+pub(crate) fn service_lock_waiting(path: &Path, wait: Wait) -> Result<ServiceLock, String> {
+    Lease::acquire(path, Create::Yes, wait).map_err(|error| match error {
+        LockError::Busy => format!("another service owns {}: the lock is held", path.display()),
+        LockError::Unsafe => "service lock is not an owner-private regular file".to_owned(),
+        LockError::Io(error) => format!("cannot open service lock {}: {error}", path.display()),
+    })
 }
 
 pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {

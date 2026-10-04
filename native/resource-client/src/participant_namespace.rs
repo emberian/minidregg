@@ -9,7 +9,6 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 
 const FORMAT: &str = "minidregg-participant-reservation-v1";
@@ -85,17 +84,17 @@ fn private_root(root: &Path) -> Result<()> {
 }
 
 fn lock(root: &Path) -> Result<transport::ServiceLock> {
-    let path = root.join("namespace.lock");
-    for _ in 0..500 {
-        match transport::service_lock(&path) {
-            Ok(guard) => return Ok(guard),
-            Err(error) if error.starts_with("another service owns ") => {
-                thread::sleep(Duration::from_millis(10))
-            }
-            Err(error) => return Err(error),
-        }
+    use mini_sdk::lock::{Create, Lease, LockError, Wait};
+    match Lease::acquire(
+        &root.join("namespace.lock"),
+        Create::Yes,
+        Wait::Poll { tries: 500, interval: Duration::from_millis(10) },
+    ) {
+        Ok(guard) => Ok(guard),
+        Err(LockError::Busy) => Err("namespace is busy; retry the same request".into()),
+        Err(LockError::Unsafe) => Err("service lock is not an owner-private regular file".into()),
+        Err(LockError::Io(error)) => Err(format!("cannot open service lock: {error}")),
     }
-    Err("namespace is busy; retry the same request".into())
 }
 
 fn checked_text(name: &str, value: &str) -> Result<()> {
