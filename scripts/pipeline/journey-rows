@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats objectrecord)
+JOURNEY_ROWS=(journey objective rooms activity seats objectrecord welcomecontinuity sshe2e)
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -111,5 +111,39 @@ row_objectrecord() {
   cp "$RUN/or/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/or/transcript" "$OUT/" 2>/dev/null   # kept: the exact output of every command of the world
   tail -1 "$OUT/objectrecord.out" >&2
+  return $rc
+}
+
+# Key-only welcome continuity: a participant joins from the sponsor's welcome, the receipt is authenticated
+# by read-only lookup and the local Lean verifier, refused welcomes (forged, wrong possession, wrong command,
+# lost custody) leave no workspace. One sub-row per step of the driver (rows.tsv).
+row_welcomecontinuity() {
+  local d=$SRC/native/resource-client/welcome-continuity-journey.sh
+  [ -f "$d" ] || return 99
+  [ -x "$BIN/minidregg-client-consent" ] || { echo "the set has no signing-consent provider (minidregg-client-consent)" >&2; return 98; }
+  bash "$d" "$BIN/minidregg-host" "$BIN/mini" "$BIN/minidregg-link-sqlite-store" \
+    "$BIN/minidregg-credential-signature-verifier" "$RUN/wc" >"$OUT/welcome.out" 2>"$OUT/welcome.err"
+  local rc=$?
+  awk -F'\t' 'NR>1 {st=($2 ~ /^PASS/)?"PASS":"FAIL"; printf "%s\t%s\t0\t%s\n", $1, st, $2}' "$RUN/wc/rows.tsv" >"$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/wc/logs" "$OUT/logs" 2>/dev/null   # every step's stdout, stderr and opcode log; keys are not in it
+  tail -1 "$OUT/welcome.err" >&2
+  return $rc
+}
+
+# The ssh:DEST operator route end to end (native/mini-sdk/tests/ssh-e2e.sh): the SDK's ssh client, a real
+# unprivileged sshd on loopback, the forced `mini socket-proxy`, a real Host; a planted host key, an unknown
+# host key and an unauthorised key are refused by name. Builds the SDK test binary on first use into a
+# shared target dir (CARGO_TARGET_DIR), so the first tip on a box is slow and the rest are warm.
+row_sshe2e() {
+  local d=$SRC/native/mini-sdk/tests/ssh-e2e.sh
+  [ -f "$d" ] || return 99
+  command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ] || { echo "no sshd on this box" >&2; return 98; }
+  [ -f "$SET/run.sh" ] || { echo "the set has no run.sh (candidate layout)" >&2; return 98; }
+  mkdir -p "$HOME/.cache/journey-cargo-target"
+  CARGO_TARGET_DIR=$HOME/.cache/journey-cargo-target bash "$d" "$SET" "$RUN/ssh" >"$OUT/ssh-e2e.out" 2>"$OUT/ssh-e2e.err"
+  local rc=$?
+  cp -r "$RUN/ssh/log" "$OUT/log" 2>/dev/null
+  grep -E '^test |^test result' "$OUT/log/ssh-e2e.log" 2>/dev/null | cut -c1-160 | sed 's/ \.\.\. .*$/ .../' >"$OUT/tests.txt"
+  tail -1 "$OUT/ssh-e2e.err" >&2
   return $rc
 }
