@@ -1,0 +1,37 @@
+# unit-tests.tsv: path<TAB>floor  (python3 -m unittest MODULE, run in the file's directory). The floor is the count measured
+# 2026-10-05 on df0cd116: fewer tests than the floor is red (a deleted/renamed/skipped test), a failure is red.
+# scripts/check-unit-tests.sh. Dashed file names (test-ws-continuity-journey.py, test-docuverse-same-store.py,
+# test-protected-document-same-store.py, .spw/tools/check-source.py) are not importable as modules: not here.
+coordination/test_namespace_projection.py	4
+deploy/hermes-dispatch/test_dispatch.py	3
+native/resource-client/test_composed_scenario.py	27
+native/resource-client/test_joined_member_journey.py	15
+native/resource-client/test_latency_same_store.py	9
+native/resource-client/test_platform_provision.py	20
+native/resource-client/test_platform_service_cut.py	9
+native/resource-client/test_platform_stage.py	14
+native/resource-client/test_platform_stage_root.py	13
+native/resource-client/test_platform_task_readiness.py	7
+native/resource-client/test_shell_credential_launcher.py	4
+scripts/spk-platform/tests/test_app_document_journey.py	8
+scripts/spk-platform/tests/test_app_document_room_context.py	3
+scripts/spk-platform/tests/test_checkpoint_app.py	4
+scripts/spk-platform/tests/test_connector_authority.py	3
+scripts/spk-platform/tests/test_same_store_app.py	19
+scripts/spk-platform/tests/test_same_store_inputs.py	11
+scripts/spk-platform/tests/test_sandbox_launcher_stage.py	4
+scripts/spk-platform/tests/test_spk_ingest_namespace.py	3
+scripts/spk-platform/tests/test_ws_continuity_fixture.py	20
+scripts/spk-platform/tests/test_ws_continuity_launch.py	8
+scripts/spk-platform/tests/test_ws_continuity_regressions.py	14
+scripts/test_lean_scoped_dag.py	7
+scripts/test_lean_warm_preflight.py	4
+testing/journeys/test_same_world_resident.py	6
+testing/journeys/test_shared_resident_useful_work.py	14
+testing/journeys/test_station_resident_fixture.py	6
+testing/test_generic_simplex_operator.py	11
+testing/test_generic_simplex_session.py	5
+@known-red	scripts/spk-platform/tests/test_native_input_successor.py	01a108ba-55a3
+@known-red	scripts/spk-platform/tests/test_ticket_preflight.py	01a108ba-55a3
+@elsewhere	scripts/test_build_gate_boundaries.py	local-gates build-closure
+@elsewhere	scripts/test_lean_build_surfaces.py	local-gates build-closure

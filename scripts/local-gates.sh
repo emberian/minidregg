@@ -31,6 +31,8 @@
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
 #   build-closure  source classification/target coverage, the obsolete-policy-verifier source scan, and gate regression tests
+#   unit-tests     the python unittest modules no other gate ran (scripts/gates/unit-tests.tsv: a floor of tests per
+#                  module, known-red rows that must still fail, a new test_*.py in no row is red)
 #   host-closure   the import closure of Host.Main equals scripts/gates/host-closure.pin
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
 #   exports        every @[export] is called from native/ or allowlisted with a reason
@@ -71,7 +73,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c objective-cgen drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -103,6 +105,7 @@ g_drift() {
 }
 g_prover-glue()   { bash scripts/check-prover-glue.sh; }
 g_build-closure() { bash scripts/check-build-closure.sh && bash scripts/check-canonical-policy-portal.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py; }
+g_unit-tests()    { bash scripts/check-unit-tests.sh; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
