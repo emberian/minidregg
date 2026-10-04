@@ -7,7 +7,11 @@
 #   * an INCONSISTENT row (a family proved AND refuted),
 #   * a TOOTHLESS assumption (an open hypothesis with no named satisfying AND
 #     refuting instance) not in scripts/hypothesis-ledger-allow.txt,
-#   * a stale allowlist entry (the ratchet only tightens),
+#   * a consumer COVERED by a refutation (a refuting instance unifies with the
+#     consumer's binder: the consumer is true of nothing) -- VACUOUS,
+#   * a TRIVIAL hypothesis structure (bound by a theorem, inhabited for every
+#     parameter with degenerate fields) not in scripts/trivial-structure-allow.txt,
+#   * a stale allowlist entry in either list (the ratchet only tightens),
 #   * a broken instrument: a planted family classified wrongly, a pinned real
 #     row that moved, or fewer consumed families than the pinned floor.
 # STALE rows (a family proved outright, still bound as a premise) are printed,
@@ -17,7 +21,11 @@
 #   (a) a scratch family with a proved negation and a consumer is planted;
 #       the run must exit non-zero and print it VACUOUS;
 #   (b) the scan loop is deleted; the run must exit non-zero on the instrument;
-#   (c) the real run must not see the scratch plant.
+#   (c) the real run must not see the scratch plant;
+#   (d) a PackedRefinement-shaped structure planted OUTSIDE the plant namespace
+#       must turn the run RED as TRIVIAL;
+#   (e) the covered-consumer pass is deleted; the un-fixed Polishchuk-Spielman
+#       plant must stop reading VACUOUS and fail the instrument.
 # The copies are written to a temporary directory; the tree is never edited.
 #
 # usage: scripts/check-hypothesis-ledger.sh [--no-self-test]
@@ -28,6 +36,7 @@ cd "$root"
 export PATH=$HOME/.elan/bin:$PATH
 ledger=scripts/HypothesisLedger.lean
 export HYP_LEDGER_ALLOW="$root/scripts/hypothesis-ledger-allow.txt"
+export HYP_TRIVIAL_ALLOW="$root/scripts/trivial-structure-allow.txt"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hyp-ledger.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
@@ -96,6 +105,48 @@ EOF
     echo "self-test (b) scan deleted: PASS (exit $status; $(grep -ac "hypothesis-ledger: instrument:" "$tmp/noscan.log") instrument failures, first: $(grep -a -m1 "hypothesis-ledger: instrument:" "$tmp/noscan.log"))"
   else
     echo "self-test (b) scan deleted: FAIL (exit $status)"; cat "$tmp/noscan.log"; failed=1
+  fi
+
+  # (d) the probe outside the plant namespace: a PackedRefinement-shaped structure
+  #     (the zk-truth lane's 2026-10-04 finding) bound by a theorem must turn the run RED
+  python3 - "$ledger" "$tmp/trivial.lean" <<'EOF'
+import sys
+src = open(sys.argv[1]).read()
+anchor = "set_option maxHeartbeats 0 in\nrun_meta"
+assert src.count(anchor) == 1, "self-test: run_meta anchor not found"
+plant = """namespace Minidregg.Scratch
+structure Refinement (evaluate : Nat → Option Nat) where
+  represents : Nat → Nat → Prop
+  acceptedStep : ∀ {input output state}, evaluate input = some output →
+    represents input state → ∃ next, (next = state ∨ next = state + 1) ∧ represents output next
+theorem refinement_consumer (evaluate : Nat → Option Nat) (r : Refinement evaluate) : True := trivial
+end Minidregg.Scratch
+
+"""
+open(sys.argv[2], "w").write(src.replace(anchor, plant + anchor))
+EOF
+  status=$(run "$tmp/trivial.lean" "$tmp/trivial.log")
+  if [ "$status" != 0 ] && grep -aq "RED: structure Minidregg.Scratch.Refinement is TRIVIAL" "$tmp/trivial.log"; then
+    echo "self-test (d) planted trivial structure: PASS (exit $status)"
+  else
+    echo "self-test (d) planted trivial structure: FAIL (exit $status)"; cat "$tmp/trivial.log"; failed=1
+  fi
+
+  # (e) delete the covered-consumer pass: the un-fixed Polishchuk-Spielman plant
+  #     (refuted at ZMod 5, consumed at ZMod 5) must stop reading VACUOUS
+  python3 - "$ledger" "$tmp/nocover.lean" <<'EOF'
+import sys
+src = open(sys.argv[1]).read()
+begin, end = "  -- COVER-BEGIN", "  -- COVER-END\n"
+assert src.count(begin) == 1 and src.count(end) == 1, "self-test: cover markers not found"
+i, j = src.index(begin), src.index(end) + len(end)
+open(sys.argv[2], "w").write(src[:i] + src[j:])
+EOF
+  status=$(run "$tmp/nocover.lean" "$tmp/nocover.log")
+  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman expected VACUOUS" "$tmp/nocover.log"; then
+    echo "self-test (e) covered-consumer pass deleted: PASS (exit $status; $(grep -a -m1 'UnfixedPolishchukSpielman expected' "$tmp/nocover.log"))"
+  else
+    echo "self-test (e) covered-consumer pass deleted: FAIL (exit $status)"; cat "$tmp/nocover.log"; failed=1
   fi
 fi
 

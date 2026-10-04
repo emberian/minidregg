@@ -42,6 +42,7 @@ negative atom.  (Both: INCONSISTENT.)  OPEN otherwise.
 | status  | verdict | meaning |
 |---|---|---|
 | REFUTED | VACUOUS (RED) | every consumer is true of nothing |
+| any, a refutation COVERS a consumer | VACUOUS (RED) | that consumer is true of nothing (see `covers`) |
 | PROVED  | STALE (yellow) | the consumers can drop the premise |
 | OPEN, sat + ref instances | GREEN | the floor is satisfiable and refutable |
 | OPEN, missing either | TOOTHLESS | no named instance shows the floor has teeth |
@@ -61,9 +62,26 @@ tier is where `GameSlotBound`, `HaboeckTheorem2` and `HashEqHiding` live
 is the honest frontier, printed but not a gate (red as a steady state hides
 everything).
 
-**The gate is on the instrument.**  The `Plant` namespace below carries four
+**Covered consumers.**  "Refuted only when refuted generally" let the
+un-fixed Polishchuk--Spielman floor read OPEN while its keystone consumer sat
+at `ZMod 5`, exactly where it was false.  A family refuted at any instance is
+not thereby false everywhere (a floor must be refutable: `MaskedOpeningHiding`
+is refuted at an F₅ triple by design), but a refutation that unifies with a
+consumer's binder makes THAT consumer true of nothing: the family reads
+VACUOUS (RED) and the row names the covered consumers (`covers`).
+
+**Trivial hypothesis structures.**  A structure bound by a theorem whose
+proof fields close when its predicate fields are constantly `True` (or
+`False`), its `Option` fields `none` and other data `default`, for every
+parameter at once, certifies nothing by itself (`PackedRefinement`, inhabited
+for every network through the administrative stutter).  Each such structure
+must be listed with a reason in `scripts/trivial-structure-allow.txt`
+(`HYP_TRIVIAL_ALLOW`), a ratchet like the TOOTHLESS allowlist.
+
+**The gate is on the instrument.**  The `Plant` namespace below carries five
 families whose verdicts are known by construction (VACUOUS, STALE, TOOTHLESS,
-GREEN); if any comes out otherwise, or fewer than `scanFloor` families with a
+GREEN, and the covered Polishchuk--Spielman regression) and two structures
+(the `PackedRefinement` regression must read TRIVIAL, a total codec must not); if any comes out otherwise, or fewer than `scanFloor` families with a
 consumer were found, the run fails whatever the tree says.  Plants never count
 toward the real verdict.  Pinned real-tree rows (`mustBe`) fail the run if the
 classification of a known family moves.
@@ -72,6 +90,8 @@ Run: `lake env lean scripts/HypothesisLedger.lean`
 (or `scripts/check-hypothesis-ledger.sh`, which adds the allowlist.)
 -/
 import AxiomCensusResearch
+import Selvage.PolishchukSpielmanRefutation
+import Theory.ObjectiveBendDemandMachine
 
 open Lean Elab Meta
 
@@ -99,6 +119,47 @@ def Teeth (n : Nat) : Prop := n = 0
 theorem teeth_sat : Teeth 0 := rfl
 theorem teeth_ref : ¬ Teeth 1 := by simp [Teeth]
 theorem teeth_consumer (n : Nat) (h : Teeth n) : n = 0 := h
+
+/-- REGRESSION (2026-10-03, D-0006): the un-fixed Polishchuk--Spielman floor,
+verbatim from the deleted `Minidregg.Selvage.PolishchukSpielman F`, with the
+deleted keystone's consumer at `ZMod 5` and the real refutation at that field.
+The general-refutation-only rule read it OPEN (TOOTHLESS, allowlisted); a
+refutation that covers a consumer must read VACUOUS. -/
+def UnfixedPolishchukSpielman (F : Type) [Field F] : Prop :=
+  ∀ (A B : Polynomial (Polynomial F)) (SX SZ : Finset F) (aX aZ bX bZ : ℕ),
+    A.natDegree ≤ aX → Selvage.ZDegLE A aZ → B.natDegree ≤ bX → Selvage.ZDegLE B bZ →
+    (∀ x ∈ SX, A.eval (Polynomial.C x) ∣ B.eval (Polynomial.C x)) →
+    (∀ z ∈ SZ, A.map (Polynomial.evalRingHom z) ∣ B.map (Polynomial.evalRingHom z)) →
+    aX + bX < SX.card → aZ + bZ < SZ.card →
+    bX * SZ.card + bZ * SX.card < SX.card * SZ.card →
+    A ∣ B
+theorem unfixedPS_refuted_F5 : ¬ UnfixedPolishchukSpielman (ZMod 5) :=
+  Selvage.PolishchukSpielmanRefutation.polishchukSpielman_unfixed_false_F5
+theorem unfixedPS_keystone (h : UnfixedPolishchukSpielman (ZMod 5)) : True := trivial
+theorem unfixedPS_general {F : Type} [Field F] (h : UnfixedPolishchukSpielman F) : True := trivial
+
+/-- REGRESSION (2026-10-04, PACKED-REFINEMENT-AUDIT): `PackedRefinement` over
+`stepRaw`'s macrostep, the network abstracted to its evaluation. The
+administrative stutter admits `represents := fun _ _ => True` (and the empty
+relation): the probe must read it TRIVIAL. -/
+inductive Macrostep : Theory.ObjectiveBendDemandMachine.State →
+    Theory.ObjectiveBendDemandMachine.State → Prop
+  | administrative (state) : Macrostep state state
+  | transition (state) : Macrostep state (Theory.ObjectiveBendDemandMachine.stepRaw state)
+structure PackedRefinement (evaluate : Array Bool → Option (Array Bool)) where
+  represents : Array Bool → Theory.ObjectiveBendDemandMachine.State → Prop
+  acceptedStep : ∀ {input output state}, evaluate input = some output →
+    output[0]? = some true → represents input state →
+    ∃ next, Macrostep state next ∧ represents (output.extract 1 output.size) next
+theorem packedRefinement_consumer (evaluate : Array Bool → Option (Array Bool))
+    (refinement : PackedRefinement evaluate) : True := trivial
+
+/-- A codec with a totality obligation: `decode := none` cannot discharge it, so
+the probe must NOT read it TRIVIAL. -/
+structure TotalCodec where
+  decode : Nat → Option Nat
+  total : ∀ n, decode n = some n
+theorem totalCodec_consumer (codec : TotalCodec) : True := trivial
 end Plant
 
 /-! ## Classification -/
@@ -140,6 +201,9 @@ structure Row where
   ref : Array Name := #[]
   condSat : Array Name := #[]
   condRef : Array Name := #[]
+  /-- consumers a refutation covers (true of nothing), and the refutations that do -/
+  covered : Array Name := #[]
+  coveredBy : Array Name := #[]
   deriving Inhabited
 
 structure Ledger where
@@ -338,6 +402,55 @@ def propArity (type : Expr) : MetaM (Option Nat) :=
   forallTelescope type fun xs body => do
     if body.consumeMData.isProp then return some xs.size else return none
 
+/-! ## Covered consumers
+
+A refutation `¬ D b⃗` (general or at an instance) COVERS a consumer binding
+`D a⃗` when `D b⃗` unifies with `D a⃗`, the refutation's variables as
+metavariables and the consumer's as rigid: the consumer is true of nothing at
+exactly the point it assumes.  This is the sound form of "refuted at any
+instance": a floor refuted at a point it is never assumed at (`Teeth`, refuted
+at 1, consumed at a free `n`) keeps its teeth. -/
+
+/-- The atoms `D …` of a hypothesis type (∧-split, not under ∀). -/
+partial def binderAtomExprs (families : Std.HashMap Name Nat) (e : Expr) : List (Name × Expr) :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``And 2 then
+    binderAtomExprs families e.appFn!.appArg! ++ binderAtomExprs families e.appArg!
+  else match familyApp families e with
+    | some (c, _) => [(c, e)]
+    | none => []
+
+/-- The atoms of family `fam` a refutation refutes, its variables as metavariables:
+`¬ D …`, `D … → False`, or a hypothesis `D …` of a theorem concluding `False`. -/
+def refutedAtoms (families : Std.HashMap Name Nat) (fam refutation : Name) : MetaM (List Expr) := do
+  let rconst ← mkConstWithFreshMVarLevels refutation
+  let (mvars, _, body) ← forallMetaTelescope (← inferType rconst)
+  let body := body.consumeMData
+  let mut atoms : List Expr := []
+  if body.isAppOfArity ``Not 1 then atoms := body.appArg! :: atoms
+  if let .forallE _ dom inner _ := body then
+    if !inner.hasLooseBVars && inner.consumeMData.isConstOf ``False then atoms := dom :: atoms
+  if body.isConstOf ``False then
+    for m in mvars do atoms := (← instantiateMVars (← inferType m)) :: atoms
+  return atoms.filter fun a => match familyApp families a with
+    | some (c, _) => c == fam
+    | none => false
+
+def covers (families : Std.HashMap Name Nat) (fam consumer refutation : Name) : MetaM Bool := do
+  let cinfo ← getConstInfo consumer
+  forallTelescope cinfo.type fun xs _ => do
+    for x in xs do
+      let ty ← inferType x
+      unless ← isProp ty do continue
+      for (c, atom) in binderAtomExprs families ty do
+        unless c == fam do continue
+        let hit ← withNewMCtxDepth <| withTransparency .instances do
+          for p in ← refutedAtoms families fam refutation do
+            if ← isDefEq p atom then return true
+          return false
+        if hit then return true
+    return false
+
 def scan : MetaM Ledger := do
   let env ← getEnv
   let mut ledger : Ledger := {}
@@ -370,6 +483,16 @@ def scan : MetaM Ledger := do
     catch _ =>
       ledger := { ledger with errors := ledger.errors.push name }
   -- SCAN-END
+  -- COVER-BEGIN covered consumers: only families with a refuting instance and a consumer
+  for (fam, r) in ledger.rows.toList do
+    if r.ref.isEmpty || r.consumers.isEmpty then continue
+    for consumer in r.consumers do
+      for refutation in r.ref do
+        let hit ← try covers ledger.families fam consumer refutation catch _ => pure false
+        if hit then
+          ledger := ledger.modify fam fun r =>
+            { r with covered := push r.covered consumer, coveredBy := push r.coveredBy refutation }
+  -- COVER-END
   return ledger
 
 /-! ## Verdicts -/
@@ -389,6 +512,7 @@ def status (r : Row) : String :=
 
 def verdict (r : Row) : Verdict :=
   if r.consumers.isEmpty then .unconsumed
+  else if !r.covered.isEmpty then .vacuous
   else match status r with
     | "INCONSISTENT" => .inconsistent
     | "REFUTED" => .vacuous
@@ -407,7 +531,8 @@ def plantMustBe : List (Name × Verdict) :=
   [(`Minidregg.HypothesisLedger.Plant.Refuted, .vacuous),
    (`Minidregg.HypothesisLedger.Plant.Proved, .stale),
    (`Minidregg.HypothesisLedger.Plant.Toothless, .toothless),
-   (`Minidregg.HypothesisLedger.Plant.Teeth, .green)]
+   (`Minidregg.HypothesisLedger.Plant.Teeth, .green),
+   (`Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman, .vacuous)]
 
 /-- The minimum number of families with a consumer a working scan finds.
 Pinned below the 2026-10-01 count; a scan that silently stopped walking
@@ -428,8 +553,9 @@ reported and not gated.  It is a ratchet, not a pardon: an entry with no reason,
 an entry naming no family, an entry whose family is no longer TOOTHLESS (it
 gained its teeth, or was proved -- delete the line), and an entry for a VACUOUS
 or INCONSISTENT row all fail the run. -/
-def readAllow : IO (List (Name × String)) := do
-  let some path ← IO.getEnv "HYP_LEDGER_ALLOW" | return []
+def readAllow (envVar : String := "HYP_LEDGER_ALLOW") : IO (List (Name × String)) := do
+  let some path ← IO.getEnv envVar | return []
+  if path.isEmpty then return []
   let text ← IO.FS.readFile path
   return text.splitOn "\n" |>.filterMap fun line =>
     let line := line.trimAscii.toString
@@ -442,6 +568,97 @@ def moduleOf (env : Environment) (n : Name) : String :=
   match env.getModuleIdxFor? n with
   | some idx => (env.header.moduleNames[idx.toNat]?.map toString).getD "?"
   | none => "(this file)"
+
+/-! ## Trivial inhabitants
+
+A hypothesis STRUCTURE (`PackedRefinement N`) is a premise whose content is its
+proof fields.  If the structure is inhabited, for every parameter at once, with
+its predicate fields constantly `True` (or constantly `False`), its
+`Option`-valued fields `none` and other data `default`, then by itself it
+certifies nothing: TRIVIAL.  The population is every structure we own that a
+theorem we own binds and that has a proof field. -/
+
+open Elab Tactic in
+/-- Close `goal` with a fixed, cheap battery (no search). -/
+def closeByBattery (goal : MVarId) : MetaM Bool := do
+  let attempt : TermElabM Bool := do
+    let tac ← `(tactic| (intros; first
+      | contradiction | trivial | rfl
+      | exact ⟨_, trivial⟩
+      | exact ⟨_, by constructor, trivial⟩
+      | (constructor <;> first | trivial | rfl | constructor)
+      | (simp_all; done)))
+    try
+      let rest ← Lean.Elab.Tactic.run goal (Tactic.withoutRecover (evalTactic tac))
+      -- error recovery may have closed a goal with `sorry`: that is a failure
+      return rest.isEmpty && !(← instantiateMVars (mkMVar goal)).hasSorry
+    catch _ => return false
+  -- a failed attempt must leave no message behind (tactic errors are logged, not thrown)
+  let saved := (← getThe Core.State).messages
+  let ok ← tryCatchRuntimeEx
+    (withTheReader Core.Context (fun ctx => { ctx with maxHeartbeats := 20000 * 1000 }) do
+      Core.withCurrHeartbeats (Term.withoutErrToSorry attempt).run')
+    (fun _ => pure false)
+  modifyThe Core.State fun st => { st with messages := saved }
+  return ok
+
+/-- The degenerate value of a data field, or `none` when there is none to try. -/
+def degenerate (type : Expr) (useTrue : Bool) : MetaM (Option Expr) :=
+  forallTelescopeReducing type fun xs target => do
+    let target ← whnfR target
+    if target.isProp then
+      return some (← mkLambdaFVars xs (mkConst (if useTrue then ``True else ``False)))
+    if target.isAppOfArity ``Option 1 then
+      return some (← mkLambdaFVars xs (← mkAppOptM ``Option.none #[target.appArg!]))
+    try return some (← mkLambdaFVars xs (← mkAppOptM ``Inhabited.default #[target, none]))
+    catch _ => return none
+
+/-- `some strategy` when the structure is TRIVIAL (see above). -/
+def probeTrivial (s : Name) : MetaM (Option String) := do
+  let some (.inductInfo ind) := (← getEnv).find? s | return none
+  let some ctorName := ind.ctors.head? | return none
+  let ctor ← getConstInfoCtor ctorName
+  for useTrue in [true, false] do
+    let ok ← forallBoundedTelescope ctor.type ind.numParams fun _ fields => do
+      let mut rest := fields
+      let mut proofs := 0
+      repeat
+        match rest.consumeMData with
+        | .forallE _ ty body _ =>
+          let value? ← if ← isProp ty then do
+              proofs := proofs + 1
+              let goal ← mkFreshExprMVar (← Core.betaReduce (← instantiateMVars ty))
+              if ← closeByBattery goal.mvarId! then pure (some goal) else pure none
+            else degenerate ty useTrue
+          match value? with
+          | some v => rest := body.instantiate1 v
+          | none => return false
+        | _ => break
+      return proofs > 0
+    if ok then return some (if useTrue then "predicates := True" else "predicates := False")
+  return none
+
+/-- Structures we own bound by a theorem we own, with their consumers. -/
+def boundStructures : MetaM (Std.HashMap Name (Array Name)) := do
+  let env ← getEnv
+  let mut bound : Std.HashMap Name (Array Name) := {}
+  for (name, info) in env.constants.toList do
+    unless ours name && info matches .thmInfo _ do continue
+    -- a structure's own projections are its fields, not consumers
+    if env.isProjectionFn name then continue
+    let heads ← try forallTelescope info.type fun xs _ => do
+        let mut hs : Array Name := #[]
+        for x in xs do
+          if let .const c _ := (← inferType x).getAppFn then
+            if ours c && isStructure env c && !isClass env c && !hs.contains c then hs := hs.push c
+        return hs
+      catch _ => pure #[]
+    for h in heads do bound := bound.insert h ((bound.getD h #[]).push name)
+  return bound
+
+def plantTrivialMustBe : List (Name × Bool) :=
+  [(`Minidregg.HypothesisLedger.Plant.PackedRefinement, true),
+   (`Minidregg.HypothesisLedger.Plant.TotalCodec, false)]
 
 def run : MetaM Unit := do
   let env ← getEnv
@@ -497,10 +714,39 @@ def run : MetaM Unit := do
     let mark := if tierRed then (if allowed && v == .toothless then "ALLOWED" else "RED") else
       if v == .stale then "yellow" else "ok"
     let showConsumers := tierRed || v == .stale
-    IO.println s!"{fam} | {status r} | {v.label} [{mark}] | {r.consumers.size} | {names (r.proved ++ r.refuted)} | {names r.sat} | {names r.ref} | {names (r.condSat ++ r.condRef) 3} | {if showConsumers then names r.consumers 8 else ""}  [{moduleOf env fam}]"
+    IO.println s!"{fam} | {status r} | {v.label} [{mark}] | {r.consumers.size} | {names (r.proved ++ r.refuted)} | {names r.sat} | {names r.ref} | {names (r.condSat ++ r.condRef) 3} | {if !r.covered.isEmpty then s!"covered: {names r.covered 8} by {names r.coveredBy 3}" else if showConsumers then names r.consumers 8 else ""}  [{moduleOf env fam}]"
     if tierRed then
       if allowed && v == .toothless then pure ()
       else failures := failures.push s!"RED: {fam} is {v.label} with {r.consumers.size} consumer(s): {names r.consumers 4}"
+  -- trivial inhabitants
+  let bound ← boundStructures
+  let trivialAllow ← readAllow "HYP_TRIVIAL_ALLOW"
+  for (st, want) in plantTrivialMustBe do
+    unless bound.contains st do
+      failures := failures.push s!"instrument: plant {st} has no consumer"
+    let got := (← tryCatchRuntimeEx (probeTrivial st) (fun _ => pure none)).isSome
+    unless got == want do
+      failures := failures.push s!"instrument: plant {st} expected TRIVIAL={want}, got {got}"
+  let mut trivials : Array (Name × String) := #[]
+  let mut probed := 0
+  for (st, _) in bound.toList do
+    if isPlant st then continue
+    probed := probed + 1
+    if let some how ← tryCatchRuntimeEx (probeTrivial st) (fun _ => pure none) then
+      trivials := trivials.push (st, how)
+  IO.println ""
+  IO.println s!"TRIVIAL STRUCTURES (bound by a theorem; inhabited with degenerate fields for every parameter): {trivials.size} of {probed} probed"
+  for (st, how) in trivials.qsort (fun a b => a.1.toString < b.1.toString) do
+    let allowed := trivialAllow.any (·.1 == st)
+    let consumers := bound.getD st #[]
+    IO.println s!"  {st} [{if allowed then "ALLOWED" else "RED"}] {how}; {consumers.size} consumer(s): {names consumers 3}  [{moduleOf env st}]"
+    unless allowed do
+      failures := failures.push s!"RED: structure {st} is TRIVIAL ({how}); bound by {names consumers 3}"
+  for (a, reason) in trivialAllow do
+    if reason.isEmpty then
+      failures := failures.push s!"trivial-allowlist: {a} carries no reason"
+    unless trivials.any (·.1 == a) do
+      failures := failures.push s!"trivial-allowlist: {a} is not a TRIVIAL bound structure -- delete the entry"
   for (a, reason) in allow do
     if reason.isEmpty then
       failures := failures.push s!"allowlist: {a} carries no reason"

@@ -1,0 +1,25 @@
+# scripts/trivial-structure-allow.txt -- hypothesis STRUCTURES the ledger's trivial-inhabitant probe
+# inhabits on 2026-10-04 (lane PROOF-ENG; persvati ledger run over the research umbrella): every
+# predicate field constantly True (or False), Option fields none, other data default, every proof
+# field closed by a fixed battery, for every parameter at once. By itself such a structure certifies
+# nothing; whatever its consumers prove must come from their other premises.
+# Format: <structure> <reason>. A RATCHET, not a pardon: a structure that becomes TRIVIAL and is not
+# listed FAILS the gate (PackedRefinement, the regression this exists for, would); an entry that is no
+# longer TRIVIAL FAILS until deleted. Each line is an open review: does the premise carry content?
+Minidregg.Assurance.Ext6GateProofDeploymentAdmission.Deployment.ControlledExecution  [7 consumers; predicates := True; Assurance.Ext6GateProofDeploymentAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Assurance.HyperdocumentHistoryAdmission.PostSpan  [1 consumers; predicates := True; Assurance.HyperdocumentHistoryAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Assurance.NoteSpendProofControllerAdmission.SameCoinHidingLaws  [2 consumers; predicates := True; Assurance.NoteSpendProofControllerAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Compiler.NativeWorkProfiles.Tower256DotProductRequest  [1 consumers; predicates := True; Compiler.NativeWorkProfiles] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Compiler.NextgenLightClientPublicInputs.TowerElem  [3 consumers; predicates := True; Compiler.NextgenLightClientPublicInputs] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Compiler.Tower256NativeByteBoundary.SemanticChecker  [5 consumers; predicates := False; Compiler.Tower256NativeByteBoundary] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Kernel.AuthenticatedSettlementFinality.SignatureOrigin  [6 consumers; predicates := True; Kernel.AuthenticatedSettlementFinality] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Kernel.OutboxDelivery.AckVerifier  [13 consumers; predicates := True; Kernel.OutboxDelivery] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Kernel.ProviderExecutionLease.CompletionBoundary  [16 consumers; predicates := False; Kernel.ProviderExecutionLease] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Kernel.ReplicatedSettlementFinality.QuorumSystem  [21 consumers; predicates := False; Kernel.ReplicatedSettlementFinality] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Kernel.WorldKindInstance.Prepared  [2 consumers; predicates := True; Kernel.WorldKindInstance] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Selvage.Oracle  [110 consumers; predicates := True; Selvage.FiatShamir] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Selvage.ProofSystem  [8 consumers; predicates := True; Selvage.HeteroComposition] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Theory.PlanBinding.Plan  [5 consumers; predicates := True; Theory.PlanBinding] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Theory.PrivateEvidencePortal  [1 consumers; predicates := True; Theory.PrivateComputationDeclaration] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Theory.ResourceCost.Quote  [4 consumers; predicates := True; Theory.ResourceCost] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
+Minidregg.Theory.TypedAuthorization.Parentage  [57 consumers; predicates := True; Theory.TypedAuthorization] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
