@@ -1,0 +1,27 @@
+edition ObjectiveBend 1
+# Named scenarios for the market programs, evaluated by the preview (runBounded).
+# Each entry returns a Nat or Bool so the preview cohort can pin the value.
+import ./MarketMath.obend as Math
+
+# ---- MarketMath: arithmetic spot checks ----
+def divideQuotient(n: Nat, divisor: Nat) -> Nat:
+  Math.divide(n, divisor).quotient
+
+def divideRemainder(n: Nat, divisor: Nat) -> Nat:
+  Math.divide(n, divisor).remainder
+
+def subTruncated(a: Nat, b: Nat) -> Nat:
+  Math.sub(a, b)
+
+def minOf(a: Nat, b: Nat) -> Nat:
+  Math.min(a, b)
+
+def leHolds(a: Nat, b: Nat) -> Bool:
+  Math.le(a, b)
+
+def ltHolds(a: Nat, b: Nat) -> Bool:
+  Math.lt(a, b)
+
+# The min_balance property instantiated at one (quantity, supply).
+def minBalanceHolds(quantity: Nat, supply: Nat) -> Bool:
+  Math.add(Math.min(quantity, supply), Math.sub(supply, Math.min(quantity, supply))) == supply

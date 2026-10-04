@@ -1,0 +1,83 @@
+edition ObjectiveBend 1
+# Exact structural naturals for the market programs: no float tolerance, no host
+# overflow, no worker-selected grid. Core4 has `+`, `*`, `&&`, `==` on Nat and no
+# order, truncated subtraction or division, so those are built by recursion on
+# the successor structure exactly as in the Gen-1 MarketMath.
+#
+# Port of examples/objective-bend-collective/MarketMath.bend.
+# Omitted (Objective laws are retained, never checked; kept as named properties):
+#   add_zero:     add(0, n) == n
+#   sub_zero:     sub(n, 0) == n
+#   min_balance:  add(min(q, s), sub(s, min(q, s))) == s   for all q, s
+# Dropped as redundant with the primitives: Gen-1 add and mul (structural unary
+# recursion) are `+` and `*`; `choose_nat`/`choose_bool`/`not` keep their names
+# but are now lazy conditionals (only the chosen side is forced).
+
+record Division:
+  quotient: Nat
+  remainder: Nat
+
+def add(a: Nat, b: Nat) -> Nat:
+  a + b
+
+def mul(a: Nat, b: Nat) -> Nat:
+  a * b
+
+# Truncated subtraction: sub(a, b) is 0 when b exceeds a.
+def sub(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0n: a
+    case 1n+q:
+      match a:
+        case 0n: 0n
+        case 1n+p: sub(p, q)
+
+def le(a: Nat, b: Nat) -> Bool:
+  match a:
+    case 0n: true
+    case 1n+p:
+      match b:
+        case 0n: false
+        case 1n+q: le(p, q)
+
+def lt(a: Nat, b: Nat) -> Bool:
+  le(a + 1n, b)
+
+def chooseNat(a: Nat, b: Nat, choose: Bool) -> Nat:
+  if choose then a else b
+
+def chooseBool(a: Bool, b: Bool, choose: Bool) -> Bool:
+  if choose then a else b
+
+def min(a: Nat, b: Nat) -> Nat:
+  match a:
+    case 0n: 0n
+    case 1n+p:
+      match b:
+        case 0n: 0n
+        case 1n+q: 1n + min(p, q)
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+# Euclidean division by a positive divisor, structurally recursing on the
+# numerator. `count` is the running remainder, always below the divisor.
+def incrementQuotient(result: Division, increment: Bool) -> Division:
+  if increment then {quotient: result.quotient + 1n, remainder: result.remainder} else result
+
+def divideStep(n: Nat, divisor: Nat, count: Nat) -> Division:
+  match n:
+    case 0n: {quotient: 0n, remainder: count}
+    case 1n+p: divideNext(p, divisor, count + 1n)
+
+def divideNext(p: Nat, divisor: Nat, next: Nat) -> Division:
+  divideReset(p, divisor, next, next == divisor)
+
+def divideReset(p: Nat, divisor: Nat, next: Nat, reset: Bool) -> Division:
+  incrementQuotient(divideStep(p, divisor, chooseNat(0n, next, reset)), reset)
+
+# A zero divisor yields quotient 0 and the numerator as remainder.
+def divide(n: Nat, divisor: Nat) -> Division:
+  match divisor:
+    case 0n: {quotient: 0n, remainder: n}
+    case 1n+p: divideStep(n, divisor, 0n)
