@@ -15,6 +15,7 @@
 # updated 2026-10-04: FASTMACHINE 09adc743: Theory.ObjectiveBendDemandMachineFast carries the @[csimp] fast stepRaw/step/runBounded/forceWith, so the Host now compiles through it  [counts: Minidregg 0 1, Theory 66 215, Kernel 335 496, Pred 7 11, Effects 0 3, Compiler 128 386, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: proof-eng: Theory.AssertAxioms imports Theory.AxiomPin (the multi-name #assert_axioms), so the pin command module enters with it  [counts: Minidregg 0 1, Theory 67 147, Kernel 335 477, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: RECEIVER-COLLAPSE: Kernel.SubjectKeyRotation becomes Kernel.Receivers.SubjectKeyRotation, the first family on the one receiving pipeline (Theory.Receiving, Kernel.Receiving)  [counts: Minidregg 0 1, Theory 68 148, Kernel 336 481, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: shipfix item 4: DeclaredResourceController imports Kernel.RefusalLane (per-signer refusal lane, Host-process state)  [counts: Minidregg 0 1, Theory 68 148, Kernel 337 482, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -515,6 +516,7 @@ Kernel.ReceiptContinuity
 Kernel.Receivers.SubjectKeyRotation
 Kernel.Receiving
 Kernel.RecipientReadEntitlement
+Kernel.RefusalLane
 Kernel.ResidentContextProjection
 Kernel.ResourceBirthController
 Kernel.ResourceBirthPolicyController

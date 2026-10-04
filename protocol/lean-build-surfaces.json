@@ -3474,7 +3474,7 @@
     {
       "module": "Host.ApplicationShareIssueGrainInspection",
       "path": "Host/ApplicationShareIssueGrainInspection.lean",
-      "sha256": "1ebbb3a30ce4cb540c13da364169e8b5ba64d365d08adfb952713d75adcdddb6",
+      "sha256": "7669e7356637dc6c3fb631918ab6d000057c7e12a42123f52dd7281b76d58e47",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3691,7 +3691,7 @@
     {
       "module": "Host.Json",
       "path": "Host/Json.lean",
-      "sha256": "3e48b43572ad265364506ee50a3f9cfea5183bf6902cbf640739504ab5b17521",
+      "sha256": "77e57362056972179923c81fb0af17e82a14db42313feb2e5633fd2b64cb9497",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4020,7 +4020,7 @@
     {
       "module": "Kernel.ApplicationAgentLifetimeDispatchCurrent",
       "path": "Kernel/ApplicationAgentLifetimeDispatchCurrent.lean",
-      "sha256": "e0c12b9915e30b8597c0c151a863f255810447894537bef02b0957c768948dce",
+      "sha256": "40018ef0e7ec240518a7aefed2876a45008b01b08866cb4dfaa5b8b6469ff242",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4048,7 +4048,7 @@
     {
       "module": "Kernel.ApplicationAgentLifetimeDispatchPayer",
       "path": "Kernel/ApplicationAgentLifetimeDispatchPayer.lean",
-      "sha256": "b7826a8cd112a1392be5b78d6afc82460418bb6e57e5dc692d8856209910d76a",
+      "sha256": "38b45ea4c43468d5d4b337f67942d238ecdd919b1b457b2b2edb512f8891b69f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4139,7 +4139,7 @@
     {
       "module": "Kernel.ApplicationDispatchAdmission",
       "path": "Kernel/ApplicationDispatchAdmission.lean",
-      "sha256": "9d6da06299c7fbad271c9f5a493c1c683e8af16c670bb489e250b1a3dff80c89",
+      "sha256": "f9fc2b57aff266e7c33b67877647c2e9a999c3d5f486da91726185ba73255387",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4188,7 +4188,7 @@
     {
       "module": "Kernel.ApplicationDispatchAgentPayer",
       "path": "Kernel/ApplicationDispatchAgentPayer.lean",
-      "sha256": "cad9d461c6d6a31060039fef6d54a272d1157b11d124014249487656e6b51aeb",
+      "sha256": "cef63a998f55bde7a690c14465c2d8ade60623278a3e37fc94404a9970273aa0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4230,7 +4230,7 @@
     {
       "module": "Kernel.ApplicationDispatchAuthority",
       "path": "Kernel/ApplicationDispatchAuthority.lean",
-      "sha256": "5f51e19b19f4498c9dcd312115361930673d716a975fb896c97668aa365fed0d",
+      "sha256": "2e4f8f87fbec778ed991cc97a3fe83f7afafa36eb5b2eec667e992b76546994d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4377,7 +4377,7 @@
     {
       "module": "Kernel.ApplicationGrain",
       "path": "Kernel/ApplicationGrain.lean",
-      "sha256": "9359b8f9e16db28d2b11222f199b50d4660b009a4c0808c448e27a979f7d3357",
+      "sha256": "95cd24bf89581a95c21d1895999be03ad35aca18ead85808e37c1e2ed551726b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4391,7 +4391,7 @@
     {
       "module": "Kernel.ApplicationGrainLaws",
       "path": "Kernel/ApplicationGrainLaws.lean",
-      "sha256": "080e7c11f46baea5b355e4e3ad32051a30cb3fb3cbd0be390def84b712e4601d",
+      "sha256": "a92faade20d7b5280ba19f1cddafb2b1ba6dc2995c8e98859e9378cb2b748fcd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4419,7 +4419,7 @@
     {
       "module": "Kernel.ApplicationGrainSessionEnrollmentAdmission",
       "path": "Kernel/ApplicationGrainSessionEnrollmentAdmission.lean",
-      "sha256": "7da6e7d0bffb3b5ec710e6bacc5a60835d8e524a6c4e753de0062e3071521172",
+      "sha256": "6174847706d271e206c7eb63ff91937b41309ff42d5c8a5c529f5946a31e4a70",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4475,7 +4475,7 @@
     {
       "module": "Kernel.ApplicationLifecycleBeginReceiver",
       "path": "Kernel/ApplicationLifecycleBeginReceiver.lean",
-      "sha256": "541774e9abbf4a960c06e73e1d89c1e8327efb80100eee345072345fe13118c3",
+      "sha256": "1256ffff98062e4f88f3fa5785671bd5ca03ace345009496c11ab8505010cd24",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4538,7 +4538,7 @@
     {
       "module": "Kernel.ApplicationLifecycleClaimCurrent",
       "path": "Kernel/ApplicationLifecycleClaimCurrent.lean",
-      "sha256": "d12c425169a53d1c903edd955961993349f7597d326308610fc69e733a774d72",
+      "sha256": "bf06002eca790c3eb2b023b915ce62621bdf19c8d69810164442200d9c39c7bf",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4895,7 +4895,7 @@
     {
       "module": "Kernel.ApplicationShareIssueSource",
       "path": "Kernel/ApplicationShareIssueSource.lean",
-      "sha256": "e558010afdde1bc7ec68f00c0150d4e578938a44495a70a3e19a10be69e665b3",
+      "sha256": "14222f007e6e526993d2d657aec57aa2674167a8419e146e3e4baa3afd2b80d3",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5203,7 +5203,7 @@
     {
       "module": "Kernel.DeclaredResourceController",
       "path": "Kernel/DeclaredResourceController.lean",
-      "sha256": "b3f1de6e716cb723d0a8afaf2b0fb8f26b648549ca6751c9eae5d7d9c490b02a",
+      "sha256": "729e9aa0bf0197f9ff0d1525c52c65fa357e186adeb29db350dc7b489f2bc13b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6993,6 +6993,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.RefusalLane",
+      "path": "Kernel/RefusalLane.lean",
+      "sha256": "9c214fced2c501a06765c20ba103ff3125ed27fab57986c4306ce635a1c64493",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.ReplicatedSettlementFinality",
       "path": "Kernel/ReplicatedSettlementFinality.lean",
       "sha256": "f09fc75d8444cda6e56449ab6b5067f526dbdc49dd9ce20a41ea94ee63ea239e",
@@ -7079,7 +7086,7 @@
     {
       "module": "Kernel.ResourceTransaction",
       "path": "Kernel/ResourceTransaction.lean",
-      "sha256": "25385a5cfe3d22af34a6910e3a959c586db660ba74bef2aa3d7fc90b745931b4",
+      "sha256": "84b08cda72331350d37a60a3d56c4a73763938d8ffed2b43770514359e34108d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
