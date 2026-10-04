@@ -42,7 +42,7 @@ os.umask(0o077)
 HERE=pathlib.Path(__file__).resolve().parent
 REPO=HERE.parent.parent
 ap=argparse.ArgumentParser()
-ap.add_argument('verb',choices=['all','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
+ap.add_argument('verb',choices=['all','summary','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
 for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable']:
     ap.add_argument('--'+f)
 a=ap.parse_args()
@@ -129,15 +129,25 @@ if a.verb=='all':
     step('invoke',*D,'--label','r13-core4-disabled','--expect','refused')
     for p in (pathlib.Path(str(root)+'-disabled')/'results').glob('*.json'):
         if not p.name.endswith('.dry.json'):(root/'results'/p.name).write_bytes(p.read_bytes())
-    rows=[json.loads(p.read_text()) for p in sorted((root/'results').glob('*.json')) if not p.name.endswith('.dry.json')]
+    subprocess.run(me+['summary',*W],check=True)
+
+elif a.verb=='summary':
+    # A pure function of results/: every step row and every readback check.
+    rows=[];reads=[]
+    for p in sorted((root/'results').glob('*.json')):
+        if p.name.endswith('.dry.json') or p.name=='summary.json':continue
+        (reads if p.name.startswith('readback-') else rows).append(json.loads(p.read_text())|({'label':p.stem} if p.name.startswith('readback-') else {}))
     def ok(row):
         if row['expect']=='confirmed':return row['rc']==0 and not row['unchanged']
         if row['expect']=='prepared':return row['rc']==0 and row['unchanged']
         return row['refused'] and row['unchanged']
-    summary={'world':str(root),'rows':[{k:row.get(k) for k in ['label','expect','rc','unchanged','reason','detail']}|{'pass':ok(row)} for row in rows]}
-    summary['allPass']=all(r['pass'] for r in summary['rows'])
+    summary={'world':str(root),
+        'rows':[{k:row.get(k) for k in ['label','expect','rc','unchanged','reason','detail']}|{'pass':ok(row)} for row in rows],
+        'readbacks':[{'label':r['label'],'height':r['height'],'returns':len(r['returns']),
+            'pass':bool(r['returns']) and all(c['stored'] and c['bytesExact'] for c in r['returns'])} for r in reads]}
+    summary['allPass']=all(r['pass'] for r in summary['rows']+summary['readbacks'])
     (root/'results'/'summary.json').write_text(json.dumps(summary,indent=1)+'\n')
-    print(json.dumps({'allPass':summary['allPass'],'rows':len(rows)}))
+    print(json.dumps({'allPass':summary['allPass'],'rows':len(rows),'readbacks':len(reads)}))
     if not summary['allPass']:raise SystemExit('acceptance failed: see results/summary.json')
 
 elif a.verb=='world':
