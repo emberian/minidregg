@@ -1,0 +1,116 @@
+edition ObjectiveBend 1
+# Candidate review is an endorsement about exact source, never proof of truth.
+# Inputs come from the authenticated source/policy/request views. The module
+# only proposes adoption; the current native source/root/law receiver decides it.
+#
+# Port of world/Workshop/CatalogReview.bend. Byte lists (List<&2, Nat>) become
+# opaque Strings: a String compares with `==` (labelEqual) and carries a digest
+# or name as one atom; the native bridge, not this module, pins their byte shape.
+
+record Candidate:
+  source: String
+  program: String
+  revision: Nat
+
+record Recommendation:
+  candidate: Candidate
+  policy: String
+  ready: Bool
+
+record Decision:
+  candidate: Candidate
+  policy: String
+  endorsed: Bool
+
+record Proposal:
+  expected: Candidate
+  selected: Candidate
+  policy: String
+
+sum Adoption:
+  hold: {}
+  propose: Proposal
+
+def candidateEq(a: Candidate, b: Candidate) -> Bool:
+  a.source == b.source && a.program == b.program && a.revision == b.revision
+
+# Every field in the review and decision is bound; source-name equality alone
+# cannot turn a review of revision A into authority to install revision B.
+def eligible(candidate: Candidate, policy: String, review: Recommendation, decision: Decision) -> Bool:
+  review.ready && decision.endorsed && candidateEq(candidate, review.candidate) && candidateEq(candidate, decision.candidate) && policy == review.policy && policy == decision.policy
+
+def choose(expected: Candidate, candidate: Candidate, policy: String, allowed: Bool) -> Adoption:
+  if allowed then Adoption.propose({expected: expected, selected: candidate, policy: policy}) else Adoption.hold()
+
+def prepare(expected: Candidate, candidate: Candidate, policy: String, review: Recommendation, decision: Decision) -> Adoption:
+  choose(expected, candidate, policy, eligible(candidate, policy, review, decision))
+
+# LAW proposal_exact / prepared_exact (not checkable yet: a general statement
+# over all inputs). Every successful proposal retains the predecessor and the
+# chosen source and policy, even when eligibility is overridden. Native
+# admission must check `expected` against the actual current source root.
+# Decidable form, checked on the scenario below:
+def proposalExact(expected: Candidate, candidate: Candidate, policy: String, result: Adoption) -> Bool:
+  match result:
+    case hold(_): true
+    case propose(p): candidateEq(p.expected, expected) && candidateEq(p.selected, candidate) && p.policy == policy
+
+def isHold(a: Adoption) -> Bool:
+  match a:
+    case hold(_): true
+    case propose(_): false
+
+def isPropose(a: Adoption) -> Bool:
+  match a:
+    case hold(_): false
+    case propose(_): true
+
+# ---- scenario: source "catalog/audit" revision 2 replaces revision 1 --------
+
+def current() -> Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 1n}
+
+def selected() -> Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 2n}
+
+def recommendation(ready: Bool) -> Recommendation:
+  {candidate: selected(), policy: "policy-9", ready: ready}
+
+def decision(endorsed: Bool) -> Decision:
+  {candidate: selected(), policy: "policy-9", endorsed: endorsed}
+
+# Review and decision both name revision 2 and policy-9: proposes.
+def proposesWhenEligible() -> Bool:
+  isPropose(prepare(current(), selected(), "policy-9", recommendation(true), decision(true)))
+
+# LAW unready_never_proposes, instance: a review that is not ready holds.
+def unreadyNeverProposes() -> Bool:
+  isHold(prepare(current(), selected(), "policy-9", recommendation(false), decision(true)))
+
+def unendorsedNeverProposes() -> Bool:
+  isHold(prepare(current(), selected(), "policy-9", recommendation(true), decision(false)))
+
+# A review of revision 1 is not authority to adopt revision 2.
+def staleReviewHolds() -> Bool:
+  isHold(prepare(current(), selected(), "policy-9", {candidate: current(), policy: "policy-9", ready: true}, decision(true)))
+
+def otherPolicyHolds() -> Bool:
+  isHold(prepare(current(), selected(), "policy-8", recommendation(true), decision(true)))
+
+# LAW proposal_exact / prepared_exact, instances.
+def proposalIsExact() -> Bool:
+  proposalExact(current(), selected(), "policy-9", prepare(current(), selected(), "policy-9", recommendation(true), decision(true))) && proposalExact(current(), selected(), "policy-9", prepare(current(), selected(), "policy-9", recommendation(false), decision(true)))
+
+# The proposal carries the predecessor revision (1) and the selected one (2).
+def proposedPredecessorRevision() -> Nat:
+  match prepare(current(), selected(), "policy-9", recommendation(true), decision(true)):
+    case hold(_): 99n
+    case propose(p): p.expected.revision
+
+def proposedSelectedRevision() -> Nat:
+  match prepare(current(), selected(), "policy-9", recommendation(true), decision(true)):
+    case hold(_): 99n
+    case propose(p): p.selected.revision
+
+def allHold() -> Bool:
+  proposesWhenEligible() && unreadyNeverProposes() && unendorsedNeverProposes() && staleReviewHolds() && otherPolicyHolds() && proposalIsExact()

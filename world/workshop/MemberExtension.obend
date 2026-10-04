@@ -1,0 +1,61 @@
+edition ObjectiveBend 1
+# A separately authored member extension; the workshop sources are intact.
+# Port of world/Workshop/MemberExtension.bend. It supplies the audit method
+# the workshop requires, delegates to the inherited review through
+# AuditedReview, and offers an alternate presentation over the composed final
+# review. This module extends a record and specs it does not own.
+import ./CatalogReview.obend as Review
+import ./ReusableWorkshop.obend as Shop
+
+# Revision 0 is never audited in; any later revision is.
+def audited(candidate: Review.Candidate) -> Bool:
+  match candidate.revision:
+    case 0n: false
+    case 1n+prior: true
+
+spec MemberAudit for Shop.Workshop:
+  def audit(candidate: Review.Candidate) -> Bool:
+    audited(candidate)
+
+# The new label is authored text "Reviewed". It is unrelated to approval or
+# authority; the verdict is whatever the final self's review returns.
+spec ReviewedPresentation for Shop.Workshop:
+  requires review(candidate: Review.Candidate, policy: String) -> Review.Recommendation
+  def present(candidate: Review.Candidate, policy: String, label: String) -> Shop.Card:
+    super.present(candidate, policy, "Reviewed")
+
+def memberWorkshop(rows: Shop.Catalog) -> Shop.Workshop:
+  fix(compose(Shop.CatalogLookup, Shop.CatalogReviewer, MemberAudit, Shop.AuditedReview, Shop.Presentation, ReviewedPresentation), Shop.seed(rows))
+
+# ---- scenario: alpha has revision 1, beta has revision 0 ----------------------
+
+def zeroRevisionDenied() -> Bool:
+  audited(Shop.beta())
+
+def positiveRevisionAllowed() -> Bool:
+  audited(Shop.alpha())
+
+# alpha is catalogued at revision 1: the audit lets it through.
+def alphaStaysReady() -> Bool:
+  memberWorkshop(Shop.rows()).review(Shop.alpha(), "policy-1").ready
+
+# beta is catalogued (the plain workshop calls it ready) but revision 0 fails
+# the audit: a failed audit denies a previously ready review.
+def betaReadyWithoutAudit() -> Bool:
+  Shop.plainWorkshop(Shop.rows()).review(Shop.beta(), "policy-1").ready
+
+def betaDeniedByAudit() -> Bool:
+  memberWorkshop(Shop.rows()).review(Shop.beta(), "policy-1").ready
+
+# An uncatalogued candidate cannot be upgraded by the audit extension.
+def gammaStaysDenied() -> Bool:
+  memberWorkshop(Shop.rows()).review(Shop.gamma(), "policy-1").ready
+
+def auditedReviewKeepsPolicy() -> Bool:
+  memberWorkshop(Shop.rows()).review(Shop.alpha(), "policy-1").policy == "policy-1"
+
+def alternateLabelIsReviewed() -> Bool:
+  memberWorkshop(Shop.rows()).present(Shop.alpha(), "policy-1", "ignored").label == "Reviewed"
+
+def alternatePresentationCarriesAuditedVerdict() -> Bool:
+  memberWorkshop(Shop.rows()).present(Shop.beta(), "policy-1", "ignored").review.ready

@@ -1,0 +1,167 @@
+edition ObjectiveBend 1
+# Reusable workshop behaviour as specifications over one open record.
+# Port of world/Workshop/ReusableWorkshop.bend. The Gen-1 file passed affine
+# callbacks (`final_catalog`, `inherited_review`) as arguments; here each of
+# those callbacks is a method of the final record, reached as `self.m(..)`
+# (the final self) or `super.m(..)` (the inherited whole super), which is what
+# those callbacks stood for. Calling these functions confers no authority.
+import ./CatalogReview.obend as Review
+
+sum Catalog:
+  empty: {}
+  row: {candidate: Review.Candidate, label: String, rest: Catalog}
+
+sum Lookup:
+  missing: {}
+  found: {candidate: Review.Candidate, label: String}
+
+record Card:
+  candidate: Review.Candidate
+  label: String
+  review: Review.Recommendation
+
+# The open target. `rows` is admitted catalog data (environment first); the
+# methods are the demands the specs below provide and require of one another.
+record Workshop:
+  rows: Catalog
+  audit(candidate: Review.Candidate) -> Bool
+  catalog(candidate: Review.Candidate) -> Lookup
+  review(candidate: Review.Candidate, policy: String) -> Review.Recommendation
+  present(candidate: Review.Candidate, policy: String, label: String) -> Card
+
+def lookup(selected: Review.Candidate, catalog: Catalog) -> Lookup:
+  match catalog:
+    case empty(_): Lookup.missing()
+    case row(r): if Review.candidateEq(selected, r.candidate) then Lookup.found({candidate: r.candidate, label: r.label}) else lookup(selected, r.rest)
+
+# A catalogued candidate is ready only if the found row is exactly the one
+# asked about (source, program and revision).
+def reviewFound(candidate: Review.Candidate, policy: String, found: Lookup) -> Review.Recommendation:
+  match found:
+    case missing(_): {candidate: candidate, policy: policy, ready: false}
+    case found(f): {candidate: candidate, policy: policy, ready: Review.candidateEq(candidate, f.candidate)}
+
+# The audit verdict can only strengthen: a denied review stays denied and a
+# failed audit denies even a previously ready review. Source and policy are
+# carried through unchanged.
+def strengthen(prior: Review.Recommendation, audited: Bool) -> Review.Recommendation:
+  {candidate: prior.candidate, policy: prior.policy, ready: prior.ready && audited}
+
+# Provides `catalog` from the admitted rows.
+spec CatalogLookup for Workshop:
+  def catalog(candidate: Review.Candidate) -> Lookup:
+    lookup(candidate, self.rows)
+
+# Requires `catalog`. A third-party override of `catalog` composed later is
+# observed here, because the call goes through the final self.
+spec CatalogReviewer for Workshop:
+  requires catalog(candidate: Review.Candidate) -> Lookup
+  def review(candidate: Review.Candidate, policy: String) -> Review.Recommendation:
+    reviewFound(candidate, policy, self.catalog(candidate))
+
+# Requires an `audit` supplied by the composing member. Delegates once to the
+# inherited review (super.review), then strengthens its verdict.
+spec AuditedReview for Workshop:
+  requires audit(candidate: Review.Candidate) -> Bool
+  def review(candidate: Review.Candidate, policy: String) -> Review.Recommendation:
+    strengthen(super.review(candidate, policy), self.audit(candidate))
+
+# Requires `review`; its callback is the final self's review. It receives only
+# authorized label/reference data, never resident journals.
+spec Presentation for Workshop:
+  requires review(candidate: Review.Candidate, policy: String) -> Review.Recommendation
+  def present(candidate: Review.Candidate, policy: String, label: String) -> Card:
+    {candidate: candidate, label: label, review: self.review(candidate, policy)}
+
+# Placeholder implementations for the seed (the inherited target of `fix`):
+# nothing is catalogued, nothing is audited in, nothing is ready.
+def seed(rows: Catalog) -> Workshop:
+  {rows: rows, audit: fn(candidate: Review.Candidate) -> Bool: false, catalog: fn(candidate: Review.Candidate) -> Lookup: Lookup.missing(), review: fn(candidate: Review.Candidate, policy: String) -> Review.Recommendation: {candidate: candidate, policy: policy, ready: false}, present: fn(candidate: Review.Candidate, policy: String, label: String) -> Card: {candidate: candidate, label: label, review: {candidate: candidate, policy: policy, ready: false}}}
+
+# The workshop without an audit method: catalog, review, presentation.
+def plainWorkshop(rows: Catalog) -> Workshop:
+  fix(compose(CatalogLookup, CatalogReviewer, Presentation), seed(rows))
+
+# ---- scenario ----------------------------------------------------------------
+# Two catalogued candidates; "gamma" is not catalogued.
+
+def alpha() -> Review.Candidate:
+  {source: "catalog/alpha", program: "p-1", revision: 1n}
+
+def beta() -> Review.Candidate:
+  {source: "catalog/beta", program: "p-2", revision: 0n}
+
+def gamma() -> Review.Candidate:
+  {source: "catalog/gamma", program: "p-3", revision: 4n}
+
+def alphaNewRevision() -> Review.Candidate:
+  {source: "catalog/alpha", program: "p-1", revision: 2n}
+
+def rows() -> Catalog:
+  Catalog.row({candidate: alpha(), label: "Alpha", rest: Catalog.row({candidate: beta(), label: "Beta", rest: Catalog.empty()})})
+
+def isFound(l: Lookup) -> Bool:
+  match l:
+    case missing(_): false
+    case found(_): true
+
+def foundLabelIs(l: Lookup, wanted: String) -> Bool:
+  match l:
+    case missing(_): false
+    case found(f): f.label == wanted
+
+def catalogFindsAlpha() -> Bool:
+  foundLabelIs(plainWorkshop(rows()).catalog(alpha()), "Alpha")
+
+def catalogFindsBeta() -> Bool:
+  foundLabelIs(plainWorkshop(rows()).catalog(beta()), "Beta")
+
+def catalogMissesGamma() -> Bool:
+  isFound(plainWorkshop(rows()).catalog(gamma()))
+
+# Source and revision are part of the key: a new revision of alpha is not alpha.
+def catalogMissesNewRevision() -> Bool:
+  isFound(plainWorkshop(rows()).catalog(alphaNewRevision()))
+
+def catalogedIsReady() -> Bool:
+  plainWorkshop(rows()).review(alpha(), "policy-1").ready
+
+def uncataloguedIsNotReady() -> Bool:
+  plainWorkshop(rows()).review(gamma(), "policy-1").ready
+
+def reviewKeepsPolicy() -> Bool:
+  plainWorkshop(rows()).review(alpha(), "policy-1").policy == "policy-1"
+
+def presentationCarriesLabelAndVerdict() -> Bool:
+  plainWorkshop(rows()).present(alpha(), "policy-1", "Catalog entry").label == "Catalog entry" && plainWorkshop(rows()).present(alpha(), "policy-1", "Catalog entry").review.ready
+
+# A third-party override of `catalog`, composed after the reviewer, is seen by
+# the reviewer through the final self: everything is now catalogued as gamma.
+spec PinnedCatalog for Workshop:
+  def catalog(candidate: Review.Candidate) -> Lookup:
+    Lookup.found({candidate: candidate, label: "Pinned"})
+
+def overriddenWorkshop(rows: Catalog) -> Workshop:
+  fix(compose(CatalogLookup, CatalogReviewer, PinnedCatalog), seed(rows))
+
+def overrideObservedByReviewer() -> Bool:
+  overriddenWorkshop(rows()).review(gamma(), "policy-1").ready
+
+# Decidable forms of the audit laws (the Gen-1 `law`s audit_source_exact,
+# denied_review_stays_denied, failed_audit_denies). Their general statements
+# range over every candidate, policy and verdict; not checkable yet.
+def recommendationEq(a: Review.Recommendation, b: Review.Recommendation) -> Bool:
+  Review.candidateEq(a.candidate, b.candidate) && a.policy == b.policy && a.ready == b.ready
+
+def auditSourceExact() -> Bool:
+  recommendationEq(strengthen({candidate: alpha(), policy: "policy-1", ready: true}, true), {candidate: alpha(), policy: "policy-1", ready: true}) && recommendationEq(strengthen({candidate: alpha(), policy: "policy-1", ready: true}, false), {candidate: alpha(), policy: "policy-1", ready: false})
+
+def deniedReviewStaysDenied() -> Bool:
+  recommendationEq(strengthen({candidate: alpha(), policy: "policy-1", ready: false}, true), {candidate: alpha(), policy: "policy-1", ready: false})
+
+def failedAuditDenies() -> Bool:
+  recommendationEq(strengthen({candidate: alpha(), policy: "policy-1", ready: true}, false), {candidate: alpha(), policy: "policy-1", ready: false})
+
+# Control: the recommendation equality sees the verdict, not only the source.
+def recommendationEqSeesVerdict() -> Bool:
+  recommendationEq({candidate: alpha(), policy: "policy-1", ready: true}, {candidate: alpha(), policy: "policy-1", ready: false})

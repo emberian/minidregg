@@ -1,5 +1,129 @@
 [
  {
+  "name": "CatalogProposesWhenEligible",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "proposesWhenEligible",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogUnreadyNeverProposes",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "unreadyNeverProposes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogUnendorsedNeverProposes",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "unendorsedNeverProposes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogStaleReviewHolds",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "staleReviewHolds",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogOtherPolicyHolds",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "otherPolicyHolds",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogProposalIsExact",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "proposalIsExact",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CatalogProposedPredecessorRevision",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "proposedPredecessorRevision",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "CatalogProposedSelectedRevision",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "proposedSelectedRevision",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CatalogAllHold",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   }
+  ],
+  "entry": "allHold",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
   "name": "CapacityDemonstrationResult",
   "modules": [
    {
@@ -118,6 +242,700 @@
    }
   ],
   "entry": "tokenOrderMatters",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "WorkshopCatalogFindsAlpha",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "catalogFindsAlpha",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopCatalogFindsBeta",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "catalogFindsBeta",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopCatalogMissesGammaControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "catalogMissesGamma",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "WorkshopCatalogMissesNewRevisionControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "catalogMissesNewRevision",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "WorkshopCatalogedIsReady",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "catalogedIsReady",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopUncataloguedIsNotReadyControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "uncataloguedIsNotReady",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "WorkshopReviewKeepsPolicy",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "reviewKeepsPolicy",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopPresentationCarriesLabelAndVerdict",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "presentationCarriesLabelAndVerdict",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopOverrideObservedByReviewer",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "overrideObservedByReviewer",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopAuditSourceExact",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "auditSourceExact",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopDeniedReviewStaysDenied",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "deniedReviewStaysDenied",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopFailedAuditDenies",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "failedAuditDenies",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "WorkshopRecommendationEqSeesVerdictControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "recommendationEqSeesVerdict",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "MemberZeroRevisionDeniedControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "zeroRevisionDenied",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "MemberPositiveRevisionAllowed",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "positiveRevisionAllowed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "MemberAlphaStaysReady",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "alphaStaysReady",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "MemberBetaReadyWithoutAudit",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "betaReadyWithoutAudit",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "MemberBetaDeniedByAuditControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "betaDeniedByAudit",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "MemberGammaStaysDeniedControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "gammaStaysDenied",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "MemberAuditedReviewKeepsPolicy",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "auditedReviewKeepsPolicy",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "MemberAlternateLabelIsReviewed",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "alternateLabelIsReviewed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "MemberAlternatePresentationCarriesAuditedVerdictControl",
+  "modules": [
+   {
+    "name": "CatalogReview",
+    "source": "CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "ReusableWorkshop",
+    "source": "ReusableWorkshop.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "MemberExtension",
+    "source": "MemberExtension.obend",
+    "imports": [
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Shop",
+      "path": "./ReusableWorkshop.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "alternatePresentationCarriesAuditedVerdict",
   "arguments": [],
   "expectedType": "boolean",
   "expected": false
