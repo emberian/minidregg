@@ -4190,14 +4190,25 @@ struct BirthShape<'a> {
     world: Option<Value>,
 }
 
-/// `--fields`: `open`, or a comma list of field numbers and inclusive ranges
-/// (`0-15,20`). The Host refuses a write to any field a cell did not declare.
+/// `--fields`: `open`, or a comma list of field numbers, inclusive ranges and at
+/// most one unbounded tail (`0-15,20,2000-`: every field from 2000 up). The Host
+/// refuses a write to any field a cell did not declare. A list is `["0",…]`; a
+/// list with a tail is `{"fields":[…],"from":"2000"}` (`put_fields` writes the
+/// birth's `fields` and `fieldsFrom`).
 pub(crate) fn parse_fields(text: &str) -> Result<Value> {
     if text == "open" {
         return Ok(json!("open"));
     }
     let mut fields: Vec<u64> = Vec::new();
+    let mut tail: Option<u64> = None;
     for part in text.split(',') {
+        if let Some(first) = part.strip_suffix('-') {
+            let first: u64 = first.parse().map_err(|_| format!("--fields: bad tail {part:?}"))?;
+            if tail.replace(first).is_some() {
+                return Err("--fields: at most one unbounded tail (N-)".into());
+            }
+            continue;
+        }
         let (low, high) = match part.split_once('-') {
             Some((low, high)) => (low, high),
             None => (part, part),
@@ -4213,7 +4224,28 @@ pub(crate) fn parse_fields(text: &str) -> Result<Value> {
             }
         }
     }
-    Ok(Value::Array(fields.into_iter().map(|f| json!(f.to_string())).collect()))
+    let listed = Value::Array(fields.iter().map(|f| json!(f.to_string())).collect());
+    match tail {
+        None => Ok(listed),
+        Some(first) => {
+            if let Some(inside) = fields.iter().find(|f| **f >= first) {
+                return Err(format!("--fields: field {inside} lies in the tail from {first}").into());
+            }
+            Ok(json!({"fields":listed,"from":first.to_string()}))
+        }
+    }
+}
+
+/// Write a parsed `--fields` declaration into a birth object: `fields` (`"open"`
+/// or the listed fields) and, with a tail, `fieldsFrom`.
+fn put_fields(target: &mut Value, fields: &Value) {
+    match fields.get("from") {
+        Some(from) => {
+            target["fields"] = fields["fields"].clone();
+            target["fieldsFrom"] = from.clone();
+        }
+        None => target["fields"] = fields.clone(),
+    }
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
@@ -4486,7 +4518,7 @@ fn birth(
         requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
     }
     if let Some(fields) = &shape.fields {
-        requested_core["fields"] = fields.clone();
+        put_fields(&mut requested_core, fields);
     }
     if let Some(world) = &shape.world {
         requested_core["world"] = world.clone();
@@ -4612,7 +4644,7 @@ fn birth(
     }
     // K-FIELD-CLOSURE: a declared cell names the fields it may hold.
     if let Some(fields) = &shape.fields {
-        resource["fields"] = fields.clone();
+        put_fields(&mut resource, fields);
     }
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
@@ -7810,6 +7842,17 @@ mod tests {
         assert!(parse_fields("").is_err());
         assert!(parse_fields("3-1").is_err());
         assert!(parse_fields("a").is_err());
+        // An unbounded tail (ROOM-SCHEMA v2): one, above every listed field.
+        assert_eq!(parse_fields("7,2000-").unwrap(), json!({"fields":["7"],"from":"2000"}));
+        assert_eq!(parse_fields("2000-").unwrap(), json!({"fields":[],"from":"2000"}));
+        assert!(parse_fields("7-,9-").is_err());
+        assert!(parse_fields("2001,2000-").is_err());
+        let mut birth = json!({});
+        put_fields(&mut birth, &parse_fields("7,2000-").unwrap());
+        assert_eq!(birth, json!({"fields":["7"],"fieldsFrom":"2000"}));
+        let mut birth = json!({});
+        put_fields(&mut birth, &parse_fields("open").unwrap());
+        assert_eq!(birth, json!({"fields":"open"}));
     }
 
     #[test]

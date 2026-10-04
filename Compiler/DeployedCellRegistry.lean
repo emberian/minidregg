@@ -40,10 +40,11 @@ set_option autoImplicit false
 /-- These values are wire pins.  Version 2 is the `DREGG/STORE` frame at each
 kind's declared wire; version-1 cells (countability-selected witness codecs)
 are retired; the declared-effect wire is version 4 since its key codec carries the
-blinding and a cell's field declaration (`state-key/tagged-v3`; v3 was the declaration alone).  Schema id 14 is the document schema every hyperdocument witness
+blinding and a cell's field declaration (`state-key/tagged-v3`; v3 was the declaration alone),
+and version 5 since the declaration's tail `fieldsFrom` (`state-key/tagged-v4`).  Schema id 14 is the document schema every hyperdocument witness
 names (`HyperdocumentOperationIntent.documentSchema`); `documentSchema_deployed`
 checks the two against each other. -/
-def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 4⟩
+def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 5⟩
 def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 4⟩
 def hyperdocumentContentSchemaRef : SchemaRef := ⟨⟨14⟩, 2⟩
 def hyperdocumentEventSchemaRef : SchemaRef := ⟨⟨15⟩, 2⟩

@@ -335,34 +335,52 @@ fn nat_prefix(bytes: &[u8]) -> Result<(Nat, &[u8])> {
 }
 
 /// Check an opened declaration (state-key tags 4 `fieldDeclared` and 5
-/// `fieldsOpen`, value 0) against the view's displayed `cell.declaration`:
+/// `fieldsOpen`, value 0; tag 6 `fieldsFrom`, value the tail's first field)
+/// against the view's displayed `cell.declaration` and `cell.declaredFrom`:
 /// `"open"` is exactly one tag-5 entry; a list of field numbers is exactly the
-/// tag-4 entries, one per field.  Every declaration entry names one cell.
-fn check_declaration(displayed: Option<&Value>, opened: &[&Vec<u8>]) -> Result<()> {
+/// tag-4 entries, one per field; a displayed tail is exactly one tag-6 entry
+/// holding it, and no tail is displayed without one.  Every declaration entry
+/// names one cell.
+fn check_declaration(displayed: Option<&Value>, displayed_from: Option<&Value>, opened: &[&Vec<u8>]) -> Result<()> {
     let refuse = |why: &str| Err(format!("view refused: {why}"));
     let mut object: Option<Nat> = None;
     let mut fields = Vec::new();
     let mut open = 0usize;
+    let mut tails = Vec::new();
     for entry in opened {
         let (cell, rest) = nat_prefix(&entry[1..])?;
-        let rest = if entry[0] == 4 {
-            let (field, rest) = nat_prefix(rest)?;
-            fields.push(field.to_decimal());
-            rest
-        } else {
-            open += 1;
-            rest
-        };
-        if rest != [255u8].as_slice() {
-            return refuse("a declaration entry holds a value other than 0");
+        match entry[0] {
+            4 => {
+                let (field, rest) = nat_prefix(rest)?;
+                fields.push(field.to_decimal());
+                if rest != [255u8].as_slice() {
+                    return refuse("a declaration entry holds a value other than 0");
+                }
+            }
+            5 => {
+                open += 1;
+                if rest != [255u8].as_slice() {
+                    return refuse("a declaration entry holds a value other than 0");
+                }
+            }
+            _ => tails.push(rest.to_vec()),
         }
         if object.get_or_insert_with(|| cell.clone()) != &cell {
             return refuse("declaration entries name two cells");
         }
     }
+    match (displayed_from, tails.as_slice()) {
+        (None, []) => {}
+        (Some(Value::String(first)), [held]) => {
+            if int_bytes(first)? != *held {
+                return refuse("its displayed roster tail is not its opened tail");
+            }
+        }
+        _ => return refuse("its displayed declaration tail is not its opened tail"),
+    }
     match displayed {
         Some(Value::String(text)) if text == "open" => {
-            if open != 1 || !fields.is_empty() {
+            if open != 1 || !fields.is_empty() || !tails.is_empty() {
                 return refuse("it displays an open cell and opens a different declaration");
             }
         }
@@ -383,7 +401,7 @@ fn check_declaration(displayed: Option<&Value>, opened: &[&Vec<u8>]) -> Result<(
     Ok(())
 }
 
-/// The canonical entry bytes of one displayed declared entry.
+/// The canonical entry bytes
 fn declared_entry_bytes(entry: &Value) -> Result<Vec<u8>> {
     let key = entry.get("key").ok_or("declared entry lacks key")?;
     let text = |name: &str| -> Result<String> {
@@ -489,9 +507,10 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
         // fields they declare.  Every opened declaration entry must be the
         // displayed declaration, and every displayed declaration opened.
         let displayed = resource.get("cell").and_then(|cell| cell.get("declaration"));
+        let displayed_from = resource.get("cell").and_then(|cell| cell.get("declaredFrom"));
         let (declarations, values): (Vec<&Vec<u8>>, Vec<&Vec<u8>>) =
-            opened.iter().partition(|entry| matches!(entry.first(), Some(4 | 5)));
-        check_declaration(displayed, &declarations)?;
+            opened.iter().partition(|entry| matches!(entry.first(), Some(4..=6)));
+        check_declaration(displayed, displayed_from, &declarations)?;
         if list.len() != values.len() {
             return Err(format!(
                 "view refused: it displays {} entries and opens {}",
@@ -546,18 +565,28 @@ mod tests {
         let encoded = nat_bytes(300);
         let (value, rest) = nat_prefix(&encoded).unwrap();
         assert_eq!((value.to_decimal().as_str(), rest), ("300", &[][..]));
-        assert!(check_declaration(Some(&json!(["2", "1"])), &[&one, &two]).is_ok());
-        assert!(check_declaration(Some(&json!("open")), &[&open]).is_ok());
-        assert!(check_declaration(None, &[]).is_ok());
-        assert!(check_declaration(Some(&json!(["1"])), &[&one, &two]).is_err());
-        assert!(check_declaration(Some(&json!(["1", "2"])), &[&one, &other_cell]).is_err());
-        assert!(check_declaration(Some(&json!("open")), &[&one]).is_err());
-        assert!(check_declaration(None, &[&one]).is_err());
+        assert!(check_declaration(Some(&json!(["2", "1"])), None, &[&one, &two]).is_ok());
+        assert!(check_declaration(Some(&json!("open")), None, &[&open]).is_ok());
+        assert!(check_declaration(None, None, &[]).is_ok());
+        assert!(check_declaration(Some(&json!(["1"])), None, &[&one, &two]).is_err());
+        assert!(check_declaration(Some(&json!(["1", "2"])), None, &[&one, &other_cell]).is_err());
+        assert!(check_declaration(Some(&json!("open")), None, &[&one]).is_err());
+        assert!(check_declaration(None, None, &[&one]).is_err());
+        // ROOM-SCHEMA v2: a roster tail is one tag-6 entry holding its first field.
+        let mut tail = vec![6u8];
+        tail.extend(nat_bytes(7));
+        tail.extend(int_bytes("2000").unwrap());
+        let from = json!("2000");
+        assert!(check_declaration(Some(&json!(["1"])), Some(&from), &[&one, &tail]).is_ok());
+        assert!(check_declaration(Some(&json!(["1"])), Some(&json!("2001")), &[&one, &tail]).is_err());
+        assert!(check_declaration(Some(&json!(["1"])), None, &[&one, &tail]).is_err());
+        assert!(check_declaration(Some(&json!(["1"])), Some(&from), &[&one]).is_err());
+        assert!(check_declaration(Some(&json!("open")), Some(&from), &[&open, &tail]).is_err());
         let mut nonzero = vec![4u8];
         nonzero.extend(nat_bytes(7));
         nonzero.extend(nat_bytes(1));
         nonzero.extend(int_bytes("3").unwrap());
-        assert!(check_declaration(Some(&json!(["1"])), &[&nonzero]).is_err());
+        assert!(check_declaration(Some(&json!(["1"])), None, &[&nonzero]).is_err());
     }
 
     #[test]

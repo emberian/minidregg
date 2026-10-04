@@ -66,6 +66,8 @@ private def keyJson : Minidregg.Theory.EffectDeclaration.StateKey → Json
        ("declares", number field.value)]
   | .fieldsOpen object => .mkObj
       [("type", toJson "open"), ("resource", number object.value)]
+  | .fieldsFrom object => .mkObj
+      [("type", toJson "from"), ("resource", number object.value)]
 
 private def actionJson : Minidregg.Theory.DeclaredActionLowering.Action → Json
   | .create key value => .mkObj

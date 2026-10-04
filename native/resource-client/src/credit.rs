@@ -19,7 +19,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) use crate::room_schema::{ROOM_FIELDS_START,TARIFF_FIELDS};
+pub(crate) use crate::room_schema::TARIFF_FIELDS;
 /// Fresh rooms declare one central schema, including names, paid-open and assignment.
 pub(crate) fn room_declared_fields() -> String { crate::room_schema::declared_fields() }
 
@@ -1046,9 +1046,10 @@ mod tests {
         keys.dedup();
         assert_eq!(keys.len(), TARIFF_FIELDS.len());
         assert_eq!(field_key("week").unwrap(), "1001");
-        // Every room field sits at or above the roster's ceiling.
+        // Every room field sits in the room's own band, below the roster tail.
         for (_, key) in TARIFF_FIELDS {
-            assert!(key.parse::<u64>().unwrap() >= ROOM_FIELDS_START);
+            let key = key.parse::<u64>().unwrap();
+            assert!(key >= crate::room_schema::ROOM_FIELDS_START && key < crate::room_schema::ROSTER_FROM);
         }
         assert!(field_key("weekly").is_err());
     }

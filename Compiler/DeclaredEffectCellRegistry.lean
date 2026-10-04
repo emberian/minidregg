@@ -14,8 +14,9 @@ reference, installs the store-codec materializer, round-trips a nonempty
 Schema reference `91004` moved from version 1 (the four-slot, sixteen-shard
 page frame `LOOM/EFFECT/PAGE`) to version 2 (the `DREGG/STORE` frame at the
 declared-effect wire), and to version 4 when the wire's key codec carried both the
-blinding and a cell's field declaration (`state-key/tagged-v3`).  Version-1, -2 and
--3 cells refuse to decode (their layout digests differ).  Retirement
+blinding and a cell's field declaration (`state-key/tagged-v3`), and to version 5
+when the declaration gained its tail `fieldsFrom` (`state-key/tagged-v4`).  Version-1
+through -4 cells refuse to decode (their layout digests differ).  Retirement
 prevents identifier resurrection; physical stable-media installation and
 digest collision resistance remain the existing explicit refinement ceilings.
 -/
@@ -51,7 +52,7 @@ def kindAtTag : UInt8 -> Option Kind
   rfl
 
 /-- Schema id 91004, version 4: the store frame at `DeclaredEffectCell.wire`. -/
-def effectCellSchemaRef : SchemaRef := ⟨⟨91004⟩, 4⟩
+def effectCellSchemaRef : SchemaRef := ⟨⟨91004⟩, 5⟩
 
 def schemaRef : Kind -> SchemaRef
   | .declaredEffect => effectCellSchemaRef

@@ -42,7 +42,7 @@
 //! says who may write whose stream; it says nothing about rooms. Any member may
 //! append a topic or pin entry to their own stream, and `tail` shows it, marked
 //! ignored with the reason; the room's topic and pin are the last such entries,
-//! in merge order, whose author is the founder (roster field 2). Reactions and
+//! in merge order, whose author is the founder (the roster's founder row). Reactions and
 //! replies are open to every member.
 //!
 //! TEXT. The stream cell holds only a digest of each payload. The Host's tail
@@ -849,8 +849,12 @@ pub(crate) struct Roster {
     pub members: Vec<(String, String)>,
 }
 
-/// The roster from a room cell's resource view.
-pub(crate) fn roster_of(view: &Value) -> Roster {
+/// The roster from a room cell's resource view (ROOM-SCHEMA v2,
+/// `room_schema`): the founder at `ROSTER_FROM`, member `k` at
+/// `ROSTER_FROM + 2k - 1` (subject) and `+ 2k` (stream), unbounded. A view of a
+/// cell that is not a v2 room is refused by name (`check_room_view`).
+pub(crate) fn roster_of(view: &Value) -> Result<Roster, String> {
+    crate::room_schema::check_room_view(view)?;
     let mut fields: BTreeMap<u64, String> = BTreeMap::new();
     for entry in view.pointer("/cell/entries").and_then(Value::as_array).into_iter().flatten() {
         let field = entry.pointer("/key/field").and_then(Value::as_str).and_then(|f| f.parse::<u64>().ok());
@@ -859,15 +863,15 @@ pub(crate) fn roster_of(view: &Value) -> Roster {
             fields.insert(f, v.to_owned());
         }
     }
-    // The roster is the fields below the room cell's own fields (the
-    // tariff, Hermes: `credit::ROOM_FIELDS_START`); a field at or above it is
-    // never a member row.
+    // The roster is the room's tail; the room's own fields (the tariff,
+    // Hermes, the names index) sit below it and are never member rows.
+    let from = crate::room_schema::ROSTER_FROM;
     let members = fields
-        .iter()
-        .filter(|(f, _)| **f >= 3 && **f % 2 == 1 && **f + 1 < crate::credit::ROOM_FIELDS_START)
+        .range(from + 1..)
+        .filter(|(f, _)| (**f - from) % 2 == 1)
         .filter_map(|(f, subject)| fields.get(&(f + 1)).map(|stream| (subject.clone(), stream.clone())))
         .collect();
-    Roster { founder: fields.get(&2).cloned(), members }
+    Ok(Roster { founder: fields.get(&crate::room_schema::FOUNDER_FIELD).cloned(), members })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1229,7 +1233,7 @@ impl Held {
 
     fn roster(&mut self, session: &Session, room: &Room) -> Result<(), Done> {
         let view = signed_read(session, &self.ws, &room.name, "roster", &self.grant, "resource", &[])?;
-        self.roster = roster_of(&view);
+        self.roster = roster_of(&view).map_err(error)?;
         Ok(())
     }
 
@@ -1299,7 +1303,7 @@ fn read_held(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String
         value
     };
     let roster_bin = latest("roster").ok_or_else(|| error(format!("this session holds no read of {}; tail it first", room.name)))?;
-    let roster = roster_of(&render("view-resource", &roster_bin)?);
+    let roster = roster_of(&render("view-resource", &roster_bin)?).map_err(error)?;
     let keys = room_keys(session, room)?;
     let mut entries = Vec::new();
     let mut missing = Vec::new();
@@ -2054,7 +2058,8 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     let grant = room_grant(session, name, &me, &MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>())?;
     let grant_name = format!("{name}-room");
     import_from(session, &grant_name, &grant)?;
-    roster_write(session, name, &[(2, &me), (3, &me), (4, &stream_target)])?;
+    let (subject_row, stream_row) = crate::room_schema::member_fields(1);
+    roster_write(session, name, &[(crate::room_schema::FOUNDER_FIELD, &me), (subject_row, &me), (stream_row, &stream_target)])?;
     let room = Room { name: name.to_owned(), grant: grant_name, stream: Some(stream_name) };
     save_room(session, &room).map_err(error)?;
     let mut record = get_json(&room_path(session, name)).unwrap_or_default();
@@ -2069,7 +2074,7 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
 /// room beside it. The room keeps its own law and grants; adopting adds what
 /// `chat new` adds after the room's birth: the founder's stream born in the
 /// room under the founder's author law, the founder's own room grant, and the
-/// roster's founder row (field 2) with the founder's stream. Members join
+/// roster's founder row (`room_schema::FOUNDER_FIELD`) with the founder's stream. Members join
 /// with `chat invite` / `chat join` as in any chat room.
 ///
 /// Only the room's controller adopts: the reference must carry its control
@@ -2091,7 +2096,7 @@ fn chat_adopt(session: &Session, name: &str) -> Result<(), Done> {
         return Err(usage(format!("only the founder who controls {name} adopts chat into it")));
     }
     let ws = workspace_record(session).map_err(error)?;
-    let roster = roster_of(&signed_read(session, &ws, name, "roster", &room_ref, "resource", &[])?);
+    let roster = roster_of(&signed_read(session, &ws, name, "roster", &room_ref, "resource", &[])?).map_err(error)?;
     adopt_decision(roster.founder.as_deref(), &me, name)?;
     let law = author_law(&me);
     let stream_name = format!("{name}-me");
@@ -2106,7 +2111,8 @@ fn chat_adopt(session: &Session, name: &str) -> Result<(), Done> {
         import_from(session, &grant_name, &grant)?;
     }
     if roster.founder.is_none() {
-        roster_write(session, name, &[(2, &me), (3, &me), (4, &stream_target)])?;
+        let (subject_row, stream_row) = crate::room_schema::member_fields(1);
+        roster_write(session, name, &[(crate::room_schema::FOUNDER_FIELD, &me), (subject_row, &me), (stream_row, &stream_target)])?;
     }
     let room = Room { name: name.to_owned(), grant: grant_name, stream: Some(stream_name) };
     save_room(session, &room).map_err(error)?;
@@ -2171,7 +2177,7 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
     let me = me(session)?;
     let ws = workspace_record(session).map_err(error)?;
     let grant = reference(session, &room.grant).map_err(error)?;
-    let roster = roster_of(&signed_read(session, &ws, name, "roster", &grant, "resource", &[])?);
+    let roster = roster_of(&signed_read(session, &ws, name, "roster", &grant, "resource", &[])?).map_err(error)?;
     if roster.founder.as_deref() != Some(me.as_str()) {
         return Err(usage(format!("only the founder of {name} invites")));
     }
@@ -2186,14 +2192,12 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
         client("workspace", &flags)?;
     }
     // A kick/leave revokes grants but retains the stream and roster history.
-    // Re-invitation gives fresh source authority and reuses that subject's slot.
+    // Re-invitation gives fresh source authority and reuses that subject's rows.
+    // A new member's rows are the next pair of the roster tail: no ceiling.
     let prior=roster.members.iter().find(|(s,_)|s==subject).map(|(_,stream)|stream.clone());
-    if prior.is_none() && roster.members.len()>=crate::room_schema::ROSTER_MEMBER_CAPACITY {
-        return Err(usage(format!("the roster of {name} has reached its {} historical member slots; re-inviting an existing subject reuses its slot",crate::room_schema::ROSTER_MEMBER_CAPACITY)));
-    }
     let invitation = room_grant(session, name, subject, verbs)?;
     let stream_target=if let Some(stream)=prior {stream}else {
-        let slot=2*(roster.members.len() as u64+1)+1;
+        let (slot, _) = crate::room_schema::member_fields(roster.members.len() as u64 + 1);
         let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
         let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), None)?;
         let stream_target=member(&stream,"target").map_err(error)?.to_owned();
@@ -2226,7 +2230,7 @@ fn room_ls(session: &Session, room: &Room, since: u64, import: bool, as_json: bo
     let ws = workspace_record(session).map_err(error)?;
     let grant = reference(session, &room.grant).map_err(error)?;
     let room_cell = member(&grant, "target").map_err(error)?.to_owned();
-    let roster = roster_of(&signed_read(session, &ws, &room.name, "roster", &grant, "resource", &[])?);
+    let roster = roster_of(&signed_read(session, &ws, &room.name, "roster", &grant, "resource", &[])?).map_err(error)?;
     let view = signed_read(session, &ws, &room.name, "since", &grant, "since", &[("height", since.to_string())])?;
     let entries: Vec<Value> = view.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
     // cell -> (first height, last height, writers)
@@ -2312,7 +2316,7 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
     let mut room = Room { name: name.to_owned(), grant: name.to_owned(), stream: None };
     let ws = workspace_record(session).map_err(error)?;
     let grant = reference(session, name).map_err(error)?;
-    let roster = roster_of(&signed_read(session, &ws, name, "roster", &grant, "resource", &[])?);
+    let roster = roster_of(&signed_read(session, &ws, name, "roster", &grant, "resource", &[])?).map_err(error)?;
     if let Some((_, stream)) = roster.members.iter().find(|(s, _)| *s == me) {
         let stream_name = format!("{name}-me");
         let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
@@ -2579,17 +2583,26 @@ mod tests {
 
     #[test]
     fn the_roster_reads_founder_and_member_rows() {
-        let view = json!({"type":"resource","cell":{"root":"1","entries":[
-            {"key":{"type":"object","resource":"9","field":"1"},"value":"0"},
-            {"key":{"type":"object","resource":"9","field":"2"},"value":"100"},
-            {"key":{"type":"object","resource":"9","field":"3"},"value":"100"},
-            {"key":{"type":"object","resource":"9","field":"4"},"value":"500"},
-            {"key":{"type":"object","resource":"9","field":"5"},"value":"200"},
-            {"key":{"type":"object","resource":"9","field":"6"},"value":"600"}]}});
+        let declaration: Vec<String> = (1001..=1012).map(|f| f.to_string()).collect();
+        let view = json!({"type":"resource","cell":{"root":"1","declaration":declaration,"declaredFrom":"2000","entries":[
+            {"key":{"type":"object","resource":"9","field":"1008"},"value":"0"},
+            {"key":{"type":"object","resource":"9","field":"2000"},"value":"100"},
+            {"key":{"type":"object","resource":"9","field":"2001"},"value":"100"},
+            {"key":{"type":"object","resource":"9","field":"2002"},"value":"500"},
+            {"key":{"type":"object","resource":"9","field":"2003"},"value":"200"},
+            {"key":{"type":"object","resource":"9","field":"2004"},"value":"600"},
+            {"key":{"type":"object","resource":"9","field":"2999"},"value":"300"},
+            {"key":{"type":"object","resource":"9","field":"3000"},"value":"700"}]}});
         assert_eq!(
-            roster_of(&view),
-            Roster { founder: Some("100".into()), members: vec![("100".into(), "500".into()), ("200".into(), "600".into())] }
+            roster_of(&view).unwrap(),
+            Roster { founder: Some("100".into()), members: vec![("100".into(), "500".into()), ("200".into(), "600".into()), ("300".into(), "700".into())] }
         );
+        // A room born under room schema v1 is refused by name, not misread.
+        let mut v1: Vec<String> = (2..=1012).map(|f| f.to_string()).collect();
+        v1.sort();
+        let old = json!({"type":"resource","cell":{"root":"1","declaration":v1,"entries":[
+            {"key":{"type":"object","resource":"9","field":"2"},"value":"100"}]}});
+        assert!(roster_of(&old).unwrap_err().contains("room schema v1"));
     }
 
     #[test]

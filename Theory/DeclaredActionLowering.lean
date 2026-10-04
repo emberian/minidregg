@@ -366,6 +366,7 @@ def keyCode : StateKey -> Nat
   | .fieldDeclared object field =>
       Nat.pair 4 (Nat.pair object.value field.value)
   | .fieldsOpen object => Nat.pair 5 object.value
+  | .fieldsFrom object => Nat.pair 6 object.value
 
 def keyOfCode (code : Nat) : Option StateKey :=
   let tagged := Nat.unpair code
@@ -382,6 +383,7 @@ def keyOfCode (code : Nat) : Option StateKey :=
       let parts := Nat.unpair tagged.2
       some (.fieldDeclared ⟨parts.1⟩ ⟨parts.2⟩)
   | 5 => some (.fieldsOpen ⟨tagged.2⟩)
+  | 6 => some (.fieldsFrom ⟨tagged.2⟩)
   | _ => none
 
 @[simp] theorem keyOfCode_keyCode (key : StateKey) :

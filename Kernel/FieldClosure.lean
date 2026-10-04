@@ -11,7 +11,9 @@ bytes on a cell someone else's law governs.
 The kernel closes it, default-closed:
 
 * A declared cell carries its **declaration** in its own store, written at
-  birth: `fieldDeclared ⟨cell⟩ ⟨n⟩` for each field it may hold, or
+  birth: `fieldDeclared ⟨cell⟩ ⟨n⟩` for each field it may hold, optionally
+  `fieldsFrom ⟨cell⟩` holding `t` for every field at or above `t` (an unbounded
+  tail: a room's roster, whose rows are allocated on join), or
   `fieldsOpen ⟨cell⟩` for an open kind.  No action writes a declaration key
   (`admitted_preserves_declared`), so the declaration is fixed for the cell's
   life.  A cell that declares nothing is closed to every field.
@@ -27,6 +29,7 @@ so the kernel's check and a law-level model (`Kernel.Job`) apply the same
 function.
 -/
 import Kernel.DeclaredResourceProjection
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.FieldClosure
 
@@ -41,14 +44,15 @@ set_option autoImplicit false
 
 /-! ## §1. The rule, over field values -/
 
-/-- A declared cell's field set: exactly the listed fields, or open. -/
+/-- A declared cell's field set: exactly the listed fields and, with a `tail`,
+every field at or above it; or open. -/
 inductive FieldSet where
-  | closed (fields : List Nat)
+  | closed (fields : List Nat) (tail : Option Nat := none)
   | «open»
   deriving DecidableEq, Repr
 
 def FieldSet.covers : FieldSet → Nat → Bool
-  | .closed fields, n => decide (n ∈ fields)
+  | .closed fields tail, n => decide (n ∈ fields) || tail.any (fun first => decide (first ≤ n))
   | .open, _ => true
 
 /-- Every field a write could have changed: those present before or after. -/
@@ -135,10 +139,18 @@ theorem open_admits_every_field (pre post : Values) :
 
 def declaredKey (cellId n : Nat) : StateKey := .fieldDeclared ⟨cellId⟩ ⟨n⟩
 def openKey (cellId : Nat) : StateKey := .fieldsOpen ⟨cellId⟩
+def fromKey (cellId : Nat) : StateKey := .fieldsFrom ⟨cellId⟩
 
-/-- Field `n` is declared at cell `cellId`: the cell is open, or declares `n`. -/
+/-- The tail a `fieldsFrom` entry holding `lowest` declares covers field `n`. -/
+def tailCovers (lowest : Option Int) (n : Nat) : Bool :=
+  lowest.any fun first => decide (first ≤ (n : Int))
+
+/-- Field `n` is declared at cell `cellId`: the cell is open, declares `n`, or
+declares a tail at or below `n`.  Each disjunct is one lookup: the check never
+scans the declaration, however many fields a tail admits. -/
 def declaredIn (cellId : Nat) (store : Store effectLayout) (n : Nat) : Bool :=
-  (store (openKey cellId).address).isSome || (store (declaredKey cellId n).address).isSome
+  (store (openKey cellId).address).isSome || (store (declaredKey cellId n).address).isSome ||
+    tailCovers (store (fromKey cellId).address) n
 
 /-- A present key is admissible under the cell's declaration: an object field of
 this cell is declared; every other key is the key law's to judge. -/
@@ -196,6 +208,7 @@ theorem get_values (cellId n : Nat) (store : Store effectLayout) :
     | blinding => simp at found
     | fieldDeclared _ _ => simp at found
     | fieldsOpen _ => simp at found
+    | fieldsFrom _ => simp at found
   cases held : store (StateKey.objectField ⟨cellId⟩ ⟨n⟩).address with
   | none =>
     unfold DeclaredResourceProjection.get
@@ -264,29 +277,35 @@ theorem closed_preserved {cellId : Nat} {pre post : Store effectLayout}
   | blinding => trivial
   | fieldDeclared _ _ => trivial
   | fieldsOpen _ => trivial
+  | fieldsFrom _ => trivial
 
 /-! ## §3. Writing a declaration at birth -/
 
-def FieldSet.keys (cellId : Nat) : FieldSet → List StateKey
-  | .closed fields => fields.map (declaredKey cellId)
-  | .open => [openKey cellId]
+/-- The declaration entries of `set`: each listed field's key holding `0`, the
+tail's key holding its first field, or the open key holding `0`. -/
+def FieldSet.entries (cellId : Nat) : FieldSet → List (StateKey × Int)
+  | .closed fields tail =>
+      fields.map (fun n => (declaredKey cellId n, 0)) ++
+        (tail.map fun first => (fromKey cellId, (first : Int))).toList
+  | .open => [(openKey cellId, 0)]
 
-/-- `store` with `set`'s declaration written into it, each key holding `0`. -/
+/-- `store` with `set`'s declaration written into it. -/
 def declare (cellId : Nat) (set : FieldSet) (store : Store effectLayout) : Store effectLayout :=
-  (set.keys cellId).foldl (fun acc key => acc.set key.address (some 0)) store
+  (set.entries cellId).foldl (fun acc entry => acc.set entry.1.address (some entry.2)) store
 
 /-! ## §4. No action writes a declaration -/
 
 theorem writableKeyCheck_not_declaration {kind : ResourceKind} (target : ResourceId kind)
     (key : StateKey) (writable : writableKeyCheck target key = true) :
-    (∀ object field, key ≠ .fieldDeclared object field) ∧ ∀ object, key ≠ .fieldsOpen object := by
+    (∀ object field, key ≠ .fieldDeclared object field) ∧ (∀ object, key ≠ .fieldsOpen object) ∧
+      ∀ object, key ≠ .fieldsFrom object := by
   cases kind <;> cases key <;> simp_all [writableKeyCheck]
 
 /-- An admitted declaration's patch writes no declaration key. -/
 theorem admitted_writes_no_declaration {kind : ResourceKind} {target : ResourceId kind}
     (declaration : Declaration target) (admitted : declaration.Admitted) (key : StateKey)
     (isDeclaration : (∃ object field, key = .fieldDeclared object field) ∨
-      ∃ object, key = .fieldsOpen object) :
+      (∃ object, key = .fieldsOpen object) ∨ ∃ object, key = .fieldsFrom object) :
     key.address ∉ Patch.writeFootprint declaration.patch := by
   intro written
   rw [Patch.mem_writeFootprint_iff] at written
@@ -301,26 +320,28 @@ theorem admitted_writes_no_declaration {kind : ResourceKind} {target : ResourceI
     rw [guardedSet_address] at address
     have same := StateKey.address_injective (Option.some.inj address)
     have writable : writableKeyCheck target written = true := actionAdmitted
-    obtain ⟨notDeclared, notOpen⟩ := writableKeyCheck_not_declaration target written writable
-    rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩
+    obtain ⟨notDeclared, notOpen, notFrom⟩ := writableKeyCheck_not_declaration target written writable
+    rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩ | ⟨object, rfl⟩
     · exact notDeclared object field same
     · exact notOpen object same
+    · exact notFrom object same
   | write written expected replacement =>
     simp only [Action.ops, List.mem_singleton] at opMember
     subst opMember
     rw [guardedSet_address] at address
     have same := StateKey.address_injective (Option.some.inj address)
     have writable : writableKeyCheck target written = true := actionAdmitted
-    obtain ⟨notDeclared, notOpen⟩ := writableKeyCheck_not_declaration target written writable
-    rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩
+    obtain ⟨notDeclared, notOpen, notFrom⟩ := writableKeyCheck_not_declaration target written writable
+    rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩ | ⟨object, rfl⟩
     · exact notDeclared object field same
     · exact notOpen object same
+    · exact notFrom object same
   | move source destination resource sourceExpected destinationExpected amount =>
     simp only [Action.ops, List.mem_cons, List.not_mem_nil, or_false] at opMember
     rcases opMember with rfl | rfl <;>
     · rw [guardedSet_address] at address
       have same := StateKey.address_injective (Option.some.inj address)
-      rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩ <;> cases same
+      rcases isDeclaration with ⟨object, field, rfl⟩ | ⟨object, rfl⟩ | ⟨object, rfl⟩ <;> cases same
 
 /-- **A cell's declaration is fixed**: running an admitted declaration leaves
 every field's declared-ness as it was. -/
@@ -328,11 +349,13 @@ theorem admitted_preserves_declared {kind : ResourceKind} {target : ResourceId k
     (declaration : Declaration target) (admitted : declaration.Admitted)
     (cellId : Nat) (store : Store effectLayout) (n : Nat) :
     declaredIn cellId (Patch.run store declaration.patch) n = declaredIn cellId store n := by
-  unfold declaredIn openKey declaredKey
+  unfold declaredIn openKey declaredKey fromKey
   rw [Patch.run_frame _ _ _
-      (admitted_writes_no_declaration declaration admitted _ (.inr ⟨_, rfl⟩)),
+      (admitted_writes_no_declaration declaration admitted _ (.inr (.inl ⟨_, rfl⟩))),
     Patch.run_frame _ _ _
-      (admitted_writes_no_declaration declaration admitted _ (.inl ⟨_, _, rfl⟩))]
+      (admitted_writes_no_declaration declaration admitted _ (.inl ⟨_, _, rfl⟩)),
+    Patch.run_frame _ _ _
+      (admitted_writes_no_declaration declaration admitted _ (.inr (.inr ⟨_, rfl⟩)))]
 
 /-! ## §5. Poles, on field values -/
 
@@ -350,6 +373,37 @@ theorem open_admits_created_field :
 theorem closed_admits_declared_write :
     firstUndeclared (FieldSet.closed (List.range 16)).covers [(0, 6), (8, 0)]
       [(0, 6), (8, 0), (12, 77)] = none := by decide
+
+/-- **The tail's satisfiable pole** (a room: fixed fields 1001..1012, roster tail
+from 2000): rows created at the tail's first field and far above it are
+declared, however many members came before. -/
+theorem tail_admits_rows_at_and_above :
+    firstUndeclared (FieldSet.closed ((List.range 12).map (· + 1001)) (some 2000)).covers
+      [(1001, 5)] [(1001, 5), (2000, 7), (2001, 9), (1000001, 3)] = none := by decide
+
+/-- **The tail's refutable pole**: the field just below the tail, outside the
+listed fields, is named. -/
+theorem tail_names_field_below :
+    firstUndeclared (FieldSet.closed ((List.range 12).map (· + 1001)) (some 2000)).covers
+      [(1001, 5)] [(1001, 5), (1999, 7)] = some 1999 := by decide
+
+/-- A declared cell's lookup (`declaredIn`, what the receiver and the cell law
+evaluate) on a room's birth store: the listed fields and the tail are declared,
+the gap between them is not, and the tail is one entry (`declaration_one_tail_entry`). -/
+theorem room_birth_declared_boundary :
+    declaredIn 7 (declare 7 (.closed [1001, 1012] (some 2000)) 0) 1012 = true ∧
+    declaredIn 7 (declare 7 (.closed [1001, 1012] (some 2000)) 0) 2000 = true ∧
+    declaredIn 7 (declare 7 (.closed [1001, 1012] (some 2000)) 0) 1000000 = true ∧
+    declaredIn 7 (declare 7 (.closed [1001, 1012] (some 2000)) 0) 1999 = false ∧
+    declaredIn 7 (declare 7 (.closed [1001, 1012] (some 2000)) 0) 1013 = false := by
+  decide
+
+/-- The width the room schema saves: a declaration with a tail writes one entry
+for the whole unbounded roster, where the pre-declared roster wrote one entry
+per slot. -/
+theorem declaration_one_tail_entry (cellId : Nat) (fields : List Nat) (first : Nat) :
+    ((FieldSet.closed fields (some first)).entries cellId).length = fields.length + 1 := by
+  simp [FieldSet.entries]
 
 end Minidregg.Kernel.FieldClosure
 
@@ -373,3 +427,7 @@ end Minidregg.Kernel.FieldClosure
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.open_admits_created_field
 /-- info: 'Minidregg.Kernel.FieldClosure.closed_admits_declared_write' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FieldClosure.closed_admits_declared_write
+#assert_axioms Minidregg.Kernel.FieldClosure.tail_admits_rows_at_and_above
+#assert_axioms Minidregg.Kernel.FieldClosure.tail_names_field_below
+#assert_axioms Minidregg.Kernel.FieldClosure.room_birth_declared_boundary
+#assert_axioms Minidregg.Kernel.FieldClosure.declaration_one_tail_entry

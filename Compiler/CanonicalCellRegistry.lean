@@ -153,15 +153,17 @@ frames to `StoreCodec` frames; authority v6 tags every capability scope's
 target set (explicit or `under` a room); the Book's balance codec became the zigzag
 integer codec; the declared roles moved in S2c, and to v4 when the declared-effect key codec
 `state-key/tagged-v3` carried both the blinding (tag 3, K-NARROW-HIDE) and a cell's declaration
-(tags 4/5, K-FIELD-CLOSURE); the compute braid's v3 had the declaration alone at tags 3/4. -/
+(tags 4/5, K-FIELD-CLOSURE); the compute braid's v3 had the declaration alone at tags 3/4.
+The declared roles are v5 since `state-key/tagged-v4` added the declaration tail `fieldsFrom`
+(tag 6, ROOM-SCHEMA v2); a v4 declared cell refuses to decode. -/
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
   | .authority => ⟨⟨91003⟩, 8⟩
-  | .declaredObject => ⟨⟨91004⟩, 4⟩
+  | .declaredObject => ⟨⟨91004⟩, 5⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
-  | .accountMetadata => ⟨⟨91007⟩, 4⟩
-  | .declaredProgram => ⟨⟨91008⟩, 4⟩
+  | .accountMetadata => ⟨⟨91007⟩, 5⟩
+  | .declaredProgram => ⟨⟨91008⟩, 5⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 4⟩
   | .stream => ⟨⟨91012⟩, 3⟩
@@ -349,6 +351,8 @@ def KeyAllowed (kind : ResourceKind) (cellId : Nat) : StateKey → Prop
   | .fieldDeclared object _ =>
       (kind = .object ∨ kind = .account) ∧ object.value = cellId
   | .fieldsOpen object =>
+      (kind = .object ∨ kind = .account) ∧ object.value = cellId
+  | .fieldsFrom object =>
       (kind = .object ∨ kind = .account) ∧ object.value = cellId
 
 instance keyAllowedDecidable (kind : ResourceKind) (cellId : Nat) (key : StateKey) :

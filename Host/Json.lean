@@ -2076,8 +2076,11 @@ private def birthParts (path : String)
   let roomField := if (raw.get? "room").isSome then ["room", "placement"] else []
   let blindingField := if (raw.get? "blinding").isSome then ["blinding"] else []
   -- K-FIELD-CLOSURE: a declared resource names the fields it may hold, or
-  -- `"open"`; absent, it declares none and holds none.
+  -- `"open"`; absent, it declares none and holds none.  `fieldsFrom` adds the
+  -- unbounded tail (every field at or above it) to a closed declaration.
   let fieldsField := if storage = "declared" ∧ (raw.get? "fields").isSome then ["fields"] else []
+  let fieldsFromField :=
+    if storage = "declared" ∧ (raw.get? "fieldsFrom").isSome then ["fieldsFrom"] else []
   let worldFields := if storage = "world-kind" then ["definition"]
     else if storage = "world-instance" then
       ["definition", "fromKind", "expectedKindRoot", "expectedKindRevision"] else []
@@ -2089,11 +2092,16 @@ private def birthParts (path : String)
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
-      roomField ++ blindingField ++ fieldsField ++ worldFields) json
-  let declaration : Minidregg.Kernel.FieldClosure.FieldSet ← match obj.get? "fields" with
-    | none => pure (.closed [])
-    | some (.str "open") => pure .open
-    | some value => .closed <$> list (path ++ ".fields") nat value
+      roomField ++ blindingField ++ fieldsField ++ fieldsFromField ++ worldFields) json
+  let tail ← match obj.get? "fieldsFrom" with
+    | none => pure none
+    | some value => some <$> nat (path ++ ".fieldsFrom") value
+  let declaration : Minidregg.Kernel.FieldClosure.FieldSet ← match obj.get? "fields", tail with
+    | none, tail => pure (.closed [] tail)
+    | some (.str "open"), none => pure .open
+    | some (.str "open"), some _ =>
+        throw s!"{path}.fieldsFrom: an open cell already declares every field"
+    | some value, tail => (.closed · tail) <$> list (path ++ ".fields") nat value
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
@@ -4619,9 +4627,10 @@ private def stateKeyJson : Minidregg.Theory.EffectDeclaration.StateKey → Lean.
   | .fieldDeclared object field => .mkObj [("type", "declared"),
       ("resource", decimal object.value), ("declares", decimal field.value)]
   | .fieldsOpen object => .mkObj [("type", "open"), ("resource", decimal object.value)]
+  | .fieldsFrom object => .mkObj [("type", "from"), ("resource", decimal object.value)]
 
 private def isDeclarationKey : Minidregg.Theory.EffectDeclaration.StateKey → Bool
-  | .fieldDeclared _ _ | .fieldsOpen _ => true
+  | .fieldDeclared _ _ | .fieldsOpen _ | .fieldsFrom _ => true
   | _ => false
 
 /-- A declared cell's view: `entries` are the values it holds; its declaration
@@ -4637,10 +4646,17 @@ private def declaredCellJson (root : Digest)
   let declared := all.filterMap fun entry => match entry.1.2 with
     | .fieldDeclared _ field => some (decimal field.value)
     | _ => none
+  -- The declaration's tail (ROOM-SCHEMA v2): every field at or above it.
+  let tail := all.findSome? fun entry => match entry.1.2 with
+    | .fieldsFrom _ => some (signedDecimal (entry.2 : Int))
+    | _ => none
   let base := [("root", decimal root.value),
     ("entries", .arr <| entries.toArray.map fun entry => .mkObj
       [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))]),
-    ("declaration", if isOpen then "open" else .arr declared.toArray)]
+    ("declaration", if isOpen then "open" else .arr declared.toArray)] ++
+    (match tail with
+     | some first => [("declaredFrom", first)]
+     | none => [])
   let grain := entries.findSome? fun entry => match entry.1.2 with
     | .objectField task field => if field.value = 0 then some task.value else none
     | _ => none

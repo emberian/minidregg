@@ -441,7 +441,7 @@ fn verify(
     let mut image = None;
     let (view, c, _) = workspace::signed_view(root, &ws, &reference(&invitation)?, "resource")?;
     consistent(&mut image, &c)?;
-    let roster = crate::chat::roster_of(&view);
+    let roster = crate::chat::roster_of(&view)?;
     if roster.founder.as_deref() != p["founder"].as_str()
         || !roster.members.iter().any(|(subject, stream)| {
             Some(subject.as_str()) == p["recipient"].as_str()

@@ -666,6 +666,7 @@ def declaredField : EffectDeclaration.StateKey → CellField
   -- Neither is ever written after birth.
   | .fieldDeclared _ field => .slot field.value
   | .fieldsOpen _ => .code
+  | .fieldsFrom _ => .code
 
 def contentField : Hyperdocument.Namespace → CellField
   | .links | .marks | .annotations => .annotations

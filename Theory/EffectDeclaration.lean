@@ -32,9 +32,9 @@ open Minidregg.Theory.Store
 
 /-- Every mutable coordinate is kind-correct by construction.
 
-`fieldDeclared` and `fieldsOpen` are a declared cell's **declaration**
-(K-FIELD-CLOSURE, `Kernel.FieldClosure`): the fields the cell may hold,
-written at birth.  No action writes them (`DeclaredActionLowering.writableKeyCheck`),
+`fieldDeclared`, `fieldsFrom` and `fieldsOpen` are a declared cell's
+**declaration** (K-FIELD-CLOSURE, `Kernel.FieldClosure`): the fields the cell
+may hold, written at birth.  No action writes them (`DeclaredActionLowering.writableKeyCheck`),
 so a cell's declaration is fixed for its life. -/
 inductive StateKey where
   | objectField (object : ResourceId .object) (field : Digest)
@@ -48,6 +48,11 @@ inductive StateKey where
   | fieldDeclared (object : ResourceId .object) (field : Digest)
   /-- The cell declares that it may hold any object field: an open kind. -/
   | fieldsOpen (object : ResourceId .object)
+  /-- The cell declares every object field numbered at or above the value this
+  key holds: an unbounded tail beside its listed fields.  A room's roster is
+  such a tail: a member's rows are allocated on join, and nothing is reserved
+  for members who never come. -/
+  | fieldsFrom (object : ResourceId .object)
   deriving DecidableEq, Repr
 
 /-- The declared-effect layout: one RAM namespace whose keys are the typed

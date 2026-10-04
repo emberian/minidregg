@@ -60,6 +60,8 @@ def stateKeyStream : StreamCodec StateKey where
         4 :: StreamCodec.nat.encode object.value ++ digestStream.encode field
     | .fieldsOpen object =>
         5 :: StreamCodec.nat.encode object.value
+    | .fieldsFrom object =>
+        6 :: StreamCodec.nat.encode object.value
   decodePrefix
     | 0 :: bytes => do
         let (object, afterObject) <- StreamCodec.nat.decodePrefix bytes
@@ -80,6 +82,9 @@ def stateKeyStream : StreamCodec StateKey where
     | 5 :: bytes => do
         let (object, suffix) <- StreamCodec.nat.decodePrefix bytes
         some (.fieldsOpen ⟨object⟩, suffix)
+    | 6 :: bytes => do
+        let (object, suffix) <- StreamCodec.nat.decodePrefix bytes
+        some (.fieldsFrom ⟨object⟩, suffix)
     | _ => none
   decodePrefix_encode := by
     intro key suffix
@@ -98,12 +103,19 @@ def stateKeyStream : StreamCodec StateKey where
           digestStream.decodePrefix_encode]
     | fieldsOpen object =>
         simp [StreamCodec.nat.decodePrefix_encode]
+    | fieldsFrom object =>
+        simp [StreamCodec.nat.decodePrefix_encode]
 
-/-- v3 (INTEGRATOR-3): tag 3 is the blinding (K-NARROW-HIDE, the proof braid's v2), tags 4 and 5
+/-- v4 (ROOM-SCHEMA v2): tag 6 is `fieldsFrom`, a declaration of every object field at or above
+the value it holds (a room's roster tail; K-FIELD-CLOSURE's language grew a case).  v3 cells lay
+out a different digest and are refused (`StoreCodec.decode_other_layout`), never reinterpreted:
+a world born under v3 is re-genesised, not carried.
+
+v3 (INTEGRATOR-3) (INTEGRATOR-3): tag 3 is the blinding (K-NARROW-HIDE, the proof braid's v2), tags 4 and 5
 a cell's declaration (K-FIELD-CLOSURE, the compute braid's v2 at tags 3 and 4). Both v2s and v1
 lay out a different digest, so every earlier declared cell is refused
 (`StoreCodec.decode_other_layout`), never reinterpreted. -/
-def stateKeyCodecId : String := "state-key/tagged-v3"
+def stateKeyCodecId : String := "state-key/tagged-v4"
 
 /-- The effect layout on the wire.  Its single namespace contributes no bytes;
 keys are typed state keys and values are zigzag integers. -/

@@ -9,9 +9,12 @@ run exactly these client operations. `law.author.json` is the one law the templa
 
 - **The room** `ROOM` is a `declared` cell. Its law is `law.author.json` with the founder's
   subject: only the founder writes it (mutate 2, append 7); reads and grants pass.
-- **The roster** is the room cell's fields: field 2 = the founder's subject; member `k`
-  (from 1) = field `2k+1` (subject) and field `2k+2` (the member's stream cell). Field 1 is
-  the field every declared cell is born with (value 0); the roster leaves it alone.
+- **The roster** is the room cell's tail (ROOM-SCHEMA v2, `native/resource-client/src/room_schema.rs`):
+  the room declares its own fields 1001..1012 and every field from 2000 up (`--fields
+  1001,…,1012,2000-`, one `fieldsFrom` declaration entry). Field 2000 = the founder's subject;
+  member `k` (from 1) = field `2000+2k-1` (subject) and field `2000+2k` (the member's stream
+  cell). Rows are allocated on join and kept after a kick; there is no member ceiling. A room
+  born under v1 (roster pre-declared in fields 2..1000, 499 slots) is refused by name.
 - **A stream per member**: a `stream` cell born `--in ROOM`, owned by the member, under
   `law.author.json` with the member's subject. Only its owner can append to it.
 - **The room grant**: `observe` + `append` `under ROOM` (`"room": true`). It reads the
@@ -25,16 +28,16 @@ run exactly these client operations. `law.author.json` is the one law the templa
 3. `propose` + `submit` + `publish-delegation`: delegate ROOM to FOUNDER, verbs observe,append, `room: true`
    (the founder's own grant on ROOM names ROOM alone; reading the streams needs `under ROOM`);
    `import ROOM-room --from-ref` it.
-4. `propose` + `submit` an invoke on ROOM: create fields 2 = FOUNDER, 3 = FOUNDER, 4 = ROOM-me's cell.
+4. `propose` + `submit` an invoke on ROOM: create fields 2000 = FOUNDER, 2001 = FOUNDER, 2002 = ROOM-me's cell.
 
 ## `chat invite ROOM SUBJECT [NAME]` (the founder; the founder pays)
 
-1. Read the roster; refuse unless I am field 2 and SUBJECT is not on it.
+1. Read the roster; refuse unless I am field 2000 (re-inviting SUBJECT reuses its rows).
 2. Delegate ROOM to SUBJECT (observe, append, `room: true`), submit, publish.
 3. `workspace --action create --name ROOM-<subject> --storage stream --predicate law.author(SUBJECT) --in ROOM --owner SUBJECT`
    (K-STREAM: a workspace without a birth context cannot birth, so the founder births it;
    the owner and control grants go to SUBJECT, the founder holds nothing on it).
-4. Invoke on ROOM: create fields 2k+1 = SUBJECT, 2k+2 = the stream cell.
+4. Invoke on ROOM: create fields 2000+2k-1 = SUBJECT, 2000+2k = the stream cell (k = members + 1).
 5. Print `chat join ROOM <the recipient reference>` for the member.
 
 ## `chat join ROOM INVITATION` (the member)
