@@ -57,6 +57,7 @@ structure HelperSpec where
   listen : Option String := none
   peers : List (Nat × String) := []
   pairKeys : List (Nat × System.FilePath) := []
+  deriving Inhabited
 
 def HelperSpec.args (spec : HelperSpec) : Array String := Id.run do
   let mut args := #["session"]
@@ -125,6 +126,10 @@ structure Native where
   journal : System.FilePath
   helper : Helper
   storage : Storage
+  /-- The exact helper session this replica was opened with, so a restart
+  reopens the same keys, listener and peers from the durable journal alone. -/
+  spec : HelperSpec
+  writable : Bool
   deriving Inhabited
 
 def storage (n : Native) : Storage := n.storage
@@ -161,13 +166,14 @@ def openNative (spec : HelperSpec) (journal : System.FilePath) (context : Contex
     | throw (IO.userError "agreement journal is not an append-only log or has a corrupt frame")
   let some restored := openRestored context (bytes.take valid)
     | throw (IO.userError "agreement journal does not replay under this exact context")
-  let helper ← spawnHelper {spec with journal := if writable then some journal else none}
+  let spec := {spec with journal := if writable then some journal else none}
+  let helper ← spawnHelper spec
   if writable then
     let (status,_) ← helper.call opOpen (u64 bytes.length ++ u64 valid)
     if status != 0 then
       helper.close
       throw (IO.userError "agreement journal writer open refused")
-  return ⟨journal,helper,← journalStorage helper writable ⟨context,restored⟩⟩
+  return ⟨journal,helper,← journalStorage helper writable ⟨context,restored⟩,spec,writable⟩
 
 structure Envelope where
   context : Context
@@ -246,6 +252,12 @@ def openRuntime (spec : HelperSpec) (journal : System.FilePath) (context : Conte
 def Runtime.now (r : Runtime) : IO Nat := do
   return r.logicalBase + ((← IO.monoMsNow) - r.monotonicBase)
 def Runtime.close (r : Runtime) : IO Unit := r.native.helper.close
+/-- Process restart: stop this helper session (releasing the writer lock) and
+open the same replica again from its durable journal alone. Every volatile
+image, cursor and connection of the old session is lost. -/
+def Runtime.reopen (r : Runtime) : IO Runtime := do
+  r.close
+  openRuntime r.native.spec r.native.journal r.context r.native.writable
 def Runtime.current (r : Runtime) : IO (Option (Restored r.context)) :=
   GenericSimplexIO.current (storage r.native) r.context
 /-- Network ingress admits ONLY authenticated protocol delivery, never checked,

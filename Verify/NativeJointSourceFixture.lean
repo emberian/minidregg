@@ -203,6 +203,17 @@ def openReplicas (root : System.FilePath) (helpers : Helpers) (writable : Bool) 
     replicas := replicas.push (← openReplica root helpers index writable)
   return replicas
 
+/-- `run`: one call through in-process agreement among the four actual
+replicas (the same per-replica `iteration` the standing service runs, packets
+handed over directly), then the lost-response/restart test: every helper
+session is stopped, every journal reopened from disk, every source store
+reloaded, and the exact original receipt must be there with exactly one
+append. Test fixture only: it holds all four writer locks. -/
+def runCall (root : System.FilePath) (helpers : Helpers) (callFile : System.FilePath)
+    (fuel : Nat) : IO Unit := do
+  let replicas ← openReplicas root helpers true
+  let _ ← GenericSimplexSourceHarness.runCallChecked fuel replicas (← IO.FS.readBinFile callFile).toList
+
 /-- Independent process readback: no drive, proposal, or admission is called. -/
 def lookupAllCall (root : System.FilePath) (helpers : Helpers)
     (callFile outputFile : System.FilePath) : IO Unit := do
@@ -297,9 +308,12 @@ def main (args : List String) : IO Unit := do
       let some seconds := seconds.toNat? | throw (IO.userError "invalid deadline seconds")
       let some proposer := proposer.toNat? | throw (IO.userError "invalid proposer index")
       awaitCall root callFile outputFile seconds id proposer
+  | ["run", root, store, signature, agreement, callFile, fuel] =>
+      let some fuel := fuel.toNat? | throw (IO.userError "invalid fuel")
+      runCall root ⟨store,signature,agreement⟩ callFile fuel
   | ["lookup-all-call", root, store, signature, agreement, callFile, outputFile] =>
       lookupAllCall root ⟨store,signature,agreement⟩ callFile outputFile
   | ["convert-journal", root, store, signature, agreement, index] =>
       let some index := index.toNat? | throw (IO.userError "invalid replica index")
       convertJournal root ⟨store,signature,agreement⟩ index
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME | convert-journal ROOT STORE SIGNATURE AGREEMENT INDEX")
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME | convert-journal ROOT STORE SIGNATURE AGREEMENT INDEX")

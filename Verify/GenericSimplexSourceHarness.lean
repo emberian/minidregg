@@ -112,12 +112,16 @@ def runWithLostResponseCheck (fuel : Nat) (replicas : Array Replica) (signedIngr
   require (tipKey first.participant != tipKey final.participant)
     "tip key did not distinguish the pre- and post-mutation histories"
   -- Deliberately lose all caller completion responses and volatile participant
-  -- state. Reopen protocol journals from the original fixture state, then load
-  -- and reverify actual physical source stores. Nothing resubmits the mutation.
+  -- state: each replica's helper session is stopped and its protocol journal
+  -- reopened from disk alone, over the original pre-mutation source state; the
+  -- physical source store is then reloaded and reverified. Nothing resubmits
+  -- the mutation.
   let mut restarted : Array Replica := #[]
-  for original in before do
-    let opened ← openParticipant original.config original.participant.runtime.native
-      original.participant.runtime.context original.participant.source
+  for index in List.range before.size do
+    let some original := before[index]? | throw (IO.userError "missing original replica")
+    let some live := finished[index]? | throw (IO.userError "missing finished replica")
+    let runtime ← live.participant.runtime.reopen
+    let opened ← openParticipant original.config runtime original.participant.source
     let participant ← match opened with
       | .ok participant => pure participant
       | .error detail => throw (IO.userError ("protocol restart refused: " ++ detail))
