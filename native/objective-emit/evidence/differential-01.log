@@ -1,0 +1,258 @@
+# differential 2026-10-04T00:56:46-0400 cflags='' limits heap=4000000 stack=4000000 ticks=20000000
+# GenericExtensionReuse typing=accepted:{"tag":"natural"} rom-nodes=68 labels=11 full-ticks=111 lean-suite-s=2.1
+PASS GenericExtensionReuse full limits=(4000000,4000000,20000000) outcome=finished ticks=111 heap=24 stack=0 state-sha256=a06f623977d8fd11
+PASS GenericExtensionReuse ticks-third limits=(4000000,4000000,37) outcome=suspended-ticks ticks=37 heap=16 stack=3 state-sha256=1f8c6cb6f80282b8
+PASS GenericExtensionReuse ticks-two-thirds limits=(4000000,4000000,74) outcome=suspended-ticks ticks=74 heap=21 stack=7 state-sha256=5cff567fac7b8385
+PASS GenericExtensionReuse heap-half limits=(12,4000000,20000000) outcome=suspended-capacity ticks=33 heap=12 stack=5 state-sha256=3b66988c213b3afa
+PASS GenericExtensionReuse resume-capacity limits=(4000000,4000000,19999967) resume outcome=finished ticks=78 heap=24 stack=0 state-sha256=a06f623977d8fd11
+PASS GenericExtensionReuse stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=c2531f55a3b3632c
+PASS GenericExtensionReuse resume-half limits=(4000000,4000000,19999945) resume outcome=finished ticks=56 heap=24 stack=0 state-sha256=a06f623977d8fd11
+# RepeatedExtension typing=accepted:{"tag":"natural"} rom-nodes=43 labels=8 full-ticks=99 lean-suite-s=1.8
+PASS RepeatedExtension full limits=(4000000,4000000,20000000) outcome=finished ticks=99 heap=19 stack=0 state-sha256=0388dc65688dfd98
+PASS RepeatedExtension ticks-third limits=(4000000,4000000,33) outcome=suspended-ticks ticks=33 heap=9 stack=5 state-sha256=ee38817791169adc
+PASS RepeatedExtension ticks-two-thirds limits=(4000000,4000000,66) outcome=suspended-ticks ticks=66 heap=17 stack=3 state-sha256=2befea5f2ae0bc0b
+PASS RepeatedExtension heap-half limits=(9,4000000,20000000) outcome=suspended-capacity ticks=33 heap=9 stack=5 state-sha256=ee38817791169adc
+PASS RepeatedExtension resume-capacity limits=(4000000,4000000,19999967) resume outcome=finished ticks=66 heap=19 stack=0 state-sha256=0388dc65688dfd98
+PASS RepeatedExtension stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=88a0157558e1c201
+PASS RepeatedExtension resume-half limits=(4000000,4000000,19999951) resume outcome=finished ticks=50 heap=19 stack=0 state-sha256=0388dc65688dfd98
+# EvenOddTen typing=accepted:{"tag":"boolean"} rom-nodes=70 labels=17 full-ticks=276 lean-suite-s=2.2
+PASS EvenOddTen full limits=(4000000,4000000,20000000) outcome=finished ticks=276 heap=50 stack=0 state-sha256=e60388d6d34dd24c
+PASS EvenOddTen ticks-third limits=(4000000,4000000,92) outcome=suspended-ticks ticks=92 heap=23 stack=9 state-sha256=23ebe2d77850bf4e
+PASS EvenOddTen ticks-two-thirds limits=(4000000,4000000,184) outcome=suspended-ticks ticks=184 heap=38 stack=2 state-sha256=5982bf98af5351a2
+PASS EvenOddTen heap-half limits=(25,4000000,20000000) outcome=suspended-capacity ticks=103 heap=25 stack=10 state-sha256=61a771ee75051184
+PASS EvenOddTen resume-capacity limits=(4000000,4000000,19999897) resume outcome=finished ticks=173 heap=50 stack=0 state-sha256=e60388d6d34dd24c
+PASS EvenOddTen stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=5147cea49be1d7a0
+PASS EvenOddTen resume-half limits=(4000000,4000000,19999862) resume outcome=finished ticks=138 heap=50 stack=0 state-sha256=e60388d6d34dd24c
+# TwiceReview typing=accepted:{"tag":"natural"} rom-nodes=91 labels=20 full-ticks=238 lean-suite-s=2.4
+PASS TwiceReview full limits=(4000000,4000000,20000000) outcome=finished ticks=238 heap=46 stack=0 state-sha256=0ac61d4cb2d35905
+PASS TwiceReview ticks-third limits=(4000000,4000000,79) outcome=suspended-ticks ticks=79 heap=22 stack=8 state-sha256=c584d7fd2a819efd
+PASS TwiceReview ticks-two-thirds limits=(4000000,4000000,158) outcome=suspended-ticks ticks=158 heap=41 stack=3 state-sha256=25be01e7d7c8f201
+PASS TwiceReview heap-half limits=(23,4000000,20000000) outcome=suspended-capacity ticks=86 heap=23 stack=10 state-sha256=756fe9dff84372cf
+PASS TwiceReview resume-capacity limits=(4000000,4000000,19999914) resume outcome=finished ticks=152 heap=46 stack=0 state-sha256=0ac61d4cb2d35905
+PASS TwiceReview stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=7b4bd7e9d833da5d
+PASS TwiceReview resume-half limits=(4000000,4000000,19999881) resume outcome=finished ticks=119 heap=46 stack=0 state-sha256=0ac61d4cb2d35905
+# ImportedReview typing=accepted:{"tag":"natural"} rom-nodes=91 labels=20 full-ticks=238 lean-suite-s=1.9
+PASS ImportedReview full limits=(4000000,4000000,20000000) outcome=finished ticks=238 heap=46 stack=0 state-sha256=2ac9719f71e37fb2
+PASS ImportedReview ticks-third limits=(4000000,4000000,79) outcome=suspended-ticks ticks=79 heap=22 stack=8 state-sha256=c519245a3a411cff
+PASS ImportedReview ticks-two-thirds limits=(4000000,4000000,158) outcome=suspended-ticks ticks=158 heap=41 stack=3 state-sha256=87063dbdc667a0e1
+PASS ImportedReview heap-half limits=(23,4000000,20000000) outcome=suspended-capacity ticks=86 heap=23 stack=10 state-sha256=562d30e92d101f5e
+PASS ImportedReview resume-capacity limits=(4000000,4000000,19999914) resume outcome=finished ticks=152 heap=46 stack=0 state-sha256=2ac9719f71e37fb2
+PASS ImportedReview stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=8ee4e6ad905ce7a8
+PASS ImportedReview resume-half limits=(4000000,4000000,19999881) resume outcome=finished ticks=119 heap=46 stack=0 state-sha256=2ac9719f71e37fb2
+# LazySpecification typing=accepted:{"tag":"natural"} rom-nodes=68 labels=18 full-ticks=144 lean-suite-s=2.0
+PASS LazySpecification full limits=(4000000,4000000,20000000) outcome=finished ticks=144 heap=32 stack=0 state-sha256=1994c4334f0da9b2
+PASS LazySpecification ticks-third limits=(4000000,4000000,48) outcome=suspended-ticks ticks=48 heap=16 stack=6 state-sha256=e651aa5d0077a6d8
+PASS LazySpecification ticks-two-thirds limits=(4000000,4000000,96) outcome=suspended-ticks ticks=96 heap=26 stack=6 state-sha256=1902353791d38f6b
+PASS LazySpecification heap-half limits=(16,4000000,20000000) outcome=suspended-capacity ticks=52 heap=16 stack=6 state-sha256=11727975bf22ba66
+PASS LazySpecification resume-capacity limits=(4000000,4000000,19999948) resume outcome=finished ticks=92 heap=32 stack=0 state-sha256=1994c4334f0da9b2
+PASS LazySpecification stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=46b3174a253d76a5
+PASS LazySpecification resume-half limits=(4000000,4000000,19999928) resume outcome=finished ticks=72 heap=32 stack=0 state-sha256=1994c4334f0da9b2
+# Heterogeneous typing=accepted:{"member":{"tag":"natural"},"name":"x","tag":"field","tail":{"member":{"tag":"natural"},"name":"y","tag":"field","tail":{"member":{"tag":"natural"},"name":"z","tag":"field","tail":{"tag":"emptyRow"}}}} rom-nodes=52 labels=12 full-ticks=97 lean-suite-s=1.8
+PASS Heterogeneous full limits=(4000000,4000000,20000000) outcome=finished ticks=97 heap=23 stack=0 state-sha256=02a7b0f3fe174a52
+PASS Heterogeneous ticks-third limits=(4000000,4000000,32) outcome=suspended-ticks ticks=32 heap=10 stack=5 state-sha256=a288304676e547b8
+PASS Heterogeneous ticks-two-thirds limits=(4000000,4000000,64) outcome=suspended-ticks ticks=64 heap=18 stack=2 state-sha256=617d7a613a3db183
+PASS Heterogeneous heap-half limits=(11,4000000,20000000) outcome=suspended-capacity ticks=35 heap=11 stack=4 state-sha256=173ce740cfeaf1a7
+PASS Heterogeneous resume-capacity limits=(4000000,4000000,19999965) resume outcome=finished ticks=62 heap=23 stack=0 state-sha256=02a7b0f3fe174a52
+PASS Heterogeneous stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=150981b1e8812acf
+PASS Heterogeneous resume-half limits=(4000000,4000000,19999952) resume outcome=finished ticks=49 heap=23 stack=0 state-sha256=02a7b0f3fe174a52
+# LazySharedField typing=accepted:{"tag":"natural"} rom-nodes=36 labels=7 full-ticks=8240 lean-suite-s=2.6
+PASS LazySharedField full limits=(4000000,4000000,20000000) outcome=finished ticks=8240 heap=779 stack=0 state-sha256=685ad11d2c8d8e93
+PASS LazySharedField ticks-third limits=(4000000,4000000,2746) outcome=suspended-ticks ticks=2746 heap=268 stack=13 state-sha256=c2b387c2d9250757
+PASS LazySharedField ticks-two-thirds limits=(4000000,4000000,5493) outcome=suspended-ticks ticks=5493 heap=525 stack=12 state-sha256=14d793076f5c5b3e
+PASS LazySharedField heap-half limits=(389,4000000,20000000) outcome=suspended-capacity ticks=4053 heap=389 stack=12 state-sha256=7d2f0a3b450aa305
+PASS LazySharedField resume-capacity limits=(4000000,4000000,19995947) resume outcome=finished ticks=4187 heap=779 stack=0 state-sha256=685ad11d2c8d8e93
+PASS LazySharedField stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=b41dfde8a2428252
+PASS LazySharedField resume-half limits=(4000000,4000000,19995880) resume outcome=finished ticks=4120 heap=779 stack=0 state-sha256=685ad11d2c8d8e93
+# LazyUnusedArgument typing=accepted:{"tag":"natural"} rom-nodes=23 labels=4 full-ticks=43 lean-suite-s=1.9
+PASS LazyUnusedArgument full limits=(4000000,4000000,20000000) outcome=finished ticks=43 heap=9 stack=0 state-sha256=21630a61f612d73e
+PASS LazyUnusedArgument ticks-third limits=(4000000,4000000,14) outcome=suspended-ticks ticks=14 heap=5 stack=3 state-sha256=d3a9ff868473522c
+PASS LazyUnusedArgument ticks-two-thirds limits=(4000000,4000000,28) outcome=suspended-ticks ticks=28 heap=7 stack=5 state-sha256=7ac1bafd1e80533d
+PASS LazyUnusedArgument heap-half limits=(4,4000000,20000000) outcome=suspended-capacity ticks=12 heap=4 stack=3 state-sha256=33da23b1805929a9
+PASS LazyUnusedArgument resume-capacity limits=(4000000,4000000,19999988) resume outcome=finished ticks=31 heap=9 stack=0 state-sha256=21630a61f612d73e
+PASS LazyUnusedArgument stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=a1b0d45e6554e1f1
+PASS LazyUnusedArgument resume-half limits=(4000000,4000000,19999979) resume outcome=finished ticks=22 heap=9 stack=0 state-sha256=21630a61f612d73e
+# LazyUnusedField typing=accepted:{"tag":"natural"} rom-nodes=27 labels=6 full-ticks=48 lean-suite-s=2.0
+PASS LazyUnusedField full limits=(4000000,4000000,20000000) outcome=finished ticks=48 heap=12 stack=0 state-sha256=8515cbd44a64748a
+PASS LazyUnusedField ticks-third limits=(4000000,4000000,16) outcome=suspended-ticks ticks=16 heap=5 stack=4 state-sha256=6af9f82804ad3165
+PASS LazyUnusedField ticks-two-thirds limits=(4000000,4000000,32) outcome=suspended-ticks ticks=32 heap=8 stack=7 state-sha256=25aeee772ef4a924
+PASS LazyUnusedField heap-half limits=(6,4000000,20000000) outcome=suspended-capacity ticks=18 heap=5 stack=3 state-sha256=77c81c2653bba2ac
+PASS LazyUnusedField resume-capacity limits=(4000000,4000000,19999982) resume outcome=finished ticks=30 heap=12 stack=0 state-sha256=8515cbd44a64748a
+PASS LazyUnusedField stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=ce9b8653b3b1e116
+PASS LazyUnusedField resume-half limits=(4000000,4000000,19999976) resume outcome=finished ticks=24 heap=12 stack=0 state-sha256=8515cbd44a64748a
+# OrdinaryReturn typing=accepted:{"tag":"natural"} rom-nodes=13 labels=3 full-ticks=25 lean-suite-s=1.7
+PASS OrdinaryReturn full limits=(4000000,4000000,20000000) outcome=finished ticks=25 heap=6 stack=0 state-sha256=2c3df6b3b7fb73a2
+PASS OrdinaryReturn ticks-third limits=(4000000,4000000,8) outcome=suspended-ticks ticks=8 heap=3 stack=5 state-sha256=ced9f433bd7a650b
+PASS OrdinaryReturn ticks-two-thirds limits=(4000000,4000000,16) outcome=suspended-ticks ticks=16 heap=5 stack=4 state-sha256=e4faab5221d515a0
+PASS OrdinaryReturn heap-half limits=(3,4000000,20000000) outcome=suspended-capacity ticks=10 heap=3 stack=4 state-sha256=7cf91d72ebb56f83
+PASS OrdinaryReturn resume-capacity limits=(4000000,4000000,19999990) resume outcome=finished ticks=15 heap=6 stack=0 state-sha256=2c3df6b3b7fb73a2
+PASS OrdinaryReturn stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=9c4d3ce2a6ff95ce
+PASS OrdinaryReturn resume-half limits=(4000000,4000000,19999988) resume outcome=finished ticks=13 heap=6 stack=0 state-sha256=2c3df6b3b7fb73a2
+# QuotedFields typing=accepted:{"tag":"natural"} rom-nodes=19 labels=5 full-ticks=40 lean-suite-s=1.6
+PASS QuotedFields full limits=(4000000,4000000,20000000) outcome=finished ticks=40 heap=9 stack=0 state-sha256=b444d93c2dd15c25
+PASS QuotedFields ticks-third limits=(4000000,4000000,13) outcome=suspended-ticks ticks=13 heap=4 stack=4 state-sha256=3fce2d9fe1bdb3b3
+PASS QuotedFields ticks-two-thirds limits=(4000000,4000000,26) outcome=suspended-ticks ticks=26 heap=7 stack=0 state-sha256=9119d3a53c4294dc
+PASS QuotedFields heap-half limits=(4,4000000,20000000) outcome=suspended-capacity ticks=13 heap=4 stack=4 state-sha256=3fce2d9fe1bdb3b3
+PASS QuotedFields resume-capacity limits=(4000000,4000000,19999987) resume outcome=finished ticks=27 heap=9 stack=0 state-sha256=b444d93c2dd15c25
+PASS QuotedFields stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=ec3a9d53fe5878f9
+PASS QuotedFields resume-half limits=(4000000,4000000,19999980) resume outcome=finished ticks=20 heap=9 stack=0 state-sha256=b444d93c2dd15c25
+# ScalarBooleanTrue typing=accepted:{"tag":"boolean"} rom-nodes=13 labels=3 full-ticks=25 lean-suite-s=1.6
+PASS ScalarBooleanTrue full limits=(4000000,4000000,20000000) outcome=finished ticks=25 heap=6 stack=0 state-sha256=f381ec4719d3f507
+PASS ScalarBooleanTrue ticks-third limits=(4000000,4000000,8) outcome=suspended-ticks ticks=8 heap=3 stack=5 state-sha256=bdfb6382cab43630
+PASS ScalarBooleanTrue ticks-two-thirds limits=(4000000,4000000,16) outcome=suspended-ticks ticks=16 heap=5 stack=4 state-sha256=0d40053aba225ee2
+PASS ScalarBooleanTrue heap-half limits=(3,4000000,20000000) outcome=suspended-capacity ticks=10 heap=3 stack=4 state-sha256=5db6b21829127195
+PASS ScalarBooleanTrue resume-capacity limits=(4000000,4000000,19999990) resume outcome=finished ticks=15 heap=6 stack=0 state-sha256=f381ec4719d3f507
+PASS ScalarBooleanTrue stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=6a2d6fa13efe5a8b
+PASS ScalarBooleanTrue resume-half limits=(4000000,4000000,19999988) resume outcome=finished ticks=13 heap=6 stack=0 state-sha256=f381ec4719d3f507
+# ScalarStringTrue typing=accepted:{"tag":"label"} rom-nodes=13 labels=4 full-ticks=25 lean-suite-s=1.8
+PASS ScalarStringTrue full limits=(4000000,4000000,20000000) outcome=finished ticks=25 heap=6 stack=0 state-sha256=dd681afe5a6c7e78
+PASS ScalarStringTrue ticks-third limits=(4000000,4000000,8) outcome=suspended-ticks ticks=8 heap=3 stack=5 state-sha256=1fe37e7c0bdd339d
+PASS ScalarStringTrue ticks-two-thirds limits=(4000000,4000000,16) outcome=suspended-ticks ticks=16 heap=5 stack=4 state-sha256=179368f8273fa40a
+PASS ScalarStringTrue heap-half limits=(3,4000000,20000000) outcome=suspended-capacity ticks=10 heap=3 stack=4 state-sha256=a252a65852ba00c7
+PASS ScalarStringTrue resume-capacity limits=(4000000,4000000,19999990) resume outcome=finished ticks=15 heap=6 stack=0 state-sha256=dd681afe5a6c7e78
+PASS ScalarStringTrue stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=e2d4e41bdc030bde
+PASS ScalarStringTrue resume-half limits=(4000000,4000000,19999988) resume outcome=finished ticks=13 heap=6 stack=0 state-sha256=dd681afe5a6c7e78
+# ScalarStringConjunction typing=refused rom-nodes=15 labels=5 full-ticks=27 lean-suite-s=1.6
+PASS ScalarStringConjunction full limits=(4000000,4000000,20000000) outcome=refused:wrongValue ticks=27 heap=6 stack=1 state-sha256=f25aba5caaed97f6
+PASS ScalarStringConjunction ticks-third limits=(4000000,4000000,9) outcome=suspended-ticks ticks=9 heap=3 stack=5 state-sha256=2f0ea5083a067afb
+PASS ScalarStringConjunction ticks-two-thirds limits=(4000000,4000000,18) outcome=suspended-ticks ticks=18 heap=5 stack=3 state-sha256=5c90625464f4a9f0
+PASS ScalarStringConjunction heap-half limits=(3,4000000,20000000) outcome=suspended-capacity ticks=10 heap=3 stack=4 state-sha256=e4442f1d3a006b92
+PASS ScalarStringConjunction resume-capacity limits=(4000000,4000000,19999990) resume outcome=refused:wrongValue ticks=17 heap=6 stack=1 state-sha256=f25aba5caaed97f6
+PASS ScalarStringConjunction stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=cacc6b534dffdd86
+PASS ScalarStringConjunction resume-half limits=(4000000,4000000,19999987) resume outcome=refused:wrongValue ticks=14 heap=6 stack=1 state-sha256=f25aba5caaed97f6
+# ScalarAdvance typing=accepted:{"member":{"member":{"member":{"tag":"natural"},"name":"resource","tag":"field","tail":{"member":{"tag":"label"},"name":"root","tag":"field","tail":{"tag":"emptyRow"}}},"name":"0","tag":"field","tail":{"tag":"emptyRow"}},"name":"reads","tag":"field","tail":{"member":{"member":{"member":{"member":{"tag":"natural"},"name":"resource","tag":"field","tail":{"member":{"tag":"label"},"name":"root","tag":"field","tail":{"tag":"emptyRow"}}},"name":"ref","tag":"field","tail":{"member":{"tag":"natural"},"name":"field","tag":"field","tail":{"member":{"tag":"natural"},"name":"before","tag":"field","tail":{"member":{"tag":"natural"},"name":"after","tag":"field","tail":{"tag":"emptyRow"}}}}},"name":"0","tag":"field","tail":{"tag":"emptyRow"}},"name":"effects","tag":"field","tail":{"tag":"emptyRow"}}} rom-nodes=27 labels=13 full-ticks=31 lean-suite-s=1.5
+PASS ScalarAdvance full limits=(4000000,4000000,20000000) outcome=finished ticks=31 heap=10 stack=0 state-sha256=1bc3567208742613
+PASS ScalarAdvance ticks-third limits=(4000000,4000000,10) outcome=suspended-ticks ticks=10 heap=3 stack=7 state-sha256=80f62e426787fb15
+PASS ScalarAdvance ticks-two-thirds limits=(4000000,4000000,20) outcome=suspended-ticks ticks=20 heap=5 stack=5 state-sha256=d39ab99b94f08b01
+PASS ScalarAdvance heap-half limits=(5,4000000,20000000) outcome=suspended-capacity ticks=20 heap=5 stack=5 state-sha256=d39ab99b94f08b01
+PASS ScalarAdvance resume-capacity limits=(4000000,4000000,19999980) resume outcome=finished ticks=11 heap=10 stack=0 state-sha256=1bc3567208742613
+PASS ScalarAdvance stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=90259cd12a5ce53d
+PASS ScalarAdvance resume-half limits=(4000000,4000000,19999985) resume outcome=finished ticks=16 heap=10 stack=0 state-sha256=1bc3567208742613
+# ScalarCapturedAdvance typing=accepted:{"tag":"natural"} rom-nodes=77 labels=18 full-ticks=159 lean-suite-s=1.6
+PASS ScalarCapturedAdvance full limits=(4000000,4000000,20000000) outcome=finished ticks=159 heap=43 stack=0 state-sha256=b2ac0d027f97ea7c
+PASS ScalarCapturedAdvance ticks-third limits=(4000000,4000000,53) outcome=suspended-ticks ticks=53 heap=16 stack=6 state-sha256=07c7cacdf73bb03c
+PASS ScalarCapturedAdvance ticks-two-thirds limits=(4000000,4000000,106) outcome=suspended-ticks ticks=106 heap=29 stack=6 state-sha256=179e08f8c599c920
+PASS ScalarCapturedAdvance heap-half limits=(21,4000000,20000000) outcome=suspended-capacity ticks=76 heap=21 stack=3 state-sha256=b3a557b206a8ccb9
+PASS ScalarCapturedAdvance resume-capacity limits=(4000000,4000000,19999924) resume outcome=finished ticks=83 heap=43 stack=0 state-sha256=b2ac0d027f97ea7c
+PASS ScalarCapturedAdvance stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=3 heap=0 stack=3 state-sha256=c84139a56c7f58a1
+PASS ScalarCapturedAdvance resume-half limits=(4000000,4000000,19999921) resume outcome=finished ticks=80 heap=43 stack=0 state-sha256=b2ac0d027f97ea7c
+# ScalarReusedAdvance typing=accepted:{"tag":"natural"} rom-nodes=72 labels=19 full-ticks=169 lean-suite-s=2.1
+PASS ScalarReusedAdvance full limits=(4000000,4000000,20000000) outcome=finished ticks=169 heap=45 stack=0 state-sha256=65c2727be3eccf2d
+PASS ScalarReusedAdvance ticks-third limits=(4000000,4000000,56) outcome=suspended-ticks ticks=56 heap=14 stack=7 state-sha256=509f7342eeeb5584
+PASS ScalarReusedAdvance ticks-two-thirds limits=(4000000,4000000,112) outcome=suspended-ticks ticks=112 heap=29 stack=8 state-sha256=ec31e53fe1e39c8d
+PASS ScalarReusedAdvance heap-half limits=(22,4000000,20000000) outcome=suspended-capacity ticks=87 heap=22 stack=4 state-sha256=33e6d56f34915294
+PASS ScalarReusedAdvance resume-capacity limits=(4000000,4000000,19999913) resume outcome=finished ticks=82 heap=45 stack=0 state-sha256=65c2727be3eccf2d
+PASS ScalarReusedAdvance stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=3 heap=0 stack=3 state-sha256=2b6a4fee8adffa05
+PASS ScalarReusedAdvance resume-half limits=(4000000,4000000,19999916) resume outcome=finished ticks=85 heap=45 stack=0 state-sha256=65c2727be3eccf2d
+# ScalarHeterogeneousAdvance typing=accepted:{"tag":"natural"} rom-nodes=47 labels=14 full-ticks=94 lean-suite-s=1.8
+PASS ScalarHeterogeneousAdvance full limits=(4000000,4000000,20000000) outcome=finished ticks=94 heap=21 stack=0 state-sha256=fcddd92cfa39c044
+PASS ScalarHeterogeneousAdvance ticks-third limits=(4000000,4000000,31) outcome=suspended-ticks ticks=31 heap=8 stack=4 state-sha256=a5aba02676d05589
+PASS ScalarHeterogeneousAdvance ticks-two-thirds limits=(4000000,4000000,62) outcome=suspended-ticks ticks=62 heap=19 stack=2 state-sha256=3520edde6c23a77b
+PASS ScalarHeterogeneousAdvance heap-half limits=(10,4000000,20000000) outcome=suspended-capacity ticks=46 heap=10 stack=6 state-sha256=b16f03c662c66f8f
+PASS ScalarHeterogeneousAdvance resume-capacity limits=(4000000,4000000,19999954) resume outcome=finished ticks=48 heap=21 stack=0 state-sha256=fcddd92cfa39c044
+PASS ScalarHeterogeneousAdvance stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=3 heap=0 stack=3 state-sha256=1e3f645b378d2563
+PASS ScalarHeterogeneousAdvance resume-half limits=(4000000,4000000,19999953) resume outcome=finished ticks=47 heap=21 stack=0 state-sha256=fcddd92cfa39c044
+# ScalarNativeAdvance typing=accepted:{"member":{"member":{"member":{"tag":"natural"},"name":"resource","tag":"field","tail":{"member":{"tag":"label"},"name":"root","tag":"field","tail":{"tag":"emptyRow"}}},"name":"0","tag":"field","tail":{"tag":"emptyRow"}},"name":"reads","tag":"field","tail":{"member":{"member":{"member":{"member":{"tag":"natural"},"name":"resource","tag":"field","tail":{"member":{"tag":"label"},"name":"root","tag":"field","tail":{"tag":"emptyRow"}}},"name":"ref","tag":"field","tail":{"member":{"tag":"natural"},"name":"field","tag":"field","tail":{"member":{"tag":"natural"},"name":"before","tag":"field","tail":{"member":{"tag":"natural"},"name":"after","tag":"field","tail":{"tag":"emptyRow"}}}}},"name":"0","tag":"field","tail":{"tag":"emptyRow"}},"name":"effects","tag":"field","tail":{"tag":"emptyRow"}}} rom-nodes=33 labels=13 full-ticks=37 lean-suite-s=1.9
+PASS ScalarNativeAdvance full limits=(4000000,4000000,20000000) outcome=finished ticks=37 heap=12 stack=0 state-sha256=7efc1343a8048f2d
+PASS ScalarNativeAdvance ticks-third limits=(4000000,4000000,12) outcome=suspended-ticks ticks=12 heap=3 stack=9 state-sha256=bfbf81040abb5a1e
+PASS ScalarNativeAdvance ticks-two-thirds limits=(4000000,4000000,24) outcome=suspended-ticks ticks=24 heap=6 stack=5 state-sha256=ccd7f3a236a1c476
+PASS ScalarNativeAdvance heap-half limits=(6,4000000,20000000) outcome=suspended-capacity ticks=28 heap=6 stack=4 state-sha256=ae21301b26b791f4
+PASS ScalarNativeAdvance resume-capacity limits=(4000000,4000000,19999972) resume outcome=finished ticks=9 heap=12 stack=0 state-sha256=7efc1343a8048f2d
+PASS ScalarNativeAdvance stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=3 heap=0 stack=3 state-sha256=48f63897e13c14a5
+PASS ScalarNativeAdvance resume-half limits=(4000000,4000000,19999982) resume outcome=finished ticks=19 heap=12 stack=0 state-sha256=7efc1343a8048f2d
+# QuantityOnce typing=accepted:{"tag":"natural"} rom-nodes=20 labels=3 full-ticks=41 lean-suite-s=1.8
+PASS QuantityOnce full limits=(4000000,4000000,20000000) outcome=finished ticks=41 heap=8 stack=0 state-sha256=3f8d3b2107ee50dc
+PASS QuantityOnce ticks-third limits=(4000000,4000000,13) outcome=suspended-ticks ticks=13 heap=4 stack=5 state-sha256=78799a2b1e15449b
+PASS QuantityOnce ticks-two-thirds limits=(4000000,4000000,27) outcome=suspended-ticks ticks=27 heap=7 stack=1 state-sha256=75b22a19a3597ec8
+PASS QuantityOnce heap-half limits=(4,4000000,20000000) outcome=suspended-capacity ticks=14 heap=4 stack=5 state-sha256=fe77641f542aa8b0
+PASS QuantityOnce resume-capacity limits=(4000000,4000000,19999986) resume outcome=finished ticks=27 heap=8 stack=0 state-sha256=3f8d3b2107ee50dc
+PASS QuantityOnce stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=2460f70fae611f5d
+PASS QuantityOnce resume-half limits=(4000000,4000000,19999980) resume outcome=finished ticks=21 heap=8 stack=0 state-sha256=3f8d3b2107ee50dc
+# QuantityDuplicated typing=refused rom-nodes=16 labels=3 full-ticks=36 lean-suite-s=1.9
+PASS QuantityDuplicated full limits=(4000000,4000000,20000000) outcome=finished ticks=36 heap=7 stack=0 state-sha256=f478279b1948ef86
+PASS QuantityDuplicated ticks-third limits=(4000000,4000000,12) outcome=suspended-ticks ticks=12 heap=4 stack=4 state-sha256=22943692e9b3fd5a
+PASS QuantityDuplicated ticks-two-thirds limits=(4000000,4000000,24) outcome=suspended-ticks ticks=24 heap=6 stack=2 state-sha256=c737622e185307f0
+PASS QuantityDuplicated heap-half limits=(3,4000000,20000000) outcome=suspended-capacity ticks=11 heap=3 stack=5 state-sha256=4b73717592f76066
+PASS QuantityDuplicated resume-capacity limits=(4000000,4000000,19999989) resume outcome=finished ticks=25 heap=7 stack=0 state-sha256=f478279b1948ef86
+PASS QuantityDuplicated stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=1675f1dc9aba754f
+PASS QuantityDuplicated resume-half limits=(4000000,4000000,19999982) resume outcome=finished ticks=18 heap=7 stack=0 state-sha256=f478279b1948ef86
+# ReflectScalarSpecification typing=refused rom-nodes=38 labels=10 full-ticks=49 lean-suite-s=1.7
+PASS ReflectScalarSpecification full limits=(4000000,4000000,20000000) outcome=finished ticks=49 heap=15 stack=0 state-sha256=764876cb263cd1a0
+PASS ReflectScalarSpecification ticks-third limits=(4000000,4000000,16) outcome=suspended-ticks ticks=16 heap=5 stack=4 state-sha256=25205bfca1544c06
+PASS ReflectScalarSpecification ticks-two-thirds limits=(4000000,4000000,32) outcome=suspended-ticks ticks=32 heap=10 stack=6 state-sha256=3535ebec4a4755f8
+PASS ReflectScalarSpecification heap-half limits=(7,4000000,20000000) outcome=suspended-capacity ticks=18 heap=5 stack=3 state-sha256=30aba2e682399bad
+PASS ReflectScalarSpecification resume-capacity limits=(4000000,4000000,19999982) resume outcome=finished ticks=31 heap=15 stack=0 state-sha256=764876cb263cd1a0
+PASS ReflectScalarSpecification stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=04e0b60fdc655728
+PASS ReflectScalarSpecification resume-half limits=(4000000,4000000,19999976) resume outcome=finished ticks=25 heap=15 stack=0 state-sha256=764876cb263cd1a0
+# AncestryDiamondSave typing=accepted:{"tag":"natural"} rom-nodes=286 labels=30 full-ticks=237 lean-suite-s=1.7
+PASS AncestryDiamondSave full limits=(4000000,4000000,20000000) outcome=finished ticks=237 heap=58 stack=0 state-sha256=eb3411aeb923e51c
+PASS AncestryDiamondSave ticks-third limits=(4000000,4000000,79) outcome=suspended-ticks ticks=79 heap=32 stack=7 state-sha256=6ac060faeb88ed98
+PASS AncestryDiamondSave ticks-two-thirds limits=(4000000,4000000,158) outcome=suspended-ticks ticks=158 heap=46 stack=11 state-sha256=b5322b95a5dcd75b
+PASS AncestryDiamondSave heap-half limits=(29,4000000,20000000) outcome=suspended-capacity ticks=65 heap=29 stack=8 state-sha256=e24df4c88f99ee5d
+PASS AncestryDiamondSave resume-capacity limits=(4000000,4000000,19999935) resume outcome=finished ticks=172 heap=58 stack=0 state-sha256=eb3411aeb923e51c
+PASS AncestryDiamondSave stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=4acf35ec267ac2de
+PASS AncestryDiamondSave resume-half limits=(4000000,4000000,19999882) resume outcome=finished ticks=119 heap=58 stack=0 state-sha256=eb3411aeb923e51c
+# AncestryDiamondWeightOnce typing=accepted:{"tag":"natural"} rom-nodes=286 labels=30 full-ticks=211 lean-suite-s=1.7
+PASS AncestryDiamondWeightOnce full limits=(4000000,4000000,20000000) outcome=finished ticks=211 heap=54 stack=0 state-sha256=6a49e656a1c5c23a
+PASS AncestryDiamondWeightOnce ticks-third limits=(4000000,4000000,70) outcome=suspended-ticks ticks=70 heap=31 stack=8 state-sha256=cfb2491ef22c886a
+PASS AncestryDiamondWeightOnce ticks-two-thirds limits=(4000000,4000000,140) outcome=suspended-ticks ticks=140 heap=43 stack=15 state-sha256=b9313de2c290da0e
+PASS AncestryDiamondWeightOnce heap-half limits=(27,4000000,20000000) outcome=suspended-capacity ticks=54 heap=27 stack=5 state-sha256=3c5575f3d7274860
+PASS AncestryDiamondWeightOnce resume-capacity limits=(4000000,4000000,19999946) resume outcome=finished ticks=157 heap=54 stack=0 state-sha256=6a49e656a1c5c23a
+PASS AncestryDiamondWeightOnce stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=6be30f07fbd21051
+PASS AncestryDiamondWeightOnce resume-half limits=(4000000,4000000,19999895) resume outcome=finished ticks=106 heap=54 stack=0 state-sha256=6a49e656a1c5c23a
+# AncestryAroundWrapsPrimaries typing=accepted:{"tag":"natural"} rom-nodes=286 labels=30 full-ticks=327 lean-suite-s=1.8
+PASS AncestryAroundWrapsPrimaries full limits=(4000000,4000000,20000000) outcome=finished ticks=327 heap=70 stack=0 state-sha256=eaa7c6098858e128
+PASS AncestryAroundWrapsPrimaries ticks-third limits=(4000000,4000000,109) outcome=suspended-ticks ticks=109 heap=37 stack=12 state-sha256=d4369b22c7ce3ff3
+PASS AncestryAroundWrapsPrimaries ticks-two-thirds limits=(4000000,4000000,218) outcome=suspended-ticks ticks=218 heap=63 stack=5 state-sha256=4e8fc01dc25178e3
+PASS AncestryAroundWrapsPrimaries heap-half limits=(35,4000000,20000000) outcome=suspended-capacity ticks=99 heap=35 stack=10 state-sha256=3060838c9903e214
+PASS AncestryAroundWrapsPrimaries resume-capacity limits=(4000000,4000000,19999901) resume outcome=finished ticks=228 heap=70 stack=0 state-sha256=eaa7c6098858e128
+PASS AncestryAroundWrapsPrimaries stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=731f2cecd4c3222e
+PASS AncestryAroundWrapsPrimaries resume-half limits=(4000000,4000000,19999837) resume outcome=finished ticks=164 heap=70 stack=0 state-sha256=eaa7c6098858e128
+# SumsTotal typing=refused rom-nodes=52 labels=13 full-ticks=204 lean-suite-s=1.7
+PASS SumsTotal full limits=(4000000,4000000,20000000) outcome=finished ticks=204 heap=31 stack=0 state-sha256=bbca13dc5b1d125a
+PASS SumsTotal ticks-third limits=(4000000,4000000,68) outcome=suspended-ticks ticks=68 heap=15 stack=5 state-sha256=af4ca66ee5ce564b
+PASS SumsTotal ticks-two-thirds limits=(4000000,4000000,136) outcome=suspended-ticks ticks=136 heap=24 stack=3 state-sha256=01b3d148719b3bcb
+PASS SumsTotal heap-half limits=(15,4000000,20000000) outcome=suspended-capacity ticks=78 heap=15 stack=4 state-sha256=7492862e0d78afa4
+PASS SumsTotal resume-capacity limits=(4000000,4000000,19999922) resume outcome=finished ticks=126 heap=31 stack=0 state-sha256=bbca13dc5b1d125a
+PASS SumsTotal stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=46c39e31e2e9e64e
+PASS SumsTotal resume-half limits=(4000000,4000000,19999898) resume outcome=finished ticks=102 heap=31 stack=0 state-sha256=bbca13dc5b1d125a
+# StressCount typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=360037 lean-suite-s=444.6
+PASS StressCount full limits=(4000000,4000000,20000000) outcome=finished ticks=360037 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+PASS StressCount ticks-third limits=(4000000,4000000,120012) outcome=suspended-ticks ticks=120012 heap=16011 stack=8000 state-sha256=56441b8babda1640
+PASS StressCount ticks-two-thirds limits=(4000000,4000000,240024) outcome=suspended-ticks ticks=240024 heap=32013 stack=16002 state-sha256=afeff306accee5d4
+PASS StressCount heap-half limits=(20007,4000000,20000000) outcome=suspended-capacity ticks=149982 heap=20007 stack=9998 state-sha256=34dc77ea5a7b62f4
+PASS StressCount resume-capacity limits=(4000000,4000000,19850018) resume outcome=finished ticks=210055 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+PASS StressCount stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=5ac7b3a2b7014a2c
+PASS StressCount resume-half limits=(4000000,4000000,19819982) resume outcome=finished ticks=180019 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+# StressWork typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=524293 lean-suite-s=109.8
+PASS StressWork full limits=(4000000,4000000,20000000) outcome=finished ticks=524293 heap=49163 stack=0 state-sha256=ec53e4a356254e80
+PASS StressWork ticks-third limits=(4000000,4000000,174764) outcome=suspended-ticks ticks=174764 heap=16400 stack=15 state-sha256=e68dd588e623ce29
+PASS StressWork ticks-two-thirds limits=(4000000,4000000,349528) outcome=suspended-ticks ticks=349528 heap=32783 stack=12 state-sha256=41d0fe1fb602c6ee
+PASS StressWork heap-half limits=(24581,4000000,20000000) outcome=suspended-capacity ticks=262062 heap=24581 stack=14 state-sha256=fef4b90b2d40384c
+PASS StressWork resume-capacity limits=(4000000,4000000,19737938) resume outcome=finished ticks=262231 heap=49163 stack=0 state-sha256=ec53e4a356254e80
+PASS StressWork stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=92c241018e953333
+PASS StressWork resume-half limits=(4000000,4000000,19737854) resume outcome=finished ticks=262147 heap=49163 stack=0 state-sha256=ec53e4a356254e80
+# StressSharedWork typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=58039 lean-suite-s=10.6
+PASS StressSharedWork full limits=(4000000,4000000,20000000) outcome=finished ticks=58039 heap=6014 stack=0 state-sha256=bd4f08e54c022a8e
+PASS StressSharedWork ticks-third limits=(4000000,4000000,19346) outcome=suspended-ticks ticks=19346 heap=2428 stack=1612 state-sha256=063732dcefdbcd7c
+PASS StressSharedWork ticks-two-thirds limits=(4000000,4000000,38692) outcome=suspended-ticks ticks=38692 heap=4846 stack=3223 state-sha256=ca27425efc6da498
+PASS StressSharedWork heap-half limits=(3007,4000000,20000000) outcome=suspended-capacity ticks=23981 heap=3007 stack=1997 state-sha256=e5bb7f023cfc1f00
+PASS StressSharedWork resume-capacity limits=(4000000,4000000,19976019) resume outcome=finished ticks=34058 heap=6014 stack=0 state-sha256=bd4f08e54c022a8e
+PASS StressSharedWork stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=3e20ec528cfd3d29
+PASS StressSharedWork resume-half limits=(4000000,4000000,19970981) resume outcome=finished ticks=29020 heap=6014 stack=0 state-sha256=bd4f08e54c022a8e
+# StressBig typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=5437 lean-suite-s=1.9
+PASS StressBig full limits=(4000000,4000000,20000000) outcome=finished ticks=5437 heap=614 stack=0 state-sha256=b5e3e274faf75e1a
+PASS StressBig ticks-third limits=(4000000,4000000,1812) outcome=suspended-ticks ticks=1812 heap=251 stack=120 state-sha256=d2d2c615d23fd24e
+PASS StressBig ticks-two-thirds limits=(4000000,4000000,3624) outcome=suspended-ticks ticks=3624 heap=493 stack=242 state-sha256=22e483b1f76983ac
+PASS StressBig heap-half limits=(307,4000000,20000000) outcome=suspended-capacity ticks=2232 heap=307 stack=148 state-sha256=c397a5e236fff2e8
+PASS StressBig resume-capacity limits=(4000000,4000000,19997768) resume outcome=finished ticks=3205 heap=614 stack=0 state-sha256=b5e3e274faf75e1a
+PASS StressBig stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=8a62d62accefaa56
+PASS StressBig resume-half limits=(4000000,4000000,19997282) resume outcome=finished ticks=2719 heap=614 stack=0 state-sha256=b5e3e274faf75e1a
+# StressList typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=147064 lean-suite-s=40.2
+PASS StressList full limits=(4000000,4000000,20000000) outcome=finished ticks=147064 heap=21018 stack=0 state-sha256=c8c577ed0c73e23c
+PASS StressList ticks-third limits=(4000000,4000000,49021) outcome=suspended-ticks ticks=49021 heap=7158 stack=1021 state-sha256=ed98ee6c3d83eb85
+PASS StressList ticks-two-thirds limits=(4000000,4000000,98042) outcome=suspended-ticks ticks=98042 heap=14308 stack=2043 state-sha256=05da56cb6e08c279
+PASS StressList heap-half limits=(10509,4000000,20000000) outcome=suspended-capacity ticks=72009 heap=10509 stack=1503 state-sha256=8f3d2532b0d896f9
+PASS StressList resume-capacity limits=(4000000,4000000,19927991) resume outcome=finished ticks=75055 heap=21018 stack=0 state-sha256=c8c577ed0c73e23c
+PASS StressList stack-three limits=(4000000,3,20000000) outcome=suspended-capacity ticks=4 heap=1 stack=3 state-sha256=45ac1be713d960fc
+PASS StressList resume-half limits=(4000000,4000000,19926468) resume outcome=finished ticks=73532 heap=21018 stack=0 state-sha256=c8c577ed0c73e23c
+# TOTAL pass=224 fail=0

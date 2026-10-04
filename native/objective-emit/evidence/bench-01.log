@@ -1,0 +1,28 @@
+## StressWork lean-interpreted (lake env lean --run ... bench), one run
+{"bytes":2273062,"outcome":"finished","runBoundedPlusEncodeMs":20063}
+wall_s=21.42 maxrss_kb=1518996
+## StressWork C (diff-01 binary), one run
+{"outcome":"finished","detail":"","ticks":524293,"trace":"868b16364f7ef8d7","heap":49163,"stack":0,"bytes":2273062}
+wall_s=0.01 maxrss_kb=10096
+ec53e4a356254e80
+ec53e4a356254e80
+## StressCount lean-interpreted (lake env lean --run ... bench), one run
+{"bytes":1680175,"outcome":"finished","runBoundedPlusEncodeMs":39263}
+wall_s=40.72 maxrss_kb=1519168
+## StressCount C (diff-01 binary), one run
+{"outcome":"finished","detail":"","ticks":360037,"trace":"b74ff78e1bc08c0a","heap":40014,"stack":0,"bytes":1680175}
+wall_s=0.01 maxrss_kb=11872
+78bdd6f416b95afb
+78bdd6f416b95afb
+StressWork C one run wall_ms=22.65 {"outcome":"finished","detail":"","ticks":524293,"trace":"868b16364f7ef8d7","heap":49163,"stack":0,"bytes":2273062}
+StressCount C one run wall_ms=13.44 {"outcome":"finished","detail":"","ticks":360037,"trace":"b74ff78e1bc08c0a","heap":40014,"stack":0,"bytes":1680175}
+## StressWork lean-native bench one run
+{"bytes":2273062,"outcome":"finished","runBoundedPlusEncodeMs":21243}
+wall_s=21.27 maxrss_kb=73484
+## StressCount lean-native bench one run
+{"bytes":1680175,"outcome":"finished","runBoundedPlusEncodeMs":37515}
+wall_s=37.54 maxrss_kb=71996
+## StressWork lean-native stepRaw-iterate (no capacity check) 524293 ticks
+{"bytes":2273062,"heap":49163,"stepRawIteratePlusEncodeMs":8843}
+## StressCount lean-native stepRaw-iterate (no capacity check) 360037 ticks
+{"bytes":1680175,"heap":40014,"stepRawIteratePlusEncodeMs":6323}

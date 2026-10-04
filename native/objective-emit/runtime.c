@@ -255,7 +255,12 @@ static void step_raw(void) {
     switch (f.tag) {
     case F_UPDATE:
       if (f.addr < heap_len && heap[f.addr].st == C_EVALUATING) {
-        Cell c = heap[f.addr]; c.st = C_CACHED; c.value = v; heap_set(f.addr, c); POP();
+        Cell c = heap[f.addr]; c.st = C_CACHED; c.value = v;
+#ifdef OB_MUTATE_UPDATE
+        /* Deliberate mutation for the harness control: forget the value (call-by-name). */
+        c.st = C_SUSPENDED;
+#endif
+        heap_set(f.addr, c); POP();
       } else { refuse(R_INVALIDUPDATE); POP(); }
       return;
     case F_REFLECT:

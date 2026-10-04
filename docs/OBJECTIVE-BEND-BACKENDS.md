@@ -1,0 +1,54 @@
+# Objective Bend backends — map, evidence class, refinement status to `stepRaw`
+
+One semantics: `Theory/ObjectiveBendDemandMachine.lean` `stepRaw` / `step` /
+`runBounded` (Core4 with sums). The Core4 soundness theorems (`runBounded_*_sound`,
+`checked_reachable_no_refusal`) are about `runBounded`. Every backend below is
+classified by **what it executes** and **how it is related to that function**.
+
+Evidence classes: authored / compiled / executed / integrated / deployed.
+Every number below is copied from the artifact it cites; a number with no artifact
+is not stated.
+
+| Backend | What runs | Evidence class | Refinement to `stepRaw` |
+|---|---|---|---|
+| **Preview interpreter** (`Host/ObjectiveBendPreview.lean`) | `runBounded` itself, under `lean --run` (Lean IR interpreter) | executed (Studio preview path, TS `objective-preview.ts`) | **identity**: it IS the function the theorems are about. Trust added: the Lean IR interpreter. |
+| **Lean-native** (`native/objective-emit/build-lean-native.sh`) | `runBounded` compiled by Lean's own compiler to C | executed (lane W3.BACKENDS: `lean-native-01`, state bytes identical to the interpreter's on StressWork) | **identity modulo the Lean compiler** (the trust `#assert_compiled` already takes). |
+| **C machine** (`Compiler/ObjectiveBendEmitC.lean` + `native/objective-emit/runtime.c`) | a hand-defunctionalized `stepRaw` over a per-program code ROM; unbounded naturals; exact `Limits`/tick accounting; canonical State codec; Lean→C resume | executed (differential harness), not integrated: no Mini path invokes it | **differential only, no theorem.** Per packet and case: outcome, tick count, per-tick fingerprint and State bytes equal `runBounded`'s (`differential-01.log` / `differential-02.log`: 224/224 cases PASS over 32 packets — 26 preview-cohort items + 6 in `native/objective-emit/extra-cohort.json` — each with full run, tick cuts at T/3 and 2T/3, heap at half, stack 3, Lean→C resume at T/2, and Lean→C resume of a capacity suspension. Controls: `-DOB_MUTATE_EXTEND` gives 25 FAIL in 7 packets, all at the State-bytes level only (outcome, ticks and fingerprint unchanged). `-DOB_MUTATE_UPDATE` (forget cached values) gives 24 FAIL over 4 packets, with ticks/heap changed). The ROM's derived code is read off `stepRaw` (`fixBody_exact`, `mixTarget_exact`, pinned). Theorem path: a Lean model of the defunctionalized machine + simulation `R s r → R (stepRaw s) (stepRef r)`, then either generating the C switch from the model or compiling the model with Lean. |
+| **Re-execution at admission** | the Lean machine (re-execution is the admission check; proofs are an empty carrier slot) | integrated where the native receiver runs it | identity (it is the Lean function). |
+| **Oblivious fixed-access network** (`Compiler/ObjectiveThunkNetwork.lean`, `ObjectiveDemand*Network.lean`; cut tranche, not yet on main) | a Boolean DAG that scans every heap/stack row per tick at a public `Shape` | authored/compiled in the tranche lanes (RECORD); 15–18 of 21 constructors; no sums | **open.** zk-truth lane: `PackedRefinement` as stated is inhabited by administrative stutter; corrected `PackedCodec` authored (RECORD, `claude-zktruth-20261004/STATUS.txt`). Code ROM lacks sums and the fix/mix derived code this lane's ROM has. |
+| **BFV arithmetic lowering** (`Compiler/ObjectiveNatural*.lean`, codex-bend-logic lane, not on main) | all-Nat `+` expressions after source fix/beta normalisation → Emit graphs → real BFV | executed in its lane (RECORD: BEND-LOGIC-COMPILATION "artifact 13327B 218f020c…") | to the **source** relation (`Step`/`Evaluates`), not to `stepRaw`; arbitrary-witness soundness/completeness for the graph; no demand-machine run is involved. |
+| **zk trace** (`BendTraceIR2`, IR2 descriptors) | proof of a network run | research; Selvage/IR2 not an admitted proof system | inherits the network's open refinement; public tariff, never measured ticks (`Assurance/ObjectiveZkStepTariff.lean`, zk-truth lane). |
+| **Interaction nets / HVM** | — | design note only (`docs/OBJECTIVE-BEND-INTERACTION-NETS.md`) | none; outside the sound fragment (open recursion), eager CUDA runtime. |
+| **bend2 `comp.ts` C/JS/GPU** | strict CBV over the TS checker's Book | upstream, not used | none, and none transferable (strict; "bugs ARE expected", `bend2/comp.ts:1-3`). |
+
+## One tariff, two physical costs
+
+Every backend reports (or is shaped by) the same public resource vector:
+`Limits` (heap cells, stack frames) and ticks (one tick = one `stepRaw`). The
+C machine's tick/heap/stack numbers are checked equal to `runBounded`'s in
+every differential case, so a tariff over that vector prices native execution
+without conversion. Physical cost (C wall time, network gates) is never the
+charge; a public fixed-capacity envelope is (zk-truth lane `tariffView`).
+The C machine's timing and access pattern depend on data: it is a clear
+backend only.
+
+## Measurements
+
+Artifacts on hbox under `/home/hbox/workbox/claude-backends-20261004/`:
+`logs/bench-01.log`, the C binaries `diff-01/<packet>/prog`, and `lean-native-0{1,2}/`.
+Each figure is one run.
+
+| Packet (ticks, final heap) | Lean IR interpreter: `runBounded`+encode, in process | Lean-native (Lean compiler) | hand C, process wall |
+|---|---|---|---|
+| `StressWork` work(14) (524,293 ticks, 49,163 cells) | 20,063 ms (process 21.42 s, maxrss 1.52 GB) | 21,243 ms (maxrss 73 MB) | 22.65 ms (maxrss ≈10 MB) |
+| `StressCount` count(20000) (360,037 ticks, 40,014 cells, stack depth ≈20,000) | 39,263 ms | 37,515 ms | 13.44 ms |
+
+On both packets all three produce byte-identical final States: sha256 prefix `ec53e4a356254e80` (StressWork) and `78bdd6f416b95afb` (StressCount).
+
+**Lean-native is no faster than the interpreter.** So the Lean machine's cost is algorithmic, not interpretive.
+
+- A diagnostic `stepRaw` iteration without `step`'s capacity check (`bench-raw`) takes 8,843 ms and 6,323 ms.
+- INFERRED cause: the heap `Array` is not uniquely referenced at `set!`/`push`, because `{state with heap := state.heap.set! …}` keeps `state` alive. `step` additionally retains the pre-transition State for the capacity branch. Each heap mutation therefore copies O(heap). `step` also recomputes `List.length` of the stack every tick.
+- This cost belongs to the function that re-execution at admission runs.
+- The fix is a uniqueness-preserving rewrite of `stepRaw`/`step` (same meaning, proofs re-checked). Theory/ObjectiveBendDemandMachine is W3.EVENTS' file this wave, so it is filed DEFERRED rather than edited here.
+

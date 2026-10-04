@@ -165,6 +165,25 @@ def bench (corePath : String) (heap stack ticks : Nat) : IO UInt32 := do
     ("runBoundedPlusEncodeMs", toJson (after - before))]).compress
   pure 0
 
+/-- Diagnostic: `stepRaw` iterated `ticks` times WITHOUT `step`'s capacity
+check (which keeps the pre-transition State alive across the transition).
+Not a reference semantics; it isolates the cost of retaining that State. -/
+def rawIterate : Nat → State → State
+  | 0, s => s
+  | n+1, s => rawIterate n (stepRaw s)
+
+def benchRaw (corePath : String) (ticks : Nat) : IO UInt32 := do
+  let term ← loadTerm corePath
+  let compiled ← compileChecked term
+  let before ← IO.monoMsNow
+  let final := rawIterate ticks (initial term)
+  let some bytes := (encodeState compiled.rom final).toOption
+    | throw (IO.userError "codec refused the state")
+  let after ← IO.monoMsNow
+  IO.println (Json.mkObj [("bytes", toJson bytes.size), ("heap", toJson final.heap.size),
+    ("stepRawIteratePlusEncodeMs", toJson (after - before))]).compress
+  pure 0
+
 def emit (corePath outPath : String) : IO UInt32 := do
   let compiled ← compileChecked (← loadTerm corePath)
   match emitC compiled with
@@ -201,6 +220,7 @@ def main (arguments : List String) : IO UInt32 := do
       suite core out (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
     | ["bench", core, heap, stack, ticks] =>
       bench core (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
+    | ["bench-raw", core, ticks] => benchRaw core (← parseNat "ticks" ticks)
     | ["typing", typed] => typing typed
     | _ =>
       IO.eprintln "usage: emit CORE OUT_C | run CORE HEAP STACK TICKS OUT_STATE | suite CORE OUT_DIR HEAP STACK TICKS | bench CORE HEAP STACK TICKS | typing TYPED"
