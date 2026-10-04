@@ -1126,6 +1126,47 @@ mod anchor_tests {
         store.durable_append(2, b"two", b"tag-two").unwrap();
         store
     }
+    /// A read of a Store whose anchor is current changes no byte of the anchor, the lock or the
+    /// database file, and no modification time. (A read that finds the anchor BEHIND the head
+    /// — a crash between an append's commit and its anchor publish — still ratchets it forward:
+    /// `durable_read_repairs_an_anchor_that_lags_the_head` pins that, deliberately.)
+    #[test]
+    fn a_durable_read_of_a_current_anchor_writes_nothing() {
+        use std::os::unix::fs::MetadataExt;
+        let s = store();
+        let anchor_path = anchor::path(s.root());
+        let lock_path = {
+            let mut p = anchor_path.as_os_str().to_owned();
+            p.push(".lock");
+            PathBuf::from(p)
+        };
+        let snapshot = |path: &Path| {
+            let m = fs::metadata(path).unwrap();
+            (fs::read(path).unwrap(), m.mtime(), m.mtime_nsec(), m.ino())
+        };
+        let before = (snapshot(&anchor_path), snapshot(&lock_path), snapshot(s.database_path()));
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        for _ in 0..3 {
+            let read = s.durable_read(1, true).unwrap();
+            assert_eq!(read.head, 2);
+        }
+        let after = (snapshot(&anchor_path), snapshot(&lock_path), snapshot(s.database_path()));
+        assert_eq!(before, after, "a read must leave the anchor, its lock and the database untouched");
+    }
+    /// The crash-repair half: the anchor lags the head by one entry; the next read ratchets it.
+    #[test]
+    fn durable_read_repairs_an_anchor_that_lags_the_head() {
+        let s = store();
+        let anchor_path = anchor::path(s.root());
+        let at_head = fs::read(&anchor_path).unwrap();
+        s.database
+            .exec(b"INSERT INTO durable_log(height,record,tag) VALUES(3,x'7468726565',x'7461672d7468726565')\0")
+            .unwrap();
+        assert_eq!(fs::read(&anchor_path).unwrap(), at_head, "setup: the anchor lags");
+        assert_eq!(s.durable_read(1, true).unwrap().head, 3);
+        assert_ne!(fs::read(&anchor_path).unwrap(), at_head, "the read ratcheted the lagging anchor");
+        assert_eq!(s.durable_read(1, true).unwrap().head, 3);
+    }
     #[test]
     fn explicit_deployment_identity_changes_refuse_at_genesis_and_head() {
         let s = store();

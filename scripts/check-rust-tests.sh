@@ -142,7 +142,9 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::same_height_record_and_genesis_conflicts_refuse \
   anchor_tests::anchor_loss_refuses_until_explicit_enrollment_and_foreign_anchor_refuses \
   anchor_tests::whole_database_replacement_is_detected_by_sibling_anchor \
-  anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory
+  anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory \
+  anchor_tests::a_durable_read_of_a_current_anchor_writes_nothing \
+  anchor_tests::durable_read_repairs_an_anchor_that_lags_the_head
 # TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
 # member keys sealed and never returned, tickets bound to one body and one uid,
 # echo withheld, caller hang-up stops the provider call, Discord's one channel.
