@@ -63,9 +63,9 @@ case "$(uname -s):$(uname -m)" in
   *) candidate_die "qualified target is Linux x86_64 only; this is $(uname -s) $(uname -m)" ;;
 esac
 if [ "$client_only" = 1 ]; then
-  candidate_require git jq tar sha256sum file rustup cargo cc
+  candidate_require git jq tar sha256sum file rustup cargo cc flock
 else
-  candidate_require git jq tar sha256sum file curl lake rustup cargo cc python3 readelf
+  candidate_require git jq tar sha256sum file curl lake rustup cargo cc python3 readelf flock
 fi
 client_targets=${MINI_CLIENT_TARGETS-aarch64-apple-darwin}
 for target in $client_targets; do
@@ -175,14 +175,40 @@ fi
 
 # 5. Rust binaries. Paths are remapped so the bytes do not depend on where the
 # operator unpacked the source or keeps the cargo registry.
+#
+# Remapping is not enough. Cargo hashes the absolute path of every path
+# dependency that lies outside the building package's own directory
+# (native/grain-runtime builds ../signed-api-path, ../inference-scheduler, ...)
+# into `-C metadata`, hence into the crate's disambiguator, every symbol hash and
+# the layout of the binary, and --remap-path-prefix does not reach it. Built
+# under two different --out directories the same source gave two different
+# grain-runtime binaries (cv 01a0f830-42e7: 7b8f929c vs e75bccf1 on 7961b345),
+# and every crate with such a dependency, resource-client's `mini` now included,
+# has the same shape. So every cargo command here runs through ONE fixed path: a
+# symlink to the extracted source, which cargo follows lexically (two builds of
+# grain-runtime from different real directories through it are byte-identical).
+# The symlink lives in a 0700 directory owned by this account and is held under
+# flock, so two builds on one host take turns instead of racing for it. The
+# path is part of the build's identity, so it is recorded in provenance.json,
+# and builds compared for reproducibility must share MINI_CANDIDATE_BUILD_ROOT.
+build_root=${MINI_CANDIDATE_BUILD_ROOT:-/tmp/minidregg-candidate-build}
+mkdir -p -m 0700 "$build_root" 2>/dev/null || true
+[ -d "$build_root" ] && [ ! -L "$build_root" ] && [ -O "$build_root" ] \
+  || candidate_die "build root $build_root is not a directory owned by this account (set MINI_CANDIDATE_BUILD_ROOT)"
+exec 9>"$build_root/lock"
+flock 9
+bsrc=$build_root/src
+rm -f "$bsrc"
+ln -s "$src" "$bsrc"
+trap 'rm -f "$bsrc"' EXIT
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 cargo_home=$(CDPATH='' cd -- "$cargo_home" && pwd -P)
-export RUSTFLAGS="--remap-path-prefix=$src=/minidregg --remap-path-prefix=$cargo_home=/cargo"
+export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo"
 export CARGO_INCREMENTAL=0
 build_rust() {
   crate=$1 bin=$2
-  (cd "$src" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
-    --manifest-path "$src/native/$crate/Cargo.toml" \
+  (cd "$bsrc" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
+    --manifest-path "$bsrc/native/$crate/Cargo.toml" \
     --target-dir "$out/work/target/$crate" --bin "$bin" \
     >"$out/logs/cargo-$crate-$bin.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-$crate-$bin.log" >&2; candidate_die "cargo build failed: $crate/$bin"; }
@@ -242,13 +268,13 @@ WRAP
   # rustc strips the stabs afterwards but the UUID stays. -Wl,-S keeps the
   # debug map out of the link, so the bytes do not depend on --out. The prefix
   # maps keep the build directory out of ring's C objects as well.
-  (cd "$src" && env "CC_$target_cc=$cc_wrap" \
+  (cd "$bsrc" && env "CC_$target_cc=$cc_wrap" \
       "CFLAGS_$target_cc=-ffile-prefix-map=$out=/out -ffile-prefix-map=$cargo_home=/cargo" \
       RUSTFLAGS="--remap-path-prefix=$out=/out $RUSTFLAGS -C link-arg=-Wl,-S" \
       "CARGO_TARGET_${target_env}_LINKER=$cc_wrap" SDKROOT="$out/work/sdk/MacOSX.sdk" \
       ZIG_GLOBAL_CACHE_DIR="$out/work/zig-cache" ZIG_LOCAL_CACHE_DIR="$out/work/zig-cache" \
     cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
-    --manifest-path "$src/native/resource-client/Cargo.toml" --target "$target" \
+    --manifest-path "$bsrc/native/resource-client/Cargo.toml" --target "$target" \
     --target-dir "$out/work/target/client-$target" --bin mini \
     >"$out/logs/cargo-client-$target.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-client-$target.log" >&2; candidate_die "client build failed: $target"; }
@@ -276,7 +302,7 @@ if [ "$client_only" = 1 ]; then
     --arg commit "$commit" --arg archive "$archive_sha" --arg origin "$source_origin" \
     --arg files "$source_files_sha" --arg rustPin "$rust_pin" --arg rustc "$rustc_version" \
     --arg cargo "$cargo_version" --arg cc "$cc_version" --arg zig "$zig_version" \
-    --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo" \
+    --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo, cargo ran through $bsrc" \
     --argjson clients "$clients_json" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{type: "minidregg-client-provenance-v1",
       source: {commit: $commit, archive: "source.tar", archiveSha256: $archive,
@@ -330,7 +356,7 @@ printf '%s' "$roles" | jq --arg c "$commit" '. + {sourceCommit: $c, origin: "bui
 jq -n --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \
   --arg rustPin "$rust_pin" --arg rustc "$rustc_version" --arg cargo "$cargo_version" \
-  --arg cc "$cc_version" --arg zig "$zig_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo" \
+  --arg cc "$cc_version" --arg zig "$zig_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo, cargo ran through $bsrc" \
   --arg sourceOrigin "$source_origin" \
   --argjson tCache "$((t_cache - t_lean))" --argjson tHost "$((t_host - t_cache))" \
   --argjson tRust "$((t_rust - t_host))" --argjson tTotal "$(( $(date +%s) - t_start ))" \

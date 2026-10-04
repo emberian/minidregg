@@ -88,8 +88,18 @@ candidate builder compiles the Host import closure; separately qualify the
 required umbrella/assurance targets when those interfaces change.
 
 Rust binaries are built with `--remap-path-prefix` for the source tree
-(`/minidregg`) and `$CARGO_HOME` (`/cargo`), so their bytes do not depend on
-where the operator unpacked the source or keeps the registry. The Host's bytes
+(`/minidregg`) and `$CARGO_HOME` (`/cargo`), and every cargo command runs
+through one fixed symlink to the extracted source
+(`$MINI_CANDIDATE_BUILD_ROOT/src`, default `/tmp/minidregg-candidate-build/src`;
+a 0700 directory owned by the builder, serialised with `flock`, recorded in
+`provenance.json`). Both are needed: cargo hashes the absolute path of every path
+dependency outside a package's own directory into `-C metadata`, hence into every
+symbol hash, and remapping does not reach that. Without the fixed path the same
+source built under two `--out` directories gave two different `grain-runtime`
+binaries (cv 01a0f830-42e7). So their bytes do not depend on where the operator
+unpacked the source or keeps the registry, provided two builds being compared use
+the same `MINI_CANDIDATE_BUILD_ROOT`. To check: build twice with different `--out`
+and compare `sha256sum OUT/bin/*`. The Host's bytes
 do not contain build paths. The macOS client additionally maps `OUT` out of its
 C objects and links with `-Wl,-S`, because the Mach-O UUID is computed over the
 linker's output while it still names each object by path; two builds in
