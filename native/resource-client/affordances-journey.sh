@@ -253,19 +253,24 @@ world() {
   jq -r '.worldRoot + "@" + .height' "$attempt/challenge.json"
 }
 audit_count() { "$HOST" "$CONFIG" audit 2>/dev/null | sed -n 's/^audited \([0-9]*\) .*/\1/p'; }
+# The workspace's namespace: a `can` probe is a dry run and burns no identity (K-AFFORDANCES; the
+# delegate probe draws its child id with participant_namespace::probe_id, it does not reserve one).
+# Prints the reservation files' names and sizes, so any added or rewritten record changes it.
+namespace_state() { (cd "$R/$1/namespace" 2>/dev/null && ls -l --time-style=+ request-*.json binding-*.json 2>/dev/null | awk '{print $5, $6}' | sort) || true; }
 
 # cstep J who line: one `can` verb, with the root/height and audit differential.
 cstep() {
   local j=$1 who=$2 line=$3 before after ab aa
-  before=$(world); ab=$(audit_count)
+  before=$(world); ab=$(audit_count); nb=$(namespace_state "$who")
   step "$j" 0 "$who" "$line"
   CAN=$LOG/can-$(printf '%02d' "$N")-$who.txt
   cp "$LAST" "$CAN"
-  after=$(world); aa=$(audit_count)
+  after=$(world); aa=$(audit_count); na=$(namespace_state "$who")
   CANS=$((CANS + 1))
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$N" "$who" "$line" "$before" "$after" "$ab/$aa" >>"$LOG/differential.tsv"
   check "$j" "world root+height unchanged by '$line' ($before)" is "$after" "$before"
   check "$j" "audit count unchanged by '$line' ($ab)" is "$aa" "$ab"
+  check "$j" "namespace reservations unchanged by '$line'" is "$na" "$nb"
 }
 has() { grep -Eq "^  $1 +$2" "$CAN" || { echo "no row [$1 $2] in $CAN"; cat "$CAN"; return 1; }; }
 hasnt() { ! grep -Eq "^  $1 " "$CAN" || { echo "unexpected row [$1] in $CAN"; return 1; }; }

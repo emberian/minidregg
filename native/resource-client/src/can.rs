@@ -102,7 +102,7 @@ impl Run<'_> {
             &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         )?;
         take_host_decision();
-        let authored = host_decided(propose_request(self.root, self.workspace, &request, &id, None, true));
+        let authored = host_decided(propose_probe(self.root, self.workspace, &request, &id));
         let verdict = match authored {
             Ok(Err(line)) => Ok(verdict_of(Some(line))),
             Err(error) => Ok(format!("(not probed: {error})")),

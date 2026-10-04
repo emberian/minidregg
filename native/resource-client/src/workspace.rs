@@ -318,15 +318,18 @@ pub(crate) fn workspace_host(value: &Value) -> Result<PathBuf> {
 /// a collision, so a workspace without a shared root (a newcomer initialized
 /// from its enrollment alone) can still create and re-delegate.
 pub(crate) fn namespace_root(root: &Path, workspace: &Value) -> Result<PathBuf> {
+    let path = namespace_path(root, workspace)?;
+    if workspace.get("namespaceRoot").is_none_or(Value::is_null) && !path.exists() {
+        make_private_dir(&path)?;
+    }
+    Ok(path)
+}
+
+/// Where this workspace's namespace is, created or not. A dry run reads it and creates nothing.
+fn namespace_path(root: &Path, workspace: &Value) -> Result<PathBuf> {
     match workspace.get("namespaceRoot") {
         Some(Value::String(_)) => member_path(workspace, "namespaceRoot"),
-        Some(Value::Null) | None => {
-            let own = root.join("namespace");
-            if !own.exists() {
-                make_private_dir(&own)?;
-            }
-            Ok(own)
-        }
+        Some(Value::Null) | None => Ok(root.join("namespace")),
         Some(_) => Err("workspace namespaceRoot is not a path".into()),
     }
 }
@@ -3046,7 +3049,28 @@ fn propose_request(
 ) -> Result<Value> {
     crate::replan::replan(
         "propose",
-        || propose_summary_once(root, workspace, request, proposal_id, private_room_name, fresh, None),
+        || propose_summary_once(root, workspace, request, proposal_id, private_room_name, fresh, None, Identities::Reserved),
+        |error, _| error == OBSERVATIONS_MOVED,
+        |_| Ok(()),
+    )
+}
+
+/// Whether a proposal's new identities are reserved in the namespace (permanent) or only drawn for
+/// a dry run (nothing written).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Identities {
+    Reserved,
+    Probe,
+}
+
+/// Author a proposal that will only ever be DRY-RUN (`can`'s probes; document actions name their
+/// line from this proposal's own signed read). Everything `propose_request` does, except that a
+/// delegation's child capability id is a probe draw (`participant_namespace::probe_id`) instead of
+/// a namespace reservation: probing burns no identity.
+pub(crate) fn propose_probe(root: &Path, workspace: &Value, request: &Value, proposal_id: &str) -> Result<Value> {
+    crate::replan::replan(
+        "propose",
+        || propose_summary_once(root, workspace, request, proposal_id, None, true, None, Identities::Probe),
         |error, _| error == OBSERVATIONS_MOVED,
         |_| Ok(()),
     )
@@ -3060,6 +3084,7 @@ fn propose_summary_once(
     private_room_name: Option<&str>,
     fresh: bool,
     append_origin: Option<&str>,
+    identities: Identities,
 ) -> Result<Value> {
     validate_name(proposal_id)?;
     let request = request.clone();
@@ -3452,25 +3477,35 @@ fn propose_summary_once(
             {
                 ancestors.push(json!(parent_id));
             }
-            let namespace = namespace_root(root, workspace)?;
             let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
                 "subject":member(workspace,"subject")?}))
             .map_err(|error| error.to_string())?;
-            let reservation = participant_namespace::reserve(
-                &namespace,
-                member(&policy, "domain")?,
-                member(workspace, "subject")?,
-                &format!("delegate-{proposal_id}"),
-                &fingerprint,
-                &[Role {
-                    label: "childCapability".into(),
-                    kind: IdKind::Capability,
-                }],
-            )?;
-            let child_id = reservation
-                .ids
-                .get("childCapability")
-                .ok_or("namespace omitted delegated capability")?;
+            let (child_id, reservation_digest) = match identities {
+                Identities::Reserved => {
+                    let reservation = participant_namespace::reserve(
+                        &namespace_root(root, workspace)?,
+                        member(&policy, "domain")?,
+                        member(workspace, "subject")?,
+                        &format!("delegate-{proposal_id}"),
+                        &fingerprint,
+                        &[Role {
+                            label: "childCapability".into(),
+                            kind: IdKind::Capability,
+                        }],
+                    )?;
+                    let child_id = reservation
+                        .ids
+                        .get("childCapability")
+                        .ok_or("namespace omitted delegated capability")?
+                        .clone();
+                    (child_id, json!(reservation.request_digest))
+                }
+                Identities::Probe => (
+                    participant_namespace::probe_id(&namespace_path(root, workspace)?, member(&policy, "domain")?)?,
+                    Value::Null,
+                ),
+            };
+            let child_id = &child_id;
             let target_root = resource
                 .get("cell")
                 .and_then(|page| page.get("root"))
@@ -3507,7 +3542,7 @@ fn propose_summary_once(
                 }
             }
             delegation = Some(json!({"recipient":recipient,"kind":kind,"target":target,
-                "childCapability":child_id,"reservation":reservation.request_digest,
+                "childCapability":child_id,"reservation":reservation_digest,
                 "domain":member(&policy,"domain")?,"name":member(&request,"name")?}));
             if let Some(room) = sealing_room(None, root, &reference)? {
                 let id = member(&self::reference(root, &room)?, "target")?.to_owned();
@@ -3701,7 +3736,7 @@ pub(crate) fn submit_intent(
                     // cut. A refresh is a separately retained derived proposal.
                     let refreshed = format!("append-{}", random_nonce()?);
                     let summary = crate::replan::replan("append authoring",
-                        || propose_summary_once(root, workspace, &request, &refreshed, None, false, Some(&proposal_id)),
+                        || propose_summary_once(root, workspace, &request, &refreshed, None, false, Some(&proposal_id), Identities::Reserved),
                         |error,_|error==OBSERVATIONS_MOVED, |_|Ok(()))?;
                     let refreshed_dir = root.join("proposals").join(&refreshed);
                     let refreshed_source = refreshed_dir.join("intent.json");

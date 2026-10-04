@@ -166,6 +166,77 @@ fn parse_ids(value: &Value, roles: &[Role]) -> Result<BTreeMap<String, String>> 
     Ok(ids)
 }
 
+/// Every candidate ID this deployment's records already hold. Refuses a root holding an
+/// unsupported or colliding record.
+fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
+    let mut used = BTreeSet::new();
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("request-") || !name.ends_with(".json") {
+            continue;
+        }
+        let prior = record(&entry.path())?;
+        if prior.get("format") != Some(&json!(FORMAT)) {
+            return Err("namespace contains unsupported reservation record".into());
+        }
+        if prior.get("deployment") != Some(&json!(deployment)) {
+            continue;
+        }
+        let prior_ids = prior
+            .get("ids")
+            .and_then(Value::as_object)
+            .ok_or("namespace record lacks ids")?;
+        for value in prior_ids.values() {
+            let id = value.as_str().ok_or("namespace record has non-string ID")?;
+            if id
+                .parse::<u64>()
+                .ok()
+                .is_none_or(|number| number < (1u64 << 63))
+                || id.starts_with('0')
+            {
+                return Err("namespace record has invalid candidate ID".into());
+            }
+            if !used.insert(id.to_owned()) {
+                return Err("namespace contains colliding candidate IDs".into());
+            }
+        }
+    }
+    Ok(used)
+}
+
+/// A fresh random candidate ID not in `used` (inserted into it).
+fn fresh_id(used: &mut BTreeSet<String>) -> Result<String> {
+    for _ in 0..16 {
+        let mut number = u64::from_be_bytes(random_bytes()?);
+        number |= 1u64 << 63;
+        let id = number.to_string();
+        if used.insert(id.clone()) {
+            return Ok(id);
+        }
+    }
+    Err("namespace random ID collision budget exhausted".into())
+}
+
+/// A candidate ID for a DRY RUN: drawn exactly as `reserve` draws one (random, in the candidate
+/// range, distinct from every ID the namespace already holds) but WRITTEN NOWHERE. A probe that
+/// the Host only dry-runs (`can`) must not consume a namespace identity: a reservation is
+/// permanent, a probe is not an identity. Reads under the namespace lock when the namespace
+/// exists and creates nothing when it does not. The returned ID has no record, so it cannot be
+/// bound to an attempt (`bind_attempt` takes a [`Reservation`], which this is not).
+pub(crate) fn probe_id(root: &Path, deployment: &str) -> Result<String> {
+    checked_text("deployment", deployment)?;
+    let mut used = if root.exists() {
+        private_root(root)?;
+        let _guard = lock(root)?;
+        used_ids(root, deployment)?
+    } else {
+        BTreeSet::new()
+    };
+    fresh_id(&mut used)
+}
+
 /// Reserve all IDs for one exact request. `fingerprint` is the caller's
 /// pre-allocation source; a changed request with the same key refuses. All
 /// controllers for a deployment must use the same root. Never delete a record
@@ -206,40 +277,7 @@ pub(crate) fn reserve(
     let path = root.join(format!("request-{request_digest}.json"));
     let fingerprint_digest = hex(&Sha256::digest(fingerprint));
     let role_spec = role_json(roles);
-    let mut used = BTreeSet::new();
-    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !name.starts_with("request-") || !name.ends_with(".json") {
-            continue;
-        }
-        let prior = record(&entry.path())?;
-        if prior.get("format") != Some(&json!(FORMAT)) {
-            return Err("namespace contains unsupported reservation record".into());
-        }
-        if prior.get("deployment") != Some(&json!(deployment)) {
-            continue;
-        }
-        let prior_ids = prior
-            .get("ids")
-            .and_then(Value::as_object)
-            .ok_or("namespace record lacks ids")?;
-        for value in prior_ids.values() {
-            let id = value.as_str().ok_or("namespace record has non-string ID")?;
-            if id
-                .parse::<u64>()
-                .ok()
-                .is_none_or(|number| number < (1u64 << 63))
-                || id.starts_with('0')
-            {
-                return Err("namespace record has invalid candidate ID".into());
-            }
-            if !used.insert(id.to_owned()) {
-                return Err("namespace contains colliding candidate IDs".into());
-            }
-        }
-    }
+    let mut used = used_ids(root, deployment)?;
     if path.exists() {
         let saved = record(&path)?;
         if saved.get("deployment") != Some(&json!(deployment))
@@ -260,20 +298,7 @@ pub(crate) fn reserve(
     }
     let mut ids = BTreeMap::new();
     for role in roles {
-        let mut candidate = None;
-        for _ in 0..16 {
-            let mut number = u64::from_be_bytes(random_bytes()?);
-            number |= 1u64 << 63;
-            let id = number.to_string();
-            if used.insert(id.clone()) {
-                candidate = Some(id);
-                break;
-            }
-        }
-        ids.insert(
-            role.label.clone(),
-            candidate.ok_or("namespace random ID collision budget exhausted")?,
-        );
+        ids.insert(role.label.clone(), fresh_id(&mut used)?);
     }
     let saved = json!({
         "format":FORMAT,"deployment":deployment,"participant":participant,
@@ -588,6 +613,38 @@ mod tests {
             record(&first.record_path).unwrap()["status"],
             "candidate-only"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The namespace's whole observable state: every entry's name and bytes.
+    fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        fs::read_dir(root)
+            .unwrap()
+            .map(|e| e.unwrap())
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), fs::read(e.path()).unwrap_or_default()))
+            .collect()
+    }
+
+    #[test]
+    fn a_probe_id_is_side_effect_free_fresh_and_never_a_reservation() {
+        let root = root();
+        // Before the namespace exists, a probe creates nothing at all.
+        assert!(probe_id(&root, "deployment-1").unwrap().parse::<u64>().unwrap() >= 1 << 63);
+        assert!(!root.exists(), "a probe must not create the namespace");
+        // After a real reservation, fifty probes change no byte of the namespace and never
+        // collide with an ID it holds; a later reservation is unaffected by them.
+        let held = reserve(&root, "deployment-1", "alice", "create", b"source", &roles()).unwrap();
+        let before = snapshot(&root);
+        let probes: BTreeSet<String> = (0..50).map(|_| probe_id(&root, "deployment-1").unwrap()).collect();
+        assert_eq!(snapshot(&root), before, "probing wrote to the namespace");
+        assert_eq!(probes.len(), 50, "probe IDs are fresh draws");
+        for id in &probes {
+            assert!(id.parse::<u64>().unwrap() >= 1 << 63 && !id.starts_with('0'));
+            assert!(!held.ids.values().any(|held| held == id), "a probe reused a reserved ID");
+        }
+        let later = reserve(&root, "deployment-1", "alice", "create-2", b"source", &roles()).unwrap();
+        assert_eq!(snapshot(&root).len(), before.len() + 1, "exactly the later reservation was added");
+        assert!(later.ids.values().all(|id| !held.ids.values().any(|h| h == id)));
         fs::remove_dir_all(root).unwrap();
     }
 
