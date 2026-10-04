@@ -27,6 +27,7 @@ for(let i=0;i<lines.length;i++){
   if(!block[k].startsWith("$ ")){k++;continue;}
   const at=i+1+k+1;const command=block[k].slice(2);const out:string[]=[];k++;
   while(k<block.length&&!block[k].startsWith("$ "))out.push(block[k++]);
+  while(out.length&&out[out.length-1]==="")out.pop(); // a blank line before the next `$ ` is not output
   let status=0;const last=out[out.length-1]?.match(/^\(exit status (\d+)\)$/);
   if(last){status=Number(last[1]);out.pop();}
   while(out.length&&out[out.length-1]==="")out.pop();
