@@ -221,6 +221,10 @@ def receiver : Receiver journal where
   nullifiers := F.nullifiers
   payload := fun ingress prepared => F.payload ingress prepared
 
+/-- `F.receiver.Reject` is `F.Reject` by definition, but instance search does not unfold
+`receiver`: a refusal of the receiver prints with the family's own `Repr`. -/
+instance receiverRejectRepr : Repr F.receiver.Reject := F.rejectRepr
+
 /-! ## Native verification and the durable append -/
 
 /-- The append's exact evidence: only `receiveLoadedDetailed`'s read-back-equal
