@@ -5,6 +5,7 @@ A sharing implementation must prove representation adequacy; this reference
 relation does not claim a heap machine, type safety, termination, proof
 consistency, or authority. -/
 import Lean
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
 
@@ -542,45 +543,8 @@ theorem one_turn_interaction (plan : Term) :
   refine .finish ⟨.next (.caseInject "written" (.record []) _ (.done (.nat 1)) rfl) ?_,.natural 1⟩
   simpa [instantiate, Term.substitute] using Steps.next (Step.done (.nat 1)) (.refl _)
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.label_equality_boolean_exact' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms label_equality_boolean_exact
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.label_equality_booleans_refused' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms label_equality_booleans_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.case_selects_injected_arm' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms case_selects_injected_arm
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.equality_drives_branch' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms equality_drives_branch
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_no_step' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms yields_no_step
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_deterministic' does not depend on any axioms
--/
-#guard_msgs in
-#print axioms yields_deterministic
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_plug' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms yields_plug
-/--
-info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.one_turn_interaction' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms one_turn_interaction
+#assert_axioms label_equality_boolean_exact label_equality_booleans_refused
+  case_selects_injected_arm equality_drives_branch yields_no_step yields_deterministic yields_plug
+  one_turn_interaction
 
 end Minidregg.Theory.ObjectiveBendOpenRecursion

@@ -13,6 +13,7 @@ extracts by re-entering lazy record fields.
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandData
 import Theory.ObjectiveBendDemandCapacity
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendDemandDataSoundness
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine
@@ -438,95 +439,9 @@ theorem sampleRecord_native_source_semantics :
 
 
 /-! Axiom pins. -/
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.runBounded_terminal' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_terminal
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.forceWith_unrestricted' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms forceWith_unrestricted
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.forceWith_policy_suspends' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms forceWith_policy_suspends
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.forceWith_finished' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms forceWith_finished
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepEvaluates_steps' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms deepEvaluates_steps
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepFields_append' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms deepFields_append
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.force_field_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms force_field_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.foldlM_fieldsInvariant' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms foldlM_fieldsInvariant
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.except_bind_ok' does not depend on any axioms
--/
-#guard_msgs in
-#print axioms except_bind_ok
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.materialize_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms materialize_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.execution_source_semantics' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms execution_source_semantics
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_closed' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms sampleRecord_closed
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_executes' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sampleRecord_executes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_source_semantics' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sampleRecord_source_semantics
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_executes_native' depends on axioms: [propext,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sampleRecord_executes_native
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_native_source_semantics' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sampleRecord_native_source_semantics
+#assert_axioms runBounded_terminal forceWith_unrestricted forceWith_policy_suspends
+  forceWith_finished deepEvaluates_steps deepFields_append force_field_sound foldlM_fieldsInvariant
+  except_bind_ok materialize_sound execution_source_semantics sampleRecord_closed
+  sampleRecord_executes sampleRecord_source_semantics sampleRecord_executes_native
+  sampleRecord_native_source_semantics
 end Minidregg.Theory.ObjectiveBendDemandDataSoundness

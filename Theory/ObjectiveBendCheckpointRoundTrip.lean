@@ -2,6 +2,7 @@
 quiescent yielded activity, is restored exactly from its token encoding.
 Fuel is the token count, so no separate depth bound is assumed. -/
 import Theory.ObjectiveBendCheckpoint
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendCheckpointRoundTrip
 open ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendCheckpoint
 set_option autoImplicit false
@@ -256,10 +257,6 @@ theorem state_roundTrip (state : State) : decodeState (encodeState state) = some
   rw [show heap.size = heap.toList.length by simp,heapDecoded]
   simp [controlOk,stackDecoded]
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendCheckpointRoundTrip.state_roundTrip' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms state_roundTrip
+#assert_axioms state_roundTrip
 
 end Minidregg.Theory.ObjectiveBendCheckpointRoundTrip

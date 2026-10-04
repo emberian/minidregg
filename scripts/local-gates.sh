@@ -16,6 +16,11 @@
 #   hyp-ledger     scripts/check-hypothesis-ledger.sh over AxiomCensusResearch (built by
 #                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
 #                  assumption, no stale allowlist entry; self-tests its instrument each run
+#   objective-proofs   ObjectiveProofs built; every Theory/ObjectiveBend* statement and
+#                  exact axiom set equals scripts/gates/objective-{statements.snapshot,axioms.pin}
+#                  (scripts/check-objective-proofs.sh proofs; self-tests its instrument each run)
+#   objective-c    the C backend differential against runBounded, State bytes included
+#                  (scripts/check-objective-proofs.sh c; needs bun)
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
@@ -56,7 +61,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -66,6 +71,8 @@ g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-s
 g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
+g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
+g_objective-c()      { bash scripts/check-objective-proofs.sh c; }
 g_drift() {
   local after; after=$(git diff --binary | git hash-object --stdin)
   if [[ "$tree_before" != "$after" ]]; then

@@ -3,6 +3,7 @@ All-constructor preservation connects the checker derivation to every actual
 raw transition; termination, liveness and native authority are separate. -/
 import Theory.ObjectiveBendDemandTyping
 import Theory.ObjectiveBendDemandAdequacy
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendDemandPreservation
 open ObjectiveBendTypes ObjectiveBendTyping ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendDemandTyping
 set_option autoImplicit false
@@ -3706,204 +3707,15 @@ theorem checked_reachable_no_internal_refusal (source : AnnotatedTerm)
       state.control ≠ .refused .invalidUpdate :=
   ObjectiveBendDemandInvariant.reachable_no_internalRefusal (source_scoped checked.derivation) reachable
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.same_type_preserves_head' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms same_type_preserves_head
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.value_head_correct' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms value_head_correct
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_binary_right_no_wrong_value' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_binary_right_no_wrong_value
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_condition_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_condition_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_condition_no_wrong_value' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_condition_no_wrong_value
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.canonical_lookup' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms canonical_lookup
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_bound_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_bound_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_application_focus_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_application_focus_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_enter_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_enter_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_update_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_update_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_internal_refusal' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms checked_reachable_no_internal_refusal
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.source_insert_binding' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms source_insert_binding
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_mix_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_mix_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_fix_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_fix_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_record_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_record_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_field_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_field_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_extend_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_extend_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_stepRaw_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_stepRaw_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_typed' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms checked_reachable_typed
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_refusal' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms checked_reachable_no_refusal
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.checked_reachable_no_wrong_value_or_missing_field' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms checked_reachable_no_wrong_value_or_missing_field
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_runBounded_no_refusal' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_runBounded_no_refusal
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.check_runBounded_no_refusal' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms check_runBounded_no_refusal
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_inject_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_inject_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_case_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_case_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_ifBool_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_ifBool_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.arms_typing_find' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms arms_typing_find
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.value_variant_fields' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms value_variant_fields
+#assert_axioms same_type_preserves_head value_head_correct typed_binary_right_no_wrong_value
+  typed_condition_preserved typed_condition_no_wrong_value canonical_lookup typed_bound_preserved
+  typed_application_focus_preserved typed_enter_preserved typed_update_preserved
+  checked_reachable_no_internal_refusal source_insert_binding typed_mix_preserved
+  typed_fix_preserved typed_record_preserved typed_field_preserved typed_extend_preserved
+  typed_stepRaw_preserved checked_reachable_typed checked_reachable_no_refusal
+  checked_reachable_no_wrong_value_or_missing_field typed_runBounded_no_refusal
+  check_runBounded_no_refusal typed_inject_preserved typed_case_preserved typed_ifBool_preserved
+  arms_typing_find value_variant_fields
 
 /-! ## Activities: yields are quiescent; a typed response resumes a typed state -/
 
@@ -4018,26 +3830,6 @@ theorem written_response_typed :
     PartialTyping {} [] (.inject "written" (.record [])) responseType [] :=
   .inject (fuel := 1) (.record (.nil [])) (by decide) rfl
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_yield_quiescent' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_yield_quiescent
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_resume_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_resume_preserved
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_perform_preserved' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms typed_perform_preserved
+#assert_axioms typed_yield_quiescent typed_resume_preserved typed_perform_preserved
 
 end Minidregg.Theory.ObjectiveBendDemandPreservation

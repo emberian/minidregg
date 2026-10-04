@@ -5,6 +5,7 @@ limits, has an independent source evaluation to the same ground observation.
 This module does not yet inhabit Representation: administrative progress and
 source-to-machine completeness remain separate substantive obligations. -/
 import Theory.ObjectiveBendDemandInvariant
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendDemandAdequacy
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine
@@ -3819,415 +3820,24 @@ the tied address is memoized in place with its retained unfolding origin. -/
         simpa [instantiate,Term.substitute] using inheritedBeta) (.refl _)))
   · exact .natural _
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_suspended' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_enter_suspended
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_cache_update' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_cache_update
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_cached' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_enter_cached
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_application' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_application
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_closure_call
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_fix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_context' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_context
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_pair' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_pair
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_bound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_bound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_immediate' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_immediate
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_object_access
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_specification_call' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_specification_call
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_primitive_return' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_primitive_return
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_realizes' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms allocateFields_realizes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_record' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_record
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_field_return
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_mix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_zero
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_successor' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_successor
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_extend_record' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_extend_record
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_stepRaw' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_stepRaw
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_graph' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_graph
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_natural_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_natural_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_boolean_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_boolean_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_label_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_label_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_finished_graph' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_finished_graph
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_natural_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_natural_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_boolean_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_boolean_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_label_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_label_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceStep_deterministic' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceStep_deterministic
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_evaluates_unique' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms source_evaluates_unique
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_observation_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_observation_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_resource_independent' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_resource_independent
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_evaluates_tail' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_evaluates_tail
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_originsBorn' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_originsBorn
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_originsBorn' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_originsBorn
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackRealizes_erases' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stackRealizes_erases
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_value_sound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_value_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_value_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_value_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enteredFocus_source' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_enteredFocus_source
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_observes_sound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_observes_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_boolean_sound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_boolean_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_beta' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_beta
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_binary_left_return' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_binary_left_return
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_return' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_return
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.initial_fix_graph' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms initial_fix_graph
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_execution' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms adequate_trace_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.adequate_trace_completion' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms adequate_trace_completion
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_executor' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms shared_field_executor
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_field_source' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms shared_field_source
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_executor' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms fixed_constant_executor
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.fixed_constant_source' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms fixed_constant_source
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_evaluates_iff_derivation' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms source_evaluates_iff_derivation
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceDerivation_cost_unique' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceDerivation_cost_unique
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceStep_derivation_tail' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceStep_derivation_tail
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.originBorn_demand_descent' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms originBorn_demand_descent
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_terminating_demand' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_terminating_demand
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.administrative_budget_halts' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms administrative_budget_halts
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_terminating_administration' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_terminating_administration
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_terminating_administration' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_terminating_administration
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.represented_born_blackhole_counterexample' depends on axioms: [propext,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms represented_born_blackhole_counterexample
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_stepRaw_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_stepRaw_names
+#assert_axioms graph_enter_suspended graph_cache_update graph_enter_cached
+  graph_evaluate_application graph_closure_call graph_evaluate_fix graph_evaluate_context
+  graph_evaluate_pair graph_evaluate_bound graph_evaluate_immediate graph_object_access
+  graph_specification_call graph_primitive_return allocateFields_realizes graph_evaluate_record
+  graph_field_return graph_evaluate_mix graph_condition_zero graph_condition_successor
+  graph_extend_record graph_stepRaw rawRun_graph rawRun_natural_sound rawRun_boolean_sound
+  rawRun_label_sound runBounded_finished_graph runBounded_natural_sound runBounded_boolean_sound
+  runBounded_label_sound sourceStep_deterministic source_evaluates_unique
+  runBounded_observation_sound runBounded_resource_independent sourceSteps_evaluates_tail
+  stepRaw_originsBorn reachable_originsBorn stackRealizes_erases graph_complete_value_sound
+  runBounded_value_sound graph_enteredFocus_source runBounded_observes_sound
+  graph_complete_boolean_sound closeTerm_beta graph_binary_left_return graph_complete_return
+  initial_fix_graph adequate_trace_execution adequate_trace_completion shared_field_executor
+  shared_field_source fixed_constant_executor fixed_constant_source source_evaluates_iff_derivation
+  sourceDerivation_cost_unique sourceStep_derivation_tail originBorn_demand_descent
+  graph_terminating_demand administrative_budget_halts rawRun_terminating_administration
+  runBounded_terminating_administration represented_born_blackhole_counterexample
+  graph_stepRaw_names
 
 /-- Finite actual traces construct coherent name assignments. Already allocated
 source identities survive every prefix, including cached structured values;
@@ -4253,20 +3863,7 @@ only freshly allocated addresses acquire names. -/
   obtain ⟨meaning,_,represented⟩ := rawRun_graphBy_names (graphBy_initializes closed) successful
   exact ⟨meaning,represented⟩
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_graphBy_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_graphBy_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_named_graph' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_named_graph
+#assert_axioms rawRun_graphBy_names rawRun_named_graph
 
  theorem push_nonEvaluating_backward {heap : Array Cell} {cell : Cell} {address : Address} {origin : Closure}
     (notEvaluating : ∀ source, cell ≠ .evaluating source)
@@ -4361,20 +3958,7 @@ GraphRepresents/Born counterexample, independently of source termination. -/
       · exact ih existing
       · exact ⟨_,reachable,entered,suspended⟩
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_evaluating_birth' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_evaluating_birth
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_evaluating_started' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_evaluating_started
+#assert_axioms stepRaw_evaluating_birth reachable_evaluating_started
 
 /-- An actual uninterrupted evaluating interval starts by entering this exact
 suspended origin. Every later member is an actual transition still carrying
@@ -4418,13 +4002,7 @@ active-update budgets and excluding blackholes in terminating source runs. -/
         exact ⟨entry,earlier,enter,old,.next segment found⟩
       · exact ⟨_,reachable,entered,suspended,.start entered suspended⟩
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_evaluating_segment' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_evaluating_segment
+#assert_axioms reachable_evaluating_segment
 
  theorem reachable_graphBy_names {start state : State} {source : Term} {meaning : AddressMeaning}
     (represented : GraphRepresentsBy meaning start source) (reachable : Reachable start state)
@@ -4476,20 +4054,7 @@ interval witness is derived from reachability, including faulty endpoints. -/
       exact Or.inr (aligned ▸ less)
   exact ⟨entered,meaning,value,nameCost,originCost,earlier,enter,suspended,segment,snapshot,demand,originDemand,le,descent⟩
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_graphBy_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_graphBy_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_evaluating_budget' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_evaluating_budget
+#assert_axioms reachable_graphBy_names reachable_evaluating_budget
 
  theorem evaluatingSegment_from_entry {address : Address} {origin : Closure} {entered state : State}
     (segment : EvaluatingSegment address origin entered state) : Reachable entered state := by
@@ -4557,20 +4122,7 @@ oracle for the heap. -/
   obtain ⟨value,cost,focusDemand,le⟩ := stack_derivation_demand context
   exact ⟨value,cost,focusDemand,Nat.le_trans le contextLe⟩
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_evaluating_current_budget' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_evaluating_current_budget
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_pending_budget' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_pending_budget
+#assert_axioms reachable_evaluating_current_budget graphBy_pending_budget
 
 /-- A cap for the exact addresses retained by the current lexical closure. -/
 def captureCap : Environment → Nat
@@ -4688,19 +4240,7 @@ is general heap/closure preservation, including actual tied Fix origins. -/
     · have aligned := sourceDerivation_cost_unique tail focusDemand
       exact Or.inl (aligned ▸ less)
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_enter_suspended' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_demandSafety_enter_suspended
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_forbids_finite_reentry' depends on axioms: [propext,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms demandSafety_forbids_finite_reentry
+#assert_axioms stepRaw_demandSafety_enter_suspended demandSafety_forbids_finite_reentry
 
  theorem budgetFocus_enter_steps {meaning : AddressMeaning} {state : State} {address : Address} {focus : Term}
     (heap : HeapRealizes meaning state.heap) (enter : state.control = .enter address)
@@ -4800,20 +4340,7 @@ finite update budgets is used separately to exclude evaluating re-entry. -/
         | some address => exact stepRaw_demandSafety_bound safe heap born current lookup
   | returned value | complete value | refused reason | blackhole address | yielded _ => simp [DemandAdministrative,current] at administrative
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_administrative' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_demandSafety_administrative
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_bound' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_demandSafety_bound
+#assert_axioms stepRaw_demandSafety_administrative stepRaw_demandSafety_bound
 
  theorem frame_derivation_demand_strict {meaning : AddressMeaning} {frame : Frame} {focus result : Term} {cost : Nat}
     (ordinary : ∀ address, frame ≠ .update address)
@@ -4947,20 +4474,7 @@ No finite-source or evaluator oracle is a premise. -/
   · intro address
     cases context <;> simp [DemandContext.frame]
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_nonUpdate_head_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_nonUpdate_head_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_context_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_context_safety
+#assert_axioms graphBy_nonUpdate_head_demandSafety graph_evaluate_context_safety
 
 
 /-- A genuine source reduction after an actual continuation prefix makes the
@@ -5021,20 +4535,7 @@ may change future names; the actual old heap prefix retains its assignment. -/
   exact graphBy_semantic_reduction_demandSafety represented same current
     (by intro address; simp [returned]) split oldControl newControl reduce
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_semantic_reduction_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_semantic_reduction_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_object_access_safety
+#assert_axioms graphBy_semantic_reduction_demandSafety graph_object_access_safety
 
 
  theorem graph_execution_demandSafety {meaning next : AddressMeaning} {state : State} {source : Term}
@@ -5138,34 +4639,8 @@ update budget, even though the heap graph itself is cyclic. -/
   · simp [stepRaw,evaluate]
   · simp [stepRaw,evaluate]
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_closure_call_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_successor_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_successor_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_enter_tied_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_enter_tied_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_fix_safety
+#assert_axioms graph_closure_call_safety graph_condition_successor_safety
+  graphBy_enter_tied_demandSafety graph_evaluate_fix_safety
 
 
  theorem budgetFocus_meaning_congr {meaning next : AddressMeaning} {state : State}
@@ -5206,11 +4681,7 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix_safety' d
   have oldFocus : budgetFocus meaning state = some focus := (budgetFocus_meaning_congr lexical same).trans current
   exact safe address origin found nameValue nameCost oldDemand focus oldFocus focusValue focusCost focusDemand
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_meaning_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandSafety_meaning_congr
+#assert_axioms demandSafety_meaning_congr
 
 
  theorem demandSafety_complete {meaning : AddressMeaning} {state : State} {value : RuntimeValue}
@@ -5426,13 +4897,7 @@ Fault exclusion is a separate source-termination consequence. -/
                   simp [stepRaw,control,frames,ResultControl] at successful
 
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_stepRaw_safety_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_stepRaw_safety_names
+#assert_axioms graph_stepRaw_safety_names
 
 
  theorem rawRun_graphBy_safety_names {meaning : AddressMeaning} {state : State} {source : Term} {ticks : Nat}
@@ -5494,20 +4959,7 @@ Fix. The named graph and safety proof are constructed by the actual trace. -/
   obtain ⟨meaning,represented,safe⟩ := rawRun_closed_demandSafety closed ticks successful
   exact graphBy_terminating_reentry_impossible represented safe terminates enter busy
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_closed_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_closed_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_terminating_reentry_impossible' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_terminating_reentry_impossible
+#assert_axioms rawRun_closed_demandSafety rawRun_terminating_reentry_impossible
 
 
  theorem reachable_closed_demandSafety {source : Term} {state : State} (closed : Scoped 0 source)
@@ -5551,20 +5003,7 @@ classifying blackholes for arbitrary diverging source computations. -/
     ∀ address, (rawRun ticks (initial source)).control ≠ .blackhole address :=
   reachable_terminating_no_blackhole closed terminates (rawRun_reachable .start ticks)
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_terminating_no_blackhole' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_terminating_no_blackhole
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_terminating_no_blackhole' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_terminating_no_blackhole
+#assert_axioms reachable_terminating_no_blackhole rawRun_terminating_no_blackhole
 
 
 /-- A finite independent derivation of the demanded returned-value context
@@ -5681,11 +5120,7 @@ uses source semantics, without a separate typed-source restriction. -/
           cases returnedValue <;> simp [valueMeaning,closeTerm_lam_form] at same
           case boolean value => subst value; simp [stepRaw,returned,head,ResultControl]
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.frame_derivation_return_progress' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms frame_derivation_return_progress
+#assert_axioms frame_derivation_return_progress
 
 
 /-- Independent source termination supplies the exact demanded frame operand
@@ -5784,20 +5219,7 @@ are excluded from these actual traces; finite completion is still separate. -/
        cases demand with
        | value isValue => cases isValue)
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_terminating_next_result' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_terminating_next_result
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_terminating_resultControl' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_terminating_resultControl
+#assert_axioms graphBy_terminating_next_result rawRun_terminating_resultControl
 
 
 /-- For arbitrary capacities, the bounded executor retains an exact actual
@@ -5865,918 +5287,54 @@ suspension, never a semantic refusal or blackhole for a terminating source. -/
       (∃ reason retained, runBounded limits ticks (initial source) = .suspended reason retained) :=
   runBounded_only_finish_or_suspend limits ticks (initial source) (rawRun_terminating_resultControl closed terminates)
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_retained_prefix' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_retained_prefix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_terminating_finish_or_suspend' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_terminating_finish_or_suspend
+#assert_axioms runBounded_retained_prefix runBounded_terminating_finish_or_suspend
 
 /-! Axiom pins for every r11 theorem not pinned above. -/
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_trans' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_trans
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_value_noStep' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms source_value_noStep
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_value_steps_identity' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms source_value_steps_identity
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceStep_evaluates_tail' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceStep_evaluates_tail
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_lift' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_lift
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.primitiveResult_value' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms primitiveResult_value
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceDerivation_evaluates' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceDerivation_evaluates
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceDerivation_cost_positive' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceDerivation_cost_positive
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceDerivation_value_inv' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceDerivation_value_inv
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceStep_derivation_prepend' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceStep_derivation_prepend
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.source_evaluates_derivation' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms source_evaluates_derivation
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceDerivation_result_unique' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceDerivation_result_unique
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_derivation_tail' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_derivation_tail
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_derivation_strict' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_derivation_strict
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_rename_identity' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_rename_identity
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_substitute_identity' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_substitute_identity
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_substitution_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_substitution_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.liftRename_comp' depends on axioms: [Quot.sound]
--/
-#guard_msgs in
-#print axioms liftRename_comp
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.liftRename_substitution_comp' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms liftRename_substitution_comp
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_rename_comp' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_rename_comp
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_rename_substitute' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_rename_substitute
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lifted_substitution_scoped' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms lifted_substitution_scoped
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lifted_substitution_rename' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms lifted_substitution_rename
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_substitute_rename' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_substitute_rename
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lifted_substitution_comp' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms lifted_substitution_comp
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scoped_substitute_comp' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scoped_substitute_comp
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.environmentSubstitution_scoped' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms environmentSubstitution_scoped
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_eq_substitution' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_eq_substitution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_meaning_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_meaning_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_scoped' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_scoped
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.valueMeaning_scoped' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms valueMeaning_scoped
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.valueMeaning_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms valueMeaning_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.cellRealizes_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms cellRealizes_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapRealizes_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms heapRealizes_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapRealizes_push' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms heapRealizes_push
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.frameMeaning_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms frameMeaning_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.valueMeaning_value' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms valueMeaning_value
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.enteredFocus_steps' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms enteredFocus_steps
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_frame' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_frame
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackRealizes_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stackRealizes_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackRealizes_steps' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stackRealizes_steps
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.sourceSteps_stack' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms sourceSteps_stack
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapRealizes_set' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms heapRealizes_set
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.cachedCell_realizes' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms cachedCell_realizes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_initializes' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_initializes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_natural_sound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_natural_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_label_sound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_label_sound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.frame_derivation_demand' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms frame_derivation_demand
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stack_derivation_demand' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stack_derivation_demand
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandContext_closes' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandContext_closes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandContext_dispatch' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandContext_dispatch
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.valueTerm_meaning' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms valueTerm_meaning
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.scalarValue_meaning' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms scalarValue_meaning
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_app' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_app
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_lambda' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_lambda
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.extendMeaning_prefix' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms extendMeaning_prefix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateClosure_realizes' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms allocateClosure_realizes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocationLoop_accumulator' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms allocationLoop_accumulator
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_cons' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms allocateFields_cons
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_record' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_record
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_mixBody' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_mixBody
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_weaken' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_weaken
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_fix' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_fix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.tiedOrigin_name_proper' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms tiedOrigin_name_proper
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapOriginsBorn_sameSize' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms heapOriginsBorn_sameSize
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapOriginsBorn_set' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms heapOriginsBorn_set
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapOriginsBorn_push' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms heapOriginsBorn_push
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapOriginsBorn_suspend' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms heapOriginsBorn_suspend
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.heapOriginsBorn_fix' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms heapOriginsBorn_fix
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_originsBorn' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms allocateFields_originsBorn
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.initial_originsBorn' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms initial_originsBorn
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_graph' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_graph
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_initializes' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_initializes
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_context_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_context_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_bound_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_bound_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_immediate_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_immediate_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_object_access_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_object_access_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_specification_call_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_specification_call_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_primitive_return_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_primitive_return_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_suspended_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_enter_suspended_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_cache_update_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_cache_update_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_enter_cached_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_enter_cached_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_pair_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_pair_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_record_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_record_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_field_return_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_field_return_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_mix_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_mix_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_zero_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_zero_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_successor_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_successor_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_successor_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_successor_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_extend_record_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_extend_record_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_fix_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_closure_call_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_closure_call_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_closure_call_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_application_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_application_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_binary_left_return_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_binary_left_return_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_complete_return_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_complete_return_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.originBorn_capture_bound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms originBorn_capture_bound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.traceFits_mono' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms traceFits_mono
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.traceFits_traceLimits' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms traceFits_traceLimits
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_absorbs' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_absorbs
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_resultControl' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_resultControl
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_terminating_administration' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_terminating_administration
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_reachable' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_reachable
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.step_finished_control' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms step_finished_control
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.step_ticks_raw' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms step_ticks_raw
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_finished_control' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_finished_control
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_finished_resultControl' depends on axioms: [propext,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_finished_resultControl
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_retains_rawRun' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_retains_rawRun
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_complete_classifies' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_complete_classifies
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_lexicalInvariant' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_lexicalInvariant
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_preservesOrigins' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_preservesOrigins
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_preservesCached' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_preservesCached
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.unused_argument_executor' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms unused_argument_executor
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.unused_argument_source' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms unused_argument_source
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_argument_executor' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms shared_argument_executor
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.shared_argument_source' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms shared_argument_source
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.push_nonEvaluating_backward' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms push_nonEvaluating_backward
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.allocateFields_evaluating_backward' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms allocateFields_evaluating_backward
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.set_nonEvaluating_backward' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms set_nonEvaluating_backward
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.evaluatingSegment_reachable' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms evaluatingSegment_reachable
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.evaluatingSegment_cell' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms evaluatingSegment_cell
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.evaluatingSegment_from_entry' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms evaluatingSegment_from_entry
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackRealizes_update_segment' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stackRealizes_update_segment
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.captureCap_le' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms captureCap_le
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.captureCap_valid' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms captureCap_valid
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.initial_demandSafety' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms initial_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_returned' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandSafety_returned
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.budgetFocus_enter_steps' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms budgetFocus_enter_steps
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.budgetCap_enter_bound' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms budgetCap_enter_bound
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_terminal' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandSafety_terminal
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.frame_derivation_demand_strict' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms frame_derivation_demand_strict
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stackUpdates_member_split' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms stackUpdates_member_split
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.budgetFocus_control_steps' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms budgetFocus_control_steps
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_execution_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_execution_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_mix_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_mix_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_condition_zero_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_condition_zero_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_field_return_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_field_return_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.budgetFocus_meaning_congr' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms budgetFocus_meaning_congr
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_complete' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms demandSafety_complete
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_next_returned_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_next_returned_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_next_complete_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_next_complete_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_next_ordinary_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_next_ordinary_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_administrative_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_administrative_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_graphBy_safety_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_graphBy_safety_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_terminating_control_budget' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_terminating_control_budget
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_terminating_reentry_impossible' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graphBy_terminating_reentry_impossible
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.reachable_closed_demandSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reachable_closed_demandSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_blackhole_origin' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms stepRaw_blackhole_origin
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.closeTerm_lam_form' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms closeTerm_lam_form
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.rawRun_terminating_graphSafety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms rawRun_terminating_graphSafety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_terminating_retained_resultControl' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_terminating_retained_resultControl
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.runBounded_only_finish_or_suspend' depends on axioms: [propext,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms runBounded_only_finish_or_suspend
+#assert_axioms sourceSteps_trans source_value_noStep source_value_steps_identity
+  sourceStep_evaluates_tail sourceSteps_lift primitiveResult_value sourceDerivation_evaluates
+  sourceDerivation_cost_positive sourceDerivation_value_inv sourceStep_derivation_prepend
+  source_evaluates_derivation sourceDerivation_result_unique sourceSteps_derivation_tail
+  sourceSteps_derivation_strict scoped_rename_identity scoped_substitute_identity
+  scoped_substitution_congr liftRename_comp liftRename_substitution_comp scoped_rename_comp
+  scoped_rename_substitute lifted_substitution_scoped lifted_substitution_rename
+  scoped_substitute_rename lifted_substitution_comp scoped_substitute_comp
+  environmentSubstitution_scoped closeTerm_eq_substitution closeTerm_meaning_congr closeTerm_scoped
+  valueMeaning_scoped valueMeaning_congr cellRealizes_congr heapRealizes_congr heapRealizes_push
+  frameMeaning_congr valueMeaning_value enteredFocus_steps sourceSteps_frame stackRealizes_congr
+  stackRealizes_steps sourceSteps_stack heapRealizes_set cachedCell_realizes graph_initializes
+  graph_complete_natural_sound graph_complete_label_sound frame_derivation_demand
+  stack_derivation_demand demandContext_closes demandContext_dispatch valueTerm_meaning
+  scalarValue_meaning closeTerm_app closeTerm_lambda extendMeaning_prefix allocateClosure_realizes
+  allocationLoop_accumulator allocateFields_cons closeTerm_record closeTerm_mixBody closeTerm_weaken
+  closeTerm_fix tiedOrigin_name_proper heapOriginsBorn_sameSize heapOriginsBorn_set
+  heapOriginsBorn_push heapOriginsBorn_suspend heapOriginsBorn_fix allocateFields_originsBorn
+  initial_originsBorn graphBy_graph graphBy_initializes graph_evaluate_context_names
+  graph_evaluate_bound_names graph_evaluate_immediate_names graph_object_access_execution
+  graph_object_access_names graph_specification_call_names graph_primitive_return_names
+  graph_enter_suspended_names graph_cache_update_names graph_enter_cached_names
+  graph_evaluate_pair_names graph_evaluate_record_names graph_field_return_execution
+  graph_field_return_names graph_evaluate_mix_execution graph_evaluate_mix_names
+  graph_condition_zero_execution graph_condition_zero_names graph_condition_successor_execution
+  graph_condition_successor_names graph_extend_record_names graph_evaluate_fix_names
+  graph_closure_call_execution graph_closure_call_names graph_evaluate_application_names
+  graph_binary_left_return_names graph_complete_return_names originBorn_capture_bound traceFits_mono
+  traceFits_traceLimits rawRun_absorbs rawRun_resultControl graph_terminating_administration
+  rawRun_reachable step_finished_control step_ticks_raw runBounded_finished_control
+  runBounded_finished_resultControl runBounded_retains_rawRun runBounded_complete_classifies
+  rawRun_lexicalInvariant rawRun_preservesOrigins rawRun_preservesCached unused_argument_executor
+  unused_argument_source shared_argument_executor shared_argument_source push_nonEvaluating_backward
+  allocateFields_evaluating_backward set_nonEvaluating_backward evaluatingSegment_reachable
+  evaluatingSegment_cell evaluatingSegment_from_entry stackRealizes_update_segment captureCap_le
+  captureCap_valid initial_demandSafety demandSafety_returned budgetFocus_enter_steps
+  budgetCap_enter_bound demandSafety_terminal frame_derivation_demand_strict
+  stackUpdates_member_split budgetFocus_control_steps graph_execution_demandSafety
+  graph_evaluate_mix_safety graph_condition_zero_safety graph_field_return_safety
+  budgetFocus_meaning_congr demandSafety_complete graph_next_returned_safety
+  graph_next_complete_safety graph_next_ordinary_safety graph_administrative_safety
+  rawRun_graphBy_safety_names graphBy_terminating_control_budget
+  graphBy_terminating_reentry_impossible reachable_closed_demandSafety stepRaw_blackhole_origin
+  closeTerm_lam_form rawRun_terminating_graphSafety runBounded_terminating_retained_resultControl
+  runBounded_only_finish_or_suspend
 
 /-! Non-vacuity of the r11 source-only premises. Every new r11 theorem whose
 premises are `Scoped 0 source` and `Evaluates source result` is instantiated
@@ -6803,72 +5361,8 @@ theorem lazyFixedSource_finish_or_suspend (limits : Limits) (ticks : Nat) :
       (∃ reason retained, runBounded limits ticks (initial lazyFixedSource) = .suspended reason retained) :=
   runBounded_terminating_finish_or_suspend lazyFixedSource_closed lazyFixedSource_evaluates limits ticks
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lazyFixedSource_closed' does not depend on any axioms
--/
-#guard_msgs in
-#print axioms lazyFixedSource_closed
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lazyFixedSource_evaluates' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms lazyFixedSource_evaluates
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lazyFixedSource_resultControl' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms lazyFixedSource_resultControl
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lazyFixedSource_finish_or_suspend' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms lazyFixedSource_finish_or_suspend
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_inject_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_evaluate_inject_names
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_case_return_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_case_return_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_ifBool_return_execution' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_ifBool_return_execution
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_case_return_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_case_return_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_ifBool_return_safety' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_ifBool_return_safety
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_via_names' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms graph_via_names
+#assert_axioms lazyFixedSource_closed lazyFixedSource_evaluates lazyFixedSource_resultControl
+  lazyFixedSource_finish_or_suspend graph_evaluate_inject_names graph_case_return_execution
+  graph_ifBool_return_execution graph_case_return_safety graph_ifBool_return_safety graph_via_names
 
 end Minidregg.Theory.ObjectiveBendDemandAdequacy

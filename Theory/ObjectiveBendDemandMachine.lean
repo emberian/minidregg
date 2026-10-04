@@ -10,6 +10,7 @@ are not constructors and cannot be minted/copied by this machine.
 Weak-head reference adequacy, graph/capture ownership and new type metatheory
 remain obligations. -/
 import Theory.ObjectiveBendOpenRecursion
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
@@ -278,20 +279,6 @@ theorem perform_yields (heap : Array Cell) (plan : Term) (environment : Environm
       ⟨heap.push (.suspended ⟨plan,environment⟩),.yielded heap.size,stack⟩ := by
   simp [stepRaw, direct]
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandMachine.perform_yields' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms perform_yields
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandMachine.perform_under_update_refused' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms perform_under_update_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendDemandMachine.resume_requires_yield' depends on axioms: [propext]
--/
-#guard_msgs in
-#print axioms resume_requires_yield
+#assert_axioms perform_yields perform_under_update_refused resume_requires_yield
 
 end Minidregg.Theory.ObjectiveBendDemandMachine

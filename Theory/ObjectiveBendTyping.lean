@@ -1,5 +1,6 @@
 import Theory.ObjectiveBendTypes
 import Theory.ObjectiveBendOpenRecursion
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendTyping
 open ObjectiveBendTypes ObjectiveBendOpenRecursion
 set_option autoImplicit false
@@ -1208,150 +1209,12 @@ unrestricted binder either. -/
 theorem computation_not_shareable (plan response result : Ty) (variables : List Nat) :
     (Ty.computation plan response result).shareableUnder variables = false := rfl
 
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.exhaustive_case_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms exhaustive_case_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.reordered_arms_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms reordered_arms_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.missing_arm_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms missing_arm_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.extra_arm_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms extra_arm_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.undeclared_injection_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms undeclared_injection_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.unannotated_injection_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms unannotated_injection_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.arm_results_must_agree' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms arm_results_must_agree
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.equality_branch_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms equality_branch_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.label_condition_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms label_condition_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.label_equality_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms label_equality_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.boolean_label_equality_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms boolean_label_equality_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.affine_in_two_arms_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms affine_in_two_arms_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.affine_in_one_arm_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms affine_in_one_arm_accepted
-
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.effect_case_accepted' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms effect_case_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.pure_arm_without_done_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms pure_arm_without_done_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.effect_as_argument_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms effect_as_argument_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.pure_affine_argument_accepted' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms pure_affine_argument_accepted
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_record_field_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms effect_in_record_field_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_payload_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms effect_in_payload_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_specification_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms effect_in_specification_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.scalar_plan_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms scalar_plan_refused
-/--
-info: 'Minidregg.Theory.ObjectiveBendTyping.closure_response_refused' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in
-#print axioms closure_response_refused
+#assert_axioms exhaustive_case_accepted reordered_arms_accepted missing_arm_refused
+  extra_arm_refused undeclared_injection_refused unannotated_injection_refused
+  arm_results_must_agree equality_branch_accepted label_condition_refused label_equality_accepted
+  boolean_label_equality_refused affine_in_two_arms_refused affine_in_one_arm_accepted
+  effect_case_accepted pure_arm_without_done_refused effect_as_argument_refused
+  pure_affine_argument_accepted effect_in_record_field_refused effect_in_payload_refused
+  effect_in_specification_refused scalar_plan_refused closure_response_refused
 
 end Minidregg.Theory.ObjectiveBendTyping
