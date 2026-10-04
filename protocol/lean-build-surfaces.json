@@ -3305,9 +3305,9 @@
     {
       "module": "Host.ApplicationFailedStartRecoveryAuthoring",
       "path": "Host/ApplicationFailedStartRecoveryAuthoring.lean",
-      "sha256": "1e83e7be49fd58bc416bdeae4de64d55bc66aa5636e24bc220a7b68f331f3e8c",
+      "sha256": "44d54b2110851b99e7a855e35eb99d6072802147043f28b2cfe321fc98fb4df5",
       "surface": "default",
-      "ownerReportedStatus": "SCOPED_LEAN_PASS_MATCHED_HISTORICAL_JOIN"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ApplicationFailedStartRecoveryInspection",
@@ -3340,21 +3340,21 @@
     {
       "module": "Host.ApplicationLifecycleBeginOperator",
       "path": "Host/ApplicationLifecycleBeginOperator.lean",
-      "sha256": "2ef6b173f38be652cb3fb5b58e0a1555b2b70c42057d8a713b375dcefbc33932",
+      "sha256": "ed6393eef7b52981dc1b6d1a5fb5747eafdfde91eed0a0e68a01e51110bb387b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ApplicationLifecycleClaimInspection",
       "path": "Host/ApplicationLifecycleClaimInspection.lean",
-      "sha256": "e2797698bcfa4288ff272eccf7e7cf626336c7bc4e79f884c33b39087d4e0800",
+      "sha256": "76d653ee499c73688a2d77ee57967a2dfdd2dfd3b4205f383f7700ed5257a7f0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ApplicationLifecycleClaimOperator",
       "path": "Host/ApplicationLifecycleClaimOperator.lean",
-      "sha256": "5a19c080db8bfe64bec852315c0132a2ef46f6985ef8d352a22f642a1f536420",
+      "sha256": "3a09a686b30193f52786a66805e8185a90d77f1daf3291f57804a41b8e91f17e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3368,21 +3368,21 @@
     {
       "module": "Host.ApplicationLifecycleCompletionAuthoring",
       "path": "Host/ApplicationLifecycleCompletionAuthoring.lean",
-      "sha256": "ac6cc8a0011776d2326c9a275aa538739915032a2bd8f1874193686d2669b93a",
+      "sha256": "15bb0a5b6aa37835b292392aef7c057703d1d63711ed98ce8546572984fb526b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ApplicationLifecycleCompletionOperator",
       "path": "Host/ApplicationLifecycleCompletionOperator.lean",
-      "sha256": "960703b9e050ae1ac490a984411f5d0e8811aed4837e4309c862e9ee582f31a1",
+      "sha256": "9da8def61a375ea7776223ba4b959e762e5749aaa71887a6ad507adde57b1f64",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ApplicationLifecycleLaunchBeginAuthoring",
       "path": "Host/ApplicationLifecycleLaunchBeginAuthoring.lean",
-      "sha256": "f48c8f75c0d971167c35ad0723fe7b19cb0ef283a2dcb0202046ffa5902b2834",
+      "sha256": "1f77fa34ab240433b7232b6783522d41b53b8337af9df7a10ef184420c94cc4c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3396,7 +3396,7 @@
     {
       "module": "Host.ApplicationLifecycleLaunchClaimAuthoring",
       "path": "Host/ApplicationLifecycleLaunchClaimAuthoring.lean",
-      "sha256": "06d99bbd751518507968476010aa49f3d4f26c521f807eabaddf5f5a018fdf1e",
+      "sha256": "d0d90ac08fe1ab5512b719b2ffc402c8184849b5fe9f9e96e728768ae1381204",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3410,7 +3410,7 @@
     {
       "module": "Host.ApplicationLifecycleLaunchCompletionAuthoring",
       "path": "Host/ApplicationLifecycleLaunchCompletionAuthoring.lean",
-      "sha256": "b6c99356d3487afee0b37db15f0928eadaac3165d8c5f6790fe63bc32ab49f75",
+      "sha256": "0aa3e458e56d8acef33ced16db65be49394119de41f8d6b218e0449ed81c52c7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3690,7 +3690,7 @@
     {
       "module": "Host.Json",
       "path": "Host/Json.lean",
-      "sha256": "ad35f6c2024bd1fa38d3318dde7e3e066124923a63d22f3aa4c3f0366d95c054",
+      "sha256": "286bd94da928201c504043c15171b6a6ae57fb5282eff9d25b6268168dfb37a5",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3732,7 +3732,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "d63bea2d2739ec1d8227c23296d962b123a8d360b19dc18ea6a2df9e5e5bd1c6",
+      "sha256": "62ff6b220c1cf8f98a02b59c35403197726c5723a6fa7eafaadeea3e7289f052",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4775,7 +4775,7 @@
     {
       "module": "Kernel.ApplicationLifecycleResidentProfile",
       "path": "Kernel/ApplicationLifecycleResidentProfile.lean",
-      "sha256": "a2ab7c0e226f6e4071473359b0ffbbb1a5bd2e97522bec4a95d8dc40f14403da",
+      "sha256": "99f9018aa4ddd2475abab8fc4ff15f8ad441b37f6558848b2a32501eecd92304",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
