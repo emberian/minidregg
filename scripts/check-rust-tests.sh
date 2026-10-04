@@ -273,6 +273,29 @@ exact scheduler-resolve      inference-scheduler --test core -- \
   dead_lease_holder_frees_its_slot_only_by_operator_resolve
 # --- end W1.9 rows
 
+# Private rooms (W1.9b 4564a8fa, 8c67fc66, d38116cd): the refusals the room lane
+# added beside the lineage tests in rc-roomkey-lineage
+exact rc-private-rooms       resource-client --bin mini -- \
+  workspace::roomkey::tests::a_sealed_entry_is_bound_to_its_stream_and_position \
+  workspace::roomkey::tests::non_member_cannot_open_a_sealed_entry \
+  workspace::roomkey::tests::kicked_member_cannot_open_post_rotation_content_and_keeps_the_past \
+  workspace::roomkey::tests::a_wrong_epoch_is_refused_by_name \
+  workspace::roomkey::tests::a_malformed_wrap_or_release_atom_in_the_keys_cell_is_an_error_not_skipped \
+  workspace::roomkey::tests::rotation_leaves_out_members_without_a_grant_and_needs_a_keyed_room \
+  workspace::roomkey::tests::a_hosted_invitee_into_a_private_room_needs_i_know \
+  workspace::private::tests::legacy_private_content_never_seals_and_only_strikes_retaining_ciphertext
+# D15: a queued request whose caller left, or that outwaited its residence bound,
+# is answered 254 and never reaches the Host (2a72f8ed)
+exact rc-transport-queue     resource-client --bin mini -- \
+  transport::tests::serve_a_queued_abandoned_request_never_reaches_the_host \
+  transport::tests::serve_a_request_past_queue_residence_is_refused_254_unforwarded \
+  transport::tests::serve_refuses_254_only_before_forward
+# Mini SDK golden vectors: the offline core, Bread's dregg0 vector, and lowering a
+# typed Invoke to the bytes of a real admitted intent (1f3794d4)
+exact sdk-golden             mini-sdk --features native --test golden -- \
+  golden_vectors_match_the_offline_core \
+  bread_dregg0_vector_is_reproduced \
+  lowering_reproduces_a_real_admitted_intent
 # SUDO-ONLY (W1.8 two-uid tests, #[ignore]d: they run a probe as a second uid via
 # `sudo -n setpriv`). Armed by MINI_TEST_FOREIGN_UID=<uid other than ours> on a
 # runner with passwordless sudo; then they are ordinary exact rows (red on any
