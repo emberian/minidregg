@@ -968,11 +968,17 @@ structure DecodedPacket where
   context : Context
   fuel : Nat
 
-def decodePacket (value : Json) : Except String DecodedPacket := do
-  if (← value.getObjValAs? String "schema") != "dregg.objective-bend.typed-core.v3" then
-    throw "Objective typed core edition required"
-  let table ← decodeTypeTable (← value.getObjVal? "types")
-  let term ← decodeTerm 4096 (← value.getObjVal? "term")
+/-- Everything a packet carries besides its term. -/
+structure PacketParts where
+  annotations : List Nat → Option LambdaAnnotation
+  assumptions : Assumptions
+  context : Context
+  fuel : Nat
+
+/-- The term nesting capacity of a packet's term (`decodeTerm`'s fuel). -/
+def termNestingCapacity : Nat := 4096
+
+def decodePacketParts (value : Json) (table : Array (Ty × Nat)) : Except String PacketParts := do
   let annotations ← (← (← value.getObjVal? "annotations").getArr?).toList.mapM fun entry => do
     let path ← (← (← entry.getObjVal? "path").getArr?).toList.mapM jsonNat
     return (path, ← decodeLambda table entry)
@@ -991,8 +997,17 @@ def decodePacket (value : Json) : Except String DecodedPacket := do
     | .error _ => pure 4096
     | .ok fuel => jsonNat fuel
   if fuel > 16384 then throw "checker fuel capacity"
-  return ⟨⟨term, fun path => (annotations.find? (fun entry => entry.1 == path)).map Prod.snd,
-      ⟨bounds,shareable⟩⟩,context,fuel⟩
+  return ⟨fun path => (annotations.find? (fun entry => entry.1 == path)).map Prod.snd,
+      ⟨bounds,shareable⟩,context,fuel⟩
+
+/-- Schema, type table, term, then the rest (`decodePacketParts`), in that order. -/
+def decodePacket (value : Json) : Except String DecodedPacket := do
+  if (← value.getObjValAs? String "schema") != "dregg.objective-bend.typed-core.v3" then
+    throw "Objective typed core edition required"
+  let table ← decodeTypeTable (← value.getObjVal? "types")
+  let term ← decodeTerm termNestingCapacity (← value.getObjVal? "term")
+  let parts ← decodePacketParts value table
+  return ⟨⟨term, parts.annotations, parts.assumptions⟩, parts.context, parts.fuel⟩
 
 def quantityJson : Quantity → Json
   | .erased => toJson "erased" | .affine => toJson "affine"

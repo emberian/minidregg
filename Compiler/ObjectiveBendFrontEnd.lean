@@ -7,15 +7,16 @@ against its parsed imports, elaborate the selected declaration
 core (`dregg.objective-bend.core.v2`) and the typing proposal packet
 (`dregg.objective-bend.typed-core.v3`) that the checker reads.
 
-`accept` closes the loop on the SAME bytes: it decodes the packet the front end
-just rendered with the checker's own decoder, requires the decoded term to be
-the erasure of the elaborator's annotated term, and runs the proof-producing
-checker on it. An `Accepted` value therefore carries a typing derivation for
-exactly the Core4 term the elaborator produced (`ObjectiveBendFrontEndAdequacy`
-states what that buys). Nothing here is trusted to agree with anything else:
-each equality is checked when it is needed and carried as a proof. -/
+`accept` closes the loop on the SAME value: it decodes the packet the front end
+just rendered with the checker's own decoder and runs the proof-producing checker
+on it. That the decoded term IS the erasure of the elaborator's annotated term is a
+theorem (`ObjectiveBendTermWire.decode_json`), not a run-time comparison: `accept`
+refuses only a term nested deeper than the decoder's capacity. An `Accepted` value
+therefore carries a typing derivation for exactly the Core4 term the elaborator
+produced (`ObjectiveBendFrontEndAdequacy` states what that buys). -/
 import Compiler.ObjectiveBendParse
 import Compiler.ObjectiveBendElaborate
+import Compiler.ObjectiveBendTermWire
 import Compiler.Sha256
 import Theory.ObjectiveBendTyping
 namespace Minidregg.Compiler.ObjectiveBendFrontEnd
@@ -204,16 +205,27 @@ def Lowering.packet (l : Lowering) : Json :=
 
 /-! ## Acceptance: the checker on the front end's own packet -/
 
+/-- With a typing proposal, the packet's `term` field is the rendering of the selected term. -/
+theorem Lowering.packet_term (l : Lowering) {proposal : Json} (proposed : l.proposal = .ok proposal) :
+    l.packet.getObjVal? "term" = .ok l.term.json := by
+  unfold Lowering.packet
+  rw [proposed]
+  exact ObjectiveBendTermWire.getObjVal_mkObj (by simp) (by simp)
+
 /-- The front end's packet, decoded by the checker's decoder: its annotations and assumptions
 type the erasure of the elaborator's term, and the proof-producing checker accepted that
-term closed. The packet's own term is the same term (checked by comparing renderings, a
-refusal otherwise; not a proof), so the checker typed exactly what the packet carries. -/
+term closed. The packet's own term IS that erasure (`packetTerm`, by
+`ObjectiveBendTermWire.decode_json`), so the checker typed exactly what the packet carries. -/
 structure Accepted (l : Lowering) where
   private mk ::
   erased : CoreTerm
   erasure : l.term.erase = .ok erased
+  proposal : Json
+  proposed : l.proposal = .ok proposal
   packet : DecodedPacket
   decoded : decodePacket l.packet = .ok packet
+  /-- The decoded packet's term is the elaborator's erased term: a theorem, not a check. -/
+  packetTerm : packet.source.term = erased
   closed : packet.context = []
   /-- The checked source: the packet's annotations on the elaborator's erased term. -/
   source : Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm
@@ -221,23 +233,37 @@ structure Accepted (l : Lowering) where
   typed : Checked source []
   checkedExact : check source [] packet.fuel = some typed
 
+/-- The checked source IS the decoded packet's source. -/
+theorem Accepted.source_eq_packet {l : Lowering} (a : Accepted l) : a.source = a.packet.source := by
+  rw [a.sourceExact, ← a.packetTerm]
+
 def accept (l : Lowering) : Except Diagnostic (Accepted l) := do
   match erasure : l.term.erase with
   | .error e => throw (elaborationRefusal ("core erasure: " ++ e))
   | .ok erased =>
-    match decoded : decodePacket l.packet with
-    | .error e =>
-      throw { stage := "objective-source-type-proposal", message := match l.proposal with
-        | .error message => message
-        | .ok _ => "typed packet does not decode: " ++ e }
-    | .ok packet =>
-      if reprStr packet.source.term != reprStr erased then
-        throw (elaborationRefusal "decoded packet term differs from the elaborator's erased term")
-      if closed : packet.context = [] then
-        let source := { packet.source with term := erased }
-        match typed : check source [] packet.fuel with
-        | some checked => pure ⟨erased, erasure, packet, decoded, closed, source, rfl, checked, typed⟩
-        | none => throw { stage := "objective-typed-check", message := "the checker refused the front end's typed packet" }
-      else throw (elaborationRefusal "typed packet context must be closed")
+    match proposed : l.proposal with
+    | .error message => throw { stage := "objective-source-type-proposal", message }
+    | .ok proposal =>
+      if shallow : ObjectiveBendTermWire.depth l.term ≤ Minidregg.Theory.ObjectiveBendTyping.termNestingCapacity then
+        match decoded : decodePacket l.packet with
+        | .error e =>
+          throw { stage := "objective-source-type-proposal", message := "typed packet does not decode: " ++ e }
+        | .ok packet =>
+          have packetTerm : packet.source.term = erased := by
+            have rendered := ObjectiveBendTermWire.decode_json l.term _ erased shallow erasure
+            have read := ObjectiveBendTermWire.decodePacket_term decoded (l.packet_term proposed)
+            rw [rendered] at read
+            exact (Except.ok.inj read).symm
+          if closed : packet.context = [] then
+            let source := { packet.source with term := erased }
+            match typed : check source [] packet.fuel with
+            | some checked =>
+              pure ⟨erased, erasure, proposal, proposed, packet, decoded, packetTerm, closed, source, rfl, checked, typed⟩
+            | none => throw { stage := "objective-typed-check", message := "the checker refused the front end's typed packet" }
+          else throw (elaborationRefusal "typed packet context must be closed")
+      else throw (elaborationRefusal "core term nesting exceeds the checker's decoding capacity")
+
+#assert_axioms Lowering.packet_term
+#assert_axioms Accepted.source_eq_packet
 
 end Minidregg.Compiler.ObjectiveBendFrontEnd

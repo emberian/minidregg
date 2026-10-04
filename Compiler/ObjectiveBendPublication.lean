@@ -6,12 +6,16 @@ parsed import edges to the module the package says it targets, lower the selecte
 declaration in definition mode with the publication type fuel. `publishedCore`
 is the canonical bytes of the resulting typed-core packet.
 
-The publisher signs exactly these bytes (`Host.ObjectivePackageAuthor.publication`),
-and the receiver recomputes them and admits an artifact only when its typed core
-is byte-identical and the package names this front end
-(`ObjectiveBendNativeAdmission.SourceSelection.replayExact`). So the package's
-`frontEnd` pin is not a label the publisher asserts: it names the computation
-the receiver performs. -/
+The publisher signs exactly these bytes (`Host.ObjectivePackageAuthor.publication`).
+A receiver holds a `Replayed` token (`replayAccept`): it re-ran the front end on the
+package, the checker accepted the lowering (`ObjectiveBendFrontEnd.accept`), and the
+artifact's typed core is byte-for-byte the rendering of that lowering. The receiver then
+types and runs `accepted.source`, the elaborator's own term; the typed-core bytes are a
+commitment it compared, never a value it parses. Native admission
+(`ObjectiveBendNativeAdmission.SourceSelection`) and the activity kernel
+(`ObjectiveActivity.publish`, `loadProgram`) both hold this token, and both require the
+package to name this front end, so the package's `frontEnd` pin is not a label the
+publisher asserts: it names the computation the receiver performs. -/
 import Compiler.ObjectiveSourcePackage
 import Compiler.ObjectiveBendFrontEndIdentity
 namespace Minidregg.Compiler.ObjectiveBendPublication
@@ -84,4 +88,36 @@ theorem replayedCore_is_lowering {p : ObjectiveSourcePackage.Package} {bytes : L
       refine ⟨l, rfl, by simp [hp, Except.toBool], ?_⟩
       simpa [hr, hp, bind, Except.bind, Except.toOption, pure, Except.pure] using replayed
 
+/-- A receiver's replay of a package against an offered typed core: the front end's lowering
+of the package's sources, the checker's acceptance of it, the offered core is exactly its
+rendering, and the checker fuel the rendering carries is within the receiver's capacity. -/
+structure Replayed (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8) (maxFuel : Nat) where
+  private mk ::
+  lowering : Lowering
+  replayExact : replay p = .ok lowering
+  accepted : Accepted lowering
+  coreExact : lowering.packet.compress.toUTF8.toList = typedCore
+  fuelWithin : accepted.packet.fuel ≤ maxFuel
+
+def replayAccept (p : ObjectiveSourcePackage.Package) (typedCore : List UInt8) (maxFuel : Nat) :
+    Except Diagnostic (Replayed p typedCore maxFuel) :=
+  match replayed : replay p with
+  | .error d => throw d
+  | .ok lowering => do
+    let accepted ← accept lowering
+    if core : lowering.packet.compress.toUTF8.toList = typedCore then
+      if fuel : accepted.packet.fuel ≤ maxFuel then pure ⟨lowering, replayed, accepted, core, fuel⟩
+      else throw (refusal "typed core checker fuel exceeds the receiver's capacity")
+    else throw (refusal "offered typed core differs from the front end's replay of the package")
+
+/-- A replay token's core is the one `replayedCore` computes. -/
+theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8} {maxFuel : Nat}
+    (r : Replayed p typedCore maxFuel) : ObjectiveBendPublication.replayedCore p = some typedCore := by
+  unfold replayedCore publishedCore
+  have core := r.coreExact
+  simp only [String.toUTF8] at core
+  simp [r.replayExact, r.accepted.proposed, bind, Except.bind, Except.toOption, pure, Except.pure, core]
+
+#assert_axioms replayedCore_is_lowering
+#assert_axioms Replayed.core_replayed
 end Minidregg.Compiler.ObjectiveBendPublication

@@ -383,7 +383,9 @@ def ATerm.erase : ATerm → Except String CoreTerm
   | .reflect v => return .reflect (← v.erase)
   | .metadata v => return .metadata (← v.erase)
   | .project v => return .project (← v.erase)
-  | .nat v => match v.toNat? with | some n => .ok (.nat n) | none => .error "non-canonical natural"
+  | .nat v => match v.toNat? with
+    | some n => if toString n = v then .ok (.nat n) else .error "non-canonical natural"
+    | none => .error "non-canonical natural"
   | .boolean v => .ok (.boolean v)
   | .label v => .ok (.label v)
   | .binary p l r => return .binary (← primitiveOf p) (← l.erase) (← r.erase)

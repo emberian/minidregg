@@ -389,9 +389,10 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   frontEndExact : package.package.frontEnd = policy.frontEnd
   /-- ... which is this receiver's own ... -/
   frontEndOwn : policy.frontEnd = ObjectiveBendFrontEndIdentity.identity
-  /-- ... and the artifact's typed core is exactly what that front end computes from the
-  package's sources: the receiver re-ran it. -/
-  replayExact : ObjectiveBendPublication.replayedCore package.package = some loaded.artifact.typedCore
+  /-- ... and the receiver re-ran it: the artifact's typed core is exactly the rendering of
+  that front end's lowering of the package's sources, which the checker accepted. The
+  receiver types and runs `replayed.accepted.source`, never a parse of the core bytes. -/
+  replayed : ObjectiveBendPublication.Replayed package.package loaded.artifact.typedCore claim.capacity.typeFuel
   inputCodecExact : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
@@ -404,24 +405,26 @@ private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Depl
   if full : ResourceObservationAdmission.readerFields environment.context claim.source.kind claim.source.capability = none then
     match observed : read.prepared.observed.before with
     | ⟨.content,payload⟩ =>
-      let loaded ← ObjectiveBendArtifactSource.lookupWithin payload.logical ⟨claim.sourceAtom⟩
-        policy.sourceBytes claim.capacity.typeFuel
+      let loaded ← ObjectiveBendArtifactSource.lookup payload.logical ⟨claim.sourceAtom⟩ policy.sourceBytes
       let package ← ObjectiveBendPublishedPackage.lookup payload.logical ⟨loaded.artifact.package⟩ policy.sourceBytes
       if declaration : ObjectiveSourcePackage.selectedDeclaration package.package = some loaded.artifact.declaration then
         if frontEnd : package.package.frontEnd = policy.frontEnd then
           if own : policy.frontEnd = ObjectiveBendFrontEndIdentity.identity then
-           if replayed : ObjectiveBendPublication.replayedCore package.package = some loaded.artifact.typedCore then
             if input : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId then
               if claimInput : claim.inputCodec = loaded.artifact.inputCodec then
                 if output : claim.outputCodec = loaded.artifact.outputCodec then
                   if registered : loaded.artifact.outputCodec ∈ policy.outputs then
-                    some ⟨full,payload,observed,loaded,package,declaration,frontEnd,own,replayed,input,
-                      claimInput,output,registered⟩
+                    -- The replay (parse, elaborate, check) runs last, after every cheap refusal.
+                    match ObjectiveBendPublication.replayAccept package.package loaded.artifact.typedCore
+                        claim.capacity.typeFuel with
+                    | .error _ => none
+                    | .ok replayed =>
+                      some ⟨full,payload,observed,loaded,package,declaration,frontEnd,own,replayed,input,
+                        claimInput,output,registered⟩
                   else none
                 else none
               else none
             else none
-           else none
           else none
         else none
       else none
@@ -476,7 +479,7 @@ structure Core {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {d
   inputCommitted : ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode input) = claim.expectedInput
   inputTerm : ObjectiveBendOpenRecursion.Term
   inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits = .ok inputTerm
-  typed : Checked (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm) []
+  typed : Checked (ObjectiveBendNativeInput.instantiate source.replayed.accepted.source inputTerm) []
 
 /-- Every admitted Objective invocation is charged positive work: the signed
 `proofWork` (which `checkedFunding` binds to the fee-first compute preparation)
@@ -495,7 +498,7 @@ def Core.guards {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {
 def Core.applied {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {durable : Durable}
     {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
     {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) : AnnotatedTerm :=
-  ObjectiveBendNativeInput.instantiate core.source.loaded.checked.packet.source core.inputTerm
+  ObjectiveBendNativeInput.instantiate core.source.replayed.accepted.source core.inputTerm
 
 def Core.contextBytes {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {durable : Durable}
     {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
@@ -537,7 +540,7 @@ def prepareCore {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {
         match inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits with
         | .error _ => return .error .objectiveInput
         | .ok inputTerm =>
-          let some typed := check (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm)
+          let some typed := check (ObjectiveBendNativeInput.instantiate source.replayed.accepted.source inputTerm)
             [] claim.capacity.typeFuel | return .error .objectiveInput
           return .ok ⟨semantics,policy,policyExact,policyEdition,capacities,tariffExact,tariffValid,
             ⟨funding.1,funding.2⟩,authenticated,guardLists,guardsExact,source,input,rfl,inputCommitted,

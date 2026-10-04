@@ -1,6 +1,8 @@
-/- Canonical immutable Objective source loading. This replaces the TT source
-carrier for new Objective receiving. A checked source core is not permission to
-run it; consumers retain the actual current read and its CAS dependency. -/
+/- Canonical immutable Objective source loading: the artifact record, decoded and
+named by its identity. Loading does not parse or type the artifact's typed core:
+a receiver re-runs the front end on the artifact's package and requires the core
+to be that replay's rendering (`ObjectiveBendPublication.Replayed`), then types the
+replayed term. Consumers retain the actual current read and its CAS dependency. -/
 import Compiler.ObjectiveBendSourceArtifact
 import Kernel.ContentResource
 import Kernel.ResourceObservationAdmission
@@ -22,9 +24,8 @@ structure Loaded (store : ContentResource.ContentStore) (id : AtomId) (maxBytes 
   artifact : ObjectiveBendSourceArtifact.Artifact
   decoded : ObjectiveBendSourceArtifact.decode record.payload = some artifact
   identityExact : ObjectiveBendSourceArtifact.identity artifact = id.digest
-  checked : ObjectiveBendSourceArtifact.Checked artifact maxBytes
 
-def lookupWithin (store : ContentResource.ContentStore) (id : AtomId) (maxBytes maxFuel : Nat) :
+def lookup (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) :
     Option (Loaded store id maxBytes) := do
   match recordExact : Hyperdocument.lookup store .atoms id with
   | none => none
@@ -36,15 +37,10 @@ def lookupWithin (store : ContentResource.ContentStore) (id : AtomId) (maxBytes 
         | none => none
         | some artifact =>
           if identityExact : ObjectiveBendSourceArtifact.identity artifact = id.digest then
-            match ObjectiveBendSourceArtifact.checkWithin artifact maxBytes maxFuel with
-            | .error _ => none
-            | .ok checked => some ⟨record,recordExact,live,schemaExact,artifact,decoded,identityExact,checked⟩
+            some ⟨record,recordExact,live,schemaExact,artifact,decoded,identityExact⟩
           else none
       else none
     else none
-
-def lookup (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) :
-    Option (Loaded store id maxBytes) := lookupWithin store id maxBytes 16384
 
 theorem loaded_canonical {store : ContentResource.ContentStore} {id : AtomId} {maxBytes : Nat}
     (loaded : Loaded store id maxBytes) :

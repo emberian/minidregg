@@ -2,7 +2,8 @@
 
 `ObjectiveBendFrontEnd.Accepted l` is the front end checking its own output: the
 packet it rendered decodes (with the checker's decoder) to exactly the erasure of
-the elaborator's annotated term, and the proof-producing checker accepted it
+the elaborator's annotated term (`packetTerm`, proved by
+`ObjectiveBendTermWire.decode_json`), and the proof-producing checker accepted it
 closed. Composed with the Core4 metatheory this gives, for every program the front
 end accepts:
 
@@ -81,6 +82,20 @@ theorem accept_inhabited :
       | .error _ => false) = true := by
   native_decide
 #assert_compiled accept_inhabited
+
+/-- The example as a one-module source package naming this front end. -/
+def example_package : ObjectiveSourcePackage.Package :=
+  ⟨ObjectiveBendFrontEndIdentity.identity, [⟨"Example", example_source.toUTF8.toList, []⟩], 0, "ten"⟩
+
+/-- A receiver's replay token is inhabited: replaying the example package against the core it
+publishes succeeds (`ObjectiveBendPublication.Replayed`, the premise of
+`Kernel.ObjectiveBendAdmissionSemantics.admitted_front_end` and of the activity kernel's
+`Program.runs_front_end_output`). -/
+theorem replay_inhabited :
+    (ObjectiveBendPublication.replayAccept example_package
+      ((ObjectiveBendPublication.publishedCore example_package).toOption.getD []) 16384).toBool = true := by
+  native_decide
+#assert_compiled replay_inhabited
 
 /-- The operator prelude is Objective Bend source the front end's own parser reads. -/
 theorem prelude_parses : ObjectiveBendElaborate.preludeModule.toBool = true := by native_decide

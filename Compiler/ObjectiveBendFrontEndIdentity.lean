@@ -15,6 +15,7 @@ package naming this identity (`ObjectiveBendNativeAdmission.SourceSelection`). -
 import Compiler.ObjectiveBendParse
 import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendC4
+import Compiler.ObjectiveBendTermWire
 import Compiler.ObjectiveBendFrontEnd
 import Compiler.Sha256
 namespace Minidregg.Compiler.ObjectiveBendFrontEndIdentity
@@ -24,7 +25,7 @@ set_option autoImplicit false
 /-- The fingerprinted sources, in manifest order (paths relative to this file's directory). -/
 def sources : List String :=
   ["ObjectiveBendParse.lean", "ObjectiveBendElaborate.lean", "ObjectiveBendC4.lean",
-   "ObjectiveBendFrontEnd.lean", "Sha256.lean"]
+   "ObjectiveBendTermWire.lean", "ObjectiveBendFrontEnd.lean", "Sha256.lean"]
 
 def manifestHeader : String := "DREGG/OBJECTIVE-BEND/FRONT-END/v1"
 
