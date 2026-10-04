@@ -95,6 +95,7 @@ theorem progressOuter_backed {external : Message → Prop} (c : Config) (state :
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_backed
+    | with_reducible apply propose_backed
     | backed_step
 
 theorem pass_backed {external : Message → Prop} (c : Config) (state : State)

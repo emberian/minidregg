@@ -70,6 +70,7 @@ theorem progressOuter_scoped (c : Config) (state : State)
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_scoped
+    | with_reducible apply propose_scoped
     | scoped_step
 
 theorem pass_scoped (c : Config) (state : State)

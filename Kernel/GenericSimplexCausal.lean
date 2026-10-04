@@ -909,6 +909,7 @@ theorem progressOuter_causal (c : Config) (s : State) (old : CausalInvariant s) 
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_causal
+    | with_reducible apply propose_causal
     | causal_step
 
 theorem pass_causal (c : Config) (s : State) (old : CausalInvariant s) :

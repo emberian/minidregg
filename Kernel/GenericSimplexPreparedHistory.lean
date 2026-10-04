@@ -313,6 +313,7 @@ theorem progressOuter_history (c : Config) (s : State) (old : HistoryInvariant s
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_history
+    | with_reducible apply propose_history
     | history_action
 
 theorem pass_history (c : Config) (s : State) (old : HistoryInvariant s) :

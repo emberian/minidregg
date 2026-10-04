@@ -17,6 +17,15 @@ def image (r : Runtime) : IO (Restored r.context) := do
   return prior
 def state (r : Runtime) : IO State := return (← image r).state
 
+/-- The single operation every scenario agrees on. A leader proposes only with
+work, so each node first records the locally validated offer (the native
+controller's `checked` grant, injected here as the harness's validator). -/
+def opBlock : Block := [[7]]
+def grantChecked (r : Runtime) : IO Unit := do
+  match ← persist (storage r.native) r.context (.checked opBlock) with
+  | .durable _ => pure ()
+  | _ => throw (IO.userError "checked grant did not persist")
+
 structure Keys where
   dir : System.FilePath
   binary : String
@@ -69,8 +78,8 @@ def drive (nodes : Array Runtime) (c : Context) (fuel : Nat) (cursors : Array Na
 /-- Byzantine test sender has its own real key, but may sign without following
 the honest durable-send rule. This is deliberately confined to the harness. -/
 def faultyCommitPacket (n : Native) (context : Context) (recipient : Nat) : IO Bytes := do
-  let signature ← (crypto n).sign (commitmentBytes context 1 [[]])
-  let envelope : Envelope := ⟨context,recipient,0,⟨3,1,.commit,some [[]]⟩⟩
+  let signature ← (crypto n).sign (commitmentBytes context 1 opBlock)
+  let envelope : Envelope := ⟨context,recipient,0,⟨3,1,.commit,some opBlock⟩⟩
   let tag ← n.helper.mac recipient (authenticatedFrame envelope signature)
   return packetStream.encode (wireBody envelope signature,tag)
 
@@ -94,41 +103,42 @@ def selectiveCommitRecovery (k : Keys) (base : Context) : IO Unit := do
   match ← persist (storage nodes[2]!.native) c (.tick 70) with
   | .durable _ => pure ()
   | _ => throw (IO.userError "C disable persistence")
-  let proposal : Message := ⟨0,1,.propose,some [[]]⟩
+  for node in nodes do grantChecked node
+  let proposal : Message := ⟨0,1,.propose,some opBlock⟩
   deliver nodes[1]! (← sealPacket nodes[0]!.native ⟨c,1,0,proposal⟩)
   for receiver in [0,1,2] do
     for voter in [0,1,3] do
       if receiver != voter then
         deliver nodes[receiver]!
-          (← sealPacket nodes[voter]!.native ⟨c,receiver,0,⟨voter,1,.vote,some [[]]⟩⟩)
+          (← sealPacket nodes[voter]!.native ⟨c,receiver,0,⟨voter,1,.vote,some opBlock⟩⟩)
   for receiver in [0,1,2] do
     for sender in [0,1] do
       if receiver != sender then
         deliver nodes[receiver]!
-          (← sealPacket nodes[sender]!.native ⟨c,receiver,0,⟨sender,1,.commit,some [[]]⟩⟩)
+          (← sealPacket nodes[sender]!.native ⟨c,receiver,0,⟨sender,1,.commit,some opBlock⟩⟩)
   deliver nodes[0]! (← faultyCommitPacket nodes[3]!.native c 0)
   let a ← state nodes[0]!
   let b ← state nodes[1]!
   let third ← state nodes[2]!
-  ensure ((viewAt a 1).committed == some [[]] &&
+  ensure ((viewAt a 1).committed == some opBlock &&
       (viewAt b 1).committed.isNone && (viewAt third 1).committed.isNone)
     "selective COMMIT counterexample not reached"
-  ensure ((← exportCommitment (storage nodes[1]!.native) (crypto nodes[1]!.native) c 1 [[]]).isSome)
+  ensure ((← exportCommitment (storage nodes[1]!.native) (crypto nodes[1]!.native) c 1 opBlock).isSome)
     "durable COMMIT sender incorrectly requires local doCommit"
-  ensure ((← exportCommitment (storage nodes[2]!.native) (crypto nodes[2]!.native) c 1 [[]]).isNone)
+  ensure ((← exportCommitment (storage nodes[2]!.native) (crypto nodes[2]!.native) c 1 opBlock).isNone)
     "disabled non-sender exported COMMIT"
-  let some recovered ← recoverCommitment (storage nodes[0]!.native) (crypto nodes[0]!.native) c 1 [[]]
+  let some recovered ← recoverCommitment (storage nodes[0]!.native) (crypto nodes[0]!.native) c 1 opBlock
     | throw (IO.userError "one committed replica could not recover transferable certificate")
   -- Reopen the runtime: the witness is journaled, not ephemeral packet state.
   nodes[0]!.close
   let restarted ← openRuntime (spec k 0) (journal 0) c
-  let some recoveredAgain ← recoverCommitment (storage restarted.native) (crypto restarted.native) c 1 [[]]
+  let some recoveredAgain ← recoverCommitment (storage restarted.native) (crypto restarted.native) c 1 opBlock
     | throw (IO.userError "restart lost COMMIT witness")
   ensure (recoveredAgain.block == recovered.block) "restart changed recovered block"
   for receiver in [1,2] do
     match ← receiveFinality nodes[receiver]! recovered.bytes with
     | .durable after =>
-      ensure ((viewAt after 1).committed == some [[]]) "relayed quorum did not catch up"
+      ensure ((viewAt after 1).committed == some opBlock) "relayed quorum did not catch up"
     | _ => throw (IO.userError "recovered quorum import failed")
   -- A repeated certificate must leave the durable log untouched, while the
   -- first certificate above had to retain the previously missing witness.
@@ -234,17 +244,18 @@ def main (args : List String) : IO Unit := do
     let nodes ← (List.range 4).toArray.mapM fun i =>
       openRuntime (spec k i (some (address i))
         (((List.range 4).filter (· != i)).map fun j => (j,address j))) (dir / s!"journal-{i}") c
+    for node in nodes do grantChecked node
     let s1 ← state nodes[0]!
     let some first := s1.outbox.head? | throw (IO.userError "no initial message")
     let packet ← sealPacket nodes[0]!.native ⟨c,1,0,first⟩
     let tampered := packet.dropLast ++ [if packet.getLast? == some 0 then 1 else 0]
     ensure ((← authenticate nodes[1]!.native c 1 tampered).isNone) "tampered MAC accepted"
     ensure ((← authenticate nodes[1]!.native {c with epoch := 1} 1 packet).isNone) "cross-epoch packet accepted"
-    let forged ← sealPacket nodes[3]!.native ⟨c,1,0,⟨0,1,.vote,some [[]]⟩⟩
+    let forged ← sealPacket nodes[3]!.native ⟨c,1,0,⟨0,1,.vote,some opBlock⟩⟩
     ensure ((← authenticate nodes[1]!.native c 1 forged).isNone) "Byzantine peer forged honest sender"
     drive nodes c 2000 (Array.replicate 4 0)
     let states ← nodes.toList.mapM state
-    ensure (states.all fun s => s.committedTip == [[]]) "TCP four-node common commit"
+    ensure (states.all fun s => s.committedTip == opBlock) "TCP four-node common commit"
     IO.println "PASS persistent TCP four-node commit: one long-lived helper per node, authenticated packets, append-only journals"
     let senderState ← state nodes[0]!
     let some vote := senderState.outbox.find? (fun message => message.kind == .vote && message.view == 1)
@@ -289,10 +300,10 @@ def main (args : List String) : IO Unit := do
     IO.println "PASS candidate relay: actual TCP, context/recipient/MAC binding, durable unvalidated offers and retransmission dedup"
     let mut attestations := []
     for node in nodes do
-      let some a ← exportCommitment (storage node.native) (crypto node.native) c 1 [[]]
+      let some a ← exportCommitment (storage node.native) (crypto node.native) c 1 opBlock
         | throw (IO.userError "durable export")
       attestations := attestations ++ [a]
-    let cert : Certificate := ⟨c,1,[[]],attestations.take 3⟩
+    let cert : Certificate := ⟨c,1,opBlock,attestations.take 3⟩
     let firstNative := nodes[0]!.native
     ensure (← verifyCertificate (crypto firstNative) c cert) "real PQ certificate"
     let some verified ← verifyCommitted (crypto firstNative) c cert

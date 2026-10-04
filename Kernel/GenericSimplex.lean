@@ -192,7 +192,23 @@ def castVote (s : State) (number : Nat) (block : Block) : State :=
   let v := viewAt s number
   if v.voted || v.disableRequested then s else
   broadcast (putView s { v with voted := true }) number .vote (some block)
+/-- The view of `bestParent`: the highest view below `current` with a prepared
+block (0, the genesis view, if none). -/
+def bestParentView (s : State) : Nat :=
+  ((List.range s.current).reverse.find? fun old => !(preparedAt s old).isEmpty).getD 0
+/-- A leader has work when a checked offer extends the best parent, or when the
+best parent is prepared at least two views back (the view after it ended
+without a block) and is still not locally committed: an empty extension then
+lets a later view commit it. A parent prepared in the immediately preceding
+view is normally committed by that view's own COMMITs, so it is not work. -/
+def hasWork (s : State) : Bool :=
+  let parent := bestParent s
+  s.offers.any (fun bytes => validBlock s (parent ++ [bytes])) ||
+    (bestParentView s + 1 < s.current && !isPrefix parent s.committedTip)
+/-- Quiescent proposal: with no work the leader proposes nothing and its view
+ends by CANDIDATE(⊥). An idle domain therefore adds no blocks. -/
 def propose (s : State) : State :=
+  if !hasWork s then s else
   let parent := bestParent s
   let payload := (s.offers.find? (fun bytes => validBlock s (parent ++ [bytes]))).getD []
   let block := parent ++ [payload]
@@ -215,6 +231,12 @@ def enterView (c : Config) (s : State) (number : Nat) : State :=
   if c.leader number == s.self then propose s else s
 def progressOuter (c : Config) (s : State) : State := Id.run do
   let mut s := s
+  -- Late proposal: work (an offer) can arrive after the leader entered its
+  -- view. It proposes at most once per view (the recorded proposal guards it)
+  -- and never after requesting the view's disable.
+  let v := viewAt s s.current
+  if c.leader s.current == s.self && v.proposal.isNone && !v.disableRequested then
+    s := propose s
   let v := viewAt s s.current
   if !v.voted && !v.disableRequested then
     if let some block := v.proposal then

@@ -85,7 +85,11 @@ CANDIDATE(⊥) never sends COMMIT for that view, no view gathers q = 3 COMMITs.
 Afterwards every message takes 1.5·timeout, ten times the paper's timeout/7
 premise: under the fixed timer every replica fires CANDIDATE(⊥) before any
 proposal arrives, so no later view commits, while the backoff timer outgrows
-the delay. The offer is given once, at start: nothing resubmits. -/
+the delay. Two operations are offered once, at start, the second extending
+the first (a leader proposes only with work, so view 2 needs the second);
+nothing resubmits. -/
+def payload2 : Bytes := [45]
+def block2 : Block := [payload,payload2]
 structure Timed where
   cfg : Config
   nodes : Array State
@@ -106,8 +110,9 @@ def Timed.act (t : Timed) (delay : Delay) (i : Nat) (input : Input) : Timed :=
   let logs := t.logs.set! i (t.logs[i]! ++ [input])
   { t with nodes := nodes, logs := logs, arrivals := t.arrivals ++ sent }
 
-def Timed.initial (cfg : Config) (delay : Delay) : Timed := Id.run do
-  let nodes := (List.range cfg.parties).map fun i => start cfg i 0 [payload] [block]
+def Timed.initial (cfg : Config) (delay : Delay) (offers : List Bytes := [payload,payload2])
+    (checked : List Block := [block,block2]) : Timed := Id.run do
+  let nodes := (List.range cfg.parties).map fun i => start cfg i 0 offers checked
   let arrivals := nodes.flatMap fun s =>
     s.outbox.flatMap fun m => ((List.range cfg.parties).filter (· != s.self)).map fun r => (delay 0 r m,r,m)
   return ⟨cfg,nodes.toArray,Array.replicate cfg.parties [],arrivals,0⟩
@@ -210,6 +215,25 @@ def main : IO Unit := do
     "fixed timer committed under the 1.5·timeout schedule: the recovery check does not discriminate backoff"
   ensure (timedSafe fixed) "fixed timer: delivered histories not prefix-consistent"
   IO.println s!"PASS backoff recovery: payload committed at views {views} on all four, no resubmit, delivered prefix-consistent; the fixed timer under the same schedule committed nothing by t=4000 (views reached {fixed.nodes.toList.map (·.current)})"
+  -- (3) Idle quiescence: one operation, then nothing. It commits in view 1;
+  -- afterwards no leader has work, so no block is proposed and every later
+  -- view ends by CANDIDATE(⊥) on the backoff timer. A late offer is proposed
+  -- by the then-current leader without waiting for a view change.
+  let quick : Delay := fun _ _ _ => 1
+  let cfgI : Config := {cfg with timeout := 100, backoffCap := 3}
+  let idle := (Timed.initial cfgI quick [payload] [block]).runUntil quick 10 20000 400000
+  let proposals (t : Timed) := (t.nodes.toList.flatMap fun s => s.outbox.filter (·.kind == .propose)).length
+  ensure (idle.nodes.all fun s => s.committedTip == block)
+    "idle: the single operation did not commit, or a later block was committed"
+  ensure (proposals idle == 1) s!"idle: {proposals idle} proposals for one operation"
+  ensure (idle.nodes.all fun s => s.current ≥ 5) "idle: views stopped advancing"
+  ensure (timedSafe idle) "idle: delivered histories not prefix-consistent"
+  let lateOffer := (List.range 4).foldl (fun t i => t.act quick i (.checked block2)) idle
+  let late := lateOffer.runUntil quick 10 (idle.now + 50) 100000
+  ensure (late.nodes.all fun s => s.committedTip == block2)
+    "idle: a late offer was not proposed and committed within the current view"
+  ensure (timedSafe late) "late offer: delivered histories not prefix-consistent"
+  IO.println s!"PASS idle quiescence: 1 proposal for 1 operation over t=20000 (views reached {idle.nodes.toList.map (·.current)}); a late offer committed within {late.now - idle.now} time units of being checked (views now {late.nodes.toList.map (·.current)})"
   let normal := run 4000 initial (fun _ => false)
   ensure (normal.nodes.all (fun s => !s.committedTip.isEmpty)) "normal progress"
   ensure (safe normal && restarted normal) "normal safety/replay"

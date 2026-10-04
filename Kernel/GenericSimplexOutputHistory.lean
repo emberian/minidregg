@@ -238,6 +238,7 @@ theorem progressOuter_output (c : Config) (s : State) (old : OutputHistory s) :
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_output
+    | with_reducible apply propose_output
     | output_action
 
 theorem pass_output (c : Config) (s : State) (old : OutputHistory s) :

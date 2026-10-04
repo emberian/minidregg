@@ -57,10 +57,12 @@ one appended delta. Nothing is rewritten: a legacy whole-image `agreement.bin`
 is not this shape and does not decode (`convert-journal` re-encodes it
 explicitly and checks the replayed state is identical). -/
 
-/-- ASCII "MINI-SIMPLEX-LOG" and format version 2. Version 2 is the timeout
-backoff epoch: its base frame carries a five-field `Config`. A version-1 log
-(four-field `Config`) refuses at this magic rather than being reinterpreted. -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,2]
+/-- ASCII "MINI-SIMPLEX-LOG" and a format version. The version also names the
+`step` the inputs were recorded under, since a journal is replayed, not read:
+version 2 = the timeout-backoff epoch (five-field `Config`); version 3 = the
+quiescent-leader epoch (a leader proposes only with work). An older log
+refuses at this magic rather than being replayed under a different `step`. -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,3]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an

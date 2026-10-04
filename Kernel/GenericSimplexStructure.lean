@@ -122,6 +122,7 @@ theorem progressOuter_preserves (c : Config) (s : State) :
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | apply preserves_trans _ (enterView_preserves c _ _)
+    | apply preserves_trans _ (propose_preserves _)
     | audit_step
     | split
 

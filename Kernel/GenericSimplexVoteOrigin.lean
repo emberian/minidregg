@@ -170,6 +170,7 @@ theorem progressOuter_origin (c : Config) (s : State) (old : OriginInvariant s) 
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_origin
+    | with_reducible apply propose_origin
     | (with_reducible apply castVote_safe_origin; rotate_left; solve | simp_all)
     | (with_reducible apply castVote_prepared_origin; rotate_left; solve | apply List.mem_of_head?; assumption)
     | origin_step

@@ -32,9 +32,10 @@ theorem runSchedule_reachable {c : Config} {faulty : Finset Nat}
     exact ih (.next reachable party input allowed.1) allowed.2
 
 def config : Config := ⟨4,1,10,4,0⟩
-def baseBlock : Block := [[]]
 def otherBlock : Block := [[1]]
-def checked (_ : Network) (_ : Nat) (block : Block) : Prop := block = otherBlock
+def thirdBlock : Block := [[2]]
+def checked (_ : Network) (_ : Nat) (block : Block) : Prop :=
+  block = otherBlock ∨ block = thirdBlock
 
 
 def inputDecision (c : Config) (faulty : Finset Nat) (net : Network) (party : Nat) (input : Input) :
@@ -53,12 +54,15 @@ def deliver (receiver sender : Nat) (kind : Kind) (block : Block) : Nat × Input
   (receiver, .delivery ⟨sender,1,kind,some block⟩)
 
 def honestFaulty : Finset Nat := {3}
+/-- A leader proposes only with work, so the run begins with the checked
+offer that gives leader 0 something to propose. -/
 def honestSchedule : Schedule := [
-  deliver 1 0 .propose baseBlock, deliver 2 0 .propose baseBlock,
-  deliver 0 1 .vote baseBlock, deliver 0 2 .vote baseBlock,
-  deliver 1 0 .vote baseBlock, deliver 1 2 .vote baseBlock,
-  deliver 2 0 .vote baseBlock, deliver 2 1 .vote baseBlock,
-  deliver 0 1 .commit baseBlock, deliver 0 2 .commit baseBlock]
+  (0,.checked otherBlock), (1,.checked otherBlock), (2,.checked otherBlock),
+  deliver 1 0 .propose otherBlock, deliver 2 0 .propose otherBlock,
+  deliver 0 1 .vote otherBlock, deliver 0 2 .vote otherBlock,
+  deliver 1 0 .vote otherBlock, deliver 1 2 .vote otherBlock,
+  deliver 2 0 .vote otherBlock, deliver 2 1 .vote otherBlock,
+  deliver 0 1 .commit otherBlock, deliver 0 2 .commit otherBlock]
 def honestRun : Network := runSchedule config honestFaulty (initial config 0) honestSchedule
 
 /-- Three honest parties actually exchange proposals/votes/commits while the
@@ -70,20 +74,20 @@ theorem honest_run_reachable : Reachable config honestFaulty checked 0 honestRun
   runSchedule_reachable .initial honestSchedule honest_schedule_allowed
 
 theorem honest_run_commits :
-    (.commit 0 1 baseBlock : AuditEvent) ∈ honestRun.audit ∧
-      baseBlock ∈ (honestRun.localState 0).delivered := by decide
+    (.commit 0 1 otherBlock : AuditEvent) ∈ honestRun.audit ∧
+      otherBlock ∈ (honestRun.localState 0).delivered := by decide
 
 theorem honest_fault_bound : honestFaulty.card ≤ config.faults := by decide
 
 def excessFaulty : Finset Nat := {2,3}
 def hostileSchedule : Schedule := [
-  (1,.checked otherBlock),
+  (0,.checked thirdBlock), (1,.checked otherBlock),
   deliver 1 2 .vote otherBlock, deliver 1 3 .vote otherBlock,
   deliver 1 2 .candidate otherBlock, deliver 1 3 .candidate otherBlock,
   deliver 1 2 .ready otherBlock, deliver 1 3 .ready otherBlock,
   deliver 1 2 .commit otherBlock, deliver 1 3 .commit otherBlock,
-  deliver 0 2 .vote baseBlock, deliver 0 3 .vote baseBlock,
-  deliver 0 2 .commit baseBlock, deliver 0 3 .commit baseBlock]
+  deliver 0 2 .vote thirdBlock, deliver 0 3 .vote thirdBlock,
+  deliver 0 2 .commit thirdBlock, deliver 0 3 .commit thirdBlock]
 def hostileRun : Network := runSchedule config excessFaulty (initial config 0) hostileSchedule
 
 /-- Exactly f+1 Byzantine parties can give honest parties conflicting quorums.
@@ -95,9 +99,9 @@ theorem hostile_run_reachable : Reachable config excessFaulty checked 0 hostileR
   runSchedule_reachable .initial hostileSchedule hostile_schedule_allowed
 
 theorem hostile_run_conflicting_commits :
-    (.commit 0 1 baseBlock : AuditEvent) ∈ hostileRun.audit ∧
+    (.commit 0 1 thirdBlock : AuditEvent) ∈ hostileRun.audit ∧
     (.commit 1 1 otherBlock : AuditEvent) ∈ hostileRun.audit ∧
-    ¬baseBlock.IsPrefix otherBlock ∧ ¬otherBlock.IsPrefix baseBlock := by decide
+    ¬thirdBlock.IsPrefix otherBlock ∧ ¬otherBlock.IsPrefix thirdBlock := by decide
 
 theorem hostile_exactly_one_fault_over_bound :
     excessFaulty.card = config.faults+1 ∧ 0 ∉ excessFaulty ∧ 1 ∉ excessFaulty := by decide

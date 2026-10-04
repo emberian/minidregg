@@ -191,6 +191,7 @@ theorem progressOuter_positive (c : Config) (s : State) (old : Positive s) :
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterNext_positive
+    | with_reducible apply propose_positive
     | positive_step
 
 theorem progressViews_positive (c : Config) (numbers : List Nat) (s : State)

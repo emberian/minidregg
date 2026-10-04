@@ -539,6 +539,7 @@ theorem progressOuter_invariant (c : Config) (external : Message → Prop) (s : 
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
     | with_reducible apply enterView_invariant
+    | with_reducible apply propose_invariant
     | emission_basic_step
 
 theorem pass_invariant (c : Config) (external : Message → Prop) (s : State)

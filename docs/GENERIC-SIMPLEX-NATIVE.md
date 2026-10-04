@@ -80,7 +80,7 @@ and every replica of one instance runs the same policy. The four-source fixture
 uses `backoffCap = 3` (a view timer of 100 s growing to 800 s).
 
 **What broke.** Contexts carry five `Config` fields; a four-field `context.bin`
-does not decode. The journal magic is `MINI-SIMPLEX-LOG` version 2; a version-1
+does not decode. The journal magic is `MINI-SIMPLEX-LOG` version 2 (3 since the quiescent leader below); an older
 journal refuses at the magic instead of being reinterpreted. COMMIT signatures
 cover the encoded context, so no old certificate verifies. A mesh moves to fix C
 by re-genesis (`init` a new context), not by conversion.
@@ -96,6 +96,49 @@ prefix-consistent deliveries; the fixed timer under the same schedule commits
 nothing, which the harness asserts, so the check fails without fix C (removing
 the backoff from `viewTimeout` turns it red: "backoff: pending block never
 committed").
+
+## Departure: the quiescent leader
+
+**Before.** The leader of every view proposed on entering it: its best parent
+extended by a checked offer, or by an empty block when it had none. An idle
+domain therefore committed an empty block every view, so the number of views
+and the length of every block (exact ancestry) grew without bound, and each
+replica's per-input cost grew with them (measured below, Q2).
+
+**Now, exactly** (Kernel/GenericSimplex.lean, `hasWork`, `propose`,
+`progressOuter`):
+
+- `propose` acts only if `hasWork s`: some offer `b` has `validBlock s
+  (bestParent s ++ [b])`, or the best parent was prepared at least two views
+  back (`bestParentView s + 1 < s.current`) and is not a prefix of the local
+  `committedTip`. Otherwise it returns the state unchanged.
+- A leader may propose late: each `progressOuter` call lets the leader of the
+  current view propose if that view has no recorded proposal and the leader has
+  not requested its disable. The recorded proposal makes it at most once per
+  view; the existing rules are unchanged.
+- A parent prepared in the immediately preceding view is not work, because that
+  view's own COMMITs normally commit it. If they never come (the 00f711 shape:
+  two COMMITs), the next view ends by CANDIDATE(⊥) and the leader of the view
+  after it extends the parent with an empty block, which commits it.
+- Safety: the theorems quantify over this executable `step`. The nine
+  invariant files' `progressOuter` lemmas gained the `propose` case (the
+  existing `propose_*` lemmas); no statement changed. The witness executions
+  (GenericSimplexWitnesses) now begin with checked offers, since a leader with
+  no offer no longer proposes; they still exhibit a committing honest run and
+  the f+1-fault conflicting commits.
+- Consequences: an idle domain proposes nothing and every view ends by
+  CANDIDATE(⊥) on the backoff timer (one view per `timeout · 2^backoffCap` at
+  steady idle). An operation arriving mid-view is proposed by the current
+  leader at once. A stuck prepared parent costs one extra view. Liveness is
+  not a theorem here.
+- Journals record inputs, and replaying them under a different `step` would
+  reinterpret them, so this is log format version 3; older logs refuse at the
+  magic.
+- Test: `Verify.GenericSimplexHarness` "idle quiescence": one operation, one
+  proposal over t = 20000 while the views keep advancing (28 views), and a late
+  offer committed within 50 time units of being checked. With `hasWork`
+  forced true (the old behaviour) the harness does not finish its recovery run
+  in 900 s (logs/p2-mutant-alwayswork.log).
 
 ## Native source consumer
 
