@@ -1,7 +1,8 @@
 /- `lean --run` entry for Objective source publication: inspect an imported
-package/artifact pair, replay a package's module sources, or author a
-publication payload. The payload author is `Host.ObjectivePackageAuthor.author`
-(also the native Host's `objective-publication` operation). -/
+package/artifact pair, replay a package (this front end on its own sources:
+`ObjectiveBendPublication.publishedCore`, the receiver's computation), or author
+a publication payload from offered and replayed bytes
+(`Host.ObjectivePackageAuthor.author`). -/
 import Host.ObjectivePackageAuthor
 
 open Lean
@@ -42,21 +43,16 @@ def main (args : List String) : IO UInt32 := do
       let some package := Minidregg.Compiler.ObjectiveSourcePackage.decode raw.toList | do
         IO.eprintln "canonical Objective package required";return (2 : UInt32)
       if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then IO.eprintln "package structure refusal";return (2 : UInt32)
-      IO.FS.createDirAll directory
-      let mut modules : List Json := []
-      for index in List.range package.modules.length do
-        let some module := package.modules[index]? | throw (IO.userError "package module index")
-        let path := directory / s!"module-{index}.obend"
-        IO.FS.writeBinFile path ⟨module.source.toArray⟩
-        modules := modules ++ [Json.mkObj [("name",toJson module.name),("sourcePath",toJson path.toString),
-          ("imports",toJson (module.imports.map fun edge => Json.mkObj [("alias",toJson edge.importAlias),
-            ("path",toJson edge.path),("module",toJson (toString edge.target))]))]]
-      let input := Json.mkObj [("schema",toJson "dregg.objective-bend.package-input.v1"),
-        ("edition",toJson "objective-bend-1"),("modules",toJson modules),
-        ("entryModule",toJson (toString package.entryModule)),("entryDefinition",toJson package.entryDefinition)]
-      IO.FS.writeFile (directory / "package-input.json") input.compress
-      IO.println input.compress
-      return (0 : UInt32)
+      if package.frontEnd != Minidregg.Compiler.ObjectiveBendFrontEndIdentity.identity then
+        IO.eprintln s!"package names another front end ({package.frontEnd}) than this one";return (2 : UInt32)
+      match Minidregg.Compiler.ObjectiveBendPublication.publishedCore package with
+      | .error d => IO.eprintln d.json.compress;return (2 : UInt32)
+      | .ok core =>
+        IO.FS.createDirAll directory
+        IO.FS.writeBinFile (directory / "replayed-core.json") ⟨core.toArray⟩
+        IO.println <| (Lean.Json.mkObj [("schema",toJson "mini-studio-replayed-source-v1"),
+          ("frontEnd",toJson package.frontEnd),("core",toJson (directory / "replayed-core.json").toString)]).compress
+        return (0 : UInt32)
     catch error => IO.eprintln error.toString;return (2 : UInt32)
   let [packagePath,replayedPackagePath,offeredPath,expectedPath,codecPath,outputPath] := args | do
     IO.eprintln "usage: objective-studio-publication PACKAGE_BIN REPLAYED_PACKAGE_BIN OFFERED_CANONICAL_CORE REPLAYED_CANONICAL_CORE NATIVE_OUTPUT_CODEC_BIN NEW_PAYLOAD_JSON"

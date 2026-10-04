@@ -1,14 +1,15 @@
-/- Objective Bend surface → Core4 elaboration, in Lean.
+/- Objective Bend surface → Core4 elaboration: THE elaborator.
 
-A port of native/bend-source/objective-elaborate.ts: same surface AST (the
-JSON the TS parser emits), same Core4 term, same lambda/inject typing
-proposals. Translation validation (scripts: native/bend-source/
-objective-elaborate-tv.ts) compares this elaborator's output with the TS
-elaborator's on every in-repo .obend, byte-for-byte after JSON key
-canonicalization. There is no adequacy theorem yet: "surface meaning
-preserved" needs a surface semantics, which does not exist. All recursion is
-fuel-bounded; running out of fuel is a refusal, never a guess. -/
+Reads the `dregg.objective-bend.module.v1` AST that `Compiler.ObjectiveBendParse`
+produces and emits the Core4 term and its lambda/inject typing proposals. It was
+ported from the retired TypeScript elaborator and translation-validated against
+it until that elaborator was deleted (docs/OBJECTIVE-BEND-FRONTEND.md,
+"Provenance"). What is proved of its output once the checker accepts it is in
+`Compiler.ObjectiveBendFrontEndAdequacy`; "surface meaning preserved" needs a
+surface semantics, which does not exist. All recursion is fuel-bounded; running
+out of fuel is a refusal, never a guess. -/
 import Lean
+import Compiler.ObjectiveBendParse
 import Std.Data.HashMap
 import Theory.ObjectiveBendOpenRecursion
 import Compiler.ObjectiveBendC4
@@ -875,8 +876,8 @@ argument of an application and caches it on first demand, so `v` is evaluated at
 once however often x is used and not at all when x is unused (call-by-need): a let is
 sharing, never a copy of v. Scope is the body only: `v` is elaborated outside the
 binder. In an activity tail the lambda's codomain is the activity type (a pure body is
-lifted with `done`). Mirror of `lowerLet` in objective-elaborate.ts, same order of
-effects (the order assigns recursive-sum variable numbers). -/
+lifted with `done`). The order of effects is part of the contract (it assigns
+recursive-sum variable numbers). -/
 def lowerLet (c : Ctx) (fuel : Nat) (name type : String) (value : Expr) (env : List Binding) (m : Module)
     (tailPosition : Bool) (elaborateValue : M ATerm) (lowerBody : List Binding → M ATerm)
     (bodyType : List Binding → M (Option PTy)) : M ATerm := do
@@ -1241,42 +1242,29 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
 
 /-! ## The package prelude
 
-Mirror of `preludeSource` in objective-elaborate.ts, written out as the AST the TS
-parser produces for that source (translation validation compares what each lowers to,
-so a divergence between the two is caught). Truncated subtraction `sub`; `le`, `lt`
+`preludeSource` is Objective Bend source, read by the same parser as any module.
+Truncated subtraction `sub`; `le`, `lt`
 (order, by recursion on the successor structure); floor `divide` that is TOTAL: a zero
 divisor gives 0n (Core4 has no catchable exception). Cost: each is O(value) machine
 steps. Only the definitions an operator needs are emitted. -/
 
-def natParam (name : String) : Param := ⟨name, "Nat", "default"⟩
-def call (f : String) (args : List Expr) : Expr := .call (.var f) args
+def preludeSource : String :=
+  "edition ObjectiveBend 1\n" ++
+  "def sub(a: Nat, b: Nat) -> Nat:\n  match b:\n    case 0n: a\n    case 1n+q:\n      match a:\n" ++
+  "        case 0n: 0n\n        case 1n+p: sub(p, q)\n\n" ++
+  "def le(a: Nat, b: Nat) -> Bool:\n  match a:\n    case 0n: true\n    case 1n+p:\n      match b:\n" ++
+  "        case 0n: false\n        case 1n+q: le(p, q)\n\n" ++
+  "def lt(a: Nat, b: Nat) -> Bool:\n  match b:\n    case 0n: false\n    case 1n+q:\n      match a:\n" ++
+  "        case 0n: true\n        case 1n+p: lt(p, q)\n\n" ++
+  "def quotient(a: Nat, b: Nat) -> Nat:\n  if lt(a, b) then 0n else 1n + quotient(sub(a, b), b)\n\n" ++
+  "def divide(a: Nat, b: Nat) -> Nat:\n  match b:\n    case 0n: 0n\n    case 1n+q: quotient(a, b)\n"
 
-def preludeModule : Module := ⟨preludeModuleName, [], [
-  .function "sub" [natParam "a", natParam "b"] "Nat"
-    (.cases (.var "b") [
-      (.zero, .expr (.var "a")),
-      (.succ "q", .cases (.var "a") [
-        (.zero, .expr (.nat "0")),
-        (.succ "p", .expr (call "sub" [.var "p", .var "q"]))])]),
-  .function "le" [natParam "a", natParam "b"] "Bool"
-    (.cases (.var "a") [
-      (.zero, .expr (.bool true)),
-      (.succ "p", .cases (.var "b") [
-        (.zero, .expr (.bool false)),
-        (.succ "q", .expr (call "le" [.var "p", .var "q"]))])]),
-  .function "lt" [natParam "a", natParam "b"] "Bool"
-    (.cases (.var "b") [
-      (.zero, .expr (.bool false)),
-      (.succ "q", .cases (.var "a") [
-        (.zero, .expr (.bool true)),
-        (.succ "p", .expr (call "lt" [.var "p", .var "q"]))])]),
-  .function "quotient" [natParam "a", natParam "b"] "Nat"
-    (.expr (.ite (call "lt" [.var "a", .var "b"]) (.nat "0")
-      (.binary "+" (.nat "1") (call "quotient" [call "sub" [.var "a", .var "b"], .var "b"])))),
-  .function "divide" [natParam "a", natParam "b"] "Nat"
-    (.cases (.var "b") [
-      (.zero, .expr (.nat "0")),
-      (.succ "q", .expr (call "quotient" [.var "a", .var "b"]))])]⟩
+/-- The prelude module: `preludeSource` through the parser and the AST decoder. -/
+def preludeModule : Except String Module := do
+  let ast ← match ObjectiveBendParse.parseObjective preludeSource with
+    | .ok ast => pure ast
+    | .error d => throw ("prelude: " ++ d.message)
+  decodeModule (Json.mkObj [("name", toJson preludeModuleName), ("imports", Json.arr #[]), ("ast", ast)])
 
 /-- What a prelude definition calls (transitively closed by `preludeClosure`). -/
 def preludeNeeds : String → List String
@@ -1370,8 +1358,9 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
       fields ← emitDecl c fuel m d fields
   -- The prelude definitions an operator lowered to (closed under what they call), after the user's.
   let needed := preludeClosure (← get).preludeUsed
-  for d in preludeModule.decls do
-    if needed.contains d.name then fields ← emitDecl c fuel preludeModule d fields
+  let some prelude := c.modules[c.userCount]? | fail "internal: the prelude module is missing"
+  for d in prelude.decls do
+    if needed.contains d.name then fields ← emitDecl c fuel prelude d fields
   let mut rowFields : List (String × PTy) := []
   let mut unresolved : List String := []
   for (name, _) in fields do
@@ -1382,7 +1371,7 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   let reason := if unresolved.isEmpty then none else some ("declaration types unresolved: " ++ String.intercalate ", " unresolved)
   let rootExtension := ATerm.lam ⟨some (.variable 0), some (arrowTy .emptyRow (.variable 0)), "unrestricted", "reusable", reason⟩
     (.lam ⟨some .emptyRow, some (.variable 0), "unrestricted", "reusable", reason⟩ (.extend (.bound 0) fields))
-  let packageLabel := (toJson ((userModules ++ (if needed.isEmpty then [] else [preludeModule])).map (·.name))).compress
+  let packageLabel := (toJson ((userModules ++ (if needed.isEmpty then [] else [prelude])).map (·.name))).compress
   let root := ATerm.fix (.specification (.record [("package", .label packageLabel)]) rootExtension) (.record [])
   let some entry := userModules[entryModule]? | fail "missing selected entry"
   let entryKey := entry.name ++ "." ++ entryDefinition
@@ -1411,7 +1400,7 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
 
 /-- Build the context; duplicate declarations / types refuse as in the TS. -/
 def context (userModules : List Module) : Except String Ctx := do
-  let modules := userModules ++ [preludeModule]
+  let modules := userModules ++ [← preludeModule]
   let userCount := userModules.length
   let mut decls : List (String × Decl × Module) := []
   let mut records : List (String × Decl) := []
@@ -1489,12 +1478,12 @@ end
 
 /-! ### The shared type table
 
-Mirror of `typeTable` in objective-elaborate.ts. Every composite type is one table
+Every composite type is one table
 entry whose children are inline leaves or `{tag:"ref", index}` to an earlier entry;
 identical entries are stored once. Entries are created in post-order (children
 before parent, in the fixed order of each constructor's fields), walking the
 annotations in order (domain, then codomain), then the global bound, then the sum
-bounds. Translation validation compares the tables, so the order is a contract. -/
+bounds. The order is a contract (the checker decodes refs to earlier entries only). -/
 
 structure Interner where
   table : Array Json := #[]

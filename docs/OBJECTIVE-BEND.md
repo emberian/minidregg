@@ -80,7 +80,7 @@ record knot, so mutually recursive definitions (the `EvenOdd` example) work thro
 it. That is Faré's "global fixed point of the namespace" (ltuo §9.3.7). The root is
 itself a specification, `fix(specification(package, λglobals λseed. extend seed
 {…}), {})`: its extension overlays the declarations on the inherited row
-(`objective-elaborate.ts`, "The package root is itself a specification"), so a
+(`Compiler/ObjectiveBendElaborate.lean`, the package knot in `elaborateM`), so a
 package is an extensible value in the core. No surface form yet names another
 package's root, so another package still cannot extend it from source.
 
@@ -133,8 +133,8 @@ and **the package root as a specification**.
    it, with no new constructors (see "landed" above). What is missing is the theorem:
    invariance under renaming of the ordered presentation, and suffix soundness.
    `OrderedPresentationInvariant` (`Compiler/ObjectiveBendC4.lean`) is stated as a
-   `Prop` and not proved; the evidence is `native/bend-source/objective-c4-tests.ts`
-   (56 published precedence vectors and 4000 seeded random DAGs). `before` and `after`
+   `Prop` and not proved; the evidence is `Compiler/ObjectiveBendC4Vectors.lean`
+   (56 published precedence vectors and 4000 seeded random DAGs, compiled theorems). `before` and `after`
    methods are still refused by the elaborator; Core4 has `perform` now, so they are
    buildable and not built.
 4. **Checked `requires` and closed final-self assumptions** (typing rules only;
@@ -253,31 +253,26 @@ says nothing about the front end that produced the term.
 ### Preview: `runBounded`
 
 Studio's preview runs: Rust `native/resource-client/src/workspace/studio_preview.rs`
-spawns bun; `objective-frontend.ts` captures the package and `objective-parser.ts`
-parses it; `objective-preview.ts` runs `objective-elaborate.ts`, writes the core and
-typed packets and checks that the typed term equals the core term; then
-`lean --run Host/ObjectiveBendPreview.lean` decodes the packet, runs `check`, then
-`runBounded`. This is the function the soundness and no-refusal theorems describe. An
-activity runs to its first yield; the preview prints the typed Plan, resumes with each
-supplied response (checked against the entry's declared response type) and runs to the
-next yield. Responses stand in for the kernel: nothing is admitted.
-On main the route is wire-broken: the Rust side writes `preview-input.v1` and accepts
-only `preview-result.v1`, while the in-tree TypeScript requires `preview-input.v2`
-and emits `preview-result.v2`. The fix (Rust speaking v2, v1 deleted) exists in a
-lane and has not landed. To drive the tools directly from the repository root:
+runs the pinned native Host's `objective-front` command, the Lean front end
+(`Host/ObjectiveBendFrontEnd`): `capture` locks the package's sources, `preview`
+parses (`Compiler/ObjectiveBendParse`), elaborates (`Compiler/ObjectiveBendElaborate`),
+writes the core and the typed packet, decodes the packet, runs `check`, then
+`runBounded`, in one process. This is the function the soundness and no-refusal
+theorems describe. An activity runs to its first yield; the preview prints the typed
+Plan, resumes with each supplied response (checked against the entry's declared
+response type) and runs to the next yield. Responses stand in for the kernel: nothing
+is admitted. From the repository root, against built oleans:
 
 ```sh
-bun native/bend-source/objective-frontend.ts \
-  tests/objective-bend-source/GenericExtension-package.json NEW_CAPTURE_DIR
-bun native/bend-source/objective-preview-request.ts \
-  NEW_CAPTURE_DIR/objective.json NEW_REQUEST_JSON '["7"]' '[]'
-bun native/bend-source/objective-preview.ts \
-  NEW_REQUEST_JSON NEW_RESULT_DIR PINNED_TOOLING_CONFIG
+F="lake env lean --run Host/ObjectiveBendFrontEndMain.lean"
+$F capture tests/objective-bend-source/GenericExtension-package.json NEW_CAPTURE_DIR
+# a preview-input.v2 request naming NEW_CAPTURE_DIR/objective.json and its sha256
+$F preview NEW_REQUEST_JSON NEW_RESULT_DIR
 ```
 
-The tooling config pins compiled tools and semantic modules; a fresh checkout does
-not contain one. Schemas: [capture](OBJECTIVE-BEND-FRONTEND.md),
-[preview](OBJECTIVE-BEND-PREVIEW.md). The preview carries `authority: none`.
+or `bun docs/tutorial/run.ts FILE.obend ENTRY [ARGS]` for one file. Schemas:
+[capture](OBJECTIVE-BEND-FRONTEND.md), [preview](OBJECTIVE-BEND-PREVIEW.md). The
+preview carries `authority: none`.
 
 ### Native admission
 
@@ -291,7 +286,10 @@ with family `objectiveMethod` (that Rust half is on main). The Host pins the ope
 policy for Objective into its runtime parameters. `ResourceTransaction.prepareFrom`
 decodes the claim and prepares compute funding; `DeclaredResourceController.admit`
 dispatches to Objective admission, which checks every signature and capability
-first, then the policy, the selected artifact and package pins, the inputs against
+first, then the policy, the selected artifact and the package (it must name the
+policy's front end, which must be the receiver's own, and the artifact's typed core
+must be byte-identical to what the receiver's front end computes from the package's
+sources: `SourceSelection.replayExact`), the inputs against
 the claim's commitment, the typed check of the applied term, and runs `executeWith`,
 lowers the result to a Plan and requires the Plan's effects to equal the command's
 effects exactly. Commit and receipt are the existing durable path; on reopen the
@@ -301,24 +299,26 @@ produced a native accepted receipt.** The admission modules
 family-aware controller) compiled in lanes against a mixed file set and are being
 integrated into one coherent build. Known design holes on that path: the claim's
 `proofWork` is chosen by the caller and nothing relates it to measured work (zero
-work means free execution up to the policy maximum); the policy's elaborator pin is
-checked for hex format only; the route's guard list is empty for every route.
+work means free execution up to the policy maximum); the route's guard list is empty
+for every route.
 
 ### The trusted front-end boundary
 
-Trusted (no theorem; checked only by replay):
+Trusted (no theorem; one Lean implementation, recomputed by the receiver):
 
-- the TypeScript parser, capture and elaborator (`objective-parser.ts`,
-  `objective-frontend.ts`, `objective-elaborate.ts`) and `literalAnnotations`;
+- the Lean parser, capture and elaborator (`Compiler/ObjectiveBendParse`,
+  `Host/ObjectiveBendFrontEnd`, `Compiler/ObjectiveBendElaborate`) and the typing
+  proposal: there is no surface semantics, so no theorem says the core means what the
+  source says. What IS proved of the front end's output is in
+  `Compiler/ObjectiveBendFrontEndAdequacy` (typed when the checker accepts, never
+  refused by the machine, finished runs are source evaluations of it);
 - the package capture and fingerprint tooling; `ObjectiveSourcePackage.wellFormed`
   is structural only;
-- source-to-core correspondence: native loading establishes a live, immutable,
-  canonical package and a typed core term, not that the core is what the source
-  says. A third party who publishes benign source with a different core is caught
-  only by a signer who replays the elaboration (publication compares the offered
-  core with an independent replay);
-- the elaborator pin, which binds nothing until the package carries a lowerer hash
-  that admission compares;
+- source-to-core correspondence beyond "this core is what the Lean front end computes
+  from these sources": admission recomputes the core from the package and admits only
+  an identical artifact (`ObjectiveBendAdmissionSemantics.admitted_front_end`), so a
+  publisher cannot pair benign source with a different core; whether that front end is
+  right is the first item above;
 - spec laws (closures, never checked); `linear`, which the checker enforces as at most
   once, not exactly once;
 - the meaning of a Plan extracted from deep Data, until the two open theorems above
@@ -347,7 +347,7 @@ hides none of these.
 
 ## Surface → core elaboration
 
-`objective-elaborate.ts`, as it is:
+`Compiler/ObjectiveBendElaborate.lean`, as it is:
 
 | Surface | Core |
 | --- | --- |
@@ -383,7 +383,7 @@ Known front-end defects:
 - `requires` is carried as a string and never checked.
 - `before` and `after` methods are refused.
 - `compose` is shared: the inherited composite is bound once, so term size is linear in
-  the number of composed specs (`objective-elaborate-tests.ts`, "COMPOSE SHARING").
+  the number of composed specs (`tests/objective-bend-source/check-elaborate.ts`, "COMPOSE SHARING").
 
 The drivers in `examples/objective-bend-world/reference/` embed packets from the
 current front end; `scripts/check-objective-examples.sh` fails when one is stale.

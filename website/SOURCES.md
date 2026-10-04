@@ -39,7 +39,7 @@ OB = `docs/OBJECTIVE-BEND.md`.
 | the checker returns a typing derivation; affine and linear are at most once | OB:67-68, 73-75 |
 | example (an excerpt) | docs/tutorial/ch4-specs.obend:10-20 (checked by the `website` gate) |
 | `Billing` sees a later layer; `bill(2)` is 7, then 9 with `Surcharge` | docs/OBJECTIVE-BEND-TUTORIAL.md:590-609 |
-| a gate re-runs every tutorial command and fails on a changed output | scripts/check-objective-frontend.sh:19-20; scripts/check-objective-tutorial.ts:45-48 |
+| a gate re-runs every tutorial command and fails on a changed output | scripts/check-objective-frontend.sh:23-24; scripts/check-objective-tutorial.ts:45-48 |
 | proofs in `Theory/ObjectiveBend*.lean`; axioms `propext`, `Classical.choice`, `Quot.sound`; no `sorry` | OB:172-174 |
 | soundness (weak head) | OB:181-182 |
 | preservation | OB:184 |

@@ -3,28 +3,53 @@
 The front end turns `.obend` source into the Core4 term that
 `Theory.ObjectiveBendDemandMachine` runs, plus a typing proposal that the
 proof-producing checker (`Theory.ObjectiveBendTyping.check`) either accepts
-with a derivation or refuses. Everything here is trusted tooling except the
-checker and the machine: see "Trust boundary" below.
+with a derivation or refuses. It is ONE program, in Lean; there is no other
+parser or elaborator. See "Trust boundary" for what is proved of it.
 
-| Stage | File | Output |
+| Stage | Module | Output |
 | --- | --- | --- |
-| Parse | `native/bend-source/objective-parser.ts` | `dregg.objective-bend.module.v1` AST |
-| Capture | `native/bend-source/objective-frontend.ts` | locked package (`objective.json`, sources, ASTs) |
-| Elaborate | `native/bend-source/objective-elaborate.ts` (TS) and `Compiler/ObjectiveBendElaborate.lean` (Lean) | `PREFIX.core.json`, `PREFIX.typed.json` |
-| Linearize | `native/bend-source/objective-c4.ts`, `Compiler/ObjectiveBendC4.lean` | C4 precedence lists |
-| Preview | `native/bend-source/objective-preview.ts` → `Host/ObjectiveBendPreview.lean` | check + `runBounded` result |
+| Parse | `Compiler/ObjectiveBendParse.lean` | `dregg.objective-bend.module.v1` AST |
+| Capture | `Host/ObjectiveBendFrontEnd.lean` (`capture`) | locked package (`objective.json`, `source/<i>.obend`) |
+| Elaborate | `Compiler/ObjectiveBendElaborate.lean`, driven by `Compiler/ObjectiveBendFrontEnd.lean` | `PREFIX.core.json`, `PREFIX.typed.json` |
+| Linearize | `Compiler/ObjectiveBendC4.lean` | C4 precedence lists |
+| Preview | `Host/ObjectiveBendFrontEnd.lean` (`preview`) → `Host/ObjectiveBendPreview.lean` | check + `runBounded` result |
+| Publish | `Compiler/ObjectiveBendPublication.lean` (`publishedCore`) | the typed core a package publishes |
+
+The commands (`identity`, `parse`, `capture`, `elaborate`, `preview`, `batch`) run
+as `lake env lean --run Host/ObjectiveBendFrontEndMain.lean COMMAND ...` or, compiled,
+as `minidregg-host /dev/null objective-front COMMAND ...`; the Host's
+`objective-publication PACKAGE_SPEC CODEC NEW_DIR` and the receiver's admission run the
+same code.
+
+## Identity
+
+`Compiler/ObjectiveBendFrontEndIdentity.lean` fingerprints the front end compiled
+into a program: `manifest` lists the SHA-256 of the parser, elaborator, C4, driver and
+SHA-256 sources (read when that module is elaborated; it imports all of them, so an
+edit rebuilds it), and `identity` is the SHA-256 of the manifest. `objective-front
+identity` prints both; the `identity` row of `scripts/check-objective-frontend.sh`
+recomputes them with `sha256sum`. A source package names the front end that lowered
+it (`ObjectiveSourcePackage.Package.frontEnd`), the operator policy pins one
+(`ObjectiveBendNativeAdmission.Policy.frontEnd`, printed by `objective-constants`),
+and admission requires the package's pin to be the policy's and the policy's to be the
+receiver's own, then recomputes the core (below). Any edit to a fingerprinted file is a
+new identity: re-pin the policy (a re-genesis) and re-publish.
 
 ## Capture
 
-`objective-frontend.ts` reads `dregg.objective-bend.package-input.v1`
-(edition `objective-bend-1`): modules `{name, sourcePath, imports:[{alias,
-path, module, sha256?}], sha256?}`, canonical decimal module indices,
-`entryModule`, `entryDefinition`. Imports name earlier modules only, by
-`./NAME.obend`; the manifest locks alias and path. Gen-1 `./NAME.bend`
-imports are refused by the parser and the frontend. Each source is read once
-and parsed as strict UTF-8; optional expected hashes refuse changed bytes. The
-explicit `--objective-edition-1` option adopts a `dregg.bend.package-input.v1`
-Studio capture (same `.obend` import rule). SHA-256 values here are byte
+`capture` reads `dregg.objective-bend.package-input.v1` (edition
+`objective-bend-1`): modules `{name, sourcePath, imports:[{alias, path, module,
+sha256?}], sha256?}`, canonical decimal module indices, `entryModule`,
+`entryDefinition`. Imports name earlier modules only, by `./NAME.obend`; the
+manifest locks alias and path. Gen-1 `./NAME.bend` imports are refused by the parser
+and the capture. Each source is read once and decoded as strict UTF-8 (a leading
+byte-order mark is consumed); optional expected hashes refuse changed bytes. The
+explicit `--objective-edition-1` option adopts a `dregg.bend.package-input.v1` Studio
+capture (same `.obend` import rule). The capture
+(`dregg.objective-bend.captured-package.v2`) records the front-end identity, each
+module's source copy and SHA-256, and each import edge with its lock; there is no
+stored AST (the source is the package; `parse` prints the AST on demand). A v1 capture
+(with ASTs and TypeScript tool hashes) does not load. SHA-256 values here are byte
 fingerprints, not Mini package identities.
 
 ## Surface language and its core lowering
@@ -117,10 +142,9 @@ Each is a recursion over `ifZero`, so it is exact on every Nat and costs about
 one machine step per unit of the smaller operand (`/`: of the dividend). A zero
 divisor must mean something because the machine has no catchable exception; `0n`
 is the `Nat.div` convention, and a program whose zero divisor is a real case must
-test it first. A package using none of these operators is unchanged. The TS source
-of the prelude is `preludeSource` in `objective-elaborate.ts`; the Lean elaborator
-carries it as the AST that source parses to, and translation validation catches a
-divergence. Replacing this by machine primitives (O(1)) is a core change and is
+test it first. A package using none of these operators is unchanged. The prelude is
+Objective Bend source (`preludeSource` in `Compiler/ObjectiveBendElaborate.lean`) read
+by the same parser as any module (`prelude_parses`). Replacing this by machine primitives (O(1)) is a core change and is
 not done: the lowering is the one place to swap.
 
 `let x = v` (statement form: the rest of the body follows at the same indent) and
@@ -159,51 +183,69 @@ runs `check` on the same decoded term and refuses anything outside the
 checker's fragment (for example a scalar-target spec, whose `extend` needs a
 row, or an affine parameter used twice).
 
-## The Lean elaborator and translation validation
+## Publication and the receiver
 
-`Compiler/ObjectiveBendElaborate.lean` is a port of the TS elaborator over the
-same AST: same term, same proposal, fuel-bounded total functions. It erases to
-the Core4 `Term`, sums and `perform` included. There is no adequacy
-theorem: "surface meaning preserved" needs a surface semantics, which does
-not exist. The evidence is translation validation:
+`ObjectiveBendPublication.replay` is the front end on a package's own source bytes:
+decode and fingerprint each module, parse it, lock every parsed import edge to the
+module the package names, lower the selected declaration in definition mode with type
+fuel 16384; `publishedCore` is the canonical bytes of the typed packet.
+`objective-publication` publishes exactly those bytes for a package naming this Host's
+front end, and native admission recomputes them: an artifact whose typed core differs
+from the receiver's own `publishedCore` of its package is refused
+(`SourceSelection.replayExact`), as is a package naming another front end. The source
+package is edition 3 (`frame` byte 3: sources, import locks, entry, one `frontEnd`
+pin; no ASTs, no parser/frontend/elaborator pin triple); the policy is edition 4 (one
+`frontEnd` pin). Earlier editions do not decode.
 
-```
-bun native/bend-source/objective-elaborate-tv.ts NEW_DIR \
-  lake env lean --run Host/ObjectiveBendElaborateRun.lean
-```
+## Provenance
 
-compares the two elaborators on every declaration of every
-`tests/objective-bend-source/*.obend`, every preview-cohort invocation and 19
-inline refusal/acceptance probes (canonical JSON, both must refuse or both
-must agree on term and proposal), and checks that a mutated term and a
-mutated annotation are caught. `OrderedPresentationInvariant` in
-`Compiler/ObjectiveBendC4.lean` states renaming invariance of C4 on ordered
-presentations; it is not proved. `objective-c4-tests.ts` checks pommette's
-published vectors and the invariance property on 4000 seeded DAGs.
+The parser and elaborator were ported from TypeScript and translation-validated
+against it before the TypeScript was deleted (2026-10-04): the parser on every
+in-repo `.obend` plus 2720 seeded mutants and 66 probes (2854 jobs: identical ASTs and
+identical refusal messages and spans, except two deliberate divergences where the
+TypeScript accepted what it should not: an identifier such as `valueOf` read as a
+binary operator through `Object.prototype`, and a string literal holding a lone UTF-16
+surrogate escape); and the whole pipeline, source to core term and typing proposal, on
+every declaration of every `tests/objective-bend-source/*.obend`, every
+preview-cohort invocation and the elaborator probes (302 jobs, 0 disagreements; a
+mutated term is caught). Reports: `docs/objective-bend/evidence/front-end-port-20261004.json`.
 
 ## Checks
 
 ```
-bun native/bend-source/objective-elaborate-tests.ts
-bun native/bend-source/objective-c4-tests.ts
-bun tests/objective-bend-source/check-parser.ts
-bun tests/objective-bend-source/check-preview.ts \
-  tests/objective-bend-source/preview-cohort.json NEW_DIR LEAN OLEAN_ROOT [BUN]
+bash scripts/check-objective-frontend.sh
 ```
 
-`check-preview.ts` captures each cohort item with the real frontend,
-elaborates it and runs the compiled checker and `runBounded`; it also checks a
-wrong capture pin and a typing-budget refusal, and tick and heap suspensions.
-A cohort item pins a scalar result (`expected`), or a whole structured result
-(`expectedData`, typed data compared with record fields ordered by name), or the
-reason a result has no deep view (`expectedDataStatus`), or exhaustion of the
-preview's tick budget (`expectedStatus: "suspended"`).
+runs every row through the Lean front end: `identity` (the compiled-in manifest is
+`sha256sum` of the files), `elaborate-tests` (`tests/objective-bend-source/check-elaborate.ts`:
+the elaboration cohort, one batch), `c4-tests` (`Compiler/ObjectiveBendC4Vectors`:
+pommette's vectors and refusals, and the ordered-presentation invariance on 4000
+seeded DAGs, compiled theorems), `check-parser`, `check-preview` (each cohort item
+captured, elaborated, checked and run; a wrong capture pin and a typing-budget
+refusal; tick and heap suspensions), `publication`
+(`tests/objective-native/PublicationReplay.lean`: the Host's publication of
+`world/NativeReceipt.obend` is what the receiver's replay recomputes; a foreign pin, a
+changed source and a tampered core are refused), `examples`, `tutorial`. A cohort item pins a
+scalar result (`expected`), or a whole structured result (`expectedData`, typed data
+compared with record fields ordered by name), or the reason a result has no deep view
+(`expectedDataStatus`), or exhaustion of the preview's tick budget
+(`expectedStatus: "suspended"`).
 
 ## Trust boundary
 
-Trusted (not checked by anything): the TS parser and frontend, the TS and Lean
-elaborators (translation validation shows only that the two agree), the
-typing proposal's choices, the C4 implementation. Checked: typing of the
-emitted term (proof-producing `check`), and evaluation (`runBounded`, with the
-soundness theorems in `Theory/ObjectiveBendDemandAdequacy.lean`). Laws are
-retained, never discharged; `requires` is not checked.
+Trusted (no theorem): the parser, the elaborator and its typing proposal's choices,
+the C4 implementation. Their output is not trusted blindly:
+`Compiler/ObjectiveBendFrontEndAdequacy` proves that whenever the checker accepts the
+front end's own packet (`ObjectiveBendFrontEnd.accept`), the erasure of the
+elaborator's term is closed and typed by the checker's derivation (`accepted_typed`),
+is never refused by the bounded demand machine at any budget
+(`accepted_never_refused`), and a finished run of it is a deep source evaluation of it
+(`accepted_execution_semantics`); `accept_inhabited` exhibits a surface program it
+holds for. `Kernel/ObjectiveBendAdmissionSemantics.admitted_front_end` proves an
+admitted invocation's typed core is byte-for-byte this front end's lowering of the
+package's sources. Open: there is no surface semantics, so nothing states that the
+core means what the source means; the packet's decoded term equals the elaborator's
+erasure by a run-time comparison (`accept`), not a proof; and the receiver checks the
+term it decodes from the published bytes, linked to the lowering only by byte
+equality (a `Lean.Json` parse/print round trip is not proved). Laws are retained,
+never discharged; `requires` is not checked.

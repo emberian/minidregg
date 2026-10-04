@@ -127,28 +127,3 @@ def preview (typed limits : Json) (responsesJson : Json := Json.arr #[]) : Excep
     ("proofScope",toJson "actual compiled checker/executor join; preservation and elaboration adequacy separate")]
 
 end Minidregg.Host.ObjectiveBendPreview
-
-def main (arguments : List String) : IO UInt32 := do
-  let paths : Option (String × String × Option String) := match arguments with
-    | [packet,limits] => some (packet,limits,none)
-    | [packet,limits,responses] => some (packet,limits,some responses)
-    | _ => none
-  let some (packetPath,limitsPath,responsesPath?) := paths | do
-    IO.eprintln "usage: objective-preview TYPED_CORE_PACKET_JSON LIMITS_JSON [RESPONSES_JSON]"
-    return 2
-  try
-    let packet ← IO.FS.readFile packetPath
-    let limits ← IO.FS.readFile limitsPath
-    let responses ← match responsesPath? with
-      | some path => IO.FS.readFile path
-      | none => pure "[]"
-    let result := do
-      Minidregg.Host.ObjectiveBendPreview.preview (← Lean.Json.parse packet) (← Lean.Json.parse limits)
-        (← Lean.Json.parse responses)
-    match result with
-    | .ok output => IO.println output.compress; return 0
-    | .error message =>
-      IO.eprintln (Lean.Json.mkObj [("schema",Lean.toJson "dregg.bend.compiler-diagnostic.v1"),
-        ("stage",Lean.toJson "objective-typed-preview"),("message",Lean.toJson message)]).compress
-      return 2
-  catch error => IO.eprintln error.toString; return 2

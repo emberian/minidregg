@@ -43,7 +43,7 @@ those are V, not general OO linearization/construction correctness.
 Objective Bend Core4 (Theory/ObjectiveBend*; see docs/OBJECTIVE-BEND.md) has
 compiled S for the core: runBounded_*_sound, typed_stepRaw_preserved and
 check_runBounded_no_refusal, compiled only in the opt-in ResearchWip library at
-this revision. Surface-to-core elaboration is TypeScript (objective-elaborate.ts)
+this revision. Surface-to-core elaboration was TypeScript (objective-elaborate.ts; since 2026-10-04 it is the Lean front end, docs/OBJECTIVE-BEND-FRONTEND.md)
 and is a trusted boundary with no S or R.
 Missing S/R:
  - Surface-to-core: a Lean elaborator or a checked translation-validation

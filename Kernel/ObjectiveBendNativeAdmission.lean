@@ -14,6 +14,7 @@ A closed registered policy selects source/input/output and resource envelopes;
 actual full writes and guards are checked before an AcceptedInvocation exists. -/
 import Kernel.ObjectiveBendNativeInput
 import Kernel.ObjectiveBendPublishedPackage
+import Compiler.ObjectiveBendPublication
 import Kernel.ObjectiveBendPreparedOutput
 import Compiler.ObjectiveBendCombinedResult
 import Compiler.ObjectiveBendGenericResult
@@ -53,18 +54,6 @@ def charge (c : ObjectiveInvocationClaim.Capacity) : ResourceCost.Charge
   | .sideEffectCount => c.sideEffectCount
   | .feeDebit => c.feeDebit
   | .leaseByteBlocks => c.leaseByteBlocks
-
-structure Tooling where
-  parserSha256 : String
-  frontendSha256 : String
-  elaboratorSha256 : String
-  deriving DecidableEq, Repr
-
-def toolingStream : StreamCodec Tooling := StreamCodec.xmap
-  (StreamCodec.product PolicyRecordCodec.stringStream
-    (StreamCodec.product PolicyRecordCodec.stringStream PolicyRecordCodec.stringStream))
-  (fun t => (t.parserSha256,t.frontendSha256,t.elaboratorSha256))
-  (fun t => ⟨t.1,t.2.1,t.2.2⟩) (by intro t; cases t; rfl)
 
 /-- The public, versioned price of a DECLARED execution envelope (the charge
 law of 2026-10-04): the caller declares its envelope in the signed claim, the
@@ -140,9 +129,10 @@ structure Policy where
   outputs : List Digest
   /-- CLEAR disclosure audience; current native audience checks are additional. -/
   clearAudience : Digest
-  /-- Explicit trusted parser/frontend/elaborator boundary. Each pin is compared
-  with the selected package's own pin (`SourceSelection`). -/
-  tooling : Tooling
+  /-- The front end this deployment admits: a package must name it, and it must be the
+  receiver's own (`ObjectiveBendFrontEndIdentity.identity`), whose output on the package's
+  sources the receiver recomputes (`SourceSelection.replayExact`). -/
+  frontEnd : String
   /-- The public price of a declared envelope. -/
   tariff : Tariff
   deriving DecidableEq, Repr
@@ -150,13 +140,14 @@ structure Policy where
 def policyStream : StreamCodec Policy := StreamCodec.xmap
   (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.product ObjectiveInvocationClaim.capacityStream
     (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product digestStream
-    (StreamCodec.product toolingStream tariffStream))))))
-  (fun p => (p.edition,p.sourceBytes,p.maximum,p.outputs,p.clearAudience,p.tooling,p.tariff))
+    (StreamCodec.product PolicyRecordCodec.stringStream tariffStream))))))
+  (fun p => (p.edition,p.sourceBytes,p.maximum,p.outputs,p.clearAudience,p.frontEnd,p.tariff))
   (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2.1,p.2.2.2.2.2.2⟩) (by intro p; cases p; rfl)
 
-/-- Edition 3: the tariff joined the policy. A policy of an earlier frame does
-not decode; neither does one whose tariff is not valid. -/
-def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [3]
+/-- Edition 4: one front-end identity replaced the parser/frontend/elaborator pins
+(edition 3 joined the tariff). A policy of an earlier frame does not decode; neither
+does one whose tariff is not valid. -/
+def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [4]
 def encodePolicy (p : Policy) : List UInt8 := policyFrame ++ policyStream.encode p
 def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
@@ -225,7 +216,7 @@ def resultProfile (policy : Policy) (artifact : ObjectiveBendSourceArtifact.Arti
 
 /-- What a published Objective method MEANS: the receiving semantics edition,
 the evaluator, the exact typed Core4 of the selected declaration and its input
-and output codecs. Tool pins, source bytes and the package are provenance and
+and output codecs. The front-end pin, source bytes and the package are provenance and
 do not enter it (`methodSemanticId_provenance_free`). -/
 def methodSemanticId (artifact : ObjectiveBendSourceArtifact.Artifact) : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.METHOD-SEMANTIC-ID/v1".toUTF8.toList
@@ -233,14 +224,14 @@ def methodSemanticId (artifact : ObjectiveBendSourceArtifact.Artifact) : Digest 
       bytesStream.encode artifact.typedCore ++ digestStream.encode artifact.inputCodec ++
       digestStream.encode artifact.outputCodec)).digest
 
-/-- The exact published method: its package (sources, ASTs, import locks,
-parser/frontend/elaborator pins), selected declaration, typed core and codecs.
+/-- The exact published method: its package (sources, import locks, the front-end
+identity), selected declaration, typed core and codecs.
 This is the atom id a claim names (`claim.sourceAtom`). -/
 def methodArtifactId (artifact : ObjectiveBendSourceArtifact.Artifact) : Digest :=
   ObjectiveBendSourceArtifact.identity artifact
 
 /-- Re-publishing the same typed core from another package (other source
-spelling, other tool pins) keeps the method's semantic id; its artifact id is
+spelling, another front end) keeps the method's semantic id; its artifact id is
 the artifact's own identity and commits the package. -/
 theorem methodSemanticId_provenance_free {a b : ObjectiveBendSourceArtifact.Artifact}
     (core : a.typedCore = b.typedCore) (input : a.inputCodec = b.inputCodec)
@@ -459,11 +450,13 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   loaded : ObjectiveBendArtifactSource.Loaded payload.logical ⟨claim.sourceAtom⟩ policy.sourceBytes
   package : ObjectiveBendPublishedPackage.Loaded payload.logical ⟨loaded.artifact.package⟩ policy.sourceBytes
   declarationExact : ObjectiveSourcePackage.selectedDeclaration package.package = some loaded.artifact.declaration
-  parserExact : package.package.parserSha256 = policy.tooling.parserSha256
-  frontendExact : package.package.frontendSha256 = policy.tooling.frontendSha256
-  /-- The package names the elaborator that produced its typed core, and it is
-  the operator's pinned one. -/
-  elaboratorExact : package.package.elaboratorSha256 = policy.tooling.elaboratorSha256
+  /-- The package names the policy's front end ... -/
+  frontEndExact : package.package.frontEnd = policy.frontEnd
+  /-- ... which is this receiver's own ... -/
+  frontEndOwn : policy.frontEnd = ObjectiveBendFrontEndIdentity.identity
+  /-- ... and the artifact's typed core is exactly what that front end computes from the
+  package's sources: the receiver re-ran it. -/
+  replayExact : ObjectiveBendPublication.replayedCore package.package = some loaded.artifact.typedCore
   inputCodecExact : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
@@ -480,14 +473,14 @@ private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Depl
         policy.sourceBytes claim.capacity.typeFuel
       let package ← ObjectiveBendPublishedPackage.lookup payload.logical ⟨loaded.artifact.package⟩ policy.sourceBytes
       if declaration : ObjectiveSourcePackage.selectedDeclaration package.package = some loaded.artifact.declaration then
-        if parser : package.package.parserSha256 = policy.tooling.parserSha256 then
-          if frontend : package.package.frontendSha256 = policy.tooling.frontendSha256 then
-           if elaborator : package.package.elaboratorSha256 = policy.tooling.elaboratorSha256 then
+        if frontEnd : package.package.frontEnd = policy.frontEnd then
+          if own : policy.frontEnd = ObjectiveBendFrontEndIdentity.identity then
+           if replayed : ObjectiveBendPublication.replayedCore package.package = some loaded.artifact.typedCore then
             if input : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId then
               if claimInput : claim.inputCodec = loaded.artifact.inputCodec then
                 if output : claim.outputCodec = loaded.artifact.outputCodec then
                   if registered : loaded.artifact.outputCodec ∈ policy.outputs then
-                    some ⟨full,payload,observed,loaded,package,declaration,parser,frontend,elaborator,input,
+                    some ⟨full,payload,observed,loaded,package,declaration,frontEnd,own,replayed,input,
                       claimInput,output,registered⟩
                   else none
                 else none

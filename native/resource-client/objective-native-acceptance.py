@@ -2,17 +2,18 @@
 """The native Objective Accepted receipt on a scratch world, and its refusals.
 
 A fresh private one-sponsor Store (newparticipant-acceptance.sh) whose genesis
-pins an Objective invocation policy (tariff, output codecs, the parser/frontend/
-elaborator pins of THIS checkout's tools). Never a live or common world.
+pins an Objective invocation policy (tariff, output codecs, and the identity of
+the Host's own Lean front end, which the receiver re-runs on every published
+package). Never a live or common world.
 
   world    --bin DIR --root NEW_DIR [--tariff-base N --tariff-tick N] [--disable EVALUATOR-NAMES]
            policy authoring, genesis, `mini serve`, two content documents
            (`source` holds the published method, `notes` is its input and
            its effect/result target).
   publish  --root W [--method FILE.obend --entry NAME]
-           pinned frontend capture, pinned elaborator, package input, the
-           Host's objective-publication author, and an ordinary content
-           proposal of the package and artifact atoms on `source`.
+           the Host's objective-publication (its own Lean front end captures
+           and lowers the method), and an ordinary content proposal of the
+           package and artifact atoms on `source`.
   invoke   --root W --label L [--byte B]
            fresh nonce; signed resource-scope queries of `source` and `notes`
            (that nonce); the retained request; `mini objective-invoke` (local
@@ -23,7 +24,8 @@ elaborator pins of THIS checkout's tools). Never a live or common world.
            plan consent, submitted; the Host must refuse and the judged height
            and notes root must not move.
   publish-variant --root W --label L
-           the same method under a package naming another elaborator.
+           the same method and core under a package naming another front end
+           (authored by Host/ObjectiveStudioPublication.lean, not the Host).
   retry-submit --root W --label L
            submit a retained (prepare-only) call later.
   readback --root W --label L
@@ -100,7 +102,7 @@ if a.verb=='all':
     step('refuse',*W,'--label','r01-source-is-package','--mutation','source-atom','--argument','@package')
     step('invoke',*W,'--label','r02-core-differs-from-replay','--request-edit',str(HERE/'objective-native-edit-core.py'),'--expect','refused')
     step('publish-variant',*W,'--label','pin')
-    step('refuse',*W,'--label','r03-elaborator-pin','--mutation','source-atom','--argument','@pin')
+    step('refuse',*W,'--label','r03-front-end-pin','--mutation','source-atom','--argument','@pin')
     step('refuse',*W,'--label','r04-foreign-capability','--mutation','capability','--argument','@source-operation')
     step('refuse',*W,'--label','r05-query-nonce','--mutation','command-nonce')
     step('invoke',*W,'--label','r06-stale','--prepare-only','true','--expect','prepared')
@@ -158,13 +160,12 @@ elif a.verb=='world':
         if not p.is_file():raise SystemExit(f'missing {p}')
     if root.exists():raise SystemExit('root exists')
     root.mkdir(mode=0o700);T.mkdir()
-    pins=json.loads(sh('pins','bun',REPO/'native/bend-source/objective-source-package.ts','--pins').stdout)
     constants=json.loads(sh('constants',host,'/dev/null','objective-constants').stdout)
     tariff={'version':'1','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
         'stack':'0','outputNodes':'0','outputBytes':'0','inputBytes':'0'}
     policy={'schema':'dregg.objective-bend.policy.v1','sourceBytes':'4194304',
         'maximum':{k:str(v) for k,v in MAXIMUM.items()},'outputs':[constants['genericCodec']],
-        'clearAudience':digest_hex(1),'tooling':pins,'tariff':tariff}
+        'clearAudience':digest_hex(1),'frontEnd':constants['frontEnd'],'tariff':tariff}
     (root/'policy.json').write_text(json.dumps(policy,indent=1))
     sh('policy',host,'/dev/null','author','objective-policy',root/'policy.json',root/'policy.hex')
     policy_hex=(root/'policy.hex').read_text().strip()
@@ -175,7 +176,7 @@ elif a.verb=='world':
     s={'type':'minidregg-objective-native-acceptance-v1','root':str(root),'bin':str(bin_),'host':str(host),
        'mini':str(mini),'config':str(w/'deployment'/'pinned-config.json'),'socket':str(sock),
        'sponsor':str(w/'sponsor'),'key':str(w/'sponsor.key'),'subject':'7',
-       'serverPid':int((w/'public'/'server.pid').read_text()),'constants':constants,'pins':pins,
+       'serverPid':int((w/'public'/'server.pid').read_text()),'constants':constants,
        'tariff':tariff,'policyHex':policy_hex,
        'hostSha256':hashlib.sha256(host.read_bytes()).hexdigest(),
        'miniSha256':hashlib.sha256(mini.read_bytes()).hexdigest()}
@@ -193,15 +194,7 @@ elif a.verb=='publish':
     spec={'schema':'dregg.objective-bend.package-input.v1','edition':'objective-bend-1',
         'modules':[{'name':method.stem,'sourcePath':str(method),'imports':[]}],'entryModule':'0','entryDefinition':entry}
     (pub/'spec.json').write_text(json.dumps(spec))
-    sh('frontend','bun',REPO/'native/bend-source/objective-frontend.ts',pub/'spec.json',pub/'cap')
-    limits=json.dumps({'heap':'100000','stack':'100000','ticks':'100000','typeFuel':'16384'})
-    sh('elaborate','bun',REPO/'native/bend-source/objective-elaborate.ts',pub/'cap'/'objective.json',pub/'def',
-       '[]','[]',limits,'definition')
-    sh('package-input','bun',REPO/'native/bend-source/objective-source-package.ts',pub/'cap'/'objective.json',
-       pub/'package-input.json')
-    core=pub/'def.typed.json'
-    if not core.exists():raise SystemExit('elaborator wrote no def.typed.json: '+' '.join(p.name for p in pub.iterdir()))
-    sh('publication',host,s['config'],'objective-publication',pub/'package-input.json',core,'generic',pub/'out')
+    sh('publication',host,s['config'],'objective-publication',pub/'spec.json','generic',pub/'out')
     out=json.loads((pub/'out'/'publication.json').read_text())
     req={'type':'minidregg-workspace-proposal-v1','action':'invoke','targets':[{'name':'source','payload':out['payload']}]}
     (pub/'proposal.json').write_text(json.dumps(req))
@@ -357,13 +350,18 @@ elif a.verb=='publish-variant':
     # other than the policy's: the receiver must refuse it by the pin alone.
     s=state();host=s['host'];mini=s['mini']
     pub=root/'publication';v=root/f'variant-{a.label}';v.mkdir(mode=0o700)
-    pin=json.loads((pub/'package-input.json').read_text())
-    # A well-formed pin naming no elaborator the policy admits (one per label,
-    # so two variants are two packages).
-    pin['elaboratorSha256']=hashlib.sha256(f'not-the-pinned-elaborator:{a.label}'.encode()).hexdigest()
-    (v/'package-input.json').write_text(json.dumps(pin))
-    sh(f'variant-{a.label}-publication',host,s['config'],'objective-publication',v/'package-input.json',
-       pub/'def.typed.json','generic',v/'out')
+    # A well-formed pin naming no front end the policy admits (one per label, so two
+    # variants are two packages): the honest package with its front-end identity's
+    # bytes replaced, authored with the honest core by the Lean publication author.
+    honest=(pub/'out'/'package.bin').read_bytes()
+    own=s['constants']['frontEnd'].encode()
+    if honest.count(own)!=1:raise SystemExit('package does not carry the front-end identity exactly once')
+    other=hashlib.sha256(f'not-this-front-end:{a.label}'.encode()).hexdigest()
+    (v/'package.bin').write_bytes(honest.replace(own,other.encode()))
+    (v/'out').mkdir()
+    sh(f'variant-{a.label}-publication','lake','env','lean','--run',REPO/'Host/ObjectiveStudioPublication.lean',
+       v/'package.bin',v/'package.bin',pub/'out'/'core.canonical.json',pub/'out'/'core.canonical.json',
+       pub/'out'/'output-codec.bin',v/'out'/'publication.json',cwd=REPO)
     out=json.loads((v/'out'/'publication.json').read_text())
     (v/'proposal.json').write_text(json.dumps({'type':'minidregg-workspace-proposal-v1','action':'invoke',
         'targets':[{'name':'source','payload':out['payload']}]}))
@@ -373,7 +371,7 @@ elif a.verb=='publish-variant':
     sh(f'variant-{a.label}-submit',mini,'workspace','--action','submit','--dir',s['sponsor'],
        '--intent',pathlib.Path(s['sponsor'])/'proposals'/pid/'intent.json','--attempt',pathlib.Path(s['sponsor'])/'attempts'/pid)
     s.setdefault('variants',{})[a.label]=out['artifactId'];s['variants'][a.label+'-package']=out['packageId']
-    save(s);print(json.dumps({'variant':a.label,'artifactId':out['artifactId'],'elaboratorSha256':pin['elaboratorSha256']}))
+    save(s);print(json.dumps({'variant':a.label,'artifactId':out['artifactId'],'frontEnd':other}))
 
 elif a.verb=='readback':
     # A signed read of `notes`; for every confirmed invocation, the return atom

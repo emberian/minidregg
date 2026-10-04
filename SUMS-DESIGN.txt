@@ -88,7 +88,7 @@ Base: minidregg c8fdd000. Tags: READ = read in code at that commit; DECIDED = th
  DemandData gains Data.variant so the Plan path can extract it); C10 partly (computed selector
  comparison; dynamic get still move 5).
 
-9. SURFACE SYNTAX FOR W1.5 (objective-parser.ts / objective-elaborate.ts)
+9. SURFACE SYNTAX FOR W1.5 (then objective-parser.ts / objective-elaborate.ts; now Compiler/ObjectiveBendParse.lean / Compiler/ObjectiveBendElaborate.lean)
   sum Shape:                         | declaration, mirrors `record`; a field per label
     circle: Nat                      | recursive mention (List in List) → bounded variable + shareable
     square: {side: Nat}              |   premise in literalAnnotations

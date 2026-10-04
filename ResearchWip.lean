@@ -49,8 +49,6 @@ import Compiler.EmitSystemFast
 import Compiler.GenericSimplexTransferability
 import Compiler.JointBackendPartyCodec
 import Compiler.NativeDurableEventRegistry
-import Compiler.ObjectiveBendC4
-import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendEmitC
 import Compiler.ObjectiveDemandCode
 import Compiler.ObjectiveDemandLayout

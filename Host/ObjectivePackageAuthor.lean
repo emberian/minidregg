@@ -1,13 +1,14 @@
 /- Objective source package and publication authoring.
 
-`load` turns a package-input JSON (exact module source and AST bytes, import
-locks, the parser/frontend/elaborator pins) into the canonical package;
-`author` is the ordinary source publication payload author. expectedCore comes from the
-signing consumer's independent pinned replay of the immutable package bytes.
-This module checks exact pairing; supplying that trusted replay is an external
-obligation, not a theorem inferred from arbitrary input JSON. No authority is
-created by source publication. -/
+`publication` publishes a package this Host's own front end lowers: the package
+names `ObjectiveBendFrontEndIdentity.identity`, and its typed core is
+`ObjectiveBendPublication.publishedCore` of the package, the same function the
+receiver recomputes at admission. `author` is the ordinary source publication
+payload author; its expectedCore is a consumer's own replay (for a third
+party's offered core, `ObjectiveBendPublication.publishedCore` again). No
+authority is created by source publication. -/
 import Compiler.ObjectiveSourcePackage
+import Compiler.ObjectiveBendPublication
 import Compiler.ObjectiveBendSourceArtifact
 import Kernel.ObjectiveBendNativeInput
 import Kernel.ObjectiveBendPublishedPackage
@@ -63,43 +64,6 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
     ("sourceCorrespondence",toJson "exact offered/independently replayed packet; trusted replay supplied by signing consumer"),
     ("laws",toJson "undischarged")]
 
-private def text (j : Json) (k : String) : Except String String := j.getObjValAs? String k
-private def rows (j : Json) (k : String) : Except String (Array Json) := do (← j.getObjVal? k).getArr?
-private def smallNat (j : Json) (k : String) : Except String Nat := do
-  let s ← text j k
-  if s.length > 3 then throw "package index textual capacity"
-  let some n := s.toNat? | throw "package index decimal"
-  if toString n != s then throw "package index noncanonical"
-  pure n
-private def bytesOf (j : Json) (k : String) : Except String (List UInt8) := do
-  let value ← text j k
-  if value.length > 16777216 then throw "package hex byte capacity"
-  let some bytes := ObjectiveBendPlanAdapter.unhex value.toList | throw s!"{k} must be lowercase hex"
-  pure bytes
-
-/-- Package input (schema dregg.objective-bend.source-package-input.v2): exact
-module bytes, ASTs, import locks, entry, and the three tool pins. Refuses any
-package that is not `wellFormed`. -/
-def load (json : Json) : Except String Minidregg.Compiler.ObjectiveSourcePackage.Package := do
-  if (← text json "schema") != "dregg.objective-bend.source-package-input.v2" then throw "Objective package input schema"
-  if (← text json "edition") != "objective-bend-1" then throw "Objective source edition"
-  let raw ← rows json "modules"
-  if raw.isEmpty || raw.size > 64 then throw "Objective module capacity"
-  let modules ← raw.toList.mapM fun m => do
-    let imports ← (← rows m "imports").toList.mapM fun i => do
-      pure ({importAlias := ← text i "alias", path := ← text i "path", target := ← smallNat i "target"} :
-        Minidregg.Compiler.ObjectiveSourcePackage.Import)
-    pure ({name := ← text m "name", source := ← bytesOf m "sourceHex", ast := ← bytesOf m "astHex", imports} :
-      Minidregg.Compiler.ObjectiveSourcePackage.Module)
-  if (modules.map (fun m => m.source.length)).sum > 4194304 ||
-      (modules.map (fun m => m.ast.length)).sum > 8388608 then throw "Objective source/AST byte capacity"
-  let package : Minidregg.Compiler.ObjectiveSourcePackage.Package :=
-    ⟨← text json "parserSha256",← text json "frontendSha256",← text json "elaboratorSha256",modules,
-      ← smallNat json "entryModule",← text json "entryDefinition"⟩
-  if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then
-    throw "Objective source package structure/import/pin refusal"
-  pure package
-
 /-- A registered output codec by name. -/
 def outputCodecOf : String → Except String Digest
   | "scalar" => pure ObjectiveBendPlanAdapter.codecId
@@ -114,21 +78,29 @@ structure Publication where
   core : List UInt8
   json : Json
 
-/-- The signer's own publication: the package from its input, the typed core
-its pinned elaborator just produced (canonicalized, never re-elaborated here),
-and the payload `author` checks. Offered and expected core are the same bytes
-because this signer is the replaying consumer; a third party's offered core
-goes through `author` with the consumer's own replay instead. -/
-def publication (input core : List UInt8) (outputCodec : String) : Except String Publication := do
-  let some text := String.fromUTF8? ⟨input.toArray⟩ | throw "package input is not UTF-8"
-  let package ← load (← Json.parse text)
+/-- The package of captured modules, naming this Host's front end. -/
+def packageOf (modules : List (ObjectiveBendFrontEnd.SourceModule × List UInt8)) (entryModule : Nat)
+    (entryDefinition : String) : Minidregg.Compiler.ObjectiveSourcePackage.Package :=
+  ⟨ObjectiveBendFrontEndIdentity.identity, modules.map (fun (m, bytes) => ⟨m.name, bytes,
+    m.imports.map fun i => ⟨i.importAlias, i.path, i.target⟩⟩), entryModule, entryDefinition⟩
+
+/-- The signer's own publication: the package and the typed core this Host's front end
+computes from it (`publishedCore`), paired by `author` as offered and expected core. -/
+def publication (package : Minidregg.Compiler.ObjectiveSourcePackage.Package) (outputCodec : String) :
+    Except String Publication := do
+  if package.frontEnd != ObjectiveBendFrontEndIdentity.identity then
+    throw "a publication names this Host's front end"
+  if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then
+    throw "Objective source package structure/import/pin refusal"
+  let core ← match ObjectiveBendPublication.publishedCore package with
+    | .ok core => pure core
+    | .error d => throw (d.stage ++ ": " ++ d.message)
   let packageBytes := Minidregg.Compiler.ObjectiveSourcePackage.encode package
-  let canonical ← canonicalizePacket 4194304 core
   let codec ← outputCodecOf outputCodec
-  let json ← author packageBytes packageBytes canonical canonical (digestStream.encode codec)
+  let json ← author packageBytes packageBytes core core (digestStream.encode codec)
   let some declaration := Minidregg.Compiler.ObjectiveSourcePackage.selectedDeclaration package
     | throw "Objective selected declaration missing"
-  let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,declaration,canonical,
+  let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,declaration,core,
     Minidregg.Kernel.ObjectiveBendNativeInput.codecId,codec⟩
-  pure ⟨packageBytes,encode artifact,canonical,json⟩
+  pure ⟨packageBytes,encode artifact,core,json⟩
 end Minidregg.Host.ObjectivePackageAuthor

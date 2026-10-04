@@ -1,7 +1,8 @@
 /- Exact live immutable Objective package in the same signed source store.
-This establishes source/module/tool/selection identity, not frontend adequacy.
-The publishing/importing signer separately regenerates and compares the full
-selected core through its pinned trusted elaborator before signing. -/
+This establishes source/module/front-end/selection identity. That the selected
+core IS this front end's output on these sources is checked at admission
+(`ObjectiveBendNativeAdmission.SourceSelection.replayExact`, the receiver
+recomputing `ObjectiveBendPublication.publishedCore`). -/
 import Compiler.ObjectiveSourcePackage
 import Kernel.ContentResource
 namespace Minidregg.Kernel.ObjectiveBendPublishedPackage

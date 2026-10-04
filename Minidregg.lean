@@ -48,3 +48,6 @@ import Theory.CheckedCarry
 import Compiler.LegacyStoreCarryChecks
 import Compiler.CarryConfigurationChecks
 import Verify.JointDecisionRecovery
+-- The Objective Bend front end's compiled vectors (the front end itself is reached through Host.Main).
+import Compiler.Sha256Vectors
+import Compiler.ObjectiveBendC4Vectors

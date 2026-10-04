@@ -12,3 +12,4 @@ import Theory.ObjectiveBendDemandCollectProofs
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract
+import Compiler.ObjectiveBendFrontEndAdequacy

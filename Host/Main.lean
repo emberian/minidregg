@@ -180,6 +180,7 @@ import Kernel.ObjectiveBendNativeAdmission
 import Host.ObjectiveInvocationQuote
 import Host.ObjectiveInvocationSettings
 import Host.ObjectivePackageAuthor
+import Host.ObjectiveBendFrontEnd
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
@@ -5712,6 +5713,9 @@ def run (arguments : List String) : IO UInt32 := do
   | [_, "objective-constants"] =>
       IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
       pure 0
+  -- The Objective Bend front end (parse/capture/elaborate/preview), the same code
+  -- `lean --run Host/ObjectiveBendFrontEndMain.lean` runs; it reads no configuration.
+  | _ :: "objective-front" :: rest => Minidregg.Host.ObjectiveBendFrontEnd.run rest
   | [_, "author", "objective-policy", input, output] =>
       let bytes ← readBoundedBytes input 65536
       let some text := String.fromUTF8? bytes.toByteArray
@@ -5739,16 +5743,27 @@ def run (arguments : List String) : IO UInt32 := do
           writeJson outputPath (← IO.ofExcept
             (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
           pure 0
-      | "objective-publication", [packageInputPath, corePath, outputCodec, outputDirectory] =>
-          let input ← readBoundedBytes packageInputPath 25165824
-          let core ← readBoundedBytes corePath 4194304
-          let result ← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.publication input core outputCodec)
+      | "objective-publication", [specPath, outputCodec, outputDirectory] =>
+          -- Capture the spec's sources, lower the selected definition with this Host's own
+          -- front end, and author the publication payload (no external typed core).
           let directory := System.FilePath.mk outputDirectory
           if ← directory.pathExists then throw (IO.userError "publication output directory already exists")
+          let captured ← match ← (Minidregg.Host.ObjectiveBendFrontEnd.captureSpec specPath false).run with
+            | .ok c => pure c
+            | .error d => throw (IO.userError d.json.compress)
+          let package := Minidregg.Host.ObjectivePackageAuthor.packageOf
+            (captured.modules.toList.zip (captured.bytes.toList.map (·.toList))) captured.entryModule captured.entryDefinition
+          let result ← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.publication package outputCodec)
           IO.FS.createDirAll directory
+          match ← (Minidregg.Host.ObjectiveBendFrontEnd.writeCapture captured (directory / "capture")).run with
+            | .ok _ => pure ()
+            | .error d => throw (IO.userError d.json.compress)
           IO.FS.writeBinFile (directory / "package.bin") ⟨result.package.toArray⟩
           IO.FS.writeBinFile (directory / "artifact.bin") ⟨result.artifact.toArray⟩
           IO.FS.writeBinFile (directory / "core.canonical.json") ⟨result.core.toArray⟩
+          IO.FS.writeBinFile (directory / "output-codec.bin")
+            ⟨(Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode
+              (← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.outputCodecOf outputCodec))).toArray⟩
           IO.FS.writeFile (directory / "publication.json") result.json.compress
           IO.println result.json.compress
           pure 0

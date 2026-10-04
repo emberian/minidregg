@@ -1,415 +1,168 @@
-{
-  "schema": "dregg.objective-bend.typed-core.v3",
-  "term": {
-    "tag": "get",
-    "target": {
-      "tag": "fix",
-      "spec": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "record",
-          "fields": [
-            {
-              "name": "package",
-              "value": {
-                "tag": "label",
-                "value": "[\"LazySharedField\"]"
-              }
-            }
-          ]
-        },
-        "extension": {
-          "tag": "lam",
-          "body": {
-            "tag": "lam",
-            "body": {
-              "tag": "extend",
-              "inherited": {
-                "tag": "bound",
-                "index": 0
-              },
-              "fields": [
-                {
-                  "name": "LazySharedField.work",
-                  "value": {
-                    "tag": "lam",
-                    "body": {
-                      "tag": "ifZero",
-                      "value": {
-                        "tag": "bound",
-                        "index": 0
-                      },
-                      "zero": {
-                        "tag": "nat",
-                        "value": "1"
-                      },
-                      "successor": {
-                        "tag": "binary",
-                        "primitive": "add",
-                        "left": {
-                          "tag": "app",
-                          "fn": {
-                            "tag": "get",
-                            "target": {
-                              "tag": "bound",
-                              "index": 3
-                            },
-                            "name": "LazySharedField.work"
-                          },
-                          "arg": {
-                            "tag": "bound",
-                            "index": 0
-                          }
-                        },
-                        "right": {
-                          "tag": "app",
-                          "fn": {
-                            "tag": "get",
-                            "target": {
-                              "tag": "bound",
-                              "index": 3
-                            },
-                            "name": "LazySharedField.work"
-                          },
-                          "arg": {
-                            "tag": "bound",
-                            "index": 0
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "LazySharedField.Fields",
-                  "value": {
-                    "tag": "lam",
-                    "body": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "record",
-                        "fields": [
-                          {
-                            "name": "costly",
-                            "value": {
-                              "tag": "app",
-                              "fn": {
-                                "tag": "get",
-                                "target": {
-                                  "tag": "bound",
-                                  "index": 3
-                                },
-                                "name": "LazySharedField.work"
-                              },
-                              "arg": {
-                                "tag": "nat",
-                                "value": "8"
-                              }
-                            }
-                          },
-                          {
-                            "name": "twice",
-                            "value": {
-                              "tag": "binary",
-                              "primitive": "add",
-                              "left": {
-                                "tag": "get",
-                                "target": {
-                                  "tag": "bound",
-                                  "index": 1
-                                },
-                                "name": "costly"
-                              },
-                              "right": {
-                                "tag": "get",
-                                "target": {
-                                  "tag": "bound",
-                                  "index": 1
-                                },
-                                "name": "costly"
-                              }
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "LazySharedField.result",
-                  "value": {
-                    "tag": "get",
-                    "target": {
-                      "tag": "fix",
-                      "spec": {
-                        "tag": "get",
-                        "target": {
-                          "tag": "bound",
-                          "index": 1
-                        },
-                        "name": "LazySharedField.Fields"
-                      },
-                      "seed": {
-                        "tag": "record",
-                        "fields": [
-                          {
-                            "name": "costly",
-                            "value": {
-                              "tag": "nat",
-                              "value": "0"
-                            }
-                          },
-                          {
-                            "name": "twice",
-                            "value": {
-                              "tag": "nat",
-                              "value": "0"
-                            }
-                          }
-                        ]
-                      }
-                    },
-                    "name": "twice"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "seed": {
-        "tag": "record",
-        "fields": []
-      }
-    },
-    "name": "LazySharedField.result"
-  },
-  "types": [
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "twice",
-      "member": {
-        "tag": "natural"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "costly",
-      "member": {
-        "tag": "natural"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "1"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "2"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "LazySharedField.result",
-      "member": {
-        "tag": "natural"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "LazySharedField.Fields",
-      "member": {
-        "tag": "ref",
-        "index": "5"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "6"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "LazySharedField.work",
-      "member": {
-        "tag": "ref",
-        "index": "4"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "7"
-      }
-    }
-  ],
-  "annotations": [
-    {
-      "path": [
-        "0",
-        "0",
-        "1"
-      ],
-      "domain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    }
-  ],
-  "bounds": [
-    {
-      "index": "0",
-      "type": {
-        "tag": "ref",
-        "index": "8"
-      }
-    }
-  ],
-  "shareableVariables": [
-    "0"
-  ],
-  "fuel": "4096",
-  "context": [],
-  "sourceEntry": "LazySharedField.result",
-  "sourceModules": [
-    {
-      "name": "LazySharedField",
-      "sourceSha256": "b82b3b233713d8f7784b97665ff34bd88aad331914f2cefdaddaf38537e8c467",
-      "astSha256": "12e17276bebbeb2a1df7e7b4adf98b63f23c4da4bd1d5096e1bb2e1e4a77f9f1",
-      "imports": []
-    }
-  ],
-  "status": "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"
-}
+{"types":
+ [{"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "twice",
+   "member": {"tag": "natural"}},
+  {"tail": {"tag": "ref", "index": "1"},
+   "tag": "field",
+   "name": "costly",
+   "member": {"tag": "natural"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "2"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "LazySharedField.result",
+   "member": {"tag": "natural"}},
+  {"tail": {"tag": "ref", "index": "6"},
+   "tag": "field",
+   "name": "LazySharedField.Fields",
+   "member": {"tag": "ref", "index": "5"}},
+  {"tail": {"tag": "ref", "index": "7"},
+   "tag": "field",
+   "name": "LazySharedField.work",
+   "member": {"tag": "ref", "index": "4"}}],
+ "term":
+ {"target":
+  {"tag": "fix",
+   "spec":
+   {"tag": "specification",
+    "metadata":
+    {"tag": "record",
+     "fields":
+     [{"value": {"value": "[\"LazySharedField\"]", "tag": "label"},
+       "name": "package"}]},
+    "extension":
+    {"tag": "lam",
+     "body":
+     {"tag": "lam",
+      "body":
+      {"tag": "extend",
+       "inherited": {"tag": "bound", "index": 0},
+       "fields":
+       [{"value":
+         {"tag": "lam",
+          "body":
+          {"zero": {"value": "1", "tag": "nat"},
+           "value": {"tag": "bound", "index": 0},
+           "tag": "ifZero",
+           "successor":
+           {"tag": "binary",
+            "right":
+            {"tag": "app",
+             "fn":
+             {"target": {"tag": "bound", "index": 3},
+              "tag": "get",
+              "name": "LazySharedField.work"},
+             "arg": {"tag": "bound", "index": 0}},
+            "primitive": "add",
+            "left":
+            {"tag": "app",
+             "fn":
+             {"target": {"tag": "bound", "index": 3},
+              "tag": "get",
+              "name": "LazySharedField.work"},
+             "arg": {"tag": "bound", "index": 0}}}}},
+         "name": "LazySharedField.work"},
+        {"value":
+         {"tag": "lam",
+          "body":
+          {"tag": "lam",
+           "body":
+           {"tag": "record",
+            "fields":
+            [{"value":
+              {"tag": "app",
+               "fn":
+               {"target": {"tag": "bound", "index": 3},
+                "tag": "get",
+                "name": "LazySharedField.work"},
+               "arg": {"value": "8", "tag": "nat"}},
+              "name": "costly"},
+             {"value":
+              {"tag": "binary",
+               "right":
+               {"target": {"tag": "bound", "index": 1},
+                "tag": "get",
+                "name": "costly"},
+               "primitive": "add",
+               "left":
+               {"target": {"tag": "bound", "index": 1},
+                "tag": "get",
+                "name": "costly"}},
+              "name": "twice"}]}}},
+         "name": "LazySharedField.Fields"},
+        {"value":
+         {"target":
+          {"tag": "fix",
+           "spec":
+           {"target": {"tag": "bound", "index": 1},
+            "tag": "get",
+            "name": "LazySharedField.Fields"},
+           "seed":
+           {"tag": "record",
+            "fields":
+            [{"value": {"value": "0", "tag": "nat"}, "name": "costly"},
+             {"value": {"value": "0", "tag": "nat"}, "name": "twice"}]}},
+          "tag": "get",
+          "name": "twice"},
+         "name": "LazySharedField.result"}]}}}},
+   "seed": {"tag": "record", "fields": []}},
+  "tag": "get",
+  "name": "LazySharedField.result"},
+ "status":
+ "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority",
+ "sourceModules":
+ [{"sourceSha256":
+   "b82b3b233713d8f7784b97665ff34bd88aad331914f2cefdaddaf38537e8c467",
+   "name": "LazySharedField",
+   "imports": []}],
+ "sourceEntry": "LazySharedField.result",
+ "shareableVariables": ["0"],
+ "schema": "dregg.objective-bend.typed-core.v3",
+ "fuel": "4096",
+ "context": [],
+ "bounds": [{"type": {"tag": "ref", "index": "8"}, "index": "0"}],
+ "annotations":
+ [{"reuse": "reusable",
+   "path": ["0", "0", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "variable", "index": "0"},
+   "codomain": {"tag": "ref", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "2"}}]}

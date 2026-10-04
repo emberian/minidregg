@@ -25,8 +25,8 @@ is not a canonical source identity, publication receipt or execution authority.
 The first source implementation is WIP and has not been compiled or received in
 a browser. Governed publication, prototype instantiation and instance evolution
 are unavailable until their real producer and native intent APIs are connected.
-Objective Bend preview is a separate route (`studio_preview.rs` to
-`objective-preview.ts`; see [Objective Bend](OBJECTIVE-BEND.md#execution-paths)). No compiler success or installed program is
+Objective Bend preview is a separate route (`studio_preview.rs` to the pinned Host's
+`objective-front` command; see [Objective Bend](OBJECTIVE-BEND.md#execution-paths)). No compiler success or installed program is
 inferred from a document save or package metadata.
 
 Module, import and entry controls apply exact revision-bound composition operations.

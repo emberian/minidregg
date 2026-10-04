@@ -32,4 +32,24 @@ theorem admitted_source_semantics {F : Type} [Field F] [DecidableEq F] {deployme
     admitted.output.execution
 
 #assert_axioms admitted_source_semantics
+
+/-- The front-end pin binds. An admitted invocation's method comes from a package that names
+THIS receiver's front end (`ObjectiveBendFrontEndIdentity.identity`, by way of the policy's pin),
+and the typed core the receiver checked and ran is byte-for-byte the rendering of that front
+end's own lowering of the package's sources, which the receiver recomputed: no publisher-supplied
+core is admitted on the strength of a label. (Front-end adequacy of that lowering:
+`Compiler.ObjectiveBendFrontEndAdequacy`.) -/
+theorem admitted_front_end {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
+    (admitted : Admitted prepared ingress writes guards) :
+    admitted.core.source.package.package.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
+    ∃ l, ObjectiveBendPublication.replay admitted.core.source.package.package = .ok l ∧
+      l.proposal.toBool = true ∧
+      l.packet.compress.toUTF8.toList = admitted.core.source.loaded.artifact.typedCore :=
+  ⟨admitted.core.source.frontEndExact.trans admitted.core.source.frontEndOwn,
+    ObjectiveBendPublication.replayedCore_is_lowering admitted.core.source.replayExact⟩
+
+#assert_axioms admitted_front_end
 end Minidregg.Kernel.ObjectiveBendAdmissionSemantics

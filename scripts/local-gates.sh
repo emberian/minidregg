@@ -30,10 +30,10 @@
 #   exports        every @[export] is called from native/ or allowlisted with a reason
 #   shell-paths    no shell-line parser confines a friend-typed path by is_absolute();
 #                  paths go through shell::session_fs (scripts/check-shell-paths.sh; self-tests)
-#   objective-frontend  the Objective Bend front end (scripts/check-objective-frontend.sh): elaborate
-#                  tests, C4 vectors, parser, preview cohort, TS/Lean elaborator translation
-#                  validation (builds Compiler.ObjectiveBendElaborate), typed examples, and the
-#                  tutorial re-run; a Lean row with no built tree is RED ("needs warm base")
+#   objective-frontend  the Objective Bend front end (scripts/check-objective-frontend.sh), all through
+#                  the Lean front end: identity manifest, elaboration cohort, C4 vectors, parser,
+#                  preview cohort, typed examples, and the tutorial re-run; a row with no built
+#                  tree is RED ("needs warm base")
 #   website        website/status.html is what website/gen-status.py generates from README.md's
 #                  Honest state table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused

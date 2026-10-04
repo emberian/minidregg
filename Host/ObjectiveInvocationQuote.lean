@@ -358,16 +358,17 @@ def constants : Json := Json.mkObj [
   ("resultCodec",hexDigest ObjectiveBendResultAdapter.codecId),
   ("combinedCodec",hexDigest ObjectiveBendNativeAdmission.combinedCodec),
   ("genericCodec",hexDigest ObjectiveBendGenericResult.codecId),
-  ("resultStorageSchema",hexDigest ObjectiveBendResultAdapter.storageSchema)]
+  ("resultStorageSchema",hexDigest ObjectiveBendResultAdapter.storageSchema),
+  ("frontEnd",Json.str ObjectiveBendFrontEndIdentity.identity)]
 
 /-- Operator policy authoring: JSON → canonical policy hex for the
 `objectiveInvocation` pin. The edition is always this build's semanticsId. -/
 def authorPolicy (json : Json) : Except String String := do
   if (← field json "schema") != Json.str "dregg.objective-bend.policy.v1" then
     throw "schema must be dregg.objective-bend.policy.v1"
-  let tooling ← field json "tooling"
-  let text (value : Json) (name : String) : Except String String := do
-    ((← field value name).getStr?).mapError fun _ => s!"{name} must be a string"
+  let frontEnd ← ((← field json "frontEnd").getStr?).mapError fun _ => "frontEnd must be a string"
+  if frontEnd != ObjectiveBendFrontEndIdentity.identity then
+    throw s!"frontEnd must be this Host's front end {ObjectiveBendFrontEndIdentity.identity} (objective-constants)"
   let outputs ← (← arrayOf json "outputs").mapM fun value => do
     let hex ← (value.getStr?).mapError fun _ => "outputs must be hex digests"
     let some bytes := ObjectiveBendPlanAdapter.unhex hex.toList | throw "outputs must be lowercase hex"
@@ -381,7 +382,7 @@ def authorPolicy (json : Json) : Except String String := do
     throw s!"tariff must be version {ObjectiveBendNativeAdmission.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
     ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
-    ⟨← text tooling "parserSha256",← text tooling "frontendSha256",← text tooling "elaboratorSha256"⟩,tariff⟩
+    frontEnd,tariff⟩
   let encoded := ObjectiveBendNativeAdmission.encodePolicy policy
   if ObjectiveBendNativeAdmission.decodePolicy encoded != some policy then throw "policy does not round-trip"
   pure (ObjectiveBendNativeInput.hex encoded)

@@ -1,6 +1,6 @@
-/- C4 linearization (ltuo §7.4.4): C3 plus the suffix property. The same
-algorithm as native/bend-source/objective-c4.ts (itself a port of pommette.scm
-`c4-linearize`). Specifications are identified by declaration keys. -/
+/- C4 linearization (ltuo §7.4.4): C3 plus the suffix property. A port of
+pommette.scm `c4-linearize`; its published vectors are compiled theorems in
+`Compiler.ObjectiveBendC4Vectors`. Specifications are identified by declaration keys. -/
 import Std.Data.HashMap
 namespace Minidregg.Compiler.ObjectiveBendC4
 set_option autoImplicit false
@@ -144,8 +144,8 @@ identities: the precedence list (and its most specific suffix) of the renamed
 presentation is the renamed result, and a refusal stays a refusal. It is a
 claim about the ORDERED presentation (local parent sequences and suffix
 marks), not about a bare DAG: a bare symmetric poset admits no equivariant
-strict order. Current evidence: native/bend-source/objective-c4-tests.ts
-checks it on 4000 seeded random DAGs with suffix marks. Its premises are
+strict order. Current evidence: `Compiler.ObjectiveBendC4Vectors.ordered_presentation_invariance_4000`
+checks it (compiled) on 4000 seeded random DAGs with suffix marks. Its premises are
 inhabited by the identity renaming. -/
 def OrderedPresentationInvariant : Prop :=
   ∀ (g : Graph) (to back : String → String),

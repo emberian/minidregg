@@ -6,21 +6,25 @@
 # verdict is red, not green: the verdict is read from the artifact, not the exit code
 # alone). The exit status is the number of red rows. Logs: build-logs/objective-frontend/.
 #
-#   TypeScript only (bun):
-#     elaborate-tests   native/bend-source/objective-elaborate-tests.ts
-#     c4-tests          native/bend-source/objective-c4-tests.ts (pommette vectors, 4000 DAGs)
+# There is one front end, in Lean (Host/ObjectiveBendFrontEnd: Compiler/ObjectiveBendParse,
+# Compiler/ObjectiveBendElaborate, Compiler/ObjectiveBendC4); every row drives it. Rows need a
+# built Lean tree (LAKE_ROOT, default this checkout, where the needed modules are built first):
+#     identity          the compiled-in front-end identity's manifest equals sha256sum of the
+#                       listed source files (the pin names exactly these bytes)
+#     elaborate-tests   tests/objective-bend-source/check-elaborate.ts (the elaboration cohort)
+#     c4-tests          Compiler/ObjectiveBendC4Vectors: pommette vectors, refusals and the
+#                       ordered-presentation invariance on 4000 seeded DAGs (compiled theorems)
 #     check-parser      tests/objective-bend-source/check-parser.ts
-#   Need a built Lean tree (LAKE_ROOT, default this checkout) with the Theory oleans:
 #     check-preview     tests/objective-bend-source/check-preview.ts over preview-cohort.json
-#     elaborate-tv      translation validation: Compiler/ObjectiveBendElaborate (Lean) against
-#                       the TS elaborator; builds Compiler.ObjectiveBendElaborate first, which
-#                       no default lake target does (it is in ResearchWip only)
+#     publication       tests/objective-native/PublicationReplay.lean: what the Host publishes is
+#                       what the receiver's replay recomputes; foreign pin, changed source and
+#                       tampered core are refused
 #     examples          scripts/check-objective-examples.sh (typed packets, drivers, cohort)
 #     tutorial          scripts/check-objective-tutorial.ts: every command block of
 #                       docs/OBJECTIVE-BEND-TUTORIAL.md re-run through docs/tutorial/run.ts
 #
-# A Lean row with no lean binary, no Theory oleans or no Compiler/ObjectiveBendElaborate.olean
-# is RED and says "needs warm base": nothing is skipped and nothing falls back.
+# A row with no lean binary or no built front end is RED and says "needs warm base":
+# nothing is skipped and nothing falls back.
 # env: LAKE_ROOT  a built tree providing .lake/build/lib/lean (default: this checkout; when it
 #                 is another tree it is only read, never built into)
 #      BUN        bun binary (default: bun)
@@ -35,53 +39,66 @@ logs=$repo/build-logs/objective-frontend; mkdir -p "$logs"
 work=$(mktemp -d "${TMPDIR:-/tmp}/objective-frontend.XXXXXX")
 only=${OBJECTIVE_FRONTEND_ONLY:-}
 export LEAN_NUM_THREADS=2
-ROWS=(elaborate-tests c4-tests check-parser check-preview elaborate-tv examples tutorial)
+ROWS=(identity elaborate-tests c4-tests check-parser check-preview publication examples tutorial)
 declare -A STATUS
 red=0
 
 need_bun() { command -v "$bun" >/dev/null 2>&1 || { echo "needs bun: '$bun' not on PATH"; return 1; }; }
 need_lean() {
   command -v lean >/dev/null 2>&1 || { echo "needs warm base: no lean binary on PATH"; return 1; }
-  [ -d "$lake_root/.lake/build/lib/lean/Theory" ] || { echo "needs warm base: no built Theory oleans under $lake_root/.lake/build/lib/lean"; return 1; }
-}
-need_elaborator_olean() {
   if [ "$lake_root" = "$repo" ]; then
-    lake build Compiler.ObjectiveBendElaborate || return 1
+    lake build Host.ObjectiveBendFrontEnd Host.ObjectivePackageAuthor Compiler.ObjectiveBendC4Vectors || return 1
   fi
-  [ -f "$lake_root/.lake/build/lib/lean/Compiler/ObjectiveBendElaborate.olean" ] \
-    || { echo "needs warm base: Compiler/ObjectiveBendElaborate.olean is not built under $lake_root"; return 1; }
+  [ -f "$lake_root/.lake/build/lib/lean/Host/ObjectiveBendFrontEnd.olean" ] \
+    || { echo "needs warm base: no built front end (Host/ObjectiveBendFrontEnd.olean) under $lake_root"; return 1; }
 }
 lean_path() { (cd "$lake_root" && lake env printenv LEAN_PATH); }
+front_env() { LEAN=$(cd "$lake_root" && lake env which lean) && LEAN_PATH=$(lean_path) && export LEAN LEAN_PATH; }
 
-r_elaborate-tests() { need_bun && "$bun" native/bend-source/objective-elaborate-tests.ts; }
-r_c4-tests()        { need_bun && "$bun" native/bend-source/objective-c4-tests.ts; }
-r_check-parser()    { need_bun && "$bun" tests/objective-bend-source/check-parser.ts; }
-r_check-preview()   {
-  need_bun && need_lean || return 1
-  local lean; lean=$(cd "$lake_root" && lake env which lean) || return 1
-  "$bun" tests/objective-bend-source/check-preview.ts tests/objective-bend-source/preview-cohort.json \
-    "$work/preview" "$lean" "$lake_root/.lake/build/lib/lean" "$(command -v "$bun")"
+r_identity() {
+  need_lean && front_env || return 1
+  "$LEAN" --run Host/ObjectiveBendFrontEndMain.lean identity > "$work/identity.json" || return 1
+  python3 - "$work/identity.json" <<'PY'
+import hashlib,json,sys
+j=json.load(open(sys.argv[1]));lines=j["manifest"].rstrip("\n").split("\n")
+assert lines[0]=="DREGG/OBJECTIVE-BEND/FRONT-END/v1",lines[0]
+for line in lines[1:]:
+  name,digest=line.split(" ")
+  actual=hashlib.sha256(open("Compiler/"+name,"rb").read()).hexdigest()
+  assert actual==digest,f"{name}: compiled-in {digest}, on disk {actual} (stale build)"
+assert hashlib.sha256(j["manifest"].encode()).hexdigest()==j["frontEnd"],"identity is not the manifest hash"
+print("FRONT-END IDENTITY PASS: "+j["frontEnd"]+" = sha256 of the manifest of "+str(len(lines)-1)+" source files, each matching the checkout")
+PY
 }
-r_elaborate-tv()    {
-  need_bun && need_lean && need_elaborator_olean || return 1
-  local lp; lp=$(lean_path) || return 1
-  "$bun" native/bend-source/objective-elaborate-tv.ts "$work/tv" env "LEAN_PATH=$lp" lean --run Host/ObjectiveBendElaborateRun.lean
+r_elaborate-tests() { need_bun && need_lean && front_env && "$bun" tests/objective-bend-source/check-elaborate.ts; }
+r_c4-tests() {
+  need_lean && front_env || return 1
+  printf 'import Compiler.ObjectiveBendC4Vectors\n#eval IO.println Minidregg.Compiler.ObjectiveBendC4Vectors.summary\n' > "$work/c4.lean"
+  "$LEAN" "$work/c4.lean"
+}
+r_check-parser()    { need_bun && need_lean && front_env && "$bun" tests/objective-bend-source/check-parser.ts; }
+r_check-preview()   {
+  need_bun && need_lean && front_env || return 1
+  "$bun" tests/objective-bend-source/check-preview.ts tests/objective-bend-source/preview-cohort.json \
+    "$work/preview" "$LEAN" "$LEAN_PATH"
+}
+r_publication()     {
+  need_lean && front_env || return 1
+  "$LEAN" --run tests/objective-native/PublicationReplay.lean world/NativeReceipt.obend note
 }
 r_examples()        {
   need_bun && need_lean || return 1
   LAKE_ROOT=$lake_root BUN=$bun WORK=$work/examples bash scripts/check-objective-examples.sh
 }
-r_tutorial()        {
-  need_bun && need_lean || return 1
-  LEAN=$(cd "$lake_root" && lake env which lean) OLEAN_ROOT=$lake_root/.lake/build/lib/lean "$bun" scripts/check-objective-tutorial.ts
-}
+r_tutorial()        { need_bun && need_lean && front_env && "$bun" scripts/check-objective-tutorial.ts; }
 # The marker each row must print (extended regex); a row with no marker line is red.
 declare -A MARK=(
+  [identity]='^FRONT-END IDENTITY PASS: [0-9a-f]{64} '
   [elaborate-tests]='^EVERY OBEND ELABORATES: [0-9]+ files$'
   [c4-tests]='^C4 ORDERED-PRESENTATION INVARIANCE PASS'
   [check-parser]='^EVERY OBEND PARSES: [0-9]+ files$'
   [check-preview]='"status":"passed"'
-  [elaborate-tv]='"status":"passed"'
+  [publication]='^PUBLICATION REPLAY PASS: '
   [examples]='^results: '
   [tutorial]='^TUTORIAL PASS: [0-9]+ commands'
 )

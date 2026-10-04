@@ -1,816 +1,284 @@
-{
-  "schema": "dregg.objective-bend.typed-core.v3",
-  "term": {
-    "tag": "app",
-    "fn": {
-      "tag": "get",
-      "target": {
-        "tag": "fix",
-        "spec": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "record",
-            "fields": [
-              {
-                "name": "package",
-                "value": {
-                  "tag": "label",
-                  "value": "[\"GenericExtension\"]"
-                }
-              }
-            ]
-          },
-          "extension": {
-            "tag": "lam",
-            "body": {
-              "tag": "lam",
-              "body": {
-                "tag": "extend",
-                "inherited": {
-                  "tag": "bound",
-                  "index": 0
-                },
-                "fields": [
-                  {
-                    "name": "GenericExtension.AddOne",
-                    "value": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "binary",
-                          "primitive": "add",
-                          "left": {
-                            "tag": "bound",
-                            "index": 0
-                          },
-                          "right": {
-                            "tag": "nat",
-                            "value": "1"
-                          }
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "name": "GenericExtension.AddSelf",
-                    "value": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "binary",
-                          "primitive": "add",
-                          "left": {
-                            "tag": "bound",
-                            "index": 0
-                          },
-                          "right": {
-                            "tag": "bound",
-                            "index": 1
-                          }
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "name": "GenericExtension.combined",
-                    "value": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "fix",
-                        "spec": {
-                          "tag": "app",
-                          "fn": {
-                            "tag": "app",
-                            "fn": {
-                              "tag": "lam",
-                              "body": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "specification",
-                                  "metadata": {
-                                    "tag": "record",
-                                    "fields": [
-                                      {
-                                        "name": "operator",
-                                        "value": {
-                                          "tag": "label",
-                                          "value": "compose"
-                                        }
-                                      },
-                                      {
-                                        "name": "inherited",
-                                        "value": {
-                                          "tag": "bound",
-                                          "index": 1
-                                        }
-                                      },
-                                      {
-                                        "name": "wrapping",
-                                        "value": {
-                                          "tag": "bound",
-                                          "index": 0
-                                        }
-                                      }
-                                    ]
-                                  },
-                                  "extension": {
-                                    "tag": "mix",
-                                    "lower": {
-                                      "tag": "bound",
-                                      "index": 1
-                                    },
-                                    "upper": {
-                                      "tag": "bound",
-                                      "index": 0
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "arg": {
-                              "tag": "get",
-                              "target": {
-                                "tag": "bound",
-                                "index": 2
-                              },
-                              "name": "GenericExtension.AddOne"
-                            }
-                          },
-                          "arg": {
-                            "tag": "get",
-                            "target": {
-                              "tag": "bound",
-                              "index": 2
-                            },
-                            "name": "GenericExtension.AddSelf"
-                          }
-                        },
-                        "seed": {
-                          "tag": "bound",
-                          "index": 0
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "name": "GenericExtension.addCaptured",
-                    "value": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "lam",
-                          "body": {
-                            "tag": "binary",
-                            "primitive": "add",
-                            "left": {
-                              "tag": "bound",
-                              "index": 0
-                            },
-                            "right": {
-                              "tag": "bound",
-                              "index": 2
-                            }
-                          }
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "name": "GenericExtension.reuseCaptured",
-                    "value": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "fix",
-                        "spec": {
-                          "tag": "app",
-                          "fn": {
-                            "tag": "app",
-                            "fn": {
-                              "tag": "lam",
-                              "body": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "specification",
-                                  "metadata": {
-                                    "tag": "record",
-                                    "fields": [
-                                      {
-                                        "name": "operator",
-                                        "value": {
-                                          "tag": "label",
-                                          "value": "compose"
-                                        }
-                                      },
-                                      {
-                                        "name": "inherited",
-                                        "value": {
-                                          "tag": "bound",
-                                          "index": 1
-                                        }
-                                      },
-                                      {
-                                        "name": "wrapping",
-                                        "value": {
-                                          "tag": "bound",
-                                          "index": 0
-                                        }
-                                      }
-                                    ]
-                                  },
-                                  "extension": {
-                                    "tag": "mix",
-                                    "lower": {
-                                      "tag": "bound",
-                                      "index": 1
-                                    },
-                                    "upper": {
-                                      "tag": "bound",
-                                      "index": 0
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "arg": {
-                              "tag": "app",
-                              "fn": {
-                                "tag": "get",
-                                "target": {
-                                  "tag": "bound",
-                                  "index": 2
-                                },
-                                "name": "GenericExtension.addCaptured"
-                              },
-                              "arg": {
-                                "tag": "nat",
-                                "value": "2"
-                              }
-                            }
-                          },
-                          "arg": {
-                            "tag": "app",
-                            "fn": {
-                              "tag": "get",
-                              "target": {
-                                "tag": "bound",
-                                "index": 2
-                              },
-                              "name": "GenericExtension.addCaptured"
-                            },
-                            "arg": {
-                              "tag": "nat",
-                              "value": "3"
-                            }
-                          }
-                        },
-                        "seed": {
-                          "tag": "bound",
-                          "index": 0
-                        }
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "seed": {
-          "tag": "record",
-          "fields": []
-        }
-      },
-      "name": "GenericExtension.reuseCaptured"
-    },
-    "arg": {
-      "tag": "nat",
-      "value": "5"
-    }
-  },
-  "types": [
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "1"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "wrapping",
-      "member": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "inherited",
-      "member": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "3"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "operator",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "4"
-      }
-    },
-    {
-      "tag": "specification",
-      "metadata": {
-        "tag": "ref",
-        "index": "5"
-      },
-      "extension": {
-        "tag": "ref",
-        "index": "2"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "6"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "2"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "GenericExtension.reuseCaptured",
-      "member": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "GenericExtension.addCaptured",
-      "member": {
-        "tag": "ref",
-        "index": "8"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "9"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "GenericExtension.combined",
-      "member": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "10"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "GenericExtension.AddSelf",
-      "member": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "11"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "GenericExtension.AddOne",
-      "member": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "12"
-      }
-    }
-  ],
-  "annotations": [
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1"
-      ],
-      "domain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "7"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "6"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "4"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "4",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "7"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "4",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "2"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "6"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    }
-  ],
-  "bounds": [
-    {
-      "index": "0",
-      "type": {
-        "tag": "ref",
-        "index": "13"
-      }
-    }
-  ],
-  "shareableVariables": [
-    "0"
-  ],
-  "fuel": "4096",
-  "context": [],
-  "sourceEntry": "GenericExtension.reuseCaptured",
-  "sourceModules": [
-    {
-      "name": "GenericExtension",
-      "sourceSha256": "b56ee9b65465f1c4463b12f40a71109feb0ee2381086a99d8772cf1bae62530f",
-      "astSha256": "2a3520cd88ca3de7bba11c388d253ee6e014c976134d2a7424ac2f64ce992386",
-      "imports": []
-    }
-  ],
-  "status": "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"
-}
+{"types":
+ [{"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "1"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "wrapping",
+   "member": {"tag": "ref", "index": "2"}},
+  {"tail": {"tag": "ref", "index": "3"},
+   "tag": "field",
+   "name": "inherited",
+   "member": {"tag": "ref", "index": "2"}},
+  {"tail": {"tag": "ref", "index": "4"},
+   "tag": "field",
+   "name": "operator",
+   "member": {"tag": "label"}},
+  {"tag": "specification",
+   "metadata": {"tag": "ref", "index": "5"},
+   "extension": {"tag": "ref", "index": "2"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "6"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "2"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "GenericExtension.reuseCaptured",
+   "member": {"tag": "ref", "index": "1"}},
+  {"tail": {"tag": "ref", "index": "9"},
+   "tag": "field",
+   "name": "GenericExtension.addCaptured",
+   "member": {"tag": "ref", "index": "8"}},
+  {"tail": {"tag": "ref", "index": "10"},
+   "tag": "field",
+   "name": "GenericExtension.combined",
+   "member": {"tag": "ref", "index": "1"}},
+  {"tail": {"tag": "ref", "index": "11"},
+   "tag": "field",
+   "name": "GenericExtension.AddSelf",
+   "member": {"tag": "ref", "index": "2"}},
+  {"tail": {"tag": "ref", "index": "12"},
+   "tag": "field",
+   "name": "GenericExtension.AddOne",
+   "member": {"tag": "ref", "index": "2"}}],
+ "term":
+ {"tag": "app",
+  "fn":
+  {"target":
+   {"tag": "fix",
+    "spec":
+    {"tag": "specification",
+     "metadata":
+     {"tag": "record",
+      "fields":
+      [{"value": {"value": "[\"GenericExtension\"]", "tag": "label"},
+        "name": "package"}]},
+     "extension":
+     {"tag": "lam",
+      "body":
+      {"tag": "lam",
+       "body":
+       {"tag": "extend",
+        "inherited": {"tag": "bound", "index": 0},
+        "fields":
+        [{"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "binary",
+             "right": {"value": "1", "tag": "nat"},
+             "primitive": "add",
+             "left": {"tag": "bound", "index": 0}}}},
+          "name": "GenericExtension.AddOne"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "binary",
+             "right": {"tag": "bound", "index": 1},
+             "primitive": "add",
+             "left": {"tag": "bound", "index": 0}}}},
+          "name": "GenericExtension.AddSelf"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "fix",
+            "spec":
+            {"tag": "app",
+             "fn":
+             {"tag": "app",
+              "fn":
+              {"tag": "lam",
+               "body":
+               {"tag": "lam",
+                "body":
+                {"tag": "specification",
+                 "metadata":
+                 {"tag": "record",
+                  "fields":
+                  [{"value": {"value": "compose", "tag": "label"},
+                    "name": "operator"},
+                   {"value": {"tag": "bound", "index": 1}, "name": "inherited"},
+                   {"value": {"tag": "bound", "index": 0},
+                    "name": "wrapping"}]},
+                 "extension":
+                 {"upper": {"tag": "bound", "index": 0},
+                  "tag": "mix",
+                  "lower": {"tag": "bound", "index": 1}}}}},
+              "arg":
+              {"target": {"tag": "bound", "index": 2},
+               "tag": "get",
+               "name": "GenericExtension.AddOne"}},
+             "arg":
+             {"target": {"tag": "bound", "index": 2},
+              "tag": "get",
+              "name": "GenericExtension.AddSelf"}},
+            "seed": {"tag": "bound", "index": 0}}},
+          "name": "GenericExtension.combined"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "lam",
+             "body":
+             {"tag": "binary",
+              "right": {"tag": "bound", "index": 2},
+              "primitive": "add",
+              "left": {"tag": "bound", "index": 0}}}}},
+          "name": "GenericExtension.addCaptured"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "fix",
+            "spec":
+            {"tag": "app",
+             "fn":
+             {"tag": "app",
+              "fn":
+              {"tag": "lam",
+               "body":
+               {"tag": "lam",
+                "body":
+                {"tag": "specification",
+                 "metadata":
+                 {"tag": "record",
+                  "fields":
+                  [{"value": {"value": "compose", "tag": "label"},
+                    "name": "operator"},
+                   {"value": {"tag": "bound", "index": 1}, "name": "inherited"},
+                   {"value": {"tag": "bound", "index": 0},
+                    "name": "wrapping"}]},
+                 "extension":
+                 {"upper": {"tag": "bound", "index": 0},
+                  "tag": "mix",
+                  "lower": {"tag": "bound", "index": 1}}}}},
+              "arg":
+              {"tag": "app",
+               "fn":
+               {"target": {"tag": "bound", "index": 2},
+                "tag": "get",
+                "name": "GenericExtension.addCaptured"},
+               "arg": {"value": "2", "tag": "nat"}}},
+             "arg":
+             {"tag": "app",
+              "fn":
+              {"target": {"tag": "bound", "index": 2},
+               "tag": "get",
+               "name": "GenericExtension.addCaptured"},
+              "arg": {"value": "3", "tag": "nat"}}},
+            "seed": {"tag": "bound", "index": 0}}},
+          "name": "GenericExtension.reuseCaptured"}]}}}},
+    "seed": {"tag": "record", "fields": []}},
+   "tag": "get",
+   "name": "GenericExtension.reuseCaptured"},
+  "arg": {"value": "5", "tag": "nat"}},
+ "status":
+ "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority",
+ "sourceModules":
+ [{"sourceSha256":
+   "b56ee9b65465f1c4463b12f40a71109feb0ee2381086a99d8772cf1bae62530f",
+   "name": "GenericExtension",
+   "imports": []}],
+ "sourceEntry": "GenericExtension.reuseCaptured",
+ "shareableVariables": ["0"],
+ "schema": "dregg.objective-bend.typed-core.v3",
+ "fuel": "4096",
+ "context": [],
+ "bounds": [{"type": {"tag": "ref", "index": "13"}, "index": "0"}],
+ "annotations":
+ [{"reuse": "reusable",
+   "path": ["0", "0", "0", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "variable", "index": "0"},
+   "codomain": {"tag": "ref", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "1"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "1"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "2"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "2", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "7"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "2", "0", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "6"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "3"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "2"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "3", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "ref", "index": "1"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "3", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "4"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "4", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "7"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "0", "1", "0", "0", "1", "4", "0", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "2"},
+   "codomain": {"tag": "ref", "index": "6"}}]}

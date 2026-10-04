@@ -1,0 +1,40 @@
+{
+ "schema": "dregg.objective-bend.front-end-port-evidence.v1",
+ "date": "2026-10-04",
+ "meaning": "Translation validation of the Lean front end against the TypeScript parser and elaborator it replaced, run before the TypeScript was deleted. Executed evidence about agreement on these inputs; not a correctness theorem.",
+ "parser": {
+  "lean": "Compiler/ObjectiveBendParse.lean",
+  "typescript": "native/bend-source/objective-parser.ts at 796d7d7a",
+  "where": "local Mac, lean v4.30.0 (lean --run), bun",
+  "jobs": 2854,
+  "corpus": "68 git-tracked .obend files; 40 seeded mutants of each (delete/insert/duplicate-line/re-indent); 33 probes with and without an edition line",
+  "identicalAst": 2018,
+  "identicalRefusal": 832,
+  "refusalDetailDiffer": 0,
+  "divergences": [
+   {
+    "names": [
+     "probe8",
+     "probe-e8",
+     "probe29",
+     "probe-e29"
+    ],
+    "reason": "deliberate: the TypeScript accepted `x valueOf x` (an Object.prototype key read as a precedence) and a string literal with a lone UTF-16 surrogate escape; the Lean parser refuses both"
+   }
+  ]
+ },
+ "pipeline": {
+  "lean": "Host/ObjectiveBendFrontEnd batch (parse, import locks, elaborate, project, typing proposal)",
+  "typescript": "objective-parser.ts + objective-elaborate.ts at 796d7d7a (elaborate + literalAnnotations)",
+  "where": "persvati lane elaborator, after the prelude became .obend source",
+  "jobs": 302,
+  "corpus": "every non-type declaration of every tests/objective-bend-source/*.obend (definition mode), every preview-cohort invocation (application mode with its arguments and projections), and the 34 probes of objective-elaborate-tv.ts",
+  "compared": "core term; typing proposal types, annotations, bounds, shareable variables, fuel, context, source entry; or both unsupported; refusals must agree",
+  "verdicts": {
+   "agree": 286,
+   "agree: both refuse": 16
+  },
+  "disagreements": 0,
+  "falsifier": "a one-label mutation of a Lean term is detected by the same comparison"
+ }
+}

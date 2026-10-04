@@ -1,1409 +1,498 @@
-{
-  "schema": "dregg.objective-bend.typed-core.v3",
-  "term": {
-    "tag": "get",
-    "target": {
-      "tag": "fix",
-      "spec": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "record",
-          "fields": [
-            {
-              "name": "package",
-              "value": {
-                "tag": "label",
-                "value": "[\"TwiceReview\"]"
-              }
-            }
-          ]
-        },
-        "extension": {
-          "tag": "lam",
-          "body": {
-            "tag": "lam",
-            "body": {
-              "tag": "extend",
-              "inherited": {
-                "tag": "bound",
-                "index": 0
-              },
-              "fields": [
-                {
-                  "name": "TwiceReview.BaseReview",
-                  "value": {
-                    "tag": "specification",
-                    "metadata": {
-                      "tag": "record",
-                      "fields": [
-                        {
-                          "name": "name",
-                          "value": {
-                            "tag": "label",
-                            "value": "TwiceReview.BaseReview"
-                          }
-                        },
-                        {
-                          "name": "interface",
-                          "value": {
-                            "tag": "label",
-                            "value": "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":156,\"line\":8,\"start\":126}}],\"parents\":[],\"precedence\":[\"TwiceReview.BaseReview\"],\"requirements\":[],\"suffix\":false,\"targetType\":\"Review\"}"
-                          }
-                        },
-                        {
-                          "name": "laws",
-                          "value": {
-                            "tag": "record",
-                            "fields": []
-                          }
-                        }
-                      ]
-                    },
-                    "extension": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "extend",
-                          "inherited": {
-                            "tag": "bound",
-                            "index": 0
-                          },
-                          "fields": [
-                            {
-                              "name": "review",
-                              "value": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "binary",
-                                  "primitive": "add",
-                                  "left": {
-                                    "tag": "bound",
-                                    "index": 0
-                                  },
-                                  "right": {
-                                    "tag": "nat",
-                                    "value": "1"
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "TwiceReview.TwiceReview",
-                  "value": {
-                    "tag": "specification",
-                    "metadata": {
-                      "tag": "record",
-                      "fields": [
-                        {
-                          "name": "name",
-                          "value": {
-                            "tag": "label",
-                            "value": "TwiceReview.TwiceReview"
-                          }
-                        },
-                        {
-                          "name": "interface",
-                          "value": {
-                            "tag": "label",
-                            "value": "{\"methods\":[{\"name\":\"twice\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":269,\"line\":13,\"start\":240}}],\"parents\":[],\"precedence\":[\"TwiceReview.TwiceReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":237,\"line\":12,\"start\":203}}],\"suffix\":false,\"targetType\":\"Review\"}"
-                          }
-                        },
-                        {
-                          "name": "laws",
-                          "value": {
-                            "tag": "record",
-                            "fields": [
-                              {
-                                "name": "twice_distinct",
-                                "value": {
-                                  "tag": "lam",
-                                  "body": {
-                                    "tag": "lam",
-                                    "body": {
-                                      "tag": "lam",
-                                      "body": {
-                                        "tag": "binary",
-                                        "primitive": "equal",
-                                        "left": {
-                                          "tag": "app",
-                                          "fn": {
-                                            "tag": "get",
-                                            "target": {
-                                              "tag": "bound",
-                                              "index": 2
-                                            },
-                                            "name": "twice"
-                                          },
-                                          "arg": {
-                                            "tag": "bound",
-                                            "index": 0
-                                          }
-                                        },
-                                        "right": {
-                                          "tag": "app",
-                                          "fn": {
-                                            "tag": "get",
-                                            "target": {
-                                              "tag": "bound",
-                                              "index": 2
-                                            },
-                                            "name": "review"
-                                          },
-                                          "arg": {
-                                            "tag": "app",
-                                            "fn": {
-                                              "tag": "get",
-                                              "target": {
-                                                "tag": "bound",
-                                                "index": 2
-                                              },
-                                              "name": "review"
-                                            },
-                                            "arg": {
-                                              "tag": "bound",
-                                              "index": 0
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            ]
-                          }
-                        }
-                      ]
-                    },
-                    "extension": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "extend",
-                          "inherited": {
-                            "tag": "bound",
-                            "index": 0
-                          },
-                          "fields": [
-                            {
-                              "name": "twice",
-                              "value": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "app",
-                                  "fn": {
-                                    "tag": "get",
-                                    "target": {
-                                      "tag": "bound",
-                                      "index": 2
-                                    },
-                                    "name": "review"
-                                  },
-                                  "arg": {
-                                    "tag": "app",
-                                    "fn": {
-                                      "tag": "get",
-                                      "target": {
-                                        "tag": "bound",
-                                        "index": 2
-                                      },
-                                      "name": "review"
-                                    },
-                                    "arg": {
-                                      "tag": "bound",
-                                      "index": 0
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "TwiceReview.AugmentedReview",
-                  "value": {
-                    "tag": "specification",
-                    "metadata": {
-                      "tag": "record",
-                      "fields": [
-                        {
-                          "name": "name",
-                          "value": {
-                            "tag": "label",
-                            "value": "TwiceReview.AugmentedReview"
-                          }
-                        },
-                        {
-                          "name": "interface",
-                          "value": {
-                            "tag": "label",
-                            "value": "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":496,\"line\":19,\"start\":466}}],\"parents\":[],\"precedence\":[\"TwiceReview.AugmentedReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":463,\"line\":18,\"start\":429}}],\"suffix\":false,\"targetType\":\"Review\"}"
-                          }
-                        },
-                        {
-                          "name": "laws",
-                          "value": {
-                            "tag": "record",
-                            "fields": []
-                          }
-                        }
-                      ]
-                    },
-                    "extension": {
-                      "tag": "lam",
-                      "body": {
-                        "tag": "lam",
-                        "body": {
-                          "tag": "extend",
-                          "inherited": {
-                            "tag": "bound",
-                            "index": 0
-                          },
-                          "fields": [
-                            {
-                              "name": "review",
-                              "value": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "binary",
-                                  "primitive": "add",
-                                  "left": {
-                                    "tag": "app",
-                                    "fn": {
-                                      "tag": "get",
-                                      "target": {
-                                        "tag": "bound",
-                                        "index": 1
-                                      },
-                                      "name": "review"
-                                    },
-                                    "arg": {
-                                      "tag": "bound",
-                                      "index": 0
-                                    }
-                                  },
-                                  "right": {
-                                    "tag": "nat",
-                                    "value": "1"
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "TwiceReview.reviewTarget",
-                  "value": {
-                    "tag": "lam",
-                    "body": {
-                      "tag": "fix",
-                      "spec": {
-                        "tag": "app",
-                        "fn": {
-                          "tag": "app",
-                          "fn": {
-                            "tag": "lam",
-                            "body": {
-                              "tag": "lam",
-                              "body": {
-                                "tag": "specification",
-                                "metadata": {
-                                  "tag": "record",
-                                  "fields": [
-                                    {
-                                      "name": "operator",
-                                      "value": {
-                                        "tag": "label",
-                                        "value": "compose"
-                                      }
-                                    },
-                                    {
-                                      "name": "inherited",
-                                      "value": {
-                                        "tag": "bound",
-                                        "index": 1
-                                      }
-                                    },
-                                    {
-                                      "name": "wrapping",
-                                      "value": {
-                                        "tag": "bound",
-                                        "index": 0
-                                      }
-                                    }
-                                  ]
-                                },
-                                "extension": {
-                                  "tag": "mix",
-                                  "lower": {
-                                    "tag": "bound",
-                                    "index": 1
-                                  },
-                                  "upper": {
-                                    "tag": "bound",
-                                    "index": 0
-                                  }
-                                }
-                              }
-                            }
-                          },
-                          "arg": {
-                            "tag": "app",
-                            "fn": {
-                              "tag": "app",
-                              "fn": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "lam",
-                                  "body": {
-                                    "tag": "specification",
-                                    "metadata": {
-                                      "tag": "record",
-                                      "fields": [
-                                        {
-                                          "name": "operator",
-                                          "value": {
-                                            "tag": "label",
-                                            "value": "compose"
-                                          }
-                                        },
-                                        {
-                                          "name": "inherited",
-                                          "value": {
-                                            "tag": "bound",
-                                            "index": 1
-                                          }
-                                        },
-                                        {
-                                          "name": "wrapping",
-                                          "value": {
-                                            "tag": "bound",
-                                            "index": 0
-                                          }
-                                        }
-                                      ]
-                                    },
-                                    "extension": {
-                                      "tag": "mix",
-                                      "lower": {
-                                        "tag": "bound",
-                                        "index": 1
-                                      },
-                                      "upper": {
-                                        "tag": "bound",
-                                        "index": 0
-                                      }
-                                    }
-                                  }
-                                }
-                              },
-                              "arg": {
-                                "tag": "get",
-                                "target": {
-                                  "tag": "bound",
-                                  "index": 2
-                                },
-                                "name": "TwiceReview.BaseReview"
-                              }
-                            },
-                            "arg": {
-                              "tag": "get",
-                              "target": {
-                                "tag": "bound",
-                                "index": 2
-                              },
-                              "name": "TwiceReview.TwiceReview"
-                            }
-                          }
-                        },
-                        "arg": {
-                          "tag": "get",
-                          "target": {
-                            "tag": "bound",
-                            "index": 2
-                          },
-                          "name": "TwiceReview.AugmentedReview"
-                        }
-                      },
-                      "seed": {
-                        "tag": "bound",
-                        "index": 0
-                      }
-                    }
-                  }
-                },
-                {
-                  "name": "TwiceReview.twiceOfThree",
-                  "value": {
-                    "tag": "app",
-                    "fn": {
+{"types":
+ [{"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "twice",
+   "member": {"tag": "ref", "index": "1"}},
+  {"tail": {"tag": "ref", "index": "2"},
+   "tag": "field",
+   "name": "review",
+   "member": {"tag": "ref", "index": "1"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "boolean"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "5"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "laws",
+   "member": {"tag": "emptyRow"}},
+  {"tail": {"tag": "ref", "index": "7"},
+   "tag": "field",
+   "name": "interface",
+   "member": {"tag": "label"}},
+  {"tail": {"tag": "ref", "index": "8"},
+   "tag": "field",
+   "name": "name",
+   "member": {"tag": "label"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "4"}},
+  {"tag": "specification",
+   "metadata": {"tag": "ref", "index": "9"},
+   "extension": {"tag": "ref", "index": "10"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "6"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "twice_distinct",
+   "member": {"tag": "ref", "index": "12"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "laws",
+   "member": {"tag": "ref", "index": "13"}},
+  {"tail": {"tag": "ref", "index": "14"},
+   "tag": "field",
+   "name": "interface",
+   "member": {"tag": "label"}},
+  {"tail": {"tag": "ref", "index": "15"},
+   "tag": "field",
+   "name": "name",
+   "member": {"tag": "label"}},
+  {"tag": "specification",
+   "metadata": {"tag": "ref", "index": "16"},
+   "extension": {"tag": "ref", "index": "10"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "wrapping",
+   "member": {"tag": "ref", "index": "17"}},
+  {"tail": {"tag": "ref", "index": "18"},
+   "tag": "field",
+   "name": "inherited",
+   "member": {"tag": "ref", "index": "11"}},
+  {"tail": {"tag": "ref", "index": "19"},
+   "tag": "field",
+   "name": "operator",
+   "member": {"tag": "label"}},
+  {"tag": "specification",
+   "metadata": {"tag": "ref", "index": "20"},
+   "extension": {"tag": "ref", "index": "10"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "wrapping",
+   "member": {"tag": "ref", "index": "11"}},
+  {"tail": {"tag": "ref", "index": "22"},
+   "tag": "field",
+   "name": "inherited",
+   "member": {"tag": "ref", "index": "21"}},
+  {"tail": {"tag": "ref", "index": "23"},
+   "tag": "field",
+   "name": "operator",
+   "member": {"tag": "label"}},
+  {"tag": "specification",
+   "metadata": {"tag": "ref", "index": "24"},
+   "extension": {"tag": "ref", "index": "10"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "11"},
+   "codomain": {"tag": "ref", "index": "25"}},
+  {"tag": "arrow",
+   "reuse": "reusable",
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "17"},
+   "codomain": {"tag": "ref", "index": "21"}},
+  {"tail": {"tag": "emptyRow"},
+   "tag": "field",
+   "name": "TwiceReview.twiceOfThree",
+   "member": {"tag": "natural"}},
+  {"tail": {"tag": "ref", "index": "28"},
+   "tag": "field",
+   "name": "TwiceReview.reviewTarget",
+   "member": {"tag": "ref", "index": "4"}},
+  {"tail": {"tag": "ref", "index": "29"},
+   "tag": "field",
+   "name": "TwiceReview.AugmentedReview",
+   "member": {"tag": "ref", "index": "11"}},
+  {"tail": {"tag": "ref", "index": "30"},
+   "tag": "field",
+   "name": "TwiceReview.TwiceReview",
+   "member": {"tag": "ref", "index": "17"}},
+  {"tail": {"tag": "ref", "index": "31"},
+   "tag": "field",
+   "name": "TwiceReview.BaseReview",
+   "member": {"tag": "ref", "index": "11"}}],
+ "term":
+ {"target":
+  {"tag": "fix",
+   "spec":
+   {"tag": "specification",
+    "metadata":
+    {"tag": "record",
+     "fields":
+     [{"value": {"value": "[\"TwiceReview\"]", "tag": "label"},
+       "name": "package"}]},
+    "extension":
+    {"tag": "lam",
+     "body":
+     {"tag": "lam",
+      "body":
+      {"tag": "extend",
+       "inherited": {"tag": "bound", "index": 0},
+       "fields":
+       [{"value":
+         {"tag": "specification",
+          "metadata":
+          {"tag": "record",
+           "fields":
+           [{"value": {"value": "TwiceReview.BaseReview", "tag": "label"},
+             "name": "name"},
+            {"value":
+             {"value":
+              "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":156,\"line\":8,\"start\":126}}],\"parents\":[],\"precedence\":[\"TwiceReview.BaseReview\"],\"requirements\":[],\"suffix\":false,\"targetType\":\"Review\"}",
+              "tag": "label"},
+             "name": "interface"},
+            {"value": {"tag": "record", "fields": []}, "name": "laws"}]},
+          "extension":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "extend",
+             "inherited": {"tag": "bound", "index": 0},
+             "fields":
+             [{"value":
+               {"tag": "lam",
+                "body":
+                {"tag": "binary",
+                 "right": {"value": "1", "tag": "nat"},
+                 "primitive": "add",
+                 "left": {"tag": "bound", "index": 0}}},
+               "name": "review"}]}}}},
+         "name": "TwiceReview.BaseReview"},
+        {"value":
+         {"tag": "specification",
+          "metadata":
+          {"tag": "record",
+           "fields":
+           [{"value": {"value": "TwiceReview.TwiceReview", "tag": "label"},
+             "name": "name"},
+            {"value":
+             {"value":
+              "{\"methods\":[{\"name\":\"twice\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":269,\"line\":13,\"start\":240}}],\"parents\":[],\"precedence\":[\"TwiceReview.TwiceReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":237,\"line\":12,\"start\":203}}],\"suffix\":false,\"targetType\":\"Review\"}",
+              "tag": "label"},
+             "name": "interface"},
+            {"value":
+             {"tag": "record",
+              "fields":
+              [{"value":
+                {"tag": "lam",
+                 "body":
+                 {"tag": "lam",
+                  "body":
+                  {"tag": "lam",
+                   "body":
+                   {"tag": "binary",
+                    "right":
+                    {"tag": "app",
+                     "fn":
+                     {"target": {"tag": "bound", "index": 2},
                       "tag": "get",
-                      "target": {
-                        "tag": "app",
-                        "fn": {
-                          "tag": "get",
-                          "target": {
-                            "tag": "bound",
-                            "index": 1
-                          },
-                          "name": "TwiceReview.reviewTarget"
-                        },
-                        "arg": {
-                          "tag": "record",
-                          "fields": [
-                            {
-                              "name": "review",
-                              "value": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "bound",
-                                  "index": 0
-                                }
-                              }
-                            },
-                            {
-                              "name": "twice",
-                              "value": {
-                                "tag": "lam",
-                                "body": {
-                                  "tag": "bound",
-                                  "index": 0
-                                }
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      "name": "twice"
-                    },
-                    "arg": {
-                      "tag": "nat",
-                      "value": "3"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "seed": {
-        "tag": "record",
-        "fields": []
-      }
-    },
-    "name": "TwiceReview.twiceOfThree"
-  },
-  "types": [
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "twice",
-      "member": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "review",
-      "member": {
-        "tag": "ref",
-        "index": "1"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "2"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "boolean"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "5"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "laws",
-      "member": {
-        "tag": "emptyRow"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "interface",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "7"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "name",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "8"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "4"
-      }
-    },
-    {
-      "tag": "specification",
-      "metadata": {
-        "tag": "ref",
-        "index": "9"
-      },
-      "extension": {
-        "tag": "ref",
-        "index": "10"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "6"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "twice_distinct",
-      "member": {
-        "tag": "ref",
-        "index": "12"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "laws",
-      "member": {
-        "tag": "ref",
-        "index": "13"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "interface",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "14"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "name",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "15"
-      }
-    },
-    {
-      "tag": "specification",
-      "metadata": {
-        "tag": "ref",
-        "index": "16"
-      },
-      "extension": {
-        "tag": "ref",
-        "index": "10"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "wrapping",
-      "member": {
-        "tag": "ref",
-        "index": "17"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "inherited",
-      "member": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "18"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "operator",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "19"
-      }
-    },
-    {
-      "tag": "specification",
-      "metadata": {
-        "tag": "ref",
-        "index": "20"
-      },
-      "extension": {
-        "tag": "ref",
-        "index": "10"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "wrapping",
-      "member": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "inherited",
-      "member": {
-        "tag": "ref",
-        "index": "21"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "22"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "operator",
-      "member": {
-        "tag": "label"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "23"
-      }
-    },
-    {
-      "tag": "specification",
-      "metadata": {
-        "tag": "ref",
-        "index": "24"
-      },
-      "extension": {
-        "tag": "ref",
-        "index": "10"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "25"
-      }
-    },
-    {
-      "tag": "arrow",
-      "reuse": "reusable",
-      "parameter": "unrestricted",
-      "domain": {
-        "tag": "ref",
-        "index": "17"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "21"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "TwiceReview.twiceOfThree",
-      "member": {
-        "tag": "natural"
-      },
-      "tail": {
-        "tag": "emptyRow"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "TwiceReview.reviewTarget",
-      "member": {
-        "tag": "ref",
-        "index": "4"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "28"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "TwiceReview.AugmentedReview",
-      "member": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "29"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "TwiceReview.TwiceReview",
-      "member": {
-        "tag": "ref",
-        "index": "17"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "30"
-      }
-    },
-    {
-      "tag": "field",
-      "name": "TwiceReview.BaseReview",
-      "member": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "tail": {
-        "tag": "ref",
-        "index": "31"
-      }
-    }
-  ],
-  "annotations": [
-    {
-      "path": [
-        "0",
-        "0",
-        "1"
-      ],
-      "domain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "emptyRow"
-      },
-      "codomain": {
-        "tag": "variable",
-        "index": "0"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0",
-        "1"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "4"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0",
-        "2",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "6"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0",
-        "2",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "5"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0",
-        "2",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "boolean"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "1"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "4"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "1",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2",
-        "1"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "4"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "2",
-        "1",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "3"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "21"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "26"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "25"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "11"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "27"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "3",
-        "0",
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "0"
-      ],
-      "domain": {
-        "tag": "ref",
-        "index": "17"
-      },
-      "codomain": {
-        "tag": "ref",
-        "index": "21"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "4",
-        "0",
-        "0",
-        "1",
-        "0"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    },
-    {
-      "path": [
-        "0",
-        "0",
-        "1",
-        "0",
-        "0",
-        "1",
-        "4",
-        "0",
-        "0",
-        "1",
-        "1"
-      ],
-      "domain": {
-        "tag": "natural"
-      },
-      "codomain": {
-        "tag": "natural"
-      },
-      "parameter": "unrestricted",
-      "reuse": "reusable"
-    }
-  ],
-  "bounds": [
-    {
-      "index": "0",
-      "type": {
-        "tag": "ref",
-        "index": "32"
-      }
-    }
-  ],
-  "shareableVariables": [
-    "0"
-  ],
-  "fuel": "4096",
-  "context": [],
-  "sourceEntry": "TwiceReview.twiceOfThree",
-  "sourceModules": [
-    {
-      "name": "TwiceReview",
-      "sourceSha256": "b7adabd3dbd422059f9332d76a5d768aff600c5547f0dbb81b05a2bdd9932a0c",
-      "astSha256": "78affc02be0c9c56a733aaa2e3c961098500ce5f52cef59fd99a99dd8613ddba",
-      "imports": []
-    }
-  ],
-  "status": "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"
-}
+                      "name": "review"},
+                     "arg":
+                     {"tag": "app",
+                      "fn":
+                      {"target": {"tag": "bound", "index": 2},
+                       "tag": "get",
+                       "name": "review"},
+                      "arg": {"tag": "bound", "index": 0}}},
+                    "primitive": "equal",
+                    "left":
+                    {"tag": "app",
+                     "fn":
+                     {"target": {"tag": "bound", "index": 2},
+                      "tag": "get",
+                      "name": "twice"},
+                     "arg": {"tag": "bound", "index": 0}}}}}},
+                "name": "twice_distinct"}]},
+             "name": "laws"}]},
+          "extension":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "extend",
+             "inherited": {"tag": "bound", "index": 0},
+             "fields":
+             [{"value":
+               {"tag": "lam",
+                "body":
+                {"tag": "app",
+                 "fn":
+                 {"target": {"tag": "bound", "index": 2},
+                  "tag": "get",
+                  "name": "review"},
+                 "arg":
+                 {"tag": "app",
+                  "fn":
+                  {"target": {"tag": "bound", "index": 2},
+                   "tag": "get",
+                   "name": "review"},
+                  "arg": {"tag": "bound", "index": 0}}}},
+               "name": "twice"}]}}}},
+         "name": "TwiceReview.TwiceReview"},
+        {"value":
+         {"tag": "specification",
+          "metadata":
+          {"tag": "record",
+           "fields":
+           [{"value": {"value": "TwiceReview.AugmentedReview", "tag": "label"},
+             "name": "name"},
+            {"value":
+             {"value":
+              "{\"methods\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":496,\"line\":19,\"start\":466}}],\"parents\":[],\"precedence\":[\"TwiceReview.AugmentedReview\"],\"requirements\":[{\"name\":\"review\",\"parameters\":[{\"name\":\"value\",\"quantity\":\"default\",\"type\":\"Nat\"}],\"resultType\":\"Nat\",\"span\":{\"end\":463,\"line\":18,\"start\":429}}],\"suffix\":false,\"targetType\":\"Review\"}",
+              "tag": "label"},
+             "name": "interface"},
+            {"value": {"tag": "record", "fields": []}, "name": "laws"}]},
+          "extension":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "extend",
+             "inherited": {"tag": "bound", "index": 0},
+             "fields":
+             [{"value":
+               {"tag": "lam",
+                "body":
+                {"tag": "binary",
+                 "right": {"value": "1", "tag": "nat"},
+                 "primitive": "add",
+                 "left":
+                 {"tag": "app",
+                  "fn":
+                  {"target": {"tag": "bound", "index": 1},
+                   "tag": "get",
+                   "name": "review"},
+                  "arg": {"tag": "bound", "index": 0}}}},
+               "name": "review"}]}}}},
+         "name": "TwiceReview.AugmentedReview"},
+        {"value":
+         {"tag": "lam",
+          "body":
+          {"tag": "fix",
+           "spec":
+           {"tag": "app",
+            "fn":
+            {"tag": "app",
+             "fn":
+             {"tag": "lam",
+              "body":
+              {"tag": "lam",
+               "body":
+               {"tag": "specification",
+                "metadata":
+                {"tag": "record",
+                 "fields":
+                 [{"value": {"value": "compose", "tag": "label"},
+                   "name": "operator"},
+                  {"value": {"tag": "bound", "index": 1}, "name": "inherited"},
+                  {"value": {"tag": "bound", "index": 0}, "name": "wrapping"}]},
+                "extension":
+                {"upper": {"tag": "bound", "index": 0},
+                 "tag": "mix",
+                 "lower": {"tag": "bound", "index": 1}}}}},
+             "arg":
+             {"tag": "app",
+              "fn":
+              {"tag": "app",
+               "fn":
+               {"tag": "lam",
+                "body":
+                {"tag": "lam",
+                 "body":
+                 {"tag": "specification",
+                  "metadata":
+                  {"tag": "record",
+                   "fields":
+                   [{"value": {"value": "compose", "tag": "label"},
+                     "name": "operator"},
+                    {"value": {"tag": "bound", "index": 1},
+                     "name": "inherited"},
+                    {"value": {"tag": "bound", "index": 0},
+                     "name": "wrapping"}]},
+                  "extension":
+                  {"upper": {"tag": "bound", "index": 0},
+                   "tag": "mix",
+                   "lower": {"tag": "bound", "index": 1}}}}},
+               "arg":
+               {"target": {"tag": "bound", "index": 2},
+                "tag": "get",
+                "name": "TwiceReview.BaseReview"}},
+              "arg":
+              {"target": {"tag": "bound", "index": 2},
+               "tag": "get",
+               "name": "TwiceReview.TwiceReview"}}},
+            "arg":
+            {"target": {"tag": "bound", "index": 2},
+             "tag": "get",
+             "name": "TwiceReview.AugmentedReview"}},
+           "seed": {"tag": "bound", "index": 0}}},
+         "name": "TwiceReview.reviewTarget"},
+        {"value":
+         {"tag": "app",
+          "fn":
+          {"target":
+           {"tag": "app",
+            "fn":
+            {"target": {"tag": "bound", "index": 1},
+             "tag": "get",
+             "name": "TwiceReview.reviewTarget"},
+            "arg":
+            {"tag": "record",
+             "fields":
+             [{"value": {"tag": "lam", "body": {"tag": "bound", "index": 0}},
+               "name": "review"},
+              {"value": {"tag": "lam", "body": {"tag": "bound", "index": 0}},
+               "name": "twice"}]}},
+           "tag": "get",
+           "name": "twice"},
+          "arg": {"value": "3", "tag": "nat"}},
+         "name": "TwiceReview.twiceOfThree"}]}}}},
+   "seed": {"tag": "record", "fields": []}},
+  "tag": "get",
+  "name": "TwiceReview.twiceOfThree"},
+ "status":
+ "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority",
+ "sourceModules":
+ [{"sourceSha256":
+   "b7adabd3dbd422059f9332d76a5d768aff600c5547f0dbb81b05a2bdd9932a0c",
+   "name": "TwiceReview",
+   "imports": []}],
+ "sourceEntry": "TwiceReview.twiceOfThree",
+ "shareableVariables": ["0"],
+ "schema": "dregg.objective-bend.typed-core.v3",
+ "fuel": "4096",
+ "context": [],
+ "bounds": [{"type": {"tag": "ref", "index": "32"}, "index": "0"}],
+ "annotations":
+ [{"reuse": "reusable",
+   "path": ["0", "0", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "variable", "index": "0"},
+   "codomain": {"tag": "ref", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "emptyRow"},
+   "codomain": {"tag": "variable", "index": "0"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "0", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "4"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "0", "1", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "0", "2", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "6"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "0", "2", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "5"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "0", "2", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "boolean"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "4"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "1", "1", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "2", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "4"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "2", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "2", "1", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "3"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "3"},
+   "codomain": {"tag": "ref", "index": "3"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "3", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "21"},
+   "codomain": {"tag": "ref", "index": "26"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "3", "0", "0", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "11"},
+   "codomain": {"tag": "ref", "index": "25"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "3", "0", "0", "0", "1", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "11"},
+   "codomain": {"tag": "ref", "index": "27"}},
+  {"reuse": "reusable",
+   "path":
+   ["0", "0", "1", "0", "0", "1", "3", "0", "0", "0", "1", "0", "0", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "ref", "index": "17"},
+   "codomain": {"tag": "ref", "index": "21"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "4", "0", "0", "1", "0"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}},
+  {"reuse": "reusable",
+   "path": ["0", "0", "1", "0", "0", "1", "4", "0", "0", "1", "1"],
+   "parameter": "unrestricted",
+   "domain": {"tag": "natural"},
+   "codomain": {"tag": "natural"}}]}

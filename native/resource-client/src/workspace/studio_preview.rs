@@ -1,8 +1,9 @@
-//! Pure Objective source preview custody. Server configuration selects pinned
-//! producers; browser input selects only this member's retained capture and its
-//! typed argument values. One wire edition: preview-input.v2 / preview-result.v2
-//! (typed-values-v1 arguments). The v1 wire is deleted; a v1 configuration,
-//! request or result refuses to load.
+//! Pure Objective source preview custody. Server configuration pins ONE producer: the
+//! native Host binary, whose `objective-front` command is the Lean Objective Bend front
+//! end (capture, then preview: parse, elaborate, check, run). Browser input selects only
+//! this member's retained capture and its typed argument values. One wire edition:
+//! captured-package.v2, preview-input.v2 / preview-result.v2 (typed-values-v1 arguments).
+//! A tooling-v2 configuration (bun + TypeScript front end) or a v1 capture refuses to load.
 use super::*;
 use std::process::{Command, Stdio};
 
@@ -15,7 +16,8 @@ fn checked_path(config: &Value, name: &str) -> Result<PathBuf> {
     if sha(&path)? != member(&config[name], "sha256")? { return Err(format!("configured {name} changed")); }
     Ok(path)
 }
-const CONFIG_SCHEMA: &str = "mini-studio-preview-tooling-v2";
+const CONFIG_SCHEMA: &str = "mini-studio-preview-tooling-v3";
+const CAPTURE_SCHEMA: &str = "dregg.objective-bend.captured-package.v2";
 const REQUEST_SCHEMA: &str = "dregg.objective-bend.preview-input.v2";
 const RESULT_SCHEMA: &str = "dregg.objective-bend.preview-result.v2";
 const TYPED_SCHEMA: &str = "dregg.objective-bend.typed-preview.v2";
@@ -25,7 +27,7 @@ const CUSTODY: &str = "mini-studio-preview-custody-v2";
 fn config() -> Result<Value> {
     let path=std::env::var_os(CONFIG_ENV).ok_or("Objective preview is not configured on this server")?;
     let value=bounded_json_limit(Path::new(&path), 65536)?;
-    exact(&value, &["schema","bun","frontend","parser","adapter","tooling"])?;
+    exact(&value, &["schema","host"])?;
     if value["schema"] != CONFIG_SCHEMA { return Err("unknown Studio preview configuration".into()); }
     Ok(value)
 }
@@ -61,20 +63,20 @@ pub(super) fn admitted_capture(root:&Path, workspace:&Value, id:&str, snapshot:&
     }
     Ok(value)
 }
-fn child(bun:&Path, script:&Path, args:&[&Path], suffix:Option<&str>, dir:&Path, stage:&str)->Result<i32> {
+fn child(host:&Path, args:&[&Path], suffix:Option<&str>, dir:&Path, stage:&str)->Result<i32> {
     create_private(&dir.join(format!("{stage}.out")),&[])?;
     create_private(&dir.join(format!("{stage}.err")),&[])?;
     let out=fs::File::create(dir.join(format!("{stage}.out"))).map_err(|e|e.to_string())?;
     let err=fs::File::create(dir.join(format!("{stage}.err"))).map_err(|e|e.to_string())?;
     let mut command=Command::new("timeout");
-    command.args(["--kill-after=2s","45s"]).arg(bun).arg(script);
+    command.args(["--kill-after=2s","45s"]).arg(host).args(["/dev/null","objective-front"]);
     for arg in args { command.arg(arg); }
     if let Some(flag)=suffix { command.arg(flag); }
     let status=command.stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err)).status().map_err(|e|format!("{stage}: {e}"))?;
     Ok(status.code().unwrap_or(125))
 }
 pub(super) fn validate_capture(input:&Value, captured:&Value, input_sha:&str, source_hashes:&[String])->Result<()> {
-    if captured["schema"]!="dregg.objective-bend.captured-package.v1" || captured["edition"]!="objective-bend-1" || captured["requestSha256"]!=input_sha
+    if captured["schema"]!=CAPTURE_SCHEMA || captured["edition"]!="objective-bend-1" || !captured["frontEnd"].is_string() || captured["requestSha256"]!=input_sha
         || captured["entryModule"]!=input["entryModule"] || captured["entryDefinition"]!=input["entryDefinition"] {return Err("Objective capture differs from selected source/edition/entry".into());}
     let old=input["modules"].as_array().ok_or("source modules absent")?;
     let new=captured["modules"].as_array().ok_or("captured modules absent")?;
@@ -88,20 +90,20 @@ pub(super) fn validate_capture(input:&Value, captured:&Value, input_sha:&str, so
     }
     Ok(())
 }
-fn validate_result(result:&Value, capture_sha:&str, input_sha:&str, tooling_sha:&str, captured:&Value,request_sha:&str)->Result<()> {
+fn validate_result(result:&Value, capture_sha:&str, input_sha:&str, captured:&Value,request_sha:&str)->Result<()> {
     let (schema,typed)=(RESULT_SCHEMA,TYPED_SCHEMA);
     if result["binding"]["previewRequestSha256"]!=request_sha {return Err("preview argument/limit request binding changed".into());}
     if !matches!(result["status"].as_str(),Some("finished"|"suspended"|"divergent"|"refused")){return Err("unknown preview outcome".into());}
     if result["schema"]!=schema || result["binding"]["sourceRequestSha256"]!=input_sha
         || result["binding"]["captureSha256"]!=capture_sha || result["binding"]["edition"]!="objective-bend-1"
         || result["binding"]["sourceEntry"]!=captured["sourceEntry"] {return Err("preview belongs to different source/edition/entry".into());}
-    if result["status"]!="refused" && (result["preview"]["status"]!=result["status"] || result["binding"]["toolingManifestSha256"]!=tooling_sha
+    if result["status"]!="refused" && (result["preview"]["status"]!=result["status"] || result["binding"]["frontEnd"]!=captured["frontEnd"]
         || result["preview"]["schema"]!=typed || result["preview"]["sameDecodedTerm"]!=true || result["preview"]["typing"]!="accepted by actual annotated checker") {return Err("preview lacks matched checked execution".into());}
     let cm=captured["modules"].as_array().ok_or("captured modules absent")?;
     let rm=result["binding"]["modules"].as_array().ok_or("preview module binding absent")?;
     if cm.len()!=rm.len(){return Err("preview module bindings changed".into());}
     for (a,b) in cm.iter().zip(rm) {
-        if a["name"]!=b["name"] || a["sha256"]!=b["sourceSha256"] || a["astSha256"]!=b["astSha256"] || a["imports"]!=b["imports"] {return Err("preview source/AST/import binding changed".into());}
+        if a["name"]!=b["name"] || a["sha256"]!=b["sourceSha256"] || a["imports"]!=b["imports"] {return Err("preview source/import binding changed".into());}
     }
     Ok(())
 }
@@ -110,8 +112,7 @@ pub(super) fn run(root:&Path, workspace:&Value, id:&str, snapshot:&str, edition:
     let args=arguments(args)?;
     admitted_capture(root,workspace,id,snapshot)?;
     let cfg=config()?;
-    let bun=checked_path(&cfg,"bun")?;let frontend=checked_path(&cfg,"frontend")?;
-    checked_path(&cfg,"parser")?;let adapter=checked_path(&cfg,"adapter")?;let tooling=checked_path(&cfg,"tooling")?;
+    let host=checked_path(&cfg,"host")?;
     let source=directory(root,id)?.join(snapshot);
     let input_path=source.join("package-input.json");let input=bounded_json_limit(&input_path,MAX_PROJECT as u64)?;let input_sha=sha(&input_path)?;
     let source_hashes=input["modules"].as_array().ok_or("source modules absent")?.iter().enumerate().map(|(i,m)|{
@@ -121,21 +122,21 @@ pub(super) fn run(root:&Path, workspace:&Value, id:&str, snapshot:&str, edition:
     let parent=source.join("previews");
     if !parent.exists(){make_private_dir(&parent)?;}else{private_dir(&parent)?;}
     let run=token()?;let dir=parent.join(&run);make_private_dir(&dir)?;
-    let start=json!({"type":CUSTODY,"package":id,"snapshot":snapshot,"run":run,"subject":member(workspace,"subject")?,"edition":edition,"arguments":args,"sourceRequestSha256":input_sha,"sourceHashes":source_hashes,"toolingSha256":cfg["tooling"]["sha256"],"status":"started"});
+    let start=json!({"type":CUSTODY,"package":id,"snapshot":snapshot,"run":run,"subject":member(workspace,"subject")?,"edition":edition,"arguments":args,"sourceRequestSha256":input_sha,"sourceHashes":source_hashes,"hostSha256":cfg["host"]["sha256"],"status":"started"});
     atomic_json(&dir.join("started.json"),&start,None)?;
     let result=(||->Result<Value>{
         let captured_dir=dir.join("objective");
-        let rc=child(&bun,&frontend,&[&input_path,&captured_dir],Some("--objective-edition-1"),&dir,"capture")?;
+        let rc=child(&host,&[Path::new("capture"),input_path.as_path(),captured_dir.as_path()],Some("--objective-edition-1"),&dir,"capture")?;
         if rc!=0 {let diagnostic=bounded_json_limit(&captured_dir.join("diagnostic.json"),1024*1024).unwrap_or_else(|_|json!({"stage":"objective-capture","message":format!("source capture stopped with status {rc}")}));return Ok(json!({"status":"refused","diagnostic":diagnostic}));}
         let capture_path=captured_dir.join("objective.json");let captured=bounded_json_limit(&capture_path,4*1024*1024)?;
         validate_capture(&input,&captured,&input_sha,&source_hashes)?;
         let capture_sha=sha(&capture_path)?;
         let request=json!({"schema":REQUEST_SCHEMA,"capturePath":capture_path,"captureSha256":capture_sha,"arguments":args,"argumentEncoding":ARGUMENT_ENCODING,"projections":[],"limits":serde_json::from_str::<Value>(LIMITS).map_err(|e|e.to_string())?});
         let request_path=dir.join("request.json");create_private(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
-        let output_dir=dir.join("output");let rc=child(&bun,&adapter,&[&request_path,&output_dir,&tooling],None,&dir,"preview")?;
+        let output_dir=dir.join("output");let rc=child(&host,&[Path::new("preview"),request_path.as_path(),output_dir.as_path()],None,&dir,"preview")?;
         let path=output_dir.join(if rc==0 {"preview.json"} else {"diagnostic.json"});
         let output=bounded_json_limit(&path,4*1024*1024)?;
-        validate_result(&output,&capture_sha,&input_sha,member(&cfg["tooling"],"sha256")?,&captured,&sha(&request_path)?)?;
+        validate_result(&output,&capture_sha,&input_sha,&captured,&sha(&request_path)?)?;
         Ok(output)
     })();
     let mut record=start;
@@ -165,7 +166,7 @@ pub(super) fn load(root:&Path,workspace:&Value,id:&str,snapshot:&str,run:&str)->
         validate_capture(&input,&captured,&input_sha,&hashes)?;
         let request_path=dir.join("request.json");let request=bounded_json_limit(&request_path,65536)?;
         if request["schema"]!=REQUEST_SCHEMA || request["argumentEncoding"]!=ARGUMENT_ENCODING || request["arguments"]!=value["arguments"] || request["projections"]!=json!([]) || request["limits"]!=serde_json::from_str::<Value>(LIMITS).map_err(|e|e.to_string())? {return Err("retained preview request differs from custody".into());}
-        validate_result(&value["result"],&sha(&captured_path)?,&input_sha,member(&value,"toolingSha256")?,&captured,&sha(&request_path)?)?;
+        validate_result(&value["result"],&sha(&captured_path)?,&input_sha,&captured,&sha(&request_path)?)?;
     }
     Ok(value)
 }
@@ -189,22 +190,26 @@ pub(super) fn runs(root:&Path,workspace:&Value,id:&str,snapshot:&str)->Result<Ve
     use super::*;
     #[test] fn source_preview_rejects_substituted_entry_and_bytes(){
         let input=json!({"entryModule":"0","entryDefinition":"run","modules":[{"name":"A","imports":[]}]});
-        let good=json!({"schema":"dregg.objective-bend.captured-package.v1","edition":"objective-bend-1","requestSha256":"request","entryModule":"0","entryDefinition":"run","modules":[{"name":"A","sha256":"source","imports":[]}]});
+        let good=json!({"schema":CAPTURE_SCHEMA,"edition":"objective-bend-1","frontEnd":"front","requestSha256":"request","entryModule":"0","entryDefinition":"run","modules":[{"name":"A","sha256":"source","imports":[]}]});
         assert!(validate_capture(&input,&good,"request",&["source".into()]).is_ok());
         let mut wrong=good.clone();wrong["entryDefinition"]=json!("other");assert!(validate_capture(&input,&wrong,"request",&["source".into()]).is_err());
         assert!(validate_capture(&input,&good,"request",&["different".into()]).is_err());
+        let mut retired=good.clone();retired["schema"]=json!("dregg.objective-bend.captured-package.v1");
+        assert!(validate_capture(&input,&retired,"request",&["source".into()]).is_err());
     }
     #[test] fn preview_v2_arguments_preserve_types_and_reject_ambiguity(){
         assert!(arguments(r#"[{"tag":"label","value":"true"},{"tag":"boolean","value":true},{"tag":"natural","value":"42"}]"#).is_ok());
         for text in [r#"[{"tag":"natural","value":"042"}]"#,r#"[{"tag":"boolean","value":"true"}]"#,r#"[{"tag":"record","fields":[{"name":"x","value":{"tag":"natural","value":"1"}},{"name":"x","value":{"tag":"natural","value":"2"}}]}]"#,r#"[{"tag":"label","value":"x","authority":true}]"#] {assert!(arguments(text).is_err());}
     }
     #[test] fn preview_v2_result_rejects_changed_wire_or_argument_request(){
-        let capture=json!({"sourceEntry":"A.run","modules":[]});
-        let output=json!({"schema":"dregg.objective-bend.preview-result.v2","status":"finished","binding":{"previewRequestSha256":"request","sourceRequestSha256":"source","captureSha256":"capture","edition":"objective-bend-1","sourceEntry":"A.run","toolingManifestSha256":"tooling","modules":[]},"preview":{"schema":"dregg.objective-bend.typed-preview.v2","status":"finished","sameDecodedTerm":true,"typing":"accepted by actual annotated checker"}});
-        assert!(validate_result(&output,"capture","source","tooling",&capture,"request").is_ok());
-        assert!(validate_result(&output,"capture","source","tooling",&capture,"changed arguments").is_err());
+        let capture=json!({"sourceEntry":"A.run","frontEnd":"front","modules":[]});
+        let output=json!({"schema":"dregg.objective-bend.preview-result.v2","status":"finished","binding":{"previewRequestSha256":"request","sourceRequestSha256":"source","captureSha256":"capture","edition":"objective-bend-1","sourceEntry":"A.run","frontEnd":"front","modules":[]},"preview":{"schema":"dregg.objective-bend.typed-preview.v2","status":"finished","sameDecodedTerm":true,"typing":"accepted by actual annotated checker"}});
+        assert!(validate_result(&output,"capture","source",&capture,"request").is_ok());
+        assert!(validate_result(&output,"capture","source",&capture,"changed arguments").is_err());
+        let mut other=output.clone();other["binding"]["frontEnd"]=json!("another front end");
+        assert!(validate_result(&other,"capture","source",&capture,"request").is_err());
         let mut retired=output.clone();retired["schema"]=json!("dregg.objective-bend.preview-result.v1");
-        assert!(validate_result(&retired,"capture","source","tooling",&capture,"request").is_err());
+        assert!(validate_result(&retired,"capture","source",&capture,"request").is_err());
     }
 
     #[test] fn source_capture_retarget_does_not_authorize_retained_bytes(){

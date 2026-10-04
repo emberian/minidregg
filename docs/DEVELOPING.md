@@ -20,10 +20,11 @@ proposal, and qualifying a new runtime are different operations.
 | Is there a circuit or FHE specialization? | No. The circuit, natural-number and FHE specializations of the upstream Bend kernel were deleted on 2026-10-04; deriving them from the demand machine is open work |
 
 Objective Bend's semantics, machine and typing live in `Theory/ObjectiveBend*.lean`.
-The front end is TypeScript: `native/bend-source/objective-parser.ts`,
-`objective-frontend.ts` (capture), `objective-elaborate.ts` (surface to core) and
-`objective-preview.ts`. `Host/ObjectiveBendPreview.lean` checks and runs a decoded
-core term; `Kernel/ObjectiveBendPreparedOutput.lean` and
+The front end is Lean: `Compiler/ObjectiveBendParse.lean` (parser),
+`Compiler/ObjectiveBendElaborate.lean` (surface to core), `Compiler/ObjectiveBendFrontEnd.lean`
+(driver and its checked result) and `Host/ObjectiveBendFrontEnd.lean` (capture, elaborate,
+preview commands; [front end](OBJECTIVE-BEND-FRONTEND.md)). `Host/ObjectiveBendPreview.lean`
+checks and runs a decoded core term; `Kernel/ObjectiveBendPreparedOutput.lean` and
 `Compiler/ObjectiveBendPlanAdapter.lean` turn a result into a scalar Plan. The
 [language guide](OBJECTIVE-BEND.md) states what each of these proves and where
 the trusted boundary sits. At this revision the `Theory/ObjectiveBend*` proofs are

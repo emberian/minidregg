@@ -292,8 +292,5 @@ route (the kernel itself is above); a guardedness check; string operations beyon
 ## Checks
 
 ```
-bun native/bend-source/objective-elaborate-tests.ts
-bun tests/objective-bend-source/check-parser.ts
-bun native/bend-source/objective-elaborate-tv.ts NEW_DIR lake env lean --run Host/ObjectiveBendElaborateRun.lean
-bun tests/objective-bend-source/check-preview.ts tests/objective-bend-source/preview-cohort.json NEW_DIR LEAN OLEAN_ROOT
+bash scripts/check-objective-frontend.sh   # every row through the Lean front end
 ```
