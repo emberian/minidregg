@@ -121,7 +121,7 @@ theorem neutral_content_birth_admitted :
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
   · intro address member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
-  · unfold Kernel.ObjectiveActivityCell.reservedBase; decide
+  · unfold Kernel.ProtectedCell.reservedBase; decide
 
 theorem authored_history_cannot_be_injected_at_birth :
     ¬CanonicalCellRegistry.UserInitial deployment 100

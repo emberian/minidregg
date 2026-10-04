@@ -262,7 +262,7 @@ def convertPayload (kind : Kind) (height : Nat) (bytes : List UInt8) :
       match NockProgramCodec.materializer.codec.decode bytes with
       | some store => .ok store
       | none => .error "carry source Nock program is not canonical"
-  | .content | .policySource | .worldKind | .worldInstance | .objectiveActivity =>
+  | .content | .policySource | .worldKind | .worldInstance | .objectiveActivity | .seat =>
       .error "carry role requires a separate closed semantic converter"
 
 end Minidregg.Compiler.LegacyStoreCarry

@@ -36,6 +36,8 @@ def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .streamEntry | .system => none
   -- An activity cell is read through the activity view, never observed as a resource.
   | .objectiveActivity => none
+  -- A seat cell is read through the seat view, never observed as a resource.
+  | .seat => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

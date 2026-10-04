@@ -712,6 +712,7 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
   -- An entry cell is read through its stream's `tail`, never observed itself.
   | .streamEntry, _ | .system, _ => none
   | .objectiveActivity, _ => none
+  | .seat, _ => none
 
 /-- A read under `fields` keeps an address exactly when its field is named;
 an address with no field is kept only by a scope naming every field. -/

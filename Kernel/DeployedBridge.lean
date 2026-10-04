@@ -100,6 +100,17 @@ def objectiveActivityWire : Wire Kernel.ObjectiveActivityCell.layout where
   keyCodecId := fun _ => "unit"
   valueCodecId := fun _ => "dregg/objective-activity-cell/v1"
 
+/-- A seat-kernel cell: one RAM address holding its payload. -/
+def seatWire : Wire Kernel.SeatCell.layout where
+  name := "dregg/seat-address/v1"
+  namespaces := [()]
+  namespaces_complete := by intro u; cases u; simp
+  namespaceStream := unitStream
+  keyStream := fun _ => unitStream
+  valueStream := fun _ => Kernel.SeatCell.payloadStream
+  keyCodecId := fun _ => "unit"
+  valueCodecId := fun _ => "dregg/seat-cell/v1"
+
 /-- **One wire per registered kind.** -/
 def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .content => HyperdocumentCell.contentWire
@@ -119,6 +130,7 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .worldKind => WorldKindCell.definitionWire
   | .worldInstance => WorldKindCell.instanceWire
   | .objectiveActivity => objectiveActivityWire
+  | .seat => seatWire
 
 /-! ## The cell decoder -/
 

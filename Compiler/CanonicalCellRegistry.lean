@@ -64,6 +64,7 @@ import Kernel.FieldClosure
 import Kernel.SystemCell
 import Theory.CanonicalResourceBookInvariant
 import Kernel.ObjectiveActivityCell
+import Kernel.SeatCell
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 
@@ -115,11 +116,15 @@ inductive Kind where
   record, an answer slot, an object's declared state or an activity package,
   each at its coordinate; written only by `ObjectiveActivityReceiver`. -/
   | objectiveActivity
+  /-- A seat-kernel cell (`Kernel.SeatCell`): a contract instance, an invitation,
+  a seat, an activity's seat holdings or a contract package, each at its
+  coordinate; written only by `SeatReceiver` (and an ending activity's turn). -/
+  | seat
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity, .seat]
 
 /-! ## Who may write which kind -/
 
@@ -260,6 +265,7 @@ def Kind.tag : Kind → UInt8
   | .worldKind => 17
   | .worldInstance => 18
   | .objectiveActivity => Kernel.ObjectiveActivityCell.registryTag
+  | .seat => Kernel.SeatCell.registryTag
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -279,6 +285,7 @@ def kindAtTag : UInt8 → Option Kind
   | 17 => some .worldKind
   | 18 => some .worldInstance
   | 19 => some .objectiveActivity
+  | 20 => some .seat
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -314,13 +321,15 @@ def schemaRef : Kind → SchemaRef
   | .worldKind => ⟨⟨91016⟩, 1⟩
   | .worldInstance => ⟨⟨91017⟩, 1⟩
   | .objectiveActivity => ⟨⟨Kernel.ObjectiveActivityCell.schemaId⟩, Kernel.ObjectiveActivityCell.wireVersion⟩
+  | .seat => ⟨⟨Kernel.SeatCell.schemaId⟩, Kernel.SeatCell.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
   cases left <;> cases right <;>
     simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion,
       NockProgramCodec.schemaId, NockProgramCodec.wireVersion,
-      Kernel.ObjectiveActivityCell.schemaId, Kernel.ObjectiveActivityCell.wireVersion] at same ⊢
+      Kernel.ObjectiveActivityCell.schemaId, Kernel.ObjectiveActivityCell.wireVersion,
+      Kernel.SeatCell.schemaId, Kernel.SeatCell.wireVersion] at same ⊢
 
 abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .content => Hyperdocument.layout
@@ -340,6 +349,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .worldKind => WorldKindCell.definitionLayout
   | .worldInstance => WorldKindCell.instanceLayout
   | .objectiveActivity => Kernel.ObjectiveActivityCell.layout
+  | .seat => Kernel.SeatCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -359,6 +369,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .worldKind => WorldKindCell.definitionMaterializer
   | .worldInstance => WorldKindCell.instanceMaterializer
   | .objectiveActivity => Kernel.ObjectiveActivityCell.materializer
+  | .seat => Kernel.SeatCell.materializer
 
 /-- The store wire of every kind whose materializer is the generic
 `StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
@@ -376,7 +387,7 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .system => some Kernel.SystemCell.wire
   | .worldKind => some WorldKindCell.definitionWire
   | .worldInstance => some WorldKindCell.instanceWire
-  | .resourceBook | .policySource | .nockProgram | .objectiveActivity => none
+  | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
 
 /-- A kind with a store wire is materialized by it, so its cell root is that
 wire's salted root. -/
@@ -656,7 +667,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v15".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v16".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -686,6 +697,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       Kernel.SystemCell.Law state
   | .objectiveActivity, state => PresentLaw (Kernel.ObjectiveActivityCell.CellValid deployment.domain cellId)
       (Kernel.ObjectiveActivityCell.payloadAt state)
+  | .seat, state => PresentLaw (Kernel.SeatCell.CellValid deployment.domain cellId)
+      (Kernel.SeatCell.payloadAt state)
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -793,17 +806,17 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
   | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
-  | .streamEntry, _ | .system, _ | .objectiveActivity, _ => False
+  | .streamEntry, _ | .system, _ | .objectiveActivity, _ | .seat, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by
   cases kind <;> unfold UserShape <;> infer_instance
 
 /-- A user birth: lawful at its id, of a user shape, and outside the activity
-kernel's protected coordinate space (`ObjectiveActivityCell.reservedBase`). -/
+kernel families' protected coordinate space (`ProtectedCell.reservedBase`: activity and seat cells). -/
 def UserInitial (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) : Prop :=
   (CellLaw deployment cellId cell ∧ UserShape cell.kind cell.payload.logical) ∧
-    cellId < Kernel.ObjectiveActivityCell.reservedBase
+    cellId < Kernel.ProtectedCell.reservedBase
 
 instance userInitialDecidable (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) :
     Decidable (UserInitial deployment cellId cell) := by
@@ -821,9 +834,14 @@ def userInitialCheck (deployment : Deployment) (cellId : Nat) (cell : PackedCell
 theorem userInitial_not_activity_coordinate {deployment : Deployment} {cellId : Nat} {cell : PackedCell registry}
     (admitted : UserInitial deployment cellId cell) (domain : Digest) (role : Kernel.ObjectiveActivityCell.Role)
     (key : List UInt8) : cellId ≠ Kernel.ObjectiveActivityCell.coordinate domain role key := by
-  have below := admitted.2
-  have above := Kernel.ObjectiveActivityCell.coordinate_reserved domain role key
-  omega
+  exact Nat.ne_of_lt (lt_of_lt_of_le admitted.2 (Kernel.ObjectiveActivityCell.coordinate_reserved domain role key))
+
+/-- **No birth squats a seat coordinate**: a seat account, an invitation, an
+instance cell or a contract package. -/
+theorem userInitial_not_seat_coordinate {deployment : Deployment} {cellId : Nat} {cell : PackedCell registry}
+    (admitted : UserInitial deployment cellId cell) (domain : Digest) (role : Kernel.SeatCell.Role)
+    (key : List UInt8) : cellId ≠ Kernel.SeatCell.coordinate domain role key :=
+  Nat.ne_of_lt (lt_of_lt_of_le admitted.2 (Kernel.SeatCell.coordinate_reserved domain role key))
 
 def BirthsAdmissible (deployment : Deployment) (descriptor : ResourceBirth.Descriptor registry) : Prop :=
   ∀ item ∈ descriptor.births, UserInitial deployment item.create.cellId item.create.cell
@@ -1244,7 +1262,7 @@ theorem program_user_initial_iff (deployment : Deployment) (cellId : Nat)
     (program : NockProgramCodec.Program) :
     UserInitial deployment cellId (programCell program) ↔
       deployment.Valid ∧ cellId = programCellId deployment.domain program ∧
-        Evaluator.RecordAdmissible program ∧ cellId < Kernel.ObjectiveActivityCell.reservedBase := by
+        Evaluator.RecordAdmissible program ∧ cellId < Kernel.ProtectedCell.reservedBase := by
   simp [UserInitial, CellLaw, LogicalLaw, UserShape, programCell, PresentLaw,
     NockProgramCodec.CellValid, programCellId, and_assoc]
 
@@ -1425,11 +1443,11 @@ theorem user_content_inhabited : UserInitial deployment 11 emptyContent := by
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
   · intro address member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
-  · unfold Kernel.ObjectiveActivityCell.reservedBase; decide
+  · unfold Kernel.ProtectedCell.reservedBase; decide
 
 end Witness
 
-#assert_axioms userInitial_not_activity_coordinate
+#assert_axioms userInitial_not_activity_coordinate userInitial_not_seat_coordinate
 end Minidregg.Compiler.CanonicalCellRegistry
 
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.registry_lifecycle_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
