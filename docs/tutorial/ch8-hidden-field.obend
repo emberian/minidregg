@@ -1,0 +1,12 @@
+edition ObjectiveBend 1
+# Chapter 8: nor in a record field, which is also a shared thunk.
+
+sum Plan:
+  go: {}
+
+sum Response:
+  ok: {}
+
+def run(n: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.go({})):
+    case ok(_): {x: perform(Plan.go({}))}.x

@@ -1,0 +1,39 @@
+edition ObjectiveBend 1
+# Chapter 4: specifications. A spec is a named, reusable layer for a record.
+# def adds or replaces a method. super.m is the method below; self.m is the
+# method of the final object.
+
+record Shop:
+  price(n: Nat) -> Nat
+  bill(n: Nat) -> Nat
+
+spec Base for Shop:
+  def price(n: Nat) -> Nat:
+    n * 3n
+
+spec Billing for Shop:
+  def bill(n: Nat) -> Nat:
+    self.price(n) + 1n
+
+spec Surcharge for Shop:
+  def price(n: Nat) -> Nat:
+    super.price(n) + 2n
+
+# fix needs something to start from. These methods are replaced by the specs.
+def blank() -> Shop:
+  {price: fn(n: Nat) -> Nat: 0n, bill: fn(n: Nat) -> Nat: 0n}
+
+def shop() -> Shop:
+  fix(compose(Base, Billing), blank())
+
+def surcharged() -> Shop:
+  fix(compose(Base, Billing, Surcharge), blank())
+
+def billOfTwo() -> Nat:
+  shop().bill(2n)
+
+def surchargedBillOfTwo() -> Nat:
+  surcharged().bill(2n)
+
+def surchargedPriceOfTwo() -> Nat:
+  surcharged().price(2n)

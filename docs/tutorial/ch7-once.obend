@@ -1,0 +1,13 @@
+edition ObjectiveBend 1
+# Chapter 7: an affine parameter may be used at most once.
+
+def once(affine x: Nat) -> Nat:
+  x + 1n
+
+# At most once includes not at all.
+def dropped(affine x: Nat) -> Nat:
+  0n
+
+# linear is checked the same way: at most once, not exactly once.
+def droppedLinear(linear y: Nat) -> Nat:
+  0n

@@ -1,0 +1,3 @@
+edition ObjectiveBend 1
+def less(a: Nat, b: Nat) -> Bool:
+  a < b

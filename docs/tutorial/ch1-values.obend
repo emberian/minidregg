@@ -1,0 +1,21 @@
+edition ObjectiveBend 1
+# Chapter 1: values, functions, records.
+
+record Point:
+  x: Nat
+  y: Nat
+
+def double(n: Nat) -> Nat:
+  n + n
+
+def answer() -> Nat:
+  double(21n)
+
+def origin() -> Point:
+  {x: 0n, y: 0n}
+
+def shifted(p: Point, by: Nat) -> Point:
+  {x: p.x + by, y: p.y}
+
+def shiftedX() -> Nat:
+  shifted(origin(), 5n).x

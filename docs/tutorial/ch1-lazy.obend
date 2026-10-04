@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+# Chapter 1: laziness. A field is computed only when something reads it.
+
+record Pair:
+  good: Nat
+  bad: Nat
+
+# Running spin never finishes: it calls itself forever.
+def spin(n: Nat) -> Nat:
+  spin(n)
+
+def pair() -> Pair:
+  {good: 7n, bad: spin(0n)}
+
+def good() -> Nat:
+  pair().good
+
+def bad() -> Nat:
+  pair().bad

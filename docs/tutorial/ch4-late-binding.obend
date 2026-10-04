@@ -1,0 +1,34 @@
+edition ObjectiveBend 1
+# Chapter 4: extensions. extension(self, super) builds a value in layers.
+# super is what the layers below produced. self is the final result of all
+# the layers, so a layer can read a field that a later layer changes.
+
+record Account:
+  base: Nat
+  total: Nat
+
+# total is computed from base, read through self.
+extension Defaults(self: Account, super: Account) -> Account:
+  {base: 10n, total: self.base + 1n}
+
+# This layer changes base and keeps everything else from below.
+extension Raised(self: Account, super: Account) -> Account:
+  extend(super, {base: super.base + 5n})
+
+def seed() -> Account:
+  {base: 0n, total: 0n}
+
+def plain() -> Account:
+  fix(Defaults, seed())
+
+def raised() -> Account:
+  fix(compose(Defaults, Raised), seed())
+
+def plainTotal() -> Nat:
+  plain().total
+
+def raisedBase() -> Nat:
+  raised().base
+
+def raisedTotal() -> Nat:
+  raised().total

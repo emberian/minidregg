@@ -1,0 +1,3 @@
+edition ObjectiveBend 1
+def sub(a: Nat, b: Nat) -> Nat:
+  a - b

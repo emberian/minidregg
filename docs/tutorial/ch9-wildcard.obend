@@ -1,0 +1,7 @@
+edition ObjectiveBend 1
+# Chapter 9: a Nat match takes exactly a zero case and a successor case.
+
+def f(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case _: 2n

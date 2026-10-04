@@ -1,0 +1,5 @@
+edition ObjectiveBend 1
+# Chapter 7: used twice, the checker refuses the program.
+
+def twice(affine x: Nat) -> Nat:
+  x + x

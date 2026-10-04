@@ -1,0 +1,42 @@
+edition ObjectiveBend 1
+# Chapter 2: natural numbers, match, booleans and if.
+# A Nat is 0n or 1n+p, where p is the one below it. There is no negative.
+
+def pred(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p: p
+
+def isZero(n: Nat) -> Bool:
+  match n:
+    case 0n: true
+    case 1n+p: false
+
+# Subtract b from a, stopping at zero. There is no - operator.
+def minus(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0n: a
+    case 1n+q: minus(pred(a), q)
+
+def even(n: Nat) -> Bool:
+  match n:
+    case 0n: true
+    case 1n+p: if even(p) then false else true
+
+def pick(flag: Bool, a: Nat, b: Nat) -> Nat:
+  match flag:
+    case true: a
+    case false: b
+
+# == and != compare two Nats and give a Bool. && and || join two Bools.
+def small(n: Nat) -> Bool:
+  isZero(n) && n == 0n
+
+def differ(a: Nat, b: Nat) -> Bool:
+  a != b
+
+def either(a: Bool, b: Bool) -> Bool:
+  a || b
+
+def clamp(n: Nat) -> Nat:
+  if n == 10n then 9n else n

@@ -1,0 +1,39 @@
+edition ObjectiveBend 1
+# Chapter 6: prototypes and reflection. prototype(spec, target) keeps a spec
+# and the object built from it together. reflect, metadata and targetOf take
+# them apart without running the other half.
+
+record Tally:
+  n: Nat
+
+spec Start for Tally:
+  law nonNegative: true
+  def n() -> Nat:
+    41n
+
+def seed() -> Tally:
+  {n: 0n}
+
+def built() -> Tally:
+  fix(Start, seed())
+
+def firstName() -> String:
+  metadata(reflect(prototype(Start, built()))).name
+
+def target() -> Nat:
+  targetOf(prototype(Start, built())).n
+
+def interface() -> String:
+  metadata(Start).interface
+
+# stuck never finishes. The prototype is never asked for its target, so
+# reflecting on it still works.
+def stuck() -> Tally:
+  stuck()
+
+def name() -> String:
+  metadata(reflect(prototype(Start, stuck()))).name
+
+# Asking for the target of the same prototype does run it.
+def stuckTarget() -> Nat:
+  targetOf(prototype(Start, stuck())).n

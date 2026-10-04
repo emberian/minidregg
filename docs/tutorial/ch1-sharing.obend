@@ -1,0 +1,20 @@
+edition ObjectiveBend 1
+# Chapter 1: sharing. An argument is evaluated at most once, however
+# often the function reads it. (match is explained in chapter 2; read
+# work(n) as a slow way to compute 2 to the power n.)
+
+def work(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case 1n+p: work(p) + work(p)
+
+def twice(x: Nat) -> Nat:
+  x + x
+
+# work(8n) is passed once and read twice.
+def shared() -> Nat:
+  twice(work(8n))
+
+# work(8n) is written twice, so it is computed twice.
+def separate() -> Nat:
+  work(8n) + work(8n)

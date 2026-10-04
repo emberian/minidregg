@@ -1,0 +1,27 @@
+edition ObjectiveBend 1
+# Chapter 8: an activity. It hands a Plan to its host, waits for a response,
+# and carries on with the response in hand.
+
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+
+sum Plan:
+  write: Write
+
+sum Response:
+  written: {}
+  refused: {}
+
+# One turn: ask for count to become count + 1, and report the new count.
+def bump(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): count + 1n
+    case refused(_): count
+
+# A resident: it asks again after every response, and never finishes.
+def serve(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): serve(count + 1n)
+    case refused(_): serve(count)

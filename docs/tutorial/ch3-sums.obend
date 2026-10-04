@@ -1,0 +1,41 @@
+edition ObjectiveBend 1
+# Chapter 3: sums. A sum value is one of several labelled cases.
+
+sum Shape:
+  circle: Nat
+  square: {side: Nat}
+
+def area(s: Shape) -> Nat:
+  match s:
+    case circle(r): r * r * 3n
+    case square(q): q.side * q.side
+
+def bigSquare() -> Nat:
+  area(Shape.square({side: 4n}))
+
+def smallCircle() -> Nat:
+  area(Shape.circle(2n))
+
+# A list is a sum that mentions itself.
+sum List:
+  nil: {}
+  cons: {head: Nat, tail: List}
+
+def length(xs: List) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): 1n + length(c.tail)
+
+def sum(xs: List) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): c.head + sum(c.tail)
+
+def numbers() -> List:
+  List.cons({head: 2n, tail: List.cons({head: 7n, tail: List.cons({head: 5n, tail: List.nil()})})})
+
+def count() -> Nat:
+  length(numbers())
+
+def total() -> Nat:
+  sum(numbers())

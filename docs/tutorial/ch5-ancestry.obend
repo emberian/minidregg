@@ -1,0 +1,65 @@
+edition ObjectiveBend 1
+# Chapter 5: declared ancestry. A spec can say which specs it extends.
+# Each trace method adds its own digit after the one from below, so the
+# result spells the order the layers ran in. weight adds up the weights of
+# the layers. combine + adds the layers own result to the next one.
+
+record Doc:
+  trace() -> Nat
+  weight() -> Nat
+
+spec Root for Doc:
+  def trace() -> Nat:
+    1n
+  combine + weight() -> Nat:
+    1n
+
+spec Left extends Root for Doc:
+  def trace() -> Nat:
+    super.trace() * 10n + 2n
+  combine + weight() -> Nat:
+    20n
+
+spec Right extends Root for Doc:
+  def trace() -> Nat:
+    super.trace() * 10n + 3n
+  combine + weight() -> Nat:
+    300n
+
+# Both reaches Root by two paths (through Left and through Right).
+spec Both extends Left, Right for Doc:
+  def trace() -> Nat:
+    super.trace() * 10n + 4n
+  combine + weight() -> Nat:
+    4000n
+
+# around wraps the whole chain, including layers more specific than itself.
+spec Logged extends Both for Doc:
+  around trace() -> Nat:
+    super.trace() + 50000n
+
+spec Last extends Logged for Doc:
+  def trace() -> Nat:
+    super.trace() * 10n + 5n
+
+def blank() -> Doc:
+  {trace: 0n, weight: 0n}
+
+def bothTrace() -> Nat:
+  fix(Both, blank()).trace
+
+def bothWeight() -> Nat:
+  fix(Both, blank()).weight
+
+def loggedTrace() -> Nat:
+  fix(Logged, blank()).trace
+
+def lastTrace() -> Nat:
+  fix(Last, blank()).trace
+
+# compose copies each spec as written, so Root runs twice here.
+def composedWeight() -> Nat:
+  fix(compose(Left, Right), blank()).weight
+
+def interface() -> String:
+  metadata(Last).interface

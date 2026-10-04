@@ -1,0 +1,15 @@
+edition ObjectiveBend 1
+# Chapter 8: an effect may not hide in an argument. An argument is a shared
+# thunk, so the effect would run once and be cached.
+
+sum Plan:
+  go: {}
+
+sum Response:
+  ok: {}
+
+def keep(x: Nat) -> Nat:
+  x
+
+def run(n: Nat) -> Activity<Plan, Response, Nat>:
+  keep(perform(Plan.go({})))

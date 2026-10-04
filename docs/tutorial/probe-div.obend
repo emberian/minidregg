@@ -1,0 +1,3 @@
+edition ObjectiveBend 1
+def f(a: Nat, b: Nat) -> Nat:
+  a / b
