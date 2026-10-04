@@ -121,19 +121,37 @@ used where it was built; moving it means rebuilding or rewriting `manifest.json`
 ```json
 {"type": "minidregg-candidate-provenance-v1",
  "source": {"commit": "<40 hex>", "archive": "source.tar", "archiveSha256": "<64 hex>",
-            "origin": "git-archive-HEAD | supplied-archive",
+            "origin": "build.sh | sealed-capsule | <roles manifest origin>",
             "fileList": "logs/source-files.sha256", "fileListSha256": "<64 hex>"},
  "target": "x86_64-linux",
- "toolchains": {"leanToolchain": "...", "lean": "...", "lake": "...", "mathlibRev": "...",
-                "rustToolchain": "...", "rustc": "...", "cargo": "...", "cc": "...", "rustflags": "..."},
- "binaries": {"host": {"path": "bin/minidregg-host", "sha256": "..."}, "mini": {...},
-              "store": {...}, "verifier": {...}},
- "hostBuildManifest": {"path": "work/host-build/manifest.txt", "sha256": "..."},
- "seconds": {"leanPackagesAndMathlibCache": 0, "nativeHost": 0, "rust": 0, "total": 0},
+ "toolchains": {"recorded": "build.sh", "leanToolchain": "...", "lean": "...", "lake": "...",
+                "mathlibRev": "...", "rustToolchain": "...", "rustc": "...", "cargo": "...",
+                "cc": "...", "rustflags": "...", "seconds": {}},
+ "binaries": {"host": {"path": "bin/minidregg-host", "sha256": "..."}, "mini": {},
+              "store": {}, "verifier": {}, "grainRuntime": {}},
+ "abi": {"glibcRequired": "2.39", "binaries": {"mini": {"glibcRequired": "2.39",
+         "glibcStrong": [], "glibcWeakOnly": [], "needed": ["libc.so.6"]}}},
+ "packaging": {"type": "build.sh | sealed-capsule | <roles manifest origin>"},
+ "hostBuildManifest": {"path": "/abs/.../manifest.txt", "sha256": "..."},
+ "clients": {"x86_64-unknown-linux-gnu": {"path": "bin/mini", "sha256": "..."}},
  "builtUtc": "..."}
 ```
 
-Paths here are relative to `OUT`.
+Binary paths here are relative to `OUT`.
+
+**One packaging format, one packager.** `deploy/candidate/package.py` writes
+every candidate directory: `build.sh` calls it after building (`--roles`, the
+binaries already in `OUT/bin`), a lane build on a build box calls it with its own
+role manifest (`--roles ROLES.json --source-archive SOURCE.tar`), and a sealed
+hbox family is packaged with `--capsule FAMILY_DIR`. Every binary is claimed to
+be built from the archive's one commit: `--roles` requires the manifest's
+`sourceCommit` to be the archive's commit, and `--capsule` refuses a family any
+of whose shipped roles was built at another commit (an "unchanged-role-reuse"
+row is a claim, not a build) or whose seal does not cover its manifest.
+`.abi` records each ELF's non-weak `GLIBC_*` version needs (`readelf -V`):
+`edge/mini/ship.sh` (dregg-infra) refuses a box whose glibc is older than
+`.abi.glibcRequired`, and the box's own loader resolves every shipped binary
+before publication.
 
 **Reproducing.** Two builds from archives with the same compiled inputs, in
 different directories, yielded the same four core SHA-256s in the dated baseline

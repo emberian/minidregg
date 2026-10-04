@@ -10,8 +10,10 @@
 #   bin/spk-browser-proxy                       TLS browser entrance
 #   bin/mini-discord                            Discord entrance
 #   bin/pay-watcher                             Solana pay watcher
-# plus provenance.json (source commit, toolchains, hashes), SHA256SUMS, and
-# manifest.json: the journey-format manifest (absolute paths + SHA-256 pins).
+# packaged by deploy/candidate/package.py into the one candidate format:
+# provenance.json (source commit, toolchains, hashes, each ELF's glibc needs),
+# SHA256SUMS, and manifest.json (the journey-format manifest: absolute paths +
+# SHA-256 pins). package.py --capsule packages a sealed hbox family the same way.
 # Friend builds of the client ride along: bin/mini is the Linux x86-64 client,
 # and each target in MINI_CLIENT_TARGETS (default aarch64-apple-darwin) is
 # cross-built to bin/clients/TARGET/mini, hashed into provenance.json
@@ -54,7 +56,7 @@ esac
 if [ "$client_only" = 1 ]; then
   candidate_require git jq tar sha256sum file rustup cargo cc
 else
-  candidate_require git jq tar sha256sum file curl lake rustup cargo cc
+  candidate_require git jq tar sha256sum file curl lake rustup cargo cc python3 readelf
 fi
 client_targets=${MINI_CLIENT_TARGETS-aarch64-apple-darwin}
 for target in $client_targets; do
@@ -279,95 +281,38 @@ file "$out"/bin/minidregg-host "$out"/bin/mini "$out"/bin/minidregg-link-sqlite-
   "$out"/bin/minidregg-credential-signature-verifier "$out"/bin/clients/*/mini \
   > "$out/logs/file-types.txt" 2>/dev/null || true
 
-# 7. The operator scripts travel with the binaries, from the same archive.
-for script in run.sh lib.sh; do
-  install -m 0555 "$src/deploy/candidate/$script" "$out/$script"
+# 7. Package: the one candidate format, written by deploy/candidate/package.py
+# from THIS archive's bytes (the copy extracted into work/src). The roles are the
+# binaries built above; package.py copies nothing (they are already in bin/),
+# installs run.sh, lib.sh, genesis.sh, genesis-params.example.json and
+# INTERFACES.md from source.tar, records each ELF's glibc needs, and writes
+# provenance.json, SHA256SUMS and manifest.json.
+roles_json="$out/work/roles.json"
+roles='{}'
+for pair in host:minidregg-host mini:mini store:minidregg-link-sqlite-store \
+    verifier:minidregg-credential-signature-verifier grainRuntime:grain-runtime \
+    grainProviderBridge:grain-provider-bridge inferenceScheduler:mini-inference-scheduler \
+    spkHost:spk-host spkBrowserProxy:spk-browser-proxy discord:mini-discord payWatcher:pay-watcher; do
+  role=${pair%%:*} file=$out/bin/${pair#*:}
+  roles=$(printf '%s' "$roles" | jq --arg r "$role" --arg p "$file" --arg h "$(candidate_sha256 "$file")" \
+    '.[$r] = $p | .sha256[$r] = $h')
 done
-install -m 0555 "$src/native/resource-client/genesis.sh" "$out/genesis.sh"
-install -m 0444 "$src/native/resource-client/genesis-params.example.json" \
-  "$out/genesis-params.example.json"
-for document in INTERFACES.md; do
-  install -m 0444 "$src/deploy/candidate/$document" "$out/$document"
-done
-
-# 8. Provenance (relative paths, toolchains, timings) and the journey-format
-# manifest (absolute paths + SHA-256 pins) that every consumer reads.
-sha_of() { candidate_sha256 "$out/$1"; }
-host_build_manifest_sha=$(candidate_sha256 "$out/work/host-build/manifest.txt")
-jq -n \
-  --arg commit "$commit" --arg archive "$archive_sha" --arg origin "$source_origin" \
-  --arg files "$source_files_sha" \
-  --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
-  --arg rustPin "$rust_pin" --arg rustc "$rustc_version" --arg cargo "$cargo_version" \
-  --arg cc "$cc_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo" \
+printf '%s' "$roles" | jq --arg c "$commit" '. + {sourceCommit: $c, origin: "build.sh"}' >"$roles_json"
+jq -n --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \
-  --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
-  --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
-  --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
-  --arg grain "$(sha_of bin/grain-runtime)" --arg discord "$(sha_of bin/mini-discord)" \
-  --arg providerBridge "$(sha_of bin/grain-provider-bridge)" \
-  --arg inferenceScheduler "$(sha_of bin/mini-inference-scheduler)" \
-  --arg spkHost "$(sha_of bin/spk-host)" --arg spkBrowser "$(sha_of bin/spk-browser-proxy)" \
-  --arg payWatcher "$(sha_of bin/pay-watcher)" \
-  --arg hostManifest "$host_build_manifest_sha" \
+  --arg rustPin "$rust_pin" --arg rustc "$rustc_version" --arg cargo "$cargo_version" \
+  --arg cc "$cc_version" --arg zig "$zig_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo" \
+  --arg sourceOrigin "$source_origin" \
   --argjson tCache "$((t_cache - t_lean))" --argjson tHost "$((t_host - t_cache))" \
   --argjson tRust "$((t_rust - t_host))" --argjson tTotal "$(( $(date +%s) - t_start ))" \
-  --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson clients "$clients_json" --arg zig "$zig_version" \
-  '{type: "minidregg-candidate-provenance-v1",
-    source: {commit: $commit, archive: "source.tar", archiveSha256: $archive,
-             origin: $origin, fileList: "logs/source-files.sha256", fileListSha256: $files},
-    target: "x86_64-linux",
-    toolchains: {leanToolchain: $leanPin, lean: $lean, lake: $lake, mathlibRev: $mathlib,
-                 rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc, zig: $zig,
-                 rustflags: $rustflags},
-    binaries: {host: {path: "bin/minidregg-host", sha256: $host},
-               mini: {path: "bin/mini", sha256: $mini},
-               store: {path: "bin/minidregg-link-sqlite-store", sha256: $store},
-               verifier: {path: "bin/minidregg-credential-signature-verifier", sha256: $verifier},
-               grainRuntime: {path: "bin/grain-runtime", sha256: $grain},
-               grainProviderBridge: {path: "bin/grain-provider-bridge", sha256: $providerBridge},
-               inferenceScheduler: {path: "bin/mini-inference-scheduler", sha256: $inferenceScheduler},
-               spkHost: {path: "bin/spk-host", sha256: $spkHost},
-               spkBrowserProxy: {path: "bin/spk-browser-proxy", sha256: $spkBrowser},
-               discord: {path: "bin/mini-discord", sha256: $discord},
-               payWatcher: {path: "bin/pay-watcher", sha256: $payWatcher}},
-    clients: $clients,
-    hostBuildManifest: {path: "work/host-build/manifest.txt", sha256: $hostManifest},
-    seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal},
-    builtUtc: $built}' > "$out/provenance.json"
-(cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
-  bin/minidregg-credential-signature-verifier bin/grain-runtime bin/grain-provider-bridge \
-  bin/mini-inference-scheduler bin/spk-host bin/spk-browser-proxy bin/mini-discord bin/pay-watcher \
-  $(jq -r '.clients[].path' provenance.json | grep -vx bin/mini) \
-  provenance.json run.sh lib.sh genesis.sh INTERFACES.md \
-  genesis-params.example.json source.tar logs/source-files.sha256) > "$out/SHA256SUMS"
-jq -n --arg dir "$out" --arg sourceCommit "$commit" --arg sourcePath "$src" \
-  --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
-  --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
-  --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
-  --arg grain "$(sha_of bin/grain-runtime)" --arg providerBridge "$(sha_of bin/grain-provider-bridge)" \
-  --arg inferenceScheduler "$(sha_of bin/mini-inference-scheduler)" \
-  --arg spkHost "$(sha_of bin/spk-host)" --arg spkBrowser "$(sha_of bin/spk-browser-proxy)" \
-  --arg discord "$(sha_of bin/mini-discord)" --arg payWatcher "$(sha_of bin/pay-watcher)" \
-  --arg candidate "$(sha_of provenance.json)" --argjson clients "$clients_json" \
-  '{host: ($dir + "/bin/minidregg-host"), mini: ($dir + "/bin/mini"), shell: ($dir + "/bin/mini"),
-    store: ($dir + "/bin/minidregg-link-sqlite-store"),
-    verifier: ($dir + "/bin/minidregg-credential-signature-verifier"),
-    hermes: ($dir + "/bin/grain-runtime"),
-    grainRuntime: ($dir + "/bin/grain-runtime"),
-    grainProviderBridge: ($dir + "/bin/grain-provider-bridge"),
-    inferenceScheduler: ($dir + "/bin/mini-inference-scheduler"),
-    spkHost: ($dir + "/bin/spk-host"), spkHostFeatures: [],
-    spkBrowserProxy: ($dir + "/bin/spk-browser-proxy"), browserProxy: ($dir + "/bin/spk-browser-proxy"),
-    sourceCommit: $sourceCommit, sourcePath: $sourcePath,
-    discord: ($dir + "/bin/mini-discord"), payWatcher: ($dir + "/bin/pay-watcher"),
-    candidate: ($dir + "/provenance.json"),
-    clients: ($clients | with_entries(.value = ($dir + "/" + .value.path))),
-    sha256: {host: $host, mini: $mini, shell: $mini, store: $store, verifier: $verifier,
-             hermes: $grain, grainRuntime: $grain, grainProviderBridge: $providerBridge,
-             inferenceScheduler: $inferenceScheduler,
-             spkHost: $spkHost, spkBrowserProxy: $spkBrowser, browserProxy: $spkBrowser, discord: $discord,
-             payWatcher: $payWatcher, candidate: $candidate}}' \
-  > "$out/manifest.json"
+  '{recorded: "build.sh", sourceOrigin: $sourceOrigin, leanToolchain: $leanPin, lean: $lean, lake: $lake,
+    mathlibRev: $mathlib, rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc, zig: $zig,
+    rustflags: $rustflags,
+    seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal}}' \
+  >"$out/work/toolchains.json"
+python3 "$src/deploy/candidate/package.py" --roles "$roles_json" --source-archive "$out/source.tar" \
+  --out "$out" --into-existing --toolchains "$out/work/toolchains.json" \
+  --host-build-manifest "$out/work/host-build/manifest.txt" >"$out/logs/package.json" \
+  || candidate_die "package.py refused the build (above)"
 stamp "done: $out/manifest.json"
 cat "$out/SHA256SUMS"
