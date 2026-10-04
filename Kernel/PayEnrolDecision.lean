@@ -411,8 +411,8 @@ theorem journal_patch_footprint (o : Observation) (reason : JournalReason) :
 
 Book row 0 is the enrollment address (P1's happy-vector address, owned by the
 float account 107); rows 1 and 2 are free deposit addresses.  The tariff turns
-self-enrollment on at index 0 with the P1 mint, rate 1, a 10¹⁰ cap, node rate
-5 952 380 and a 1-token journal floor; the birth fee is 9.  The clock is at
+self-enrollment on at index 0 with the P1 mint, rate 1, a 10¹⁰ cap, week rate
+999 999 840 (the fixtures' historical week) and a 1-token journal floor; the birth fee is 9.  The clock is at
 hour 500 000. -/
 
 def enrolFixtureTariff : Tariff :=
@@ -495,6 +495,26 @@ theorem at_price_enrols :
     decideEnrol fixtureStore fixturePrice fixtureTip (paid 999999849 (.present fixtureBytes)) both
       false = .ok (.enrol ⟨fixtureMemo, 107, 999999849, 1, some 1, 500168⟩) := by decide +kernel
 
+/-- The operator's tariff: 50 DREGG a week, exactly (`nodeWeekRate = 50 000 000` at six
+decimals), enrollment on at index 0. -/
+def fiftyDreggTariff : Tariff := { enrolFixtureTariff with nodeWeekRate := 50000000 }
+
+def fiftyDreggStore : PayStore := fixtureStore.set tariffAddress (some fiftyDreggTariff)
+
+/-- At the operator's tariff the price is the birth fee plus exactly 50 DREGG. -/
+theorem fifty_dregg_price : enrolPrice fiftyDreggTariff fixturePrice = 50000009 := by decide
+
+/-- Refuting pole of the retired hourly unit: 49.999992 DREGG plus the birth fee, the old
+realized week, is below the price and is journaled. -/
+theorem old_hourly_week_journaled :
+    decideEnrol fiftyDreggStore fixturePrice fixtureTip (paid 50000001 (.present fixtureBytes)) both
+      false = .ok (.journal .belowPrice) := by decide +kernel
+
+/-- Exactly 50 DREGG plus the birth fee enrolls for one week. -/
+theorem fifty_dregg_enrols :
+    decideEnrol fiftyDreggStore fixturePrice fixtureTip (paid 50000009 (.present fixtureBytes)) both
+      false = .ok (.enrol ⟨fixtureMemo, 107, 50000009, 1, some 1, 500168⟩) := by decide +kernel
+
 /-- A squat: another Mini key's memo naming an ssh key already enrolled. -/
 theorem ssh_key_taken_journaled :
     decideEnrol (fixtureStore.set (sshIndexAddress fixtureMemo.sshBlob) (some (List.replicate 32 3)))
@@ -555,6 +575,9 @@ theorem wrong_mint_refused :
 #assert_axioms ssh_sig_invalid_journaled
 #assert_axioms below_price_journaled
 #assert_axioms at_price_enrols
+#assert_axioms fifty_dregg_price
+#assert_axioms old_hourly_week_journaled
+#assert_axioms fifty_dregg_enrols
 #assert_axioms ssh_key_taken_journaled
 #assert_axioms ssh_key_mismatch_journaled
 #assert_axioms subject_taken_journaled
