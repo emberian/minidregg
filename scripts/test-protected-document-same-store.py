@@ -32,7 +32,7 @@ class BindingChecks(unittest.TestCase):
             workspace = self.root / role
             home = self.root / (role + '-home')
             workspace.mkdir(); home.mkdir()
-            state = {'subject': str(index + 1), 'host': manifest['host'], 'hostSha256': manifest['sha256']['host'],
+            state = {'subject': str(index + 1), 'host': manifest['host'],
                      'config': self.binding['configPath'], 'socket': self.binding['socketPath']}
             (workspace / 'workspace.json').write_text(json.dumps(state))
             self.binding[role] = {'workspace': str(workspace), 'home': str(home)}
@@ -49,6 +49,16 @@ class BindingChecks(unittest.TestCase):
     def test_modified_native_binary_is_refused(self):
         (self.root / 'mini').write_bytes(b'other')
         with self.assertRaisesRegex(AssertionError, 'mini changed'):
+            receiving.validate(self.binding)
+
+    def test_host_bytes_that_differ_from_the_pin_are_refused(self):
+        other = self.root / 'other-host'
+        other.write_bytes(b'not the pinned Host')
+        state_path = self.root / 'member/workspace.json'
+        state = json.loads(state_path.read_text())
+        self.assertNotIn('hostSha256', state)
+        state['host'] = str(other); state_path.write_text(json.dumps(state))
+        with self.assertRaisesRegex(AssertionError, 'Host differs|Host pin differs'):
             receiving.validate(self.binding)
 
     def test_other_socket_and_duplicate_subject_are_refused(self):

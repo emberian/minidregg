@@ -44,7 +44,9 @@ def validate(binding):
         check(Path(state['config']).resolve(strict=True) == config, f'{role} config differs')
         check(state['socket'] == str(socket), f'{role} socket differs')
         check(Path(state['host']).resolve(strict=True) == Path(manifest['host']).resolve(strict=True), f'{role} Host differs')
-        check(state['hostSha256'] == manifest['sha256']['host'], f'{role} Host pin differs')
+        # workspace.json names its Host by path only (no hash field); the pin is
+        # checked on the bytes that path resolves to.
+        check(digest(Path(state['host']).resolve(strict=True)) == manifest['sha256']['host'], f'{role} Host pin differs')
         # Optional room-key cache input belongs to other receiving consumers;
         # protected documents use their native private storage.key.
         password = selected.get('cachePassphraseFile')
