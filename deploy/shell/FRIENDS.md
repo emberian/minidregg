@@ -514,9 +514,17 @@ what is decided, from `deploy/pay/enrol-terms.json` and `deploy/pay/README.md`:
   DREGG, 8 atomic units under 50); enrolling costs the one-time birth fee plus that, and the
   Host's own quote, which `mini join` prints, is the amount to send.
 - you run `mini join --solana` on your machine. it makes (or takes) your Mini key there, signs
-  two possessions, and prints the address, the memo (400 bytes) and the amount; **it submits
-  nothing**, you pay from your own wallet. `mini join --wait` then polls the public enrollment
-  view for your key; `mini join --renew` prints the memo again with one week's amount. the v2
+  two possessions, and prints the Host's quote (the price as birth fee + membership + spendable
+  credit, and that the quote does not reserve the price), then the address, the mint, the amount
+  in DREGG and in atomic units, the memo (400 bytes), a Solana Pay link and an `spl-token transfer`
+  line; **it submits nothing**, you pay from your own wallet. send from a wallet you control, never
+  an exchange: exchanges drop memos, and a transfer without the memo can fail enrollment; some
+  wallets also drop the memo from a Solana Pay link, so check the memo is in the transaction
+  before you sign, or use the `spl-token` line. your wallet, your ssh key and your Mini key are
+  linked publicly and permanently on Solana. `mini join --wait` then polls the public enrollment
+  view for your key and, once you are enrolled, prints your subject, your workspace, your account,
+  your lease (the box hour it runs until) and the ssh line for your proxy key; `mini join --renew`
+  prints the memo again with one week's amount. the v2
   memo (`--memo-version v2`) also commits to your next key; v1 does not.
 
 ```
