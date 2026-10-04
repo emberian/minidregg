@@ -1,0 +1,16 @@
+cut            invoke
+actor          12504530369102912422
+intent bytes   355 bytes
+  44524547472f434f4e54524143542f494e54454e542f763110ff000102030405060708090a0b0c0d0e0f7f59f4a3239c5ab2ff010001ff3ac8c6e7355714a7ff5621ff06ff6fff62ff6aff65ff63ff74ff8b52df1024e12745d7b52887ce4ecd517431fb963a0164e234f222f06cb2f3ebff2603a89dc864cd88ff2603a89dc864cd88ff09ff6dff7bff22ff61ff63ff74ff69ff6fff6eff73ff22ff3aff5bff7bff22ff61ff74ff6fff6dff22ff3aff22ff31ff22ff2cff22ff6bff69ff6eff64ff22ff3aff7bff22ff74ff79ff70ff65ff22ff3aff22ff74ff65ff78ff74ff22ff7dff2cff22ff70ff61ff79ff6cff6fff61ff64ff22ff3aff22ff36ff38ff36ff35ff36ff63ff36ff63ff36ff66ff22ff2cff22ff74ff79ff70ff65ff22ff3aff22ff63ff72ff65ff61ff74ff65ff41ff74ff6fff6dff22ff7dff5dff2cff22ff74ff79ff70ff65ff22ff3aff22ff63ff6fff6eff74ff65ff6eff74ff22ff7dff00
+preimage       382 bytes (DREGG/CONTRACT/INTENT-ID/v1 || intent bytes)
+invocation id  517c51eaf37444843059811b487ef049e1f71883c418a9e9ad7c1d0295fad0e5
+ed25519
+  public key   32 bytes, sha256 24e9d3f8e873d1962968eee18a7c52330a0f14965358924629103431d02dee38
+  signature    64 bytes, sha256 e7c8cf8fdb0dd2091fa5a5f3c59f2328c584e9e69e345eb9a1d55db978751ca4
+  verified     ok
+  tampered     refused: Ed25519 half does not verify
+hybrid
+  public key   1984 bytes, sha256 2cfc9b488a6523d065e79b7c66ec03c71e0b0b431e8e97bde666fb37e5e2e513
+  signature    3373 bytes, sha256 c014d4dc7a42c138f4df6d0e64372a482a3aa1d9d7d4434a487394b1c8a08882
+  verified     ok
+  tampered     refused: ML-DSA-65 half does not verify

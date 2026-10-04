@@ -10,6 +10,7 @@
 use ed25519_dalek::SigningKey;
 use zeroize::Zeroizing;
 
+use crate::signer::{Ed25519Signer, HybridSigner, Scheme, Signer};
 use crate::{Error, Result};
 
 /// Bread's identity path (pinned here only for the cross-derivation golden vector).
@@ -18,6 +19,11 @@ pub const BREAD_PATH: &str = "dregg/0";
 /// The Mini key path for a key generation.
 pub fn mini_path(generation: u32) -> String {
     format!("mini/{generation}")
+}
+
+/// The derivation path of the hybrid scheme's ML-DSA-65 seed for a key generation.
+pub fn ml_dsa_path(generation: u32) -> String {
+    format!("{}/ml-dsa-65", mini_path(generation))
 }
 
 /// `blake3::derive_key(path, seed)` → Ed25519 signing key. The same function as Bread's
@@ -41,9 +47,20 @@ impl Profile {
         Ok(Profile { name: name.to_owned(), seed: Zeroizing::new(seed) })
     }
 
-    /// The Mini key of `generation`.
-    pub fn mini_key(&self, generation: u32) -> SigningKey {
-        derive(&self.seed, &mini_path(generation))
+    /// The Mini signer of `generation` under `scheme`. The Ed25519 half is always
+    /// `derive(seed, "mini/<generation>")`; the hybrid's ML-DSA-65 seed is
+    /// `blake3::derive_key("mini/<generation>/ml-dsa-65", seed)` (a distinct path, so the
+    /// post-quantum key is unlinkable from the Ed25519 key by derivation alone).
+    pub fn mini_signer(&self, generation: u32, scheme: Scheme) -> Box<dyn Signer> {
+        let path = mini_path(generation);
+        match scheme {
+            Scheme::Ed25519 => Box::new(Ed25519Signer(derive(&self.seed, &path))),
+            Scheme::HybridEd25519MlDsa65 => {
+                let ed = derive(&self.seed, &path).to_bytes();
+                let xi = Zeroizing::new(blake3::derive_key(&ml_dsa_path(generation), &*self.seed));
+                Box::new(HybridSigner::from_seeds(&ed, &xi))
+            }
+        }
     }
 
     /// The seed, for a store writing the profile file. Key material.
@@ -162,10 +179,21 @@ mod tests {
     #[test]
     fn mini_paths_are_separated_from_bread_and_each_other() {
         let p = Profile::from_seed("golden", golden_seed()).unwrap();
-        let k0 = crate::hex::encode(p.mini_key(0).verifying_key().as_bytes());
-        let k1 = crate::hex::encode(p.mini_key(1).verifying_key().as_bytes());
+        let k0 = crate::hex::encode(&p.mini_signer(0, Scheme::Ed25519).public_key());
+        let k1 = crate::hex::encode(&p.mini_signer(1, Scheme::Ed25519).public_key());
         assert_ne!(k0, "335840a9ca2a7a62bcfb83e3df15933c7e091c2dfd9083c26d93a8c468058b9a");
         assert_ne!(k0, k1);
+    }
+
+    #[test]
+    fn the_hybrid_signer_is_the_ed25519_key_plus_a_distinctly_derived_ml_dsa_key() {
+        let p = Profile::from_seed("golden", golden_seed()).unwrap();
+        let (ed, h0, h1) = (p.mini_signer(0, Scheme::Ed25519), p.mini_signer(0, Scheme::HybridEd25519MlDsa65),
+            p.mini_signer(1, Scheme::HybridEd25519MlDsa65));
+        assert_eq!(h0.public_key()[..32], ed.public_key()[..], "same Ed25519 key as the plain scheme");
+        assert_ne!(h0.public_key()[32..], h1.public_key()[32..], "ML-DSA key rotates with the generation");
+        assert_eq!(h0.public_key(), p.mini_signer(0, Scheme::HybridEd25519MlDsa65).public_key(), "derivation is deterministic");
+        assert_ne!(mini_path(0), ml_dsa_path(0));
     }
 
     #[test]

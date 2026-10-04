@@ -1,35 +1,48 @@
 //! Typed intents over the SHARED-CONTRACTS cuts, their canonical bytes and `InvocationId`.
 //!
-//! TODO(W2.A): lane W2.A owns these types in Lean (`Kernel/Contracts/*`). When that codec
-//! lands, replace [`Intent::canonical_bytes`] with golden vectors emitted by the Lean codec and
-//! delete this encoder: one encoder, Lean-authored. Until then the encoding below is SDK-owned,
-//! domain-tagged `MINI/SDK/INTENT/v1`, and pinned by `golden/vectors.json` in both the Rust
-//! and TS suites.
+//! The encoding is DEFINED in Lean: `Kernel/Contracts/Intents.lean` (`intentCodec`, frame
+//! `DREGG/CONTRACT/INTENT/v1`, built from the repo's one stream nucleus
+//! `Tower256ConcreteBackend.StreamCodec`). This module is the single client-side encoder (the TS
+//! SDK reaches it through wasm; there is no third copy) and is held to the Lean codec by
+//! `golden/lean-intents.json`, emitted by Lean's own exported entry point
+//! (`minidregg_intent_encode`) and compared byte for byte by `tests/golden.rs`.
 //!
-//! Canonical encoding (all integers little-endian):
+//! Stream primitives (the Lean names in parentheses):
 //! ```text
-//! intent      := "MINI/SDK/INTENT/v1" ‖ salt[16] ‖ dec(actor) ‖ u8(cut tag) ‖ body
-//! str(s)      := u32(len) ‖ utf8          dec(s) := str(s), s a canonical decimal
-//! bytes(b)    := u32(len) ‖ b             list(f) := u32(n) ‖ f…    opt(f) := 0 | 1 ‖ f
-//! objectRef   := dec(id) ‖ dec(domain) ‖ str(kind)
-//! revisionRef := objectRef ‖ dec(root)
-//! artifactRef := sha256[32] ‖ u64(length) ‖ str(format)
-//! json(v)     := str(canonical JSON: sorted keys, no whitespace, integers only)
-//! 1 Observe   := revisionRef ‖ str(projection) ‖ dec(capability)
-//! 2 Invoke    := list(revisionRef ‖ dec(cap) ‖ dec(observeCap) ‖ dec(schemaVersion) ‖ json(payload))
-//!                ‖ opt(str(route) ‖ bytes(context))
-//! 3 Reserve   := artifactRef(candidate) ‖ list(objectRef) ‖ artifactRef(law) ‖ artifactRef(obligation)
-//! 4 Install   := artifactRef(candidate) ‖ revisionRef(preimage) ‖ artifactRef(effects) ‖ artifactRef(obligation)
-//! 5 Release   := artifactRef(result) ‖ list(dec audience) ‖ artifactRef(law)
-//! 6 Retire    := artifactRef(obligation) ‖ artifactRef(evidence)
-//! InvocationId := SHA-256("MINI/SDK/INVOCATION-ID/v1" ‖ intent)
+//! nat(n)      := base-255 little-endian digits of n ‖ 0xFF            (StreamCodec.nat)
+//! bytes(b)    := nat(len) ‖ b                                          (bytesStream)
+//! string(s)   := nat(#scalars) ‖ nat(scalar)…                          (stringStream)
+//! list(f)     := nat(n) ‖ f…                                           (StreamCodec.list)
+//! option(f)   := 0 | 1 ‖ f                                             (StreamCodec.option)
+//! sum         := nested prefix-free: inl = 0 ‖ x, inr = 1 ‖ y          (StreamCodec.sum)
 //! ```
+//! Layout:
+//! ```text
+//! intent      := "DREGG/CONTRACT/INTENT/v1" ‖ bytes(salt[16]) ‖ nat(actor) ‖ cut
+//! object      := nat(id) ‖ nat(domain) ‖ string(kind)
+//! revision    := object ‖ nat(root)
+//! artifact    := bytes(sha256[32]) ‖ nat(length) ‖ string(format)
+//! route       := ordinary 0 | objectiveMethod 1 0 | activityDispatch 1 1 0 | roomRelease 1 1 1 0 | roomPublish 1 1 1 1
+//! cut         := observe   0              ‖ revision ‖ string(projection) ‖ nat(capability)
+//!              | invoke    1 0            ‖ list(revision ‖ nat(cap) ‖ nat(observeCap) ‖ nat(schema) ‖ string(canonical payload JSON))
+//!                                          ‖ option(route ‖ bytes(context))
+//!              | reserve   1 1 0          ‖ artifact(candidate) ‖ list(object) ‖ artifact(law) ‖ artifact(obligation)
+//!              | install   1 1 1 0        ‖ artifact(candidate) ‖ revision(preimage) ‖ artifact(effects) ‖ artifact(obligation)
+//!              | release   1 1 1 1 0      ‖ artifact(result) ‖ list(nat audience) ‖ artifact(law)
+//!              | retire    1 1 1 1 1      ‖ artifact(obligation) ‖ artifact(evidence)
+//! InvocationId := SHA-256("DREGG/CONTRACT/INTENT-ID/v1" ‖ intent)
+//! ```
+//! This `InvocationId` is the client's stable name for one semantic request, available before
+//! the Host assigns the request its (source, transaction, event) coordinate
+//! (`Kernel.Contracts.InvocationId`); the salt chosen at creation is what makes it one request.
 use serde_json::{json, Map, Value};
 
 use crate::{Error, Result};
 
-pub const INTENT_DOMAIN: &[u8] = b"MINI/SDK/INTENT/v1";
-pub const INVOCATION_DOMAIN: &[u8] = b"MINI/SDK/INVOCATION-ID/v1";
+/// `intentFrame` in `Kernel/Contracts/Intents.lean`.
+pub const INTENT_FRAME: &[u8] = b"DREGG/CONTRACT/INTENT/v1";
+/// `intentIdFrame` in `Kernel/Contracts/Intents.lean`.
+pub const INTENT_ID_FRAME: &[u8] = b"DREGG/CONTRACT/INTENT-ID/v1";
 
 /// A canonical decimal natural, Mini's spelling of every native identifier and root.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -123,7 +136,7 @@ pub struct Intent {
     pub cut: Cut,
 }
 
-/// `SHA-256("MINI/SDK/INVOCATION-ID/v1" ‖ canonical intent)`.
+/// `SHA-256(intentIdFrame ‖ canonical intent)` — see the module docs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InvocationId(pub [u8; 32]);
 impl InvocationId {
@@ -132,132 +145,254 @@ impl InvocationId {
     }
 }
 
+/// The Lean `StreamCodec` primitives, as byte writers.
 struct W(Vec<u8>);
 impl W {
-    fn u32(&mut self, n: usize) -> Result<()> {
-        let n: u32 = n.try_into().map_err(|_| "intent field exceeds u32 length")?;
-        self.0.extend_from_slice(&n.to_le_bytes());
-        Ok(())
+    /// `StreamCodec.nat`: base-255 little-endian digits, then 255.
+    fn nat_u64(&mut self, mut n: u64) {
+        while n > 0 {
+            self.0.push((n % 255) as u8);
+            n /= 255;
+        }
+        self.0.push(255);
     }
-    fn bytes(&mut self, b: &[u8]) -> Result<()> {
-        self.u32(b.len())?;
+    fn nat_usize(&mut self, n: usize) {
+        self.nat_u64(n as u64);
+    }
+    /// A canonical decimal natural of any size.
+    fn dec(&mut self, d: &Dec) {
+        let mut digits: Vec<u8> = d.0.bytes().map(|b| b - b'0').collect();
+        // Repeated division by 255 on the decimal digits; remainders are the base-255 digits.
+        while digits.iter().any(|&x| x != 0) {
+            let mut rem: u32 = 0;
+            for x in digits.iter_mut() {
+                let cur = rem * 10 + *x as u32;
+                *x = (cur / 255) as u8;
+                rem = cur % 255;
+            }
+            self.0.push(rem as u8);
+        }
+        self.0.push(255);
+    }
+    fn bytes(&mut self, b: &[u8]) {
+        self.nat_usize(b.len());
         self.0.extend_from_slice(b);
-        Ok(())
     }
-    fn str(&mut self, s: &str) -> Result<()> {
-        self.bytes(s.as_bytes())
+    /// `stringStream`: the scalar count, then each scalar value as a `nat`.
+    fn str(&mut self, s: &str) {
+        self.nat_usize(s.chars().count());
+        for c in s.chars() {
+            self.nat_u64(c as u64);
+        }
     }
-    fn dec(&mut self, d: &Dec) -> Result<()> {
-        self.str(&d.0)
+    fn list_len(&mut self, n: usize) {
+        self.nat_usize(n);
     }
-    fn object(&mut self, o: &ObjectRef) -> Result<()> {
-        self.dec(&o.id)?;
-        self.dec(&o.domain)?;
-        self.str(&o.kind)
+    fn tag(&mut self, bytes: &[u8]) {
+        self.0.extend_from_slice(bytes);
     }
-    fn revision(&mut self, r: &RevisionRef) -> Result<()> {
-        self.object(&r.object)?;
-        self.dec(&r.root)
+    fn object(&mut self, o: &ObjectRef) {
+        self.dec(&o.id);
+        self.dec(&o.domain);
+        self.str(&o.kind);
     }
-    fn artifact(&mut self, a: &ArtifactRef) -> Result<()> {
-        self.0.extend_from_slice(&a.sha256);
-        self.0.extend_from_slice(&a.length.to_le_bytes());
-        self.str(&a.format)
+    fn revision(&mut self, r: &RevisionRef) {
+        self.object(&r.object);
+        self.dec(&r.root);
     }
+    fn artifact(&mut self, a: &ArtifactRef) {
+        self.bytes(&a.sha256);
+        self.nat_u64(a.length);
+        self.str(&a.format);
+    }
+    /// The nested-sum tag of `routeStream`.
+    fn route(&mut self, route: &str) {
+        match route {
+            "ordinary" => self.tag(&[0]),
+            "objectiveMethod" => self.tag(&[1, 0]),
+            "activityDispatch" => self.tag(&[1, 1, 0]),
+            "roomRelease" => self.tag(&[1, 1, 1, 0]),
+            _ => self.tag(&[1, 1, 1, 1]),
+        }
+    }
+}
+
+/// The exact integer a JSON number denotes, if it denotes one of magnitude at most `2^53`: the
+/// number's literal read as `digits × 10^exponent`, an integer iff the division is exact. The
+/// SPELLING does not matter (`100`, `100.0`, `1e2` are one number), the VALUE does, and a fraction
+/// is refused, never rounded (`1.0000000000000000001` is not `1`). This is the twin of Lean's
+/// `Kernel.Contracts.Intents.integerValue?` and is held to it by the vectors
+/// (`payload-number-*` rows of `golden/intents.json`).
+pub fn integer_value(n: &serde_json::Number) -> Option<i64> {
+    integer_value_of_literal(&n.to_string())
+}
+
+fn integer_value_of_literal(literal: &str) -> Option<i64> {
+    let (negative, rest) = match literal.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, literal),
+    };
+    let (mantissa, exponent) = match rest.find(['e', 'E']) {
+        Some(i) => (&rest[..i], rest[i + 1..].parse::<i64>().ok()?),
+        None => (rest, 0),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if int.is_empty() || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let digits: String = int.chars().chain(frac.chars()).collect();
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
+        return Some(0);
+    }
+    // value = digits × 10^-scale
+    let scale = i64::try_from(frac.len()).ok()?.checked_sub(exponent)?;
+    let whole: String = if scale <= 0 {
+        if (digits.len() as i64).checked_add(-scale)? > 16 {
+            return None;
+        }
+        format!("{digits}{}", "0".repeat((-scale) as usize))
+    } else {
+        let scale = usize::try_from(scale).ok()?;
+        if scale > digits.len() || digits[digits.len() - scale..].bytes().any(|b| b != b'0') {
+            return None;
+        }
+        digits[..digits.len() - scale].to_owned()
+    };
+    let magnitude: i64 = whole.parse().ok()?;
+    if magnitude > 1 << 53 {
+        return None;
+    }
+    Some(if negative { -magnitude } else { magnitude })
 }
 
 /// Canonical JSON: object keys sorted by UTF-8 bytes, no whitespace, strings escaped as
-/// `serde_json` escapes them, numbers restricted to integers of magnitude ≤ 2^53 so every
-/// implementation (including JavaScript) reads them identically. Floats are refused.
+/// `serde_json` escapes them, numbers only integers of magnitude <= 2^53 (written as plain
+/// integers, see [`integer_value`]). Anything else is refused. This is the twin of Lean's
+/// `Kernel.Contracts.Intents.canonText`.
 pub fn canonical_json(value: &Value) -> Result<String> {
-    fn check(v: &Value) -> Result<()> {
+    fn write(v: &Value, out: &mut String) -> Result<()> {
         match v {
-            Value::Number(n) => {
-                let ok = n.as_i64().is_some_and(|i| i.unsigned_abs() <= 1 << 53)
-                    || n.as_u64().is_some_and(|u| u <= 1 << 53);
-                if ok { Ok(()) } else { Err("canonical JSON admits only integers of magnitude ≤ 2^53; use a decimal string".into()) }
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Value::Number(n) => match integer_value(n) {
+                Some(i) => out.push_str(&i.to_string()),
+                None => return Err("canonical JSON admits only integers of magnitude ≤ 2^53; use a decimal string".into()),
+            },
+            Value::String(s) => out.push_str(&serde_json::to_string(s).map_err(|e| Error(e.to_string()))?),
+            Value::Array(a) => {
+                out.push('[');
+                for (i, x) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    write(x, out)?;
+                }
+                out.push(']');
             }
-            Value::Array(a) => a.iter().try_for_each(check),
-            Value::Object(o) => o.values().try_for_each(check),
-            _ => Ok(()),
+            Value::Object(o) => {
+                // serde_json's Map (no `preserve_order`) is a BTreeMap: keys iterate in byte order.
+                out.push('{');
+                for (i, (k, x)) in o.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&serde_json::to_string(k).map_err(|e| Error(e.to_string()))?);
+                    out.push(':');
+                    write(x, out)?;
+                }
+                out.push('}');
+            }
         }
+        Ok(())
     }
-    check(value)?;
-    // serde_json's Map (no `preserve_order`) is a BTreeMap: keys are emitted in byte order.
-    serde_json::to_string(value).map_err(|e| Error(e.to_string()))
+    let mut out = String::new();
+    write(value, &mut out)?;
+    Ok(out)
 }
 
 impl Intent {
+    /// The Lean codec's bytes (`intentCodec.encode`), or the named refusal.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>> {
-        let mut w = W(INTENT_DOMAIN.to_vec());
-        w.0.extend_from_slice(&self.request_salt);
-        w.dec(&self.actor)?;
-        w.0.push(self.cut.tag());
+        let mut w = W(INTENT_FRAME.to_vec());
+        w.bytes(&self.request_salt);
+        w.dec(&self.actor);
         match &self.cut {
             Cut::Observe { resource, projection, capability } => {
-                w.revision(resource)?;
-                w.str(projection)?;
-                w.dec(capability)?;
+                w.tag(&[0]);
+                w.revision(resource);
+                w.str(projection);
+                w.dec(capability);
             }
             Cut::Invoke { targets, family } => {
                 if targets.is_empty() {
                     return Err("an invocation names at least one target".into());
                 }
-                w.u32(targets.len())?;
+                w.tag(&[1, 0]);
+                w.list_len(targets.len());
                 for t in targets {
-                    w.revision(&t.revision)?;
-                    w.dec(&t.capability)?;
-                    w.dec(&t.observe_capability)?;
-                    w.dec(&t.schema_version)?;
-                    w.str(&canonical_json(&t.payload)?)?;
+                    w.revision(&t.revision);
+                    w.dec(&t.capability);
+                    w.dec(&t.observe_capability);
+                    w.dec(&t.schema_version);
+                    w.str(&canonical_json(&t.payload)?);
                 }
                 match family {
-                    None => w.0.push(0),
+                    None => w.tag(&[0]),
                     Some(f) => {
                         if !ROUTES.contains(&f.route.as_str()) {
                             return Err(Error(format!("unknown invocation family route {:?}", f.route)));
                         }
-                        w.0.push(1);
-                        w.str(&f.route)?;
-                        w.bytes(&f.context)?;
+                        w.tag(&[1]);
+                        w.route(&f.route);
+                        w.bytes(&f.context);
                     }
                 }
             }
             Cut::Reserve { candidate, footprint, law, obligation } => {
-                w.artifact(candidate)?;
-                w.u32(footprint.len())?;
+                w.tag(&[1, 1, 0]);
+                w.artifact(candidate);
+                w.list_len(footprint.len());
                 for o in footprint {
-                    w.object(o)?;
+                    w.object(o);
                 }
-                w.artifact(law)?;
-                w.artifact(obligation)?;
+                w.artifact(law);
+                w.artifact(obligation);
             }
             Cut::Install { candidate, preimage, effects, obligation } => {
-                w.artifact(candidate)?;
-                w.revision(preimage)?;
-                w.artifact(effects)?;
-                w.artifact(obligation)?;
+                w.tag(&[1, 1, 1, 0]);
+                w.artifact(candidate);
+                w.revision(preimage);
+                w.artifact(effects);
+                w.artifact(obligation);
             }
             Cut::Release { result, audience, law } => {
-                w.artifact(result)?;
-                w.u32(audience.len())?;
+                w.tag(&[1, 1, 1, 1, 0]);
+                w.artifact(result);
+                w.list_len(audience.len());
                 for d in audience {
-                    w.dec(d)?;
+                    w.dec(d);
                 }
-                w.artifact(law)?;
+                w.artifact(law);
             }
             Cut::Retire { obligation, evidence } => {
-                w.artifact(obligation)?;
-                w.artifact(evidence)?;
+                w.tag(&[1, 1, 1, 1, 1]);
+                w.artifact(obligation);
+                w.artifact(evidence);
             }
         }
         Ok(w.0)
     }
 
-    pub fn invocation_id(&self) -> Result<InvocationId> {
-        let mut pre = INVOCATION_DOMAIN.to_vec();
+    /// The bytes hashed into the `InvocationId` (`intentIdPreimage` in Lean).
+    pub fn id_preimage(&self) -> Result<Vec<u8>> {
+        let mut pre = INTENT_ID_FRAME.to_vec();
         pre.extend(self.canonical_bytes()?);
-        Ok(InvocationId(crate::sha256(&pre)))
+        Ok(pre)
+    }
+
+    pub fn invocation_id(&self) -> Result<InvocationId> {
+        Ok(InvocationId(crate::sha256(&self.id_preimage()?)))
     }
 
     /// Lower to the authoring JSON the local Host's `author intent` (op 7) reads, for the
@@ -327,7 +462,8 @@ pub mod spelling {
     fn artifact(v: &Value) -> Result<ArtifactRef> {
         let o = exact(v, &["sha256", "length", "format"])?;
         let sha: [u8; 32] = crate::hex::decode(&s(&o["sha256"])?)?.try_into().map_err(|_| "sha256 must be 32 bytes")?;
-        let length = o["length"].as_u64().filter(|n| *n <= 1 << 53).ok_or("length must be an integer ≤ 2^53")?;
+        let length = o["length"].as_number().and_then(integer_value).and_then(|n| u64::try_from(n).ok())
+            .ok_or("length must be a natural number ≤ 2^53")?;
         Ok(ArtifactRef { sha256: sha, length, format: s(&o["format"])? })
     }
     fn list<T>(v: &Value, f: impl Fn(&Value) -> Result<T>) -> Result<Vec<T>> {
@@ -394,6 +530,21 @@ mod tests {
 
     pub(crate) fn object(id: &str) -> ObjectRef {
         ObjectRef { id: Dec::new(id).unwrap(), domain: Dec::new("8501").unwrap(), kind: "object".into() }
+    }
+
+    #[test]
+    fn the_integer_rule_is_by_value_exact_and_bounded() {
+        // The cases of Lean's `integerValue_cases` theorem, spelled as JSON literals.
+        let n = |lit: &str| serde_json::from_str::<serde_json::Number>(lit).ok().and_then(|n| integer_value(&n));
+        for (lit, want) in [("100", Some(100)), ("100.0", Some(100)), ("1e2", Some(100)), ("1E2", Some(100)), ("15e-1", None),
+            ("1.5", None), ("-50", Some(-50)), ("-5.0e1", Some(-50)), ("0.0", Some(0)), ("-0", Some(0)), ("0e7", Some(0)),
+            ("1e-400000", None), ("1e-2", None), ("1.0000000000000000001", None),
+            ("9007199254740992", Some(9007199254740992)), ("9007199254740993", None), ("1e400", None),
+            ("900719925474099200e-2", Some(9007199254740992)), ("-9007199254740992", Some(-9007199254740992))] {
+            assert_eq!(n(lit), want, "{lit}");
+        }
+        assert_eq!(canonical_json(&serde_json::from_str("{\"b\":1e1,\"a\":[2.0,-0]}").unwrap()).unwrap(), "{\"a\":[2,0],\"b\":10}");
+        assert!(canonical_json(&serde_json::from_str("[1.5]").unwrap()).is_err());
     }
 
     #[test]

@@ -57,6 +57,33 @@ pub fn outcome_of(v: &Value) -> Outcome {
     }
 }
 
+/// What a RETAINED history says about an exact call, by the Host's own words and nothing else
+/// (reading evidence off disk, not building a typed receipt): any element that is `confirmed` with
+/// a known confirmation word is the confirmation point and is returned verbatim; otherwise the NEWEST
+/// element being a refusal is terminal; otherwise the call is pending (look it up). This is the rule
+/// of `workspace.rs::retained_attempt_outcome`; [`classify`] refines it for the typed flow by also
+/// requiring the five receipt fields.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Standing {
+    Confirmed(Value),
+    Refused,
+    Pending,
+}
+
+pub fn standing(history: &[Value]) -> Standing {
+    let confirmed = |v: &Value| {
+        v.get("type").and_then(Value::as_str) == Some("confirmed")
+            && v.get("confirmation").and_then(Value::as_str).is_some_and(|c| CONFIRMATIONS.contains(&c))
+    };
+    if let Some(v) = history.iter().rev().find(|v| confirmed(v)) {
+        return Standing::Confirmed(v.clone());
+    }
+    match history.last() {
+        Some(v) if v.get("type").and_then(Value::as_str) == Some("refused") => Standing::Refused,
+        _ => Standing::Pending,
+    }
+}
+
 /// Classify a retained outcome history (oldest first): any confirmation wins; otherwise only
 /// the NEWEST outcome being a refusal is terminal; otherwise undecided. (The rule of
 /// `workspace.rs::retained_attempt_outcome`.)
@@ -188,7 +215,10 @@ pub enum DeliveryState {
     Completed(Value),
 }
 
-/// A delivery record's JSON: `{"binding", "phase": "started"|"completed", "evidence"?}`.
+/// A delivery record's JSON: `{"binding", "phase": "started"|"completed", "request", "at", "evidence"?}`.
+/// `binding` is what the effect IS (known before it starts, so a later open can check it);
+/// `request` is the identity of this one send (a nonce, a message id) that the destination can be
+/// asked about, known only once the send is decided, so it lives beside the binding, not in it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Delivery {
     pub binding: Value,
@@ -217,10 +247,10 @@ impl Delivery {
         }
     }
 
-    /// The record to retain BEFORE the external send. Only from `Fresh`.
-    pub fn start(&self, at: u64) -> Result<Value> {
+    /// The record to retain BEFORE the external send, naming the send (`request`). Only from `Fresh`.
+    pub fn start(&self, request: Value, at: u64) -> Result<Value> {
         match self.state() {
-            DeliveryState::Fresh => Ok(json!({"binding":self.binding,"phase":"started","at":at})),
+            DeliveryState::Fresh => Ok(json!({"binding":self.binding,"phase":"started","request":request,"at":at})),
             DeliveryState::Unknown => Err("delivery UNKNOWN: inspect the destination and resolve before continuing; never re-sent automatically".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
         }
@@ -229,7 +259,8 @@ impl Delivery {
     /// The record after destination evidence (a 2xx, or an operator's destination lookup).
     pub fn complete(&self, evidence: Value, at: u64) -> Result<Value> {
         match self.state() {
-            DeliveryState::Unknown => Ok(json!({"binding":self.binding,"phase":"completed","evidence":evidence,"at":at})),
+            DeliveryState::Unknown => Ok(json!({"binding":self.binding,"phase":"completed",
+                "request":self.record.as_ref().map_or(Value::Null, |r| r["request"].clone()),"evidence":evidence,"at":at})),
             DeliveryState::Fresh => Err("cannot complete a delivery that was never started".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
         }
@@ -308,17 +339,35 @@ mod tests {
     }
 
     #[test]
+    fn standing_is_the_words_alone_while_classify_also_wants_the_receipt() {
+        let word_only = json!({"type":"confirmed","confirmation":"installed"});
+        let refused = json!({"type":"refused","reason":"staleRoot"});
+        let uncertain = json!({"type":"uncertain"});
+        // A known word is a confirmation point for the retained reading, wherever it sits ...
+        assert_eq!(standing(&[word_only.clone(), uncertain.clone()]), Standing::Confirmed(word_only.clone()));
+        assert_eq!(standing(&[refused.clone(), word_only.clone(), refused.clone()]), Standing::Confirmed(word_only.clone()));
+        // ... but not for the typed flow: a confirmation without its receipt fields is undecided.
+        assert!(matches!(classify(&[word_only.clone()]), Some(Outcome::Undecided(_))));
+        // Otherwise only the NEWEST refusal is terminal; an unknown word or an empty history is pending.
+        assert_eq!(standing(&[uncertain.clone(), refused.clone()]), Standing::Refused);
+        assert_eq!(standing(&[refused, uncertain]), Standing::Pending);
+        assert_eq!(standing(&[json!({"type":"confirmed","confirmation":"absent"})]), Standing::Pending);
+        assert_eq!(standing(&[]), Standing::Pending);
+    }
+
+    #[test]
     fn delivery_unknown_is_resolved_only_by_evidence_never_by_resending() {
         let binding = json!({"source":"42:7","destination":"webhook"});
         let fresh = Delivery::open(binding.clone(), None).unwrap();
-        let started = fresh.start(1).unwrap();
+        let started = fresh.start(json!({"nonce":"ab"}), 1).unwrap();
         let unknown = Delivery::open(binding.clone(), Some(started)).unwrap();
         assert_eq!(unknown.state(), DeliveryState::Unknown);
-        assert!(unknown.start(2).unwrap_err().0.contains("UNKNOWN"));
+        assert!(unknown.start(json!({"nonce":"cd"}), 2).unwrap_err().0.contains("UNKNOWN"));
         let done = unknown.complete(json!({"http":204}), 3).unwrap();
+        assert_eq!(done["request"], json!({"nonce":"ab"}), "completion keeps the identity of the send it resolves");
         let done = Delivery::open(binding, Some(done)).unwrap();
         assert_eq!(done.state(), DeliveryState::Completed(json!({"http":204})));
-        assert!(done.start(4).is_err());
+        assert!(done.start(json!(null), 4).is_err());
         assert!(Delivery::open(json!({"other":1}), done.record).is_err());
     }
 }

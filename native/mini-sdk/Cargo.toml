@@ -22,7 +22,11 @@ wasm = ["dep:wasm-bindgen"]
 [dependencies]
 blake3 = { version = "=1.8.4", default-features = false }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
-serde_json = "=1.0.151"
+# FIPS 204 ML-DSA-65, pure Rust, seeded entry points only (no RNG, so it builds for wasm32).
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+# arbitrary_precision keeps a number's literal, so the exact integer rule of the canonical JSON
+# (contracts::integer_value, twin of Lean's integerValue?) never sees an f64-rounded value.
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 sha2 = { version = "=0.10.9", default-features = false }
 zeroize = "=1.9.0"
 libc = { version = "=0.2.189", optional = true }

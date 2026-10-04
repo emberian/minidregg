@@ -181,12 +181,42 @@ exact sdk-custody            mini-sdk --lib --features native -- \
   store::tests::leases_survive_reopen_and_corruption_is_not_absence \
   store::tests::attempt_history_is_numeric_and_transport_metadata_is_not_an_outcome \
   store::tests::a_group_readable_directory_refuses \
+  store::tests::metadata_and_partial_writes_reserve_their_attempt_without_becoming_outcomes \
+  store::tests::later_outcomes_remain_later_beyond_four_digits_and_legacy_padding_is_preserved \
+  store::tests::sparse_history_does_not_reuse_old_attempt_numbers_and_exhaustion_refuses_without_wrapping \
+  store::tests::a_phase_record_may_exist_only_once_with_these_contents \
   custody::tests::recovered_after_uncertain_is_confirmed_by_exact_lookup_never_a_new_nonce \
   custody::tests::refused_permits_one_successor_with_fresh_nonces_only \
   custody::tests::unsent_is_never_sent_but_unsent_after_uncertain_stays_uncertain \
   custody::tests::unknown_confirmation_words_and_malformed_receipts_are_undecided \
   custody::tests::classification_confirmation_wins_then_newest_refusal \
-  custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending
+  custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending \
+  custody::tests::standing_is_the_words_alone_while_classify_also_wants_the_receipt
+# The ssh:DEST operator route (cv 01a104fe-958e): named certainly-unsent refusals before the channel
+# opens, uncertain and never resent after the write. Stand-in rows; the real-sshd rows are
+# tests/ssh.rs (--ignored, need a reachable sshd: MINI_SDK_SSH_TEST_HOST / _IDENTITY).
+exact sdk-ssh                mini-sdk --lib --features native -- \
+  operator::tests::addresses_parse_to_routes_and_bad_destinations_refuse_by_name \
+  operator::tests::ssh_failures_before_the_channel_opens_are_certainly_unsent_and_named \
+  operator::tests::a_session_that_never_opens_times_out_as_certainly_unsent \
+  operator::tests::requests_round_trip_over_one_reused_ssh_session_with_the_unix_frames \
+  operator::tests::an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket \
+  operator::tests::a_hangup_after_the_write_is_uncertain_closes_the_session_and_is_never_resent \
+  operator::tests::a_garbled_or_missing_reply_is_uncertain_not_unsent \
+  operator::tests::a_session_that_ended_between_requests_is_replaced_before_anything_is_written
+# Hybrid Ed25519 + ML-DSA-65 signers (cv 01a0f6bb-c108, 01a0f52e-774e): both halves or refusal.
+exact sdk-pq                 mini-sdk --lib --features native -- \
+  signer::tests::both_schemes_sign_and_verify_and_widths_are_fixed \
+  signer::tests::signing_is_deterministic_and_the_ed_half_is_the_plain_ed25519_signature \
+  signer::tests::a_wrong_key_refuses_in_every_half \
+  signer::tests::tampering_either_half_or_the_layout_refuses_and_names_the_half \
+  sign::tests::hybrid_keys_sign_transactions_end_to_end_and_every_header_verifies_under_both_halves \
+  profile::tests::the_hybrid_signer_is_the_ed25519_key_plus_a_distinctly_derived_ml_dsa_key
+# The intent encoder is held to LEAN's bytes (cv 01a104fe-94a5), and the worked example is pinned.
+exact sdk-lean-pin           mini-sdk --features native --test golden --test examples -- \
+  lean_vectors_are_reproduced_byte_for_byte \
+  the_intent_example_prints_exactly_its_pinned_output \
+  the_examples_intent_bytes_are_leans
 # resource-client (bin mini), one row per defect so a red names it
 # D1: sparse board rendering never scans the address space (bce707b7)
 exact rc-board-sparse        resource-client --bin mini -- \

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::custody::{classify, Outcome};
+use crate::custody::{classify, standing, Outcome, Standing};
 use crate::durable::{self, Perm};
 use crate::lock::{Create, Lease, LockError, Wait};
 use crate::{Error, Result};
@@ -36,6 +36,21 @@ pub fn private_dir(path: &Path) -> Result<()> {
 pub fn atomic_json(path: &Path, value: &Value) -> Result<()> {
     let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     durable::replace(path, &bytes, Perm::Private).map_err(|e| e.to_string().into())
+}
+
+/// Write a record that may exist only ONCE with these exact contents: absent, it is written
+/// durably (as [`atomic_json`]); present and equal, it is re-synced and accepted (an interrupted
+/// writer's retry); present and different, it refuses. A phase marker is retained this way, so a
+/// retry can never silently replace what a crashed run decided.
+pub fn write_once(path: &Path, value: &Value) -> Result<()> {
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    match durable::retain_exact(path, &bytes, Perm::Private) {
+        Ok(_) => Ok(()),
+        Err(durable::RetainError::Differs) => {
+            Err(Error(format!("retained record {} differs; no replacement", path.display())))
+        }
+        Err(durable::RetainError::Io(e)) => Err(e.to_string().into()),
+    }
 }
 
 /// Read a bounded JSON record; absence is `None`, corruption is an error (never absence).
@@ -136,9 +151,10 @@ impl AttemptDir {
         Ok((self.0.join(format!("retry-{i:04}.bin")), self.0.join(format!("retry-{i:04}.json"))))
     }
 
-    /// Retained decoded outcomes, oldest first: `outcome.json`, then `retry-N.json` in numeric
-    /// (not lexical) order.
-    pub fn history(&self) -> Result<Vec<Value>> {
+    /// The retained `retry-N.json` outcome files in numeric attempt order (not lexical: a fifth
+    /// digit does not reorder time, and legacy zero-padded widths are preserved). Transport
+    /// metadata and half-written `.bin` files are never outcomes.
+    pub fn outcome_files(&self) -> Result<Vec<PathBuf>> {
         let mut rows = Vec::new();
         for entry in fs::read_dir(&self.0).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -147,19 +163,31 @@ impl AttemptDir {
             }
         }
         rows.sort();
+        Ok(rows.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// Retained decoded outcomes, oldest first: `outcome.json`, then `retry-N.json` in numeric
+    /// (not lexical) order.
+    pub fn history(&self) -> Result<Vec<Value>> {
         let mut out = Vec::new();
         if let Some(v) = read_json(&self.0.join("outcome.json"))? {
             out.push(v);
         }
-        for (_, p) in rows {
+        for p in self.outcome_files()? {
             out.push(read_json(&p)?.ok_or("retained outcome vanished")?);
         }
         Ok(out)
     }
 
-    /// The classified outcome of this attempt's retained history.
+    /// The classified outcome of this attempt's retained history (typed receipts).
     pub fn outcome(&self) -> Result<Option<Outcome>> {
         Ok(classify(&self.history()?))
+    }
+
+    /// What the retained history says about the exact call, by the Host's words alone
+    /// ([`standing`]): the reading every client uses to decide whether a call is admitted.
+    pub fn standing(&self) -> Result<Standing> {
+        Ok(standing(&self.history()?))
     }
 }
 
@@ -204,6 +232,57 @@ mod tests {
         assert_eq!(dir.history().unwrap().len(), 3);
         assert!(matches!(dir.outcome().unwrap(), Some(Outcome::Confirmed(_))));
         assert_eq!(dir.next_retry().unwrap().1, root.join("retry-0012.json"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn metadata_and_partial_writes_reserve_their_attempt_without_becoming_outcomes() {
+        let root = scratch("reserve");
+        fs::create_dir_all(&root).unwrap();
+        for name in ["retry-0001.bin", "retry-0002.json", "retry-10000.transport.json"] {
+            fs::write(root.join(name), name.as_bytes()).unwrap();
+        }
+        let dir = AttemptDir(root.clone());
+        assert_eq!(dir.next_retry().unwrap(), (root.join("retry-10001.bin"), root.join("retry-10001.json")));
+        assert_eq!(dir.outcome_files().unwrap(), vec![root.join("retry-0002.json")]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn later_outcomes_remain_later_beyond_four_digits_and_legacy_padding_is_preserved() {
+        let root = scratch("legacy");
+        fs::create_dir_all(&root).unwrap();
+        for name in ["retry-10000.json", "retry-9999.json", "retry-003.json", "retry-10000.transport.json",
+            "retry-garbage.json", "retry--1.json"] {
+            fs::write(root.join(name), b"{}").unwrap();
+        }
+        let dir = AttemptDir(root.clone());
+        assert_eq!(dir.outcome_files().unwrap(),
+            ["retry-003.json", "retry-9999.json", "retry-10000.json"].map(|n| root.join(n)).to_vec());
+        assert_eq!(dir.next_retry().unwrap().0, root.join("retry-10001.bin"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sparse_history_does_not_reuse_old_attempt_numbers_and_exhaustion_refuses_without_wrapping() {
+        let root = scratch("sparse");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("retry-0042.bin"), b"x").unwrap();
+        assert_eq!(AttemptDir(root.clone()).next_retry().unwrap().1, root.join("retry-0043.json"));
+        fs::write(root.join("retry-18446744073709551615.bin"), b"x").unwrap();
+        assert!(AttemptDir(root.clone()).next_retry().unwrap_err().0.contains("exceeds u64"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_phase_record_may_exist_only_once_with_these_contents() {
+        let root = scratch("once");
+        private_dir(&root).unwrap();
+        let path = root.join("phase.json");
+        write_once(&path, &json!({"attempt":"a"})).unwrap();
+        write_once(&path, &json!({"attempt":"a"})).unwrap(); // an interrupted writer's retry
+        assert!(write_once(&path, &json!({"attempt":"b"})).unwrap_err().0.contains("no replacement"));
+        assert_eq!(read_json(&path).unwrap().unwrap(), json!({"attempt":"a"}));
         fs::remove_dir_all(root).unwrap();
     }
 

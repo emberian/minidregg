@@ -7,7 +7,6 @@
 //! 227 Objective (W1.2 owns its Objective half; not wrapped here until it lands).
 use std::path::Path;
 
-use ed25519_dalek::VerifyingKey;
 use serde_json::Value;
 
 use crate::frame::{pair, Process};
@@ -36,22 +35,22 @@ impl Consent {
         Process::start(executable, settings).map(Consent)
     }
 
-    /// Op 220: this key is the intent subject's current signing key at the verified frontier.
-    pub fn intent(&mut self, intent_bin: &[u8], key: &VerifyingKey) -> Result<ConsentedIntent> {
-        let reply = self.0.call(220, &pair(intent_bin, &pair(key.as_bytes(), &[])?)?)?;
+    /// Op 220: this key (the scheme's public-key wire layout) is the intent subject's current signing key at the verified frontier.
+    pub fn intent(&mut self, intent_bin: &[u8], key: &[u8]) -> Result<ConsentedIntent> {
+        let reply = self.0.call(220, &pair(intent_bin, &pair(key, &[])?)?)?;
         ConsentedIntent::from_consent_reply(intent_bin, reply)
     }
 
     /// Op 221: the headers of the operator's challenge that this intent permits this key to sign.
-    pub fn observation(&mut self, intent_bin: &[u8], key: &VerifyingKey, intent_signature: &[u8; 64],
+    pub fn observation(&mut self, intent_bin: &[u8], key: &[u8], intent_signature: &[u8],
         challenge_bin: &[u8]) -> Result<Vec<Vec<u8>>> {
-        let payload = pair(intent_bin, &pair(key.as_bytes(), &pair(intent_signature, challenge_bin)?)?)?;
+        let payload = pair(intent_bin, &pair(key, &pair(intent_signature, challenge_bin)?)?)?;
         headers(&self.0.call(221, &payload)?)
     }
 
     /// Op 222: the headers of the operator's plan that this intent permits this key to sign.
-    pub fn plan(&mut self, intent_bin: &[u8], key: &VerifyingKey, plan_bin: &[u8]) -> Result<Vec<Vec<u8>>> {
-        headers(&self.0.call(222, &pair(intent_bin, &pair(key.as_bytes(), plan_bin)?)?)?)
+    pub fn plan(&mut self, intent_bin: &[u8], key: &[u8], plan_bin: &[u8]) -> Result<Vec<Vec<u8>>> {
+        headers(&self.0.call(222, &pair(intent_bin, &pair(key, plan_bin)?)?)?)
     }
 
     /// Op 224: the operator's reply to a specialized plan request equals the plan the Lean
@@ -87,7 +86,7 @@ mod tests {
         // Answers op 220 with the 3 bytes "abd" whatever was asked.
         let (exe, settings) = fake::script("echo", "exec 3<&0; cat <&3 >/dev/null & printf '\\004\\000\\000\\000\\334abd'");
         let mut c = Consent::start(&exe, &settings).unwrap();
-        let key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]).verifying_key();
+        let key = [1u8; 32];
         let err = c.intent(b"abc", &key).unwrap_err();
         assert!(err.0.contains("different retained intent"), "{err}");
     }

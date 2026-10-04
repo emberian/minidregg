@@ -1,23 +1,15 @@
-// Byte-for-byte differential: the TS SDK against the FRESHLY BUILT wasm of the Rust offline core,
-// on the golden inputs AND on mutated/adversarial inputs the golden file does not hold. Each case
-// also asserts its mutation actually changed the input (a falsifier that stopped falsifying is a
-// green that means nothing).
+// Byte-for-byte differential of what the TS SDK still carries natively (derivation, Ed25519, the
+// explain text, the digests) against the FRESHLY BUILT wasm of the Rust offline core, on the golden
+// inputs AND on mutated/adversarial inputs the golden file does not hold. Each case also asserts
+// its mutation actually changed the input (a falsifier that stopped falsifying is a green that
+// means nothing). The intent encoder, canonical JSON, lowering and hybrid scheme are NOT carried in
+// TS: they are the core, so there is nothing to differ and the evidence is Lean's vectors
+// (golden.test.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalJson, derive, explain, hex, intentBytes, invocationId, lower, signRaw, unhex, sha256, headersDigest, confirmDigest } from "../src/index.ts";
-import { fixture, golden as g, oracle } from "./oracle.ts";
+import { canonicalJson, derive, explain, hex, intentBytes, invocationId, signRaw, unhex, sha256, headersDigest, confirmDigest, SdkError } from "../src/index.ts";
+import { fixture, golden as g, intentInputs, leanVectors, oracle } from "./support.ts";
 
-const both = (ts: () => string, rs: () => string) => {
-  let a: string | Error, b: string | Error;
-  try { a = ts(); } catch (x) { a = x as Error; }
-  try { b = rs(); } catch (x) { b = new Error(String(x)); }
-  if (a instanceof Error || b instanceof Error) {
-    assert.ok(a instanceof Error && b instanceof Error, `one side refused, the other did not: ts=${a} rs=${b}`);
-    return "refused";
-  }
-  assert.equal(a, b);
-  return a;
-};
 const clone = <T>(v: T): T => structuredClone(v);
 
 test("derive + sign across paths and messages", () => {
@@ -29,50 +21,35 @@ test("derive + sign across paths and messages", () => {
   }
 });
 
-test("canonical JSON: key order is UTF-8 byte order, escapes match serde_json", () => {
+test("canonical JSON (the core's): key order is UTF-8 byte order, escapes match serde_json", () => {
   const cases = [
     { "ｚ": 1, "😀": 2, "z": 3, "é": 4, "": 5, "A": [true, false, null] },
-    { s: "\u0000\u0007\b\t\n\f\r\u001b\u007f \"\\/ünï😀" },
+    { s: "\u0000\u0007\b\t\n\f\r\u001b\u007f \"\\/ünï😀" },
     { n: [0, -1, 9007199254740992, -9007199254740992] },
   ];
-  for (const c of cases) both(() => canonicalJson(c as never), () => oracle.canonicalJson(JSON.stringify(c)));
   // UTF-16 order would put 😀 before ｚ; UTF-8 order puts ｚ first.
-  assert.ok(canonicalJson(cases[0] as never).indexOf("ｚ") < canonicalJson(cases[0] as never).indexOf("😀"));
-  for (const bad of [{ f: 1.5 }, { big: 2 ** 53 + 2 }]) {
-    assert.equal(both(() => canonicalJson(bad as never), () => oracle.canonicalJson(JSON.stringify(bad))), "refused");
-  }
+  const c0 = canonicalJson(cases[0] as never);
+  assert.ok(c0.indexOf("ｚ") < c0.indexOf("😀"));
+  assert.equal(c0, '{"":5,"A":[true,false,null],"z":3,"é":4,"ｚ":1,"😀":2}');
+  assert.equal(canonicalJson(cases[1] as never), '{"s":"\\u0000\\u0007\\b\\t\\n\\f\\r\\u001b\x7f \\"\\\\/ünï😀"}');
+  assert.equal(canonicalJson(cases[2] as never), '{"n":[0,-1,9007199254740992,-9007199254740992]}');
+  for (const bad of [{ f: 1.5 }, { big: 2 ** 53 + 2 }]) assert.throws(() => canonicalJson(bad as never), /integers/);
 });
 
-test("intent bytes and InvocationId under mutation, including refusals", () => {
-  for (const row of g.intents) {
-    const base = row.intent;
-    const variants: unknown[] = [base];
-    const salt = clone(base); salt.salt = "ff" + base.salt.slice(2); variants.push(salt);
-    const actor = clone(base); actor.actor = "18446744073709551615"; variants.push(actor);
-    const lead = clone(base); lead.actor = "07"; variants.push(lead); // noncanonical decimal: both refuse
-    const upper = clone(base); upper.salt = base.salt.toUpperCase(); variants.push(upper); // both refuse
-    if (base.cut === "invoke") {
-      const fam = clone(base); fam.family = { route: "roomPublish", context: "" }; variants.push(fam);
-      const badRoute = clone(base); badRoute.family = { route: "root", context: "00" }; variants.push(badRoute);
-      const none = clone(base); none.targets = []; variants.push(none);
-      const uni = clone(base); uni.targets[0].payload = { type: "content", actions: [{ type: "createAtom", atom: "1", kind: { type: "text" }, payload: "f09f9880", "ｚ": "😀" }] }; variants.push(uni);
-    }
-    let distinct = new Set<string>();
-    for (const v of variants) {
-      const s = JSON.stringify(v);
-      const b = both(() => hex(intentBytes(v as never)), () => oracle.intentBytes(s));
-      both(() => invocationId(v as never), () => oracle.invocationId(s));
-      distinct.add(b);
-    }
-    assert.ok(distinct.size >= 3, `${row.name}: mutations did not change the bytes`);
-  }
-});
-
-test("lowering, including refusals", () => {
-  for (const row of g.intents) {
-    for (const ctx of [g.lowering.context, { ...g.lowering.context, domain: "9" }, { ...g.lowering.context, commandNonce: "1" }]) {
-      both(() => canonicalJson(lower(row.intent, ctx)), () => oracle.lowerIntent(JSON.stringify(row.intent), JSON.stringify(ctx)));
-    }
+test("the TS spelling reaches the core unmangled; mutations change the bytes and refusals are SdkErrors", () => {
+  const ok = new Set(leanVectors.vectors.filter((v: any) => v.result === "ok").map((v: any) => v.name));
+  for (const row of intentInputs) {
+    if (!ok.has(row.name) || row.name.startsWith("payload-number")) continue;
+    const base = JSON.parse(row.text);
+    const salt = clone(base); salt.salt = "ff" + base.salt.slice(2);
+    const actor = clone(base); actor.actor = "18446744073709551615";
+    const distinct = new Set([hex(intentBytes(base)), hex(intentBytes(salt)), hex(intentBytes(actor))]);
+    assert.equal(distinct.size, 3, `${row.name}: mutations did not change the bytes`);
+    const lead = clone(base); lead.actor = "07";
+    assert.throws(() => intentBytes(lead), SdkError);
+    // The core's answers and the TS wrapper's agree (the wrapper adds nothing).
+    assert.equal(hex(intentBytes(base)), oracle.intentBytes(JSON.stringify(base)));
+    assert.equal(invocationId(base), oracle.invocationId(JSON.stringify(base)));
   }
 });
 

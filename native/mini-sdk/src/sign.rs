@@ -1,10 +1,11 @@
 //! Signing. A key signs exactly the bytes the consent process returned, and the transaction
-//! headers only under a matching [`Confirmation`]. Signatures are Ed25519 over the raw bytes,
-//! as `resource-client`'s `sign_headers` and intent signing do; domain separation lives in the
-//! Lean header encoding (`DREGG/AUTH/SIGNED-REQUEST`, `DREGG/AUTH/PLAN`).
-use ed25519_dalek::{Signer, SigningKey};
-
+//! headers only under a matching [`Confirmation`]. Signatures are over the raw bytes, as
+//! `resource-client`'s `sign_headers` and intent signing do; domain separation lives in the
+//! Lean header encoding (`DREGG/AUTH/SIGNED-REQUEST`, `DREGG/AUTH/PLAN`). The key is any
+//! [`Signer`] (Ed25519 or the Ed25519 + ML-DSA-65 hybrid); a signature is that scheme's
+//! fixed-width byte string.
 use crate::confirm::{Confirmation, Presented};
+use crate::signer::Signer;
 use crate::{Error, Result};
 
 /// Consent op 220 returned these intent bytes unchanged for this key: the subject's current
@@ -24,27 +25,27 @@ impl ConsentedIntent {
     }
 }
 
-pub fn sign_intent(key: &SigningKey, intent: &ConsentedIntent) -> [u8; 64] {
-    key.sign(&intent.0).to_bytes()
+pub fn sign_intent(key: &dyn Signer, intent: &ConsentedIntent) -> Result<Vec<u8>> {
+    key.sign(&intent.0)
 }
 
 /// Observation headers (consent op 221). An observation authorizes a read, never a mutation
 /// (SHARED-CONTRACTS); it is consent-gated, not confirmation-gated.
-pub fn sign_observation_headers(key: &SigningKey, consented: &[Vec<u8>]) -> Vec<[u8; 64]> {
-    consented.iter().map(|h| key.sign(h).to_bytes()).collect()
+pub fn sign_observation_headers(key: &dyn Signer, consented: &[Vec<u8>]) -> Result<Vec<Vec<u8>>> {
+    consented.iter().map(|h| key.sign(h)).collect()
 }
 
 /// Transaction headers: only under the member's confirmation of this exact presentation.
-pub fn sign_transaction(key: &SigningKey, presented: &Presented, confirmation: &Confirmation) -> Result<Vec<[u8; 64]>> {
+pub fn sign_transaction(key: &dyn Signer, presented: &Presented, confirmation: &Confirmation) -> Result<Vec<Vec<u8>>> {
     confirmation.check(presented)?;
     if presented.headers.is_empty() {
         return Err(Error("no consented headers".into()));
     }
-    Ok(presented.headers.iter().map(|h| key.sign(h).to_bytes()).collect())
+    presented.headers.iter().map(|h| key.sign(h)).collect()
 }
 
 /// The JSON list the Host's `signatures` codec (op 9) reads.
-pub fn signatures_json(signatures: &[[u8; 64]]) -> String {
+pub fn signatures_json(signatures: &[Vec<u8>]) -> String {
     let list: Vec<String> = signatures.iter().map(|s| crate::hex::encode(s)).collect();
     serde_json::to_string(&list).unwrap_or_default()
 }
@@ -53,6 +54,8 @@ pub fn signatures_json(signatures: &[[u8; 64]]) -> String {
 mod tests {
     use super::*;
     use crate::contracts::InvocationId;
+    use crate::signer::{verify, Ed25519Signer, HybridSigner, Scheme};
+    use ed25519_dalek::SigningKey;
     use serde_json::json;
 
     fn presented() -> Presented {
@@ -64,7 +67,7 @@ mod tests {
 
     #[test]
     fn signatures_need_the_confirmation_of_this_exact_presentation() {
-        let key = SigningKey::from_bytes(&[9; 32]);
+        let key = Ed25519Signer(SigningKey::from_bytes(&[9; 32]));
         let p = presented();
         let c = p.confirm([5; 16]).unwrap();
         let sigs = sign_transaction(&key, &p, &c).unwrap();
@@ -90,8 +93,26 @@ mod tests {
     fn intent_signing_requires_the_unchanged_consent_reply() {
         assert!(ConsentedIntent::from_consent_reply(b"abc", b"abd".to_vec()).is_err());
         let ok = ConsentedIntent::from_consent_reply(b"abc", b"abc".to_vec()).unwrap();
-        let key = SigningKey::from_bytes(&[9; 32]);
-        assert_eq!(sign_intent(&key, &ok), key.sign(b"abc").to_bytes());
-        assert_eq!(signatures_json(&[[0; 64]]), json!(["00".repeat(64)]).to_string());
+        let key = Ed25519Signer(SigningKey::from_bytes(&[9; 32]));
+        assert_eq!(sign_intent(&key, &ok).unwrap(), key.sign(b"abc").unwrap());
+        assert_eq!(signatures_json(&[vec![0; 64]]), json!(["00".repeat(64)]).to_string());
+    }
+
+    #[test]
+    fn hybrid_keys_sign_transactions_end_to_end_and_every_header_verifies_under_both_halves() {
+        let key = HybridSigner::from_seeds(&[9; 32], &[3; 32]);
+        let p = presented();
+        let c = p.confirm([5; 16]).unwrap();
+        let sigs = sign_transaction(&key, &p, &c).unwrap();
+        assert_eq!(sigs.len(), p.headers.len());
+        for (header, sig) in p.headers.iter().zip(&sigs) {
+            assert_eq!(sig.len(), Scheme::HybridEd25519MlDsa65.signature_len());
+            verify(Scheme::HybridEd25519MlDsa65, &key.public_key(), header, sig).unwrap();
+        }
+        // The confirmation gate is scheme-independent.
+        let forged = Confirmation { nonce: [6; 16], ..c };
+        assert!(sign_transaction(&key, &p, &forged).is_err());
+        let body: Vec<String> = serde_json::from_str(&signatures_json(&sigs)).unwrap();
+        assert!(body.iter().all(|h| h.len() == 2 * 3373));
     }
 }

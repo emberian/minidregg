@@ -58,41 +58,29 @@
       "3ebf9f52ea5ca6d87ce3e8052f60ed0b35bf67fd27137d11339e176970dc91bb",
       "a26430538a4d0224fc72909ae845afee687b6e9bcef95a67a94656f5922c0f87"
     ],
-    "intents": {
-      "install": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f01000000370401010101010101010101010101010101010101010101010101010101010101010a000000000000000900000062656e642d636f726501000000390400000038353031060000006f626a656374030000003132330404040404040404040404040404040404040404040404040404040404040404010000000000000004000000706c616e03030303030303030303030303030303030303030303030303030303030303030200000000000000060000007469636b6574",
-        "invocationId": "c4808ee267980533d87a0eead1520c8340d029d5d59399896e1cb7e96751f1de"
-      },
-      "invoke-family": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f010000003702010000001400000031313731333939373830393230353730303530380400000038353031060000006f626a6563744d0000003934353331333838393931333431353733343337353438313237363231383933383432373838373037353936333639353430333831333335323838393137353535353633373830313131373439130000003935393134363032333031383437313635303313000000393539313436303233303138343731363530330100000039690000007b22616374696f6e73223a5b7b2261746f6d223a223130303031222c226b696e64223a7b2274797065223a2274657874227d2c227061796c6f6164223a223631222c2274797065223a2263726561746541746f6d227d5d2c2274797065223a22636f6e74656e74227d010f0000006f626a6563746976654d6574686f640300000000ff10",
-        "invocationId": "00ddd4087dbbfa71fcf166c712dcd9f7eaa1fff1467fc6087673c5790eec4f40"
-      },
-      "invoke-fixture": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f14000000313235303435333033363931303239313234323202020000001400000031313731333939373830393230353730303530380400000038353031060000006f626a6563744d0000003934353331333838393931333431353733343337353438313237363231383933383432373838373037353936333639353430333831333335323838393137353535353633373830313131373439130000003935393134363032333031383437313635303313000000393539313436303233303138343731363530330100000039690000007b22616374696f6e73223a5b7b2261746f6d223a223130303031222c226b696e64223a7b2274797065223a2274657874227d2c227061796c6f6164223a223631222c2274797065223a2263726561746541746f6d227d5d2c2274797065223a22636f6e74656e74227d1400000031343537373730383933383630303338353232390400000038353031060000006f626a6563744d0000003430393733373930303037343235383232313734313837363639353135343739373233303636363939323632333937353536363535313838393531313137383232343730323835313435383233130000003935393134363032333031383437313635303313000000393539313436303233303138343731363530330100000039690000007b22616374696f6e73223a5b7b2261746f6d223a223130303032222c226b696e64223a7b2274797065223a2274657874227d2c227061796c6f6164223a223632222c2274797065223a2263726561746541746f6d227d5d2c2274797065223a22636f6e74656e74227d00",
-        "invocationId": "6e4ced0c59fc05c30e52942246be9a37f938daa23a4e9d4cc12cc6e1f135ff18"
-      },
-      "observe": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f0100000037010200000034320400000038353031060000006f626a65637401000000300d000000766965772d7265736f757263650100000033",
-        "invocationId": "0b81a1dc347af217bb474c388f0ff70a4f51f34859aac7d5dabf9bfb454232ff"
-      },
-      "release": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f010000003705050505050505050505050505050505050505050505050505050505050505050505000000000000000e000000746578742fc3bc6ec3af636f6465030000000100000031020000003230030000003330300202020202020202020202020202020202020202020202020202020202020202000000000000000006000000706f6c696379",
-        "invocationId": "e02aa8680914c4662ca44534cad91b22e440b5446ab3a92aabbf582f8ba58584"
-      },
-      "reserve": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f01000000370301010101010101010101010101010101010101010101010101010101010101010a000000000000000900000062656e642d636f72650200000001000000310400000038353031060000006f626a65637401000000320400000038353031060000006f626a6563740202020202020202020202020202020202020202020202020202020202020202000000000000000006000000706f6c69637903030303030303030303030303030303030303030303030303030303030303030000000000002000060000007469636b6574",
-        "invocationId": "43be4827e05e5ddc0b2f47e9b39b19f1b1e7100d44e554b8c47415cd3648ae96"
-      },
-      "retire": {
-        "bytes": "4d494e492f53444b2f494e54454e542f7631000102030405060708090a0b0c0d0e0f01000000370603030303030303030303030303030303030303030303030303030303030303030200000000000000060000007469636b657406060606060606060606060606060606060606060606060606060606060606064000000000000000090000006e756c6c6966696572",
-        "invocationId": "41218be765d75a7da802f7ddb61c15c551e7733adeb085a22362e90d18a817d9"
-      }
-    },
     "lowering": "{\"grants\":[{\"capability\":\"9591460230184716503\",\"kind\":\"object\",\"target\":\"11713997809205700508\"},{\"capability\":\"9591460230184716503\",\"kind\":\"object\",\"target\":\"14577708938600385229\"}],\"nonce\":\"222719215467042138278261233788192580851\",\"purpose\":{\"draft\":{\"command\":{\"nonce\":\"137748996673342400647380509571761787076\",\"subject\":\"12504530369102912422\",\"targets\":[{\"capability\":\"9591460230184716503\",\"expectedTargetRoot\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\",\"kind\":\"object\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"schemaVersion\":\"9\",\"target\":\"11713997809205700508\"},{\"capability\":\"9591460230184716503\",\"expectedTargetRoot\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\",\"kind\":\"object\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"schemaVersion\":\"9\",\"target\":\"14577708938600385229\"}]},\"type\":\"invoke\"},\"type\":\"prepare\"},\"subject\":\"12504530369102912422\"}",
     "sign": [
       "9052e1ceacc50903300b57acb807d517e3bae3721f429082f2bc942102fa961bb4ac6ffd77f593132cb2d466e5447463de24301fb5d6a2dc5f170b77bbe72003",
       "64c3df7632f16da5c8a014bd3cb2f54c4c12701eb7d646bc70f23a15c687b936fb77c0b7bab77392b7a804c8906538f08d51ddf4ebd388eeb9ecc0bc2c6d8801"
-    ]
+    ],
+    "signers": {
+      "ed25519": {
+        "publicKey": "f5baaebcc385cfdf9ed5f5487ace4a977815571aee365ff93fa8a4da05a39555",
+        "publicKeyLen": 32,
+        "publicKeySha256": "24e9d3f8e873d1962968eee18a7c52330a0f14965358924629103431d02dee38",
+        "signatureEd": "b63d55f00042d1a64f9ca95d40d7368e4cffcce5dc92681bc034489ff7fe73e7079e48779dabf02d773547a6ab0c8cc700629a7fb97545fd5d9dcd6556774306",
+        "signatureLen": 64,
+        "signatureSha256": "d55f478114c24f4c9570152fd16cf7b0f10902848f133386f2dcbb32cfeea16f"
+      },
+      "hybrid": {
+        "publicKey": "f5baaebcc385cfdf9ed5f5487ace4a977815571aee365ff93fa8a4da05a39555",
+        "publicKeyLen": 1984,
+        "publicKeySha256": "2cfc9b488a6523d065e79b7c66ec03c71e0b0b431e8e97bde666fb37e5e2e513",
+        "signatureEd": "b63d55f00042d1a64f9ca95d40d7368e4cffcce5dc92681bc034489ff7fe73e7079e48779dabf02d773547a6ab0c8cc700629a7fb97545fd5d9dcd6556774306",
+        "signatureLen": 3373,
+        "signatureSha256": "becc832c4ce92d358e1bb0a56f2380a9e4a5d90a5e5abfc429294bd786c25361"
+      }
+    }
   },
   "explain": {
     "headersSha256": "0303030303030303030303030303030303030303030303030303030303030303",
@@ -110,236 +98,6 @@
       "00"
     ]
   ],
-  "intents": [
-    {
-      "intent": {
-        "actor": "12504530369102912422",
-        "cut": "invoke",
-        "family": null,
-        "salt": "000102030405060708090a0b0c0d0e0f",
-        "targets": [
-          {
-            "capability": "9591460230184716503",
-            "observeCapability": "9591460230184716503",
-            "payload": {
-              "actions": [
-                {
-                  "atom": "10001",
-                  "kind": {
-                    "type": "text"
-                  },
-                  "payload": "61",
-                  "type": "createAtom"
-                }
-              ],
-              "type": "content"
-            },
-            "revision": {
-              "object": {
-                "domain": "8501",
-                "id": "11713997809205700508",
-                "kind": "object"
-              },
-              "root": "94531388991341573437548127621893842788707596369540381335288917555563780111749"
-            },
-            "schemaVersion": "9"
-          },
-          {
-            "capability": "9591460230184716503",
-            "observeCapability": "9591460230184716503",
-            "payload": {
-              "actions": [
-                {
-                  "atom": "10002",
-                  "kind": {
-                    "type": "text"
-                  },
-                  "payload": "62",
-                  "type": "createAtom"
-                }
-              ],
-              "type": "content"
-            },
-            "revision": {
-              "object": {
-                "domain": "8501",
-                "id": "14577708938600385229",
-                "kind": "object"
-              },
-              "root": "40973790007425822174187669515479723066699262397556655188951117822470285145823"
-            },
-            "schemaVersion": "9"
-          }
-        ]
-      },
-      "name": "invoke-fixture"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "cut": "invoke",
-        "family": {
-          "context": "00ff10",
-          "route": "objectiveMethod"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f",
-        "targets": [
-          {
-            "capability": "9591460230184716503",
-            "observeCapability": "9591460230184716503",
-            "payload": {
-              "actions": [
-                {
-                  "atom": "10001",
-                  "kind": {
-                    "type": "text"
-                  },
-                  "payload": "61",
-                  "type": "createAtom"
-                }
-              ],
-              "type": "content"
-            },
-            "revision": {
-              "object": {
-                "domain": "8501",
-                "id": "11713997809205700508",
-                "kind": "object"
-              },
-              "root": "94531388991341573437548127621893842788707596369540381335288917555563780111749"
-            },
-            "schemaVersion": "9"
-          }
-        ]
-      },
-      "name": "invoke-family"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "capability": "3",
-        "cut": "observe",
-        "projection": "view-resource",
-        "resource": {
-          "object": {
-            "domain": "8501",
-            "id": "42",
-            "kind": "object"
-          },
-          "root": "0"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f"
-      },
-      "name": "observe"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "candidate": {
-          "format": "bend-core",
-          "length": 10,
-          "sha256": "0101010101010101010101010101010101010101010101010101010101010101"
-        },
-        "cut": "reserve",
-        "footprint": [
-          {
-            "domain": "8501",
-            "id": "1",
-            "kind": "object"
-          },
-          {
-            "domain": "8501",
-            "id": "2",
-            "kind": "object"
-          }
-        ],
-        "law": {
-          "format": "policy",
-          "length": 0,
-          "sha256": "0202020202020202020202020202020202020202020202020202020202020202"
-        },
-        "obligation": {
-          "format": "ticket",
-          "length": 9007199254740992,
-          "sha256": "0303030303030303030303030303030303030303030303030303030303030303"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f"
-      },
-      "name": "reserve"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "candidate": {
-          "format": "bend-core",
-          "length": 10,
-          "sha256": "0101010101010101010101010101010101010101010101010101010101010101"
-        },
-        "cut": "install",
-        "effects": {
-          "format": "plan",
-          "length": 1,
-          "sha256": "0404040404040404040404040404040404040404040404040404040404040404"
-        },
-        "obligation": {
-          "format": "ticket",
-          "length": 2,
-          "sha256": "0303030303030303030303030303030303030303030303030303030303030303"
-        },
-        "preimage": {
-          "object": {
-            "domain": "8501",
-            "id": "9",
-            "kind": "object"
-          },
-          "root": "123"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f"
-      },
-      "name": "install"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "audience": [
-          "1",
-          "20",
-          "300"
-        ],
-        "cut": "release",
-        "law": {
-          "format": "policy",
-          "length": 0,
-          "sha256": "0202020202020202020202020202020202020202020202020202020202020202"
-        },
-        "result": {
-          "format": "text/ünïcode",
-          "length": 5,
-          "sha256": "0505050505050505050505050505050505050505050505050505050505050505"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f"
-      },
-      "name": "release"
-    },
-    {
-      "intent": {
-        "actor": "7",
-        "cut": "retire",
-        "evidence": {
-          "format": "nullifier",
-          "length": 64,
-          "sha256": "0606060606060606060606060606060606060606060606060606060606060606"
-        },
-        "obligation": {
-          "format": "ticket",
-          "length": 2,
-          "sha256": "0303030303030303030303030303030303030303030303030303030303030303"
-        },
-        "salt": "000102030405060708090a0b0c0d0e0f"
-      },
-      "name": "retire"
-    }
-  ],
   "lowering": {
     "context": {
       "commandNonce": "137748996673342400647380509571761787076",
@@ -348,7 +106,7 @@
     },
     "intent": "invoke-fixture"
   },
-  "note": "Inputs are hand-written; every `expect` value is what the Rust offline core computes (MINI_SDK_REGEN=1 cargo test --test golden). The TS SDK recomputes each independently and must match byte for byte; tests/golden.rs also pins two EXTERNAL facts: Bread's dregg/0 vector and that lowering reproduces a real retained intent.json.",
+  "note": "Inputs are hand-written; every `expect` value is what the Rust offline core computes (MINI_SDK_REGEN=1 cargo test --test golden). Intent bytes are NOT here: they are Lean's, in lean-intents.json (emitted from intents.json by Kernel/Contracts/IntentVectors.lean). The TS SDK recomputes the derivation, Ed25519, explain and digest values independently of the Rust core, and reaches the intent encoder and the hybrid scheme only through it. tests/golden.rs also pins two EXTERNAL facts: Bread's dregg/0 vector and that lowering reproduces a real retained intent.json.",
   "seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
   "sign": [
     {
@@ -359,5 +117,9 @@
       "message": "",
       "path": "mini/0"
     }
-  ]
+  ],
+  "signers": {
+    "generation": 0,
+    "message": "02ff9dff02ff9dff02ff9dff02ff9dff02ff9dff02ff9dff02ff9dff02ff9dff"
+  }
 }

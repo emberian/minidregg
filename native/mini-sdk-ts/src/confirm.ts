@@ -3,7 +3,7 @@
 import { concat, equalBytes, hex, sha256, SdkError, u32le, unhex, utf8 } from "./bytes.ts";
 import type { Json } from "./contracts.ts";
 import { explain, type Explanation } from "./explain.ts";
-import { type Key, signRaw } from "./profile.ts";
+import type { Signer } from "./profile.ts";
 
 export const HEADERS_DOMAIN = utf8("MINI/SDK/HEADERS/v1");
 export const CONFIRM_DOMAIN = utf8("MINI/SDK/CONFIRM/v1");
@@ -55,11 +55,11 @@ export class Presented {
 }
 
 /** Sign exactly the consented transaction headers, only under a confirmation of this presentation. */
-export function signTransaction(key: Key, presented: Presented, confirmation: Confirmation): Uint8Array[] {
+export function signTransaction(key: Signer, presented: Presented, confirmation: Confirmation): Uint8Array[] {
   if (!equalBytes(presented.digest(confirmation.nonce), confirmation.digest)) {
     throw new SdkError("confirmation is for a different presentation; nothing signed");
   }
-  return presented.headers.map((h) => signRaw(key, h));
+  return presented.headers.map((h) => key.sign(h));
 }
 
 /** The JSON list the Host's `signatures` codec (op 9) reads. */

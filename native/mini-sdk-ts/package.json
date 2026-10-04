@@ -12,8 +12,8 @@
     "node": ">=23.6"
   },
   "scripts": {
-    "build:oracle": "cargo build --offline --locked --release --target wasm32-unknown-unknown --features wasm --manifest-path ../mini-sdk/Cargo.toml && wasm-bindgen --target nodejs --out-dir oracle \"${CARGO_TARGET_DIR:-../mini-sdk/target}/wasm32-unknown-unknown/release/mini_sdk.wasm\" && node -e \"require('fs').writeFileSync('oracle/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
-    "pretest": "npm run build:oracle",
+    "build:core": "cargo build --offline --locked --release --target wasm32-unknown-unknown --features wasm --manifest-path ../mini-sdk/Cargo.toml && wasm-bindgen --target nodejs --out-dir wasm \"${CARGO_TARGET_DIR:-../mini-sdk/target}/wasm32-unknown-unknown/release/mini_sdk.wasm\" && node -e \"require('fs').writeFileSync('wasm/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
+    "pretest": "npm run build:core",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

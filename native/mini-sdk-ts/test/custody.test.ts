@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Attempt, classify, derive, Presented, signTransaction, unhex } from "../src/index.ts";
-import { fixture, golden as g } from "./oracle.ts";
+import { Attempt, classify, derive, ed25519Signer, Presented, signTransaction, unhex } from "../src/index.ts";
+import { fixture, golden as g } from "./support.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const confirmed = (c: string) => ({ type: "confirmed", confirmation: c, transactionId: "1", eventId: "2", acceptedCount: "3", worldRoot: "4" });
@@ -32,7 +32,7 @@ test("refused permits a successor with fresh nonces only; unsent-after-uncertain
 });
 
 test("signing needs the confirmation of this exact presentation", () => {
-  const key = derive(unhex(g.seed), "mini/0");
+  const key = ed25519Signer(derive(unhex(g.seed), "mini/0"));
   const p = new Presented("07".repeat(32), 1, fixture("intent.json"), enc("intent"), fixture("plan.json"), enc("plan"), [enc("h1"), enc("h2")]);
   const c = p.confirm(new Uint8Array(16).fill(5));
   assert.equal(signTransaction(key, p, c).length, 2);

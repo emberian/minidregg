@@ -39,6 +39,7 @@ pub mod explain;
 pub mod hex;
 pub mod profile;
 pub mod sign;
+pub mod signer;
 
 #[cfg(feature = "native")]
 pub mod consent;

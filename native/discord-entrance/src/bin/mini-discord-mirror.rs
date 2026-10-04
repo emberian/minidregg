@@ -275,7 +275,7 @@ impl Mirror {
                     DeliveryState::Completed(_)=>{}
                     DeliveryState::Unknown=>return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing")),
                     DeliveryState::Fresh=>{
-                        record.save(delivery.start(now_s())?)?;
+                        record.save(delivery.start(json!({"publication":format!("{cell}:{seq}")}),now_s())?)?;
                         let answer=self.broker.call(&json!({"op":"discord-post","body":followup(text)}),Duration::from_secs(40)).map_err(|r|format!("publication {cell}:{seq} UNKNOWN ({r}); no automatic repost"))?;
                         let code=answer["status"].as_u64().unwrap_or(0) as u16;
                         if !(200..300).contains(&code){return Err(format!("publication {cell}:{seq} UNKNOWN (HTTP {code}); no automatic repost"))}

@@ -6,8 +6,9 @@
 // It builds and signs; it never executes, proves, or re-derives a plan. The plan check is the
 // member's local Lean consent process (reached from a browser through a native-messaging bridge).
 export { SdkError, hex, unhex, sha256 } from "./bytes.ts";
-export { BREAD_PATH, derive, miniPath, Profile, signRaw, type Key } from "./profile.ts";
-export { canonicalJson, intentBytes, invocationId, lower, ROUTES, type Intent, type Json, type Lowering } from "./contracts.ts";
+export { call, core, installCore, type Core } from "./core.ts";
+export { BREAD_PATH, derive, ed25519Signer, miniPath, Profile, PUBLIC_KEY_LEN, SCHEMES, SIGNATURE_LEN, signRaw, verify, type Key, type Scheme, type Signer } from "./profile.ts";
+export { canonicalJson, intentBytes, intentIdPreimage, invocationId, lower, type Intent, type Json, type Lowering } from "./contracts.ts";
 export { explain, type Bound, type Explanation } from "./explain.ts";
 export { confirmDigest, headersDigest, Presented, signaturesJson, signTransaction, type Confirmation } from "./confirm.ts";
 export { Attempt, classify, CONFIRMATIONS, outcomeOf, type Outcome, type Phase, type Receipt, type Transmission } from "./custody.ts";

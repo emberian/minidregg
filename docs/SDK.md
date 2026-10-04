@@ -22,15 +22,16 @@ Two nouns:
 
 | Piece | Rust | TS | wasm32 |
 |---|---|---|---|
-| Profiles: `blake3 derive_key("mini/<generation>", seed64)` → Ed25519, Bread's store format | `profile` | `profile.ts` | yes |
-| `Intent` over the cuts Observe/Invoke/Reserve/Install/Release/Retire; canonical bytes; `InvocationId` | `contracts` | `contracts.ts` | yes |
+| Profiles: `blake3 derive_key("mini/<generation>", seed64)` → Ed25519 (+ ML-DSA-65 for the hybrid), Bread's store format | `profile` | `profile.ts` | yes |
+| Signers: Ed25519 and Ed25519 + ML-DSA-65 hybrid behind one `Signer`; `verify` names the failing half (`docs/SDK-PQ.md`) | `signer` | `profile.ts` (hybrid = the Rust core) | yes |
+| `Intent` over the cuts Observe/Invoke/Reserve/Install/Release/Retire; canonical bytes (DEFINED by `Kernel/Contracts/Intents.lean`); `InvocationId` | `contracts` | `contracts.ts` (a wrapper over the Rust core, no second encoder) | yes |
 | `Intent::lower` → the authoring JSON the local Host's `author intent` reads (Invoke only) | `contracts` | `contracts.ts` | yes |
 | `explain()` over Host-presented JSON, bound to the intent/plan/header digests | `explain` | `explain.ts` | yes |
 | `Presented` / `Confirmation` / `sign_transaction` | `confirm`, `sign` | `confirm.ts` | yes |
 | Attempt custody machine; external `Delivery` custody | `custody` | `custody.ts` (attempts) | yes |
 | Consent-process client (ops 220/221/222/224) | `consent` (feature `native`) | — | no |
 | Local Host codec client (ops 7–11) | `host` (`native`) | — | no |
-| Operator-socket client (prepare/submit/lookup/challenge) | `operator` (`native`) | — | no |
+| Operator client (prepare/submit/lookup/challenge) over a unix socket or `ssh:DEST` (host key checking on) | `operator` (`native`) | — | no |
 | Filesystem custody: leased records, retained attempt dirs | `store` (`native`) | — | no |
 | The whole sequence | `flow::Client` (`native`) | — | no |
 
@@ -40,7 +41,7 @@ Two nouns:
 - Trusts the device, the member's **independently selected** local semantic Host image and
   consent executable (chosen by local custody — `MINI_LOCAL_HOST`, `MINI_CONSENT_HOST`,
   `MINI_CONSENT_CONFIG` — never by the operator), and the SDK's framing and signing.
-- Does not trust the operator socket: its challenge and plan are offers. Before a key signs,
+- Does not trust the operator socket (unix or ssh): its challenge and plan are offers. Before a key signs,
   the Lean consent process re-derives them from the retained intent and an independently
   admitted source prefix and returns the exact header bytes this key may sign. The SDK signs
   those bytes and nothing else.
@@ -56,8 +57,9 @@ let profile = mini_sdk::profile::store::active()?.ok_or("no profile")?;
 let mut client = Client {
     host: mini_sdk::host::LocalHost::start(&local_host, &settings)?,
     consent: mini_sdk::consent::Consent::start(&consent_host, &settings)?,
-    operator: mini_sdk::operator::Operator::new(&socket, &config, Some(host_sha256))?,
-    key: profile.mini_key(0),
+    // `socket` is an absolute unix socket path or `ssh:member@box` (see the ssh route below)
+    operator: mini_sdk::operator::Operator::new(mini_sdk::operator::Route::parse(&socket)?, &config, Some(host_sha256))?,
+    key: profile.mini_signer(0, mini_sdk::signer::Scheme::Ed25519),
 };
 let intent = Intent { actor, request_salt, cut: Cut::Invoke { targets, family: None } };
 let attempt = Attempt::first(intent.invocation_id()?, intent_nonce, command_nonce);
@@ -101,9 +103,32 @@ exists, a browser surface must not sign Mini plans.
   pins: Bread's `dregg/0` vector `335840a9…8b9a`, and lowering that reproduces a real
   admitted `intent.json` (`native/mini-sdk/tests/fixtures/`, outcome `installed`). Regenerate only for an
   announced format change: `MINI_SDK_REGEN=1 cargo test --test golden`.
-- `npm test` in `native/mini-sdk-ts`: rebuilds the wasm oracle (`--features wasm`,
-  `wasm-bindgen --target nodejs`) every run, recomputes every golden value in pure TS, and runs
-  TS against the fresh wasm on golden and mutated inputs. Requires node ≥ 23.6 (type stripping).
+- `golden/intents.json` → `golden/lean-intents.json`: the intent inputs, and the bytes (or
+  refusals) that Lean's exported entry points produced for them
+  (`lean --run Kernel/Contracts/IntentVectors.lean golden/intents.json`). The Rust suite and the TS
+  suite require the SDK's encoder to match every admitted row byte for byte and refuse every
+  refused row. A stale file (inputs changed, vectors not re-emitted) fails.
+- `npm test` in `native/mini-sdk-ts`: rebuilds the wasm core (`--features wasm`,
+  `wasm-bindgen --target nodejs`) every run. The intent encoder, canonical JSON, lowering and the
+  hybrid scheme are the core itself (no TS copy); what TS still carries natively (derivation,
+  Ed25519, explain, digests) is recomputed independently and run against the fresh wasm on golden
+  and mutated inputs. Requires node ≥ 23.6 (type stripping).
+- `examples/intent.{rs,ts}`: one worked program per SDK (no Host): build an intent, print its bytes
+  and digest, sign under both schemes, verify, refuse a tampered signature. Both print the same
+  text, pinned by `examples/intent.expected`; the bytes are cross-checked against Lean's row.
+
+## The ssh route
+
+`ssh:DEST` (`operator::Route`) runs one `ssh -T DEST` session per `Operator` whose stdio is the box's
+`mini socket-proxy` (the only command the member's key may run), carrying the unix socket's frames
+one reply per request, so the signing key never leaves the member's machine. The SDK builds the
+command itself (`BatchMode=yes`, `StrictHostKeyChecking=yes`, `ClearAllForwardings=yes`,
+`ControlPath=none`, `ConnectTimeout`, optional `-i`/`-F`): host key checking cannot be weakened by ssh
+config. The request is written only after ssh reports `Entering interactive session`; everything
+before that is certainly-unsent with a NAMED refusal (host key verification failed, authentication
+refused, destination unreachable, session not established within Ns); everything after the write is
+uncertain, the session is closed, and the exact request is never resent (a lost reply is a `lookup`
+of the same call bytes). `MINI_SSH` names another OpenSSH-compatible program.
 
 ## What it does not do
 
@@ -112,7 +137,7 @@ exists, a browser surface must not sign Mini plans.
 - **Check plans.** The plan check is the Lean consent process; the SDK is its client.
 - **Decode canonical bytes.** The local Host does (`inspect`); the SDK renders its output.
 - **Lower Reserve/Install/Release/Retire.** Those cuts have no common native wire yet; `lower`
-  refuses them by name. TODO: the intent encoding becomes a Lean contract codec's (the types are `Kernel/Contracts/Cuts.lean`; it has no codec for the cuts yet).
+  refuses them by name.
 - **Objective consent (op 227)** is not wrapped until lane W1.2 lands its Objective half.
 
 ## Migration (deletion, not addition)

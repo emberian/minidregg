@@ -35,14 +35,14 @@ SignedCall ──► .submit(operator) ──► Receipt | Refused | Uncertain �
 obligation)`, `Release(result projection, audience, law)`, `Retire(obligation, evidence)`, over
 `ObjectRef` (native id + governing domain + kind), `RevisionRef` (exact root, never
 latest-by-name), `ArtifactRef` (digest, length, format). The SDK defines these to match
-SHARED-CONTRACTS. The Lean types live in `Kernel/Contracts/{Identities,Cuts,Snapshot,Futures}.lean`
-(READ at main 5216e02f; they are imported by `ResearchWip.lean` only, not by the default umbrella).
-`Identities.lean` has lawful codecs for `ObjectRef`, `RevisionRef`, `InvocationId`, `ArtifactRef` and the
-other identities; `Cuts.lean` defines the six cut structures (`Observe`, `Invoke`, `Reserve`,
-`Install`, `Release`, `Retire`) and has no codec for them (READ: no `Codec` or canonical-bytes
-definition in that file). So the SDK's canonical intent encoding is still SDK-owned and tagged
-`MINI/SDK/INTENT/v1`; the TODO is to replace it with a Lean codec's bytes for the cuts (one
-encoder, Lean-authored, the SDK carrying golden vectors from it) and delete the SDK encoder.
+SHARED-CONTRACTS. The canonical bytes are DEFINED in Lean, `Kernel/Contracts/Intents.lean`
+(`intentCodec`, frame `DREGG/CONTRACT/INTENT/v1`, built from the repo's one `StreamCodec`
+nucleus; `@[export] minidregg_intent_encode`), and the SDK carries ONE client-side encoder
+(`native/mini-sdk/src/contracts.rs`) that is held to Lean byte for byte by
+`golden/lean-intents.json`, which Lean's own entry points emit
+(`Kernel/Contracts/IntentVectors.lean`). The TypeScript SDK has no encoder: it reaches the Rust
+core through wasm. (Earlier, the SDK owned a `MINI/SDK/INTENT/v1` encoding with a copy in each
+language; both are deleted and the format changed: every `InvocationId` changed.)
 
 Only `Invoke` (and `Observe` as the read half) lowers to today's wire: the authoring JSON
 `{subject, nonce, grants, purpose:{type:"prepare", draft:{type:"invoke", command:{subject,
