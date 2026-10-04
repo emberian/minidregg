@@ -1,0 +1,760 @@
+/-
+# Kernel.SeatStore — the seat world in stored cells, and the turns the seat kernel decides
+
+The seat kernel (`Kernel.Seat`) decides over a `World`: a Book, a registry of
+instances and invitations, and seats. On the native route that world lives in
+cells of the seat kind (`Kernel.SeatCell`, protected coordinates) and in the
+deployment's Book. A turn LOADS the part of the stored world it acts on (the
+cells its request names, decoded strictly), runs the kernel's own transition
+on it (`Seats.step`, `Seats.runPlan`: never a second transition function),
+and writes back exactly the cells whose bodies changed, plus the Book under one
+admitted batch. `Decided` carries the loaded world, the kernel's next world,
+the batch and the posts, with the equations that tie them together; so every
+kernel theorem (`step_inv`, `runPlan_posts`, `seat_conserves`, ...) holds of
+what a decided turn commits (`Decided.inv`, `Decided.conserves`,
+`Decided.seat_balances`).
+
+Six turns:
+
+* `publish`: a contract package (the stored artifact and its source package,
+  `ObjectiveActivity.Stored`, whose artifact names `contractCodecId` and whose
+  package this kernel's front end replays to the artifact's core,
+  `replayPackage`; its definition is a function, not an `Activity`) into its
+  content-addressed package cell; its payer is a registered Book account.
+* `create`: instantiate a published package as a contract instance on an
+  object: the instance cell (package pin, the instance's clause, its open seats).
+* `handOver`: the holder moves an invitation.
+* `offer`: present an invitation and a proposal; the seat's Book account is the
+  seat cell's coordinate `H(offer transaction)`; the invitation is spent (its
+  cell marked and its durable claim consumed); the seat joins the instance's
+  open seats; an activity may be named as its holder (`holdings` cell).
+* `invoke`: run the instance's own package method on the canonical view of its
+  open seats (`callData`) and perform the Plan it returns (`decodePlan`,
+  `Seats.runPlan`): reallocations judged by every touched seat's law and the
+  instance's clause, mints under derived ids with the instance's own package,
+  contract exits, termination. The declared envelope (`Config.covers`) is paid
+  to the collector at the native tariff (`Tariff.workOf`).
+* `exit`: a seat's offerer (on demand), anyone (after its deadline): the seat's
+  whole allocation to its payee. Never consults the instance's clause.
+
+Offerers are protected by offer safety, exit and conservation whoever invokes
+the method; the contract can propose only what its code computes.
+-/
+import Kernel.Seat
+import Kernel.SeatCell
+import Kernel.ObjectiveKernelConfig
+import Compiler.RefusalReason
+
+namespace Minidregg.Kernel.SeatStore
+
+open Minidregg.Theory Minidregg.Compiler
+open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
+open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Kernel.ObjectiveActivityWire
+open Minidregg.Theory.ObjectiveBendDemandData (Data)
+open Minidregg.Theory.ObjectiveBendDemandMachine (initial runBounded)
+open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
+open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch registerAccounts applyOperations)
+open Minidregg.Kernel.ObjectiveActivity (Config BookCell Postings loadBook postings postAt guardAt Stored
+  decodeStored encodeStored replayPackage)
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
+open Minidregg.Kernel.Invitations
+open Minidregg.Kernel.Seats
+open Minidregg.Pred (Pred)
+set_option autoImplicit false
+
+abbrev Snapshot (rootBytes : Bytes → Digest) := DataSnapshot rootBytes
+
+/-! ## Stored bodies -/
+
+def proposalStream : StreamCodec Proposal :=
+  let amounts := StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+  let exitRule : StreamCodec ExitRule := StreamCodec.xmap (StreamCodec.option StreamCodec.nat)
+    (fun rule => match rule with | .onDemand => none | .afterDeadline due => some due)
+    (fun wire => match wire with | none => .onDemand | some due => .afterDeadline due)
+    (by intro rule; cases rule <;> rfl)
+  StreamCodec.xmap (StreamCodec.product amounts (StreamCodec.product amounts exitRule))
+    (fun p => (p.give, p.want, p.exit)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro p; cases p; rfl)
+
+def termsStream : StreamCodec (List (String × Nat)) :=
+  StreamCodec.list (StreamCodec.product stringStream StreamCodec.nat)
+
+def instanceStream : StreamCodec Instance :=
+  StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream LawLeaf.predStream))
+    (fun i => (i.id, i.package, i.clause)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro i; cases i; rfl)
+
+def invitationStream : StreamCodec Invitation :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream
+      (StreamCodec.product stringStream (StreamCodec.product termsStream subjectStream)))))
+    (fun v => (v.id, v.inst, v.package, v.role, v.terms, v.holder))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩) (by intro v; cases v; rfl)
+
+def seatStream : StreamCodec Seat :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product subjectStream
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product proposalStream
+        (StreamCodec.product (StreamCodec.option StreamCodec.nat) StreamCodec.bool))))))
+    (fun s => (s.account, s.inst, s.offerer, s.payee, s.proposal, s.holder, s.isOpen))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2⟩) (by intro s; cases s; rfl)
+
+/-- An instance cell: the instance, its OPEN seats (the index its method sees),
+and whether it was terminated. -/
+structure InstanceBody where
+  inst : Instance
+  seats : List AccountId
+  retired : Bool
+  deriving DecidableEq, Repr
+
+/-- An invitation cell: the invitation and whether an offer spent it. -/
+structure InvitationBody where
+  invitation : Invitation
+  spent : Bool
+  deriving DecidableEq, Repr
+
+/-- A seat cell: the kernel's seat and the role and terms of the invitation
+that made it (what the contract's method is shown). -/
+structure SeatBody where
+  seat : Seat
+  role : String
+  terms : List (String × Nat)
+  deriving DecidableEq, Repr
+
+def instanceBodyStream : StreamCodec InstanceBody :=
+  StreamCodec.xmap (StreamCodec.product instanceStream
+      (StreamCodec.product (StreamCodec.list StreamCodec.nat) StreamCodec.bool))
+    (fun b => (b.inst, b.seats, b.retired)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro b; cases b; rfl)
+
+def invitationBodyStream : StreamCodec InvitationBody :=
+  StreamCodec.xmap (StreamCodec.product invitationStream StreamCodec.bool)
+    (fun b => (b.invitation, b.spent)) (fun w => ⟨w.1, w.2⟩) (by intro b; cases b; rfl)
+
+def seatBodyStream : StreamCodec SeatBody :=
+  StreamCodec.xmap (StreamCodec.product seatStream (StreamCodec.product stringStream termsStream))
+    (fun b => (b.seat, b.role, b.terms)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro b; cases b; rfl)
+
+def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
+def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
+def seatCodec := framed "DREGG/SEAT/SEAT/v1".toUTF8.toList seatBodyStream
+def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
+
+/-! ## Cells: protected coordinates -/
+
+def instanceKey (inst : InstanceId) : Bytes := StreamCodec.nat.encode inst
+def invitationKey (id : InvitationId) : Bytes := StreamCodec.nat.encode id
+def holdingsKey (record : Nat) : Bytes := StreamCodec.nat.encode record
+def packageKey (pin : Digest) : Bytes := digestStream.encode pin
+def seatKey (transaction : TransactionId) : Bytes := digestStream.encode transaction
+
+def instanceCell (domain : Digest) (inst : InstanceId) : CellId :=
+  ⟨SeatCell.coordinate domain .inst (instanceKey inst)⟩
+def invitationCell (domain : Digest) (id : InvitationId) : CellId :=
+  ⟨SeatCell.coordinate domain .invitation (invitationKey id)⟩
+def holdingsCell (domain : Digest) (record : Nat) : CellId :=
+  ⟨SeatCell.coordinate domain .holdings (holdingsKey record)⟩
+def packageCell (domain : Digest) (pin : Digest) : CellId :=
+  ⟨SeatCell.coordinate domain .package (packageKey pin)⟩
+
+/-- **A seat's Book account is its seat cell's coordinate**, keyed by the
+offer's transaction: the offerer never names it. -/
+def seatAccount (domain : Digest) (transaction : TransactionId) : AccountId :=
+  SeatCell.coordinate domain .seat (seatKey transaction)
+
+def seatCell (account : AccountId) : CellId := ⟨account⟩
+
+theorem seatAccount_protected (domain : Digest) (transaction : TransactionId) :
+    reservedBase ≤ seatAccount domain transaction := SeatCell.coordinate_reserved _ _ _
+
+/-- The registry image of a seat-kind cell. -/
+def image (role : SeatCell.Role) (key body : Bytes) : Bytes :=
+  LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.seat, SeatCell.cellOf ⟨role, key, body⟩⟩)
+
+def payloadOf (bytes : Bytes) : Option SeatCell.Payload :=
+  match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | some (.live ⟨.seat, payload⟩) => SeatCell.payloadAt payload.logical
+  | _ => none
+
+def bodyOf (role : SeatCell.Role) (bytes : Bytes) : Option Bytes := do
+  let payload ← payloadOf bytes
+  if payload.role = role then some payload.body else none
+
+def instanceImage (body : InstanceBody) : Bytes :=
+  image .inst (instanceKey body.inst.id) (instanceCodec.encode body)
+def invitationImage (body : InvitationBody) : Bytes :=
+  image .invitation (invitationKey body.invitation.id) (invitationCodec.encode body)
+/-- A seat image needs its key: the offer transaction its coordinate hashes. -/
+def seatImage (key : Bytes) (body : SeatBody) : Bytes := image .seat key (seatCodec.encode body)
+def holdingsImage (record : Nat) (seats : List AccountId) : Bytes :=
+  image .holdings (holdingsKey record) (holdingsCodec.encode seats)
+
+def readInstance {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
+    (inst : InstanceId) : Option InstanceBody :=
+  (bodyOf .inst (snapshot.canonicalBytes (instanceCell domain inst))).bind instanceCodec.decode
+def readInvitation {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
+    (id : InvitationId) : Option InvitationBody :=
+  (bodyOf .invitation (snapshot.canonicalBytes (invitationCell domain id))).bind invitationCodec.decode
+/-- A seat cell: its key (to rewrite it at its coordinate) and its body. -/
+def readSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
+    Option (Bytes × SeatBody) := do
+  let payload ← payloadOf (snapshot.canonicalBytes (seatCell account))
+  if payload.role = .seat then
+    let body ← seatCodec.decode payload.body
+    if body.seat.account = account then some (payload.key, body) else none
+  else none
+def readHoldings {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
+    (record : Nat) : List AccountId :=
+  ((bodyOf .holdings (snapshot.canonicalBytes (holdingsCell domain record))).bind holdingsCodec.decode).getD []
+
+/-! ## Refusals -/
+
+inductive Refusal where
+  | kernel (reason : Seats.Refusal)
+  | program (reason : ObjectiveActivity.Refusal)
+  | packageMissing | packageExists | notAContract (reason : String)
+  | instanceMissing (inst : InstanceId)
+  | cellUndecodable (cell : Nat)
+  | inputUndecodable
+  | plan (reason : String)
+  | methodYielded | methodFaulted (reason : String)
+  | uncovered (envelope : Capacity)
+  | payerInvalid (account : AccountId)
+  | bookUnavailable | bookRefused
+  deriving Repr
+
+def kernel {α : Type} : Except Seats.Refusal α → Except Refusal α
+  | .ok value => .ok value
+  | .error reason => .error (.kernel reason)
+
+def program {α : Type} : Except ObjectiveActivity.Refusal α → Except Refusal α
+  | .ok value => .ok value
+  | .error reason => .error (.program reason)
+
+/-! ## The contract method: its view and its Plan
+
+The method's input is canonical and total: the caller's `input`, the height,
+and the instance's OPEN seats sorted by coordinate, each with its role, terms,
+proposal and its allocation over EVERY asset its proposal names (the total view,
+as the law reads it). The method never sees a funding account or anything
+outside the instance's open seats, and `Seats.step` refuses any transfer outside
+them (`addressed`). Lists are `nil {}` / `cons {head, tail}` sums. -/
+
+def listData : List Data → Data
+  | [] => .variant "nil" (.record [])
+  | head :: tail => .variant "cons" (.record [("head", head), ("tail", listData tail)])
+
+def amountsData (entries : List (AssetId × Nat)) : Data :=
+  listData (entries.map fun entry => .record [("asset", .natural entry.1), ("amount", .natural entry.2)])
+
+def termsData (terms : List (String × Nat)) : Data :=
+  listData (terms.map fun term => .record [("name", .label term.1), ("value", .natural term.2)])
+
+def seatView (book : Book) (body : SeatBody) : Data :=
+  .record [("seat", .natural body.seat.account), ("role", .label body.role), ("terms", termsData body.terms),
+    ("give", amountsData body.seat.proposal.give), ("want", amountsData body.seat.proposal.want),
+    ("allocation", amountsData (body.seat.proposal.assets.map fun asset =>
+      (asset, (book.balance body.seat.account asset).toNat)))]
+
+def sortSeats (seats : List SeatBody) : List SeatBody :=
+  seats.mergeSort fun a b => decide (a.seat.account ≤ b.seat.account)
+
+def callData (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) : Data :=
+  .record [("input", input), ("height", .natural height),
+    ("seats", listData ((sortSeats seats).map (seatView book)))]
+
+def natField (fields : List (String × Data)) (name : String) : Option Nat :=
+  match ObjectiveActivity.fieldOf fields name with
+  | some (.natural value) => some value
+  | _ => none
+
+def labelField (fields : List (String × Data)) (name : String) : Option String :=
+  match ObjectiveActivity.fieldOf fields name with
+  | some (.label value) => some value
+  | _ => none
+
+def decodeList {α : Type} (item : Data → Option α) : Nat → Data → Option (List α)
+  | 0, _ => none
+  | _ + 1, .variant "nil" _ => some []
+  | fuel + 1, .variant "cons" (.record fields) => do
+    let head ← ObjectiveActivity.fieldOf fields "head"
+    let tail ← ObjectiveActivity.fieldOf fields "tail"
+    pure ((← item head) :: (← decodeList item fuel tail))
+  | _ + 1, _ => none
+
+def decodeTransfer : Data → Option Transfer
+  | .record fields => do
+    pure ⟨← natField fields "source", ← natField fields "destination", ← natField fields "asset",
+      ← natField fields "amount"⟩
+  | _ => none
+
+def decodeTerm : Data → Option (String × Nat)
+  | .record fields => do pure (← labelField fields "name", ← natField fields "value")
+  | _ => none
+
+def decodeAction (fuel : Nat) : Data → Option PlanAction
+  | .variant "reallocate" (.record fields) => do
+    pure (.reallocate (← decodeList decodeTransfer fuel (← ObjectiveActivity.fieldOf fields "moves")))
+  | .variant "mint" (.record fields) => do
+    pure (.mint (← labelField fields "role") (← decodeList decodeTerm fuel (← ObjectiveActivity.fieldOf fields "terms"))
+      ⟨← natField fields "holder"⟩)
+  | .variant "exit" (.record fields) => do pure (.exit (← natField fields "seat"))
+  | .variant "terminate" _ => some .terminate
+  | _ => none
+
+/-- The Plan a method returned: a list of `reallocate {moves}`, `mint {role,
+terms, holder}`, `exit {seat}`, `terminate {}`. The same members an
+offer-triggered resident contract (an activity) will one day yield. -/
+def decodePlan (fuel : Nat) (data : Data) : Except Refusal (List PlanAction) :=
+  match decodeList (decodeAction fuel) fuel data with
+  | some plan => .ok plan
+  | none => .error (.plan "the method must return a list of reallocate | mint | exit | terminate")
+
+/-- The output codec a contract artifact names: its entry is a function from
+the call to a Plan, never an `Activity`. -/
+def contractCodecId : Digest := tagged "DREGG/SEAT/CONTRACT/OUTPUT-CODEC/v1" []
+
+/-- Re-execute the instance's method: replay its stored package and
+instantiate the replayed definition with the call (typed at its declared
+domain; `Instantiated.runs_front_end_output`), run it to completion within the
+declared envelope, and extract its result. A method that yields, diverges,
+refuses or exhausts its envelope commits nothing. -/
+def runMethod (config : Config) (bytes : Bytes) (pin : Digest) (call : Data) (envelope : Capacity) :
+    Except Refusal Data := do
+  if !config.covers envelope then throw (.uncovered envelope)
+  let ticks := envelope.sourceTicks
+  let instantiated ← program (ObjectiveActivity.instantiate config bytes pin call)
+  match instantiated.checked.type with
+  | .computation _ _ _ => throw (.notAContract "the method returns an Activity")
+  | _ =>
+    match runBounded config.limits ticks (initial instantiated.applied.erase) with
+    | .finished _ finished =>
+      match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
+      | .ok result => pure result.value
+      | .error (failure, _) => throw (.program (.resultExtraction (reprStr failure)))
+    | .yielded _ _ => throw .methodYielded
+    | .divergent _ _ => throw (.methodFaulted "divergent")
+    | .refused reason _ => throw (.methodFaulted (reprStr reason))
+    | .suspended _ _ => throw (.program .exhausted)
+
+/-! ## Loading a part of the stored world -/
+
+/-- The cells a turn loaded, decoded. -/
+structure Loaded where
+  instances : List InstanceBody := []
+  invitations : List InvitationBody := []
+  seats : List (Bytes × SeatBody) := []
+  holdings : List (Nat × List AccountId) := []
+  deriving Repr
+
+/-- The kernel's world over what a turn loaded and the loaded Book. -/
+def Loaded.world (loaded : Loaded) (book : Book) : World where
+  book := book
+  registry :=
+    { instances := (loaded.instances.filter fun body => !body.retired).map InstanceBody.inst
+      live := (loaded.invitations.filter fun body => !body.spent).map InvitationBody.invitation
+      spent := (loaded.invitations.filter InvitationBody.spent).map fun body => body.invitation.id
+      retired := (loaded.instances.filter InstanceBody.retired).map fun body => body.inst.id }
+  seats := loaded.seats.map fun entry => entry.2.seat
+
+/-- The instance's open-seat index after a turn: the loaded index without the
+seats the turn closed, then the instance's seats it opened. -/
+def openIndex (base : List AccountId) (next : List Seat) (inst : InstanceId) : List AccountId :=
+  base.filter (fun account => !(next.any fun seat => seat.account == account && !seat.isOpen)) ++
+    ((next.filter fun seat => seat.isOpen && seat.inst == inst && !(base.contains seat.account)).map Seat.account)
+
+def changed {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) (bytes : Bytes) :
+    Option Post :=
+  if bytes = snapshot.canonicalBytes cell then none else some (postAt snapshot cell bytes)
+
+/-- A seat that is new in this turn: its coordinate's key and the role and
+terms of the invitation that made it. -/
+structure Fresh where
+  key : Bytes
+  role : String
+  terms : List (String × Nat)
+
+/-- The posts that write the next world's changed cells: seats, invitations,
+instances, holdings. A cell whose body did not change is not written (it is
+guarded). -/
+def statePosts {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
+    (loaded : Loaded) (fresh : Option Fresh) (next : World) : List Post :=
+  let seats := next.seats.filterMap fun seat =>
+    match loaded.seats.find? (fun entry => entry.2.seat.account == seat.account) with
+    | some (key, body) => changed snapshot (seatCell seat.account) (seatImage key { body with seat := seat })
+    | none => fresh.bind fun made =>
+        changed snapshot (seatCell seat.account) (seatImage made.key ⟨seat, made.role, made.terms⟩)
+  let invitations :=
+    (next.registry.live.map fun invitation => (⟨invitation, false⟩ : InvitationBody)) ++
+      loaded.invitations.filterMap fun body =>
+        if next.registry.spent.contains body.invitation.id then some { body with spent := true } else none
+  let invitationPosts := invitations.filterMap fun body =>
+    changed snapshot (invitationCell domain body.invitation.id) (invitationImage body)
+  let ids := (loaded.instances.map (fun body => body.inst.id) ++ next.registry.instances.map Instance.id).dedup
+  let instancePosts := ids.filterMap fun id =>
+    let base := ((loaded.instances.find? fun body => body.inst.id == id).map InstanceBody.seats).getD []
+    let inst := (next.registry.instance? id).orElse fun _ =>
+      (loaded.instances.find? fun body => body.inst.id == id).map InstanceBody.inst
+    inst.bind fun inst =>
+      changed snapshot (instanceCell domain id)
+        (instanceImage ⟨inst, openIndex base next.seats id, next.registry.retired.contains id⟩)
+  let made := next.seats.filter fun seat => !(loaded.seats.any fun entry => entry.2.seat.account == seat.account)
+  let holdingsPosts := (made.filterMap Seat.holder).dedup.filterMap fun record =>
+    changed snapshot (holdingsCell domain record)
+      (holdingsImage record (((loaded.holdings.lookup record).getD []) ++
+        (made.filter fun seat => seat.holder == some record).map Seat.account))
+  seats ++ invitationPosts ++ instancePosts ++ holdingsPosts
+
+/-- Guards on every loaded cell: a decision is bound to the state it read. -/
+def loadedCells (domain : Digest) (loaded : Loaded) : List CellId :=
+  loaded.instances.map (fun body => instanceCell domain body.inst.id) ++
+    loaded.invitations.map (fun body => invitationCell domain body.invitation.id) ++
+    loaded.seats.map (fun entry => seatCell entry.2.seat.account) ++
+    loaded.holdings.map (fun entry => holdingsCell domain entry.1)
+
+/-! ## What the kernel ran -/
+
+/-- The kernel transition a turn ran on its loaded world: nothing (a
+publication), one `Seats.step`, a method's Plan (`Seats.runPlan`), or an
+activity's end (`Seats.closeHeld`). -/
+inductive KernelRun (height : Nat) (world : World) : World → Batch → Prop
+  | nothing : KernelRun height world world noPostings
+  | stepped {actor : Actor} {action : Action} {next : World} {batch : Batch} :
+      Seats.step world height actor action = .ok (next, batch) → KernelRun height world next batch
+  | planned {inst : Instance} {mintId : Nat → InvitationId} {plan : List PlanAction} {next : World} {batch : Batch} :
+      runPlan height inst mintId world 0 plan = .ok (next, batch) → KernelRun height world next batch
+  | ended {record : Nat} {next : World} {batch : Batch} :
+      closeHeld world height record = .ok (next, batch) → KernelRun height world next batch
+
+theorem KernelRun.posts {height : Nat} {world next : World} {batch : Batch}
+    (run : KernelRun height world next batch) : Posts world.book batch next.book := by
+  cases run with
+  | nothing => exact posts_none _
+  | stepped ran => exact (step_posts ran).1
+  | planned ran => exact (runPlan_posts ran).1
+  | ended ran => exact (exitEach_posts ran).1
+
+theorem KernelRun.reachable {height : Nat} {genesis world next : World} {batch : Batch}
+    (run : KernelRun height world next batch) (reachable : Reachable genesis world) : Reachable genesis next := by
+  cases run with
+  | nothing => exact reachable
+  | stepped ran => exact Reachable.admit height _ _ reachable ran
+  | planned ran => exact runPlan_reachable reachable ran
+  | ended ran => exact closeHeld_reachable reachable ran
+
+/-- Every kernel run preserves the seat invariant (T3 (a)'s inductive step). -/
+theorem KernelRun.inv {height : Nat} {world next : World} {batch : Batch}
+    (run : KernelRun height world next batch) (inv : Inv world) : Inv next :=
+  reachable_inv_from inv (run.reachable Reachable.start)
+where
+  reachable_inv_from {world next : World} (inv : Inv world) (reachable : Reachable world next) : Inv next := by
+    induction reachable with
+    | start => exact inv
+    | admit _ _ _ _ admitted ih => exact step_inv ih admitted
+
+/-! ## Turns -/
+
+/-- A seat turn as the kernel decides it (the signed command adds the
+capabilities that authorize it, `Kernel.SeatReceiver`). -/
+inductive Turn where
+  | publish (stored : Bytes)
+  | create (inst : InstanceId) (pin : Digest) (clause : Pred)
+  | handOver (id : InvitationId) (recipient : SubjectId)
+  | offer (id : InvitationId) (expect : Expectation) (funding payee : AccountId) (proposal : Proposal)
+      (holder : Option Nat)
+  | invoke (inst : InstanceId) (input : Bytes) (envelope : Capacity) (account : AccountId)
+  | exit (seat : AccountId)
+  deriving DecidableEq, Repr
+
+abbrev TurnWire :=
+  Sum Bytes (Sum (Nat × Digest × Pred) (Sum (Nat × SubjectId)
+    (Sum (Nat × (Nat × Digest × String) × Nat × Nat × Proposal × Option Nat)
+      (Sum (Nat × Bytes × Capacity × Nat) Nat))))
+
+def Turn.toWire : Turn → TurnWire
+  | .publish artifact => .inl artifact
+  | .create inst pin clause => .inr (.inl (inst, pin, clause))
+  | .handOver invitation recipient => .inr (.inr (.inl (invitation, recipient)))
+  | .offer invitation expect funding payee proposal holder =>
+      .inr (.inr (.inr (.inl (invitation, (expect.inst, expect.package, expect.role), funding, payee, proposal, holder))))
+  | .invoke inst input envelope account => .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account)))))
+  | .exit seat => .inr (.inr (.inr (.inr (.inr seat))))
+
+def Turn.ofWire : TurnWire → Turn
+  | .inl artifact => .publish artifact
+  | .inr (.inl (inst, pin, clause)) => .create inst pin clause
+  | .inr (.inr (.inl (invitation, recipient))) => .handOver invitation recipient
+  | .inr (.inr (.inr (.inl (invitation, (i, p, r), funding, payee, proposal, holder)))) =>
+      .offer invitation ⟨i, p, r⟩ funding payee proposal holder
+  | .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account))))) => .invoke inst input envelope account
+  | .inr (.inr (.inr (.inr (.inr seat)))) => .exit seat
+
+def turnStream : StreamCodec Turn :=
+  StreamCodec.xmap
+    (StreamCodec.sum bytesStream
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream LawLeaf.predStream))
+        (StreamCodec.sum (StreamCodec.product StreamCodec.nat subjectStream)
+          (StreamCodec.sum
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream stringStream))
+                (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+                  (StreamCodec.product proposalStream (StreamCodec.option StreamCodec.nat))))))
+            (StreamCodec.sum
+              (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
+                (StreamCodec.product capacityStream StreamCodec.nat)))
+              StreamCodec.nat)))))
+    Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
+
+/-- The pin a publication's stored bytes name (0 when they do not decode). -/
+def publishedPin (stored : Bytes) : Digest :=
+  ((decodeStored stored).bind fun s => (ObjectiveBendSourceArtifact.decode s.artifact).map
+    ObjectiveBendSourceArtifact.identity).getD ⟨0⟩
+
+structure Request where
+  subject : SubjectId
+  nonce : Nat
+  turn : Turn
+  deriving DecidableEq, Repr
+
+/-- The transaction a turn commits under. A publication's is its package pin
+(publishing the same package twice is one transaction); every other turn's
+is its signer, nonce and exact turn bytes, so a retry finds its record. -/
+def transactionOf (request : Request) : TransactionId :=
+  match request.turn with
+  | .publish stored => tagged "DREGG/SEAT/TX/PUBLISH/v1" (digestStream.encode (publishedPin stored))
+  | turn => tagged "DREGG/SEAT/TX/v1"
+      (subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce ++ turnStream.encode turn)
+
+/-- The id of the `index`-th member of the Plan an invoking turn performs, if
+it mints: a digest of the turn and the instance, so the contract never chooses
+an id (a re-mint of a spent id would need a digest collision). -/
+def mintId (transaction : TransactionId) (inst : InstanceId) (index : Nat) : InvitationId :=
+  (tagged "DREGG/SEAT/INVITATION-ID/v1"
+    (digestStream.encode transaction ++ StreamCodec.nat.encode inst ++ StreamCodec.nat.encode index)).value
+
+/-- The domain of seat claims. -/
+def domain : Digest := tagged "DREGG/SEAT/DOMAIN/v1" []
+
+/-- An invitation's durable claim: an offer consumes it, so an invitation
+is spent at most once whatever its cell says. -/
+def invitationClaim (id : InvitationId) : StableNullifier :=
+  { codecVersion := 1, domain := domain,
+    nullifierId := tagged "DREGG/SEAT/CLAIM/invitation" (StreamCodec.nat.encode id),
+    canonicalBytes := "invitation".toUTF8.toList ++ StreamCodec.nat.encode id }
+
+/-! ## A decided turn -/
+
+def packageBytes {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
+    (pin : Digest) : Bytes :=
+  (bodyOf .package (snapshot.canonicalBytes (packageCell domain pin))).getD []
+
+def bookPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) {pre : BookCell}
+    {batch : Batch} (accepted : AcceptedBatch pre batch) : List Post :=
+  if batch = noPostings then []
+  else [postAt snapshot config.bookCell
+    (LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.resourceBook, accepted.post⟩))]
+
+/-- A turn the seat kernel decided: the loaded cells and Book, the kernel's run
+on them, the fees, the ONE admitted batch on the loaded Book, and the posts. -/
+structure Decided {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : Request) where
+  private mk ::
+  loaded : Loaded
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  world : World
+  worldExact : world = loaded.world (logicalBook book.logical)
+  next : World
+  batch : Batch
+  run : KernelRun height world next batch
+  fees : Batch
+  feesNone : fees.registrations = []
+  accepted : AcceptedBatch book (seqBatch batch fees)
+  fresh : Option Fresh
+  extra : List Post
+  posts : List Post
+  postsExact : posts = extra ++ statePosts config.domain snapshot loaded fresh next ++ bookPost config snapshot accepted
+  guards : List ReadGuard
+  nullifiers : List StableNullifier
+
+def Decided.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (transactionOf request) decided.posts decided.guards decided.nullifiers sealing
+
+/-- **A decided turn conserves every asset**: its postings are one admitted
+batch on the loaded Book. -/
+theorem Decided.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request) (asset : AssetId) :
+    (logicalBook decided.accepted.post.logical).totalAsset asset = (logicalBook decided.book.logical).totalAsset asset :=
+  decided.accepted.conserves asset
+
+/-- **The seat invariant holds of what a decided turn commits**: if it held of
+the loaded world, it holds of the kernel's next world, whose seats are exactly
+what the turn's seat posts encode. -/
+theorem Decided.inv {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request)
+    (inv : Inv decided.world) : Inv decided.next :=
+  decided.run.inv inv
+
+/-- **The committed Book is the kernel's next Book with the fees applied**:
+the fees move value only between the payer and the collector. -/
+theorem Decided.book_post {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : Request} (decided : Decided config snapshot height request) :
+    logicalBook decided.accepted.post.logical = decided.fees.apply decided.next.book := by
+  rw [AcceptedBatch.post_logicalBook]
+  have posts := decided.run.posts
+  rw [decided.worldExact] at posts
+  simp only [Loaded.world] at posts
+  rw [posts.2]
+  unfold Batch.apply seqBatch
+  simp only [decided.feesNone, List.append_nil, applyOperations_append_eq, registerAccounts]
+
+/-! ## Deciding a turn -/
+
+def present {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Bool :=
+  (payloadOf (snapshot.canonicalBytes cell)).isSome
+
+/-- A present cell must decode, and decode as itself: an undecodable cell is
+refused, never read as absent. -/
+def loadInstance {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
+    (inst : InstanceId) : Except Refusal (Option InstanceBody) :=
+  if present snapshot (instanceCell domain inst) then
+    match readInstance snapshot domain inst with
+    | some body => if body.inst.id = inst then .ok (some body) else .error (.cellUndecodable (instanceCell domain inst).value)
+    | none => .error (.cellUndecodable (instanceCell domain inst).value)
+  else .ok none
+
+def loadInvitation {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (domain : Digest)
+    (id : InvitationId) : Except Refusal (Option InvitationBody) :=
+  if present snapshot (invitationCell domain id) then
+    match readInvitation snapshot domain id with
+    | some body => if body.invitation.id = id then .ok (some body)
+        else .error (.cellUndecodable (invitationCell domain id).value)
+    | none => .error (.cellUndecodable (invitationCell domain id).value)
+  else .ok none
+
+def loadSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
+    Except Refusal (Option (Bytes × SeatBody)) :=
+  if present snapshot (seatCell account) then
+    match readSeat snapshot account with
+    | some entry => .ok (some entry)
+    | none => .error (.cellUndecodable account)
+  else .ok none
+
+def requireSeat {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (account : AccountId) :
+    Except Refusal (Bytes × SeatBody) := do
+  match ← loadSeat snapshot account with
+  | some entry => pure entry
+  | none => throw (.cellUndecodable account)
+
+/-- Assemble a decision: the fees after the kernel's batch, admitted as ONE
+batch on the loaded Book. -/
+def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
+    (request : Request) (loaded : Loaded) (book : BookCell) (bookExact : loadBook config snapshot = .ok book)
+    (next : World) (batch : Batch) (run : KernelRun height (loaded.world (logicalBook book.logical)) next batch)
+    (fees : Batch) (feesNone : fees.registrations = []) (fresh : Option Fresh) (extra : List Post)
+    (cells : List CellId) (nullifiers : List StableNullifier) :
+    Except Refusal (Decided config snapshot height request) :=
+  if admitted : (seqBatch batch fees).Admission (logicalBook book.logical) then
+    let accepted := AcceptedBatch.ofAdmission admitted
+    .ok ⟨loaded, book, bookExact, _, rfl, next, batch, run, fees, feesNone, accepted, fresh, extra, _, rfl,
+      (loadedCells config.domain loaded ++ cells).map (guardAt snapshot), nullifiers⟩
+  else .error .bookRefused
+
+/-- The kernel's decision of one turn on a snapshot at a height. -/
+def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
+    (request : Request) : Except Refusal (Decided config snapshot height request) :=
+  match bookExact : loadBook config snapshot with
+  | .error _ => .error .bookUnavailable
+  | .ok book =>
+    let logical := logicalBook book.logical
+    let transaction := transactionOf request
+    let domain := config.domain
+    match request.turn with
+    | .publish storedBytes => do
+      let some stored := decodeStored storedBytes | throw .packageMissing
+      let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
+      if artifact.outputCodec ≠ contractCodecId then throw (.notAContract "the artifact is not a contract package")
+      let pin := ObjectiveBendSourceArtifact.identity artifact
+      let cell := packageCell domain pin
+      if present snapshot cell then throw .packageExists
+      if stored.payer = config.asset ∨ stored.payer = config.collector ∨ reservedBase ≤ stored.payer ∨
+          stored.payer ∉ logical.accounts then throw (.payerInvalid stored.payer)
+      let definition ← program (replayPackage config stored pin)
+      match ObjectiveBendTyping.callable definition.replayed.accepted.typed.type with
+      | .arrow _ _ _ (.computation _ _ _) => throw (.notAContract "a contract method returns a Plan, not an Activity")
+      | .arrow _ _ _ _ => pure ()
+      | _ => throw (.notAContract "a contract method takes the call")
+      let loaded : Loaded := {}
+      finish config snapshot height request loaded book bookExact (loaded.world logical) noPostings .nothing
+        noPostings rfl none [postAt snapshot cell (image .package (packageKey pin) (encodeStored stored))]
+        [config.bookCell] []
+    | .create inst pin clause => do
+      if !present snapshot (packageCell domain pin) then throw .packageMissing
+      let found ← loadInstance snapshot domain inst
+      let loaded : Loaded := { instances := found.toList }
+      match ran : Seats.step (loaded.world logical) height (.subject request.subject) (.create ⟨inst, pin, clause⟩) with
+      | .error reason => throw (.kernel reason)
+      | .ok (next, batch) =>
+        finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none []
+          [packageCell domain pin, instanceCell domain inst] []
+    | .handOver invitation recipient => do
+      let found ← loadInvitation snapshot domain invitation
+      let loaded : Loaded := { invitations := found.toList }
+      match ran : Seats.step (loaded.world logical) height (.subject request.subject) (.handOver invitation recipient) with
+      | .error reason => throw (.kernel reason)
+      | .ok (next, batch) =>
+        finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none [] [] []
+    | .offer invitation expect funding payee proposal holder => do
+      let found ← loadInvitation snapshot domain invitation
+      let inst ← match found with
+        | some body => loadInstance snapshot domain body.invitation.inst
+        | none => pure none
+      let holdings := match holder with
+        | some record => [(record, readHoldings snapshot domain record)]
+        | none => []
+      let loaded : Loaded := { instances := inst.toList, invitations := found.toList, holdings := holdings }
+      let account := seatAccount domain transaction
+      let fresh : Option Fresh := found.map fun body => ⟨seatKey transaction, body.invitation.role, body.invitation.terms⟩
+      match ran : Seats.step (loaded.world logical) height (.subject request.subject)
+          (.offer invitation expect account funding payee proposal holder) with
+      | .error reason => throw (.kernel reason)
+      | .ok (next, batch) =>
+        finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl fresh []
+          [seatCell account] [invitationClaim invitation]
+    | .invoke inst inputBytes envelope account => do
+      let some input := decodeDataBytes inputBytes | throw .inputUndecodable
+      let some body ← loadInstance snapshot domain inst | throw (.instanceMissing inst)
+      if body.retired then throw (.instanceMissing inst)
+      if reservedBase ≤ account ∨ account = config.collector ∨ account = config.asset then throw (.payerInvalid account)
+      let seats ← body.seats.mapM (requireSeat snapshot)
+      let call := callData input height logical (seats.map Prod.snd)
+      let result ← runMethod config (packageBytes domain snapshot body.inst.package) body.inst.package call envelope
+      let plan ← decodePlan (config.planBudget.nodes + 1) result
+      let ids := plan.zipIdx.filterMap fun (member, index) => match member with
+        | .mint _ _ _ => some (mintId transaction inst index)
+        | _ => none
+      let minted ← ids.mapM (loadInvitation snapshot domain)
+      let loaded : Loaded := { instances := [body], invitations := minted.filterMap (fun found => found), seats := seats }
+      match ran : runPlan height body.inst (mintId transaction inst) (loaded.world logical) 0 plan with
+      | .error reason => throw (.kernel reason)
+      | .ok (next, batch) =>
+        finish config snapshot height request loaded book bookExact next batch (.planned ran)
+          ⟨[], [.fee account config.collector config.asset (config.tariff.workOf envelope)]⟩ rfl none []
+          (packageCell domain body.inst.package :: ids.map (invitationCell domain)) []
+    | .exit seat => do
+      let found ← loadSeat snapshot seat
+      let inst ← match found with
+        | some (_, body) => loadInstance snapshot domain body.seat.inst
+        | none => pure none
+      let loaded : Loaded := { instances := inst.toList, seats := found.toList }
+      match ran : Seats.step (loaded.world logical) height (.subject request.subject) (.exit seat) with
+      | .error reason => throw (.kernel reason)
+      | .ok (next, batch) =>
+        finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none []
+          [seatCell seat] []
+
+#assert_axioms seatAccount_protected KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
+  Decided.inv Decided.book_post
+
+end Minidregg.Kernel.SeatStore

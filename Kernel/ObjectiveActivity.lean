@@ -634,11 +634,29 @@ def packageBytes {rootBytes : Bytes → Digest} (config : Config) (snapshot : Da
     (pin : Digest) : Bytes :=
   (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain pin))).getD []
 
-/-- Load the artifact and its package from their cell, replay the front end on the package
-(`replayPackage`), instantiate the replayed definition with the input (typed at the
-declared domain), and check the instantiation. -/
-def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) :
-    Except Refusal (Program config pin input) := do
+/-- A replayed package definition applied to its typed input: the shared prefix
+of an activity's program and of a seat contract's one-shot method
+(`Kernel.SeatStore`). The stored package is replayed by this kernel's front end
+(`replayPackage`), the input is typed at the replayed definition's declared
+domain, and the application is checked. -/
+structure Instantiated (config : Config) (pin : Digest) (input : Data) where
+  private mk ::
+  definition : Replay config pin
+  domain : Ty
+  applied : AnnotatedTerm
+  appliedExact : applied = ⟨.app definition.source.term input.term,
+    fun path => match path with
+      | 0 :: rest => definition.source.annotations rest
+      | 1 :: rest => annotationsOf (dataAnnotations definition.source.assumptions.bounds 64 input domain []) rest
+      | _ => none,
+    definition.source.assumptions⟩
+  checked : Checked applied []
+
+/-- Load the artifact and its package from their cell body, replay the front end
+on the package (`replayPackage`), instantiate the replayed definition with the
+input (typed at the declared domain), and check the instantiation. -/
+def instantiate (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) :
+    Except Refusal (Instantiated config pin input) := do
   let some stored := decodeStored bytes | throw .packageMissing
   let definition ← replayPackage config stored pin
   let source := definition.source
@@ -651,15 +669,39 @@ def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) 
         | _ => none,
       source.assumptions⟩
     let some checked := check applied [] config.typeFuel | throw .inputType
-    match typeExact : checked.type with
-    | .computation planType responseType resultType =>
-      match replyExact : replyType applied.assumptions responseType with
-      | some reply =>
-        pure ⟨definition, domain, applied, rfl, checked, planType, responseType,
-          resultType, typeExact, reply, replyExact⟩
-      | none => throw (.outcomeProtocol "reply")
-    | _ => throw (.packageType "the definition does not return an Activity")
+    pure ⟨definition, domain, applied, rfl, checked⟩
   | _ => throw (.packageType "the definition takes no input")
+
+/-- Load an activity program: `instantiate`, then the application must be an
+`Activity<P,R,A>` whose response protocol has a reply type. -/
+def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) :
+    Except Refusal (Program config pin input) := do
+  let instance_ ← instantiate config bytes pin input
+  match typeExact : instance_.checked.type with
+  | .computation planType responseType resultType =>
+    match replyExact : replyType instance_.applied.assumptions responseType with
+    | some reply =>
+      pure ⟨instance_.definition, instance_.domain, instance_.applied, instance_.appliedExact, instance_.checked,
+        planType, responseType, resultType, typeExact, reply, replyExact⟩
+    | none => throw (.outcomeProtocol "reply")
+  | _ => throw (.packageType "the definition does not return an Activity")
+
+/-- What a seat contract's method runs is the front end's output on the package
+stored with its artifact (as `Program.runs_front_end_output` for an activity). -/
+theorem Instantiated.runs_front_end_output {config : Config} {pin : Digest} {input : Data}
+    (instance_ : Instantiated config pin input) :
+    instance_.definition.package.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
+    ∃ (l : ObjectiveBendFrontEnd.Lowering) (a : ObjectiveBendFrontEnd.Accepted l),
+      ObjectiveBendPublication.replay instance_.definition.package = .ok l ∧
+      l.packet.compress.toUTF8.toList = instance_.definition.artifact.typedCore ∧
+      a.packet.source.term = a.erased ∧
+      instance_.applied.term = .app a.erased input.term := by
+  let r := instance_.definition.replayed
+  refine ⟨instance_.definition.frontEndOwn, r.lowering, r.accepted, r.replayExact, r.coreExact,
+    r.accepted.packetTerm, ?_⟩
+  rw [instance_.appliedExact]
+  simp only [Replay.source, instance_.definition.replayed.accepted.sourceExact]
+  rfl
 
 /-- The term an activity runs is the front end's output on the package stored with its
 artifact: the package names this kernel's front end, the kernel replayed it, the artifact's
@@ -681,7 +723,7 @@ theorem Program.runs_front_end_output {config : Config} {pin : Digest} {input : 
   simp only [Replay.source, program.definition.replayed.accepted.sourceExact]
   rfl
 
-#assert_axioms Program.runs_front_end_output
+#assert_axioms Program.runs_front_end_output Instantiated.runs_front_end_output
 
 /-- Type an outcome at the program's response type. -/
 def typeResponse {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
