@@ -90,12 +90,14 @@ nextSeq (workspace.rs:3209), and a stream position holds exactly one entry forev
 DECIDED: (a) the envelope's address IS its revision (a stream position is written once), already
 bound in commit and AAD; no new field (a field that binds nothing new is a no-op); (b) delete the unreachable document create/edit sealing in seal_content
 (a second sealing shape that agrees today is one that disagrees later); legacy room-key document
-atoms are read-only + tombstone. (c) The SAME defect lives on in the successor format:
-protected_atoms.rs binding(atom) = [1 ‖ atom id] only, so an edited protected document atom can be
-re-served with its earlier fragment and opens. Fix shape: binding = atom ‖ seq ‖ prev revision
-carried in the fragment header, reader checks seq=0 iff revision=createdAt plus a retained per-atom
-(seq, revision, digest) high-water. That is protected-document territory (object audiences) —
-reported to the root, not silently widened into this lane.
+atoms are read-only + tombstone. (c) The SAME defect lived on in the successor format: protected_atoms.rs bound [1 ‖ atom id] only,
+so an edited protected-document atom re-served with its earlier fragment opened. FIXED (same lane):
+binding v2 = 2 ‖ atom ‖ seq ‖ prev revision, carried in the fragment header and in the fragment
+operation every open recomputes. Reader checks: seq = 0 iff revision = createdAt (struck lines
+exempt), and a retained per-atom version (protected-documents/atom-versions-OBJECT.json: seq,
+revision, ciphertext digest) that refuses a lower seq, the same seq with other bytes, or a next seq
+whose prev is not the revision last seen. Residual R2 stands: a reader with no history, shown a
+consistent stale RECORD (revision rolled back too), cannot tell. v1 bindings refuse to load.
 
 4. PRE-DISCLOSURE ORDERING (DECIDED) — per release operation, persistent under
 ROOT/private/room-releases/OPERATION/:

@@ -277,6 +277,15 @@ pub(crate) fn opened_entries(root:&std::path::Path,reference:&Value,view:&Value)
     let mut entries=super::entries(view)?.clone();
     let (state,key)=custody_paths(root);
     let store=if state.exists() && key.exists() {Some(custody(root)?)} else {None};
+    // The versions of protected atoms this reader has seen: they only move forward.
+    let object=super::member(reference,"target")?.to_owned();
+    nat32(&object)?;
+    let history_path=root.join("protected-documents").join(format!("atom-versions-{object}.json"));
+    let prior=if store.is_some() && history_path.exists() {Some(super::bounded_json(&history_path)?)} else {None};
+    if prior.as_ref().is_some_and(|p| p["type"]!="minidregg-protected-atom-versions-v1" || p["object"]!=object.as_str()) {
+        return Err("retained protected atom versions belong to another object".into());
+    }
+    let mut history=prior.clone().unwrap_or_else(|| json!({"type":"minidregg-protected-atom-versions-v1","object":object,"atoms":{}}));
     for atom in &mut entries {
         if atom["type"]=="annotation" && atom["body"]["type"]=="sealed" {
             let opened=store.as_ref().ok_or_else(||"protected annotation epoch key is not held".to_owned())
@@ -292,14 +301,26 @@ pub(crate) fn opened_entries(root:&std::path::Path,reference:&Value,view:&Value)
         if atom["type"]!="atom" || !is_kind(&atom["kind"]) {continue;}
         let opened=store.as_ref().ok_or_else(||"protected document epoch key is not held".to_owned())
             .and_then(|store|if atoms::is_kind(&atom["kind"]) {
-                atoms::open(super::member(reference,"target")?,atom,store)
-            }else{open_atom(super::member(reference,"target")?,text(atom,"id")?,text(atom,"payload")?,store)});
+                let bytes=atoms::open(&object,atom,store)?;
+                let id=text(atom,"id")?;
+                let version=atoms::version_of(id,&atom["kind"])?;
+                let digest=fragments::digest(&atom["kind"]["fragment"])?;
+                if let Some(row)=atoms::advance(history["atoms"].get(id),&version,atom,&digest)? {
+                    history["atoms"][id]=row;
+                }
+                Ok(bytes)
+            }else{open_atom(&object,text(atom,"id")?,text(atom,"payload")?,store)});
         atom["private"]=match opened {
             Ok(bytes)=>match String::from_utf8(bytes) {
                 Ok(text)=>json!({"text":text}), Err(error)=>json!({"hex":crate::hex(error.as_bytes())})
             },
-            Err(_)=>json!("[private: protected epoch is locked or unreadable]"),
+            Err(_) if store.is_none()=>json!("[private: protected epoch is locked or unreadable]"),
+            // A refusal is named: a rolled-back ciphertext is not a locked epoch.
+            Err(error)=>json!(format!("[private: protected epoch is locked or unreadable: {error}]")),
         };
+    }
+    if store.is_some() && Some(&history)!=prior.as_ref() {
+        super::publish_retained_json(&history_path,&history,prior.as_ref())?;
     }
     Ok(entries)
 }
@@ -916,7 +937,8 @@ mod tests {
             {"type":"createAtom","atom":"11","kind":{"type":"text"},"payload":crate::hex(b"two")}]);
         let sealed=a.seal_actions(&actions,&[4;32],&mut retained,&writer).unwrap();
         assert_eq!(sealed,a.seal_actions(&actions,&[4;32],&mut retained,&writer).unwrap());
-        let entry=|n:usize|json!({"id":actions[n]["atom"],"kind":sealed["actions"][n]["kind"],"payload":""});
+        let entry=|n:usize|json!({"id":actions[n]["atom"],"kind":sealed["actions"][n]["kind"],"payload":"",
+            "createdAt":"3","revision":"3","tombstonedAt":null});
         let first=entry(0);let second=entry(1);
         assert_eq!(atoms::open("72",&first,&retained).unwrap(),b"one");
         assert_eq!(atoms::open("72",&second,&retained).unwrap(),b"two");
@@ -942,7 +964,7 @@ mod tests {
         assert!(rewriting::planned_atom(&newest,&opened,newer.anchor.epoch).unwrap().is_none());
         let planned=rewriting::planned_atom(&newest,&opened,newer.anchor.epoch+1).unwrap().unwrap();
         assert!(planned.get("plaintext").is_none());
-        let full_before=json!({"type":"atom","id":"10","document":"72","kind":newest["kind"],"payload":"", "createdBy":{"subject":"7"},"createdAt":"3","revision":"6","tombstonedAt":null});
+        let full_before=json!({"type":"atom","id":"10","document":"72","kind":newest["kind"],"payload":"", "createdBy":{"subject":"7"},"createdAt":"3","revision":"3","tombstonedAt":null});
         let plan=json!({"root":"123","atoms":[{"atom":"10","rawBefore":full_before}],"annotations":[]});
         let request=rewriting::rekey_request("paper",&plan).unwrap();
         assert_eq!(request["targets"][0]["payload"]["actions"][0]["type"],"rewrapAtom");
@@ -956,6 +978,51 @@ mod tests {
         let mut wrong_wrap=newest.clone();wrong_wrap["kind"]["fragment"]["wrapping"]=second["kind"]["fragment"]["wrapping"].clone();
         assert!(atoms::open("72",&wrong_wrap,&reader).is_err());
         drop(retained);drop(reader);std::fs::remove_dir_all(root).unwrap();std::fs::remove_dir_all(reader_root).unwrap();
+    }
+    #[test]
+    fn protected_atom_edit_rollback_to_an_earlier_ciphertext_does_not_open() {
+        let (v,c)=source(7,9);let a=Audience::from_checked(&v,&c,"72").unwrap();
+        let (root,mut retained)=store();retained.retain(&a.anchor,&[8;32]).unwrap();
+        let writer=SigningKey::from_bytes(&[7;32]);
+        let created=a.seal_actions(&json!([{"type":"createAtom","atom":"10","kind":{"type":"text"},
+            "payload":crate::hex(b"meet at noon")}]),&[4;32],&mut retained,&writer).unwrap();
+        let origin=json!({"subject":"7"});
+        let v0=json!({"type":"atom","id":"10","document":"72","kind":created["actions"][0]["kind"],"payload":"",
+            "createdBy":origin,"createdAt":"3","revision":"3","tombstonedAt":null});
+        assert_eq!(atoms::open("72",&v0,&retained).unwrap(),b"meet at noon");
+        let before=super::super::atom_record(&v0).unwrap();
+        let edited=a.seal_actions(&json!([{"type":"editAtom","atom":"10","before":before,"kind":{"type":"text"},
+            "payload":crate::hex(b"meeting cancelled"),"tombstone":false}]),&[5;32],&mut retained,&writer).unwrap();
+        let mut v1=v0.clone();v1["kind"]=edited["actions"][0]["kind"].clone();v1["revision"]=json!("6");
+        assert_eq!(atoms::open("72",&v1,&retained).unwrap(),b"meeting cancelled");
+        let edit_version=atoms::version_of("10",&v1["kind"]).unwrap();
+        assert_eq!(edit_version.seq,1);assert_eq!(edit_version.prev,nat32("3").unwrap());
+        // The operator re-serves the earlier ciphertext under the atom's current record.
+        let mut rolled=v1.clone();rolled["kind"]=v0["kind"].clone();
+        assert!(atoms::open("72",&rolled,&retained).unwrap_err().contains("earlier ciphertext"));
+        // Or claims the edit never happened while serving the edit's ciphertext.
+        let mut unedited=v1.clone();unedited["revision"]=json!("3");
+        assert!(atoms::open("72",&unedited,&retained).is_err());
+        // A reader with history refuses even a whole-record rollback, and a fork.
+        let d0=fragments::digest(&v0["kind"]["fragment"]).unwrap();
+        let d1=fragments::digest(&v1["kind"]["fragment"]).unwrap();
+        let seen0=atoms::advance(None,&atoms::version_of("10",&v0["kind"]).unwrap(),&v0,&d0).unwrap().unwrap();
+        let seen1=atoms::advance(Some(&seen0),&edit_version,&v1,&d1).unwrap().unwrap();
+        assert!(atoms::advance(Some(&seen1),&atoms::version_of("10",&v0["kind"]).unwrap(),&v0,&d0).unwrap_err().contains("rolled back"));
+        assert!(atoms::advance(Some(&seen1),&edit_version,&v1,&d0).unwrap_err().contains("equivocates"));
+        assert_eq!(atoms::advance(Some(&seen1),&edit_version,&v1,&d1).unwrap(),None);
+        let mut skipped=seen0.clone();skipped["revision"]=json!("4");
+        assert!(atoms::advance(Some(&skipped),&edit_version,&v1,&d1).unwrap_err().contains("predecessor"));
+        // The version cannot be rewritten in the clear: the fragment operation binds it.
+        let mut forged=v1.clone();
+        let mut bytes=private::decode_hex(text(&forged["kind"]["fragment"],"ciphertext").unwrap()).unwrap();
+        let at=b"MINI/PROTECTED-AUTHORED-FRAGMENT/v1".len()+33+7;bytes[at]=2;
+        forged["kind"]["fragment"]["ciphertext"]=json!(crate::hex(&bytes));
+        assert!(atoms::open("72",&forged,&retained).is_err());
+        // A struck line keeps its last ciphertext under the strike's revision.
+        let mut struck=v1.clone();struck["revision"]=json!("8");struck["tombstonedAt"]=json!("8");
+        assert_eq!(atoms::open("72",&struck,&retained).unwrap(),b"meeting cancelled");
+        drop(retained);std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn document_guard_refresh_accepts_only_exact_semantics_before_emission() {
@@ -1016,7 +1083,8 @@ mod tests {
         let reopened=custody(&root).unwrap();
         assert_eq!(&*reopened.historical_key(&old.anchor).unwrap(),&[8;32]);
         assert_eq!(&*reopened.historical_key(&current.anchor).unwrap(),&[9;32]);
-        assert_eq!(atoms::open("72",&json!({"id":"10","kind":sealed["actions"][0]["kind"],"payload":""}),&reopened).unwrap(),b"retained history");
+        assert_eq!(atoms::open("72",&json!({"id":"10","kind":sealed["actions"][0]["kind"],"payload":"",
+            "createdAt":"3","revision":"3","tombstonedAt":null}),&reopened).unwrap(),b"retained history");
         drop(reopened);std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

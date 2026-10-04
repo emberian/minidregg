@@ -44,6 +44,16 @@ pub(super) fn rewrap(audience:&Audience,fragment:&Value,nonce:&[u8;32],store:&mu
     let key=key(&audience.object,fragment,store)?;
     Ok(crate::hex(&wrap(audience,&cipher,nonce,&key,store,writer)?))
 }
+/// The binding a fragment's header carries (checked again by `open`).
+pub(super) fn binding_of(fragment:&Value,len:usize)->Result<Vec<u8>>{
+    let bytes=private::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+len;
+    if !bytes.starts_with(FRAGMENT)||bytes.len()<h+32{return Err("authored fragment address differs".into());}
+    Ok(bytes[FRAGMENT.len()..h].to_vec())
+}
+/// Digest of a fragment's exact ciphertext (a reader's retained version identity).
+pub(super) fn digest(fragment:&Value)->Result<[u8;32]>{
+    Ok(Sha256::digest(private::decode_hex(text(fragment,"ciphertext")?)?).into())
+}
 pub(super) fn open(object:&str,binding:&[u8],fragment:&Value,store:&Store)->Result<Vec<u8>>{
     let bytes=private::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+binding.len();
     if !bytes.starts_with(FRAGMENT)||bytes.len()<h+32||bytes[FRAGMENT.len()..h]!=*binding{return Err("authored fragment address differs".into());}
