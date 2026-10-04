@@ -18,7 +18,7 @@ The behaviour theorem (a renaming simulation: lockstep `stepRaw`, `resume`, boun
 Plan/result extraction) and the typing transfer are in
 `Theory.ObjectiveBendDemandCollectProofs` (`ObjectiveProofs`). -/
 import Theory.ObjectiveBendDemandMachine
-import Theory.AssertAxioms
+import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

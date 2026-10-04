@@ -37,6 +37,7 @@ import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveBendExtensions
 import Theory.ObjectiveBendDemandCapacity
+import Theory.ObjectiveBendDemandCollectProofs
 
 open Lean Meta
 
