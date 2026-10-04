@@ -187,13 +187,13 @@ def verifyLeg {F : Type} [Field F] [DecidableEq F]
       (DeclaredResourceController.operationMarker
         prepared.authority.snapshot.domain profile.semantics command)
       (tuple.request incidence).2 envelope with
-  | .error reason => return .error (.signature reason)
+  | .error reason => return .error (.legSignature reason)
   | .ok signature =>
       if exactWire : signature.envelopeBytes = envelope then
         match admitted : authorizeLeg prepared tuple incidence physical signature with
         | .error reason => return .error reason
         | .ok authorization => return .ok ⟨signature, exactWire, authorization, admitted⟩
-      else return .error (.signature .sourceBinding)
+      else return .error (.legSignature .sourceBinding)
 
 /-- A complete special admission reuses the ordinary prepared command, tuple,
 all target observations, native signatures, current capability snapshot and

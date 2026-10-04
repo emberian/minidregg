@@ -31,7 +31,7 @@ def authenticate (native : CredentialSignatureIO.NativeConfig)
           (operationMarker loaded.snapshot.domain semantics command)
           (request loaded.snapshot semantics ambient command loaded.snapshot.cell.root)
           authorityEnvelope with
-      | .error reason => return .error (.signature reason)
+      | .error reason => return .error (.authoritySignature reason)
       | .ok _ => return .ok ()
 
 /-- The expensive continuation is selected only after authentication succeeds.

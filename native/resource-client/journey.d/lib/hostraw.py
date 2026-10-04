@@ -154,7 +154,11 @@ def cmd_refusals(log, skip):
     if current is not None:
         entries.append(current)
     for n, entry in enumerate(entries[int(skip):], int(skip) + 1):
-        kind = "lane" if "refusalLane" in entry else "signature" if "Reject.signature" in entry else "other"
+        # D3: an authority-envelope failure (signature first, unauthenticated, never
+        # charged) and a target-leg failure (authenticated, charged) are distinct names.
+        kind = ("lane" if "refusalLane" in entry else
+                "authsig" if "Reject.authoritySignature" in entry else
+                "legsig" if "Reject.legSignature" in entry else "other")
         print("%d\t%s\t%s" % (n, kind, entry[len(head):].strip()))
 
 

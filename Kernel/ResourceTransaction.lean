@@ -500,7 +500,13 @@ inductive Reject where
   | content (reason : ContentResource.Reject)
   | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
   | nullifierUsed | authorityPreparation | physicalPreparation | policyUnavailable
-  | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The command's AUTHORITY envelope did not authenticate (signature first,
+  before any preparation: `ResourceInvocationSignatureFirst`). The signer is not
+  authenticated, so nothing is charged to its refusal lane. -/
+  | authoritySignature (reason : CredentialSignatureAdmission.Reject)
+  /-- A TARGET leg's envelope did not verify, after the authority envelope
+  authenticated the signer (`verifyAndAuthorizeLeg`). Charged to the signer's lane. -/
+  | legSignature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
   | bendExecution

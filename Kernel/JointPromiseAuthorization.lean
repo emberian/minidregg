@@ -206,7 +206,7 @@ def verifyLeg (native : CredentialSignatureIO.NativeConfig)
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (commitment deployment.domain profile.semantics d).value
       (request prepared d original incidence) envelope with
-  | .error reason => return .error (.signature reason)
+  | .error reason => return .error (.legSignature reason)
   | .ok signature =>
       if wire : signature.envelopeBytes = envelope then
         match admitted : authorize prepared d original incidence signature with
@@ -215,7 +215,7 @@ def verifyLeg (native : CredentialSignatureIO.NativeConfig)
             match fields : fieldsCheck authority.evidence.capabilityValue (legFootprint prepared incidence) with
             | .error reason => return .error reason
             | .ok () => return .ok ⟨signature,wire,authority,admitted,fields⟩
-      else return .error (.signature .sourceBinding)
+      else return .error (.legSignature .sourceBinding)
 
 /-- Private token minted only by CURRENT ordinary admission plus CURRENT
 purpose-specific signatures, capabilities, full composed laws and field bounds.

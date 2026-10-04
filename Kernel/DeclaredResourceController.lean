@@ -1186,7 +1186,7 @@ def verifyAndAuthorizeLeg [DecidableEq F] {m : Type → Type} [Monad m] (native 
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (operationMarker prepared.authority.snapshot.domain profile.semantics command)
       (tuple.request incidence).2 envelope with
-  | .error reason => return .error (.signature reason)
+  | .error reason => return .error (.legSignature reason)
   | .ok signature =>
       if exactWire : signature.envelopeBytes = envelope then
         match admitted : authorizeLeg prepared tuple incidence signature with
@@ -1205,7 +1205,7 @@ def verifyAndAuthorizeLeg [DecidableEq F] {m : Type → Type} [Monad m] (native 
                     | .error reason => return .error reason
                     | .ok () => return .ok ⟨signature, exactWire, authorization, admitted,
                         covered, grossCovered, verbsCovered⟩
-      else return .error (.signature .sourceBinding)
+      else return .error (.legSignature .sourceBinding)
 
 /-- **An accepted write leg's capability covers its fields.** The capability
 that authorized target `i` names every field the leg changed, and each change
