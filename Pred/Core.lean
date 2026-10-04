@@ -144,6 +144,17 @@ says so with `eq (evaluatorSlot id) 1`. Absent that leaf, any registered, enable
 evaluator is admitted. -/
 def evaluatorSlot (evaluator : Nat) : Slot := "run/evaluator/" ++ toString evaluator
 
+/-- The slot naming the Objective method artifact that produced a command's writes
+(`Kernel.DeclaredResourceController.objectiveSlots`). The controller projects it FIRST in
+every invocation's law state and always: the claimed artifact's identity
+(`ObjectiveBendSourceArtifact.identity`, which commits the package, the declaration and the
+typed core) when the command carries an Objective claim, and `-1`, which is never an identity,
+when it does not. Being first, no later projection can shadow it (`State.get` reads the first
+occurrence). Acceptance requires that the executed artifact IS the claimed one
+(`AcceptedInvocation.objective_artifact_slot_sound`), so a law reading this slot reads which
+code produced the writes. -/
+def objectiveArtifactSlot : Slot := "objective/artifact"
+
 /-! ## §3. The AST — the ONE predicate algebra.
 
 Decidable atoms over named slots + the Boolean closure (`not`/`all`/`any`) + the `witnessed`
@@ -353,6 +364,46 @@ theorem eval_all (ps : List Pred) (old new : State) :
 theorem eval_any (ps : List Pred) (old new : State) :
     eval (Pred.any ps) old new = ps.any (fun q => eval q old new) :=
   evalWith_any failClosed ps old new
+
+/-- **The package pin clause**: the step's writes are the product of one of the named
+Objective method artifacts (`objectiveArtifactSlot`). A command without an Objective claim reads
+`-1` there and is refused; installed on an object's state cells, the clause makes the object's
+package pin a law that the ordinary resource route cannot bypass. -/
+def objectivePin (artifacts : List Nat) : Pred :=
+  .memberOf objectiveArtifactSlot (artifacts.map Int.ofNat)
+
+/-- The pin accepts exactly the steps whose artifact slot names a pinned artifact. -/
+theorem eval_objectivePin (artifacts : List Nat) (old new : State) :
+    eval (objectivePin artifacts) old new = true ↔
+      ∃ a ∈ artifacts, new.get objectiveArtifactSlot = some (Int.ofNat a) := by
+  unfold eval objectivePin
+  simp only [evalWith]
+  cases new.get objectiveArtifactSlot with
+  | none => simp
+  | some x =>
+      simp only [List.contains_iff_mem, List.mem_map, Option.some.injEq]
+      constructor
+      · rintro ⟨a, member, rfl⟩; exact ⟨a, member, rfl⟩
+      · rintro ⟨a, member, rfl⟩; exact ⟨a, member, rfl⟩
+
+/-- An unclaimed step (the slot reads `-1`) is refused by every pin. -/
+theorem objectivePin_refuses_unclaimed (artifacts : List Nat) (old new : State)
+    (unclaimed : new.get objectiveArtifactSlot = some (-1)) :
+    eval (objectivePin artifacts) old new = false := by
+  cases accepts : eval (objectivePin artifacts) old new with
+  | false => rfl
+  | true =>
+      obtain ⟨a, _, read⟩ := (eval_objectivePin artifacts old new).mp accepts
+      rw [unclaimed] at read
+      cases read
+
+/-- **Pin teeth**: a step naming artifact 7 passes the pin `[7]`, the same step fails the pin
+`[8]`, and an unclaimed step fails both. -/
+theorem objectivePin_teeth :
+    eval (objectivePin [7]) ⟨[]⟩ ⟨[(objectiveArtifactSlot, 7)]⟩ = true ∧
+      eval (objectivePin [8]) ⟨[]⟩ ⟨[(objectiveArtifactSlot, 7)]⟩ = false ∧
+      eval (objectivePin [7, 8]) ⟨[]⟩ ⟨[(objectiveArtifactSlot, -1), (objectiveArtifactSlot, 7)]⟩ = false := by
+  decide +kernel
 
 /-! ## §7. The KEYSTONE — non-vacuity + teeth (ATLAS design-law 2).
 

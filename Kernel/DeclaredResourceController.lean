@@ -208,13 +208,28 @@ def computeSlots (prepared : PreparedInvocation deployment profile ambient durab
      ("compute/steps", Int.ofNat quoted.steps),
      ("compute/credits", Int.ofNat quoted.credits)]
 
+/-- The value of `Pred.objectiveArtifactSlot` for a command: the claimed Objective method
+artifact's identity when the command carries an Objective claim, and `-1` (never an identity,
+which is a natural number) when it carries none. -/
+def objectiveArtifactValue (command : Command) : Int :=
+  match command.objectiveClaim with
+  | .ok (some claim) => Int.ofNat claim.sourceAtom.value
+  | _ => -1
+
+/-- The Objective slot block. It is derived from the signed claim BEFORE execution, which is
+sound because no `AcceptedInvocation` exists unless the executed artifact is the claimed one
+(`AcceptedInvocation.objective_artifact_slot_sound`). It is the first block of every projected
+law state, so nothing a target, request or content projection names can shadow it. -/
+def objectiveSlots (command : Command) : List (String × Int) :=
+  [(Minidregg.Pred.objectiveArtifactSlot, objectiveArtifactValue command)]
+
 def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command) : List (String × Int) :=
   let selected := incidenceTarget command primary
   let preRoot := match primary with
     | some i => (prepared.targets i).pre.root
     | none => prepared.authority.snapshot.cell.root
-  [("target/storageKind", Int.ofNat (storageKind prepared primary))] ++
+  objectiveSlots command ++ [("target/storageKind", Int.ofNat (storageKind prepared primary))] ++
   Kernel.ClockCell.slots prepared.clock.clock ++
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
@@ -383,6 +398,14 @@ theorem computeSlots_unjoint (prepared : PreparedInvocation deployment profile a
     simp only [computeSlots, computed, List.mem_cons, List.not_mem_nil, or_false] at hp
     rcases hp with rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
 
+/-- The Objective slot (`objective/artifact`) is not a joint key. -/
+theorem objectiveSlots_unjoint (command : Command) : Unjoint (objectiveSlots command) := by
+  intro p hp
+  simp only [objectiveSlots, List.mem_singleton] at hp
+  subst p
+  show Minidregg.Pred.objectiveArtifactSlot.toList.head? ≠ some 'j'
+  decide
+
 theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command) :
     Unjoint (projectCommonSlots prepared primary source) :=
@@ -390,7 +413,9 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
     (unjoint_append _ _
       (unjoint_append _ _
         (unjoint_append _ _
-          (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
+          (unjoint_append _ _
+            (unjoint_append _ _ (objectiveSlots_unjoint command)
+              (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide))
             (clockSlots_unjoint _)) (requestSlots_unjoint _))
         (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
       (runSlots_unjoint _))
@@ -477,11 +502,79 @@ theorem now_slot_exact (prepared : PreparedInvocation deployment profile ambient
         some (Int.ofNat prepared.clock.clock.now) ∧
       Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock := by
   refine ⟨?_, prepared.clock.clockExact⟩
-  simp [project, projectWithCommon, projectCommonSlots, Kernel.ClockCell.slots,
-    Minidregg.Pred.State.get]
+  simp [project, projectWithCommon, projectCommonSlots, objectiveSlots,
+    Minidregg.Pred.objectiveArtifactSlot, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.now_slot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms now_slot_exact
+
+/-- **`objective_artifact_slot_exact`.** Every law judging a resource invocation reads
+`objective/artifact` as exactly `objectiveArtifactValue command`: the slot is first in every
+projected state, so no later slot shadows it. -/
+theorem objective_artifact_slot_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    (project prepared primary source logical).get Minidregg.Pred.objectiveArtifactSlot =
+      some (objectiveArtifactValue command) := by
+  simp [project, projectWithCommon, projectCommonSlots, objectiveSlots, Minidregg.Pred.State.get]
+
+/-- **The pin refuses the ordinary route.** A command without an Objective claim is refused by
+every package pin, on every projected state, whatever its writes. -/
+theorem ordinary_objectivePin_refused (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (old : Minidregg.Pred.State) (artifacts : List Nat) (ordinary : command.objectiveClaim = .ok none) :
+    Minidregg.Pred.eval (Minidregg.Pred.objectivePin artifacts) old
+      (project prepared primary source logical) = false :=
+  Minidregg.Pred.objectivePin_refuses_unclaimed artifacts old _ (by
+    rw [objective_artifact_slot_exact]; simp [objectiveArtifactValue, ordinary])
+
+/-- **The pin admits the pinned method.** A command whose Objective claim names a pinned
+artifact passes the pin on every projected state. -/
+theorem pinned_objectivePin_accepts (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (old : Minidregg.Pred.State) (artifacts : List Nat) {claim : ObjectiveInvocationClaim.Claim}
+    (selected : command.objectiveClaim = .ok (some claim)) (pinned : claim.sourceAtom.value ∈ artifacts) :
+    Minidregg.Pred.eval (Minidregg.Pred.objectivePin artifacts) old
+      (project prepared primary source logical) = true :=
+  (Minidregg.Pred.eval_objectivePin artifacts old _).mpr
+    ⟨_, pinned, by rw [objective_artifact_slot_exact]; simp [objectiveArtifactValue, selected]⟩
+
+/-- **The refusal names the pin.** An object law that leads with the package pin refuses an
+ordinary command at exactly that clause: `LawLeaf.of` (the explanation the Host returns for a
+refused write) is the pin at path `[0]`, reading `-1` on the new state. -/
+theorem ordinary_pinned_law_names_pin (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (old : Minidregg.Pred.State) (artifacts : List Nat) (rest : List Minidregg.Pred.Pred)
+    (ordinary : command.objectiveClaim = .ok none) :
+    LawLeaf.of (Minidregg.Pred.Pred.all (Minidregg.Pred.objectivePin artifacts :: rest)) old
+        (project prepared primary source logical) =
+      some ⟨[0], Minidregg.Pred.objectivePin artifacts,
+        old.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ := by
+  have refused := ordinary_objectivePin_refused prepared primary source logical old artifacts ordinary
+  have slot : (project prepared primary source logical).get Minidregg.Pred.objectiveArtifactSlot =
+      some (-1) := by
+    rw [objective_artifact_slot_exact]; simp [objectiveArtifactValue, ordinary]
+  have leaf : Minidregg.Pred.firstFailingLeaf
+      (Minidregg.Pred.Pred.all (Minidregg.Pred.objectivePin artifacts :: rest)) old
+      (project prepared primary source logical) = some [0] := by
+    unfold Minidregg.Pred.eval at refused
+    unfold Minidregg.Pred.objectivePin at refused ⊢
+    simp only [Minidregg.Pred.firstFailingLeaf, Minidregg.Pred.Pred.all, Minidregg.Pred.PredList.ofList,
+      Minidregg.Pred.leafWith, Minidregg.Pred.leafWithAll, refused]
+    rfl
+  simp only [LawLeaf.of, leaf, Option.bind_eq_bind, Option.bind_some, Option.pure_def]
+  unfold Minidregg.Pred.objectivePin
+  simp [Minidregg.Pred.Pred.subterm, Minidregg.Pred.PredList.subterm, Minidregg.Pred.Pred.all,
+    Minidregg.Pred.PredList.ofList, LawLeaf.explained, LawLeaf.slotOf, slot]
+
+#assert_axioms ordinary_pinned_law_names_pin
+#assert_axioms objectiveSlots_unjoint
+#assert_axioms objective_artifact_slot_exact
+#assert_axioms ordinary_objectivePin_refused
+#assert_axioms pinned_objectivePin_accepts
 
 /- The tuple's generic `pre` selector constructs a complete raw leg, including
 the hash of the entire signed command's request. These projections select the
@@ -1570,6 +1663,45 @@ structure AcceptedInvocation [DecidableEq F]
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
   tuple : PreparedTuple (plan prepared)
   checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
+
+/-- An Objective claim exists only on the Objective route. -/
+theorem objectiveClaim_objective_route {command : Command} {claim : ObjectiveInvocationClaim.Claim}
+    (selected : command.objectiveClaim = .ok (some claim)) :
+    command.family.any (fun family => family.route == .objectiveMethod) = true := by
+  unfold Command.objectiveClaim at selected
+  cases family : command.family with
+  | none => rw [family] at selected; cases selected
+  | some f =>
+    rw [family] at selected
+    show (f.route == .objectiveMethod) = true
+    cases route : f.route <;> simp only [route] at selected <;> first | rfl | decide | cases selected
+
+/-- **`objective_artifact_slot_sound`.** In an accepted Objective invocation, every projected
+law state reads `objective/artifact` as the claimed artifact's identity, AND the invocation
+carries the execution evidence whose loaded, executed artifact has exactly that identity (and
+whose result names it). So the slot a law judged before execution names the code that ran:
+judging the claim is judging the execution. -/
+theorem AcceptedInvocation.objective_artifact_slot_sound [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) {claim : ObjectiveInvocationClaim.Claim}
+    (selected : command.objectiveClaim = .ok (some claim)) :
+    (∀ primary source logical, (project prepared primary source logical).get
+        Minidregg.Pred.objectiveArtifactSlot = some (Int.ofNat claim.sourceAtom.value)) ∧
+    ∃ admitted, accepted.execution = some admitted ∧ admitted.claim = claim ∧
+      ObjectiveBendSourceArtifact.identity admitted.core.source.loaded.artifact = claim.sourceAtom ∧
+      admitted.result.sourceArtifact = claim.sourceAtom := by
+  refine ⟨fun primary source logical => by
+    rw [objective_artifact_slot_exact]; simp [objectiveArtifactValue, selected], ?_⟩
+  obtain ⟨admitted, executed⟩ := Option.isSome_iff_exists.mp
+    (accepted.executionRequired (objectiveClaim_objective_route selected))
+  have same : admitted.claim = claim := by
+    have h := admitted.selected
+    rw [selected] at h
+    cases h
+    rfl
+  subst same
+  exact ⟨admitted, executed, rfl, admitted.core.source.loaded.identityExact,
+    admitted.resultExact.1.trans admitted.core.source.loaded.identityExact⟩
 
 def AcceptedInvocation.evidence [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}

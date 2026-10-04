@@ -302,6 +302,50 @@ integrated into one coherent build. Known design holes on that path: the claim's
 work means free execution up to the policy maximum); the route's guard list is empty
 for every route.
 
+### Which code wrote: the `objective/artifact` slot and the package pin
+
+Every cell law judges a step whose projected state begins with the slot
+`objective/artifact` (`Pred.objectiveArtifactSlot`). For a command with an Objective
+claim it holds the claimed method artifact's identity, which commits the package, the
+selected declaration and the typed core; for any other command it holds `-1`, never an
+identity. It is first in every law state, so no target, request or content projection
+can shadow it (`DeclaredResourceController.objective_artifact_slot_exact`). Laws run
+BEFORE the method executes (a refused law costs no execution); judging the claim is
+sound because `AcceptedInvocation` exists only after the executed artifact is shown to
+be the claimed one (`AcceptedInvocation.objective_artifact_slot_sound`).
+
+`Pred.objectivePin artifacts` is the package pin as a law clause: the step's writes are
+the product of one of the named artifacts. A command without an Objective claim is
+refused by it whatever its writes (`ordinary_objectivePin_refused`); a claim naming a
+pinned artifact passes it (`pinned_objectivePin_accepts`). Installed on an object's state
+cells, it makes the object's package pin a law the ordinary resource route cannot
+bypass. Installing it at object birth belongs to the object record (design §A). Before
+this slot, the Objective route projected no `run/` slot (`run = none` for an Objective
+claim), so no law could tell an Objective method's write from an ordinary command with
+the same writes.
+
+### Three different things called "law" and "requires"
+
+The surface language and the kernel use the same words for different things. Keep them
+apart:
+
+- **A cell law (`Pred`)** is a decidable predicate over a write's (old, new) projected
+  state and the request. It is the admission judge: every write is checked by its cell's
+  committed law, whoever proposed it.
+- **A spec `law name(args): expr`** in `.obend` is a universally quantified property of a
+  specification's *methods* (`law positive(n: Nat): self.v(n) < n`). It elaborates to a
+  closure in spec metadata and nothing discharges it. It is package evidence (proved by the
+  certifying checker where it can be, otherwise reported as unproved). It never reaches
+  admission.
+- **A spec `requires m(x: T) -> U`** declares a member the specification needs from final
+  self (a mixin dependency, checked at composition). It is not a precondition.
+
+Admission rules written in `.obend` are to be declared with their own clause kinds,
+`invariant` (a state law), `guard` (a method guard over arguments and request slots),
+`permit` and `forbid`. The Lean elaborator compiles each one to `Pred` and refuses any
+clause outside the fragment. That is one syntax with one meaning, and `Pred` stays the
+judge (program-model design §E; review `REVIEW-SCHOLAR-LAWS-20261005`, D-4).
+
 ### The trusted front-end boundary
 
 Trusted (no theorem; one Lean implementation, recomputed by the receiver):

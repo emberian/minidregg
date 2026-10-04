@@ -50,7 +50,7 @@ def installProjectionVersion : List UInt8 :=
 target/index joint slots, semantic world-kind fields and composed-law dependencies.
 Protected objects bind the fresh epoch and complete roster at the same receiving image. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER.ROM-METHOD-OUTPUTS-ATOMIC-QUOTA-BOOK-COMPUTE-FUNDING/v10".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS.WORLD-KIND-SEMANTIC-FIELDS.COMPOSED-GUARDS-AUDIENCE-ROSTER.ROM-METHOD-OUTPUTS-ATOMIC-QUOTA-BOOK-COMPUTE-FUNDING.OBJECTIVE-ARTIFACT-SLOT-FIRST/v11".toUTF8.toList
 
 /-- Content uses the complete typed document tree, revisioned atoms, ordered marks,
 transclusion read guards, event/history/link indexes and live shared-name uniqueness.
