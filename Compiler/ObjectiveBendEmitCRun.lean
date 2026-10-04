@@ -296,24 +296,49 @@ def typing (typedPath : String) : IO UInt32 := do
 end Minidregg.Compiler.ObjectiveBendEmitCRun
 
 open Minidregg.Compiler.ObjectiveBendEmitCRun in
+def dispatch (arguments : List String) : IO UInt32 := do
+  match arguments with
+  | ["emit", core, out] => emit core out
+  | ["run", core, heap, stack, ticks, out] =>
+    runReference core (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks) out
+  | ["suite", core, out, heap, stack, ticks] =>
+    suite core out (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks) none
+  | ["suite", core, out, heap, stack, ticks, responses] =>
+    suite core out (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
+      (some responses)
+  | ["bench", core, heap, stack, ticks] =>
+    bench core (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
+  | ["bench-raw", core, ticks] => benchRaw core (← parseNat "ticks" ticks)
+  | ["typing", typed] => typing typed
+  | _ =>
+    IO.eprintln "usage: emit CORE OUT_C | run CORE HEAP STACK TICKS OUT_STATE | suite CORE OUT_DIR HEAP STACK TICKS [RESPONSES] | bench CORE HEAP STACK TICKS | typing TYPED | serve"
+    pure 2
+
+open Minidregg.Compiler.ObjectiveBendEmitCRun in
+/-- `serve`: one long-lived worker for a batch driver. Each stdin line is the argument
+list of a `suite` or `typing` command (words separated by one space); the answer is that
+command's stdout lines, an `{"error":...}` line if it threw, then `##done RC`. The same
+`dispatch` as the one-shot entry, so a served verdict is a one-shot verdict. -/
+partial def serveLoop (stdin : IO.FS.Stream) : IO UInt32 := do
+  let line ← stdin.getLine
+  if line.isEmpty then return 0
+  let words := (line.trimAscii.toString.splitOn " ").filter (· != "")
+  let code ← try
+      match words with
+      | "suite" :: _ | "typing" :: _ => dispatch words
+      | _ => do IO.println (Json.mkObj [("error", toJson "serve accepts suite and typing")]).compress; pure 2
+    catch error =>
+      IO.println (Json.mkObj [("error", toJson error.toString)]).compress
+      pure 2
+  IO.println s!"##done {code}"
+  (← IO.getStdout).flush
+  serveLoop stdin
+
 def main (arguments : List String) : IO UInt32 := do
   try
     match arguments with
-    | ["emit", core, out] => emit core out
-    | ["run", core, heap, stack, ticks, out] =>
-      runReference core (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks) out
-    | ["suite", core, out, heap, stack, ticks] =>
-      suite core out (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks) none
-    | ["suite", core, out, heap, stack, ticks, responses] =>
-      suite core out (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
-        (some responses)
-    | ["bench", core, heap, stack, ticks] =>
-      bench core (← parseNat "heap" heap) (← parseNat "stack" stack) (← parseNat "ticks" ticks)
-    | ["bench-raw", core, ticks] => benchRaw core (← parseNat "ticks" ticks)
-    | ["typing", typed] => typing typed
-    | _ =>
-      IO.eprintln "usage: emit CORE OUT_C | run CORE HEAP STACK TICKS OUT_STATE | suite CORE OUT_DIR HEAP STACK TICKS [RESPONSES] | bench CORE HEAP STACK TICKS | typing TYPED"
-      pure 2
+    | ["serve"] => serveLoop (← IO.getStdin)
+    | _ => dispatch arguments
   catch error =>
     IO.eprintln (Json.mkObj [("error", toJson error.toString)]).compress
     pure 2

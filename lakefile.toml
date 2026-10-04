@@ -109,6 +109,18 @@ name = "Deployed"
 name = "AxiomCensusResearch"
 
 # HOST-KECCAK: throughput of the compiled cSHAKE256/KMAC256 (Host.CshakeBench). Not part of the umbrella gate.
+# The C-vs-Lean differential's native drivers (native/objective-emit/differential.py,
+# scripts/check-objective-proofs.sh cgen): the Lean reference side and the seeded
+# generator of well-typed Core4 programs. Compiled, not interpreted: a differential
+# run is thousands of `runBounded` executions.
+[[lean_exe]]
+name = "objective-cdiff"
+root = "Compiler.ObjectiveBendEmitCRun"
+
+[[lean_exe]]
+name = "objective-cdiff-gen"
+root = "Compiler.ObjectiveBendCDiffGen"
+
 [[lean_exe]]
 name = "cshake-bench"
 root = "Host.CshakeBench"

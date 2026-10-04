@@ -16,6 +16,13 @@
 #   c         the C differential (native/objective-emit/differential.py) over the
 #             packets of the preview cohort and native/objective-emit/extra-cohort.json:
 #             runtime.c against runBounded, per case, State bytes included.
+#   cgen      the C differential over GENERATED programs: native/objective-emit
+#             (Compiler/ObjectiveBendCDiffGen, a seeded, type-directed generator whose every program
+#             is accepted by the real checker) writes seeds 0..999, and differential.py runs each
+#             under the same cases as gate `c`. The fixed seed range makes a red reproducible
+#             (`objective-cdiff-gen gen SEED 1 DIR`). Self-tested every run: two planted miscompiles of
+#             runtime.c (native/objective-emit/cdiff-mutants.py) must each turn the same 1000 red,
+#             and the mutation must have happened (the mutator refuses a no-op).
 #   transparency  the checkpoint-transparency differential
 #             (native/objective-emit/transparency.py + scripts/ObjectiveCheckpointTransparency.lean)
 #             over every activity of the preview cohort and native/objective-emit/activity-cohort.json:
@@ -26,7 +33,7 @@
 #             Executed evidence for the open premise ForcingTransparent, not a proof.
 #             Self-tested every run: the planted `drop-stack-roots` checkpoint must go red.
 #
-# usage: scripts/check-objective-proofs.sh [proofs|c|transparency|all] [--update]
+# usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--update]
 #   --update rewrites the two snapshot files (proofs only); commit them with the change
 #   they announce. Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
@@ -149,6 +156,41 @@ gate_c() {
   [ "$failed" = 0 ]
 }
 
+gate_cgen() {
+  local seeds=${CGEN_SEEDS:-1000} start=${CGEN_START:-0}
+  # the differential's two drivers, natively compiled: the Lean machine (the reference side)
+  # and the generator
+  "$lake" build objective-cdiff objective-cdiff-gen
+  local bin=$root/.lake/build/bin ed=$root/native/objective-emit failed=0 total
+  # these runs use the same limits the burn job uses; a program that runs out of them is a case, not a skip
+  local limits="--heap 20000 --stack 20000 --ticks 20000"
+  local jobs=${CGEN_JOBS:-4}
+  echo "== generate seeds $start..$((start + seeds - 1))"
+  local summary; summary=$("$bin/objective-cdiff-gen" gen "$start" "$seeds" "$tmp/generated")
+  echo "$summary"
+  if ! grep -q "\"emitted\":$seeds," <<<"$summary" || ! grep -q '"genFailed":0,' <<<"$summary"; then
+    echo "cgen: the generator did not emit all $seeds programs"; return 1
+  fi
+  local common="--jobs $jobs --serve --lean-bin $bin/objective-cdiff --precompile-runtime $limits"
+  echo "== self-test: planted miscompiles of runtime.c must go red"
+  local m
+  for m in spec-apply-metadata add-carry; do
+    python3 "$ed/cdiff-mutants.py" apply "$m" "$ed/runtime.c" "$tmp/runtime-$m.c" || { failed=1; continue; }
+    python3 "$ed/differential.py" "$tmp/generated" "$tmp/mutant-$m" "$logs/cgen-mutant-$m.log" \
+      $common --runtime "$tmp/runtime-$m.c" --max-fail 1 >/dev/null || true
+    local first; first=$(grep '^# FIRST-FAIL' "$logs/cgen-mutant-$m.log" || true)
+    if [ -n "$first" ]; then echo "self-test (mutant $m): PASS ($first)"
+    else echo "self-test (mutant $m): FAIL (the planted miscompile survived $seeds generated programs)"; failed=1; fi
+  done
+  echo "== differential (generated seeds $start..$((start + seeds - 1)))"
+  python3 "$ed/differential.py" "$tmp/generated" "$tmp/differential-cgen" "$logs/differential-cgen.log" \
+    $common || true
+  total=$(grep '^# TOTAL' "$logs/differential-cgen.log" || true)
+  echo "differential (cgen): ${total:-no TOTAL line}"
+  if ! [[ "$total" =~ pass=([0-9]+)\ fail=0$ ]] || [ "${BASH_REMATCH[1]}" = 0 ]; then failed=1; fi
+  [ "$failed" = 0 ]
+}
+
 gate_transparency() {
   local bun; bun=$(bun_bin)
   # `lean --run scripts/ObjectiveCheckpointTransparency.lean` needs every import built
@@ -203,12 +245,13 @@ EOF
 case "$what" in
   proofs) gate_proofs 2>&1 | tee "$logs/proofs.log"; exit "${PIPESTATUS[0]}" ;;
   c) gate_c 2>&1 | tee "$logs/c.log"; exit "${PIPESTATUS[0]}" ;;
+  cgen) gate_cgen 2>&1 | tee "$logs/cgen.log"; exit "${PIPESTATUS[0]}" ;;
   transparency) gate_transparency 2>&1 | tee "$logs/transparency-gate.log"; exit "${PIPESTATUS[0]}" ;;
   all)
     red=0
-    for g in proofs c transparency; do
+    for g in proofs c cgen transparency; do
       if "$0" "$g"; then echo "objective $g: PASS"; else echo "objective $g: RED"; red=$((red+1)); fi
     done
     exit "$red" ;;
-  *) echo "usage: $0 [proofs|c|transparency|all] [--update]" >&2; exit 64 ;;
+  *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--update]" >&2; exit 64 ;;
 esac

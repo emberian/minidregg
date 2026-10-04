@@ -49,7 +49,6 @@ import Compiler.EmitSystemFast
 import Compiler.GenericSimplexTransferability
 import Compiler.JointBackendPartyCodec
 import Compiler.NativeDurableEventRegistry
-import Compiler.ObjectiveBendEmitC
 import Compiler.ObjectiveDemandCode
 import Compiler.ObjectiveDemandLayout
 import Compiler.ObjectiveDemandLiteralNetwork

@@ -16,7 +16,6 @@
     "ResearchWip"
   ],
   "programRoots": [
-    "Compiler.ObjectiveBendEmitCRun",
     "Compiler.PrivateBackendBoundaryFixture",
     "Host.BendCommitmentIR2Emit",
     "Host.BendTraceIR2Emit",
@@ -2342,6 +2341,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.ObjectiveBendCDiffGen",
+      "path": "Compiler/ObjectiveBendCDiffGen.lean",
+      "sha256": "c0897379a1cb3330eef9993e88a8564cf8f8896007e36b0305bbc014d390e8f2",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Compiler.ObjectiveBendCombinedResult",
       "path": "Compiler/ObjectiveBendCombinedResult.lean",
       "sha256": "d99e48d88aa0e0f65923032ec767470a53d9250fcf6250536b70410f1ca66bae",
@@ -2366,14 +2372,14 @@
       "module": "Compiler.ObjectiveBendEmitC",
       "path": "Compiler/ObjectiveBendEmitC.lean",
       "sha256": "0ba07eca94c8085577e085ef59dcfcab735bc8597c4e06377ca5b0eb6c4d5b39",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.ObjectiveBendEmitCRun",
       "path": "Compiler/ObjectiveBendEmitCRun.lean",
-      "sha256": "fe94ddde30d4803d481add0b9b2538c8ecf7b3145913e0f82c8ed95c8273d526",
-      "surface": "authored-research",
+      "sha256": "8a363602d380657c08d3aa6999f0101e18fe38414c255339f6ead0bd38054891",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -7664,7 +7670,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "c11425d8e0c0a3d9e840fac9014ad420e0f223c477ab60fabfc88e0fccbd3de3",
+      "sha256": "5a9a29c3911941ad8060d4d4ad3f8bbc374fcbd1f4faef4c13b583b1ff16fde3",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },

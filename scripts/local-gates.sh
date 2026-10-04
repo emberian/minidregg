@@ -25,6 +25,8 @@
 #                  (scripts/check-objective-proofs.sh proofs; self-tests its instrument each run)
 #   objective-c    the C backend differential against runBounded, State bytes included
 #                  (scripts/check-objective-proofs.sh c; needs bun)
+#   objective-cgen the same differential over 1000 GENERATED well-typed Core4 programs (fixed seeds), with two
+#                  planted runtime.c miscompiles that must each turn it red (scripts/check-objective-proofs.sh cgen)
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
@@ -69,7 +71,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c objective-cgen drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -82,6 +84,7 @@ g_fn-wire()       { bash scripts/check-fn-wire.sh; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
 g_objective-c()      { bash scripts/check-objective-proofs.sh c; }
+g_objective-cgen()   { bash scripts/check-objective-proofs.sh cgen; }
 g_drift() {
   local after; after=$(git diff --binary | git hash-object --stdin)
   if [[ "$tree_before" != "$after" ]]; then
