@@ -1,0 +1,475 @@
+edition ObjectiveBend 1
+# Shared-consequence story methods over admitted actor/property/resource inputs.
+# This module computes candidate typed writes; it never submits a native effect.
+# Plan admission must bind every input root/source and check current rights.
+# Each property has one authoritative owner, never one copy per player's bag.
+#
+# Port of examples/objective-bend-station/SharedConsequences.bend (Gen-1, which
+# was checked only through the retired BendTT path). The refusal is a sum
+# (`refused(code)`), never an empty Plan; lists are recursive sums; byte lists are
+# Strings.
+import ./NatOrder.obend as Order
+
+record SourceVersion:
+  artifact: String
+  definition: String
+  revision: Nat
+
+record Ref:
+  target: Nat
+  root: String
+
+sum Owner:
+  ground: {}
+  held: Nat
+
+record Player:
+  ref: Ref
+  subject: Nat
+  scene: Nat
+  turn: Nat
+
+record Property:
+  ref: Ref
+  scene: Nat
+  owner: Owner
+  generation: Nat
+
+record Supply:
+  ref: Ref
+  remaining: Nat
+  generation: Nat
+
+record Edge:
+  src: Nat
+  dst: Nat
+  cost: Nat
+
+sum Edges:
+  empty: {}
+  more: {head: Edge, tail: Edges}
+
+record Rules:
+  source: SourceVersion
+  ref: Ref
+  edges: Edges
+
+# Fields use the existing native scalar store: player scene 0 / turn 1; shared
+# property scene 0 / owner 1 / generation 2; shared supply amount 0 /
+# generation 1. Expected values and roots are independent admission guards, not
+# authority.
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+
+sum Writes:
+  empty: {}
+  more: {head: Write, tail: Writes}
+
+sum Effects:
+  none: {}
+  scalar: {ref: Ref, writes: Writes, rest: Effects}
+
+sum Reads:
+  none: {}
+  root: {ref: Ref, rest: Reads}
+
+record Candidate:
+  source: SourceVersion
+  reads: Reads
+  effects: Effects
+
+# Refusal codes: 1 changed source revision, 2 property already held, 3 wrong
+# scene, 4 absent authored edge, 5 insufficient shared supply, 6 aliased role
+# targets, 7 property already ground, 8 holder differs from acting player.
+# No mutation on refusal: a refusal carries only its code.
+sum Result:
+  refused: Nat
+  proposed: Candidate
+
+def distinct(a: Nat, b: Nat) -> Bool:
+  Order.not(a == b)
+
+# Roles must refer to distinct native targets; copied roots do not create roles.
+def rolesDistinct(ruleRef: Ref, playerRef: Ref, resourceRef: Ref) -> Bool:
+  distinct(ruleRef.target, playerRef.target) && distinct(ruleRef.target, resourceRef.target) && distinct(playerRef.target, resourceRef.target)
+
+def ownerWord(owner: Owner) -> Nat:
+  match owner:
+    case ground(_): 0n
+    case held(subject): 1n + subject
+
+def heldBy(owner: Owner, subject: Nat) -> Bool:
+  match owner:
+    case ground(_): false
+    case held(holder): holder == subject
+
+def sourceEq(a: SourceVersion, b: SourceVersion) -> Bool:
+  a.artifact == b.artifact && a.definition == b.definition && a.revision == b.revision
+
+def edgeEq(a: Edge, b: Edge) -> Bool:
+  a.src == b.src && a.dst == b.dst && a.cost == b.cost
+
+def containsEdge(edge: Edge, edges: Edges) -> Bool:
+  match edges:
+    case empty(_): false
+    case more(m): edgeEq(edge, m.head) || containsEdge(edge, m.tail)
+
+def one(w: Write) -> Writes:
+  Writes.more({head: w, tail: Writes.empty()})
+
+def two(w: Write, x: Write) -> Writes:
+  Writes.more({head: w, tail: one(x)})
+
+def three(w: Write, x: Write, y: Write) -> Writes:
+  Writes.more({head: w, tail: two(x, y)})
+
+def reads3(a: Ref, b: Ref, c: Ref) -> Reads:
+  Reads.root({ref: a, rest: Reads.root({ref: b, rest: Reads.root({ref: c, rest: Reads.none()})})})
+
+def effects2(a: Ref, aWrites: Writes, b: Ref, bWrites: Writes) -> Effects:
+  Effects.scalar({ref: a, writes: aWrites, rest: Effects.scalar({ref: b, writes: bWrites, rest: Effects.none()})})
+
+# ---- take ------------------------------------------------------------------------
+# A held property's location follows its holder, so a take sets the single owner.
+
+def takeCandidate(source: SourceVersion, ruleRef: Ref, player: Player, property: Property) -> Result:
+  Result.proposed({source: source, reads: reads3(ruleRef, player.ref, property.ref), effects: effects2(player.ref, one({field: 1n, before: player.turn, after: 1n + player.turn}), property.ref, two({field: 1n, before: 0n, after: 1n + player.subject}, {field: 2n, before: property.generation, after: 1n + property.generation}))})
+
+def takeScene(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, sameScene: Bool) -> Result:
+  if sameScene then takeCandidate(source, ruleRef, player, property) else Result.refused(3n)
+
+def takeSame(source: SourceVersion, ruleRef: Ref, player: Player, property: Property) -> Result:
+  match property.owner:
+    case held(_): Result.refused(2n)
+    case ground(_): takeScene(source, ruleRef, player, property, player.scene == property.scene)
+
+def takeDistinct(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, separate: Bool) -> Result:
+  if separate then takeSame(source, ruleRef, player, property) else Result.refused(6n)
+
+def takeFin(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, same: Bool) -> Result:
+  if same then takeDistinct(source, ruleRef, player, property, rolesDistinct(ruleRef, player.ref, property.ref)) else Result.refused(1n)
+
+def take(expected: SourceVersion, rules: Rules, player: Player, property: Property) -> Result:
+  takeFin(rules.source, rules.ref, player, property, sourceEq(expected, rules.source))
+
+# ---- drop ------------------------------------------------------------------------
+# Dropping installs the player's current room and makes the single global
+# property available again, in one joint candidate.
+
+def dropCandidate(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, holder: Nat) -> Result:
+  Result.proposed({source: source, reads: reads3(ruleRef, player.ref, property.ref), effects: effects2(player.ref, one({field: 1n, before: player.turn, after: 1n + player.turn}), property.ref, three({field: 0n, before: property.scene, after: player.scene}, {field: 1n, before: 1n + holder, after: 0n}, {field: 2n, before: property.generation, after: 1n + property.generation}))})
+
+def dropHeld(sameHolder: Bool, source: SourceVersion, ruleRef: Ref, player: Player, property: Property, holder: Nat) -> Result:
+  if sameHolder then dropCandidate(source, ruleRef, player, property, holder) else Result.refused(8n)
+
+def dropSame(source: SourceVersion, ruleRef: Ref, player: Player, property: Property) -> Result:
+  match property.owner:
+    case ground(_): Result.refused(7n)
+    case held(holder): dropHeld(holder == player.subject, source, ruleRef, player, property, holder)
+
+def dropDistinct(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, separate: Bool) -> Result:
+  if separate then dropSame(source, ruleRef, player, property) else Result.refused(6n)
+
+def dropFin(source: SourceVersion, ruleRef: Ref, player: Player, property: Property, same: Bool) -> Result:
+  if same then dropDistinct(source, ruleRef, player, property, rolesDistinct(ruleRef, player.ref, property.ref)) else Result.refused(1n)
+
+def drop(expected: SourceVersion, rules: Rules, player: Player, property: Property) -> Result:
+  dropFin(rules.source, rules.ref, player, property, sourceEq(expected, rules.source))
+
+# ---- move ------------------------------------------------------------------------
+# A successful spend conserves the exact authored quantity for every input.
+# Insufficient supply returns a refusal; there is no saturated or negative write.
+
+sum Spend:
+  notEnough: {}
+  enough: Nat
+
+def spend(cost: Nat, available: Nat) -> Spend:
+  match cost:
+    case 0n: Spend.enough(available)
+    case 1n+c: spendStep(c, available)
+
+def spendStep(c: Nat, available: Nat) -> Spend:
+  match available:
+    case 0n: Spend.notEnough()
+    case 1n+r: spend(c, r)
+
+# LAW spend_conserves (general over every cost and supply; not checkable yet).
+# Decidable form, stronger than Gen-1's (it also says NotEnough only when the
+# cost really exceeds the supply):
+def spendCorrect(cost: Nat, available: Nat) -> Bool:
+  match spend(cost, available):
+    case notEnough(_): Order.less(available, cost)
+    case enough(remaining): cost + remaining == available
+
+def moveSpend(spent: Spend, source: SourceVersion, ruleRef: Ref, player: Player, supply: Supply, dst: Nat) -> Result:
+  match spent:
+    case notEnough(_): Result.refused(5n)
+    case enough(remaining): Result.proposed({source: source, reads: reads3(ruleRef, player.ref, supply.ref), effects: effects2(player.ref, two({field: 0n, before: player.scene, after: dst}, {field: 1n, before: player.turn, after: 1n + player.turn}), supply.ref, two({field: 0n, before: supply.remaining, after: remaining}, {field: 1n, before: supply.generation, after: 1n + supply.generation}))})
+
+def moveScene(sameScene: Bool, source: SourceVersion, ruleRef: Ref, player: Player, supply: Supply, edge: Edge) -> Result:
+  if sameScene then moveSpend(spend(edge.cost, supply.remaining), source, ruleRef, player, supply, edge.dst) else Result.refused(3n)
+
+def moveAllowed(permitted: Bool, source: SourceVersion, ruleRef: Ref, player: Player, supply: Supply, edge: Edge) -> Result:
+  if permitted then moveScene(player.scene == edge.src, source, ruleRef, player, supply, edge) else Result.refused(4n)
+
+def moveDistinct(source: SourceVersion, ruleRef: Ref, edges: Edges, player: Player, supply: Supply, edge: Edge, separate: Bool) -> Result:
+  if separate then moveAllowed(containsEdge(edge, edges), source, ruleRef, player, supply, edge) else Result.refused(6n)
+
+def moveFin(source: SourceVersion, ruleRef: Ref, edges: Edges, player: Player, supply: Supply, edge: Edge, same: Bool) -> Result:
+  if same then moveDistinct(source, ruleRef, edges, player, supply, edge, rolesDistinct(ruleRef, player.ref, supply.ref)) else Result.refused(1n)
+
+def move(expected: SourceVersion, rules: Rules, player: Player, supply: Supply, edge: Edge) -> Result:
+  moveFin(rules.source, rules.ref, rules.edges, player, supply, edge, sourceEq(expected, rules.source))
+
+# ---- narrative -------------------------------------------------------------------
+# Narrative remains attributed provider output; a suggested candidate is data.
+# The resident has no function here that installs it or bypasses a receiver law.
+
+record Narrative:
+  request: String
+  resident: String
+  source: SourceVersion
+  observed: Reads
+  text: String
+  suggestion: Result
+
+def gmReply(request: String, resident: String, source: SourceVersion, observed: Reads, text: String, suggestion: Result) -> Narrative:
+  {request: request, resident: resident, source: source, observed: observed, text: text, suggestion: suggestion}
+
+# ---- decidable equality ----------------------------------------------------------
+
+def refEq(a: Ref, b: Ref) -> Bool:
+  a.target == b.target && a.root == b.root
+
+def writeEq(a: Write, b: Write) -> Bool:
+  a.field == b.field && a.before == b.before && a.after == b.after
+
+def writesEq(xs: Writes, ys: Writes) -> Bool:
+  match xs:
+    case empty(_): writesIsEmpty(ys)
+    case more(m): writesMoreEq(m.head, m.tail, ys)
+
+def writesMoreEq(head: Write, tail: Writes, ys: Writes) -> Bool:
+  match ys:
+    case empty(_): false
+    case more(n): writeEq(head, n.head) && writesEq(tail, n.tail)
+
+def writesIsEmpty(xs: Writes) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(_): false
+
+def effectsEq(xs: Effects, ys: Effects) -> Bool:
+  match xs:
+    case none(_): effectsIsEmpty(ys)
+    case scalar(s): effectsScalarEq(s.ref, s.writes, s.rest, ys)
+
+def effectsScalarEq(ref: Ref, writes: Writes, rest: Effects, ys: Effects) -> Bool:
+  match ys:
+    case none(_): false
+    case scalar(t): refEq(ref, t.ref) && writesEq(writes, t.writes) && effectsEq(rest, t.rest)
+
+def effectsIsEmpty(xs: Effects) -> Bool:
+  match xs:
+    case none(_): true
+    case scalar(_): false
+
+def readsEq(xs: Reads, ys: Reads) -> Bool:
+  match xs:
+    case none(_): readsIsEmpty(ys)
+    case root(r): readsRootEq(r.ref, r.rest, ys)
+
+def readsRootEq(ref: Ref, rest: Reads, ys: Reads) -> Bool:
+  match ys:
+    case none(_): false
+    case root(t): refEq(ref, t.ref) && readsEq(rest, t.rest)
+
+def readsIsEmpty(xs: Reads) -> Bool:
+  match xs:
+    case none(_): true
+    case root(_): false
+
+def candidateEq(a: Candidate, b: Candidate) -> Bool:
+  sourceEq(a.source, b.source) && readsEq(a.reads, b.reads) && effectsEq(a.effects, b.effects)
+
+def resultEq(a: Result, b: Result) -> Bool:
+  match a:
+    case refused(code): resultIsRefused(code, b)
+    case proposed(c): resultIsProposed(c, b)
+
+def resultIsRefused(code: Nat, b: Result) -> Bool:
+  match b:
+    case refused(other): code == other
+    case proposed(_): false
+
+def resultIsProposed(c: Candidate, b: Result) -> Bool:
+  match b:
+    case refused(_): false
+    case proposed(d): candidateEq(c, d)
+
+# The refusal code, or 0n for a proposal (codes start at 1).
+def reasonOf(r: Result) -> Nat:
+  match r:
+    case refused(code): code
+    case proposed(_): 0n
+
+# ---- scenario --------------------------------------------------------------------
+# Scene 0 airlock, 1 engineering, 2 infirmary. Both players draw from one oxygen
+# supply. Rule source revision 3; "previous" is revision 2.
+
+def source3() -> SourceVersion:
+  {artifact: "station/engineering", definition: "rules", revision: 3n}
+
+def source2() -> SourceVersion:
+  {artifact: "station/engineering", definition: "rules", revision: 2n}
+
+def ruleRef() -> Ref:
+  {target: 1n, root: "root-rules"}
+
+def playerRef() -> Ref:
+  {target: 2n, root: "root-player"}
+
+def propertyRef() -> Ref:
+  {target: 3n, root: "root-wrench"}
+
+def supplyRef() -> Ref:
+  {target: 4n, root: "root-oxygen"}
+
+def player(scene: Nat) -> Player:
+  {ref: playerRef(), subject: 5n, scene: scene, turn: 7n}
+
+def groundWrench(scene: Nat) -> Property:
+  {ref: propertyRef(), scene: scene, owner: Owner.ground(), generation: 2n}
+
+def heldWrench(holder: Nat) -> Property:
+  {ref: propertyRef(), scene: 0n, owner: Owner.held(holder), generation: 2n}
+
+def oxygen(remaining: Nat) -> Supply:
+  {ref: supplyRef(), remaining: remaining, generation: 1n}
+
+def edges() -> Edges:
+  Edges.more({head: {src: 0n, dst: 1n, cost: 1n}, tail: Edges.more({head: {src: 1n, dst: 0n, cost: 1n}, tail: Edges.more({head: {src: 1n, dst: 2n, cost: 2n}, tail: Edges.more({head: {src: 2n, dst: 1n, cost: 1n}, tail: Edges.empty()})})})})
+
+def rules() -> Rules:
+  {source: source3(), ref: ruleRef(), edges: edges()}
+
+def takeScenario() -> Result:
+  take(source3(), rules(), player(0n), groundWrench(0n))
+
+# LAW take_joint_effects: a successful take emits both ordered effects and all
+# three read roots (a source theorem in Gen-1; native atomicity and current
+# authority are receiver laws). Instance: the player's turn 7 -> 8, then the
+# wrench's owner 0 -> 1+5 = 6 and generation 2 -> 3, reads rule, player, wrench.
+def takeJointEffects() -> Bool:
+  resultEq(takeScenario(), Result.proposed({source: source3(), reads: Reads.root({ref: ruleRef(), rest: Reads.root({ref: playerRef(), rest: Reads.root({ref: propertyRef(), rest: Reads.none()})})}), effects: Effects.scalar({ref: playerRef(), writes: Writes.more({head: {field: 1n, before: 7n, after: 8n}, tail: Writes.empty()}), rest: Effects.scalar({ref: propertyRef(), writes: Writes.more({head: {field: 1n, before: 0n, after: 6n}, tail: Writes.more({head: {field: 2n, before: 2n, after: 3n}, tail: Writes.empty()})}), rest: Effects.none()})})}))
+
+def takeDoesNotMatchADifferentOwner() -> Bool:
+  resultEq(takeScenario(), Result.proposed({source: source3(), reads: Reads.root({ref: ruleRef(), rest: Reads.root({ref: playerRef(), rest: Reads.root({ref: propertyRef(), rest: Reads.none()})})}), effects: Effects.scalar({ref: playerRef(), writes: Writes.more({head: {field: 1n, before: 7n, after: 8n}, tail: Writes.empty()}), rest: Effects.scalar({ref: propertyRef(), writes: Writes.more({head: {field: 1n, before: 0n, after: 5n}, tail: Writes.more({head: {field: 2n, before: 2n, after: 3n}, tail: Writes.empty()})}), rest: Effects.none()})})}))
+
+def takeReason() -> Nat:
+  reasonOf(takeScenario())
+
+# LAW source_mismatch_no_effects: a changed rule source refuses with code 1.
+def takeStaleSourceReason() -> Nat:
+  reasonOf(take(source2(), rules(), player(0n), groundWrench(0n)))
+
+# LAW held_property_cannot_be_taken: code 2, for any holder.
+def takeHeldReason() -> Nat:
+  reasonOf(take(source3(), rules(), player(0n), heldWrench(9n)))
+
+def takeHeldByMeReason() -> Nat:
+  reasonOf(take(source3(), rules(), player(0n), heldWrench(5n)))
+
+def takeWrongSceneReason() -> Nat:
+  reasonOf(take(source3(), rules(), player(1n), groundWrench(0n)))
+
+# LAW aliased_roles_no_take_effects: copied roots do not create roles; the
+# property sharing the player's target refuses with code 6 and no effects.
+def takeAliasedReason() -> Nat:
+  reasonOf(take(source3(), rules(), player(0n), {ref: playerRef(), scene: 0n, owner: Owner.ground(), generation: 2n}))
+
+def takeAliasedRuleReason() -> Nat:
+  reasonOf(take(source3(), rules(), player(0n), {ref: ruleRef(), scene: 0n, owner: Owner.ground(), generation: 2n}))
+
+def dropScenario() -> Result:
+  drop(source3(), rules(), player(1n), heldWrench(5n))
+
+# Drop: the player's turn 7 -> 8; the wrench lands in the player's scene 1
+# (0 -> 1), owner 1+5 = 6 -> 0, generation 2 -> 3.
+def dropJointEffects() -> Bool:
+  resultEq(dropScenario(), Result.proposed({source: source3(), reads: Reads.root({ref: ruleRef(), rest: Reads.root({ref: playerRef(), rest: Reads.root({ref: propertyRef(), rest: Reads.none()})})}), effects: Effects.scalar({ref: playerRef(), writes: Writes.more({head: {field: 1n, before: 7n, after: 8n}, tail: Writes.empty()}), rest: Effects.scalar({ref: propertyRef(), writes: Writes.more({head: {field: 0n, before: 0n, after: 1n}, tail: Writes.more({head: {field: 1n, before: 6n, after: 0n}, tail: Writes.more({head: {field: 2n, before: 2n, after: 3n}, tail: Writes.empty()})})}), rest: Effects.none()})})}))
+
+def dropReason() -> Nat:
+  reasonOf(dropScenario())
+
+# LAW another_holder_cannot_drop: code 8.
+def dropOtherHolderReason() -> Nat:
+  reasonOf(drop(source3(), rules(), player(1n), heldWrench(9n)))
+
+def dropGroundReason() -> Nat:
+  reasonOf(drop(source3(), rules(), player(0n), groundWrench(0n)))
+
+def dropStaleSourceReason() -> Nat:
+  reasonOf(drop(source2(), rules(), player(1n), heldWrench(5n)))
+
+def dropAliasedReason() -> Nat:
+  reasonOf(drop(source3(), rules(), player(1n), {ref: playerRef(), scene: 0n, owner: Owner.held(5n), generation: 2n}))
+
+# Move scene 1 -> 2 along the authored edge (cost 2) with oxygen 10: remaining 8.
+def moveScenario() -> Result:
+  move(source3(), rules(), player(1n), oxygen(10n), {src: 1n, dst: 2n, cost: 2n})
+
+def moveJointEffects() -> Bool:
+  resultEq(moveScenario(), Result.proposed({source: source3(), reads: Reads.root({ref: ruleRef(), rest: Reads.root({ref: playerRef(), rest: Reads.root({ref: supplyRef(), rest: Reads.none()})})}), effects: Effects.scalar({ref: playerRef(), writes: Writes.more({head: {field: 0n, before: 1n, after: 2n}, tail: Writes.more({head: {field: 1n, before: 7n, after: 8n}, tail: Writes.empty()})}), rest: Effects.scalar({ref: supplyRef(), writes: Writes.more({head: {field: 0n, before: 10n, after: 8n}, tail: Writes.more({head: {field: 1n, before: 1n, after: 2n}, tail: Writes.empty()})}), rest: Effects.none()})})}))
+
+def moveReason() -> Nat:
+  reasonOf(moveScenario())
+
+# LAW move_source_mismatch_no_effects.
+def moveStaleSourceReason() -> Nat:
+  reasonOf(move(source2(), rules(), player(1n), oxygen(10n), {src: 1n, dst: 2n, cost: 2n}))
+
+# An edge the author did not write (0 -> 2) is absent: code 4. A written edge
+# with a different cost is also absent: the edge table is exact.
+def moveAbsentEdgeReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(0n), oxygen(10n), {src: 0n, dst: 2n, cost: 1n}))
+
+def moveWrongCostReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(1n), oxygen(10n), {src: 1n, dst: 2n, cost: 1n}))
+
+def moveWrongSceneReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(0n), oxygen(10n), {src: 1n, dst: 2n, cost: 2n}))
+
+# Supply 1 cannot pay cost 2: code 5, no saturated write. Exactly enough (2) succeeds.
+def moveThinSupplyReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(1n), oxygen(1n), {src: 1n, dst: 2n, cost: 2n}))
+
+def moveExactSupplyReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(1n), oxygen(2n), {src: 1n, dst: 2n, cost: 2n}))
+
+# LAW aliased_roles_no_move_effects.
+def moveAliasedReason() -> Nat:
+  reasonOf(move(source3(), rules(), player(1n), {ref: playerRef(), remaining: 10n, generation: 1n}, {src: 1n, dst: 2n, cost: 2n}))
+
+def spendConservesInstances() -> Bool:
+  spendCorrect(0n, 0n) && spendCorrect(2n, 10n) && spendCorrect(10n, 10n) && spendCorrect(3n, 2n) && spendCorrect(0n, 4n)
+
+def gmReplyKeepsFields() -> Bool:
+  match gmReply("req-1", "resident-2", source3(), Reads.none(), "The airlock hisses.", takeScenario()).suggestion:
+    case refused(_): false
+    case proposed(c): candidateEq(c, match0(takeScenario()))
+
+def match0(r: Result) -> Candidate:
+  match r:
+    case refused(_): {source: source2(), reads: Reads.none(), effects: Effects.none()}
+    case proposed(c): c
+
+def gmReplyKeepsText() -> Bool:
+  gmReply("req-1", "resident-2", source3(), Reads.none(), "The airlock hisses.", takeScenario()).text == "The airlock hisses."
+
+# ---- negative control ------------------------------------------------------------
+def resultEqSeesCode() -> Bool:
+  resultEq(Result.refused(2n), Result.refused(3n))

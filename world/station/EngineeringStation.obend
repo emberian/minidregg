@@ -1,0 +1,55 @@
+edition ObjectiveBend 1
+# An author-owned station rule source, importing the reusable consequence law.
+# The receiver binds currentSource to THIS published source artifact/export and
+# ruleRef to its current rule resource; an arbitrary claimed id is not enough.
+# Scene 0 = airlock, 1 = engineering, 2 = infirmary. Both players draw from one
+# oxygen store.
+import ./NatOrder.obend as Order
+import ./SharedConsequences.obend as Station
+
+# The authored graph and its costs are source data, not a privileged Rust rule table.
+def edges() -> Station.Edges:
+  Station.Edges.more({head: {src: 0n, dst: 1n, cost: 1n}, tail: Station.Edges.more({head: {src: 1n, dst: 0n, cost: 1n}, tail: Station.Edges.more({head: {src: 1n, dst: 2n, cost: 2n}, tail: Station.Edges.more({head: {src: 2n, dst: 1n, cost: 1n}, tail: Station.Edges.empty()})})})})
+
+def rules(currentSource: Station.SourceVersion, ruleRef: Station.Ref) -> Station.Rules:
+  {source: currentSource, ref: ruleRef, edges: edges()}
+
+def take(expected: Station.SourceVersion, currentSource: Station.SourceVersion, ruleRef: Station.Ref, player: Station.Player, property: Station.Property) -> Station.Result:
+  Station.take(expected, rules(currentSource, ruleRef), player, property)
+
+def drop(expected: Station.SourceVersion, currentSource: Station.SourceVersion, ruleRef: Station.Ref, player: Station.Player, property: Station.Property) -> Station.Result:
+  Station.drop(expected, rules(currentSource, ruleRef), player, property)
+
+def move(expected: Station.SourceVersion, currentSource: Station.SourceVersion, ruleRef: Station.Ref, player: Station.Player, supply: Station.Supply, edge: Station.Edge) -> Station.Result:
+  Station.move(expected, rules(currentSource, ruleRef), player, supply, edge)
+
+# ---- scenario --------------------------------------------------------------------
+# LAW refused_old_source: a changed authored edge table is a new source artifact;
+# a previous source identity is refused, and approving that replacement does not
+# grant installation. Instance: expected revision 2 against current revision 3.
+def refusedOldSource() -> Nat:
+  Station.reasonOf(move(Station.source2(), Station.source3(), Station.ruleRef(), Station.player(1n), Station.oxygen(10n), {src: 1n, dst: 2n, cost: 2n}))
+
+def refusedOldSourceIsCodeOne() -> Bool:
+  Station.resultEq(move(Station.source2(), Station.source3(), Station.ruleRef(), Station.player(1n), Station.oxygen(10n), {src: 1n, dst: 2n, cost: 2n}), Station.Result.refused(1n))
+
+# The station's own edge table agrees with the library scenario's table.
+def stationEdgesAgree() -> Bool:
+  Station.containsEdge({src: 1n, dst: 2n, cost: 2n}, edges()) && Station.containsEdge({src: 2n, dst: 1n, cost: 1n}, edges()) && Station.containsEdge({src: 0n, dst: 1n, cost: 1n}, edges()) && Station.containsEdge({src: 1n, dst: 0n, cost: 1n}, edges())
+
+def stationWithoutShortcut() -> Bool:
+  Station.containsEdge({src: 0n, dst: 2n, cost: 1n}, edges())
+
+# Engineering to infirmary costs 2 oxygen: 10 -> 8, and the player lands in scene 2.
+def engineeringToInfirmaryMoves() -> Bool:
+  Station.resultEq(move(Station.source3(), Station.source3(), Station.ruleRef(), Station.player(1n), Station.oxygen(10n), {src: 1n, dst: 2n, cost: 2n}), Station.moveScenario())
+
+# The infirmary back to engineering costs 1 oxygen.
+def infirmaryToEngineeringReason() -> Nat:
+  Station.reasonOf(move(Station.source3(), Station.source3(), Station.ruleRef(), Station.player(2n), Station.oxygen(3n), {src: 2n, dst: 1n, cost: 1n}))
+
+def stationTakeMatchesLibrary() -> Bool:
+  Station.resultEq(take(Station.source3(), Station.source3(), Station.ruleRef(), Station.player(0n), Station.groundWrench(0n)), Station.takeScenario())
+
+def stationDropMatchesLibrary() -> Bool:
+  Station.resultEq(drop(Station.source3(), Station.source3(), Station.ruleRef(), Station.player(1n), Station.heldWrench(5n)), Station.dropScenario())

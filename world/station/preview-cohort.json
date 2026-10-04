@@ -1,0 +1,1008 @@
+[
+ {
+  "name": "StationTakeJointEffects",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeJointEffects",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationTakeOwnerWordControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeDoesNotMatchADifferentOwner",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "StationTakeReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeReason",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "StationTakeStaleSourceReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeStaleSourceReason",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "StationTakeHeldReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeHeldReason",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "StationTakeHeldByMeReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeHeldByMeReason",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "StationTakeWrongSceneReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeWrongSceneReason",
+  "arguments": [],
+  "expected": "3"
+ },
+ {
+  "name": "StationTakeAliasedReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeAliasedReason",
+  "arguments": [],
+  "expected": "6"
+ },
+ {
+  "name": "StationTakeAliasedRuleReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "takeAliasedRuleReason",
+  "arguments": [],
+  "expected": "6"
+ },
+ {
+  "name": "StationDropJointEffects",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropJointEffects",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationDropReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropReason",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "StationDropOtherHolderReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropOtherHolderReason",
+  "arguments": [],
+  "expected": "8"
+ },
+ {
+  "name": "StationDropGroundReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropGroundReason",
+  "arguments": [],
+  "expected": "7"
+ },
+ {
+  "name": "StationDropStaleSourceReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropStaleSourceReason",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "StationDropAliasedReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "dropAliasedReason",
+  "arguments": [],
+  "expected": "6"
+ },
+ {
+  "name": "StationMoveJointEffects",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveJointEffects",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationMoveReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveReason",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "StationMoveStaleSourceReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveStaleSourceReason",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "StationMoveAbsentEdgeReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveAbsentEdgeReason",
+  "arguments": [],
+  "expected": "4"
+ },
+ {
+  "name": "StationMoveWrongCostReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveWrongCostReason",
+  "arguments": [],
+  "expected": "4"
+ },
+ {
+  "name": "StationMoveWrongSceneReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveWrongSceneReason",
+  "arguments": [],
+  "expected": "3"
+ },
+ {
+  "name": "StationMoveThinSupplyReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveThinSupplyReason",
+  "arguments": [],
+  "expected": "5"
+ },
+ {
+  "name": "StationMoveExactSupplyReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveExactSupplyReason",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "StationMoveAliasedReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "moveAliasedReason",
+  "arguments": [],
+  "expected": "6"
+ },
+ {
+  "name": "StationSpendConservesInstances",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "spendConservesInstances",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationGmReplyKeepsFields",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "gmReplyKeepsFields",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationGmReplyKeepsText",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "gmReplyKeepsText",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StationResultEqSeesCodeControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "resultEqSeesCode",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "EngineeringRefusedOldSource",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "refusedOldSource",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "EngineeringRefusedOldSourceIsCodeOne",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "refusedOldSourceIsCodeOne",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "EngineeringEdgesAgree",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "stationEdgesAgree",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "EngineeringWithoutShortcutControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "stationWithoutShortcut",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "EngineeringToInfirmaryMoves",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "engineeringToInfirmaryMoves",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "EngineeringInfirmaryToEngineeringReason",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "infirmaryToEngineeringReason",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "EngineeringTakeMatchesLibrary",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "stationTakeMatchesLibrary",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "EngineeringDropMatchesLibrary",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "SharedConsequences",
+    "source": "SharedConsequences.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "EngineeringStation",
+    "source": "EngineeringStation.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Station",
+      "path": "./SharedConsequences.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "stationDropMatchesLibrary",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ }
+]
