@@ -1,12 +1,23 @@
 # Law component source/codec integration sketch
 
-2026-10-02, Codex. Companion to `Theory/LawComposition.lean` on the independent
-`codex/law-composition` snapshot. Scoped shared-seat Lean checks pass the pure module, CanonicalPolicyAdmission,
-PolicyRecordCodec v5, PolicyHistoryResolution, ResolvedLawCompilation, and
-PolicyComponentResolution. No full consumer closure rebuild or native journey has
-run; active receivers have not been switched to this schema.
-Root decisions and full product contract are in claudesplosion's
-`planning/law-composition-2026-10-02.md`.
+2026-10-02, Codex. Companion to the pure module, now `Pred/LawComposition.lean` (it was
+`Theory/LawComposition.lean` on the independent `codex/law-composition` snapshot).
+
+**Status at main 5216e02f (READ, import closure computed over the `import` lines of the
+tree).** The modules this sketch names are in the closure of `Minidregg.lean` and of
+`Host.Main`: `Pred/LawComposition.lean` (imported by `Compiler/CanonicalPolicyAdmission`
+and `Compiler/WorldKindLawDependencies`), `Compiler/PolicyComponentResolution.lean`
+(imported by `Compiler/ComposedPolicyAdmission` and `Compiler/CandidateLawResolution`),
+`Compiler/PolicyRecordCodec.lean`, `Compiler/PolicyHistoryResolution.lean` and
+`Compiler/ResolvedLawCompilation.lean`. This note does not say whether the proof
+obligations below are discharged; read the modules for that.
+
+What the note itself recorded on 2026-10-02, before that integration: scoped shared-seat
+Lean checks passed the pure module, CanonicalPolicyAdmission, PolicyRecordCodec v5,
+PolicyHistoryResolution, ResolvedLawCompilation and PolicyComponentResolution; no full
+consumer closure rebuild or native journey had run; active receivers had not been
+switched to this schema. Root decisions and the full product contract are in
+claudesplosion's `planning/law-composition-2026-10-02.md` (outside this repository).
 
 ## Small receiving interface
 
