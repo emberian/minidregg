@@ -27,7 +27,7 @@ issuer, policy or other subject's row is in the patch's footprint
 (`grants_survive_rotation`, `rotation_preserves_other_subjects`).
 
 `digestOf` is a parameter here; the host instantiates it with cSHAKE256 under
-the tag `DREGG.SIGNING-KEY.NEXT/v1` (`Kernel.SubjectKeyRotation.nextKeyDigest`).
+the tag `DREGG.SIGNING-KEY.NEXT/v1` (`Kernel.Receivers.SubjectKeyRotation`'s `nextKeyDigest`).
 "The digest pins the key" is its collision resistance; nothing below assumes it:
 the theorems are stated over digest (in)equality, as admission is.
 -/

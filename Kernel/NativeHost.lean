@@ -348,7 +348,7 @@ def rotationPlanLoaded (config : Config) (opened : Opened config)
     (commandBytes : List UInt8) : Except String SubjectKeyRotation.SigningPlan := do
   let command ← need "noncanonical subject key rotation command"
     (SubjectKeyRotation.commandCodec.decode commandBytes)
-  let _ ← (SubjectKeyRotation.prepare config.deployment config.profile.semantics
+  let _ ← (SubjectKeyRotation.prepare (NativeHostReplay.rotationEnv config)
     opened.durable command).mapError (fun reason => s!"rotation preparation: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     SubjectKeyRotation.possessionFrame config.deployment.domain config.profile.semantics command⟩
@@ -993,26 +993,37 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
 
-def rotationSubmitLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : IO Outcome := do
-  match ← SubjectKeyRotation.receiveLoaded config.deployment config.profile.semantics
-      config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused .operationRejected "rotate-key" s!"{repr reason}"
-  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+/-- The Host settlement of every `Kernel.Receiving` family, one copy: a
+confirmed outcome is sealed against its original accepted prefix. -/
+def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
+    {env : family.Env} {durable : Durable} : family.Outcome env durable → IO Outcome
+  | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
+      confirmed config .replayed transactionId event.eventId
+  | .conflict => return refused .conflict "replay" "transaction identity conflict"
+  | .refused reason => return refused .operationRejected label s!"{repr reason}"
+  | .committed ingress _ witness =>
+      confirmed config witness.kind (family.txId env ingress) (family.event env ingress).eventId
+  | .durable ingress (.journaled kind) =>
+      confirmed config kind (family.txId env ingress) (family.event env ingress).eventId
+  | .durable _ (.rejected reason) => return durableRefusal reason
+  | .durable _ .contention => return .contention
+  | .durable _ (.unavailable detail) => return .unavailable detail.toUTF8.toList
+  | .durable _ (.uncertain detail) => return .uncertain detail.toUTF8.toList
 
-/-- Receipt-only historical lookup of one rotation ingress. -/
-def rotationLookupLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : Outcome :=
-  match SubjectKeyRotation.decodeIngress bytes with
-  | none => refused .malformed "rotate-key" "noncanonical signed ingress"
+/-- Fresh submission through a `Kernel.Receiving` family. -/
+def receivingSubmitLoaded (config : Config) (opened : Opened config) (family : Receiving.Family)
+    (env : family.Env) (label : String) (bytes : List UInt8) : IO Outcome := do
+  receivingOutcome config family label
+    (← family.receiveLoaded config.signature config.transport env opened.durable bytes)
+
+/-- Receipt-only historical lookup through a `Kernel.Receiving` family.
+Absence never submits fresh work. -/
+def receivingLookupLoaded (config : Config) (opened : Opened config) (family : Receiving.Family)
+    (env : family.Env) (label : String) (bytes : List UInt8) : Outcome :=
+  match family.decode bytes with
+  | none => refused .malformed label "noncanonical signed ingress"
   | some ingress =>
-    match SubjectKeyRotation.replay config.deployment.domain
-        config.profile.semantics opened.durable ingress with
+    match family.lookupLoaded env opened.durable ingress with
     | some (.ok receipt) =>
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
         | some original => .confirmed .replayed original

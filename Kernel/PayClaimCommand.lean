@@ -5,7 +5,7 @@ capability to arbitrary programs or a generic command-execution surface.
 -/
 import Kernel.PayReceivingContract
 import Kernel.PayEnrolClaim
-import Kernel.SubjectKeyRotation
+import Kernel.Receivers.SubjectKeyRotation
 
 namespace Minidregg.Kernel.PayClaimCommand
 open Minidregg.Compiler

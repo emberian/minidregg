@@ -34,7 +34,7 @@ import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
-import Kernel.SubjectKeyRotation
+import Kernel.Receivers.SubjectKeyRotation
 import Kernel.ParticipantFactoryProvisioning
 import Kernel.FleetTurn
 import Kernel.PayBookReceiver

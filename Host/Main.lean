@@ -6323,11 +6323,15 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((141 : UInt8), ingress)
                         | 142 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.rotationSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.receivingSubmitLoaded pinnedConfig opened
+                              SubjectKeyRotation.family (NativeHostReplay.rotationEnv pinnedConfig)
+                              "rotate-key" payload
                             return ((142 : UInt8), outcomeCodec.encode outcome)
                         | 143 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome := NativeHost.rotationLookupLoaded pinnedConfig opened payload
+                            let outcome := NativeHost.receivingLookupLoaded pinnedConfig opened
+                              SubjectKeyRotation.family (NativeHostReplay.rotationEnv pinnedConfig)
+                              "rotate-key" payload
                             return ((143 : UInt8), outcomeCodec.encode outcome)
                         | 144 =>
                             let some text := String.fromUTF8? payload.toByteArray

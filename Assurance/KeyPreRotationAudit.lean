@@ -1,12 +1,12 @@
 /-
 # Assurance.KeyPreRotationAudit -- the host's rotation admission carries the theory
 
-`Kernel.SubjectKeyRotation` admits through `Theory.KeyPreRotation.gate` and
-writes `Theory.KeyPreRotation.patch`.  These statements are about the host's
-own `Prepared`/`Accepted` values, so the theory's teeth are the deployed
-admission's, not a model's.
+`Kernel.Receivers.SubjectKeyRotation` admits through `Theory.KeyPreRotation.gate`
+and writes `Theory.KeyPreRotation.patch`, as a `Kernel.Receiving` family.  These
+statements are about the host's own `Prepared` values and admissions, so the
+theory's teeth are the deployed admission's, not a model's.
 -/
-import Kernel.SubjectKeyRotation
+import Kernel.Receivers.SubjectKeyRotation
 
 namespace Minidregg.Assurance.KeyPreRotationAudit
 
@@ -18,12 +18,11 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-variable {deployment : Deployment} {semantics : Digest} {durable : Durable}
-  {command : Command} {ingress : DecodedIngress}
+variable {env : Env} {durable : Durable} {command : Command} {ingress : DecodedIngress}
 
 /-- The authority cell an accepted rotation commits is exactly the theory's
 rotation post of the loaded cell. -/
-theorem authorityPost_is_rotation_post (prepared : Prepared deployment semantics durable command) :
+theorem authorityPost_is_rotation_post (prepared : Prepared env durable command) :
     prepared.authorityPost.logical =
       KeyPreRotation.post prepared.authority.snapshot.logical prepared.current command.rotation :=
   rfl
@@ -33,12 +32,13 @@ committed cell's current key for the subject is the new record, at a different
 epoch, and the old version is in the append-only `revoked` plane, so
 `CredentialSignatureAdmission.select` (current key only, `live` standing only)
 never selects it again. -/
-theorem accepted_old_key_refused {prepared : Prepared deployment semantics durable command}
-    (accepted : Accepted prepared ingress) :
-    currentSigningKey prepared.authorityPost.logical command.subject = some command.key ∧
-      command.key.keyEpoch ≠ prepared.current.keyEpoch ∧
+theorem accepted_old_key_refused (admission : receiver.Admitted env durable ingress) :
+    let prepared : Prepared env durable ingress.command := admission.accepted.prepared
+    currentSigningKey prepared.authorityPost.logical ingress.command.subject =
+        some ingress.command.key ∧
+      ingress.command.key.keyEpoch ≠ prepared.current.keyEpoch ∧
       prepared.authorityPost.logical ⟨.revoked, signingKeyRevocation prepared.current⟩ = some () :=
-  KeyPreRotation.old_key_refused_after_rotation accepted.gated
+  KeyPreRotation.old_key_refused_after_rotation (admitted_gate admission)
 
 /-- **On the host: a stolen daily key cannot rotate.**  Whatever the native
 verifier says about the one presented signature, the host's gate refuses a
@@ -61,7 +61,7 @@ theorem presented_only_new_key (verified : Bool) (publicKey : List UInt8)
   exact vouched
 
 /-- Grants survive an accepted rotation on the host. -/
-theorem accepted_grants_survive (prepared : Prepared deployment semantics durable command) :
+theorem accepted_grants_survive (prepared : Prepared env durable command) :
     ∀ kind (id : CapabilityId),
       prepared.authorityPost.logical ⟨.capability kind, id⟩ =
         prepared.authority.snapshot.logical ⟨.capability kind, id⟩ :=
@@ -72,7 +72,9 @@ theorem accepted_grants_survive (prepared : Prepared deployment semantics durabl
 #assert_axioms host_stolen_daily_key_refused
 #assert_axioms presented_only_new_key
 #assert_axioms accepted_grants_survive
-#assert_axioms Accepted.precommitted
-#assert_axioms Accepted.possession
+#assert_axioms Prepared.precommitted
+#assert_axioms admitted_possession
+#assert_axioms admitted_gate
+#assert_axioms refused_possession_unauthenticated
 
 end Minidregg.Assurance.KeyPreRotationAudit

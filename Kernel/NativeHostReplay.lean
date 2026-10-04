@@ -43,7 +43,7 @@ import Kernel.ApplicationFailedStartRecoveryCore
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
-import Kernel.SubjectKeyRotation
+import Kernel.Receivers.SubjectKeyRotation
 import Kernel.SubjectKeyCommitmentAdoption
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
@@ -710,6 +710,10 @@ def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
     (admitted : LifetimeDispatchAt config opened ingress) : DataIntent rootBytes :=
   ApplicationAgentLifetimeDispatchCore.candidateIntent admitted.checked
 
+/-- The deployment a subject-key rotation is admitted under. -/
+def rotationEnv (config : Config) : SubjectKeyRotation.Env :=
+  ⟨config.deployment, config.profile.semantics⟩
+
 /-- Evidence is one of the actual privately admitted receiving objects,
 never a policy decision, signature Boolean, or arbitrary DataIntent handed in
 from outside. -/
@@ -765,9 +769,8 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
   | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
-      (accepted : SubjectKeyRotation.AcceptedRotation config.deployment config.profile.semantics
-        opened.durable ingress) :
-      NativeAdmission config opened (SubjectKeyRotation.intent accepted)
+      (admission : SubjectKeyRotation.receiver.Admitted (rotationEnv config) opened.durable ingress) :
+      NativeAdmission config opened (SubjectKeyRotation.receiver.intent admission.accepted)
   | subjectKeyCommitmentAdoption {ingress : SubjectKeyCommitmentAdoption.DecodedIngress}
       (accepted : SubjectKeyCommitmentAdoption.AcceptedAdoption config.deployment config.profile.semantics
         opened.durable ingress) :
@@ -1745,12 +1748,12 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyRotation.decodeIngress bytes then
-    match ← SubjectKeyRotation.admitDecodedNative config.deployment config.profile.semantics
-        opened.durable config.signature ingress with
+    match ← SubjectKeyRotation.family.admitNative config.signature (rotationEnv config)
+        opened.durable ingress with
     | .error reason => return .error s!"subject key rotation refused: {repr reason}"
-    | .ok accepted =>
-        return .ok ⟨SubjectKeyRotation.intent accepted,
-          .subjectKeyRotation accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+    | .ok admission =>
+        return .ok ⟨SubjectKeyRotation.receiver.intent admission.accepted,
+          .subjectKeyRotation admission, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyCommitmentAdoption.decodeIngress bytes then
     match ← SubjectKeyCommitmentAdoption.admitDecodedNative config.deployment config.profile.semantics
         opened.durable config.signature ingress with

@@ -18,7 +18,7 @@ never un-revoke a key.
 
 `nextKeyDigest` is the subject's pre-rotation commitment (KERI): the digest of
 the NEXT public key under the deployment's next-key digest
-(`Kernel.SubjectKeyRotation.nextKeyDigest`).  A rotation is admitted only by
+(`Kernel.Receivers.SubjectKeyRotation`'s `nextKeyDigest`).  A rotation is admitted only by
 exhibiting a key whose digest it is (`Theory.KeyPreRotation.gate`), so whoever
 holds the current key cannot rotate.  `none` is a subject enrolled without
 pre-rotation: it cannot rotate at all, exactly as before rotation existed.

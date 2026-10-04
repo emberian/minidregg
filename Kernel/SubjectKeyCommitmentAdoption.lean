@@ -1,7 +1,7 @@
 /- Explicit current-key authorization to establish its first next-key commitment.
 The current and next key sign different frames over the complete command.
 Neither a sponsor nor a carry operator can invent this authority. -/
-import Kernel.SubjectKeyRotation
+import Kernel.Receivers.SubjectKeyRotation
 import Theory.KeyCommitmentAdoption
 
 namespace Minidregg.Kernel.SubjectKeyCommitmentAdoption
