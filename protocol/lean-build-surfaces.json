@@ -20,8 +20,7 @@
     "Compiler.PrivateBackendBoundaryFixture",
     "Host.BendCommitmentIR2Emit",
     "Host.BendTraceIR2Emit",
-    "Host.ObjectiveBendElaborateRun",
-    "Host.ObjectiveBendPreview",
+    "Host.ObjectiveBendFrontEndMain",
     "Host.ObjectiveStudioPublication",
     "Host.PortableContinuationProbe",
     "Host.PrivateCircuitPlanFixture",
@@ -2283,8 +2282,15 @@
     {
       "module": "Compiler.ObjectiveBendC4",
       "path": "Compiler/ObjectiveBendC4.lean",
-      "sha256": "622cb411fae96bea0f90da7f8c256a335931c78b92dc7d31b5739e1c5be4fa0e",
-      "surface": "authored-research",
+      "sha256": "ed5ed80790a89c9f010f5d33eac74ba43f73affb6b3cf9ebf34ff92afb85eecb",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendC4Vectors",
+      "path": "Compiler/ObjectiveBendC4Vectors.lean",
+      "sha256": "5f39ab2d3b4789f4e8fa193d23e3cc5e5b6baa8e74e40d030497f69956bcdaae",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -2304,8 +2310,8 @@
     {
       "module": "Compiler.ObjectiveBendElaborate",
       "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "a641b641875abb5e21c851f039f0e17f57be2b84a2195223ced8039aac1646a5",
-      "surface": "authored-research",
+      "sha256": "b1d5544af2d4f4a392e587d4a2c8a0206a9b791521404e8161619b727e9cc793",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -2323,6 +2329,27 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.ObjectiveBendFrontEnd",
+      "path": "Compiler/ObjectiveBendFrontEnd.lean",
+      "sha256": "3e8acfdc1ff92970574c2e9f1499e775dbb4d4754ddebbcb33643ecdb2b11dd6",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendFrontEndAdequacy",
+      "path": "Compiler/ObjectiveBendFrontEndAdequacy.lean",
+      "sha256": "0b6578fd797f977cf888b3d86936f7cbc79fe18b3de3960723daf468ba7366df",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendFrontEndIdentity",
+      "path": "Compiler/ObjectiveBendFrontEndIdentity.lean",
+      "sha256": "57530b003a848963dce17b1b4d5e51dbb318ce32f2f8b3b2aa4e7e030318315a",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Compiler.ObjectiveBendGenericResult",
       "path": "Compiler/ObjectiveBendGenericResult.lean",
       "sha256": "cfb4e975c235daaedceaeb6e25986a47bb91322a976c43148a09ea048c44dade",
@@ -2337,9 +2364,23 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.ObjectiveBendParse",
+      "path": "Compiler/ObjectiveBendParse.lean",
+      "sha256": "4343d59db4e8a29089a4f5b8709877f0726839293d1444c0005288852ac3a46f",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Compiler.ObjectiveBendPlanAdapter",
       "path": "Compiler/ObjectiveBendPlanAdapter.lean",
       "sha256": "8761e7f8763062d8c7cc993b392043361b895ef601e1d9a5d1a3839bb64576ce",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendPublication",
+      "path": "Compiler/ObjectiveBendPublication.lean",
+      "sha256": "0a98450be6eb4dc70cdf93d7410bb1165eb5c53ade32bb90cb2c2bc677f25b14",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2458,7 +2499,7 @@
     {
       "module": "Compiler.ObjectiveSourcePackage",
       "path": "Compiler/ObjectiveSourcePackage.lean",
-      "sha256": "7e500bc8aa705afb00e79c27619a8cc2f206fb450b661a89cc12dcef180f4c88",
+      "sha256": "77371745f012349b5b3c3c30da06e10b82cee67a3b025b3999c74cf83cdbad97",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2902,6 +2943,20 @@
       "sha256": "f0d10b16aa7a26abba71cac5f187450a6ef59d288981d9aa2630c9a49deae177",
       "surface": "default",
       "ownerReportedStatus": "AUTHORED_UNCOMPILED_WIP"
+    },
+    {
+      "module": "Compiler.Sha256",
+      "path": "Compiler/Sha256.lean",
+      "sha256": "b212c05aa5cc3ee3a7d431a72bf45c2ee72d8bcd8859bfd12dcf9a4d023fdb6d",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.Sha256Vectors",
+      "path": "Compiler/Sha256Vectors.lean",
+      "sha256": "7ceab8d0227a750024fd490daaab1b61e8751f1c5547a2871220c037455afe62",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.Signature",
@@ -3739,7 +3794,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "b582f8a8e0f0e2fe8cd9c7242fa440f6f6f312261ea515ae39e73fef0acdc131",
+      "sha256": "692c1981723c3d84a3642f5b02e34d9e5907962fb4b73b0f0d685219344f1a72",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3779,17 +3834,24 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Host.ObjectiveBendElaborateRun",
-      "path": "Host/ObjectiveBendElaborateRun.lean",
-      "sha256": "ad1b8bdd8c0ff3cfa17f6cc0caf0f121476ecdae3a8661b21c19976768782f97",
+      "module": "Host.ObjectiveBendFrontEnd",
+      "path": "Host/ObjectiveBendFrontEnd.lean",
+      "sha256": "98671c05360876c19b2d5ecb747cbc04b662a8855ce491a3a00ebd85af0e70eb",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Host.ObjectiveBendFrontEndMain",
+      "path": "Host/ObjectiveBendFrontEndMain.lean",
+      "sha256": "425333bdf358e3629c5b6ea0fc4178146bc319fbb4d48d4c92812ce2b44debea",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ObjectiveBendPreview",
       "path": "Host/ObjectiveBendPreview.lean",
-      "sha256": "8ff116821e9c5885099c21e110997153572da2df2e9a62ebf71610954979d016",
-      "surface": "authored-research",
+      "sha256": "5c44baa3663811ef6ba12476497890b64ccdaddc8662cfc27c361c314bb61780",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -3802,7 +3864,7 @@
     {
       "module": "Host.ObjectiveInvocationQuote",
       "path": "Host/ObjectiveInvocationQuote.lean",
-      "sha256": "8db8d32b1b65e65cacb1525a927958aed99300ed90abb1c7720c37a75563c169",
+      "sha256": "39055cac2c07935994116ef389d116580cf7cee9206207202e2d4c3d1e2bea08",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3816,14 +3878,14 @@
     {
       "module": "Host.ObjectivePackageAuthor",
       "path": "Host/ObjectivePackageAuthor.lean",
-      "sha256": "f4b47e283a3a48619f42c8942453daf71ead8e0ffcf591306d5d9584d72ac5ef",
+      "sha256": "d6d4a22836395cf31808858808c8f8ed424ee1e569c0b63deadaad36a0bf9711",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ObjectiveStudioPublication",
       "path": "Host/ObjectiveStudioPublication.lean",
-      "sha256": "36179877dfd1e81e09310cea9855abcbbe799ba17b887fa7a7ae3b4fd7796442",
+      "sha256": "9fc9d6adbb4e53281eb3f02fd07edb675f601579da58bff59cbfab16908b7af7",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6490,7 +6552,7 @@
     {
       "module": "Kernel.ObjectiveBendAdmissionSemantics",
       "path": "Kernel/ObjectiveBendAdmissionSemantics.lean",
-      "sha256": "d46a053b0f58b9806be56bbb05c7f368fc60e2077faabcf13da82ec63728780c",
+      "sha256": "7f3fe199cbb1dc2686679f012201de58526783fb005adb4abe5b7aefc2ded742",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6511,7 +6573,7 @@
     {
       "module": "Kernel.ObjectiveBendNativeAdmission",
       "path": "Kernel/ObjectiveBendNativeAdmission.lean",
-      "sha256": "e0e73dea50a27dd8ee4aa4deda0afa47f2b01810876c3da6eaa1b05ffcf06522",
+      "sha256": "b9f256649326e5d9b76f6c5ab6e0b6810a3438dc88d0ba45ab728e33fced3553",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6532,7 +6594,7 @@
     {
       "module": "Kernel.ObjectiveBendPublishedPackage",
       "path": "Kernel/ObjectiveBendPublishedPackage.lean",
-      "sha256": "9d4aa02bebd61d67b4326ff173f1ee4fd73a7a53c85d6376ad08d581efc79b9c",
+      "sha256": "680098962adceb6623cfcd813211d8bef745d87cc8665a1851c507b5541f2f3c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7435,14 +7497,14 @@
     {
       "module": "Minidregg",
       "path": "Minidregg.lean",
-      "sha256": "e051cc6bab829cd6a61b5853cc4edb66df4c1e996b7c0227979fc56f14112076",
+      "sha256": "06a9087ec857a8c5cadc768ee38ee09ed6285215a1f2da44dce50d5541e85057",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "ObjectiveProofs",
       "path": "ObjectiveProofs.lean",
-      "sha256": "7dee1a42feb299b05f0db7e2c1150f6bf32a77c406b63b7147a535721444b14e",
+      "sha256": "153e4e7633b1b4c6760886066e0023a3cb282ec1d4c673430b0021603817433c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7526,7 +7588,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "8aeb5e6d9a5529fd115910ce1610ea3cf08bb8e28d2cec204a42db646ef5618f",
+      "sha256": "630466e239c79c6738c735053fafb4eef0403302289b500cf2ee5d66a1fce3aa",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8668,7 +8730,7 @@
       "module": "Theory.AssertCompiled",
       "path": "Theory/AssertCompiled.lean",
       "sha256": "21e458c1d5d33ebe0ba335457387d83220da5889d17872ece14fd9fbceb48b49",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "previous PASS or exact vendor provenance; existing integration may already contain identical source"
     },
     {

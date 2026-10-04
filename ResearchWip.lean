@@ -122,7 +122,6 @@ import Kernel.RoomReleaseIntent
 import Kernel.RoomReleaseLineage
 import Kernel.RunComputeActivation
 import Theory.AdversarySchema
-import Theory.AssertCompiled
 import Theory.BendMaskingDescent
 import Theory.BendMaskingDimension
 import Theory.BendMaskingInterpolation
