@@ -9,7 +9,12 @@ publish = false
 [lib]
 name = "mini_sdk"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
+# rlib only. A cdylib in crate-type makes cargo name this package's artifacts without a
+# metadata hash (libmini_sdk.rlib), so the mini-sdk and resource-client workspaces overwrite
+# each other's build in a shared CARGO_TARGET_DIR (scripts/check-rust-tests.sh) and a later
+# test links against the other workspace's serde_json. The wasm core asks for its cdylib at
+# the one place it is built: `cargo rustc --crate-type cdylib` in mini-sdk-ts build:core.
+crate-type = ["rlib"]
 
 [features]
 default = []
