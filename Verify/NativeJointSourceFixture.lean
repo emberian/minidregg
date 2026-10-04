@@ -12,6 +12,7 @@ import Compiler.GenericSimplexSourceAnchor
 import Verify.GenericSimplexOperatorBridge
 import Lean
 
+set_option stderrAsMessages false
 namespace Minidregg.Verify.NativeJointSourceFixture
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -186,12 +187,6 @@ def openReplicas (root : System.FilePath) (helpers : Helpers) :
     replicas := replicas.push ⟨config,participant⟩
   return replicas
 
-def runCall (root : System.FilePath) (helpers : Helpers)
-    (ingress : System.FilePath) (fuel : Nat) : IO Unit := do
-  let replicas ← openReplicas root helpers
-  let _ ← GenericSimplexSourceHarness.runCallChecked fuel replicas (← IO.FS.readBinFile ingress).toList
-  pure ()
-
 /-- Operator output is a native Outcome frame in a private file. Diagnostic
 stdout never substitutes for a receipt. Original signed call bytes are retained. -/
 def submitCall (root : System.FilePath) (helpers : Helpers)
@@ -201,6 +196,58 @@ def submitCall (root : System.FilePath) (helpers : Helpers)
     (← IO.FS.readBinFile callFile).toList
   writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
 
+/-- Independent process readback: no drive, proposal, or admission is called. -/
+def lookupAllCall (root : System.FilePath) (helpers : Helpers)
+    (callFile outputFile : System.FilePath) : IO Unit := do
+  let replicas ← openReplicas root helpers
+  require (replicas.size == 4) "lookup requires four actual participants"
+  let call := (← IO.FS.readBinFile callFile).toList
+  let some first := replicas[0]? | throw (IO.userError "missing first source participant")
+  let ingress ← IO.ofExcept (sourceIngressOfCall first.config call)
+  match completedCall first.participant call with
+  | none =>
+    for replica in replicas do
+      require (completedCall replica.participant call).isNone "partial completion retained; use exact recovery"
+    IO.println "LOOKUP-ALL absent on four; pending voting liabilities may remain; no drive or resubmit"
+  | some receipt =>
+    let some acceptedPrefix := GenericSimplexOperatorBridge.receiptPrefix first ingress
+      | throw (IO.userError "source receipt lacks retained prefix")
+    for replica in replicas do
+      let some actual := completedCall replica.participant call
+        | throw (IO.userError "partial source completion")
+      require (NativeHostCodec.receiptStream.encode actual == NativeHostCodec.receiptStream.encode receipt) "source receipts differ"
+      require (GenericSimplexOperatorBridge.receiptPrefix replica ingress == some acceptedPrefix)
+        "source prefixes through original call differ"
+    writePrivate outputFile (NativeHostCodec.outcomeCodec.encode (.confirmed .replayed receipt)).toByteArray
+    IO.println "LOOKUP-ALL exact original receipt and complete prefix on four reopened stores"
+
+/-- One owner-private serial operator session retains only verified replicas and
+exact-byte restore caches between calls. Every request still reloads actual source
+state through the ordinary bridge. A stopped process is recovered from durable
+journals, never from this volatile session. The caller supervises each request and
+must not automatically redispatch after a lost response. -/
+def serveCalls (root : System.FilePath) (helpers : Helpers) : IO Unit := do
+  let input ← IO.getStdin
+  let output ← IO.getStdout
+  let mut replicas ← openReplicas root helpers
+  repeat
+    let line ← input.getLine
+    if line.isEmpty then return
+    let json ← IO.ofExcept (Json.parse line)
+    let values ← IO.ofExcept json.getArr?
+    require (values.size == 3) "session requires exact call, outcome, fuel"
+    let callFile ← IO.ofExcept values[0]!.getStr?
+    let outputFile ← IO.ofExcept values[1]!.getStr?
+    let fuelText ← IO.ofExcept values[2]!.getStr?
+    let some fuel := fuelText.toNat? | throw (IO.userError "invalid session fuel")
+    require (fuel > 0) "positive finite service fuel required"
+    let (next,outcome) ← GenericSimplexOperatorBridge.submit fuel replicas
+      (← IO.FS.readBinFile callFile).toList
+    replicas := next
+    writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
+    output.putStrLn "done"
+    output.flush
+
 end Minidregg.Verify.NativeJointSourceFixture
 
 open Minidregg.Verify.NativeJointSourceFixture
@@ -209,9 +256,10 @@ def main (args : List String) : IO Unit := do
   match args with
   | ["init", root, store, signature, agreement, alice, bob] =>
       initializeStores root ⟨store,signature,agreement⟩ alice bob
-  | ["run", root, store, signature, agreement, ingress, fuel] =>
-      let some fuel := fuel.toNat? | throw (IO.userError "invalid finite service fuel")
-      runCall root ⟨store,signature,agreement⟩ ingress fuel
+  | ["serve-calls",root,store,signature,agreement] =>
+      serveCalls root ⟨store,signature,agreement⟩
+  | ["lookup-all-call", root, store, signature, agreement, callFile, outputFile] =>
+      lookupAllCall root ⟨store,signature,agreement⟩ callFile outputFile
   | ["submit-call", root, store, signature, agreement, callFile, outputFile, fuel] =>
       let some fuel := fuel.toNat? | throw (IO.userError "invalid finite service fuel")
       submitCall root ⟨store,signature,agreement⟩ callFile outputFile fuel

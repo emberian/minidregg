@@ -25,7 +25,8 @@ def retainedOfferedPayload (replicas : Array Replica) (ingress : Bytes) :
     IO (Option Bytes) := do
   for replica in replicas do
     let p := replica.participant
-    let some (_, state) := Minidregg.Compiler.GenericSimplexIO.restore
+    let some (_, state) ← Minidregg.Compiler.GenericSimplexIO.restoredPair
+        (Minidregg.Compiler.GenericSimplexNative.storage p.runtime.native)
         p.runtime.context (← (Minidregg.Compiler.GenericSimplexNative.storage p.runtime.native).read)
       | throw (IO.userError "pending recovery journal refused")
     for payload in state.offers do

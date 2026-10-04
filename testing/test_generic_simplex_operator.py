@@ -70,6 +70,56 @@ class NativeFrameBoundary(unittest.TestCase):
             self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"retained-after-timeout")
             self.assertFalse((tickets[0] / "outcome.bin").exists())
 
+    def test_persistent_session_two_calls_one_process_exact_originals(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            code = """import json,os,sys
+from pathlib import Path
+for line in sys.stdin:
+    call,out,fuel=json.loads(line)
+    p=Path(out);p.write_bytes(b'receipt:'+Path(call).read_bytes());os.chmod(p,0o600)
+    print('done',flush=True)
+"""
+            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
+            pid = session.child.pid
+            try:
+                self.assertEqual(session.run(12, 2, b"first"), b"receipt:first")
+                self.assertEqual(session.run(12, 2, b"second"), b"receipt:second")
+                self.assertEqual(session.child.pid, pid)
+                calls = sorted(p.read_bytes() for p in root.glob("*/call.bin"))
+                self.assertEqual(calls, [b"first", b"second"])
+            finally:
+                session.close()
+            self.assertIsNotNone(session.child.poll())
+
+    def test_persistent_timeout_retains_once_and_refuses_redispatch(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            code = """import json,sys,time
+from pathlib import Path
+for line in sys.stdin:
+    call,out,fuel=json.loads(line)
+    Path(call).with_name('started').write_text('once')
+    time.sleep(5)
+"""
+            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
+            with self.assertRaisesRegex(RuntimeError, "completion uncertain"):
+                session.run(12, 1, b"held-original")
+            with self.assertRaisesRegex(RuntimeError, "session stopped"):
+                session.run(12, 1, b"must-not-dispatch")
+            self.assertEqual(len(list(root.glob("*/call.bin"))), 1)
+            self.assertEqual(next(root.glob("*/call.bin")).read_bytes(), b"held-original")
+            self.assertIsNotNone(session.child.poll())
+
+    def test_session_ack_is_not_a_receipt(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            code = "import sys;sys.stdin.readline();print('done',flush=True)"
+            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
+            with self.assertRaises(FileNotFoundError):
+                session.run(12, 2, b"original")
+            self.assertIsNotNone(session.child.poll())
+
     def test_private_identical_client_config_copy(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

@@ -89,7 +89,8 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
     "source harness requires four distinct agreement journal paths"
   for index in List.range replicas.size do
     let some replica := replicas[index]? | throw (IO.userError "replica identity index")
-    let some (journal,state) := Minidregg.Compiler.GenericSimplexIO.restore
+    let some (journal,state) ← Minidregg.Compiler.GenericSimplexIO.restoredPair
+        (Minidregg.Compiler.GenericSimplexNative.storage replica.participant.runtime.native)
         replica.participant.runtime.context
         (← (Minidregg.Compiler.GenericSimplexNative.storage replica.participant.runtime.native).read)
       | throw (IO.userError "replica identity journal refused")

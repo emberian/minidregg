@@ -38,7 +38,7 @@ source meter, or assert that finite operator capacity guarantees liveness. -/
 def attempt (runtime : Runtime) (config : Minidregg.Kernel.NativeHost.Config) (origin : Opened config)
     (queue : Minidregg.Compiler.GenericSimplexPending.Queue) : IO (Minidregg.Compiler.GenericSimplexPending.Queue × Outcome) := do
   let bytes ← (storage runtime.native).read
-  let some (_,state) := restore runtime.context bytes
+  let some (_,state) ← restoredPair (storage runtime.native) runtime.context bytes
     | return (queue,.invalidJournal)
   let some (block,rest) := Minidregg.Compiler.GenericSimplexPending.take state queue
     | return (Minidregg.Compiler.GenericSimplexPending.discover state queue,.idle)

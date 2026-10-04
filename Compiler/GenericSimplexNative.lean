@@ -20,6 +20,8 @@ structure Native where
   /-- Optional streaming exact-file CAS helper, independent of bounded wire
   frames and the cryptographic helper. No history truncation is implied. -/
   storageBinary : Option System.FilePath := none
+  /-- Volatile exact-byte restoration cache; authoritative bytes remain in storage. -/
+  restoreCache : Option RestoreCache := none
   deriving Inhabited
 def run (n : Native) (args : Array String) : IO IO.Process.Output :=
   IO.Process.output {cmd := n.binary.toString,args := args}
@@ -47,6 +49,7 @@ def crypto (n : Native) : Crypto where
       throw (IO.userError "agreement signature helper failed")
     return (← IO.FS.readBinFile s).toList
 def storage (n : Native) : Storage where
+  restoreCache := n.restoreCache
   read := return (← IO.FS.readBinFile n.journal).toList
   compareAppend expected next := try
     IO.FS.withTempDir fun dir => do
@@ -143,7 +146,9 @@ structure Runtime where
   monotonicBase : Nat
   deriving Inhabited
 def openRuntime (n : Native) (context : Context) : IO Runtime := do
-  let some (_,s) := restore context (← (storage n).read)
+  let cache ← IO.mkRef none
+  let n := {n with restoreCache := some cache}
+  let some (_,s) ← restoredPair (storage n) context (← (storage n).read)
     | throw (IO.userError "invalid agreement journal")
   return ⟨n,context,s.now,(← IO.monoMsNow)⟩
 def Runtime.now (r : Runtime) : IO Nat := do
@@ -154,11 +159,11 @@ def receive (runtime : Runtime) (packet : Bytes) : IO Result := do
   let n := runtime.native
   let context := runtime.context
   let bytes ← (storage n).read
-  let some (j,_) := restore context bytes | return .invalid
+  let some (j,_) ← restoredPair (storage n) context bytes | return .invalid
   let some (m,witness) ← authenticate n context j.self packet | return .invalid
   match witness with
   | some w => receiveCommitWitness (storage n) (crypto n) context bytes (← runtime.now) w
-  | none => persist (storage n) context bytes (.deliveryAt (← runtime.now) m)
+  | none => receiveAuthenticated (storage n) context bytes (← runtime.now) m
 /-- A recovered certificate relays original transferable COMMIT sends. Pairwise
 MAC authority is not promoted to another member's signature authority. -/
 def receiveFinality (runtime : Runtime) (certificateBytes : Bytes) : IO Result := do
@@ -173,11 +178,63 @@ def tick (runtime : Runtime) : IO Result := do
 def poll (runtime : Runtime) : IO Result := do
   let bytes ← (storage runtime.native).read
   persist (storage runtime.native) runtime.context bytes .poll
+/-- Application-candidate traffic is separate from 1/3VA candidate messages.
+The MAC commits the exact configured context and complete source prefix. It is
+availability/discovery input only; neither sender nor receiver grants checked. -/
+def candidateBodyStream : StreamCodec (Nat × Nat × Block) :=
+  StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat blockStream)
+
+def candidateMACFrame (context : Context) (body : Bytes) : Bytes :=
+  [77,73,78,73,45,65,80,80,45,67,65,78,68,73,68,65,84,69,1] ++
+    contextStream.encode context ++ body
+
+def sealCandidate (runtime : Runtime) (recipient : Nat) (block : Block) : IO Bytes := do
+  let n := runtime.native
+  let some (journal,_) ← restoredPair (storage n) runtime.context (← (storage n).read)
+    | throw (IO.userError "candidate sender journal refused")
+  let body := candidateBodyStream.encode (journal.self,recipient,block)
+  IO.FS.withTempDir fun dir => do
+    let frame := dir / "candidate"
+    let tag := dir / "tag"
+    writePrivate frame (candidateMACFrame runtime.context body).toByteArray
+    let output ← run n #["mac",(n.pairKey recipient).toString,frame.toString,tag.toString]
+    if output.exitCode != 0 || !output.stderr.isEmpty || !output.stdout.isEmpty then
+      throw (IO.userError "candidate MAC helper failed")
+    return packetStream.encode (body,(← IO.FS.readBinFile tag).toList)
+
+def authenticateCandidate (n : Native) (context : Context) (self : Nat)
+    (bytes : Bytes) : IO (Option Block) := do
+  let some (body,tag) := packetStream.toLawful.decode bytes | return none
+  if packetStream.encode (body,tag) != bytes || tag.length != 32 then return none
+  let some (sender,recipient,block) := candidateBodyStream.toLawful.decode body | return none
+  if candidateBodyStream.encode (sender,recipient,block) != body || recipient != self ||
+      sender ≥ context.config.parties || block.isEmpty then return none
+  let valid ← try
+    IO.FS.withTempDir fun dir => do
+      let frame := dir / "candidate"
+      let proof := dir / "tag"
+      writePrivate frame (candidateMACFrame context body).toByteArray
+      writePrivate proof tag.toByteArray
+      return positive (← run n #["verify-mac",(n.pairKey sender).toString,frame.toString,proof.toString])
+    catch _ => pure false
+  return if valid then some block else none
+
+def receiveCandidate (runtime : Runtime) (bytes : Bytes) : IO (Result × Option Block) := do
+  let n := runtime.native
+  let old ← (storage n).read
+  let some (journal,_) ← restoredPair (storage n) runtime.context old | return (.invalid,none)
+  let some block ← authenticateCandidate n runtime.context journal.self bytes
+    | return (.invalid,none)
+  let result ← retainCandidateOffers (storage n) runtime.context old block
+  match result with
+  | .durable _ => return (result,some block)
+  | _ => return (result,none)
+
 /-- Retry over fresh traffic envelopes is permitted. The retained inner
 sender/view/kind/value is stable and idempotent at the receiving engine. -/
 def outgoing (n : Native) (context : Context) : IO (List (Nat × Bytes)) := do
   let bytes ← (storage n).read
-  let some (j,s) := restore context bytes | throw (IO.userError "invalid agreement journal")
+  let some (j,s) ← restoredPair (storage n) context bytes | throw (IO.userError "invalid agreement journal")
   let mut packets := []
   for (sequence,m) in s.outbox.zipIdx |>.map (fun (m,i) => (i,m)) do
     for recipient in List.range context.config.parties do

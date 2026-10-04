@@ -117,6 +117,16 @@ def selectiveCommitRecovery (binary : String) (original : Array Native) (base : 
     | .durable after =>
       ensure ((viewAt after 1).committed == some [[]]) "relayed quorum did not catch up"
     | _ => throw (IO.userError "recovered quorum import failed")
+  -- A repeated certificate must preserve the exact durable bytes, while the
+  -- first certificate above had to retain the previously missing witness.
+  let oldBytes ← (storage runtimes[2]!.native).read
+  let reopened ← openRuntime nodes[2]! c
+  match ← receiveFinality reopened recovered.bytes with
+  | .durable _ => pure ()
+  | _ => throw (IO.userError "duplicate finality acknowledgement refused")
+  ensure ((← (storage reopened.native).read) == oldBytes)
+    "duplicate certificate grew the durable journal"
+  IO.println "PASS duplicate certificate: cold restart retains exact journal, late first witness still catches up"
   IO.println "PASS selective COMMIT: exactly one local output, durable q-send certificate, restart and two-replica catchup"
 
 def main (args : List String) : IO Unit := do
@@ -157,6 +167,51 @@ def main (args : List String) : IO Unit := do
     drive binary nodes runtimes c 1000 cursors queue
     let states ← nodes.toList.mapM (fun n => state n c)
     ensure (states.all fun s => s.committedTip == [[]]) "TCP four-node common commit"
+    let some sender := nodes[0]? | throw (IO.userError "duplicate sender")
+    let senderState ← state sender c
+    let some vote := senderState.outbox.find? (fun message => message.kind == .vote && message.view == 1)
+      | throw (IO.userError "missing real durable vote")
+    let target := runtimes[1]!
+    let beforeDuplicate ← (storage target.native).read
+    deliverTCP binary target (← sealPacket sender ⟨c,1,0,vote⟩)
+    ensure ((← (storage target.native).read) == beforeDuplicate)
+      "duplicate authenticated vote grew the journal"
+    IO.println "PASS duplicate authenticated vote: actual TCP/MAC, exact durable bytes unchanged"
+
+    -- Application availability uses a separate authenticated domain. The peer
+    -- persists offers and never receives a source-validation grant over wire.
+    let candidate : Block := [[90],[91]]
+    let envelope ← sealCandidate runtimes[0]! 1 candidate
+    ensure ((← authenticateCandidate runtimes[1]!.native {c with epoch := 1} 1 envelope).isNone)
+      "candidate crossed exact context"
+    ensure ((← authenticateCandidate runtimes[1]!.native c 2 envelope).isNone)
+      "candidate crossed recipient"
+    let corrupted := envelope.dropLast ++ [if envelope.getLast? == some 0 then 1 else 0]
+    ensure ((← authenticateCandidate runtimes[1]!.native c 1 corrupted).isNone)
+      "candidate MAC tamper accepted"
+    let beforeCandidate ← state nodes[1]! c
+    let receivedCandidate ← IO.FS.withTempDir fun dir => do
+      let sent := dir / "candidate-sent"
+      let received := dir / "candidate-received"
+      writePrivate sent envelope.toByteArray
+      helper binary #["tcp-hop",sent.toString,received.toString]
+      return (← IO.FS.readBinFile received).toList
+    let (accepted,body) ← receiveCandidate runtimes[1]! receivedCandidate
+    match accepted with
+    | .durable after =>
+      ensure (body == some candidate && after.checked == beforeCandidate.checked)
+        "candidate became a checked grant"
+      ensure (candidate.all after.offers.contains) "candidate records not retained"
+    | _ => throw (IO.userError "authenticated candidate did not persist")
+    let durableCandidate ← (storage nodes[1]!).read
+    let restartedCandidate ← openRuntime nodes[1]! c
+    let (again,_) ← receiveCandidate restartedCandidate receivedCandidate
+    match again with
+    | .durable _ => pure ()
+    | _ => throw (IO.userError "candidate retry refused")
+    ensure ((← (storage nodes[1]!).read) == durableCandidate)
+      "candidate retransmission grew journal"
+    IO.println "PASS candidate relay: actual TCP, context/recipient/MAC binding, durable unvalidated offers and exact restart dedup"
     let mut attestations := []
     for node in nodes do
       let some a ← exportCommitment (storage node) (crypto node) c 1 [[]]
@@ -176,6 +231,8 @@ def main (args : List String) : IO Unit := do
               wireBytes := wireBytes + 8 + (packetStream.encode (frame,List.replicate 32 0)).length
     IO.println s!"SERIALIZED n=4 f=1 inert first view: TCP deliveries={deliveries}, framed bytes={wireBytes}, engine certificate bytes={(certificateStream.encode cert).length}; all continuation waves included"
     let some first := nodes[0]? | throw (IO.userError "first")
+    let cachedRuntime ← openRuntime first c
+    let first := cachedRuntime.native
     ensure (← verifyCertificate (crypto first) c cert) "real PQ certificate"
     let some verified ← verifyCommitted (crypto first) c cert
       | throw (IO.userError "typed commitment verification")
@@ -200,6 +257,16 @@ def main (args : List String) : IO Unit := do
     match ← persist (storage first) c prior (.tick 2000) with
     | .conflict => pure ()
     | _ => throw (IO.userError "stale CAS accepted")
+    let some cache := first.restoreCache | throw (IO.userError "runtime cache missing")
+    ensure (← cache.get).isNone "CAS conflict retained a cache hint"
+    ensure ((← restoreCached (storage first) {c with epoch := c.epoch+1} next).isNone)
+      "cached restore crossed exact context boundary"
+    ensure ((← restoreCached (storage first) c (next ++ [255])).isNone)
+      "cached restore accepted noncanonical trailing bytes"
+    let some exact ← restoreCached (storage first) c next
+      | throw (IO.userError "actual lost-response bytes no longer restore")
+    ensure (exact.bytes == next && (← (storage first).read) == next)
+      "memoized restoration changed physical journal"
     let recovered ← state first c
     ensure (!recovered.committedTip.isEmpty && !recovered.outbox.isEmpty) "crash replay lost decision/outbox"
     let resumed ← openRuntime first c

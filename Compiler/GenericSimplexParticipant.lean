@@ -41,6 +41,7 @@ def frameStream : StreamCodec (Nat × Bytes) :=
   StreamCodec.product StreamCodec.nat bytesStream
 def protocolFrame (bytes : Bytes) : Bytes := frameStream.encode (0,bytes)
 def certificateFrame (bytes : Bytes) : Bytes := frameStream.encode (1,bytes)
+def candidateFrame (bytes : Bytes) : Bytes := frameStream.encode (2,bytes)
 
 /-- Opening checks the exact configured source genesis against the consensus
 anchor through the real historical validator. A journal alone cannot select the
@@ -51,10 +52,18 @@ def openParticipant (config : SourceConfig) (native : Native) (expected : Contex
       source.verified.origin expected [] with
   | .accepted _ =>
     let runtime ← openRuntime native expected
-    let some (_,state) := restore expected (← (storage native).read)
+    let some (_,state) ← restoredPair (storage runtime.native) expected (← (storage runtime.native).read)
       | return .error "invalid durable agreement journal"
+    -- Current-view traffic must not queue behind every historical send after
+    -- each host restart. This is a scheduling hint, never an acknowledgement:
+    -- the independent retry round still covers the entire retained old outbox.
+    let firstCurrent := (state.outbox.findIdx? (fun message =>
+      decide (state.current ≤ message.view))).getD state.outbox.length
+    let schedule : Schedule :=
+      { fresh := firstCurrent * expected.config.parties
+        retryEnd := state.outbox.length * expected.config.parties }
     return .ok ⟨runtime,source,
-      Minidregg.Compiler.GenericSimplexPending.discover state {},{}⟩
+      Minidregg.Compiler.GenericSimplexPending.discover state {},schedule⟩
   | .rejected detail => return .error detail
   | .retry failure => return .error failure.detail
 
@@ -65,6 +74,15 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
     IO (Participant config × GenericSimplexIO.Result) := do
   let some (tag,payload) := frameStream.toLawful.decode bytes | return (p,.invalid)
   if frameStream.encode (tag,payload) != bytes then return (p,.invalid)
+  if tag == 2 then
+    let (result,block) ← GenericSimplexNative.receiveCandidate p.runtime payload
+    match result,block with
+    | .durable state,some candidate =>
+      let pending := Minidregg.Compiler.GenericSimplexPending.retry p.pending
+        (applicationHistory candidate)
+      return ({p with pending :=
+        Minidregg.Compiler.GenericSimplexPending.discover state pending},result)
+    | _,_ => return (p,result)
   let result ← match tag with
     | 0 => GenericSimplexNative.receive p.runtime payload
     | 1 => GenericSimplexNative.receiveFinality p.runtime payload
@@ -194,7 +212,7 @@ round finishes its old snapshot before including later messages. No send removes
 a durable obligation or treats a lost reply as semantic failure. -/
 def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retryBudget : Nat) :
     IO (Participant config × List (Nat × Bytes)) := do
-  let some (_,state) := restore p.runtime.context (← (storage p.runtime.native).read)
+  let some (_,state) ← restoredPair (storage p.runtime.native) p.runtime.context (← (storage p.runtime.native).read)
     | return (p,[])
   let total := state.outbox.length * p.runtime.context.config.parties
   let mut schedule := p.schedule
@@ -259,7 +277,7 @@ def applyNext {config : SourceConfig} (p : Participant config)
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do
-  let some (journal,state) := restore p.runtime.context (← (storage p.runtime.native).read)
+  let some (journal,state) ← restoredPair (storage p.runtime.native) p.runtime.context (← (storage p.runtime.native).read)
     | return (p,[],"invalid engine journal")
   let queue := if p.schedule.certificates.isEmpty then certificateCandidates journal state
     else p.schedule.certificates
@@ -271,6 +289,22 @@ def certificateSlice {config : SourceConfig} (p : Participant config) :
     (fun recipient => (recipient,certificateFrame certificate.bytes))
   let (next,status) ← applyNext p certificate
   return (next,packets,status)
+
+/-- Disseminate a complete checked source candidate before its owner's next
+leader turn. Each peer independently rechecks it; a MAC never transfers source
+authority. Already installed local prefixes need no offer relay: their original
+COMMIT certificates continue through the separate positive repair budget. -/
+def candidateSlice {config : SourceConfig} (p : Participant config) : IO (List (Nat × Bytes)) := do
+  let some (_,state) ← restoredPair (storage p.runtime.native) p.runtime.context
+      (← (storage p.runtime.native).read) | return []
+  let height := p.source.verified.opened.durable.image.accepted.length
+  let some block := state.checked.find? (fun block => height < (applicationHistory block).length)
+    | return []
+  let mut packets := []
+  for recipient in List.range p.runtime.context.config.parties do
+    if recipient != state.self then
+      packets := packets ++ [(recipient,candidateFrame (← sealCandidate p.runtime recipient block))]
+  return packets
 
 /-- A finite host service call. The host supplies due arrivals before this call.
 It consumes reserved validation, continuation, fresh, retry and certificate
@@ -286,8 +320,9 @@ def service {config : SourceConfig} (p : Participant config)
   let _ ← GenericSimplexNative.poll p.runtime
   let _ ← GenericSimplexNative.tick p.runtime
   let (p,packets) ← outgoing p freshBudget retryBudget
+  let candidates ← candidateSlice p
   let (p,certificates,status) ← certificateSlice p
-  return (p,packets ++ certificates,checks,status)
+  return (p,packets ++ candidates ++ certificates,checks,status)
 
 theorem invocation_call_preserves_signed (config : SourceConfig)
     (signed : Minidregg.Kernel.DeclaredResourceController.SignedCommand) :
