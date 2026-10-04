@@ -182,14 +182,61 @@ pub(crate) fn resolve_many(root: &Path, workspace: &Value, names: &[String]) -> 
     }).collect()
 }
 
+/// The room's index pointer as this workspace last read it, in a coherent
+/// room/index pair: a candidate, like the bootstrap read it replaces, never
+/// evidence. The pair batch reads the room's pointer in the same image as the
+/// index either way and replans when it moved.
+fn hint_path(root: &Path, room: &Value) -> Result<std::path::PathBuf> {
+    let target = member(room, "target")?;
+    decimal(target, "room target")?;
+    Ok(root.join("discovery").join(format!("{target}.index")))
+}
+
+fn index_hint(root: &Path, room: &Value) -> Option<String> {
+    let text = std::fs::read_to_string(hint_path(root, room).ok()?).ok()?;
+    let index = text.trim();
+    decimal(index, "index hint").ok()?;
+    Some(index.to_owned())
+}
+
+fn remember_index(root: &Path, room: &Value, index: &str) {
+    let Ok(path) = hint_path(root, room) else { return };
+    if index_hint(root, room).as_deref() == Some(index) { return; }
+    let directory = root.join("discovery");
+    let _ = std::fs::create_dir(&directory);
+    if super::private_dir(&directory).is_ok() {
+        let _ = super::replace_private_file(&path, format!("{index}\n").as_bytes());
+    }
+}
+
+fn forget_index(root: &Path, room: &Value) {
+    if let Ok(path) = hint_path(root, room) { let _ = std::fs::remove_file(path); }
+}
+
+/// The room's discovery fields and, when it has an index, the index's names,
+/// read together in one native image.
 fn coherent_discovery(root: &Path, workspace: &Value, room: &Value)
     -> Result<Vec<(Value,String,Value,Value)>> {
     let room = existing_authority(root,room)?;
+    if let Some(hint) = index_hint(root, &room) {
+        // A stale candidate (an index this grant no longer reads, a cell gone)
+        // is not a decision about the name: discover from the room again.
+        match coherent_pair(root, workspace, &room, hint) {
+            Ok(chain) => return Ok(chain),
+            Err(_) => forget_index(root, &room),
+        }
+    }
     let (room_view, room_at) = discovery_read(root,workspace,&room,INDEX_FIELD)?;
-    let Some(mut index) = index_target(&room_view)? else {
+    let Some(index) = index_target(&room_view)? else {
         return Ok(vec![(room,INDEX_FIELD.to_owned(),room_view,room_at)]);
     };
-    // Replan only a changed room pointer, never a different unrelated world head.
+    coherent_pair(root, workspace, &room, index)
+}
+
+/// Read the room and an index candidate in one batch. Replan only a changed
+/// room pointer, never a different unrelated world head.
+fn coherent_pair(root: &Path, workspace: &Value, room: &Value, mut index: String)
+    -> Result<Vec<(Value,String,Value,Value)>> {
     for _ in 0..3 {
         let mut index_ref = room.clone();
         index_ref["target"] = json!(index);
@@ -197,17 +244,19 @@ fn coherent_discovery(root: &Path, workspace: &Value, room: &Value)
         let index_ref = existing_authority(root,&index_ref)?;
         let references = vec![room.clone(),index_ref.clone()];
         let result = super::signed_views(root,workspace,&references,"resource-scope")?;
-        let current_room = scoped_resource(&result[0].0,&room,INDEX_FIELD)?;
+        let current_room = scoped_resource(&result[0].0,room,INDEX_FIELD)?;
         let current_index = index_target(&current_room)?;
         if current_index.as_deref() != Some(&index) {
             let Some(next) = current_index else {
-                return Ok(vec![(room,INDEX_FIELD.to_owned(),current_room,result[0].1.clone())]);
+                forget_index(root, room);
+                return Ok(vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone())]);
             };
             index = next;
             continue;
         }
         let index_view = scoped_resource(&result[1].0,&index_ref,"annotations")?;
-        return Ok(vec![(room,INDEX_FIELD.to_owned(),current_room,result[0].1.clone()),
+        remember_index(root, room, &index);
+        return Ok(vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone()),
             (index_ref,"annotations".to_owned(),index_view,result[1].1.clone())]);
     }
     Err("shared-name room pointer changed repeatedly; reopen the name".into())
@@ -585,12 +634,15 @@ pub(crate) fn command(
     if member(&room, "kind")? != "object" || room.get("room").is_none() {
         return Err("name operation requires a room reference".into());
     }
-    let (room_view, room_at) = discovery_read(root, workspace, &room, INDEX_FIELD)?;
     let request = match op {
         "attach" => {
-            let index = super::reference(root, to.ok_or("attach requires --to INDEX")?)?;
-            let (index_view, index_at) = discovery_read(root, workspace, &index, "annotations")?;
-            same_snapshot(&room_at, &index_at)?;
+            let index = existing_authority(root, &super::reference(root, to.ok_or("attach requires --to INDEX")?)?)?;
+            // The room's pointer and the new index, one native image.
+            let reader = existing_authority(root, &room)?;
+            let pair = super::signed_views(root, workspace, &[reader.clone(), index.clone()], "resource-scope")?;
+            let room_view = scoped_resource(&pair[0].0, &reader, INDEX_FIELD)?;
+            let index_view = scoped_resource(&pair[1].0, &index, "annotations")?;
+            same_snapshot(&pair[0].1, &pair[1].1)?;
             if super::cell_storage(index_view.get("cell").ok_or("index lacks cell")?)? != "content"
             {
                 return Err("room index must be a content document".into());
@@ -621,12 +673,12 @@ pub(crate) fn command(
             if leaf == "index" {
                 return Err("index is the reserved room map name".into());
             }
-            let index = index_target(&room_view)?.ok_or("room has no index document")?;
-            room["target"] = json!(index);
-            room.as_object_mut().unwrap().remove("room");
-            room = existing_authority(root, &room)?;
-            let (index_view, index_at) = discovery_read(root, workspace, &room, "annotations")?;
-            same_snapshot(&room_at, &index_at)?;
+            // The room's pointer and its index's names, one native image.
+            let chain = coherent_discovery(root, workspace, &room)?;
+            let Some((index_ref, _, index_view, index_at)) = chain.get(1).cloned() else {
+                return Err("room has no index document".into());
+            };
+            room = index_ref;
             let names = bindings(&index_view)?;
             let mut actions = vec![];
             if op == "bind" {
