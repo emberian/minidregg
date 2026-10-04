@@ -135,7 +135,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
             &[base[0], base[1], base[2], base[3], &gen, "record.json"],
         )?;
         let record: crate::hostd::Record = serde_json::from_slice(&record_bytes)?;
-        let unit = resident_unit(&b.app, &b.generation);
+        let unit = resident_unit(&entry.store, &b.app, &b.generation);
         if format!("{:x}", Sha256::digest(&resident_bytes)) != b.resident_config_sha256
             || format!("{:x}", Sha256::digest(&record_bytes)) != intent.journal_sha256
             || resident["miniConfigSha256"] != b.mini_config_sha256

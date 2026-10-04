@@ -605,10 +605,10 @@ mod tests {
                         "worldRoot":LARGE_DIGEST
                     },
                     "generation":"6",
-                    "unitHex":hex(b"mini-spk-a8401-g6.service"),
+                    "unitHex":hex(b"mini-spk-s0123456789abcdef-a8401-g6.service"),
                     "imageHex":"abcd",
                     "invocationIdHex":hex(b"0123456789abcdef0123456789abcdef"),
-                    "controlGroupHex":hex(b"/system.slice/mini-spk-a8401-g6.service"),
+                    "controlGroupHex":hex(b"/system.slice/mini-spk-s0123456789abcdef-a8401-g6.service"),
                     "volumeIdHex":"a".repeat(64),
                     "custodyHex":"04",
                     "physicalWitnessHex":"05"
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(target.custody, [4]);
         let stop_identity = target.stop_identity();
         assert_eq!(stop_identity.generation, 6);
-        assert_eq!(stop_identity.unit, "mini-spk-a8401-g6.service");
+        assert_eq!(stop_identity.unit, "mini-spk-s0123456789abcdef-a8401-g6.service");
         assert_eq!(
             stop_identity.invocation_id,
             "0123456789abcdef0123456789abcdef"
@@ -688,10 +688,10 @@ mod tests {
         let current = RunningState {
             app: 8401,
             generation: 6,
-            unit: "mini-spk-a8401-g6.service",
+            unit: "mini-spk-s0123456789abcdef-a8401-g6.service",
             image_hex: "abcd",
             invocation_id: Some("0123456789abcdef0123456789abcdef"),
-            control_group: Some("/system.slice/mini-spk-a8401-g6.service"),
+            control_group: Some("/system.slice/mini-spk-s0123456789abcdef-a8401-g6.service"),
             volume_resource: 8401,
             volume_id_hex: &volume_id,
             physical_witness: &[5],

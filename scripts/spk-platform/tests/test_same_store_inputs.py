@@ -36,7 +36,8 @@ class World:
             self.manifest[role] = str(image); self.manifest["sha256"][role] = f.sha(image)
         (root / "manifest.json").write_text(json.dumps(self.manifest))
         config = {"lifecycleManagement": {"managementSubject": int(MANAGER), "managementKeyId": 90812}, "issuer": 51, "ownerBudget": 100000,
-                  "lifetime": 10000, "grainBirthTariff": {"base": 4, "perBirth": 3}, "factoryId": 1010}
+                  "lifetime": 10000, "grainBirthTariff": {"base": 4, "perBirth": 3}, "factoryId": 1010,
+                  "expectedSeed": 2**200 + 0x0123456789abcdef}
         (root / "config.json").write_text(json.dumps(config))
         genesis = {"domain": "9917", "expectedSemantics": "445566", "enrollments": [
             {"key": {"subject": CUSTODIAN}, "accountId": CUSTODIAN, "spendCapabilityId": "4101"},

@@ -43,13 +43,14 @@ private def interface (value : Interface) : Json := .mkObj
    ("canonicalHex", hex <| interfaceCodec.encode value)]
 
 /-- Strictly decode v2 only. This is a structural view of the full canonical
-frame, not proof that a caller obtained it from a fresh-tip op26 response. -/
-def inspect (bytes : List UInt8) : Except String Json := do
+frame, not proof that a caller obtained it from a fresh-tip op26 response.
+`store` is the inspecting Host's `Config.expectedSeed`. -/
+def inspect (store : Minidregg.Theory.TypedAuthorization.Digest) (bytes : List UInt8) : Except String Json := do
   let some value := ApplicationLifecycleClaimProjection.codecV2.decode bytes
     | throw "noncanonical descriptor-bound lifecycle claim frame"
   unless value.valid do
     throw "descriptor-bound lifecycle claim source shape refused"
-  unless ApplicationLifecycleResidentProfile.claimMatches value do
+  unless ApplicationLifecycleResidentProfile.claimMatches store value do
     throw "claim is outside the resident signed-SPK physical hosting profile"
   let core := value.core
   let source := core.source.begin.source

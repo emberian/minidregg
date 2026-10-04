@@ -17,8 +17,8 @@
 #   and continues the next; the message survives; a live backup is frozen;
 #   STOP; export bound to the STOP receipt; a is continued again.
 # Store 2 (RUN_ROOT/s2): grain a (app 7101 again) imports Store 1's export
-#   into its own volume, and its START is refused by the broker because Mini's
-#   resident unit name carries no Store identity (K-SPK); grain d (app 7401)
+#   into its own volume and runs beside Store 1's 7101 under its own unit
+#   (Mini's resident unit name carries the Store key); grain d (app 7401)
 #   refuses a tampered export, imports the real one (re-owned to its own app
 #   UID) and serves Store 1's message under the floor; grain b (app 7201,
 #   class M) runs beside it. Three grains of the two Stores run side by side.
@@ -123,7 +123,7 @@ r_refusals() {
       '{"verb":"install-unit","store":"0123456789abcdef","app":"7","generation":"2","unitText":"[Service]\nExecStart=/bin/sh"}' \
       '{"verb":"stop","unit":"sshd.service"}' \
       '{"verb":"place","store":"../../../../etc","app":"1"}' \
-      '{"verb":"start","unit":"mini-spk-a9101-g2.service"}'; do
+      '{"verb":"start","unit":"mini-spk-s0123456789abcdef-a9101-g2.service"}'; do
     reply=$(broker_raw "$req")
     echo "$req -> $reply"
     printf '%s' "$reply" | jq -e '.ok == false' >/dev/null
@@ -355,18 +355,25 @@ r_failstart_restart() {
   echo "Mini admitted the next START of $app at generation $gen ($unit active): the reconciled app was back in phase 2"
 }
 
-r_collision() {
-  set +e
+# r_same_app: app 7101 in Store 1 and Store 2 at once. Mini names the
+# resident unit with the Store's key (storeTag of its genesis seed), so the
+# two STARTs claim two units; until 2026-10-04 the broker refused Store 2's
+# START because both were mini-spk-a7101-g<N>.service.
+r_same_app() {
   s2 start-a >/dev/null
-  rc=$?
-  set -e
-  [ "$rc" != 0 ]
-  cat "$ROOT/s2/evidence/start-a.stderr"
-  grep -q "belongs to store" "$ROOT/s2/evidence/start-a.stderr"
   key1=$(jq -r .stateRoot "$(P1)" | awk -F/ '{print $(NF-1)}')
   key2=$(jq -r .stateRoot "$(P2)" | awk -F/ '{print $(NF-1)}')
+  [ "$key1" != "$key2" ]
+  unit1=$(running_unit "$(P1)" 7101) unit2=$(running_unit "$(P2)" 7101)
+  case "$unit1" in "mini-spk-s$key1-a7101-g"*.service) ;; *) echo "FAIL: $unit1 does not carry Store 1's key" >&2; return 1 ;; esac
+  case "$unit2" in "mini-spk-s$key2-a7101-g"*.service) ;; *) echo "FAIL: $unit2 does not carry Store 2's key" >&2; return 1 ;; esac
+  for unit in "$unit1" "$unit2"; do
+    [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ] ||
+      { echo "FAIL: $unit is not active" >&2; return 1; }
+  done
   ls -d "$GRAINS_ROOT/vars/$key1-7101" "$GRAINS_ROOT/vars/$key2-7101"
-  echo "app 7101 in two Stores: distinct volumes $key1-7101 and $key2-7101; Store 2's START refused (unit name pinned by Mini without a Store id)"
+  s2 stop-a >/dev/null
+  echo "app 7101 ran in two Stores at once: $unit1 and $unit2, volumes $key1-7101 and $key2-7101; Store 2's stopped again"
 }
 
 r_side_by_side() {
@@ -411,7 +418,7 @@ run_row() {
     s2-birth-a) row s2-birth-a s2 birth-a ;;
     s2-install-a) row s2-install-a r_install_import a "$ROOT/export-a" ;;
     s2-share-a) row s2-share-a s2 share-a ;;
-    s2-collision) row s2-collision r_collision ;;
+    s2-same-app) row s2-same-app r_same_app ;;
     s2-birth-c) row s2-birth-c s2 birth-c ;;
     s2-tamper-c) row s2-tamper-c r_tamper c 7301 ;;
     s2-tamper-d) row s2-tamper-d r_tamper d 7401 ;;
@@ -465,7 +472,7 @@ run_row() {
 ALL="identity refusals s1-store s1-birth-a s1-install-a s1-share-a s1-start-a s1-floor-a
   s1-limits-a s1-enroll-a s1-get-a s1-post-a s1-kill-a s1-floor-a2 s1-enroll-a2 s1-poll-a2
   s1-backup s1-stop-a s1-export-a s1-start-a3 s2-store s2-birth-a s2-install-a s2-share-a
-  s2-collision s2-birth-d s2-tamper-d s2-install-d s3-store s3-birth-e s3-install-e
+  s2-same-app s2-birth-d s2-tamper-d s2-install-d s3-store s3-birth-e s3-install-e
   s3-share-e s3-start-e s3-floor-e s3-enroll-e s3-poll-e s3-birth-b s3-install-b s3-share-b
   s3-start-b s3-limits-b s3-enroll-b s3-get-b side-by-side"
 

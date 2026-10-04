@@ -131,10 +131,24 @@ fn hex64(text: &str) -> bool {
 }
 
 /// Mini's lifecycle receivers pin the resident unit name (Kernel
-/// `ApplicationLifecycleResidentProfile.processIdentity`), so it carries no
-/// Store identity; the broker refuses a second Store's claim on a name.
-pub fn resident_unit(app: &str, generation: &str) -> String {
-    format!("mini-spk-a{app}-g{generation}.service")
+/// `ApplicationLifecycleResidentProfile.processIdentity`): the Store key (Mini's
+/// `storeTag` of the genesis seed identity), the app and the generation. Two
+/// Stores on one host never name the same unit.
+pub fn resident_unit(store: &str, app: &str, generation: &str) -> String {
+    format!("mini-spk-s{store}-a{app}-g{generation}.service")
+}
+
+/// The exact inverse of `resident_unit`: `(store, app, generation)` for a
+/// canonical resident unit name, nothing for any other string.
+pub fn parse_resident_unit(unit: &str) -> Option<(String, String, String)> {
+    let rest = unit.strip_prefix("mini-spk-s")?.strip_suffix(".service")?;
+    let (store, rest) = rest.split_once("-a")?;
+    let (app, generation) = rest.split_once("-g")?;
+    (store_key(store)
+        && decimal(app)
+        && decimal(generation)
+        && resident_unit(store, app, generation) == unit)
+        .then(|| (store.to_owned(), app.to_owned(), generation.to_owned()))
 }
 
 /// Volume, mount and witness names carry the Store key: two Stores on one
@@ -742,28 +756,22 @@ impl Broker {
         }
     }
 
-    fn check_resident_unit_name(unit: &str) -> io::Result<(String, String)> {
-        let rest = unit
-            .strip_prefix("mini-spk-a")
-            .and_then(|rest| rest.strip_suffix(".service"))
-            .ok_or_else(|| invalid("not a resident unit name"))?;
-        let (app, generation) = rest
-            .split_once("-g")
-            .ok_or_else(|| invalid("not a resident unit name"))?;
-        if !decimal(app) || !decimal(generation) || resident_unit(app, generation) != unit {
-            return Err(invalid("resident unit name refused"));
-        }
-        Ok((app.to_owned(), generation.to_owned()))
+    /// `(store, app, generation)` of a resident unit name, or a refusal.
+    fn check_resident_unit_name(unit: &str) -> io::Result<(String, String, String)> {
+        parse_resident_unit(unit).ok_or_else(|| invalid("resident unit name refused"))
     }
 
     fn app_units_active(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
         let mut active = Vec::new();
         for entry in fs::read_dir(self.broker_dir().join("units"))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
-            let Ok((unit_app, _)) = Self::check_resident_unit_name(&name) else {
+            let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
                 continue;
             };
-            if unit_app == app && self.unit_store(&name)?.as_deref() == Some(store) {
+            if unit_app == app
+                && unit_store == store
+                && self.unit_store(&name)?.as_deref() == Some(store)
+            {
                 let state = active_state(&name)?;
                 if matches!(
                     state.as_str(),
@@ -1075,12 +1083,11 @@ impl Broker {
                 if placement.class.is_none() {
                     return Err(invalid("set-cgroup must precede install-unit"));
                 }
-                let unit = resident_unit(&app, &generation);
+                let unit = resident_unit(&store, &app, &generation);
                 if let Some(owner) = self.unit_store(&unit)? {
                     if owner != store {
                         return Err(invalid(format!(
-                            "unit {unit} belongs to store {owner}; Mini's resident unit name \
-                             carries no Store identity (K-SPK)"
+                            "unit {unit} is recorded for store {owner}, not the store its name carries"
                         )));
                     }
                 } else if fs::symlink_metadata(Path::new(RUNTIME_UNITS).join(&unit)).is_ok()
@@ -1161,10 +1168,11 @@ impl Broker {
                 )
             }
             Request::Start { unit } => {
-                Self::check_resident_unit_name(&unit)?;
+                let (named, _, _) = Self::check_resident_unit_name(&unit)?;
                 let store = self
                     .unit_store(&unit)?
-                    .ok_or_else(|| invalid("start refused: unit not installed by this broker"))?;
+                    .filter(|store| *store == named)
+                    .ok_or_else(|| invalid("start refused: unit not installed by this broker for its store"))?;
                 self.require_unit_runtime(&store, &unit)?;
                 // A never-begun generation's earlier failed attempt.
                 if active_state(&unit)? == "failed" {
@@ -1174,9 +1182,9 @@ impl Broker {
                 Ok(json!({"unit":unit,"activeState":active_state(&unit)?}))
             }
             Request::Stop { unit } => {
-                Self::check_resident_unit_name(&unit)?;
-                if self.unit_store(&unit)?.is_none() {
-                    return Err(invalid("stop refused: unit not installed by this broker"));
+                let (named, _, _) = Self::check_resident_unit_name(&unit)?;
+                if self.unit_store(&unit)?.as_deref() != Some(named.as_str()) {
+                    return Err(invalid("stop refused: unit not installed by this broker for its store"));
                 }
                 systemctl(&["stop", &unit])?;
                 if active_state(&unit)? == "failed" {
@@ -1405,12 +1413,12 @@ mod tests {
     #[test]
     fn protocol_refuses_unknown_verbs_and_fields() {
         assert!(serde_json::from_str::<Request>(
-            r#"{"verb":"start","unit":"mini-spk-a1-g2.service"}"#
+            r#"{"verb":"start","unit":"mini-spk-s0123456789abcdef-a1-g2.service"}"#
         )
         .is_ok());
         assert!(serde_json::from_str::<Request>(r#"{"verb":"exec","command":"sh"}"#).is_err());
         assert!(serde_json::from_str::<Request>(
-            r#"{"verb":"start","unit":"mini-spk-a1-g2.service","text":"[Service]"}"#
+            r#"{"verb":"start","unit":"mini-spk-s0123456789abcdef-a1-g2.service","text":"[Service]"}"#
         )
         .is_err());
         assert!(serde_json::from_str::<Request>(
@@ -1420,15 +1428,27 @@ mod tests {
     }
 
     #[test]
-    fn resident_unit_names_are_exact() {
-        assert!(Broker::check_resident_unit_name("mini-spk-a7701-g2.service").is_ok());
+    fn resident_unit_names_are_exact_and_carry_the_store() {
+        let store = "0123456789abcdef";
+        let unit = resident_unit(store, "7701", "2");
+        assert_eq!(unit, "mini-spk-s0123456789abcdef-a7701-g2.service");
+        assert_eq!(
+            Broker::check_resident_unit_name(&unit).unwrap(),
+            (store.to_owned(), "7701".to_owned(), "2".to_owned())
+        );
+        // The same app and generation in another Store is another unit.
+        assert_ne!(resident_unit("fedcba9876543210", "7701", "2"), unit);
         for bad in [
-            "mini-spk-a07701-g2.service",
-            "mini-spk-a7701-g2.service.d",
-            "mini-spk-a7701-g0.service",
+            "mini-spk-a7701-g2.service",
+            "mini-spk-s0123456789abcdef-a07701-g2.service",
+            "mini-spk-s0123456789abcdef-a7701-g2.service.d",
+            "mini-spk-s0123456789abcdef-a7701-g0.service",
+            "mini-spk-s0123456789ABCDEF-a7701-g2.service",
+            "mini-spk-s0123456789abcde-a7701-g2.service",
+            "mini-spk-s0123456789abcdef0-a7701-g2.service",
+            "mini-spk-s0123456789abcdef-a1-g2-g3.service",
+            "mini-spk-s0123456789abcdef-a1-g2.service/../x",
             "sshd.service",
-            "mini-spk-a1-g2-g3.service",
-            "mini-spk-a1-g2.service/../x",
         ] {
             assert!(Broker::check_resident_unit_name(bad).is_err(), "{bad}");
         }

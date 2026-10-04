@@ -247,11 +247,13 @@ class NativeProfilePublicationTests(unittest.TestCase):
             native.write_text("""#!/usr/bin/env python3
 import json, os, sys
 assert sys.argv[1:3]==['grain','init-store']
+# GRAINS_ROOT MINI_HOST MINI_CONFIG: the Mini Host names the Store (storeTag).
+assert sys.argv[4]==os.environ['HOST'] and sys.argv[5]==os.environ['CONFIG']
 value={'protocol':'mini-spk-grain-init-store-v1','store':'deployment-owned-key','stateRoot':os.environ['NATIVE_STATE']}
 if os.environ.get('NATIVE_BROKER'):
-    assert sys.argv[5:]==['--broker-socket',os.environ['NATIVE_BROKER']]
+    assert sys.argv[6:]==['--broker-socket',os.environ['NATIVE_BROKER']]
     value['brokerSocket']=os.environ['NATIVE_BROKER']
-else: assert len(sys.argv)==5
+else: assert len(sys.argv)==6
 print(json.dumps(value))
 """)
             native.chmod(0o700)

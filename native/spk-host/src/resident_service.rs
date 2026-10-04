@@ -759,6 +759,10 @@ impl ResidentConfig {
             || !hex64(&config.mini_config_sha256)
             || !hex64(&config.deployment_id)
             || !hex64(&config.host_id)
+            // The unit Mini signs and systemd runs carries this Store's key.
+            || !crate::broker::store_key(&config.store)
+            || !crate::broker::parse_resident_unit(&config.unit)
+                .is_some_and(|(store, _, _)| store == config.store)
             || config.app_uid == 0
             || config.app_gid == 0
             || config.entrances.is_empty()
@@ -1794,7 +1798,7 @@ mod tests {
             "bwrapSha256": "b".repeat(64),
             "appUid": 1000,
             "appGid": 1000,
-            "unit": "mini-spk-a8401-g1.service",
+            "unit": "mini-spk-s0123456789abcdef-a8401-g1.service",
             "miniHost": "/opt/mini/host",
             "miniHostSha256": "c".repeat(64),
             "miniConfig": "/etc/mini/host.json",
@@ -1851,6 +1855,31 @@ mod tests {
         assert!(bound.validate(&config).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn resident_config_unit_must_carry_its_own_store() {
+        let (journal, path, config) = resident_config_fixture();
+        let write = |value: &serde_json::Value| {
+            let _ = fs::remove_file(&path);
+            let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600)
+                .open(&path).unwrap();
+            file.write_all(&serde_json::to_vec(value).unwrap()).unwrap();
+        };
+        write(&config);
+        assert!(ResidentConfig::load(&path).is_ok());
+        for unit in [
+            // another Store's unit for the same app and generation
+            "mini-spk-sfedcba9876543210-a8401-g1.service",
+            // the pre-Store name Mini no longer signs
+            "mini-spk-a8401-g1.service",
+        ] {
+            let mut wrong = config.clone();
+            wrong["unit"] = json!(unit);
+            write(&wrong);
+            assert!(ResidentConfig::load(&path).is_err(), "{unit}");
+        }
+        fs::remove_dir_all(journal).unwrap();
+    }
+
     #[test]
     fn resident_config_refuses_two_agent_sockets_under_one_acl_parent() {
         let (journal, path, mut config) = resident_config_fixture();

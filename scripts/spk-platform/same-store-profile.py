@@ -21,11 +21,13 @@ def prepare(path):
     f.require(value['completionCustodianKey']==Path(c['completionPublicKey']).read_bytes().hex(),'source completion key differs')
     profile=json.loads(__import__('subprocess').check_output([m['host'],str(config),'profile'],timeout=30))
     f.require(str(profile['semantics'])==c['semantics'],'source runtime semantics differs')
+    tag=str(profile.get('storeTag',''))
+    f.require(len(tag)==16 and all(ch in '0123456789abcdef' for ch in tag),'Host profile lacks its Store tag')
     root=f.absolute(c['root']);f.protected_parent(root.parent);f.require(not root.exists() and not root.is_symlink(),'fresh profile evidence root required');root.mkdir(mode=0o700)
     f.save(root/'input.json',c);f.save(root/'source-profile.json',profile)
     grains=f.absolute(c['grainsRoot']);broker=c.get('brokerSocket','/run/mini-spk-broker.sock')
     f.require(broker in ['/run/mini-spk-broker.sock',str(grains/'broker.sock')],'broker must belong to selected grains root')
-    args=[m['spkHost'],'grain','init-store',str(grains),str(config)]
+    args=[m['spkHost'],'grain','init-store',str(grains),m['host'],str(config)]
     if broker!='/run/mini-spk-broker.sock':args+=['--broker-socket',broker]
     # The exact one-shot attempt/evidence are retained before native invocation.
     rc,out,err=f.logged_run(args,root/'init-store')
@@ -33,6 +35,7 @@ def prepare(path):
     initialized=f.load(out);f.require(initialized['protocol']=='mini-spk-grain-init-store-v1' and initialized.get('brokerSocket','/run/mini-spk-broker.sock')==broker,'native Store registration differs')
     f.save(root/'init-store.json',initialized)
     state=f.absolute(initialized['stateRoot']);f.require(state.is_relative_to(grains) and state.resolve()==state,'native Store root differs')
+    f.require(state==grains/tag/'host' and initialized.get('store')==tag,'native Store root is not named by the Host Store tag')
     destination=state/'grain-host.json';f.require(not destination.exists() and not destination.is_symlink(),'profile already exists; preserve and use its retained result')
     host={'protocol':'mini-spk-grain-host-v2','stateRoot':str(state),'grainsRoot':str(grains),'miniHost':m['host'],'miniHostSha256':m['sha256']['host'],
           'miniConfig':str(config),'miniConfigSha256':c['miniConfigSha256'],'miniOperatorSocket':c['privateSocket'],

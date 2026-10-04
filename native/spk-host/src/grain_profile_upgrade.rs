@@ -1,7 +1,8 @@
 //! Local root admission of a compatible image/config transition. This is not
 //! a portable history proof. Immutable profiles retain the complete old custody;
 //! the only changes are explicitly pinned image/config fields and the stable
-//! genesis config hash used by the legacy Store directory convention.
+//! genesis config hash (the profile lineage). The Store key is Mini's
+//! `storeTag`, unchanged by an upgrade because the genesis seed is.
 use super::*;
 use crate::dispatch_author::FixedAuthoring;
 use std::os::fd::AsRawFd;
@@ -26,12 +27,20 @@ fn stable_sha(profile: &HostProfile) -> &str {
         .as_deref()
         .unwrap_or(&profile.mini_config_sha256)
 }
+/// The Store key named by the profile's state root (`GRAINS/<store>/host`).
+/// `Host::load` binds it to the pinned Host's `storeTag` on every load.
 fn store(profile: &HostProfile) -> io::Result<&str> {
-    let hash = stable_sha(profile);
-    if !hex64(hash) {
-        return Err(invalid("invalid genesis config hash"));
+    let store = profile
+        .state_root
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .filter(|name| broker::store_key(name))
+        .ok_or_else(|| invalid("profile state root names no Store key"))?;
+    if profile.state_root != profile.grains_root.join(store).join("host") {
+        return Err(invalid("profile state root is not GRAINS/<store>/host"));
     }
-    Ok(&hash[..16])
+    Ok(store)
 }
 fn profile_layout(path: &Path, profile: &HostProfile) -> io::Result<()> {
     let store = store(profile)?;
@@ -292,7 +301,7 @@ fn validate_lineage(selection: &Selection, actual: &HostProfile, depth: usize) -
     Ok(())
 }
 
-fn stopped(state_root: &Path) -> io::Result<()> {
+fn stopped(store: &str, state_root: &Path) -> io::Result<()> {
     let apps = state_root.join("apps");
     if !exists(&apps)? {
         return Ok(());
@@ -312,7 +321,7 @@ fn stopped(state_root: &Path) -> io::Result<()> {
                     run.generation
                 )));
             }
-            let unit = broker::resident_unit(&app, &run.generation.to_string());
+            let unit = broker::resident_unit(store, &app, &run.generation.to_string());
             let output = Command::new("/usr/bin/systemctl")
                 .args([
                     "--system",
@@ -375,7 +384,7 @@ pub(super) fn rebind(old_path: &Path, admission_path: &Path) -> io::Result<Value
     if selected != old_path && selected != next_path {
         return Err(invalid("another upgrade profile is already selected"));
     }
-    stopped(&old.state_root)?;
+    stopped(store(&old)?, &old.state_root)?;
     private_directory(&old.state_root.join("upgrades"))?;
     private_directory(
         next_path

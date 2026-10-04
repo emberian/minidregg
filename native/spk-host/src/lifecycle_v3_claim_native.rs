@@ -474,8 +474,11 @@ fn verified_physical_begin(
     {
         return Err(invalid("v3 claimed physical identity malformed"));
     }
-    let unit = format!("mini-spk-a{app}-g{generation}.service");
-    if begin.process_identity_hex != hex(unit.as_bytes()) {
+    let unit = String::from_utf8(crate::lifecycle_v3_native::unhex(&begin.process_identity_hex)?)
+        .map_err(|_| invalid("v3 claimed unit is not UTF-8"))?;
+    if !crate::broker::parse_resident_unit(&unit).is_some_and(|(_, unit_app, unit_generation)| {
+        unit_app == app.to_string() && unit_generation == generation.to_string()
+    }) {
         return Err(invalid("v3 claimed unit differs from inspected BEGIN"));
     }
     Ok(VerifiedBegin {
@@ -611,7 +614,7 @@ mod tests {
             volume_id_hex: "aa".repeat(32),
             snapshot_manifest: "16".into(),
             process_generation: "2".into(),
-            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            process_identity_hex: hex(b"mini-spk-s0123456789abcdef-a5-g2.service"),
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "12".into(),
@@ -691,7 +694,7 @@ mod tests {
             volume_id_hex: "aa".repeat(32),
             snapshot_manifest: "16".into(),
             process_generation: "2".into(),
-            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            process_identity_hex: hex(b"mini-spk-s0123456789abcdef-a5-g2.service"),
             transaction_id: "10".into(),
             event_id: "11".into(),
             accepted_count: "12".into(),
@@ -746,7 +749,7 @@ mod tests {
             volume_id_hex: "aa".repeat(32),
             snapshot_manifest: "16".into(),
             process_generation: "2".into(),
-            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            process_identity_hex: hex(b"mini-spk-s0123456789abcdef-a5-g2.service"),
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "11".into(),
@@ -794,7 +797,7 @@ mod tests {
             ("21".into(), "22".into(), "23".into(), "24".into())
         );
         let identity = verified_physical_begin(&fixed, &begin, &launch, "21", "22").unwrap();
-        assert_eq!(identity.unit, "mini-spk-a5-g2.service");
+        assert_eq!(identity.unit, "mini-spk-s0123456789abcdef-a5-g2.service");
         assert_eq!(identity.package_sha256, "a".repeat(64));
         assert_eq!(identity.transaction_id, "21");
         for (field, changed) in [
@@ -849,7 +852,7 @@ mod tests {
             volume_id_hex: "aa".repeat(32),
             snapshot_manifest: "16".into(),
             process_generation: "2".into(),
-            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            process_identity_hex: hex(b"mini-spk-s0123456789abcdef-a5-g2.service"),
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "11".into(),

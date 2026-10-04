@@ -45,7 +45,7 @@ jq -e '
   ((keys | sort) == (["agents","appGid","bwrap","bwrapSha256","entrances","protocol","spkHost","spkHostSha256","startAction","unit"] | sort) or
    (keys | sort) == (["agents","appGid","bwrap","bwrapSha256","createdJournal","entrances","protocol","spkHost","spkHostSha256","startAction","unit"] | sort)) and
   (.appGid | type == "number" and . > 0 and floor == .) and
-  (.unit | type == "string" and test("^mini-spk-a8401-g[1-9][0-9]*[.]service$")) and
+  (.unit | type == "string" and test("^mini-spk-s[0-9a-f]{16}-a8401-g[1-9][0-9]*[.]service$")) and
   (.spkHostSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
   (.bwrapSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
   (((.startAction | keys | sort) == ["index","kind"] and
@@ -287,7 +287,7 @@ jq -r '.agents[] | [.socket,.custody,.reverseSocket,.attemptDir,(.protocol // "m
       ((.session == "8420" and .ticketResource == "8520" and .subject == "10") or
        (.session == "8422" and .ticketResource == "8521" and .subject == "20"))' \
       "$custody" >/dev/null || fail "v2 agent custody differs from fixed source allocation"
-    generation=$(jq -er .unit "$REQUEST" | sed -n 's/^mini-spk-a8401-g\([1-9][0-9]*\)[.]service$/\1/p')
+    generation=$(jq -er .unit "$REQUEST" | sed -n 's/^mini-spk-s[0-9a-f]\{16\}-a8401-g\([1-9][0-9]*\)[.]service$/\1/p')
     jq -e --arg generation "$generation" '.appGeneration == $generation' \
       "$custody" >/dev/null || fail "v2 agent custody generation differs from candidate unit"
   fi

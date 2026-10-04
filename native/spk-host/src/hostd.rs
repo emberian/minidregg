@@ -91,7 +91,9 @@ impl VerifiedBegin {
             || self.image_identity.len() > 512
             || self.process_identity.is_empty()
             || self.process_identity.len() > 512
-            || self.unit != format!("mini-spk-a{}-g{}.service", self.app, self.generation)
+            || !crate::broker::parse_resident_unit(&self.unit).is_some_and(|(_, app, generation)| {
+                app == self.app.to_string() && generation == self.generation.to_string()
+            })
         {
             return Err(invalid("invalid verified BEGIN identity"));
         }
@@ -1969,7 +1971,7 @@ mod tests {
             package_sha256: "c".repeat(64),
             image_identity: "image".into(),
             process_identity: "unit-generation-2".into(),
-            unit: "mini-spk-a91-g2.service".into(),
+            unit: "mini-spk-s0123456789abcdef-a91-g2.service".into(),
         }
     }
 
@@ -1981,7 +1983,7 @@ mod tests {
             phase: Phase::Entered,
             child_pid: None,
             invocation_id: Some("a".repeat(32)),
-            control_group: Some("/system.slice/mini-spk-a91-g2.service".into()),
+            control_group: Some("/system.slice/mini-spk-s0123456789abcdef-a91-g2.service".into()),
             dispatch_in_flight: None,
         };
         let manager = format!("Id={}\nLoadState=loaded\nActiveState=failed\nMainPID=0\nJob=0\nInvocationID={}\nControlGroup=\n", record.unit(), "a".repeat(32));
@@ -2033,7 +2035,7 @@ mod tests {
     fn instance() -> UnitInstance {
         UnitInstance {
             invocation_id: "f".repeat(32),
-            control_group: "/user.slice/mini-spk-a91-g2.service".into(),
+            control_group: "/user.slice/mini-spk-s0123456789abcdef-a91-g2.service".into(),
         }
     }
 
@@ -3064,7 +3066,7 @@ mod tests {
             thread::spawn(move || {
                 journal.fence_and_stop(
                     |unit| {
-                        assert_eq!(unit, "mini-spk-a91-g2.service");
+                        assert_eq!(unit, "mini-spk-s0123456789abcdef-a91-g2.service");
                         Ok(())
                     },
                     stopped,
@@ -3210,7 +3212,7 @@ mod tests {
             package_sha256: "c".repeat(64),
             image_identity: "harmless-systemd-audit-probe".into(),
             process_identity: "installed-unit".into(),
-            unit: "mini-spk-a991005-g1.service".into(),
+            unit: "mini-spk-s0123456789abcdef-a991005-g1.service".into(),
         };
         let output = systemd_show(&identity.unit).unwrap();
         assert_eq!(property(&output, "LoadState").unwrap(), "loaded");
@@ -3259,11 +3261,11 @@ mod tests {
             return;
         }
         assert_eq!(unsafe { libc::geteuid() }, 0);
-        let instance = UnitInstance::current("mini-spk-a991006-g1.service").unwrap();
+        let instance = UnitInstance::current("mini-spk-s0123456789abcdef-a991006-g1.service").unwrap();
         assert_eq!(instance.invocation_id.len(), 32);
         assert_eq!(
             instance.control_group,
-            "/system.slice/mini-spk-a991006-g1.service"
+            "/system.slice/mini-spk-s0123456789abcdef-a991006-g1.service"
         );
     }
 }

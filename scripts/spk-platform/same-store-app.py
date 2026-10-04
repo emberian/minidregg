@@ -68,7 +68,8 @@ def validate(c):
         require('expectedHost' in d and d['expectedHost'],'route host required')
         subjects.append(d['subject']);route_names.append(route_name(label))
     require(len(set(route_names))==len(route_names),'route name hash collision; choose distinct inventory keys')
-    state=Path(c['grainsRoot'])/c['miniConfigSha256'][:16]/'host'/'apps'/app['app']
+    # The Store key (Mini's storeTag) is 16 hex digits; its value does not move this bound.
+    state=Path(c['grainsRoot'])/('0'*16)/'host'/'apps'/app['app']
     # INSTALL is generation 1 and each START takes the next; bound two digits.
     sockets=[state/'g99/checkpoint-control.sock',*[state/'routes'/name/'http.sock' for name in route_names]]
     require(all(len(os.fsencode(path))<=107 for path in sockets),'Linux socket pathname exceeds bound; shorten grains root or app ID')
@@ -264,7 +265,7 @@ def attach(path):
         'namespace':c['namespace'],'miniConfig':c['miniConfig'],'miniConfigSha256':c['miniConfigSha256'],
         'subjects':{label:d['subject'] for label,d in x.f['delegates'].items()},
         'inventory':{'app':x.app,'stateRoot':str(x.state),'profilePath':str(x.profile),'journalDir':str(x.state/f'apps/{x.app}/g{x.f["generation"]}'),
-            'residentConfig':str(x.state/f'apps/{x.app}/g{x.f["generation"]}/resident.json'),'unit':f'mini-spk-a{x.app}-g{x.f["generation"]}.service',
+            'residentConfig':str(x.state/f'apps/{x.app}/g{x.f["generation"]}/resident.json'),'unit':f'mini-spk-s{x.state.parent.name}-a{x.app}-g{x.f["generation"]}.service',
             'delegates':x.f['delegates']},'receiving':'provisioned; actual shared editing/revoke/restart still required'}
     save(retained,result);return result
 

@@ -88,7 +88,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.managementSubject.value == pin.managementSubject &&
       beginSource.capability == pin.appCapability do
     throw "historical BEGIN differs from fixed claim operator pin"
-  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 begin do
+  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin do
     throw "historical BEGIN is outside resident host profile"
   let opened := verified.opened
   let some retained := opened.durable.image.accepted[prior.index]?
@@ -194,8 +194,9 @@ private def envelope (slot : SigningSlot) (signature : List UInt8) :
   return CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
 
 /-- Detached assembly does not mint current authority. Op26 refreshes the
-verified tip and admits the exact three signed incidences again. -/
-def assemble (plan : Plan) (signatures : List (List UInt8)) :
+verified tip and admits the exact three signed incidences again. `store` is
+the assembling Host's `Config.expectedSeed`. -/
+def assemble (store : Minidregg.Theory.TypedAuthorization.Digest) (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let invocationCount := plan.invocation.slots.length
   unless signatures.length == invocationCount + 2 do
@@ -215,7 +216,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
       plan.originalBeginReceipt.eventId ==
         (ApplicationLifecycleBeginV3Ingress.event begin).eventId &&
       plan.originalBeginReceipt.acceptedCount == source.originalIndex + 1 &&
-      ApplicationLifecycleResidentProfile.beginMatchesV3 begin &&
+      ApplicationLifecycleResidentProfile.beginMatchesV3 store begin &&
       plan.invocation.finalizedDraft == .invoke
         (DeclaredResourceController.commandCodec.encode
           (ApplicationLifecycleClaim.command plan.invocation.domain

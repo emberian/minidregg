@@ -587,9 +587,9 @@ write_profile() {
   [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
   if [ -n "${BROKER_SOCKET:-}" ]; then
     [ "$BROKER_SOCKET" = "$GRAINS_ROOT/broker.sock" ] || fail "isolated broker must belong to grains root"
-    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" --broker-socket "$BROKER_SOCKET" >"$EV/init-store.json"
+    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$HOST" "$CONFIG" --broker-socket "$BROKER_SOCKET" >"$EV/init-store.json"
   else
-    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$CONFIG" >"$EV/init-store.json"
+    "$SPK_HOST" grain init-store "$GRAINS_ROOT" "$HOST" "$CONFIG" >"$EV/init-store.json"
   fi
   broker=$(jq -er --arg expected "${BROKER_SOCKET:-/run/mini-spk-broker.sock}" '
     (.brokerSocket // "/run/mini-spk-broker.sock") | select(. == $expected)' "$EV/init-store.json") || fail "native broker endpoint differs"

@@ -217,7 +217,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.package.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        pin.app (if request.kind == .stop then before.generation
+        config.expectedSeed pin.app (if request.kind == .stop then before.generation
                  else before.generation + 1) }
   if request.kind == .stop then
     match verified.selectRunning source with

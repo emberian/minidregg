@@ -102,7 +102,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.packageManifest != pin.packageManifest ||
       beginSource.managementSubject.value != pin.managementSubject then
     return .error "completion subject or resource differs from operator pin"
-  if !ApplicationLifecycleResidentProfile.beginMatches begin then
+  if !ApplicationLifecycleResidentProfile.beginMatches config.expectedSeed begin then
     return .error "completion BEGIN is outside resident host profile"
   let some key := config.completionCustodianKey
     | return .error "pinned physical custodian key unavailable"
@@ -131,7 +131,7 @@ def prepareVerified (config : Config) {target : Durable}
       packageCapability := pin.packageCapability
       packageObserveCapability := pin.packageObserveCapability
       packageAtomBefore := atomBefore }
-  let .ok source ← pure <| ApplicationLifecycleCompletionAuthoring.sourcePlan
+  let .ok source ← pure <| ApplicationLifecycleCompletionAuthoring.sourcePlan config.expectedSeed
       request.beginBytes request.claimIngressBytes request.signedReportBytes current
     | return .error "completion source identities refused"
   match ← ApplicationLifecycleCompletionHistory.select config opened source with

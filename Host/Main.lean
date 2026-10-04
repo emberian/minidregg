@@ -771,7 +771,8 @@ def loadSettings (path : System.FilePath) : IO Settings := do
 
 /-- Human-readable fn inbox projection is a pure presentation of the exact
 native view bytes. Query authority remains with the signed native read. -/
-def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :=
+def inspectHost (config : NativeHost.Config) (kind : String) (bytes : List UInt8) :
+    Except String Lean.Json :=
   if kind == "fn-inbox-resource" then FnInboxView.render bytes
   else if kind == "application-route-admission-attestation" then
     ApplicationRouteAdmissionInspection.inspect bytes
@@ -780,7 +781,7 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
-    ApplicationLifecycleClaimInspection.inspect bytes
+    ApplicationLifecycleClaimInspection.inspect config.expectedSeed bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
   else if kind == "subject-key-adoption-plan" then
@@ -857,6 +858,10 @@ def profileDescription (config : NativeHost.Config)
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
      ("expectedSeed", n config.expectedSeed.value),
+     -- The Store's key in physical names (resident units, volumes, slices):
+     -- the SPK host reads it here and never derives its own.
+     ("storeTag", toJson (Minidregg.Kernel.ApplicationLifecycleResidentProfile.storeTag
+       config.expectedSeed)),
      ("federation", n config.federation.value),
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),
@@ -1860,7 +1865,7 @@ def dispatchSession (config : NativeHost.Config)
           Minidregg.Host.PayClaims.claimPlanJson source
           else if kind == "pay-claim-command" then Minidregg.Host.PayClaims.claimCommandJson source
           else if kind == "pay-claim-ingress" then Minidregg.Host.PayClaims.claimIngressJson config source
-          else inspectHost kind source)
+          else inspectHost config kind source)
         return (8, value.compress.toUTF8.toList)
   | 9 =>
       let some text := String.fromUTF8? payload.toByteArray
@@ -5860,7 +5865,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
-          let value ← IO.ofExcept (inspectHost kind bytes)
+          let value ← IO.ofExcept (inspectHost config kind bytes)
           if kind == "application-route-admission-attestation" ||
               kind == "application-stream-continuity-attestation" ||
               kind == "application-dispatch-committed" ||
@@ -6883,7 +6888,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical resident BEGIN plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleBeginOperator.assemble plan signatures
+                              ApplicationLifecycleBeginOperator.assemble pinnedConfig.expectedSeed plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
                             return ((51 : UInt8), ingress)
@@ -6908,7 +6913,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical lifecycle claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleClaimOperator.assemble plan signatures
+                              ApplicationLifecycleClaimOperator.assemble pinnedConfig.expectedSeed plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
@@ -6978,7 +6983,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical launch claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchClaimAuthoring.assemble plan signatures
+                              ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.expectedSeed plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch claim ingress exceeds host frame bound")
                             return ((69 : UInt8), ingress)

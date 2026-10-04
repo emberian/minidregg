@@ -2864,18 +2864,25 @@ private def agentLifetimePaidRequest (json : Lean.Json) : Result (List UInt8) :=
 private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
   return ⟨← nat path json⟩
 
+/-- The resident signed-SPK profile names units by Store (`Config.expectedSeed`):
+its authoring kinds run only against a deployed config. -/
+private def residentStore (deployed : Option NativeHost.Config) : Result Digest :=
+  match deployed with
+  | some config => pure config.expectedSeed
+  | none => throw "resident signed-SPK authoring needs the deployed config (its Store names the unit)"
+
 /-- Validate an already signed BEGIN-v2 frame for this physical host profile.
 The generic native BEGIN route and historical replay remain unchanged. -/
-private def residentBegin (json : Lean.Json) : Result (List UInt8) := do
+private def residentBegin (store : Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin"] json
   let bytes ← decodeHex "$.begin" (← field "$" "begin" obj)
   let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode bytes
     | throw "noncanonical BEGIN-v2 ingress"
-  unless ApplicationLifecycleResidentProfile.beginMatches ingress do
+  unless ApplicationLifecycleResidentProfile.beginMatches store ingress do
     throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
   return ingress.canonicalBytes
 
-private def completionReport (json : Lean.Json) : Result (List UInt8) := do
+private def completionReport (store : Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin", "claim", "nonce", "unit", "materializedImage",
     "outcome", "invocationId", "controlGroup", "pid", "stopAudit"] json
   let outcome ← string "$.outcome" (← field "$" "outcome" obj)
@@ -2893,22 +2900,22 @@ private def completionReport (json : Lean.Json) : Result (List UInt8) := do
       controlGroup := ← decodeHex "$.controlGroup" (← field "$" "controlGroup" obj)
       pid := ← nat "$.pid" (← field "$" "pid" obj)
       stopAudit := ← decodeHex "$.stopAudit" (← field "$" "stopAudit" obj) }
-  let report ← ApplicationLifecycleCompletionAuthoring.reportPlan
+  let report ← ApplicationLifecycleCompletionAuthoring.reportPlan store
     (← decodeHex "$.begin" (← field "$" "begin" obj))
     (← decodeHex "$.claim" (← field "$" "claim" obj)) observed
   return ApplicationLifecycleCompletionReport.codec.encode report
 
-private def completionSigningFrame (json : Lean.Json) : Result (List UInt8) := do
+private def completionSigningFrame (store : Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["domain", "semantics", "begin", "report"] json
-  ApplicationLifecycleCompletionAuthoring.signingPlan
+  ApplicationLifecycleCompletionAuthoring.signingPlan store
     (← completionDigest "$.domain" (← field "$" "domain" obj))
     (← completionDigest "$.semantics" (← field "$" "semantics" obj))
     (← decodeHex "$.begin" (← field "$" "begin" obj))
     (← decodeHex "$.report" (← field "$" "report" obj))
 
-private def completionSignedReport (json : Lean.Json) : Result (List UInt8) := do
+private def completionSignedReport (store : Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin", "report", "signature"] json
-  ApplicationLifecycleCompletionAuthoring.signedReport
+  ApplicationLifecycleCompletionAuthoring.signedReport store
     (← decodeHex "$.begin" (← field "$" "begin" obj))
     (← decodeHex "$.report" (← field "$" "report" obj))
     (← decodeHex "$.signature" (← field "$" "signature" obj))
@@ -2976,7 +2983,7 @@ private def launchPhysicalSignedReport (json : Lean.Json) : Result (List UInt8) 
     (← decodeHex "$.report" (← field "$" "report" obj))
     (← decodeHex "$.signature" (← field "$" "signature" obj))
 
-private def completionSource (json : Lean.Json) : Result (List UInt8) := do
+private def completionSource (store : Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin", "claimIngress", "signedReport",
     "appRoot", "packageRoot", "appCapability", "appObserveCapability",
     "packageCapability", "packageObserveCapability", "packageAtomBefore"] json
@@ -2989,7 +2996,7 @@ private def completionSource (json : Lean.Json) : Result (List UInt8) := do
       packageObserveCapability := ⟨← nat "$.packageObserveCapability" (← field "$" "packageObserveCapability" obj)⟩
       packageAtomBefore := ← optional "$.packageAtomBefore" atomRecord
         (← field "$" "packageAtomBefore" obj) }
-  let source ← ApplicationLifecycleCompletionAuthoring.sourcePlan
+  let source ← ApplicationLifecycleCompletionAuthoring.sourcePlan store
     (← decodeHex "$.begin" (← field "$" "begin" obj))
     (← decodeHex "$.claimIngress" (← field "$" "claimIngress" obj))
     (← decodeHex "$.signedReport" (← field "$" "signedReport" obj)) current
@@ -3472,14 +3479,16 @@ def author (kind : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result (List UInt8) :=
   match kind with
-  | "application-lifecycle-resident-begin" => residentBegin json
-  | "application-lifecycle-completion-report" => completionReport json
-  | "application-lifecycle-completion-signing-frame" => completionSigningFrame json
-  | "application-lifecycle-completion-signed-report" => completionSignedReport json
+  | "application-lifecycle-resident-begin" => do residentBegin (← residentStore deployed) json
+  | "application-lifecycle-completion-report" => do completionReport (← residentStore deployed) json
+  | "application-lifecycle-completion-signing-frame" => do
+      completionSigningFrame (← residentStore deployed) json
+  | "application-lifecycle-completion-signed-report" => do
+      completionSignedReport (← residentStore deployed) json
   | "application-lifecycle-launch-physical-report" => launchPhysicalReport json
   | "application-lifecycle-launch-physical-signing-frame" => launchPhysicalSigningFrame json
   | "application-lifecycle-launch-physical-signed-report" => launchPhysicalSignedReport json
-  | "application-lifecycle-completion-source" => completionSource json
+  | "application-lifecycle-completion-source" => do completionSource (← residentStore deployed) json
   | "application-lifecycle-completion-command" => completionCommand json
   | "application-lifecycle-completion-signed-command" => completionSignedCommand json
   | "application-lifecycle-completion-ingress" => completionIngress json

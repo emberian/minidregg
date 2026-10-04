@@ -220,7 +220,7 @@ class Driver:
         profile=load(operator_custody(state/'grain-host.json',state,uid,'file'))
         require(profile.get('stateRoot')==str(state) and profile.get('grainsRoot')==self.input['grainsRoot']
                 and profile.get('brokerSocket')==self.input['brokerSocket'],'native profile pin differs')
-        unit=f'mini-spk-a{f["app"]}-g{f["generation"]}.service'
+        unit=f'mini-spk-s{state.parent.name}-a{f["app"]}-g{f["generation"]}.service'
         tag=root_file(Path(self.input['grainsRoot'])/'broker/units'/unit)
         require(tag.read_text()==state.parent.name+'\n','root unit custody tag differs')
         return f
@@ -229,7 +229,7 @@ class Driver:
         f=self.checked_fixture()
         resident=Path(f['state'])/f'apps/{f["app"]}/g{f["generation"]}/resident.json'
         config=load(resident)
-        require(f['app']==self.plan['app'] and config['unit']==f'mini-spk-a{f["app"]}-g{f["generation"]}.service','source incarnation differs')
+        require(f['app']==self.plan['app'] and config['unit']==f'mini-spk-s{Path(f["state"]).parent.name}-a{f["app"]}-g{f["generation"]}.service','source incarnation differs')
         return ['--fixture',str(self.fixture),'--expected-app',f['app'],'--expected-unit',config['unit'],
                 '--expected-resident-sha256',sha(resident),'--broker-config',self.ready['brokerConfig'],
                 '--broker-config-sha256',self.ready['brokerConfigSha256']]

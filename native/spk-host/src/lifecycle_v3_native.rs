@@ -83,10 +83,15 @@ fn checked_physical_identity(view: &Value, launch: &SourceBoundLaunch<'_>) -> io
     let expected = before
         .checked_add(1)
         .ok_or_else(|| invalid("v3 BEGIN generation overflow"))?;
+    // Mini names the unit with its own Store key; the resident checks the app
+    // and generation here and the Store against its pinned unit when it runs.
+    let unit = String::from_utf8(unhex(text(view, "processIdentityHex")?)?)
+        .map_err(|_| invalid("v3 BEGIN unit is not UTF-8"))?;
     if app == 0
         || generation != expected
-        || text(view, "processIdentityHex")?
-            != hex(format!("mini-spk-a{app}-g{generation}.service").as_bytes())
+        || !crate::broker::parse_resident_unit(&unit).is_some_and(|(_, unit_app, unit_generation)| {
+            unit_app == app.to_string() && unit_generation == generation.to_string()
+        })
         || text(view, "imageIdentityHex")? != hex(&launch.descriptor().package.image_identity)
     {
         return Err(invalid("v3 BEGIN physical unit or image identity differs"));
@@ -642,7 +647,7 @@ mod tests {
             "app":"8401",
             "beforeGeneration":"1",
             "processGeneration":"2",
-            "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
+            "processIdentityHex":hex(b"mini-spk-s0123456789abcdef-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
         });
         checked_physical_identity(&view, &launch).unwrap();
@@ -680,7 +685,7 @@ mod tests {
             "volumeIdHex":"a".repeat(64),
             "descriptorRoot":"22", "packageRoot":"22",
             "beforeGeneration":"1", "processGeneration":"2",
-            "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
+            "processIdentityHex":hex(b"mini-spk-s0123456789abcdef-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
             "worldRoot":"10", "height":"11",
             "selectedCommandDigest":null, "priorCreate":null, "slots":[]
@@ -748,7 +753,7 @@ mod tests {
             "managementSubject":"19", "authorizationOperationId":"123",
             "volumeIdHex":"a".repeat(64), "descriptorRoot":"22", "packageRoot":"22",
             "beforeGeneration":"1", "processGeneration":"2",
-            "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
+            "processIdentityHex":hex(b"mini-spk-s0123456789abcdef-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
             "worldRoot":"10", "height":"11",
             "selectedCommandDigest":"44",

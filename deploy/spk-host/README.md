@@ -61,16 +61,19 @@ image, a resident config's existence) are opened by an `O_NOFOLLOW` walk that
 requires operator ownership. Store keys are 16 lowercase hex; app ids and
 generations are canonical decimals.
 
-**Names carry the Store.** Volumes, mounts, witnesses and slices are named
-`<store>-<app>` / `s<store>a<app>`, where `<store>` is the first 16 hex of the
-SHA-256 of the Store's pinned genesis config (unique per Store: it carries the
-Store's random completion custodian key). Two Stores on one host never adopt
-each other's `/var`. The resident unit name is **not** the broker's to choose:
-Mini pins it (`Kernel/ApplicationLifecycleResidentProfile.processIdentity` =
-`mini-spk-a<app>-g<gen>.service`) and signs it into every lifecycle BEGIN, so
-two Stores with the same app id would collide on it; the broker records which
-Store installed each unit and **refuses** another Store's claim with a reason
-naming the owner. K-SPK puts the deployment id into `processIdentity`.
+**Names carry the Store.** `<store>` is Mini's `storeTag`: the low 64 bits of
+the deployment's genesis seed identity (`Config.expectedSeed`) in 16 lowercase
+hex digits, which the pinned Host prints in its `profile` and the SPK host
+never derives itself (`grain init-store GRAINS MINI_HOST MINI_CONFIG` names the
+state root `GRAINS/<store>/host` by it, and every profile load re-reads it from
+the pinned Host and refuses a state root that differs). Volumes, mounts,
+witnesses and slices are named `<store>-<app>` / `s<store>a<app>`; the resident
+unit is `mini-spk-s<store>-a<app>-g<gen>.service`, pinned by Mini
+(`Kernel/ApplicationLifecycleResidentProfile.processIdentity`) and signed into
+every lifecycle BEGIN. Two Stores on one host, a scratch copy beside a live
+world included, never name the same unit or adopt each other's `/var`. The
+broker records which Store installed each unit and refuses a start or stop
+whose record differs from the Store in the name.
 
 **The resident unit** (rendered per generation, runtime, not enabled):
 `User=`/`Group=` the operator, `Slice=` the app's class slice,

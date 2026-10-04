@@ -417,7 +417,7 @@ mod tests {
             purse_task: "8701".into(),
             purse_generation: "4".into(),
             signed_api_path: "/repo.git/".into(),
-            host_unit: "mini-spk-a8401-g2.service".into(),
+            host_unit: "mini-spk-s0123456789abcdef-a8401-g2.service".into(),
             host_invocation: "a".repeat(32),
         };
         let first = binding.fingerprint().unwrap();

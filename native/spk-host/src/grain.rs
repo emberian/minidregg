@@ -232,10 +232,9 @@ struct Host {
     profile: HostProfile,
     identity: HostIdentity,
     management_key_id: String,
-    /// The Store key: the first 16 hex of the SHA-256 of the Store's pinned
-    /// genesis config (unique per Store: it carries the Store's random
-    /// completion custodian key). Volume, mount, witness and slice names
-    /// carry it. K-SPK replaces it with the genesis deployment id.
+    /// The Store key: Mini's `storeTag` of the deployment's genesis seed
+    /// identity, read from the pinned Host's profile at every load. Resident
+    /// unit, volume, mount, witness and slice names and the state root carry it.
     store: String,
     // Serializes profile selection with grain lifecycle operations.
     _profile_lock: File,
@@ -258,11 +257,8 @@ impl Host {
             .genesis_config_sha256
             .as_ref()
             .unwrap_or(&profile.mini_config_sha256);
-        let store = genesis.get(..16).unwrap_or("").to_owned();
         if profile.protocol != "mini-spk-grain-host-v2"
             || !hex64(genesis)
-            || !broker::store_key(&store)
-            || profile.state_root != profile.grains_root.join(&store).join("host")
             || !lifecycle_selector::decimal(&profile.management_subject)
             || !lifecycle_selector::decimal(&profile.management_key_epoch)
             || !hex64(&profile.management_public_key_hex)
@@ -288,6 +284,12 @@ impl Host {
         pinned_executable(&profile.spk_host, &profile.spk_host_sha256)?;
         let identity = read_host_identity(&profile.state_root)?;
         let operator = operator_of(&profile);
+        let store = operator.store_tag(&profile.state_root)?;
+        if profile.state_root != profile.grains_root.join(&store).join("host") {
+            return Err(invalid(
+                "grain host profile state root is not this Mini Store's (storeTag)",
+            ));
+        }
         let (subject, key) = lifecycle_selector::pinned_management(&operator)?;
         if subject != profile.management_subject {
             return Err(invalid(
@@ -916,7 +918,7 @@ fn install_unit(host: &Host, app: &str, generation: u64) -> io::Result<String> {
         generation: generation.to_string(),
         runtime_sha256: Some(host.profile.spk_host_sha256.clone()),
     })?;
-    let unit = broker::resident_unit(app, &generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &generation.to_string());
     if reply.get("unit").and_then(Value::as_str) != Some(unit.as_str()) {
         return Err(invalid("broker installed a different unit"));
     }
@@ -987,7 +989,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     for run in &runs {
         match &run.state {
             RunState::Running => {
-                let unit = broker::resident_unit(app, &run.generation.to_string());
+                let unit = broker::resident_unit(&host.store, app, &run.generation.to_string());
                 return Ok(json!({"protocol":"mini-spk-grain-start-v1","app":app,
                     "generation":run.generation.to_string(),"unit":unit,
                     "already":"running","activeState":unit_active(&unit)?}));
@@ -1060,7 +1062,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         ));
     }
     mount_volume(host, &placement, &volume_id, None)?;
-    let unit = broker::resident_unit(app, &generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &generation.to_string());
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
@@ -1229,10 +1231,10 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
                 RunState::Stopped => "stopped".to_owned(),
                 RunState::Uncertain(reason) => format!("uncertain: {reason}"),
             },
-            "unit":broker::resident_unit(app, &run.generation.to_string()),
-            "unitActiveState":unit_active(&broker::resident_unit(app, &run.generation.to_string()))
+            "unit":broker::resident_unit(&host.store, app, &run.generation.to_string()),
+            "unitActiveState":unit_active(&broker::resident_unit(&host.store, app, &run.generation.to_string()))
                 .unwrap_or_default(),
-            "slice":unit_property(&broker::resident_unit(app, &run.generation.to_string()), "Slice")
+            "slice":unit_property(&broker::resident_unit(&host.store, app, &run.generation.to_string()), "Slice")
                 .unwrap_or_default(),
         })).collect::<Vec<_>>(),
     }))
@@ -1252,7 +1254,7 @@ fn supervise(host: &Host, app: &str) -> io::Result<Value> {
         return Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,"action":"none",
             "reason":"never started"}));
     };
-    let unit = broker::resident_unit(app, &latest.generation.to_string());
+    let unit = broker::resident_unit(&host.store, app, &latest.generation.to_string());
     match &latest.state {
         RunState::Stopped => Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
             "action":"none","reason":"stopped by a completed STOP"})),
@@ -1365,7 +1367,7 @@ pub fn usage() -> &'static str {
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
-     grain init-store GRAINS_ROOT MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
+     grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
      grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
      grain register-route --socket PATH --request PATH | \
      grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
@@ -1404,11 +1406,27 @@ fn install_options(rest: &[String]) -> io::Result<InstallOptions> {
     Ok(InstallOptions { class, import, management_selector })
 }
 
-/// `spk-host grain init-store GRAINS_ROOT MINI_CONFIG`: the broker creates
-/// this Store's operator-owned state directory under the grains root.
-fn init_store(root: &Path, config: &Path, socket: Option<&Path>) -> io::Result<Value> {
-    let bytes = fs::read(config)?;
-    let store = format!("{:x}", Sha256::digest(&bytes))[..16].to_owned();
+/// `spk-host grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG`: the broker
+/// creates this Store's operator-owned state directory under the grains root,
+/// named by the Store key MINI_HOST reports for MINI_CONFIG (`storeTag`). The
+/// profile later pins that Host; every load re-reads the key from it.
+fn init_store(root: &Path, host: &Path, config: &Path, socket: Option<&Path>) -> io::Result<Value> {
+    let output = Command::new(host)
+        .arg(config)
+        .arg("profile")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()?;
+    if !output.status.success() || output.stdout.len() > 64 * 1024 {
+        return Err(invalid("Mini Host refused to describe the Store's profile"));
+    }
+    let profile: Value = serde_json::from_slice(&output.stdout)?;
+    let store = profile
+        .get("storeTag")
+        .and_then(Value::as_str)
+        .filter(|tag| broker::store_key(tag))
+        .ok_or_else(|| invalid("Mini Host profile lacks a canonical Store tag"))?
+        .to_owned();
     let reply = broker::call_at(root, socket, &Request::InitStore { store: store.clone() })?;
     let expected = root.join(&store).join("host");
     if reply.get("stateRoot").and_then(Value::as_str) != expected.to_str() {
@@ -1431,9 +1449,14 @@ fn init_store(root: &Path, config: &Path, socket: Option<&Path>) -> io::Result<V
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
-    if let [verb, root, config, flag, socket] = args {
+    if let [verb, root, host, config, flag, socket] = args {
         if verb == "init-store" && flag == "--broker-socket" {
-            return init_store(Path::new(root), Path::new(config), Some(Path::new(socket)));
+            return init_store(
+                Path::new(root),
+                Path::new(host),
+                Path::new(config),
+                Some(Path::new(socket)),
+            );
         }
     }
     if let [verb, profile] = args {
@@ -1464,9 +1487,9 @@ pub fn run(args: &[String]) -> io::Result<Value> {
             return profile_upgrade::rebind(Path::new(profile), Path::new(admission));
         }
     }
-    if let [verb, root, config] = args {
+    if let [verb, root, host, config] = args {
         if verb == "init-store" {
-            return init_store(Path::new(root), Path::new(config), None);
+            return init_store(Path::new(root), Path::new(host), Path::new(config), None);
         }
     }
     if let [verb, root, instance] = args {

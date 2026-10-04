@@ -27,12 +27,13 @@ structure PhysicalObservation where
   stopAudit : List UInt8
 
 /-- Pin the raw op26 frame and derive the only installed-manifest bytes that
-may appear in the custodian's report. -/
-def reportPlan (beginBytes claimBytes : List UInt8)
+may appear in the custodian's report. `store` is the authoring Host's
+`Config.expectedSeed` (every plan here checks the unit is this Store's). -/
+def reportPlan (store : Digest) (beginBytes claimBytes : List UInt8)
     (observed : PhysicalObservation) : Except String ApplicationLifecycleCompletionReport.Report := do
   let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode beginBytes
     | throw "noncanonical BEGIN-v2 ingress"
-  unless ApplicationLifecycleResidentProfile.beginMatches begin do
+  unless ApplicationLifecycleResidentProfile.beginMatches store begin do
     throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
   let some claim := ApplicationLifecycleClaimProjection.codecV2.decode claimBytes
     | throw "noncanonical committed claim-v2 frame"
@@ -51,11 +52,11 @@ def reportPlan (beginBytes claimBytes : List UInt8)
   unless report.validFor begin do throw "physical report does not match BEGIN-v2"
   return report
 
-def signingPlan (domain semantics : Digest) (beginBytes reportBytes : List UInt8) :
+def signingPlan (store domain semantics : Digest) (beginBytes reportBytes : List UInt8) :
     Except String (List UInt8) := do
   let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode beginBytes
     | throw "noncanonical BEGIN-v2 ingress"
-  unless ApplicationLifecycleResidentProfile.beginMatches begin do
+  unless ApplicationLifecycleResidentProfile.beginMatches store begin do
     throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
   let some report := ApplicationLifecycleCompletionReport.codec.decode reportBytes
     | throw "noncanonical physical report"
@@ -66,11 +67,11 @@ def signingPlan (domain semantics : Digest) (beginBytes reportBytes : List UInt8
 
 /-- Packaging the custodian's detached signature is not signature verification.
 The native receiver checks it under the configured public key. -/
-def signedReport (beginBytes reportBytes signature : List UInt8) :
+def signedReport (store : Digest) (beginBytes reportBytes signature : List UInt8) :
     Except String (List UInt8) := do
   let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode beginBytes
     | throw "noncanonical BEGIN-v2 ingress"
-  unless ApplicationLifecycleResidentProfile.beginMatches begin do
+  unless ApplicationLifecycleResidentProfile.beginMatches store begin do
     throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
   let some report := ApplicationLifecycleCompletionReport.codec.decode reportBytes
     | throw "noncanonical physical report"
@@ -90,12 +91,12 @@ structure CurrentObservation where
 
 /-- The roots and prior atom are candidates from signed native reads. Fresh
 admission rechecks them against the current single durable image. -/
-def sourcePlan (beginBytes claimIngressBytes signedReportBytes : List UInt8)
+def sourcePlan (store : Digest) (beginBytes claimIngressBytes signedReportBytes : List UInt8)
     (current : CurrentObservation) :
     Except String ApplicationLifecycleCompletionSource.Source := do
   let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode beginBytes
     | throw "noncanonical BEGIN-v2 ingress"
-  unless ApplicationLifecycleResidentProfile.beginMatches begin do
+  unless ApplicationLifecycleResidentProfile.beginMatches store begin do
     throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
   let some claim := ApplicationLifecycleClaimV2Ingress.codec.decode claimIngressBytes
     | throw "noncanonical claim-v2 ingress"

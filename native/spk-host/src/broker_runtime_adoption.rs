@@ -231,7 +231,7 @@ impl Broker {
                 if !stopped {
                     return Err(invalid("runtime adoption requires completed STOP"));
                 }
-                let unit = resident_unit(app, generation);
+                let unit = resident_unit(store, app, generation);
                 unit_quiescent(&unit)?;
                 checked_units.insert(unit);
             }
@@ -241,7 +241,7 @@ impl Broker {
         for entry in fs::read_dir(self.broker_dir().join("units"))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             if self.unit_store(&name)?.as_deref() == Some(store) {
-                let (app, _) = Self::check_resident_unit_name(&name)?;
+                let (_, app, _) = Self::check_resident_unit_name(&name)?;
                 if !apps.contains(&app) || !checked_units.contains(&name) {
                     return Err(invalid("runtime Store has an unexplained installed unit"));
                 }

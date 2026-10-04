@@ -120,7 +120,13 @@ class World:
         require(self.broker in ("/run/mini-spk-broker.sock", str(self.grains / "broker.sock")), "broker socket must be the default or belong to the grains root")
         self.evidence = absolute(self.selection["evidence"])
         f.protected_parent(self.evidence)
-        self.state = self.grains / identity["configSha256"][:16] / "host"
+        seed = self.config.get("expectedSeed")
+        require(isinstance(seed, int) and not isinstance(seed, bool) and seed >= 0,
+                "configuration lacks its genesis expectedSeed")
+        # The Store key is Mini's storeTag (Kernel/ApplicationLifecycleResidentProfile):
+        # the low 64 bits of the genesis seed identity as 16 lowercase hex digits. The
+        # Host reports it (`profile` storeTag) and init-store names the state root by it.
+        self.state = self.grains / format(seed % 2**64, "016x") / "host"
         self.host_images = {str(absolute(self.manifest["host"]))}
 
     def member(self, subject):

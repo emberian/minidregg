@@ -82,7 +82,7 @@ For example, a broker with `grainsRoot=/var/lib/minidregg/jspk1002/grains` sets
 all Store profiles. Initialize that Store with:
 
 ```
-spk-host grain init-store GRAINS_ROOT MINI_CONFIG --broker-socket GRAINS_ROOT/broker.sock
+spk-host grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG --broker-socket GRAINS_ROOT/broker.sock
 ```
 
 The init result includes the resolved `brokerSocket`; the profile generator must

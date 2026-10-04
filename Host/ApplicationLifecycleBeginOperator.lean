@@ -119,7 +119,7 @@ def prepareVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        pin.app (before.generation + 1) }
+        config.expectedSeed pin.app (before.generation + 1) }
   unless source.valid do throw "current application does not admit requested BEGIN phase"
   let command := ApplicationLifecycleBegin.command config.deployment.domain
     config.profile.semantics source
@@ -180,8 +180,10 @@ def prepareRequestVerified (config : Config) {target : Durable}
   prepareVerified config verified pin request
 
 /-- Insert the detached signatures in the exact plan order. Decoding a plan
-does not make it current; op22 rechecks the complete ingress on a fresh tip. -/
-def assemble (plan : Plan) (signatures : List (List UInt8)) :
+does not make it current; op22 rechecks the complete ingress on a fresh tip.
+`store` is the assembling Host's `Config.expectedSeed`: the unit must be this
+Store's name. -/
+def assemble (store : Minidregg.Theory.TypedAuthorization.Digest) (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let invocationCount := plan.invocation.slots.length
   unless signatures.length == invocationCount + 1 do
@@ -197,7 +199,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
   unless source.valid &&
       source.imageIdentity == descriptor.imageIdentity &&
       source.processIdentity ==
-        ApplicationLifecycleResidentProfile.processIdentity source.app source.processGeneration &&
+        ApplicationLifecycleResidentProfile.processIdentity store source.app source.processGeneration &&
       ApplicationLifecycleBeginV2Ingress.descriptorBound
         { base := { domain := plan.invocation.domain
                     semantics := plan.invocation.semantics

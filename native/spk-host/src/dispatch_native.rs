@@ -600,6 +600,24 @@ impl Drop for ContinuityAttemptDir {
 }
 
 impl PrivateOperator {
+    /// The pinned Host's Store key: `storeTag` in its `profile` output, Mini's
+    /// tag of this deployment's genesis seed identity
+    /// (`ApplicationLifecycleResidentProfile.storeTag`). Resident unit names,
+    /// volumes, slices and the Store's state root all carry it; the physical
+    /// host reads it from Mini and never derives its own.
+    pub(crate) fn store_tag(&self, parent: &Path) -> io::Result<String> {
+        let attempt = ContinuityAttemptDir::create(parent)?;
+        let input = write_new(&attempt.0, "request.json", b"{}")?;
+        let bytes = self.tool("profile", "", &input, &attempt.0.join("profile.json"))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        value
+            .get("storeTag")
+            .and_then(serde_json::Value::as_str)
+            .filter(|tag| crate::broker::store_key(tag))
+            .map(str::to_owned)
+            .ok_or_else(|| invalid("pinned Host profile lacks a canonical Store tag"))
+    }
+
     /// Pinned executable metadata, not a current-authority grant.
     pub(crate) fn continuity_namespace(&self, parent: &Path) -> io::Result<(String, String)> {
         let attempt = ContinuityAttemptDir::create(parent)?;

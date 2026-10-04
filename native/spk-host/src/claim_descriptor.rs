@@ -68,8 +68,11 @@ fn verified_identity(
     if generation == 0 {
         return Err(invalid("resident process generation is zero"));
     }
-    let unit = format!("mini-spk-a{app}-g{generation}.service");
-    if text(inspected, "processIdentityHex")? != hex(unit.as_bytes()) {
+    let unit = String::from_utf8(crate::lifecycle_v3_native::unhex(text(inspected, "processIdentityHex")?)?)
+        .map_err(|_| invalid("source process identity is not UTF-8"))?;
+    if !crate::broker::parse_resident_unit(&unit).is_some_and(|(_, unit_app, unit_generation)| {
+        unit_app == app.to_string() && unit_generation == generation.to_string()
+    }) {
         return Err(invalid("source process identity differs from pinned unit"));
     }
     let mut image_id = Vec::with_capacity(IMAGE_ID_PREFIX.len() + 32);
@@ -284,7 +287,7 @@ mod tests {
     #[test]
     fn start_identity_binds_exact_unit_raw_spk_digest_and_native_decimal_receipt() {
         let sha = [0x5a; 32];
-        let unit = "mini-spk-a8401-g2.service";
+        let unit = "mini-spk-s0123456789abcdef-a8401-g2.service";
         let mut image = IMAGE_ID_PREFIX.to_vec();
         image.extend_from_slice(&sha);
         let source = json!({
@@ -297,7 +300,7 @@ mod tests {
         assert_eq!(begin.transaction_id, "123456");
         assert_eq!(begin.package_sha256, hex(&sha));
         let mut wrong_unit = source.clone();
-        wrong_unit["processIdentityHex"] = json!(hex(b"mini-spk-a8401-g3.service"));
+        wrong_unit["processIdentityHex"] = json!(hex(b"mini-spk-s0123456789abcdef-a8401-g3.service"));
         assert!(verified_identity(&wrong_unit, &sha, "start").is_err());
         let mut wrong_digest = source.clone();
         wrong_digest["imageIdentityHex"] = json!(hex(b"sha256:5a"));
