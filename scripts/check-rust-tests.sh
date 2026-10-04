@@ -138,13 +138,25 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_loss_refuses_until_explicit_enrollment_and_foreign_anchor_refuses \
   anchor_tests::whole_database_replacement_is_detected_by_sibling_anchor \
   anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory
-# D9-D11: Discord durable custody, mirror cursor after custody, paged backfill (bce707b7)
-exact discord-custody        discord-entrance --lib --bin mini-discord-mirror --test endpoint -- \
-  custody::tests::locks_survive_reopen_and_corruption_is_not_absence \
+# D9-D11: Discord durable custody, mirror cursor after custody, paged backfill (bce707b7);
+# the custody lease itself moved into mini-sdk (4b2f299d): row sdk-custody
+exact discord-custody        discord-entrance --bin mini-discord-mirror --test endpoint -- \
   tests::outbound_pages_restart_and_unknown_never_repost \
   tests::channel_backfill_retains_all_115_across_restart_and_small_drains \
   durable_restart_exact_binding_unknown_and_roster_revocation \
   accepted_before_deferral_is_recoverable_and_status_is_actor_bound
+# D9 / D2 as shared by the Mini SDK (5c88af84, 4b2f299d): the custody lease, numeric
+# attempt history, and the outcome classification the client copies now share
+exact sdk-custody            mini-sdk --lib --features native -- \
+  store::tests::leases_survive_reopen_and_corruption_is_not_absence \
+  store::tests::attempt_history_is_numeric_and_transport_metadata_is_not_an_outcome \
+  store::tests::a_group_readable_directory_refuses \
+  custody::tests::recovered_after_uncertain_is_confirmed_by_exact_lookup_never_a_new_nonce \
+  custody::tests::refused_permits_one_successor_with_fresh_nonces_only \
+  custody::tests::unsent_is_never_sent_but_unsent_after_uncertain_stays_uncertain \
+  custody::tests::unknown_confirmation_words_and_malformed_receipts_are_undecided \
+  custody::tests::classification_confirmation_wins_then_newest_refusal \
+  custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending
 # resource-client (bin mini), one row per defect so a red names it
 # D1: sparse board rendering never scans the address space (bce707b7)
 exact rc-board-sparse        resource-client --bin mini -- \
@@ -184,20 +196,28 @@ exact rc-job-settlement      resource-client --bin mini -- \
 # D8: a fresh v2 worker upgrade is checked against the v2 pin (3f81c7db)
 exact rc-drain-v2-pin        resource-client --bin mini -- \
   drain::tests::actual_upgrade_accepts_fresh_v2_and_legacy_v1_without_rebinding_call
-# R2-1 #3: room-key epoch monotonicity and signed lineage (3f81c7db)
+# R2-1 #3: founder-pinned room-key lineage, epoch monotonicity, two-phase release
+# (4564a8fa replaced the 3f81c7db tests); envelope rollback refused (8c67fc66)
 exact rc-roomkey-lineage     resource-client --bin mini -- \
-  workspace::roomkey::tests::operator_minted_next_wrap_fails_and_independently_authorized_rotation_decrypts \
-  workspace::roomkey::tests::rollback_to_pre_kick_epoch_and_forgetting_never_select_an_old_sealing_key \
-  workspace::roomkey::tests::first_contact_refuses_valid_old_prefix_and_empty_source_cannot_erase_a_head \
-  workspace::roomkey::tests::applied_release_advances_head_before_ciphertext_delivery_without_old_key_fallback \
-  workspace::roomkey::tests::recipient_signature_rejects_operator_substitution_and_accepts_legitimate_rotation \
-  workspace::roomkey::tests::first_invite_signed_descriptor_needs_current_authority_but_no_prior_wrap_or_record \
-  workspace::roomkey::tests::delivery_commitment_binds_complete_wrap_and_exact_recipient_address \
-  workspace::roomkey::tests::release_draft_recovers_original_key_ciphertext_and_nonce_without_sealing_permission \
-  workspace::roomkey::tests::forgotten_epochs_are_not_relearned_and_the_cache_keeps_them_forgotten
-# R2-1 #10 / C4: cohort link survives garbage and replayed startup (76757030)
-exact rc-cohort-reaccept     resource-client --bin mini -- \
-  cohort_tcp::tests::unauthenticated_garbage_and_replayed_startup_cannot_consume_enrolled_link
+  workspace::roomkey::tests::founder_unsigned_or_foreign_wrap_set_is_refused \
+  workspace::roomkey::tests::founder_and_member_pins_refuse_silent_replacement \
+  workspace::roomkey::tests::older_or_equivocating_lineage_is_refused_and_never_selects_an_old_sealing_key \
+  workspace::roomkey::tests::the_chain_starts_at_genesis_skips_burned_epochs_and_never_forks \
+  workspace::roomkey::tests::recipient_signature_rejects_operator_substitution_and_unpinned_members \
+  workspace::roomkey::tests::release_binds_records_then_reads_back_then_discloses_the_wrap \
+  workspace::roomkey::tests::release_commitment_binds_the_complete_wrap_and_its_exact_address \
+  workspace::roomkey::tests::a_stale_recipient_never_receives_a_wrap_of_an_already_used_key \
+  workspace::roomkey::tests::a_refused_rotation_draft_is_dead_forever_and_its_epoch_is_never_selected \
+  workspace::roomkey::tests::first_invite_signed_descriptor_pins_its_key_but_needs_no_prior_wrap_or_record \
+  workspace::roomkey::tests::forgotten_epochs_are_not_relearned_and_the_cache_keeps_them_forgotten \
+  workspace::protected_document::tests::protected_atom_edit_rollback_to_an_earlier_ciphertext_does_not_open
+# R2-1 #10 / C4: the cohort link admits only roster members (d7b2f19b replaced the
+# pre-shared-key adapter and its re-accept test from 76757030)
+exact rc-cohort-roster       resource-client --bin mini -- \
+  cohort_tcp::tests::registrar_enrollment_admits_only_roster_member_signature_under_fresh_challenge \
+  cohort_tcp::tests::cohort_sender_refuses_receiver_without_roster_link_secret \
+  cohort_tcp::tests::cohort_roster_digest_profile_and_shape_bind_every_link \
+  cohort_tcp::tests::registrar_worker_refuses_input_directory_of_another_enrolled_slot
 # R2-1 R4/R5: credit reference stranding and renewal overflow (76757030)
 exact rc-credit              resource-client --bin mini -- \
   credit::tests::renewal_overflow_refuses \
