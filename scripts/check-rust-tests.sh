@@ -283,6 +283,34 @@ exact rc-cohort-roster       resource-client --bin mini -- \
 # property d7b2f19b's re-accept test carried)
 exact rc-cohort-stall        resource-client --bin mini -- \
   cohort_tcp::tests::a_stalled_stranger_cannot_tie_up_the_cohort_listener
+# Hybrid X25519 + ML-KEM-768 for the traffic mix (one combiner, hybrid_kem.rs, shared with
+# private rooms): layers, the live link enrollment (MCE3) and the shared primitive. Wrong
+# recipient, split identity, tamper of EITHER ciphertext component, independent known-answer
+# vectors for the transit and link suites, and the v1 pure-ML-KEM shapes refusing by name.
+exact rc-mix-hybrid          resource-client --bin mini -- \
+  hybrid_kem::tests::an_encapsulation_opens_for_its_recipient_and_only_with_the_same_context \
+  hybrid_kem::tests::both_halves_are_required_and_both_ciphertext_components_are_bound \
+  hybrid_kem::tests::low_order_x25519_halves_are_refused_on_both_sides \
+  hybrid_kem::tests::keys_serialize_regenerate_and_refuse_the_pre_hybrid_shapes_by_name \
+  crypto_transit::tests::independent_recipient_epoch_binding_and_tag_are_enforced \
+  crypto_transit::tests::fresh_seals_are_distinct_and_public_bounds_fail_closed \
+  crypto_transit::tests::tampering_either_ciphertext_component_or_the_box_refuses \
+  crypto_transit::tests::a_capsule_needs_both_halves_of_the_recipient_secret \
+  crypto_transit::tests::a_capsule_sealed_to_a_spliced_public_key_opens_for_nobody_else \
+  crypto_transit::tests::the_v1_pure_ml_kem_suite_refuses_by_name \
+  crypto_transit::tests::the_transit_combiner_matches_an_independent_known_answer \
+  pq_mailbox::tests::hybrid_layers_open_only_for_their_recipient_and_refuse_tampering_of_either_component \
+  pq_mailbox::tests::v1_pure_ml_kem_mix_frames_and_keys_refuse_by_name \
+  pq_mailbox::tests::shared_crypto_preserves_maximum_profile_through_all_layers \
+  cohort_tcp::tests::the_link_key_needs_both_receiver_halves_and_binds_both_ciphertext_components \
+  cohort_tcp::tests::the_link_combiner_matches_an_independent_known_answer \
+  cohort_tcp::tests::mce2_v1_rosters_and_bare_ml_kem_link_keys_refuse_by_name
+# The private backend's recipient capsules share crypto_transit.rs: hybrid, algorithm 2.
+exact private-backend-hybrid private-backend --lib -- \
+  crypto_transit::tests::tampering_either_ciphertext_component_or_the_box_refuses \
+  crypto_transit::tests::the_v1_pure_ml_kem_suite_refuses_by_name \
+  crypto_transit::tests::the_transit_combiner_matches_an_independent_known_answer \
+  sealed_outbox::tests::real_recipient_capsule_rejects_wrong_key_epoch_party_sequence_and_tamper
 # R2-1 R4/R5: credit reference stranding and renewal overflow (76757030)
 exact rc-credit              resource-client --bin mini -- \
   credit::tests::renewal_overflow_refuses \
