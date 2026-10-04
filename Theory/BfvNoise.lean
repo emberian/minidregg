@@ -196,12 +196,18 @@ theorem decryptPhase_add_q (P : Params) (p : ℤ) :
     ring
   rw [this, Int.add_mul_ediv_right _ _ h2q]
 
-#print axioms decrypt_exact
-#print axioms decrypt_misses
-#print axioms encrypt_noiseAt
-#print axioms noiseAt_add
-#print axioms abs_noise_add_le
-#print axioms decryptPhase_add_q
+/-- info: 'Minidregg.Theory.Bfv.decrypt_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decrypt_exact
+/-- info: 'Minidregg.Theory.Bfv.decrypt_misses' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms decrypt_misses
+/-- info: 'Minidregg.Theory.Bfv.encrypt_noiseAt' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms encrypt_noiseAt
+/-- info: 'Minidregg.Theory.Bfv.noiseAt_add' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms noiseAt_add
+/-- info: 'Minidregg.Theory.Bfv.abs_noise_add_le' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms abs_noise_add_le
+/-- info: 'Minidregg.Theory.Bfv.decryptPhase_add_q' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decryptPhase_add_q
 
 /-! ## 6. T-composition (contract 2b): the iterated public-linear step, its compounding noise,
 and the PROVEN T ceiling.
@@ -551,20 +557,35 @@ theorem deployed_past_ceiling_admits_misdecrypt :
       ∧ decryptPhase fheRs4096 ((q4096 : ℤ) / (2 * (t4096 : ℤ)) + 1) = 1 :=
   ⟨by decide, decrypt_misses⟩
 
-#print axioms matVec_noiseAtInt
-#print axioms step_noise_le
-#print axioms iter_noise_le
-#print axioms stepMatrix_rowBound
-#print axioms safeNoise_natCast_iff
-#print axioms iterMargin_iff
-#print axioms iterMarginHolds_safe
-#print axioms noise_after_T
-#print axioms T_gt_ceiling_fails
-#print axioms safeNoise_iff_le_ceiling
-#print axioms iter_decrypts_exact
-#print axioms deployed_iterCeiling
-#print axioms deployed_iterMargin_at_ceiling
-#print axioms deployed_iterMargin_past_ceiling
-#print axioms deployed_past_ceiling_admits_misdecrypt
+/-- info: 'Minidregg.Theory.Bfv.matVec_noiseAtInt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms matVec_noiseAtInt
+/-- info: 'Minidregg.Theory.Bfv.step_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms step_noise_le
+/-- info: 'Minidregg.Theory.Bfv.iter_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iter_noise_le
+/-- info: 'Minidregg.Theory.Bfv.stepMatrix_rowBound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stepMatrix_rowBound
+/-- info: 'Minidregg.Theory.Bfv.safeNoise_natCast_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms safeNoise_natCast_iff
+/-- info: 'Minidregg.Theory.Bfv.iterMargin_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iterMargin_iff
+/-- info: 'Minidregg.Theory.Bfv.iterMarginHolds_safe' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iterMarginHolds_safe
+/-- info: 'Minidregg.Theory.Bfv.noise_after_T' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms noise_after_T
+/-- info: 'Minidregg.Theory.Bfv.T_gt_ceiling_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms T_gt_ceiling_fails
+/-- info: 'Minidregg.Theory.Bfv.safeNoise_iff_le_ceiling' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms safeNoise_iff_le_ceiling
+/-- info: 'Minidregg.Theory.Bfv.iter_decrypts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iter_decrypts_exact
+/-- info: 'Minidregg.Theory.Bfv.deployed_iterCeiling' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_iterCeiling
+/-- info: 'Minidregg.Theory.Bfv.deployed_iterMargin_at_ceiling' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_iterMargin_at_ceiling
+/-- info: 'Minidregg.Theory.Bfv.deployed_iterMargin_past_ceiling' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_iterMargin_past_ceiling
+/-- info: 'Minidregg.Theory.Bfv.deployed_past_ceiling_admits_misdecrypt' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_past_ceiling_admits_misdecrypt
 
 end Minidregg.Theory.Bfv

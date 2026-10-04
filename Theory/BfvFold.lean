@@ -246,16 +246,27 @@ theorem deployed_fold_decrypts_exact (os : List (ℕ × ℤ))
     push_cast
     nlinarith [hlen', hB]
 
-#print axioms foldEnc_phase
-#print axioms abs_sum_le_length_mul
-#print axioms SafeNoise.mono
-#print axioms fold_decrypts_exact
-#print axioms phase_lt_q
-#print axioms fold_phase_lt_q
-#print axioms margin_pos_safe
-#print axioms marginHolds_safe
-#print axioms deployed_margin_holds
-#print axioms margin_fails_big_noise
-#print axioms deployed_fold_decrypts_exact
+/-- info: 'Minidregg.Theory.Bfv.foldEnc_phase' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms foldEnc_phase
+/-- info: 'Minidregg.Theory.Bfv.abs_sum_le_length_mul' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms abs_sum_le_length_mul
+/-- info: 'Minidregg.Theory.Bfv.SafeNoise.mono' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SafeNoise.mono
+/-- info: 'Minidregg.Theory.Bfv.fold_decrypts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_decrypts_exact
+/-- info: 'Minidregg.Theory.Bfv.phase_lt_q' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms phase_lt_q
+/-- info: 'Minidregg.Theory.Bfv.fold_phase_lt_q' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_phase_lt_q
+/-- info: 'Minidregg.Theory.Bfv.margin_pos_safe' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms margin_pos_safe
+/-- info: 'Minidregg.Theory.Bfv.marginHolds_safe' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms marginHolds_safe
+/-- info: 'Minidregg.Theory.Bfv.deployed_margin_holds' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_margin_holds
+/-- info: 'Minidregg.Theory.Bfv.margin_fails_big_noise' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms margin_fails_big_noise
+/-- info: 'Minidregg.Theory.Bfv.deployed_fold_decrypts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_fold_decrypts_exact
 
 end Minidregg.Theory.Bfv

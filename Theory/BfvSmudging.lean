@@ -541,32 +541,59 @@ theorem deployed_composition_unsafe_past_cliff :
   norm_num [transcriptAdvBudget, transcriptCoordinateCount, deployedScalarEpsilon,
     maxPartiesPinned]
 
-#print axioms card_supp
-#print axioms sum_shareMass
-#print axioms l1_window_free
-#print axioms card_supp_inter
-#print axioms l1_eq
-#print axioms sd_eq
-#print axioms sd_nonneg
-#print axioms sd_le_one
-#print axioms sd_le_ratio
-#print axioms partial_decrypt_hides
-#print axioms partial_decrypt_hides_exp
-#print axioms share_simulatable
-#print axioms smudge_too_small_leaks
-#print axioms smudge_too_small_distinguishes
-#print axioms deployed_smudge_hides
-#print axioms deployed_smudge_margin
-#print axioms deployed_smudged_decrypt_exact
-#print axioms deployed_smudge_floor_leaks
-#print axioms TranscriptHybridLedger.sound
-#print axioms transcriptAdvBudget_deployed_le
-#print axioms deployed_max_transcript_budget_eq
-#print axioms deployed_transcript_hides_of_hybrid
-#print axioms deployed_one_session_residual
-#print axioms deployed_256_session_residual
-#print axioms deployed_65536_session_residual
-#print axioms deployed_composition_vacuous_at_2pow32
-#print axioms deployed_composition_unsafe_past_cliff
+/-- info: 'Minidregg.Theory.Bfv.Smudging.card_supp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms card_supp
+/-- info: 'Minidregg.Theory.Bfv.Smudging.sum_shareMass' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sum_shareMass
+/-- info: 'Minidregg.Theory.Bfv.Smudging.l1_window_free' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms l1_window_free
+/-- info: 'Minidregg.Theory.Bfv.Smudging.card_supp_inter' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms card_supp_inter
+/-- info: 'Minidregg.Theory.Bfv.Smudging.l1_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms l1_eq
+/-- info: 'Minidregg.Theory.Bfv.Smudging.sd_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sd_eq
+/-- info: 'Minidregg.Theory.Bfv.Smudging.sd_nonneg' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sd_nonneg
+/-- info: 'Minidregg.Theory.Bfv.Smudging.sd_le_one' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sd_le_one
+/-- info: 'Minidregg.Theory.Bfv.Smudging.sd_le_ratio' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sd_le_ratio
+/-- info: 'Minidregg.Theory.Bfv.Smudging.partial_decrypt_hides' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms partial_decrypt_hides
+/-- info: 'Minidregg.Theory.Bfv.Smudging.partial_decrypt_hides_exp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms partial_decrypt_hides_exp
+/-- info: 'Minidregg.Theory.Bfv.Smudging.share_simulatable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms share_simulatable
+/-- info: 'Minidregg.Theory.Bfv.Smudging.smudge_too_small_leaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms smudge_too_small_leaks
+/-- info: 'Minidregg.Theory.Bfv.Smudging.smudge_too_small_distinguishes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms smudge_too_small_distinguishes
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_smudge_hides' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_smudge_hides
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_smudge_margin' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_smudge_margin
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_smudged_decrypt_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_smudged_decrypt_exact
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_smudge_floor_leaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_smudge_floor_leaks
+/-- info: 'Minidregg.Theory.Bfv.Smudging.TranscriptHybridLedger.sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms TranscriptHybridLedger.sound
+/-- info: 'Minidregg.Theory.Bfv.Smudging.transcriptAdvBudget_deployed_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transcriptAdvBudget_deployed_le
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_max_transcript_budget_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_max_transcript_budget_eq
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_transcript_hides_of_hybrid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_transcript_hides_of_hybrid
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_one_session_residual' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_one_session_residual
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_256_session_residual' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_256_session_residual
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_65536_session_residual' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_65536_session_residual
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_composition_vacuous_at_2pow32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_composition_vacuous_at_2pow32
+/-- info: 'Minidregg.Theory.Bfv.Smudging.deployed_composition_unsafe_past_cliff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_composition_unsafe_past_cliff
 
 end Minidregg.Theory.Bfv.Smudging

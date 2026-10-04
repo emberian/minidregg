@@ -255,16 +255,26 @@ theorem negaMul_one_eq_mul (a b : Rn 1) (k : Fin 1) : negaMul a b k = a 0 * b 0 
   subst hk
   simp [negaMul]
 
-#print axioms toPoly_coeff
-#print axioms toPoly_injective
-#print axioms toPoly_add
-#print axioms negaX_dvd
-#print axioms toPoly_mul_expand
-#print axioms toPoly_negaMul_expand
-#print axioms negaMul_toPoly_dvd
-#print axioms toPoly_negaMul_quotient
-#print axioms negaMul_wraps_signed
-#print axioms negaMul_one_eq_mul
+/-- info: 'Minidregg.Theory.Bfv.toPoly_coeff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_coeff
+/-- info: 'Minidregg.Theory.Bfv.toPoly_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_injective
+/-- info: 'Minidregg.Theory.Bfv.toPoly_add' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_add
+/-- info: 'Minidregg.Theory.Bfv.negaX_dvd' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaX_dvd
+/-- info: 'Minidregg.Theory.Bfv.toPoly_mul_expand' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_mul_expand
+/-- info: 'Minidregg.Theory.Bfv.toPoly_negaMul_expand' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_negaMul_expand
+/-- info: 'Minidregg.Theory.Bfv.negaMul_toPoly_dvd' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_toPoly_dvd
+/-- info: 'Minidregg.Theory.Bfv.toPoly_negaMul_quotient' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toPoly_negaMul_quotient
+/-- info: 'Minidregg.Theory.Bfv.negaMul_wraps_signed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_wraps_signed
+/-- info: 'Minidregg.Theory.Bfv.negaMul_one_eq_mul' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_one_eq_mul
 
 /-! ## 3. THE ONE NEW RING FACT: the provable worst-case expansion `δ_R = N`. -/
 
@@ -338,11 +348,16 @@ theorem deployed_expansion_attained :
     negaMul (onesR 4096) (onesR 4096) ⟨4095, by omega⟩ = (4096 : ℤ) := by
   simpa using negaMul_expansion_attained 4096 (by omega)
 
-#print axioms negaMul_normInf_le
-#print axioms onesR_normInf
-#print axioms negaMul_expansion_attained
-#print axioms negaMul_expansion_not_below_N
-#print axioms deployed_expansion_attained
+/-- info: 'Minidregg.Theory.Bfv.negaMul_normInf_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_normInf_le
+/-- info: 'Minidregg.Theory.Bfv.onesR_normInf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms onesR_normInf
+/-- info: 'Minidregg.Theory.Bfv.negaMul_expansion_attained' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_expansion_attained
+/-- info: 'Minidregg.Theory.Bfv.negaMul_expansion_not_below_N' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms negaMul_expansion_not_below_N
+/-- info: 'Minidregg.Theory.Bfv.deployed_expansion_attained' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_expansion_attained
 
 /-! ## 4. THE PORT: `Bfv.Noise`'s public-linear step, on the ring carrier.
 
@@ -516,15 +531,25 @@ theorem polyStep_costs_expansion {p e : Rn 4096} {A M : ℤ}
     NormInfLE (negaMul p e) (4096 * A * M) := by
   simpa using negaMul_normInf_le hp he hA
 
-#print axioms matVecR_noiseAtInt
-#print axioms stepR_noise_le
-#print axioms iterRCt_succ
-#print axioms iterMsgR_succ
-#print axioms iterR_noise_le
-#print axioms stepR_rowBound_necessary
-#print axioms stepR_hypotheses_satisfiable
-#print axioms deployed_ring_depth
-#print axioms scalarMul_noise_le
-#print axioms polyStep_costs_expansion
+/-- info: 'Minidregg.Theory.Bfv.matVecR_noiseAtInt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms matVecR_noiseAtInt
+/-- info: 'Minidregg.Theory.Bfv.stepR_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stepR_noise_le
+/-- info: 'Minidregg.Theory.Bfv.iterRCt_succ' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iterRCt_succ
+/-- info: 'Minidregg.Theory.Bfv.iterMsgR_succ' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iterMsgR_succ
+/-- info: 'Minidregg.Theory.Bfv.iterR_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms iterR_noise_le
+/-- info: 'Minidregg.Theory.Bfv.stepR_rowBound_necessary' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stepR_rowBound_necessary
+/-- info: 'Minidregg.Theory.Bfv.stepR_hypotheses_satisfiable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stepR_hypotheses_satisfiable
+/-- info: 'Minidregg.Theory.Bfv.deployed_ring_depth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_ring_depth
+/-- info: 'Minidregg.Theory.Bfv.scalarMul_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMul_noise_le
+/-- info: 'Minidregg.Theory.Bfv.polyStep_costs_expansion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms polyStep_costs_expansion
 
 end Minidregg.Theory.Bfv

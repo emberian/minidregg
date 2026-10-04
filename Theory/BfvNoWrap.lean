@@ -105,13 +105,21 @@ theorem u12_bucket_capacity (qs : List ℕ)
 this module is an equality-tight boundary, not a lazy under-claim. -/
 theorem u12_capacity_tight : ¬ (253 * 4095 < fheRs4096.t) := by decide
 
-#print axioms fold_sum_no_wrap
-#print axioms fold_readout_faithful
-#print axioms wrap_misclears
-#print axioms u16_bucket_capacity
-#print axioms sixteen_exceeds_t
-#print axioms sixteen_misclears
-#print axioms u12_bucket_capacity
-#print axioms u12_capacity_tight
+/-- info: 'Minidregg.Theory.Bfv.fold_sum_no_wrap' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_sum_no_wrap
+/-- info: 'Minidregg.Theory.Bfv.fold_readout_faithful' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_readout_faithful
+/-- info: 'Minidregg.Theory.Bfv.wrap_misclears' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wrap_misclears
+/-- info: 'Minidregg.Theory.Bfv.u16_bucket_capacity' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms u16_bucket_capacity
+/-- info: 'Minidregg.Theory.Bfv.sixteen_exceeds_t' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms sixteen_exceeds_t
+/-- info: 'Minidregg.Theory.Bfv.sixteen_misclears' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms sixteen_misclears
+/-- info: 'Minidregg.Theory.Bfv.u12_bucket_capacity' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms u12_bucket_capacity
+/-- info: 'Minidregg.Theory.Bfv.u12_capacity_tight' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms u12_capacity_tight
 
 end Minidregg.Theory.Bfv

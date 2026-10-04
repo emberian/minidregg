@@ -404,21 +404,37 @@ theorem deployed_mul_relin_decrypts_exact (m₁ m₂ : ℕ) (e₁ e₂ eks : ℤ
   rw [← mulNoiseBoundN_cast]
   exact mulMarginHolds_safe _ _ _ _ _ _ deployed_mul_margin_holds
 
-#print axioms mulPhase_encrypt_eq
-#print axioms abs_mulRound_le
-#print axioms mul_relin_noise_le
-#print axioms product_no_wrap
-#print axioms mul_relin_decrypts_exact
-#print axioms deployed_product_capacity
-#print axioms product_capacity_tight
-#print axioms product_wraps
-#print axioms u16_product_misclears
-#print axioms mulNoiseBoundN_cast
-#print axioms mulMarginHolds_safe
-#print axioms deployed_mul_margin_holds
-#print axioms mul_margin_fails_big_noise
-#print axioms mul_amplifies_where_add_accepts
-#print axioms deployed_mul_margin_survives_ring_expansion
-#print axioms deployed_mul_relin_decrypts_exact
+/-- info: 'Minidregg.Theory.Bfv.mulPhase_encrypt_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mulPhase_encrypt_eq
+/-- info: 'Minidregg.Theory.Bfv.abs_mulRound_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms abs_mulRound_le
+/-- info: 'Minidregg.Theory.Bfv.mul_relin_noise_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mul_relin_noise_le
+/-- info: 'Minidregg.Theory.Bfv.product_no_wrap' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms product_no_wrap
+/-- info: 'Minidregg.Theory.Bfv.mul_relin_decrypts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mul_relin_decrypts_exact
+/-- info: 'Minidregg.Theory.Bfv.deployed_product_capacity' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_product_capacity
+/-- info: 'Minidregg.Theory.Bfv.product_capacity_tight' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms product_capacity_tight
+/-- info: 'Minidregg.Theory.Bfv.product_wraps' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms product_wraps
+/-- info: 'Minidregg.Theory.Bfv.u16_product_misclears' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms u16_product_misclears
+/-- info: 'Minidregg.Theory.Bfv.mulNoiseBoundN_cast' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms mulNoiseBoundN_cast
+/-- info: 'Minidregg.Theory.Bfv.mulMarginHolds_safe' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mulMarginHolds_safe
+/-- info: 'Minidregg.Theory.Bfv.deployed_mul_margin_holds' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_mul_margin_holds
+/-- info: 'Minidregg.Theory.Bfv.mul_margin_fails_big_noise' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms mul_margin_fails_big_noise
+/-- info: 'Minidregg.Theory.Bfv.mul_amplifies_where_add_accepts' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms mul_amplifies_where_add_accepts
+/-- info: 'Minidregg.Theory.Bfv.deployed_mul_margin_survives_ring_expansion' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_mul_margin_survives_ring_expansion
+/-- info: 'Minidregg.Theory.Bfv.deployed_mul_relin_decrypts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_mul_relin_decrypts_exact
 
 end Minidregg.Theory.Bfv

@@ -120,13 +120,21 @@ theorem r4096_value : fheRs4096.r = 843789 := by decide
 this is the headroom the noise budget spends from (`Δ/2 ≈ 2^88` of tolerable phase noise). -/
 theorem Δ4096_bits : 2 ^ 89 < fheRs4096.Δ ∧ fheRs4096.Δ < 2 ^ 90 := by decide
 
-#print axioms Params.q_eq
-#print axioms Params.r_lt_t
-#print axioms Params.Δ_pos
-#print axioms Params.q_pos
-#print axioms q4096_bits
-#print axioms t4096_simd
-#print axioms r4096_value
-#print axioms Δ4096_bits
+/-- info: 'Minidregg.Theory.Bfv.Params.q_eq' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Params.q_eq
+/-- info: 'Minidregg.Theory.Bfv.Params.r_lt_t' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Params.r_lt_t
+/-- info: 'Minidregg.Theory.Bfv.Params.Δ_pos' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Params.Δ_pos
+/-- info: 'Minidregg.Theory.Bfv.Params.q_pos' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Params.q_pos
+/-- info: 'Minidregg.Theory.Bfv.q4096_bits' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms q4096_bits
+/-- info: 'Minidregg.Theory.Bfv.t4096_simd' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms t4096_simd
+/-- info: 'Minidregg.Theory.Bfv.r4096_value' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms r4096_value
+/-- info: 'Minidregg.Theory.Bfv.Δ4096_bits' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Δ4096_bits
 
 end Minidregg.Theory.Bfv
