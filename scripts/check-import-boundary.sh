@@ -8,7 +8,7 @@
 #
 #   Theory    Mathlib Lean Theory                              the metatheory never knows the candidate
 #   Selvage   Mathlib Theory Selvage             the proof system knows only the metatheory
-#   Pred      Mathlib Theory Pred Compiler
+#   Pred      Mathlib Theory Pred
 #   Kernel    Mathlib Lean Std Init Theory Pred Compiler Kernel
 #   Compiler  Mathlib Lean Std Init Theory Pred Kernel Selvage Assurance Compiler
 #   Assurance Mathlib Theory Pred Kernel Compiler Selvage Assurance
@@ -42,6 +42,9 @@
 # NARROWED (2026-10-04): the Theory row loses Std and Init. Their
 # only Theory importers were the deleted upstream-Bend kernel and its machine;
 # Theory -> Lean remains (the Objective Bend Core4 definitions import Lean).
+# NARROWED (2026-10-04, W30-CORE4-DIGEST): the Pred row loses Compiler. Its only Compiler
+# imports were the cSHAKE256 leaf (Spec/Fast/Core), which moved to Theory so that Core4's
+# `digest` primitive (Theory/ObjectiveBendDigest) and Pred's `hashEq` share one sponge.
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u
@@ -53,7 +56,7 @@ from lean_imports import header_imports
 ALLOWED = {
     "Theory":    {"Mathlib", "Lean", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
-    "Pred":      {"Mathlib", "Theory", "Pred", "Compiler"},
+    "Pred":      {"Mathlib", "Theory", "Pred"},
     "Kernel":    {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Compiler", "Kernel"},
     "Compiler":  {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Kernel", "Selvage", "Assurance", "Compiler"},
     "Assurance": {"Mathlib", "Theory", "Pred", "Kernel", "Compiler", "Selvage", "Assurance"},

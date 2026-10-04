@@ -92,6 +92,11 @@ import Theory.Channel.Audit  -- CH-CELL theorems axiom pins (moved out so the ru
 -- Objective Bend Core4: the DEFINITIONS (calculus, typing, demand machine, data, capacity,
 -- extensions) are default-build; the metatheory proofs about them are the separate
 -- `ObjectiveProofs` library (lakefile.toml), gated on its own.
+import Theory.HashBytes  -- big-endian bytes, byte hashes and Collision: the carrier Pred.hashEq and Core4 digest share
+import Theory.Sp800185Cshake256Core  -- the kernel's cSHAKE256 (spec + @[csimp] fast sponge), moved from Compiler so Core4 can compute it
+import Theory.Sp800185Cshake256Conformance  -- executable NIST SP 800-185 and FIPS 202 vectors on the fast path (native_decide), beside the code they check
+import Theory.ObjectiveBendDigest  -- Core4 `digest`: cSHAKE256 under DREGG.OBEND.DIGEST/v1 over len(a):8 ‖ a ‖ b; binds-or-collides generic in H, length-hash pole, Hiding ASSUMED
+import Theory.ObjectiveBendDigestChecks  -- digest axiom pins + deployed-hash instances (native_decide, #assert_compiled)
 import Theory.ObjectiveBendTypes
 import Theory.ObjectiveBendOpenRecursion
 import Theory.ObjectiveBendTyping

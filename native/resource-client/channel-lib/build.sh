@@ -4,9 +4,9 @@
 # Links libminidregg-channel.so: the compiled objects of Kernel.DomainEpochExport and its whole import
 # closure (this workspace's and its packages'; the toolchain's own modules come from libleanshared), the
 # C shim, and the toolchain's shared Lean runtime. `mini relay --lean-lib` dlopens it. Build the module
-# objects first (the closure is these eleven; build.sh refuses if it grows past Init + this workspace):
-#   lake build Compiler.Sp800185Cshake256Spec:o.export Compiler.Sp800185Cshake256Fast:o.export \
-#     Compiler.Sp800185Cshake256Core:o.export Pred.HashEqDigest:o.export Theory.Channel.Cell:o.export \
+# objects first (the closure is these twelve; build.sh refuses if it grows past Init + this workspace):
+#   lake build Theory.Sp800185Cshake256Spec:o.export Theory.Sp800185Cshake256Fast:o.export \
+#     Theory.Sp800185Cshake256Core:o.export Theory.HashBytes:o.export Pred.HashEqDigest:o.export Theory.Channel.Cell:o.export \
 #     Theory.Channel.Lease:o.export Theory.Channel.Trace:o.export Theory.Channel:o.export \
 #     Theory.Channel.Envelope:o.export Kernel.DomainEpoch:o.export Kernel.DomainEpochExport:o.export
 # A missing object refuses the link by name; nothing is compiled here except the shim.

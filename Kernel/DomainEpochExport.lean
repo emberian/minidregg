@@ -439,7 +439,7 @@ step 6; `own_omission_evident`'s `Included`). -/
 def recordRootsBytesList (bytes : List UInt8) : List UInt8 :=
   match EpochRecord.decode bytes with
   | none => []
-  | some r => be16 r.domain ++ Minidregg.Pred.HashEqDigest.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val
+  | some r => be16 r.domain ++ Minidregg.Theory.HashBytes.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val
 
 @[export minidregg_channel_record_roots]
 def recordRootsBytes (record : ByteArray) : ByteArray := ⟨(recordRootsBytesList record.toList).toArray⟩
@@ -447,7 +447,7 @@ def recordRootsBytes (record : ByteArray) : ByteArray := ⟨(recordRootsBytesLis
 /-- **The roots export reads the record's own fields** off its canonical encoding. -/
 theorem recordRootsBytesList_encode (r : EpochRecord) :
     recordRootsBytesList r.encode =
-      be16 r.domain ++ Minidregg.Pred.HashEqDigest.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val := by
+      be16 r.domain ++ Minidregg.Theory.HashBytes.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val := by
   simp [recordRootsBytesList, epochRecord_decode_encode]
 
 /-- The refusing pole: bytes that are no record's encoding have no roots. -/

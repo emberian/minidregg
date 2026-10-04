@@ -1,5 +1,5 @@
 /-
-# Compiler.Sp800185Cshake256Fast -- the compiled cSHAKE256, proved equal to the spec
+# Theory.Sp800185Cshake256Fast -- the compiled cSHAKE256, proved equal to the spec
 
 `Sp800185Cshake256Spec` defines cSHAKE256 over lists and `BitVec 64` lanes;
 every theorem in the repository is about those definitions.  This module is
@@ -32,7 +32,7 @@ implement `UInt64`/`ByteArray` primitives as their Lean definitions say.
 `Sp800185Cshake256Core` imports this module and the spec; import Core.
 -/
 
-import Compiler.Sp800185Cshake256Spec
+import Theory.Sp800185Cshake256Spec
 
 namespace Minidregg.Compiler.Sp800185Cshake256.Fast
 open Minidregg.Compiler.Sp800185Cshake256

@@ -1,5 +1,5 @@
 /-
-# Compiler.Sp800185Cshake256Spec -- the cSHAKE256 specification
+# Theory.Sp800185Cshake256Spec -- the cSHAKE256 specification
 
 This module is the definition of the concrete cSHAKE256 backend: every theorem
 about Mini's roots, digests and authenticators is about these functions.  It
@@ -30,8 +30,6 @@ truncating the width byte with `UInt8.ofNat`; ordinary finite protocol frames
 are far inside the standard bound.
 -/
 
-import Init.Data.BitVec
-import Init.Data.UInt.Bitwise
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

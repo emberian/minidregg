@@ -1,5 +1,5 @@
 import Compiler.ObliviousNetwork
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 
 /- Boolean Keccak-f[1600] construction over the existing shared AND/XOR DAG.
 This is the concrete permutation required by the cSHAKE statement commitment,

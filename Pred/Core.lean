@@ -52,8 +52,8 @@ The atoms transcribe the SHAPE of breadstuffs' `StateConstraint`/`SimpleConstrai
 ## Boundary
 
 Core Lean (Init) plus `Pred.HashEqDigest`, whose one import is the leaf cSHAKE256 module
-`Compiler.Sp800185Cshake256Core` (Init + `Mathlib.Data.Nat.Digits.Defs`, no candidate code): the
-`hashEq` atom evaluates a hash, and this is the kernel's one executable cSHAKE256.
+`Theory.Sp800185Cshake256Core` (Init only, no candidate code): the `hashEq` atom evaluates a
+hash, and this is the kernel's one executable cSHAKE256. Pred imports no `Compiler` module.
 -/
 import Pred.HashEqDigest
 
@@ -113,7 +113,7 @@ def hashEqOpening (s : State) (values : List Slot) (blinder commit : Slot) :
 
 /-- The `hashEq` decision under a hash `H`: the opening exists, the commit slot is present, and it
 holds the opening's digest. The deployed atom is this at `HashEqDigest.deployed`. -/
-def hashEqHolds (H : HashEqDigest.Hash) (s : State) (values : List Slot) (blinder commit : Slot) :
+def hashEqHolds (H : Theory.HashBytes.Hash) (s : State) (values : List Slot) (blinder commit : Slot) :
     Bool :=
   match hashEqOpening s values blinder commit, s.get commit with
   | some o, some c => decide (HashEqDigest.digestWith H o = c)

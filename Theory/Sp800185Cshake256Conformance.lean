@@ -1,11 +1,12 @@
 /-
-# Compiler.Sp800185Cshake256Conformance -- executable standard vectors
+# Theory.Sp800185Cshake256Conformance -- executable standard vectors
 
 These build-time checks exercise the Lean-owned executable core against the
 published NIST SP 800-185 cSHAKE sample and the FIPS 202 SHAKE256 empty-message
 prefix.  They are kept out of the controller API's import surface, while the
-`Compiler` umbrella imports this module so a complete build still executes
-both checks.
+`Theory` umbrella imports this module so a complete build still executes
+both checks.  They live beside the code they check (moved with the cSHAKE256
+leaf from `Compiler` to `Theory`, W30-CORE4-DIGEST).
 
 The checks are conformance teeth, not collision-resistance or random-oracle
 theorems.  The two `#eval` checks use ordinary Lean evaluation; since
@@ -18,7 +19,7 @@ be a compiled-evaluation fact; the equality of the fast path to the spec for
 every input is `Fast.cshake256Fast_eq`, a kernel-checked proof.
 -/
 
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

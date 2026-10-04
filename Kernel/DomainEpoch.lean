@@ -26,7 +26,7 @@ the channel is not a kernel turn; the kernel sees one record per domain per epoc
   with the sequencer's key), and the limit `silent_and_dropped_indistinguishable`.
 
 Binding is never assumed: every binding statement is "equal, or a collision of the named
-cSHAKE256 instance" — `Pred.HashEqDigest.Collision`, the carrier K-HASHEQ's `binds_or_collides`
+cSHAKE256 instance" — `Theory.HashBytes.Collision`, the carrier K-HASHEQ's `binds_or_collides`
 already names. Hiding of `absentCommit` is K-HASHEQ's `HashEqHiding` shape (assumed, not proved, used
 by no theorem here).
 
@@ -38,7 +38,7 @@ author is a `SubjectId`), `admitAppend`, `ChannelStoreLaw` and the in-Store chai
 `Kernel.DomainEpochLaw`, under the same names. The `#assert_axioms` pins of both live in
 `Kernel.DomainEpochAudit`.
 -/
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 import Pred.HashEqDigest
 import Theory.Channel
 
@@ -46,7 +46,8 @@ namespace Minidregg.Kernel.DomainEpoch
 
 open Minidregg.Theory.Channel (Blob fit Profile U16 be16 rd16 rd16_be16 Header Cell Schedule FillPrf
   fillCell Submission Source profileOfId cell_encode_injective)
-open Minidregg.Pred.HashEqDigest (be ofBE Collision utf8 length_be)
+open Minidregg.Pred.HashEqDigest (utf8)
+open Minidregg.Theory.HashBytes (be ofBE Collision length_be)
 open Minidregg.Compiler.Sp800185Cshake256 (cshake256Bytes cshake256Bytes_length)
 
 set_option autoImplicit false
@@ -367,7 +368,7 @@ theorem absentOpening_wrong_length_refused {E n : Nat} {bytes : List UInt8}
   simp [AbsentOpening.decode, wrong]
 
 /-- The commitment, under any byte hash (the refutable pole instantiates a weak one). -/
-def commitAbsentWith (H : Minidregg.Pred.HashEqDigest.Hash) (o : AbsentOpening) : List UInt8 := H o.encode
+def commitAbsentWith (H : Minidregg.Theory.HashBytes.Hash) (o : AbsentOpening) : List UInt8 := H o.encode
 
 /-- **`commitAbsent`**: cSHAKE256 under `DREGG.CHANNEL.ABSENT/v1` of `mask ‖ salt` (K-HASHEQ's
 `H(value ‖ blinder)`, this purpose's customization). -/
@@ -377,7 +378,7 @@ theorem commitAbsent_val (o : AbsentOpening) :
     (commitAbsent o).val = commitAbsentWith (cshake256Bytes absentTag) o := rfl
 
 /-- **Binds or collides**, for any hash. -/
-theorem opening_binds_with (H : Minidregg.Pred.HashEqDigest.Hash) {o₁ o₂ : AbsentOpening}
+theorem opening_binds_with (H : Minidregg.Theory.HashBytes.Hash) {o₁ o₂ : AbsentOpening}
     (same : commitAbsentWith H o₁ = commitAbsentWith H o₂) : o₁ = o₂ ∨ Collision H := by
   by_cases h : o₁ = o₂
   · exact .inl h

@@ -43,7 +43,8 @@ import Kernel.LawView
 namespace Minidregg.Kernel.SealedMarket
 
 open Minidregg.Pred (Pred State eval Slot)
-open Minidregg.Pred.HashEqDigest (Collision deployed)
+open Minidregg.Pred.HashEqDigest (deployed)
+open Minidregg.Theory.HashBytes (Collision)
 open Minidregg.Kernel.LawView (ev_eq ev_le ev_eqSlots ev_leSlots ev_not ev_all ev_any)
 
 set_option autoImplicit false

@@ -1755,7 +1755,7 @@ theorem lower_hashEq_binds (profile : CompilerProfile) (hprofile : profile.Admis
       Minidregg.Pred.HashEqDigest.deployed o))
     (A : List ℕ → ℕ → F) (h : systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c))) :
     Minidregg.Pred.hashEqOpening new v b c = some o ∨
-      Minidregg.Pred.HashEqDigest.Collision Minidregg.Pred.HashEqDigest.deployed := by
+      Minidregg.Theory.HashBytes.Collision Minidregg.Pred.HashEqDigest.deployed := by
   obtain ⟨o', ho', hc'⟩ := (lower_hashEq_correct profile hprofile hinj).mp ⟨A, h⟩
   rw [hcommit] at hc'
   have hadm' := (Minidregg.Pred.hashEqOpening_eq_some.mp ho').2.2.2.2.2.2

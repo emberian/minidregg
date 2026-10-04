@@ -521,7 +521,7 @@ theorem leSlotsOff_merge_closed (a b : Slot) (c : Int) : MergeClosed (.leSlotsOf
 
 -- `eval_congr_toFun` and `inv_rep_independent` gained `Quot.sound` with `hashEq`: their
 -- statements mention `Pred.eval`, whose definition now reaches the Keccak-f[1600] sponge
--- (`Compiler.Sp800185Cshake256Core.absorbPadded`, itself `[propext, Quot.sound]`). It is the
+-- (`Theory.Sp800185Cshake256Core.absorbPadded`, itself `[propext, Quot.sound]`). It is the
 -- closure of a definition, not a step of either proof; `Classical.choice` stays out
 -- (`Pred.HashEqDigest.frame` keeps `Nat.digits` out of the evaluator).
 /-- info: 'Minidregg.Pred.CoordinationDial.eval_congr_toFun' depends on axioms: [propext, Quot.sound] -/

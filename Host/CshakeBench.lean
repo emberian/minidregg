@@ -7,7 +7,7 @@ pseudo-random input outside the timed region and times
 Prints MB/s and the first digest bytes, so two Host builds can be compared for
 byte identity on the same inputs.  Not part of the umbrella gate.
 -/
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 import Compiler.Sp800185Kmac256
 
 open Minidregg.Compiler.Sp800185Cshake256

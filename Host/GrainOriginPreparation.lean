@@ -9,7 +9,7 @@ selected Newsgroups audience. It is not a grant, consent proof, redaction,
 fn signature, article admission, or public transport authorization.
 -/
 import Host.GrainOriginSource
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 
 namespace Minidregg.Host.GrainOriginPreparation
 

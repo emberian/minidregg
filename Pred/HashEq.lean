@@ -31,6 +31,7 @@ import Pred.Core
 namespace Minidregg.Pred
 
 open HashEqDigest
+open Minidregg.Theory.HashBytes
 
 set_option autoImplicit false
 

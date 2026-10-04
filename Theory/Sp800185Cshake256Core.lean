@@ -1,5 +1,5 @@
 /-
-# Compiler.Sp800185Cshake256Core -- cSHAKE256: the specification and its compiled path
+# Theory.Sp800185Cshake256Core -- cSHAKE256: the specification and its compiled path
 
 Import this module.  It is `Sp800185Cshake256Spec`, the list/`BitVec`
 definitions that every theorem in the repository is about, together with
@@ -11,5 +11,5 @@ A module importing only the spec would compile against the list definitions:
 correct, and about three orders of magnitude slower.
 -/
 
-import Compiler.Sp800185Cshake256Spec
-import Compiler.Sp800185Cshake256Fast
+import Theory.Sp800185Cshake256Spec
+import Theory.Sp800185Cshake256Fast

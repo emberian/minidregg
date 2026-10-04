@@ -10,14 +10,14 @@ The implementation is executable Lean.  It gives Rust no hash semantics:
 `checkedXofCall` still treats native output as opaque bytes and accepts only
 the digest selected here.  This file proves no collision resistance and no
 random-oracle transport.  Executable NIST/FIPS vectors live in the independent
-`Sp800185Cshake256Conformance` module.  The `Compiler` umbrella imports them,
+`Theory.Sp800185Cshake256Conformance` module.  The `Theory` umbrella imports them,
 so complete builds still check conformance without putting vector constants
 and evaluation commands in every API consumer's import surface.
 -/
 
 import Theory.Bignum
 import Compiler.Tower256CshakeMerkleController
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

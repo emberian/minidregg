@@ -25,49 +25,20 @@ envelope's 32-byte uniform `r`. (`/v1` was the single-value encoding of K-HASHEQ
 its codec tag: a `/v1` commitment opens nothing here.) Outside the domain an opening is undefined and the atom fails
 closed (Pred/Core).
 
-Imports: Init and the leaf `Compiler.Sp800185Cshake256Core` (itself Init plus
-`Mathlib.Data.Nat.Digits.Defs`, no candidate code), so `Pred` stays inside its boundary in
-substance; the module path is the only `Compiler` name `Pred` now imports.
+Imports: Init and the leaf `Theory.Sp800185Cshake256Core` (itself Init only, no candidate
+code). The cSHAKE256 definition lives in the Theory tier, so `Pred` imports no `Compiler` module
+(the Pred row of scripts/check-import-boundary.sh no longer admits one).
 -/
-import Compiler.Sp800185Cshake256Core
+import Theory.Sp800185Cshake256Core
+import Theory.HashBytes
 
 namespace Minidregg.Pred.HashEqDigest
 
+open Minidregg.Theory.HashBytes
+
 set_option autoImplicit false
 
-/-! ## §1. Fixed-width big-endian bytes -/
-
-/-- The low `w` bytes of `n`, big-endian. -/
-def be : Nat → Nat → List UInt8
-  | 0, _ => []
-  | w + 1, n => be w (n / 256) ++ [UInt8.ofNat (n % 256)]
-
-/-- Big-endian bytes read back as a natural. -/
-def ofBE (bytes : List UInt8) : Nat :=
-  bytes.foldl (fun acc b => acc * 256 + b.toNat) 0
-
-@[simp] theorem length_be (w n : Nat) : (be w n).length = w := by
-  induction w generalizing n with
-  | zero => rfl
-  | succ w ih => simp [be, ih]
-
-theorem be_injective {w n m : Nat} (hn : n < 256 ^ w) (hm : m < 256 ^ w)
-    (h : be w n = be w m) : n = m := by
-  induction w generalizing n m with
-  | zero => simp at hn hm; omega
-  | succ w ih =>
-    simp only [be] at h
-    obtain ⟨hhi, hlo⟩ := List.append_inj h (by simp)
-    have hbyte : (UInt8.ofNat (n % 256)).toNat = (UInt8.ofNat (m % 256)).toNat := by
-      rw [List.cons.inj hlo |>.1]
-    simp only [UInt8.toNat_ofNat'] at hbyte
-    have hpow : 256 ^ (w + 1) = 256 ^ w * 256 := Nat.pow_succ ..
-    have hn' : n / 256 < 256 ^ w := (Nat.div_lt_iff_lt_mul (by decide)).mpr (hpow ▸ hn)
-    have hm' : m / 256 < 256 ^ w := (Nat.div_lt_iff_lt_mul (by decide)).mpr (hpow ▸ hm)
-    have hq := ih hn' hm' hhi
-    have h8 : (2 : Nat) ^ 8 = 256 := by decide
-    rw [h8] at hbyte
-    omega
+/-! ## §1. Fixed-width big-endian bytes: `Theory.HashBytes` (`be`, `ofBE`, `be_injective`) -/
 
 /-! ## §2. Names -/
 
@@ -243,9 +214,6 @@ theorem preimage_length (o : Opening) :
 
 /-! ## §4. The digest, generic in the hash, and its deployed instance -/
 
-/-- A byte hash. -/
-abbrev Hash := List UInt8 → List UInt8
-
 /-- The digest an opening commits to under `H`, as the integer the commit slot holds. -/
 def digestWith (H : Hash) (o : Opening) : Int := (ofBE (H o.preimage) : Int)
 
@@ -288,7 +256,7 @@ theorem deployed_eq_cshake256Bytes : deployed = cshake256Bytes customization := 
 open Minidregg.Compiler.Sp800185Cshake256 (absorbPadded padForRate squeeze32) in
 open Minidregg.Compiler.Sp800185Cshake256.Fast in
 /-- The deployed hash on the compiled path: frame and input pushed once into a
-byte array, absorbed by the word permutation (`Compiler.Sp800185Cshake256Fast`). -/
+byte array, absorbed by the word permutation (`Theory.Sp800185Cshake256Fast`). -/
 def deployedFast : Hash := fun input =>
   spongeBytes (pushList (pushList ByteArray.empty frame) input) 0x04
 
@@ -299,9 +267,6 @@ theorem deployedFast_eq : deployedFast = deployed := by
 
 /-- The compiled `hashEq` atom runs the fast path; `deployed` stays the definition. -/
 @[csimp] theorem deployed_eq_fast : deployed = deployedFast := deployedFast_eq.symm
-
-/-- A collision of `H` at the integer reading of its output. -/
-def Collision (H : Hash) : Prop := ∃ a b : List UInt8, a ≠ b ∧ ofBE (H a) = ofBE (H b)
 
 /-- **Binds or collides.** Two admissible openings with equal digests are equal, or `H` has a
 collision. Nothing about cSHAKE is assumed here; the disjunct is where its collision resistance

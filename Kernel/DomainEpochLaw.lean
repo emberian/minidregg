@@ -24,7 +24,8 @@ namespace Minidregg.Kernel.DomainEpoch
 
 open Minidregg.Theory.Channel (Blob fit Profile U16 be16 rd16 rd16_be16 Header Cell Schedule FillPrf
   fillCell Submission Source profileOfId cell_encode_injective)
-open Minidregg.Pred.HashEqDigest (be ofBE Collision utf8 length_be)
+open Minidregg.Pred.HashEqDigest (utf8)
+open Minidregg.Theory.HashBytes (be ofBE Collision length_be)
 open Minidregg.Theory.Store (Store)
 open Minidregg.Theory.TypedAuthorization (SubjectId)
 
