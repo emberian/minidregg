@@ -44,16 +44,23 @@ history). ember announces it, enrolls you again, and you redo your first 10 minu
 IDs (`deploy/shell/OPERATOR.md`, "Re-genesis"). nothing here has an uptime promise.
 
 **key custody (hosted shell).** your dregg signing key is made *on the box*, in your session
-home. the box's operator (root) and every process that runs as the box's `mini` account can
-read it: the Store, the Host, the operator's tools and every hosted friend's session all run
-as that one account, so the shell's verb grammar is the only fence between friends
-(`deploy/shell/README.md`). enrollment also needs your key in ember's session for a moment,
-because `enroll plan` signs with both keys in one process; ember copies it there and deletes
-the copy right after the enrollment (`OPERATOR.md`, steps 4-5). keep nothing precious behind
-a hosted key. separate accounts: an installer option that moves the operator side to its own
-account was added to dregg-infra on 2026-10-03 23:23 EDT (`tenancy=split`), after the node was read
-(it ran the 2026-10-01 candidate), so the node does not have it; one account per friend is a design, not built.
-proxy mode (below) keeps your key on your own machine; main has it, the node does not.
+home, and the box's operator (root) can always read it. who else can depends on how the box is
+set up, and ember tells you which:
+
+- **one shared account** (the public node today): the Store, the Host, the operator's tools and
+  every hosted friend's session run as the box's `mini` account, so the shell's verb grammar is
+  the only fence between friends (`deploy/shell/README.md`).
+- **separate accounts** (dregg-infra `tenancy=split`, built on main 2026-10-04, on no box yet):
+  your session runs as your own account `mini-s-NAME`, and only that account and root can read
+  your session home; the Store and the Host run as `mini-core`, which cannot read it either. a
+  provider key you `key set` is sealed by the box's key broker (`mini-keys`), which no session
+  account, not the Store and not the librarian can read: it checks your grant and makes the
+  provider call itself. a Discord line runs as your account too.
+
+enrollment also needs your key in ember's session for a moment, because `enroll plan` signs
+with both keys in one process; ember copies it there and deletes the copy right after the
+enrollment (`OPERATOR.md`, steps 4-5). keep nothing precious behind a hosted key. proxy mode
+(below) keeps your key on your own machine; main has it, the node does not.
 
 **your next key (main only).** `keygen mini.key` also makes `mini.key.next`: your *next* key.
 your record commits to it (only its digest is stored), and it is the only thing that can
@@ -83,7 +90,9 @@ the last one you hold; a `law-denied` refusal can name no clause).
    session: it must start with a lowercase letter, then lowercase letters, digits and `-`,
    32 characters at most, and it is permanent.
 3. when i say you're on the list: `ssh -t -i ~/.ssh/mini mini@2.28.141.27`. you land at
-   `mini> `. Tab completes verbs and names, Up/Down walks history, `help` lists every verb,
+   `mini> `. (on a box with separate accounts, the login is your own: `mini-s-NAME@HOST`, NAME
+   being your session name; everything after the login is the same. typing `mini@` there tells
+   you the right login and runs nothing.) Tab completes verbs and names, Up/Down walks history, `help` lists every verb,
    and `help VERB` shows what it runs.
 
 ```

@@ -447,8 +447,9 @@ def main(argv=None):
     room_alias = a.room_alias
     summary_alias = f'resident-summary-{a.task}'
     program_name = f'resident-{a.task}-captured-job.txt'
-    canonical_table, canonical_key = base / 'etc/mini/providers.json', base / 'etc/mini/credentials.key'
-    canonical_pool = base / 'var/lib/mini/credentials/_pool'
+    # Credential custody is the key broker's (minidregg native/mini-keys): the controller
+    # names the deployment's broker client config and never a seal key or a store.
+    canonical_table, canonical_broker = base / 'etc/mini/providers.json', base / 'etc/mini/keys-client.json'
     shared_document_ref = pathlib.Path(a.shared_document_reference)
     capture_path = pathlib.Path(a.capture_reference)
     registration_receipt_path = pathlib.Path(a.registration)
@@ -474,9 +475,8 @@ def main(argv=None):
     owner_enrollment = next(row for row in genesis['enrollments'] if row['key']['subject'] == owner_subject)
     tool_enrollment = next(row for row in genesis['enrollments'] if row['key']['subject'] == tool_subject)
     factory = ctx['authority']['factory']
-    pool_stat = canonical_pool.stat()
-    if canonical_pool.is_symlink() or pool_stat.st_uid != os.getuid() or pool_stat.st_mode & 0o077:
-        raise Refused('fresh owner-private canonical credential pool required')
+    if not canonical_broker.is_file() or canonical_broker.stat().st_uid != 0 or canonical_broker.stat().st_mode & 0o022:
+        raise Refused('the deployment key broker client config (root-owned) is required')
     if not registration_receipt_path.parent.is_dir():
         raise Refused('registration receipt directory absent')
     public_key_hex(founder_key.read_bytes())
@@ -745,7 +745,7 @@ def main(argv=None):
 
     # ------------------------------------------------------------ tool-workspace
     phase('tool-workspace')
-    for folder in (state, state / 'resident', home, home / 'inbox', worker, root / 'etc', root / 'credentials', root / 'keys'):
+    for folder in (state, state / 'resident', home, home / 'inbox', worker, root / 'etc', root / 'keys'):
         folder.mkdir(mode=0o700, exist_ok=True)
     # Reuse the existing source-enrolled management key; init does not rotate it.
     tool_context = {'type': 'minidregg-participant-birth-context-v1', 'genesis': genesis, 'template': template,
@@ -935,10 +935,12 @@ def main(argv=None):
             raise Refused('fixture provider readiness differs from the published endpoint')
         return ready
     ensure_provider()
-    key = root / 'etc/credentials.key'
-    if not key.exists():
-        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.write(fd, os.urandom(32))
+    # The operator's fixture pool key: handed to root, which hands it to the key
+    # broker's pool operation (dregg-infra controller-entry provider-custody-copy v2).
+    pool_secret = root / 'etc/pool.secret'
+    if not pool_secret.exists():
+        fd = os.open(pool_secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(fd, b'completion-cut-local-fixture-key\n')
         os.fsync(fd)
         os.close(fd)
     table = {'type': 'mini-provider-table-v2', 'providers': [{'name': 'resident-fixture-pool', 'endpoint': endpoint, 'kind': 'openai-compatible',
@@ -948,9 +950,9 @@ def main(argv=None):
         publish(root / 'providers-source.json', table_bytes)
     elif (root / 'providers-source.json').read_bytes() != table_bytes:
         raise Refused('retained provider table differs')
-    copy_request = {'protocol': 'mini-resident-provider-custody-copy-v1', 'task': str(a.task),
+    copy_request = {'protocol': 'mini-resident-provider-custody-copy-v2', 'task': str(a.task),
                     'table': {'source': str(root / 'providers-source.json'), 'sha256': digest(root / 'providers-source.json'), 'target': str(canonical_table)},
-                    'key': {'source': str(key), 'sha256': digest(key), 'target': str(canonical_key)}, 'provider': 'resident-fixture-pool'}
+                    'poolSecret': {'source': str(pool_secret), 'sha256': digest(pool_secret)}, 'provider': 'resident-fixture-pool'}
     if not (root / 'provider-copy-request.json').exists():
         save('provider-copy-request.json', copy_request)
     elif load(root / 'provider-copy-request.json') != copy_request:
@@ -962,34 +964,12 @@ def main(argv=None):
     ack = load(ack_path)
     if ack.get('protocol') != 'mini-resident-provider-custody-ready-v1' or ack.get('task') != str(a.task) or ack.get('requestSha256') != digest(root / 'provider-copy-request.json'):
         raise Refused('root provider copy acknowledgment differs')
-    if digest(canonical_table) != copy_request['table']['sha256'] or digest(canonical_key) != copy_request['key']['sha256']:
-        raise Refused('canonical provider custody bytes differ')
-    if canonical_table.stat().st_uid != 0 or canonical_table.stat().st_mode & 0o022 or canonical_key.stat().st_uid != os.getuid() or canonical_key.stat().st_mode & 0o077:
-        raise Refused('canonical provider custody owner/mode refused')
-    if not (root / 'fixture-pool-key').exists():
-        publish(root / 'fixture-pool-key', b'completion-cut-local-fixture-key\n')
-    journal.step('install-fixture-key', lambda: run('install-fixture-key', [
-        mini, 'key', '--action', 'set', '--pool', 'true', '--provider', 'resident-fixture-pool', '--secret', root / 'fixture-pool-key',
-        '--providers', canonical_table, '--credentials', root / 'credentials', '--credentials-key', canonical_key]) and True,
-        lambda: True if (root / 'credentials/_pool').is_dir() and any((root / 'credentials/_pool').iterdir()) else None)
-    # Preserve source-created encrypted custody and key; the canonical root was provisioned by the root service.
-    copied = []
-    for original in sorted((root / 'credentials/_pool').iterdir()):
-        if not original.is_file() or original.is_symlink():
-            raise Refused('unexpected fixture credential entry')
-        destination = canonical_pool / original.name
-        if not destination.exists():
-            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            os.write(fd, original.read_bytes())
-            os.fsync(fd)
-            os.close(fd)
-        if digest(original) != digest(destination):
-            raise Refused('encrypted custody copy differs')
-        copied.append({'original': str(original), 'canonical': str(destination), 'sha256': digest(destination)})
-    directory_fd = os.open(canonical_pool, os.O_RDONLY | os.O_DIRECTORY)
-    os.fsync(directory_fd)
-    os.close(directory_fd)
-    save('canonical-credential-copy.json', copied)
+    if digest(canonical_table) != copy_request['table']['sha256']:
+        raise Refused('canonical provider table bytes differ')
+    if canonical_table.stat().st_uid != 0 or canonical_table.stat().st_mode & 0o022:
+        raise Refused('canonical provider table owner/mode refused')
+    # The pool key is sealed by the broker (root's pool operation); this account never
+    # holds the seal key, so nothing is copied into the canonical store from here.
 
     # ------------------------------------------------------------ config
     phase('config')
@@ -1020,8 +1000,8 @@ def main(argv=None):
                                 'parentCapability': caps['providerWitness'], 'parentObserveCapability': caps['providerWitness'], 'reserve': '7000', 'provider': 'resident-fixture-pool',
                                 'contextWindowTokens': 262144, 'maxInputTokens': 16384, 'maxOutputTokens': 2048,
                                 'onBehalfOf': {'subject': founder_subject, 'publicKey': public_key_hex(founder_key.read_bytes())},
-                                'model': 'mini-hermes-completion-cut', 'providers': str(canonical_table), 'credentialsRoot': str(base / 'var/lib/mini/credentials'),
-                                'credentialsKey': str(canonical_key), 'gatewayBind': gateway, 'maxRequestBytes': 32768, 'maxResponseBytes': 524288, 'maxIterations': 1,
+                                'model': 'mini-hermes-completion-cut', 'providers': str(canonical_table), 'credentialBroker': str(canonical_broker),
+                                'gatewayBind': gateway, 'maxRequestBytes': 32768, 'maxResponseBytes': 524288, 'maxIterations': 1,
                                 'timeoutSeconds': 600, 'localFixtureHostNetwork': True},
                'commands': [{'name': 'hermes-acp', 'program': str(launcher),
                              'args': ['--workspace', str(worker), '--runtime-root', str(fixture_runtime), '--network', 'host', '--', '/agent/hermes-acp'],
