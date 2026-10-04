@@ -857,8 +857,8 @@ attribute [irreducible] portals
 /-! ## Fields (K-FIELDS): a write's footprint against the authorizing scope
 
 A scalar target's fields are its declared state keys' coordinates and its
-values are integers; a content target's fields are `body`/`annotations` and it
-moves no number.  The footprint is computed from the loaded pre-state and the
+values are integers; a content target's fields are `body`/`annotations`, or
+`atomsOf low` for an atom (a sub-field of `body`), and it moves no number.  The footprint is computed from the loaded pre-state and the
 computed post-state of the leg, never from the request or the command. -/
 
 def targetField (target : Target) : Address target.layout → CellField := by
@@ -866,14 +866,14 @@ def targetField (target : Target) : Address target.layout → CellField := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
-    | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
+    | content _ => exact fun address => ResourceObservationAdmission.contentFieldAt address
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
     | kindDefinition _ | kindRead => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     | moneyConsent _ => exact fun _ => .body
     -- An observe-only read writes nothing; its addresses are content addresses.
-    | read => exact fun address => ResourceObservationAdmission.contentField address.1
+    | read => exact fun address => ResourceObservationAdmission.contentFieldAt address
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by

@@ -115,6 +115,7 @@ import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
 import Kernel.PrivateRoomKeys  -- private room wrapping law
+import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps (AUTHORED, NOT COMPILED)
 import Kernel.StreamWrite  -- stream head and immutable entry writes
 import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)

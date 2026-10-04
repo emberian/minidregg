@@ -215,11 +215,38 @@ theorem bound_scope_covers_only_descriptor (descriptor : Descriptor)
     (field : CellField) (touched : field ∈ footprint.touched) :
     field ∈ descriptorFields descriptor := by
   have named := fields_cover_write covered touched
+  -- `descriptorFields` holds slots only, so no `atomsOf` field is named by a bound scope:
+  -- naming is membership for the field that was touched.
+  have notAtoms : ∀ low, field ≠ CellField.atomsOf low := by
+    intro low same
+    subst same
+    cases old : scope.fields with
+    | none =>
+        have inv : CellField.NamedBy (some (descriptorFields descriptor)) (CellField.atomsOf low) := by
+          simpa [bindScope, old] using named
+        obtain ⟨outer, member, covers⟩ := inv
+        simp only [descriptorFields, List.mem_toFinset, List.mem_map] at member
+        obtain ⟨entry, _, same⟩ := member
+        subst same
+        simp [CellField.covers, CellField.isAtoms] at covers
+    | some fields =>
+        have inv : CellField.NamedBy (some (fields ∩ descriptorFields descriptor)) (CellField.atomsOf low) := by
+          simpa [bindScope, old] using named
+        obtain ⟨outer, member, covers⟩ := inv
+        have inDescriptor := (Finset.mem_inter.mp member).2
+        simp only [descriptorFields, List.mem_toFinset, List.mem_map] at inDescriptor
+        obtain ⟨entry, _, same⟩ := inDescriptor
+        subst same
+        simp [CellField.covers, CellField.isAtoms] at covers
   cases old : scope.fields with
-  | none => simpa [bindScope, CellField.NamedBy, old] using named
+  | none =>
+      have inv : CellField.NamedBy (some (descriptorFields descriptor)) field := by
+        simpa [bindScope, old] using named
+      exact CellField.mem_of_namedBy notAtoms inv
   | some fields =>
-      have member : field ∈ fields ∩ descriptorFields descriptor := by
-        simpa [bindScope, CellField.NamedBy, old] using named
+      have inv : CellField.NamedBy (some (fields ∩ descriptorFields descriptor)) field := by
+        simpa [bindScope, old] using named
+      have member := CellField.mem_of_namedBy notAtoms inv
       exact (Finset.mem_inter.mp member).2
 
 end Minidregg.Compiler.WorldKindDescriptor

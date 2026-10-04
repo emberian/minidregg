@@ -230,7 +230,10 @@ its own wraps, releases and record. What it needs, and where each part stands:
      not subset), `contentField` maps an atoms-namespace address to `atomsOf (atomLow id)`, the capability
      codec/Host JSON name it `atoms:M`. Low-half granularity (not per (epoch, member) atom) is deliberate:
      a member's future wraps carry new epochs and generations but the same low half, so ONE grant covers
-     every epoch without a re-delegation per rotation. AUTHORED (uncompiled) in commit "lean(J-PRIV-1)".
+     every epoch without a re-delegation per rotation. Commit "lean(J-PRIV-1)": Theory/TypedAuthorization.lean
+     COMPILED as a whole file; the new module's theorems and the codec label lemma checked in a standalone
+     harness; the edits inside ResourceObservationAdmission, DeclaredResourceController and WorldKindDescriptor
+     AUTHORED, NOT COMPILED (need lake build of their closure before landing).
  (b) CLIENT, once (a) lands: `room invite` delegates observe with fields=[atoms:M] (+ the certificate
      region, below) instead of the whole cell. The existing flat hiding root already shows a narrowed
      reader sealed leaves for uncovered atoms (count and positions, not values); the per-address tree view

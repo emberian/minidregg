@@ -538,31 +538,108 @@ nothing.  Bounds are per write (one turn), not cumulative. -/
 (`resource/field/n`); `balance a` an account balance coordinate of asset `a`;
 `code` a declared program's code.  A content cell has two fields: `body`
 (documents, atoms, runs, elements, field records, conflicts, transclusions)
-and `annotations` (links, marks, annotation records). -/
+and `annotations` (links, marks, annotation records).
+
+`atomsOf low` is a SUB-field of a content cell's `body`: the atoms whose
+identifier has low 64 bits `low` (J-PRIV-1: a private room's keys cell names a
+member's wraps, releases and record by their low half, the member's subject
+number, so one grant covers every epoch of one member).  It is covered by
+`body`: naming `body` names every `atomsOf low`; naming `atomsOf low` names only
+those atoms.  The low half, not the full identifier, is the grain on purpose:
+a member's future wraps carry new epochs but the same low half, so the grant
+needs no re-delegation at each rotation. -/
 inductive CellField where
   | slot (n : Nat)
   | balance (asset : Nat)
   | code
   | body
   | annotations
+  | atomsOf (low : Nat)
   deriving DecidableEq, Repr
 
-/-- `fields` names `field`: every field when absent, membership otherwise. -/
+/-- Whether a field is one of the `atomsOf` sub-fields of a content body. -/
+def CellField.isAtoms : CellField → Bool
+  | .atomsOf _ => true
+  | _ => false
+
+/-- `outer.covers inner`: naming `outer` names `inner`.  Every field covers
+itself, and `body` covers each `atomsOf low`.  Nothing else covers anything:
+in particular `atomsOf low` does not cover `body`, and a named set of slots
+covers no atom. -/
+def CellField.covers (outer inner : CellField) : Bool :=
+  decide (outer = inner) || (decide (outer = CellField.body) && inner.isAtoms)
+
+theorem CellField.covers_refl (field : CellField) : field.covers field = true := by
+  simp [CellField.covers]
+
+theorem CellField.covers_trans {first second third : CellField}
+    (a : first.covers second = true) (b : second.covers third = true) :
+    first.covers third = true := by
+  cases first <;> cases second <;> cases third <;>
+    simp_all [CellField.covers, CellField.isAtoms]
+
+/-- A field other than `body` covers only itself. -/
+theorem CellField.covers_eq_of_ne_body {outer inner : CellField}
+    (notBody : outer ≠ .body) (covers : outer.covers inner = true) : outer = inner := by
+  cases outer <;> cases inner <;> simp_all [CellField.covers, CellField.isAtoms]
+
+/-- `fields` names `field`: every field when absent; otherwise some named
+field covers it (`body` covers each `atomsOf`).  For every field except
+`atomsOf` this is membership (`mem_of_namedBy`). -/
 def CellField.NamedBy (fields : Option (Finset CellField)) (field : CellField) : Prop :=
   match fields with
   | none => True
-  | some named => field ∈ named
+  | some named => ∃ outer ∈ named, outer.covers field = true
 
 instance CellField.namedByDecidable (fields : Option (Finset CellField)) (field : CellField) :
     Decidable (CellField.NamedBy fields field) := by
   cases fields <;> unfold CellField.NamedBy <;> infer_instance
 
+/-- Naming a set that holds the field names it. -/
+theorem CellField.namedBy_of_mem {named : Finset CellField} {field : CellField}
+    (member : field ∈ named) : CellField.NamedBy (some named) field :=
+  ⟨field, member, CellField.covers_refl field⟩
+
+/-- For a field that is not an `atomsOf`, naming is membership. -/
+theorem CellField.mem_of_namedBy {named : Finset CellField} {field : CellField}
+    (notAtoms : ∀ low, field ≠ .atomsOf low)
+    (isNamed : CellField.NamedBy (some named) field) : field ∈ named := by
+  obtain ⟨outer, member, covers⟩ := isNamed
+  by_cases isBody : outer = .body
+  · subst isBody
+    cases field <;> first
+      | exact absurd rfl (notAtoms _)
+      | simp_all [CellField.covers, CellField.isAtoms]
+  · have same := CellField.covers_eq_of_ne_body isBody covers
+    subst same
+    exact member
+
+/-- `body` names every atom field. -/
+theorem CellField.namedBy_atomsOf_of_body {named : Finset CellField} (low : Nat)
+    (body : CellField.body ∈ named) : CellField.NamedBy (some named) (.atomsOf low) :=
+  ⟨.body, body, by simp [CellField.covers, CellField.isAtoms]⟩
+
+/-- A grant of one member's atoms names those atoms and nothing else of the
+body: it does not name `body`, another member's atoms, or the annotations. -/
+theorem CellField.atomsOf_names_only_itself (low other : Nat) (h : low ≠ other) :
+    CellField.NamedBy (some {.atomsOf low}) (.atomsOf low) ∧
+      ¬ CellField.NamedBy (some {.atomsOf low}) (.atomsOf other) ∧
+      ¬ CellField.NamedBy (some {.atomsOf low}) .body ∧
+      ¬ CellField.NamedBy (some {.atomsOf low}) .annotations := by
+  refine ⟨CellField.namedBy_of_mem (by simp), ?_, ?_, ?_⟩ <;>
+    · rintro ⟨outer, member, covers⟩
+      simp at member
+      subst member
+      simp_all [CellField.covers, CellField.isAtoms]
+
 /-- Field narrowing: anything narrows `none`; `some c` narrows `some p` when
-`c ⊆ p`; `none` (every field) never narrows a named set. -/
+every field of `c` is named by `p` (for fields other than `atomsOf` that is
+`c ⊆ p`; a grant of `atomsOf m` narrows a grant of `body`, not the reverse);
+`none` (every field) never narrows a named set. -/
 def CellField.SetNarrows (child parent : Option (Finset CellField)) : Prop :=
   match child, parent with
   | _, none => True
-  | some c, some p => c ⊆ p
+  | some c, some p => ∀ field ∈ c, CellField.NamedBy (some p) field
   | none, some _ => False
 
 instance CellField.setNarrowsDecidable (child parent : Option (Finset CellField)) :
@@ -571,20 +648,45 @@ instance CellField.setNarrowsDecidable (child parent : Option (Finset CellField)
 
 theorem CellField.SetNarrows.refl (fields : Option (Finset CellField)) :
     CellField.SetNarrows fields fields := by
-  cases fields <;> simp [CellField.SetNarrows]
+  cases fields with
+  | none => exact True.intro
+  | some named => exact fun field member => CellField.namedBy_of_mem member
 
 theorem CellField.SetNarrows.trans {young middle old : Option (Finset CellField)}
     (first : CellField.SetNarrows young middle) (second : CellField.SetNarrows middle old) :
     CellField.SetNarrows young old := by
-  cases young <;> cases middle <;> cases old <;>
-    simp_all [CellField.SetNarrows, Finset.Subset.trans]
-  exact Finset.Subset.trans first second
+  cases young with
+  | none =>
+    cases middle with
+    | none =>
+      cases old with
+      | none => exact True.intro
+      | some old => exact absurd second (by simp [CellField.SetNarrows])
+    | some middle => exact absurd first (by simp [CellField.SetNarrows])
+  | some young =>
+    cases old with
+    | none => exact True.intro
+    | some old =>
+      cases middle with
+      | none => exact absurd second (by simp [CellField.SetNarrows])
+      | some middle =>
+        intro field member
+        obtain ⟨mid, midMember, midCovers⟩ := first field member
+        obtain ⟨top, topMember, topCovers⟩ := second mid midMember
+        exact ⟨top, topMember, CellField.covers_trans topCovers midCovers⟩
 
 theorem CellField.namedBy_of_setNarrows {child parent : Option (Finset CellField)}
     {field : CellField} (narrows : CellField.SetNarrows child parent)
     (named : CellField.NamedBy child field) : CellField.NamedBy parent field := by
-  cases child <;> cases parent <;> simp_all [CellField.SetNarrows, CellField.NamedBy]
-  exact narrows named
+  cases parent with
+  | none => exact True.intro
+  | some p =>
+    cases child with
+    | none => exact absurd narrows (by simp [CellField.SetNarrows])
+    | some c =>
+      obtain ⟨mid, midMember, midCovers⟩ := named
+      obtain ⟨top, topMember, topCovers⟩ := narrows mid midMember
+      exact ⟨top, topMember, CellField.covers_trans topCovers midCovers⟩
 
 /-- Every parent bound is met by a child bound on the same field that is no
 larger.  A child may add bounds; it may not drop or loosen one. -/

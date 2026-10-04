@@ -153,38 +153,48 @@ def targetSetStream (kind : ResourceKind) : StreamCodec (TargetSet kind) where
     | explicit targets => simp [(resourceSetStream kind).decodePrefix_encode]
     | under room => simp [StreamCodec.nat.decodePrefix_encode]
 
-/-- A field's natural label: `slot n ↦ 4n`, `balance a ↦ 4a+1`, and the
-three content/program fields at `2`, `6`, `10`.  Any other label decodes
-provisionally to `slot 0` and is refused by the whole-page re-encoding. -/
+/-- A field's natural label: `slot n ↦ 4n`, `balance a ↦ 4a+1`, `atomsOf m ↦ 4m+3`
+(J-PRIV-1), and the three content/program fields at `2`, `6`, `10`.  Any other
+label decodes provisionally to `slot 0` and is refused by the whole-page
+re-encoding. -/
 def fieldLabel : CellField → Nat
   | .slot n => 4 * n
   | .balance asset => 4 * asset + 1
   | .code => 2
   | .body => 6
   | .annotations => 10
+  | .atomsOf low => 4 * low + 3
 
 def fieldOfLabel (label : Nat) : CellField :=
   if label % 4 = 0 then .slot (label / 4)
   else if label % 4 = 1 then .balance (label / 4)
+  else if label % 4 = 3 then .atomsOf (label / 4)
   else if label = 2 then .code
   else if label = 6 then .body
   else if label = 10 then .annotations
   else .slot 0
 
 theorem fieldOfLabel_label (field : CellField) : fieldOfLabel (fieldLabel field) = field := by
-  cases field <;> simp [fieldLabel, fieldOfLabel] <;> omega
+  cases field with
+  | atomsOf low =>
+      have c : (4 * low + 3) % 4 = 3 := by omega
+      have d : (4 * low + 3) / 4 = low := by omega
+      simp [fieldLabel, fieldOfLabel, c, d]
+  | _ => simp [fieldLabel, fieldOfLabel] <;> omega
 
 def fieldSetStream : StreamCodec (Finset CellField) :=
   labeledSetStream fieldLabel fieldOfLabel fieldOfLabel_label
 
 /-- The JSON name of a field: `"7"` (slot 7), `"balance:3"`, `"code"`,
-`"body"`, `"annotations"`. -/
+`"body"`, `"annotations"`, `"atoms:12"` (the content atoms whose identifier has
+low 64 bits 12: a private room's per-member grant). -/
 def cellFieldName : CellField → String
   | .slot n => toString n
   | .balance asset => s!"balance:{asset}"
   | .code => "code"
   | .body => "body"
   | .annotations => "annotations"
+  | .atomsOf low => s!"atoms:{low}"
 
 def cellFieldOfName (name : String) : Option CellField :=
   match name with
@@ -193,6 +203,7 @@ def cellFieldOfName (name : String) : Option CellField :=
   | "annotations" => some .annotations
   | _ =>
     if name.startsWith "balance:" then (name.drop 8).toNat?.map CellField.balance
+    else if name.startsWith "atoms:" then (name.drop 6).toNat?.map CellField.atomsOf
     else name.toNat?.map CellField.slot
 
 /-- A per-field bound is labelled by the Cantor pairing of its field label and

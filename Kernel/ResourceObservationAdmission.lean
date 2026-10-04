@@ -671,13 +671,28 @@ def contentField : Hyperdocument.Namespace → CellField
   | .links | .marks | .annotations => .annotations
   | _ => .body
 
+/-- The field of one content ATOM (J-PRIV-1): a sub-field of `body` naming the
+atoms with the same low 64 bits of identifier. A private room's keys cell
+partitions its atoms by that half (`PrivateRoomKeys`: each member's wraps,
+releases and record share the member's subject number), so one grant of
+`atomsOf m` reads exactly member `m`'s atoms. -/
+def atomField (id : Nat) : CellField := .atomsOf (ContentResource.atomLow id)
+
+/-- The field of one address of a content cell: an atom is named by its low
+half (and so also by `body`, which covers every `atomsOf`); every other
+namespace is as `contentField` says. -/
+def contentFieldAt (address : Address Hyperdocument.layout) : CellField :=
+  match address with
+  | ⟨.atoms, id⟩ => atomField (show Hyperdocument.AtomId from id).digest.value
+  | ⟨space, _⟩ => contentField space
+
 /-- The field of one address of a registry cell, when the kind has fields. -/
 def fieldOf : (kind : CanonicalCellRegistry.Kind) →
     Address (CanonicalCellRegistry.layout kind) → Option CellField
   | .content, address =>
       match address.1 with
       | .blinding => none
-      | space => some (contentField space)
+      | _ => some (contentFieldAt address)
   | .declaredObject, address | .accountMetadata, address | .declaredProgram, address =>
       match address.2 with
       | .blinding => none
@@ -744,7 +759,46 @@ theorem reviewer_reads_annotations_not_body
   ⟨observe_returns_named_fields store
       (show CellField.NamedBy (some {.annotations}) .annotations by decide),
     DFinsupp.filter_apply_neg store
-      (show ¬ CellField.NamedBy (some {.annotations}) .body by decide)⟩
+      (show ¬ CellField.NamedBy (some {.annotations})
+          (atomField (show Hyperdocument.AtomId from atom).digest.value) from by
+        rintro ⟨outer, member, covers⟩
+        simp only [Finset.mem_singleton] at member
+        subst member
+        simp [atomField, CellField.covers, CellField.isAtoms] at covers)⟩
+
+/-- **J-PRIV-1, the reader side.** A reader whose scope names `atomsOf low`
+receives an atom of a content cell exactly when the atom's identifier has low
+64 bits `low`; it receives no link, mark or annotation, and it is not shown
+the body wholesale. (Authored, not yet compiled: see the lane STATUS.) -/
+theorem atoms_reader_sees_only_its_own_atoms (low : Nat) (atom : Hyperdocument.Key .atoms)
+    (store : Store (CanonicalCellRegistry.layout .content)) :
+    ((show Hyperdocument.AtomId from atom).digest.value % 2 ^ 64 = low →
+        narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.atoms, atom⟩ =
+          store ⟨.atoms, atom⟩) ∧
+      ((show Hyperdocument.AtomId from atom).digest.value % 2 ^ 64 ≠ low →
+        narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.atoms, atom⟩ = none) := by
+  constructor
+  · intro same
+    exact observe_returns_named_fields store
+      (show CellField.NamedBy (some {CellField.atomsOf low})
+          (atomField (show Hyperdocument.AtomId from atom).digest.value) from
+        CellField.namedBy_of_mem (by simp [atomField, ContentResource.atomLow, same]))
+  · intro other
+    exact DFinsupp.filter_apply_neg store
+      (show ¬ CellField.NamedBy (some {CellField.atomsOf low})
+          (atomField (show Hyperdocument.AtomId from atom).digest.value) from by
+        rintro ⟨outer, member, covers⟩
+        simp only [Finset.mem_singleton] at member
+        subst member
+        simp [atomField, ContentResource.atomLow, CellField.covers, CellField.isAtoms] at covers
+        exact other (by omega))
+
+/-- And no link: a per-member reader gets none of the annotations namespaces. -/
+theorem atoms_reader_sees_no_link (low : Nat) (link : Hyperdocument.Key .links)
+    (store : Store (CanonicalCellRegistry.layout .content)) :
+    narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.links, link⟩ = none :=
+  DFinsupp.filter_apply_neg store
+    (show ¬ CellField.NamedBy (some {CellField.atomsOf low}) .annotations by decide)
 
 /-- Pole: a reader naming field 1 of a declared object keeps field 1 and not
 field 2. -/
