@@ -41,18 +41,26 @@ repository root:
 ```sh
 lake env lean --run tests/objective-bend-source/CheckDemandData.lean
 lake env lean --run tests/objective-bend-source/CheckDemandCapacity.lean
-lake env lean --run examples/objective-bend-world/reference/GenericExtension.lean
+scripts/check-objective-examples.sh
 ```
 
 The first two are unit tests of the demand machine: deep result extraction and its
 failures (budget, duplicate field, closure leaked into data, cycle), and a capacity
 policy that suspends and later resumes a computation. They report through their exit
-status and printed lines. The third runs a pre-elaborated core term for
-[GenericExtension.obend](../tests/objective-bend-source/GenericExtension.obend) on
-the demand machine and prints its final state. The `reference/` drivers are
-generated and untyped (they do not call `check`) and contain no assertions; editing
-the `.obend` file does not change them. The source-to-execution route (capture,
-elaborate, check, run) is the preview tooling described in the
+status and printed lines. The third runs the typed examples in
+[examples/objective-bend-world/reference/](../examples/objective-bend-world/reference/)
+(GenericExtensionReuse, EvenOddTen, TwiceReview, LazySharedField). Each embeds the
+typed packet the current front end produces for its `.obend` source
+(`<Name>.typed.json`) and states the observation as a theorem: the packet passes
+`check`, `runBounded` finishes with the pinned result, and the proof rests on
+`native_decide`, which `#assert_compiled` re-runs. The script fails if a packet is
+stale against the front end (`--refresh` rewrites it), if a driver does not
+elaborate, if its printed summary differs from the `preview-cohort.json` row, or if
+the whole preview cohort fails (`--no-cohort` skips that last row). It needs `bun`,
+and takes the toolchain and built `Theory` modules from `LAKE_ROOT` (default: this
+repository); it compiles `Theory.AssertCompiled` and `Host.ObjectiveBendPreview`
+itself into a scratch directory, so neither has to be built first. The source-to-execution route
+(capture, elaborate, check, run) is the preview tooling described in the
 [language guide](OBJECTIVE-BEND.md#execution-paths).
 
 None of these commands installs a method, creates an instance, spends credits,

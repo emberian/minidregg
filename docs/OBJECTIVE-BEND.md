@@ -94,10 +94,10 @@ def review(inherited: Prior.Review) -> Prior.Review:
 ```
 
 `twice` sees the final, augmented `review` through self, so `twice(3)` reads as
-`7`. That is the expected value read from the source (authored); the generated driver
-[reference/Review.lean](../examples/objective-bend-world/reference/Review.lean)
-prints the machine's final state with no assertion, and because the package declares
-specs it cannot reach the typed preview today (see the front-end defects below).
+`7`. [reference/TwiceReview.lean](../examples/objective-bend-world/reference/TwiceReview.lean)
+embeds the typed packet the front end produces for the source, and pins the result
+`7` (checked type `natural`, no uses) as a `native_decide` theorem under
+`scripts/check-objective-examples.sh`.
 Smaller probes in
 `tests/objective-bend-source/` separate the lazy cases (`LazyUnusedArgument`,
 `LazyUnusedField`, `LazySharedField`), heterogeneous extension (`Heterogeneous`),
@@ -344,10 +344,6 @@ Known front-end defects:
 - `compose` copies `v` and `r` syntactically into both the metadata and the `mix`,
   so term size grows as 2^k in the number of composed specs, and the inherited
   composite is not shared between the copies.
-- `literalAnnotations` throws for any `spec` declaration anywhere in the package, so
-  a package that declares a spec (EvenOdd, Review, the lazy-specification probes)
-  cannot produce a typed packet, even when the entry never uses the spec. Spec method
-  lambdas get no binder hints.
 - `!= < > <= >= || - /` parse but are refused at elaboration.
 - `match` refuses wildcards.
 - Quantities map `default`/`copy` to unrestricted and `dead` to erased; the surface
@@ -356,9 +352,8 @@ Known front-end defects:
   declaration is skipped by the elaborator.
 - The parser still accepts `./NAME.bend` imports.
 
-The generated drivers in `examples/objective-bend-world/reference/` are untyped,
-print state without assertions, and some are stale against the current elaborator
-(EvenOdd encodes Booleans as labels).
+The drivers in `examples/objective-bend-world/reference/` embed packets from the
+current front end; `scripts/check-objective-examples.sh` fails when one is stale.
 
 ## What was Gen-1, and why it is gone
 
