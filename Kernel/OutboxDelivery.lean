@@ -12,6 +12,7 @@ network, authentication mechanism, native transport, or eventual-delivery fact
 is constructed here.
 -/
 import Kernel.ReactiveTerminalCell
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.OutboxDelivery
 

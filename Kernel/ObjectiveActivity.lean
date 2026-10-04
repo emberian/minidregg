@@ -2898,17 +2898,15 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
 
 /-- Settling the purse keeps the ending turn's own postings first. -/
 theorem settlePurse_prefix {config : Config} {book : Book} {held : AccountId} {escrow : Escrow}
-    {before batch : Batch} {segment : Segment}
-    (ok : settlePurse config book held escrow before segment = .ok batch) :
+    {deposit : Nat} {before batch : Batch} {segment : Segment}
+    (ok : settlePurse config book held escrow deposit before segment = .ok batch) :
     ∃ rest, batch.operations = before.operations ++ rest := by
   unfold settlePurse at ok
   split at ok
   · split at ok
     · cases ok; exact ⟨[], by simp⟩
     · cases ok
-  · split at ok
-    · cases ok; exact ⟨[], by simp⟩
-    · cases ok; exact ⟨_, rfl⟩
+  · cases ok; exact ⟨_, rfl⟩
 
 /-- **No fee depends on computation.** The fee the ending turn takes from the
 purse is the used half of the escrowed pair, chosen by how the await ended
