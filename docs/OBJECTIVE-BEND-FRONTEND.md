@@ -195,7 +195,10 @@ from the receiver's own `publishedCore` of its package is refused
 (`SourceSelection.replayExact`), as is a package naming another front end. The source
 package is edition 3 (`frame` byte 3: sources, import locks, entry, one `frontEnd`
 pin; no ASTs, no parser/frontend/elaborator pin triple); the policy is edition 4 (one
-`frontEnd` pin). Earlier editions do not decode.
+`frontEnd` pin). Earlier editions do not decode. The activity kernel holds the same replay
+token: `publish` stores an activity artifact and its package together only after this
+replay, and every later turn reloads the pair and replays it again
+(`Kernel/ObjectiveActivity.lean:1131`, `:622`).
 
 ## Provenance
 
@@ -225,7 +228,10 @@ captured, elaborated, checked and run; a wrong capture pin and a typing-budget
 refusal; tick and heap suspensions), `publication`
 (`tests/objective-native/PublicationReplay.lean`: the Host's publication of
 `world/NativeReceipt.obend` is what the receiver's replay recomputes; a foreign pin, a
-changed source and a tampered core are refused), `examples`, `tutorial`. A cohort item pins a
+changed source and a tampered core are refused), `activity-replay`
+(`tests/objective-native/ActivityReplay.lean`: the activity kernel replays the package
+stored with an activity artifact and loads the program from it; a foreign core, a foreign
+front end, a missing package and another source are refused), `examples`, `tutorial`. A cohort item pins a
 scalar result (`expected`), or a whole structured result (`expectedData`, typed data
 compared with record fields ordered by name), or the reason a result has no deep view
 (`expectedDataStatus`), or exhaustion of the preview's tick budget
@@ -243,9 +249,10 @@ is never refused by the bounded demand machine at any budget
 (`accepted_execution_semantics`); `accept_inhabited` exhibits a surface program it
 holds for. `Kernel/ObjectiveBendAdmissionSemantics.admitted_front_end` proves an
 admitted invocation's typed core is byte-for-byte this front end's lowering of the
-package's sources. Open: there is no surface semantics, so nothing states that the
-core means what the source means; the packet's decoded term equals the elaborator's
-erasure by a run-time comparison (`accept`), not a proof; and the receiver checks the
-term it decodes from the published bytes, linked to the lowering only by byte
-equality (a `Lean.Json` parse/print round trip is not proved). Laws are retained,
+package's sources. The link from the packet to the term is a theorem: the checker's decoder inverts the
+front end's rendering (`decode_json`, `Compiler/ObjectiveBendTermWire.lean:69`;
+`decodePacket_term`, `:280`), so the term the checker reads from the packet is the
+elaborator's erasure by proof, and a receiver types that term, never a parse of the
+published bytes (`Compiler/ObjectiveBendPublication.lean:1-20`). Open: there is no
+surface semantics, so nothing states that the core means what the source means. Laws are retained,
 never discharged; `requires` is not checked.

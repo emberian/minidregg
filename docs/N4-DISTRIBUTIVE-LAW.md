@@ -2,14 +2,14 @@
 
 *Design, 2026-09-05, statement-first — no Lean tonight. In the style of
 `docs/N2-HYPEREDGE-LIMIT.md`: fix the category and the statement before the Lean, name the
-keystone fields, name the risk. Every claim about the tree cites `absolute path:lines` and was
+keystone fields, name the risk. Every claim about the tree cites `path:lines` (repository-relative) and was
 read tonight unless marked **inferred** or **from memory** (literature). Mathlib is the pin
-`1c2b90b` (`/Users/ember/dev/minidregg/lake-manifest.json`, `"rev": "1c2b90b13009…"`; also
-`/Users/ember/dev/minidregg/Compiler/Signature.lean:16`).*
+`1c2b90b` (`lake-manifest.json`, `"rev": "1c2b90b13009…"`; also
+`Compiler/Signature.lean:16`).*
 
 ## 0. What N4 asks, and what the tree actually holds
 
-KERNEL-NECESSITY §N4 (`/Users/ember/dev/minidregg/docs/KERNEL-NECESSITY.md:101-122`): effects
+KERNEL-NECESSITY §N4 (`docs/KERNEL-NECESSITY.md:101-122`): effects
 form a syntax functor Σ (N3, initial side); living cells form a behaviour functor B with final
 coalgebra νB; the kernel "is exactly a distributive law λ : Σ∘B ⇒ B∘Σ"; Turi–Plotkin then gives
 bisimilarity-is-a-congruence, operational = denotational, uniqueness. The named risk (`:117-122`):
@@ -17,16 +17,16 @@ does the fail-closed `Option` gate fit the GSOS format?
 
 What the tree holds tonight:
 
-- **Σ side — held, whole.** `/Users/ember/dev/minidregg/Compiler/Signature.lean`: `Signature` =
+- **Σ side — held, whole.** `Compiler/Signature.lean`: `Signature` =
   mathlib `PFunctor` under kernel names (`:55-71`), `Term S = WType S.ar` (`:78-83`),
   `fold = WType.elim` (`:110-116`), `fold_unique` (`:165-171`), `agree_by_initiality`
-  (`:183-185`), the N3-converse (`:423-474`). `/Users/ember/dev/minidregg/Effects/EffectSpec.lean`
+  (`:183-185`), the N3-converse (`:423-474`). `Effects/EffectSpec.lean`
   derives `sig`/`Prog`/`derivedExecutor`/`derivedDescriptor`/`derive` from one declaration
   (`:101-132, 186, 255-261`).
 - **B side — nothing.** No coalgebra, no `corec`, no bisimulation, no `nuF` exists in any `.lean`
   file (grep over the tree excluding `.lake`, tonight: zero hits; the twin audit agrees,
-  `/Users/ember/dev/minidregg/docs/KERNEL-TWIN-AUDIT.md:72-77`). ATLAS lists `nuF = List Adm → Obs`
-  as a held breadstuffs artifact (`/Users/ember/dev/minidregg/ATLAS.md:140`) and as `Theory/`
+  `docs/KERNEL-TWIN-AUDIT.md:72-77`). ATLAS lists `nuF = List Adm → Obs`
+  as a held breadstuffs artifact (`ATLAS.md:140`) and as `Theory/`
   content (`:245-248`); it was never ported.
 - **Mathlib at the pin has NO distributive law and NO bialgebra.** Confirmed: `grep -rniE
   "DistributiveLaw|distributive law|Bialgebra" Mathlib/CategoryTheory/` is empty;
@@ -43,7 +43,7 @@ What the tree holds tonight:
 - **The twin caveat.** Two state/turn models coexist — (A) `KernelState`/`Gate` and (B) the typed
   cell (`Theory/CellState` + `Kernel/MultiCellHyperedge`) — and the audit proposes (B) survives
   (`KERNEL-TWIN-AUDIT.md:712-736`; D-0002 already says so,
-  `/Users/ember/dev/minidregg/docs/decisions/D-0002-canonical-hyperedge-kernel.md:3-16`). N4 is
+  `docs/decisions/D-0002-canonical-hyperedge-kernel.md:3-16`). N4 is
   therefore stated below over an abstract polynomial Σ and an abstract polynomial B, with EITHER
   gate as an instance (§2.4 shows both twins already have the same refusal shape).
 
@@ -72,7 +72,7 @@ kernel's `move` is derived end-to-end (`:286-353`). *What it costs for N4:* a un
 **no operator that combines two cells or two programs**. Turi–Plotkin's content — "bisimilarity is
 a congruence" — quantifies over operators with ≥ 2 recursive arguments; over `Σ_E` every congruence
 statement is about a single argument and collapses to functoriality (§3.1, §6). The joint turn
-(`Hyperedge`, `/Users/ember/dev/minidregg/Kernel/Turn.lean:38-55`, `ι`-ary with `Fintype ι`) is
+(`Hyperedge`, `Kernel/Turn.lean:38-55`, `ι`-ary with `Fintype ι`) is
 exactly the missing branching node. So: **Σ for N4 = `Signature`, instantiated at a signature that
 contains `EffectSpec.sig`'s prefix nodes AND an `ι`-ary joint node.** N3 needs only the former; N4
 is empty without the latter.
@@ -193,7 +193,7 @@ and the joint rule is the one that has content:
 
 This IS a plain `Σ B ⇒ B Σ` law at the `join` shape (every argument's successor used once, depth
 one) — the strict `Option`/`Except`-traversal of the `ι`-tuple, plus a side-condition
-(`Balanced`, the N2b equalizer, `/Users/ember/dev/minidregg/Kernel/TurnBalancedLimit.lean:90-115`).
+(`Balanced`, the N2b equalizer, `Kernel/TurnBalancedLimit.lean:90-115`).
 And AGAIN a fail-open sibling is lawful: `ρ'` that commits the stepping legs and drops the refused
 ones (`Σ_K` has the unary prefix/solo shapes to land in) is natural and GSOS — and it is the
 half-committed transfer, R6 violated, the exact thing `no_commit_of_nonzero_balance`
@@ -266,7 +266,7 @@ Given a law λ (any of the layers above), with Σ, B polynomial:
   this is the sentence paper2 promised: *a hyperedge over observationally-equal cells
   (equal `List Req → Obs` behaviours) is observationally equal* — turns compose over behavioural
   equivalence. Since B is deterministic, bisimilarity = trace equivalence (equal `nuF` points).
-- **Relation to `sound_bisim_ill_posed`** (`/Users/ember/dev/minidregg/docs/HYPEREDGE-DESIGN.md:91-94`,
+- **Relation to `sound_bisim_ill_posed`** (`docs/HYPEREDGE-DESIGN.md:91-94`,
   `Turn.lean:115-117` `[N-TURN-b]`): that wall refutes *soundness as bisimulation to a FREE
   abstract Spec*. N4's bisimilarity is on ONE bialgebra — the kernel's own λ — with no sibling
   spec. N4 does not resurrect the sibling; it is compatible with the wall.
@@ -281,7 +281,7 @@ one λ ⇒ two agreeing readings ⇒ composability of turns under behavioural eq
 ## 5. The Lean statement, keystone-fielded
 
 **Home.** The statement is candidate-independent (abstract `PFunctor`s), so `Theory/` — but
-`Theory/` may import only Mathlib + Theory (`/Users/ember/dev/minidregg/scripts/check-import-boundary.sh:4-9,
+`Theory/` may import only Mathlib + Theory (`scripts/check-import-boundary.sh:4-9,
 37-38`) and the N3 engine (`fold`, `fold_unique`) lives in `Compiler/Signature.lean`, which imports
 Mathlib only (`Signature.lean:34-35`). Re-deriving `fold_unique` in Theory would be a twin. Two
 honest options: (α) relocate `Compiler/Signature.lean` → `Theory/Signature.lean` verbatim (legal by

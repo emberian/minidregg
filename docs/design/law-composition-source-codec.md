@@ -17,7 +17,7 @@ Lean checks passed the pure module, CanonicalPolicyAdmission, PolicyRecordCodec 
 PolicyHistoryResolution, ResolvedLawCompilation and PolicyComponentResolution; no full
 consumer closure rebuild or native journey had run; active receivers had not been
 switched to this schema. Root decisions and the full product contract are in
-claudesplosion's `planning/law-composition-2026-10-02.md` (outside this repository).
+a scholar planning note of 2026-10-02 on law composition (outside this repository).
 
 ## Small receiving interface
 

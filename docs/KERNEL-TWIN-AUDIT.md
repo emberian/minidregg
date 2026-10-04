@@ -7,7 +7,7 @@
 files, and targeted regions of every other file quoted below; the import graph was built with
 `grep -rn "^import Kernel\.\|^import Theory\." --include='*.lean'` (387 edges). Headers of all
 47 `Kernel/*.lean` were read for classification. No file under the tree was modified; no
-`lake build` was run. Every theorem statement below is quoted verbatim with an absolute path and
+`lake build` was run. Every theorem statement below is quoted verbatim with a repository-relative path and
 line numbers; where I did not read the Lean, the claim is marked UNVERIFIED.*
 
 Counts at the audit snapshot: `Kernel/` 47 files / 23,802 lines · `Theory/` 61 files in the
@@ -24,7 +24,7 @@ picture and are covered there. All other sections describe the snapshot.
    (the abstract `Hyperedge` structure). Nothing in (B) references `KernelState`, `UKey`,
    `umap`, `Act`, `TurnReq`, `gateOK`, `admit`, `totalAsset`, `move`, `create`, `gwrite`, or
    `uproj` (grep over every (B) file: zero hits except the sentence at
-   `/Users/ember/dev/minidregg/Theory/CanonicalResourceKernel.lean:4`, which names (A) as "the
+   `Theory/CanonicalResourceKernel.lean:4`, which names (A) as "the
    original `KernelState`" and re-proves its conservation law over a new `Book`). Fail-closed,
    no-TOCTOU, conservation, frame, and receipt binding are each stated a second time over
    (B)'s carriers (§2 table).
@@ -151,7 +151,7 @@ ReceiptClaim,SelvageV0,PrivateReceipt}.lean`, `Compiler/AdmissionAir.lean:693` (
 `Compiler/Signature.lean:300` and `Pred/Core.lean:17` (both doc-comments about breadstuffs'
 `RecordKernelState`), and `Theory/CanonicalResourceKernel.lean:4` (doc-comment)).
 
-The shared object, verbatim (`/Users/ember/dev/minidregg/Kernel/Turn.lean:38-55`):
+The shared object, verbatim (`Kernel/Turn.lean:38-55`):
 
 ```lean
 structure Hyperedge
@@ -173,7 +173,7 @@ structure Hyperedge
 
 **Fail-closed.**
 
-(A) `/Users/ember/dev/minidregg/Kernel/Gate.lean:341-343`
+(A) `Kernel/Gate.lean:341-343`
 ```lean
 theorem admit_fail_closed [Theory.Verifiable CellId W] {k : KernelState} {t : TurnReq W}
     (fp : Footprint) (h : gateOK k t = false) : admit k (gatedVerb fp) t = none :=
@@ -191,7 +191,7 @@ def admit (k : KernelState) (v : Verb W) (t : TurnReq W) : Option KernelState :=
   else none
 ```
 
-(B) `/Users/ember/dev/minidregg/Kernel/DeclaredHyperedge.lean:499-514` (the joint gate)
+(B) `Kernel/DeclaredHyperedge.lean:499-514` (the joint gate)
 ```lean
 def execute
     (projection : AuthorizationProjection materializer)
@@ -210,7 +210,7 @@ def execute
     else .rejected .authorization
   else .rejected .shape
 ```
-`/Users/ember/dev/minidregg/Kernel/DeclaredHyperedge.lean:529-536`
+`Kernel/DeclaredHyperedge.lean:529-536`
 ```lean
 theorem execute_rejected_unchanged
     (projection : AuthorizationProjection materializer)
@@ -219,7 +219,7 @@ theorem execute_rejected_unchanged
     (rejected : execute projection declaration = .rejected reason) :
     (execute projection declaration).materialized = declaration.pre := by
 ```
-`/Users/ember/dev/minidregg/Kernel/MultiCellHyperedge.lean:343-355` and `369-375`
+`Kernel/MultiCellHyperedge.lean:343-355` and `369-375`
 ```lean
 def admit
     {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
@@ -253,14 +253,14 @@ legs in (B).
 
 **No-TOCTOU (check-equals-use).**
 
-(A) `/Users/ember/dev/minidregg/Kernel/Gate.lean:382-384`
+(A) `Kernel/Gate.lean:382-384`
 ```lean
 theorem admit_check_eq_use [Theory.Verifiable CellId W] {k k' : KernelState}
     {fp : Footprint} {t : TurnReq W} (h : admit k (gatedVerb fp) t = some k') :
     gateOK k t = true ∧ k' = t.act.apply k :=
 ```
 
-(B) `/Users/ember/dev/minidregg/Kernel/DeclaredHyperedge.lean:690-695`
+(B) `Kernel/DeclaredHyperedge.lean:690-695`
 ```lean
 theorem execute_committed_hyperedge_sound
     (projection : AuthorizationProjection materializer)
@@ -279,7 +279,7 @@ same-pre-state binding is `Kernel/DeclaredHyperedge.lean:166-169`
     (declaration : Declaration portal materializer Incidence) :
     declaration.authState projection = projection.project declaration.pre.logical := rfl
 ```
-Single-cell form: `/Users/ember/dev/minidregg/Theory/DeclaredTurn.lean:251-257`
+Single-cell form: `Theory/DeclaredTurn.lean:251-257`
 ```lean
 theorem execute_committed_sound {portal : Portal} (state : AuthState)
     {materializer : CellState.Materializer effectSchema Digest}
@@ -292,7 +292,7 @@ theorem execute_committed_sound {portal : Portal} (state : AuthState)
 
 **Conservation.**
 
-(A) `/Users/ember/dev/minidregg/Kernel/State.lean:176-178` and `197-199`
+(A) `Kernel/State.lean:176-178` and `197-199`
 ```lean
 theorem move_conserves (k : KernelState) (src dst : CellId) (a : AssetId) (δ : ℤ)
     (hsrc : src ∈ k.accounts) (hdst : dst ∈ k.accounts) :
@@ -303,7 +303,7 @@ theorem mint_breaks_conservation (k : KernelState) (dst : CellId) (a : AssetId) 
     (hdst : dst ∈ k.accounts) (hδ : δ ≠ 0) :
     totalAsset (mint k dst a δ) a ≠ totalAsset k a := by
 ```
-and at the gate, `/Users/ember/dev/minidregg/Kernel/Gate.lean:406-409`
+and at the gate, `Kernel/Gate.lean:406-409`
 ```lean
 theorem admit_conserves {k k' : KernelState} {v : Verb W} {t : TurnReq W}
     (a : AssetId) (h : admit k v t = some k')
@@ -311,7 +311,7 @@ theorem admit_conserves {k k' : KernelState} {v : Verb W} {t : TurnReq W}
     totalAsset k' a = totalAsset k a := by
 ```
 
-(B) `/Users/ember/dev/minidregg/Theory/CanonicalResourceKernel.lean:185-190` and `434-438`
+(B) `Theory/CanonicalResourceKernel.lean:185-190` and `434-438`
 ```lean
 theorem Operation.apply_conserves
     (operation : Operation) (book : Book)
@@ -330,7 +330,7 @@ theorem Book.creditOnly_breaks_conservation
 The file's own header, `Theory/CanonicalResourceKernel.lean:4-5`: "The original `KernelState`
 proves the right conservation equation, but its ledger is a fixed field of an early monolithic
 state." — (B) knew (A) existed and landed beside it.
-At the joint level, `/Users/ember/dev/minidregg/Kernel/MultiCellHyperedge.lean:415-420`
+At the joint level, `Kernel/MultiCellHyperedge.lean:415-420`
 ```lean
 theorem no_commit_of_nonzero_balance
     {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
@@ -339,7 +339,7 @@ theorem no_commit_of_nonzero_balance
       aggregateDelta law accepted coordinate ≠ 0) :
     IsEmpty (AdmittedCommit law boundary) :=
 ```
-and `/Users/ember/dev/minidregg/Kernel/DeclaredHyperedge.lean:738-750`
+and `Kernel/DeclaredHyperedge.lean:738-750`
 ```lean
 theorem execute_rejects_agreeing_nonzero_balance
     (projection : AuthorizationProjection materializer)
@@ -358,7 +358,7 @@ theorem execute_rejects_agreeing_nonzero_balance
 
 **Frame.**
 
-(A) `/Users/ember/dev/minidregg/Kernel/Gate.lean:426-431`
+(A) `Kernel/Gate.lean:426-431`
 ```lean
 theorem admit_footprint {k k' : KernelState} {v : Verb W} {t : TurnReq W}
     (h : admit k v t = some k') :
@@ -370,7 +370,7 @@ theorem admit_footprint {k k' : KernelState} {v : Verb W} {t : TurnReq W}
 plus `Kernel/Verbs.lean:142-145` (`gwrite_umap_frame`) and `Kernel/Receipt.lean:83-87`
 (`uproj_move_frame`).
 
-(B) `/Users/ember/dev/minidregg/Theory/CellState.lean:372-377` and `398-403`
+(B) `Theory/CellState.lean:372-377` and `398-403`
 ```lean
 theorem ValidatedPatch.field_frame
     {S : Schema.{u, v, w, x}} {Root : Type y} [DecidableEq S.Field]
@@ -388,7 +388,7 @@ theorem ValidatedPatch.field_changed_only_declared
     (changed : validated.apply.logical.fields field ≠ pre.logical.fields field) :
     field ∈ patch.fieldFootprint := by
 ```
-`/Users/ember/dev/minidregg/Theory/CanonicalTransition.lean:55-62`
+`Theory/CanonicalTransition.lean:55-62`
 ```lean
 theorem CellDelta.field_changed_only_declared
     {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
@@ -399,7 +399,7 @@ theorem CellDelta.field_changed_only_declared
     (changed : post.logical.fields field ≠ pre.logical.fields field) :
     field ∈ delta.fieldFootprint := by
 ```
-`/Users/ember/dev/minidregg/Theory/DeclaredTurn.lean:353-360`
+`Theory/DeclaredTurn.lean:353-360`
 ```lean
 theorem Commit.frame {portal : Portal} {state : AuthState}
     {materializer : CellState.Materializer effectSchema Digest}
@@ -415,7 +415,7 @@ theorem Commit.frame {portal : Portal} {state : AuthState}
 
 **Receipt binding.**
 
-(A) `/Users/ember/dev/minidregg/Kernel/Receipt.lean:59-62`
+(A) `Kernel/Receipt.lean:59-62`
 ```lean
 theorem uproj_faithful (w : Window) (k k' : KernelState) :
     uproj w k = uproj w k' ↔
@@ -426,7 +426,7 @@ theorem uproj_faithful (w : Window) (k k' : KernelState) :
 
 (B) has no theorem of the "word equality ↔ observed-state agreement" shape. Its binding is
 "the root is a projection of the canonical post":
-`/Users/ember/dev/minidregg/Theory/CanonicalTransition.lean:149-155`
+`Theory/CanonicalTransition.lean:149-155`
 ```lean
 @[simp] theorem PreparedTurn.postRoot_derived
     {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
@@ -436,7 +436,7 @@ theorem uproj_faithful (w : Window) (k k' : KernelState) :
     turn.postRoot = M.rootBytes (M.codec.encode turn.post.logical) :=
   rfl
 ```
-`/Users/ember/dev/minidregg/Theory/CellState.lean:183-187`
+`Theory/CellState.lean:183-187`
 ```lean
 theorem Materialized.root_encoding_coherent
     {S : Schema.{u, v, w, x}} {Root : Type y} {M : Materializer S Root}
@@ -483,7 +483,7 @@ the same `match` over `DataSnapshot` with a `.durable` reason wrapper.
 
 ## 3. Q2 — which of Gate.lean's residuals did (B) close?
 
-`/Users/ember/dev/minidregg/Kernel/Gate.lean:57-60`, verbatim and unchanged since its single
+`Kernel/Gate.lean:57-60`, verbatim and unchanged since its single
 commit (2026-08-08):
 ```
   [GATE-hyperedge] `admit` takes a single-incidence request — the `ι = 1`
@@ -505,7 +505,7 @@ commit (2026-08-08):
 well-typed `Hyperedge` instance whose `agree`/`balanced` proofs are real (e.g.
 `MultiCellHyperedge.lean:310-320` derives `balanced` from `commit.aggregateBalanced`). Consumers
 tree-wide (grep `toHyperedge|SemanticHyperedge`): only
-`/Users/ember/dev/minidregg/Assurance/GrainForkSettlement.lean:333-335`
+`Assurance/GrainForkSettlement.lean:333-335`
 ```lean
 def hyperedge (settlement : AcceptedSettlement (law := law) cut) :
     Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge
@@ -661,7 +661,7 @@ Sampled: the four largest plus `ErrorBudget`, `ReceiptClaim`, `NoteSpendCoreAcce
 scripts/CarrierCensus.lean`) over unwitnessed carriers — the law-1 "query, never a hand-count"
 shape, but it produces a report, not the ledger. `scripts/local-check.sh` builds
 `Theory Kernel Compiler Assurance`. The five files matching "generated" are prose mentions.
-`/Users/ember/dev/minidregg/Assurance/Placeholder.lean:4-6` still reads "Generated: namespace
+`Assurance/Placeholder.lean:4-6` still reads "Generated: namespace
 pins, keystone audit (satisfiable + teeth + premise), the carrier registry with realizer slots,
 Bound/Forced types, and the floor doc with both soundness numbers. No hand-maintained ledger
 anywhere." — contradicted by the directory around it.

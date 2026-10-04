@@ -28,7 +28,7 @@ No BendTT termination or consistency theorem is inherited by the new Fix.
 
 Historical admitted profile and source evidence
 ----------------------------------------------
-The pinned upstream snapshot at /Users/ember/dev/bend is retained for historical profile reproducibility. New Objective language implementation lives in separate versioned source; the historical upstream file policy is not a restriction on Objective syntax/core changes. bend.ts owns parsing/checking; safe.ts elaborates checked definitions to BendTT; comp.ts emits C/Metal/CUDA/JS; main.ts loads imports and supplies the CLI. Native Bend modules already export source definitions into JavaScript via its loader. This is useful authoring/compiler infrastructure, not a Mini authority boundary.
+The pinned upstream snapshot (a local checkout of the upstream Bend repository, not in this repository) is retained for historical profile reproducibility. New Objective language implementation lives in separate versioned source; the historical upstream file policy is not a restriction on Objective syntax/core changes. bend.ts owns parsing/checking; safe.ts elaborates checked definitions to BendTT; comp.ts emits C/Metal/CUDA/JS; main.ts loads imports and supplies the CLI. Native Bend modules already export source definitions into JavaScript via its loader. This is useful authoring/compiler infrastructure, not a Mini authority boundary.
 
 Upstream BendTT requests Lean 4.34.0; Mini currently pins 4.30.0. No common checkpoint's toolchain or runtime profile is changed by this lane. Consensus/composition owns an exact namespace-adapted BendTT import and the explicit compatibility check, rather than pretending source text has been checked on Mini just because upstream built it.
 
@@ -125,7 +125,7 @@ Compiler/BendWorldProgramCodec.lean: canonical source+exact elaborated Book+sema
 
 Kernel/BendWorldMethod.lean: fail-closed source provenance link to exact existing WorldMethodTrace/CheckedRun/program/evaluator, retaining the complete actual native trace. No mutation of registry, ABI, CanonicalRuntimeProfile, common receiver or native build occurs. Link validation does not confer authority or prove source compilation. Publication authentication and actual source-to-executable refinement are separate next joins.
 
-Source staged locally at /Users/ember/workbox/bend-world-additive-20261003 and copied to own isolated hbox lane. Captain owns common convergence/Git. Narrow compile is requested but not yet performed; no deployment, external model call, payment or upstream modification. This additive checkpoint is reviewable source construction; the full requested authoring/runtime/private/OO integration remains active work.
+Source was staged in a build-host working directory (not in this repository) and copied to an isolated lane. Captain owns common convergence/Git. Narrow compile is requested but not yet performed; no deployment, external model call, payment or upstream modification. This additive checkpoint is reviewable source construction; the full requested authoring/runtime/private/OO integration remains active work.
 
 Concrete continuation, with owners
 ----------------------------------
@@ -156,7 +156,7 @@ Registry/referee construction detail
 -----------------------------------
 Upstream BendTT has Value/Eval/progress, not a native Crash relation analogous to Nock. Quantity/notData/stuck diagnostics from the machine are not evidence that a source term has no value. Keep Mini's Evaluator obligations intact: the Bend machine Term domain should retain accepted Book/closed typed live entry/input evidence, or perform explicit pre-admission refusal before executing. Prove non-timeout stuck impossible on this domain; do not register diagnostics as semantic crashes by fiat. The artifact includes exact elaborated AST/Book bytes and codec, since a surface source digest alone does not certify parsing.
 
-Local upstream exact-byte SHA256 component pin ledger (algorithm stated separately from Mini cSHAKE artifact IDs): /Users/ember/workbox/bend-world-additive-20261003/upstream-source-pins.json. No digest collision-resistance theorem is asserted by the artifact roundtrip laws.
+Local upstream exact-byte SHA256 component pin ledger (algorithm stated separately from Mini cSHAKE artifact IDs): the lane's upstream-source-pins.json (not in this repository; the committed ledger is docs/objective-bend/evidence/upstream-source-pins.json). No digest collision-resistance theorem is asserted by the artifact roundtrip laws.
 
 Further receiving/cost clarification from joined owners
 ------------------------------------------------------

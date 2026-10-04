@@ -24,12 +24,14 @@ The front end is Lean: `Compiler/ObjectiveBendParse.lean` (parser),
 `Compiler/ObjectiveBendElaborate.lean` (surface to core), `Compiler/ObjectiveBendFrontEnd.lean`
 (driver and its checked result) and `Host/ObjectiveBendFrontEnd.lean` (capture, elaborate,
 preview commands; [front end](OBJECTIVE-BEND-FRONTEND.md)). `Host/ObjectiveBendPreview.lean`
-checks and runs a decoded core term; `Kernel/ObjectiveBendPreparedOutput.lean` and
-`Compiler/ObjectiveBendPlanAdapter.lean` turn a result into a scalar Plan. The
+checks and runs a decoded core term; `Kernel/ObjectiveBendPreparedOutput.lean` and the adapters
+`Compiler/ObjectiveBendPlanAdapter.lean`, `Compiler/ObjectiveBendResultAdapter.lean`,
+`Compiler/ObjectiveBendCombinedResult.lean` and `Compiler/ObjectiveBendGenericResult.lean` turn a result into a
+Plan (`Output`, `Kernel/ObjectiveBendNativeAdmission.lean:191`). The
 [language guide](OBJECTIVE-BEND.md) states what each of these proves and where
-the trusted boundary sits. At this revision the `Theory/ObjectiveBend*` proofs are
-compiled only by the opt-in `ResearchWip` library, so a green default build says
-nothing about them. A native registry/profile must actually consume a module; an
+the trusted boundary sits. The `Theory/ObjectiveBend*` proofs
+are the separate `ObjectiveProofs` library, gated by `scripts/check-objective-proofs.sh
+proofs`, so a green default build alone re-checks none of them. A native registry/profile must actually consume a module; an
 importable theorem alone does not install it.
 
 ## Run an Objective Bend example

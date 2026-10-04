@@ -1108,6 +1108,14 @@ Turn 3 is refused, so the count stays 2 and turn 4 asks for the same write
 again. It is waiting for a response. These responses are only what you typed.
 Nothing here admits a write.
 
+The Plan and Response types in this chapter are the chapter's own. An activity the
+kernel itself runs uses the kernel's shapes: its Plan is `await {write, on, patience}`
+and its response is `resumed {outcome, view}`, the settled outcome together with the
+object's declared state read in the resuming turn.
+[world/activity/Tally.obend](../world/activity/Tally.obend) is the reference program, and
+[OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity) describes the
+kernel's side.
+
 ### An effect may not hide in a shared value
 
 An argument and a record field are shared suspended computations. An effect
@@ -1198,8 +1206,9 @@ tutorial did not run these items.
 
 Roadmap, in the guide's order:
 
-1. Kernel delivery of activities. A kernel admits a yielded Plan, persists the
-   checkpoint, and resumes with a typed response. Not built.
+1. A native route for activities. The kernel's turns (persist the checkpoint,
+   resume with a typed response and a view of the object's state) are built and
+   proved, but no Host operation reaches them yet.
 2. A guardedness check, so that a well-typed resident never diverges inside a
    turn.
 3. The theorem for declared ancestry. Declared ancestry with C4 linearization
@@ -1218,7 +1227,8 @@ Further gaps the guide names, unranked: sealing, `final` and suffix
 declarations; reflection beyond `reflect`, `metadata` and `project` (listing
 fields, asking whether a field exists); a consumed mark for linear values;
 fresh persistent instances; governed live upgrade; and a canonical cost law on
-the machine.
+the machine (native admission already charges a public price for a declared
+envelope; the machine itself has no cost law).
 
 [OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md) adds what activities cannot
 do yet: a view library (Plans and responses must be non-recursive data, so lists

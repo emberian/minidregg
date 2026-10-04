@@ -151,6 +151,6 @@ authority, transition meaning, and history come from.
 
 ## Source audit
 
-- `/Users/ember/dev/HYPERDREGGMEDIA_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md`
-- `/Users/ember/dev/BREADSTUFFS_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md`
+- `HYPERDREGGMEDIA_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md` (a scholar document outside this repository)
+- `BREADSTUFFS_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md` (a scholar document outside this repository)
 - Breadstuffs audit snapshot: `89c254c251d0168c7155438cc8cabeed4d7786c2`

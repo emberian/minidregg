@@ -22,8 +22,9 @@ source bytes for the canonical package producer. The generated producer input
 uses the existing `dregg.bend.package-input.v1` schema. This local source custody
 is not a canonical source identity, publication receipt or execution authority.
 
-The first source implementation is WIP and has not been compiled or received in
-a browser. Governed publication, prototype instantiation and instance evolution
+The source workspace is compiled Rust (`native/resource-client/src/workspace/studio.rs`, two
+focused tests; routes in `native/resource-client/src/web/studio.rs`); it has been received in a
+browser only on lane builds, with no member-reachable route. Governed publication, prototype instantiation and instance evolution
 are unavailable until their real producer and native intent APIs are connected.
 Objective Bend preview is a separate route (`studio_preview.rs` to the pinned Host's
 `objective-front` command; see [Objective Bend](OBJECTIVE-BEND.md#execution-paths)). No compiler success or installed program is

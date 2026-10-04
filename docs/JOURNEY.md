@@ -4,7 +4,17 @@
 definition of done for the October 13 shellserver. It starts a fresh private
 Store from the binaries the manifest pins (sha256-checked), runs J0–J8 ([the steps](#the-steps-j0j8-and-growth),
 below), the growth measurement (G, between J6 and
-J7), the 32-field typed-state check (K4), and list items 3–7 (M3–M7). It prints
+J7), the 32-field typed-state check (K4), list items 3–7 (M3–M7) and the lane journeys
+that joined since (the `STEPS` array in `native/resource-client/journey.sh:189` is the
+list; each step's header comment names its hook in `journey.d/`; `JOURNEY_STEPS` selects a
+subset). The continuous runner (`scripts/pipeline/journey-rows:15`) runs the rows
+`journey` (J0–J8, `JROT`, `JROTL`, and `JRLANE` and any seat step when present),
+`objective` (`native/resource-client/objective-native-acceptance.py all`: the native
+Objective Accepted receipt and its refusals,
+[native admission](OBJECTIVE-BEND.md#native-admission)), `rooms`, `activity` and `seats`;
+the last two report ABSENT while no driver exists in the tree (the activity and seat
+modules have no native route yet, [activities](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity),
+[seats](SEATS.md)). It prints
 one row per step (PASS / FAIL / UNBUILT, wall seconds, the artifact that decided
 it), writes `journey-result.json`, and exits 0 only when every step passes. The
 frontier is the first step that did not pass; it is read from a run, never

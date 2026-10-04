@@ -657,9 +657,9 @@ impl Site {
             ["room",name,"resident"] => resident::page(self,name),
             ["stream", _] => simple(
                 501,
-                "Not on this tree",
-                "streams are K-STREAM (branch k-stream: the `tail` view); this mini was built from the \
-                 docuverse braid, which does not carry k-stream",
+                "No web page for streams",
+                "a room's member streams are read with the shell verbs (`tail`, `say`; \
+                 native/resource-client/src/chat.rs); there is no browser view of a stream",
             ),
             _ => simple(404, "Not found", "no such route"),
         }

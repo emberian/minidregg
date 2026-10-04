@@ -42,20 +42,22 @@ those are V, not general OO linearization/construction correctness.
 
 Objective Bend Core4 (Theory/ObjectiveBend*; see docs/OBJECTIVE-BEND.md) has
 compiled S for the core: runBounded_*_sound, typed_stepRaw_preserved and
-check_runBounded_no_refusal, compiled only in the opt-in ResearchWip library at
-this revision. Surface-to-core elaboration was TypeScript (objective-elaborate.ts; since 2026-10-04 it is the Lean front end, docs/OBJECTIVE-BEND-FRONTEND.md)
-and is a trusted boundary with no S or R.
+check_runBounded_no_refusal; as of 2026-10-05 they are the ObjectiveProofs library
+(statement snapshot and axiom pin: scripts/check-objective-proofs.sh). Surface-to-core
+elaboration was TypeScript (objective-elaborate.ts); since 2026-10-04 it is the Lean front
+end (docs/OBJECTIVE-BEND-FRONTEND.md), a trusted boundary whose output the checker
+re-checks and the receiver re-runs, with no theorem that the core means what the source
+means.
 Missing S/R:
- - Surface-to-core: a Lean elaborator or a checked translation-validation
-   statement; `requires` checked at compose/fix; spec laws discharged (today they
-   are callable closures in metadata).
- - Composition: compose is a left fold of mix. No declared ancestry,
-   linearization or generative identity, so diamond/repeated providers have no
-   semantics yet.
- - Plan path: forceWith/executeWith equal to runBounded, and soundness of the
-   deep Data extraction that becomes the Plan.
- - Completeness: reference termination implies machine termination with
-   sufficient resources (no Representation instance exists).
+ - Surface-to-core: a surface semantics; `requires` checked at compose/fix; spec laws
+   discharged (today they are callable closures in metadata).
+ - Composition: declared ancestry with C4 linearization and generative identity landed in
+   the elaborator (2026-10-03); the invariance theorem OrderedPresentationInvariant is
+   stated and not proved.
+ - Plan path: landed (forceWith is runBounded; executeWith Data is a deep source
+   evaluation; docs/OBJECTIVE-BEND.md, Formal status); the Data's uniqueness is open.
+ - Completeness: landed (machine_evaluation_complete, coreRepresentation inhabits
+   Representation); a resource bound for it is open.
  - Reflective retrieval, persistent identity and evolution: no Core4 construct;
    Mini owns identity and versioning.
 Historical: the Gen-1 certificate contract (ObjectiveBendComposition/Elaboration

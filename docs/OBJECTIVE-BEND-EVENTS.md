@@ -1,6 +1,6 @@
 # Objective Bend activities and events
 
-An Objective Bend method can now be an **activity**: a computation that hands a
+An Objective Bend method can be an **activity**: a computation that hands a
 typed Plan to the kernel, waits, and continues with the kernel's typed response.
 A long-lived object built this way is a **resident**, and an **event** is an admitted
 turn that resumes it. This page describes the language construct, its semantics and
@@ -8,11 +8,16 @@ typing, what is proved, how events are handled, and how it compares with deos-js
 Bread's JavaScript host. Design record: [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt).
 
 Evidence classes as in [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md): *authored*,
-*compiled*, *executed*, *integrated*, *deployed*. Everything below is compiled and,
-where it says so, executed in the clear preview. The kernel half, which persists an
-activity and delivers its responses, is [below](#the-kernel-activity): compiled; its
-native signed-command route is executed on `lane/activity-native-wip` and **not yet
-landed** (it waits for the object record).
+*compiled*, *executed*, *integrated*, *deployed*. The language half below is compiled
+and, where it says so, executed in the clear preview. The kernel half, which persists
+an activity and delivers its responses, is [below](#the-kernel-activity): compiled and
+proved in Lean on main, with the stored checkpoint's transparency executed by a gate.
+**No native route reaches it on main**: `Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
+`Kernel.ObjectRecord` and `Kernel.ObjectState` are not in the Host closure
+(`scripts/gates/host-closure.pin:490-500` lists only `Kernel.ObjectiveActivityCell` of
+them), so no Host operation births, delivers to or writes an activity, and no activity
+has run on a native Host. In flight: ACTIVITY-ROUTE (the receiver and Host ops),
+RETENTION-PAYERS, UPGRADE, CHECKPOINT-INVARIANT, FORCING-TRANSPARENT, SCHOLAR-CALLS.
 
 ## In the source
 
@@ -100,7 +105,11 @@ refuses it. Type agreement never crosses between an activity and a suspendable t
 
 ## What is proved
 
-All in `Theory/ObjectiveBend*.lean`, compiled, no `sorry`, axioms pinned.
+All in `Theory/ObjectiveBend*.lean`, compiled, no `sorry`; each theorem's exact axiom set
+is pinned in `scripts/gates/objective-axioms.pin` and its statement in
+`scripts/gates/objective-statements.snapshot` (gate `scripts/check-objective-proofs.sh
+proofs`). The kernel's theorems about activities are
+[further down](#the-kernel-activity).
 
 | Theorem | In plain words |
 | --- | --- |
@@ -124,150 +133,260 @@ Inside a turn, recursion is the existing lazy `fix`: a turn may diverge (a black
 or run out of ticks (a resource suspension, which is never a turn). Across turns, a
 resident is a guarded fixed point: its self-call sits in an arm of a match on a
 perform, so each unfolding past a yield costs one resume, and each resume is one
-admitted turn. The kernel's activity record consumes one generation per resume; the
-checkpoint itself is pure and repeatable, so fencing duplicate resumes is the
-kernel's job (Kernel/Contracts: `retry_cannot_reconsume_row`).
+admitted turn. The kernel's activity record consumes one generation per resume
+(`delivery_advances_generation`, `Kernel/ObjectiveResumeContract.lean:593`); the
+checkpoint itself is pure and repeatable, so fencing duplicate resumes is the kernel's
+job ([the resume contract](#the-resume-contract)).
 
 ## Events
 
 An event is an admitted turn that resumes a resident with a typed response. The
-resident yields a Plan, often an "await" naming what it waits for. The kernel admits
-an `Invoke` cut on the resident (sender, event bytes, current law), checks the response
-against the resident's declared Response type, resumes it, runs it to its next yield
-and admits that Plan. Handlers are the arms of the match on the response. Ordering:
-one activity has one generation chain, so resumes are totally ordered and later events
-wait in the resident's mailbox. Deduplication: a retry is a new `AttemptId` of the
-same `InvocationId`; charging is per invocation and the generation row is consumed
-once, so a duplicate delivery cannot resume twice.
+resident yields a Plan, often an "await" naming what it waits for. The kernel turn
+`deliver` ([below](#turns)) checks the response against the resident's declared
+Response type, resumes the stored checkpoint, runs it to its next yield and commits
+that Plan. Handlers are the arms of the match on the response. Ordering: one activity
+has one generation chain, so resumes are totally ordered. Deduplication: every
+delivery of one await shares one transaction id (`deliveryTransaction`,
+`Kernel/ObjectiveActivity.lean:315`), so the exact retry replays and any other delivery
+is a transaction conflict; the await's claim is spent once
+(`resume_consumes_once`, `:2067`). There are no inboxes: an await on a `message` is
+refused by name (`messageAwaitNeedsInbox`, `:726`).
 
 The preview stands in for the kernel: give it a list of responses and it runs to each
 yield, prints the Plan, checks and applies the next response, and reports for every
 turn the checkpoint size, that it round-trips (executed) and that the yield was
-quiescent.
+quiescent. A response is whatever the program's Response type says; a program the
+kernel can run uses the kernel's own shapes, below.
 
 ## The kernel activity
 
-[Kernel/ObjectiveActivity](../Kernel/ObjectiveActivity.lean),
+[Kernel/ObjectiveActivity](../Kernel/ObjectiveActivity.lean) (record, turns, fees),
 [Kernel/AnswerSlot](../Kernel/AnswerSlot.lean),
-[Kernel/ObjectiveActivityWire](../Kernel/ObjectiveActivityWire.lean),
-[Kernel/ObjectiveActivityCell](../Kernel/ObjectiveActivityCell.lean) and, in
-`ObjectiveProofs`, [Kernel/ObjectiveResumeContract](../Kernel/ObjectiveResumeContract.lean).
-Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §A, §B, §D (answer slots), §G, T1.
+[Kernel/ObjectiveActivityCell](../Kernel/ObjectiveActivityCell.lean) (cell role and
+coordinates), [Kernel/ObjectState](../Kernel/ObjectState.lean),
+[Kernel/ObjectRecord](../Kernel/ObjectRecord.lean),
+[Kernel/ObjectiveTariff](../Kernel/ObjectiveTariff.lean) and, in `ObjectiveProofs`,
+[Kernel/ObjectiveResumeContract](../Kernel/ObjectiveResumeContract.lean). Line numbers
+are for main at 4795b657. Evidence class: compiled and proved; not integrated (see the
+top of this page).
 
-- **Objects and cells.** An activity lives on an object: a native resource cell the
-  authority layer issues capabilities on. The activity's cells are registry cells of
-  their own role (`CanonicalCellRegistry.Kind.objectiveActivity`): the record
-  (`recordCell domain object activity`), its answer slots, the object's declared state
-  (`stateCell domain object`) and published packages. Each sits at a coordinate that is
-  a function of the deployment domain, the role and a key (`ObjectiveActivityCell.coordinate`);
-  the registry's loaded-and-final law pins every such cell to its coordinate, no birth
-  may install the role (`UserShape`), and nothing but the activity kernel's turns writes
-  it: these are protected coordinates (ids at or above 2^256, which no birth may use).
-- **The record.** The checkpoint of the yield
-  ([Theory/ObjectiveBendDemandCollect](../Theory/ObjectiveBendDemandCollect.lean)
-  `checkpoint`): the state the Plan extraction left (every cell it forced is stored as
-  its value), settled (a cached cell's origin closure, which the machine never reads
-  again, becomes the cell itself, so it retains nothing) and collected (only the cells
-  the yielded Plan and the stack reach, compacted and renumbered), as
-  checkpoint bytes (the token stream of `encodeState`), their digest, the pinned package identity, the instantiating input,
-  the generation, the escrow terms, and its phase
-  (`awaiting await | done result | faulted reason`). An await has an id
-  `H(record cell, generation, checkpoint digest)`, a source (an answer slot with one
-  decider, or a due height; a `message` await is refused by name until inboxes exist),
-  and a mandatory deadline height (yield height + `patience`).
-- **Resume with view** (ROOT ruling 10-05). The object's declared state cell holds an
-  `ObjectState {version, value}` ([Kernel/ObjectState](../Kernel/ObjectState.lean));
-  every committed write installs the next version. An activity is resumed with
-  `resumed {outcome, view}`: the outcome its await settled to, exactly (never replaced,
-  never dropped), and `view = {version, state}`, the object's declared state read IN THE
-  RESUMING TURN. The outcome sum is `reply R | refused | unknown | timedOut | broken |
-  upgraded`; staleness is not an outcome.
-- **Plans the kernel performs.** A yielded Plan is `await {write, on, patience}`. `write`
-  is a record of field edits (`keep | set v | add n`), applied by the kernel to the state
-  the activity was resumed with (`stateWrite`, the single point where a declared-state
-  write is built), installing version + 1 against the root that state was read from. So
-  no write is computed from a stale read: a delivery prepared on one snapshot is refused
-  on any snapshot where the state moved, and a fresh delivery sees the move. A birth's
-  first segment has seen no state: its write may `set` a field only when it creates the
-  state cell (`blindWrite`), and a first yield on an object with no state must create it.
-  A birth is refused unless the program's response type is `resumed {outcome, view}`,
-  types every kernel outcome at its outcome type, and (when it yields) types the view of
-  the state it leaves.
-- **Typing data.** The kernel types the datum's closed Core4 term with the actual
-  checker (`check`), annotating each injection with the constructor the declared type
-  gives it, and requires the checked type to agree (`TypedData`). Inputs, replies and
-  every delivered outcome go through it, so a delivered response carries exactly the
-  premise of `typed_resume_preserved`.
-- **Turns** (each is one `DataIntent`, all writes or none, under the admitting
-  receiver's seal): `publish`, `birth` (instantiate, run to the first yield, commit
-  record + state + slot + Book postings), `resolve` (the slot's decider, at or before
-  the deadline, typed reply; spends the slot claim), `deliver` (anyone; settles the
-  await from its slot, due height or deadline, reads the view, decodes
-  the record cell's checkpoint, resumes with the typed outcome and view, runs to the next yield
-  or end, commits the new record, the Plan's write, the next slot and the Book postings
-  together; spends the await claim), `topUp` (anyone funds a purse), `writeState` (a
-  holder of the object writes its declared state: a new version, which the next
-  delivery's view shows). Every
-  delivery of one await shares one transaction id: the exact retry replays, any other
-  is a transaction conflict.
-- **Fees on the Book.** In the deployment's credit asset, paid to its collector. An
-  activity's purse is a Book account of its own (the record cell's id), registered by
-  the birth with the payer's deposit. Every Core4 run pays the public price of its
-  declared envelope; a yield reserves the await's fee pair in the purse (refused,
-  `awaitsFunding`, when the purse cannot: the activity stays parked until a `topUp`);
-  the turn that ends the await takes one of the pair; the purse returns to the payer's
-  account when the activity ends. Each turn's postings are one admitted
-  `CanonicalResourceKernel.Batch` (`Birth.conserves`, `Delivery.conserves`).
-- **No native route yet.** The signed route (`Kernel/ObjectiveActivityReceiver`,
-  Host ops 210-214, `mini activity`, object and account ownership, the native
-  acceptance) is on `lane/activity-native-wip`: it waits for the object record
-  (`Kernel/ObjectRecord`: the object's one package pin and declared state type) before
-  any native command may birth an activity or write declared state. Until then nothing
-  outside the kernel's own modules constructs these turns.
+The reference program is [world/activity/Tally.obend](../world/activity/Tally.obend):
+its entry has type `Start -> Activity<Plan, Resumed, Nat>`, its Plan is the sum
+`await {write, on, patience}`, and its Response is `resumed {outcome, view}`. A birth
+refuses a program whose response type is not that shape (`responseParts`,
+`Kernel/ObjectiveActivity.lean:541`; `typeResponse`, `:669`).
 
-Theorems (compiled, `#assert_axioms`, no `sorry`): `resume_consumes_once` (for every
-seal: after a delivery installs, no intent spending its await is ever accepted, and its
-exact retry replays), `second_delivery_refused`, `slot_decided_once`,
-`slot_single_decider`, `resume_outcome_preserved` (an await answered by its slot reaches
-the activity exactly as decided), `resume_view_current` (the view is the state cell at the
-delivering snapshot, and an accepted delivery found that cell's root unmoved),
-`yield_write_from_current_read` (every state post is the Plan's write applied to the
-view, version + 1, against the view's root), `moved_state_refuses`,
-`stateWrite_unviewed_never_sets`, `resume_binds_checkpoint`, `resume_deterministic`,
-`refund_measurement_free`, `submitter_charge_declared`, `yield_reserves_pair`,
-`end_returns_purse`, `Birth.conserves`, `Delivery.conserves`, `TopUp.conserves`; in `ObjectiveProofs`,
-`birth_checkpoint_typed` and `delivery_checkpoint_typed` (the stored checkpoint is
-typed: `typed_checkpoint`, from `typed_yieldedPlanWith`, `typed_settle`,
-`typed_collect`), `runSegment_checkpoint` (resuming the stored checkpoint ends the
-segment exactly as resuming the extraction's state: the same Plan, result or fault;
-from `settle_resume_segment`, an exact lockstep, and `collect_resume_segment`, a
-renaming), and `runSegment_stored_complete` (resuming the stored checkpoint ends every
-segment the program's own yield ends, alike, with heap headroom of the forced state's
-size) under the OPEN premise `ForcingTransparent` (sharing transparency of the Plan
-extraction's forcing: a satisfying point `forcingTransparent_tally`, a refuting point
-`not_forcingTransparent_lostStack`; the forced checkpoint can be larger,
-`largerYield_checkpoint_grows`, hence the headroom).
+### Cells and records
 
-Executed (`scripts/check-objective-proofs.sh transparency`): every activity of the
-preview cohort and the Tally run (`native/objective-emit/activity-cohort.json`, twelve
-replies, unknown, timeout) resumed from the stored checkpoint and from its own yield
-end every segment alike, the stored side in no more ticks; Tally's stored checkpoint is
-2315 B at its first yield and 2334 B after each of the twelve replies (0 B per resume;
-the yield collected alone grows 4224 to 10918 B, +558 B per resume); a planted
-checkpoint that drops the stack's cells goes red.
+- **Cells.** An activity lives on an object (a cell with an
+  [object record](#objects-and-their-law)). Every other cell the kernel writes is a
+  registry cell of the one role `objectiveActivity` with a sub-role: `record`, `slot`,
+  `state`, `package` or `object` (`Kernel/ObjectiveActivityCell.lean:43-53`). A cell sits
+  at `coordinate domain role key` (`:88-91`), an id at or above 2^256 (`reservedBase`,
+  `:85`) that no birth may use; the registry's loaded-and-final law pins each cell to
+  its coordinate (`:14-20`), so nothing but the activity kernel's turns writes them.
+- **The record** (`Record`, `Kernel/ObjectiveActivity.lean:147-166`; frame
+  `ACTIVITY-RECORD/v5`, `:223`): object, activity id, the package identity (`pin`), the
+  instantiating input, `generation`, `checkpoint` bytes and their digest, the escrow
+  (payer, the Book account the purse returns to, the declared resume and timeout
+  envelopes and their fees), `tried` (the largest envelope an exhausted attempt at the
+  current await ran under) and the phase `awaiting await | done result | faulted reason`
+  (`:141`).
+- **The checkpoint** is `collect (settle forced)`
+  (`ObjectiveBendDemandCollect.checkpoint`, `Theory/ObjectiveBendDemandCollect.lean:195`)
+  of the state the Plan extraction left, as the token stream of `encodeState`
+  (`runSegment`, `Kernel/ObjectiveActivity.lean:749-758`). The extraction state has every
+  cell it forced stored as its value; `settle` makes a cached cell stop retaining the
+  closure it was forced from; `collect` keeps only the cells the yielded Plan and the
+  stack reach, compacted. So a checkpoint is storage-charged for what the continuation can
+  use, not for the suspended computations that produced a Plan field.
+- **An await** (`Await`, `:121`) has an id `H(record cell, generation, checkpoint
+  digest)` (`awaitId`, `:305`), a source (`reply slot decider`, or `height due`, `:114`)
+  and a mandatory deadline, the yield height plus the Plan's `patience` (bounded by
+  `Config.maxPatience`, `:334`).
+- **Answer slots** (`Kernel/AnswerSlot.lean`). A reply await names a slot whose name is
+  `H(turn, record cell, generation)` (`:100`), so no submitter chooses it. A slot has one
+  decider, fixed when it opens, one deadline and one terminal decision, written once:
+  `open --decider, at or before the deadline--> decided (reply | refused | unknown |
+  broken)` (`decide`, `:125`) or `open --anyone, after the deadline--> expired`
+  (`expire`, `:136`). Theorems: `decide_single_decider` (`:144`), `decided_refuses`
+  (`:165`), `expire_after_deadline` (`:173`), `stranger_refused` (`:188`). A decision is
+  written against the slot's open root AND spends the slot's claim
+  (`Kernel/ObjectiveActivity.lean:1358`), so a second decision is refused twice over
+  (`slot_decided_once`, `:2088`; `slot_single_decider`, `:2098`).
 
-Executed (on the WIP route, `lane/activity-native-wip`): the native acceptance drives
-[world/activity/Tally.obend](../world/activity/Tally.obend) on a scratch native world,
-every turn a signed command, 59 rows, before resume with view (ownership, slot decider, typed replies, retry and
-conflict, conflict carrying the reply, funding park, timeout, Book conservation, reopen,
-and the checkpoint's size across twelve resumes).
+### Plans and views
 
-Not yet: the native route (above); the object record (L3); a theorem that `add`-only
-writes commute (executed by the two-tallies acceptance scenario on the native route);
-exhaustion charged at the declared envelope; disposal of ended and abandoned records;
-upgrade dispositions (DRAIN/ABORT and the `upgraded` outcome's producer);
-sends, inboxes and `message` awaits; the object's law judging its declared-state writes
-(L4); a storage deposit for packages and checkpoints.
+- **Resume with view.** The object's declared state cell holds an `ObjectState
+  {version, value}` (`Kernel/ObjectState.lean:18`); every committed write installs the
+  next version. A delivery resumes the activity with `resumed {outcome, view}`
+  (`responseData`, `Kernel/ObjectiveActivity.lean:533`): the outcome its await settled to,
+  exactly (never replaced, never dropped), and `view = {version, state}`, the declared
+  state read IN THE RESUMING TURN. The outcome sum is `reply R | refused | unknown |
+  timedOut | broken | upgraded` (`AwaitOutcome`, `:505`; `kernelOutcomes`, `:538`);
+  staleness is not an outcome, and nothing on main produces `upgraded`.
+- **Plans the kernel performs.** A yielded Plan is `await {write, on, patience}`
+  (`decodePlan`, `:714`). `write` is a record of per-field edits `keep | set v | add n`
+  (`Edit`, `:881`), applied by the kernel to the state the activity was resumed with
+  (`stateWrite`, `:971`, the one point where a declared-state write is built),
+  installing version + 1 against the root that state was read from. So no write is
+  computed from a stale read: `moved_state_refuses` (`:2400`), `resume_view_current`
+  (`:2338`), `yield_write_from_current_read` (`:2370`). A birth's first segment has seen
+  no state: its write may `set` a field only when it creates the state cell
+  (`blindWrite`, `:416`; `stateWrite_unviewed_never_sets`, `:2520`). `add`-only writes
+  commute (`add_writes_commute`, `:2493`).
+- **Typing data.** The kernel types the datum's closed Core4 term with the actual checker
+  (`check`), annotating each injection with the constructor the declared type gives it,
+  and requires the checked type to agree (`TypedData`, `:484`; `typeData`, `:489`).
+  Inputs, replies and every delivered outcome go through it, so a delivered response
+  carries exactly the premise of `typed_resume_preserved`.
+- **The program is the front end's output.** `publish` stores an activity artifact AND
+  the source package it names, only after the kernel re-ran the Lean front end on the
+  package and the artifact's typed core is that replay's rendering (`publish`, `:1131`;
+  `ObjectiveBendPublication.Replayed`). Every later turn reloads the pair and replays
+  (`loadProgram`, `:622`): the term an activity runs is the front end's output on the
+  stored sources, never a parse of the core bytes (`Program.runs_front_end_output`,
+  `:651`). The package cell records its payer, a registered Book account that funds the
+  cell's retention; `publish` refuses one that is not (`Stored.payer`, `:256`;
+  `payerRegistered`, `:1124`).
+
+### Turns
+
+Nine turns; each is ONE `DataIntent` built by `intentOf` under the admitting receiver's
+seal, so its writes commit all together or not at all
+(`Kernel/ObjectiveActivity.lean:17-21`):
+
+| Turn | What it does |
+| --- | --- |
+| `publish` (`:1131`) | stores the artifact and its source package at the package cell, after the front end's replay |
+| `create` (`:1993`) | a holder of the object installs its `ObjectRecord`; refuses a second record and a pin naming an unpublished package (`create_refuses_existing`, `:2986`) |
+| `birth` (`:1233`) | instantiates the pinned definition with typed input, runs to the first yield, commits the record, the declared-state write, the answer slot and the Book postings; the object must have a record and the birth must name its pinned package (`birth_refuses_non_object`, `:2933`; `birth_refuses_other_pin`, `:2943`) |
+| `resolve` (`:1358`) | the slot's one decider decides it, typed against the activity's response type, at or before the deadline |
+| `deliver` (`:1496`) | anyone: settles the await from its slot, due height or deadline (past the deadline an open slot expires in this turn), reads the view, resumes the decoded stored checkpoint with the typed outcome and view, runs to the next yield or end, commits the new record, the Plan's write, the next slot and the postings together |
+| `exhaust` (`:1676`) | a delivery whose own run runs out of its declared envelope, committed as a paid turn ([metering](#metering-and-disposal)) |
+| `abandon` (`:1817`) | anyone, after the deadline plus grace: disposes of an await nobody ended |
+| `topUp` (`:1881`) | anyone funds an activity's purse |
+| `writeState` (`:1942`) | a holder of the object writes its declared state directly: a new version, which the next delivery's view shows |
+
+### The resume contract
+
+A delivery spends the await as a nullifier bound to the checkpoint digest AND writes the
+record cell against its current root, so consume-once is a compare-and-swap at
+admission's decide point (`Kernel/ObjectiveActivity.lean:36-39`). Proved:
+`resume_consumes_once` (`:2067`: after a delivery installs, no intent spending its await
+is ever accepted, and its exact retry replays), `second_delivery_refused` (`:2080`),
+`resume_outcome_preserved` (`:2311`: an await answered by its slot reaches the activity
+exactly as decided), `resume_binds_checkpoint` (`:2531`), `resume_deterministic`
+(`:2547`). In `ObjectiveProofs`: a delivery advances the record one generation
+(`delivery_advances_generation`, `Kernel/ObjectiveResumeContract.lean:593`); the installed
+record is stated per phase, awaiting: the record just written
+(`Delivery.installed_record`, `:562`), ended: reclaimed (`Delivery.installed_record_ended`,
+`:576`); a second delivery of one await is a hash collision
+(`second_same_await_is_collision`, `:614`). The stored checkpoint is typed
+(`birth_checkpoint_typed`, `:124`; `delivery_checkpoint_typed`, `:151`) and resuming it ends
+every segment as resuming the extraction's state would (`runSegment_checkpoint`, `:258`).
+
+`runSegment_stored_complete` (`:319`, resuming the stored checkpoint ends every segment the
+program's own yield ends, alike, with heap headroom of the forced state's size) holds
+under the OPEN premise `ForcingTransparent` (`:310`), sharing transparency of the Plan
+extraction's forcing. It has a satisfying point, `forcingTransparent_tally` (`:501`), and
+refuting ones: `not_forcingTransparent_lostStack` (`:506`), and a malformed yield for which
+the extraction succeeds and the premise fails (`not_forcingTransparent_dangling`, `:652`;
+`forcingTransparent_not_of_extraction`, `:672`). A premise naming every address a yield
+holds (`LexicalInvariant yielded`) is what a discharge needs; that is lane
+FORCING-TRANSPARENT's work.
+
+Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
+activity of the preview cohort and the Tally run
+(`native/objective-emit/activity-cohort.json`) from the stored checkpoint and from its own
+yield and compares them per segment (outcome, Plan or result data, ticks), plus a growth
+leg: TallyTwelve's stored checkpoint has one byte count over segments 1..12; a planted
+checkpoint that drops the stack's cells must go red (`scripts/check-objective-proofs.sh:14-22`).
+
+### Fees on the Book
+
+Fees are Book postings in the deployment's credit asset, paid to its collector. An
+activity's purse is a Book account of its own (`heldAccount`, `:321`: the record cell's
+id), registered by the birth with the payer's deposit. The price is the one public
+tariff of a declared envelope (`Kernel/ObjectiveTariff.lean`, shared with native Objective
+admission): a turn that runs Core4 pays `tariff.workOf` of its DECLARED envelope
+(`Capacity`), never of measured work. A declared envelope must cover the kernel's fixed
+heap, stack, type-checking fuel and Plan budget (`Config.covers`, `:345`). A yield reserves
+the await's fee pair in the purse (`resumeFee`, `timeoutFee`; `yield_reserves_pair`,
+`:2614`), refused with `awaitsFunding` when the purse cannot (the activity stays parked
+until a `topUp`); the turn that ends the await uses one of the pair; the purse returns to
+the payer when the activity ends (`end_returns_purse`, `:2626`). No amount depends on how
+much computation ran (`refund_measurement_free`, `:2586`; `submitter_charge_declared`,
+`:2606`). Every turn's postings are one `CanonicalResourceKernel.Batch` admitted on the
+loaded Book, so every turn conserves every asset: `Birth.conserves` (`:1303`),
+`Delivery.conserves` (`:1581`), `Exhaustion.conserves` (`:1744`),
+`Abandonment.conserves` (`:1851`), `TopUp.conserves` (`:1907`).
+
+### Metering and disposal
+
+- **Exhaustion is a paid turn.** An attempt whose run exhausts its declared envelope
+  commits (`exhaust`, `Kernel/ObjectiveActivity.lean:1587-1612`): the purse pays the declared envelope of the ending
+  path the first time this await exhausts (`tried = 0`), the submitter pays the public
+  price of the envelope it adds, and nothing else changes: the await, checkpoint,
+  generation and slot stay, and `tried` rises to the envelope the attempt ran under.
+  `deliver` and `exhaust` refuse an attempt at or below `tried` before it runs
+  (`alreadyExhausted`), so no attempt is ever run or paid twice.
+  `exhaustion_charges_declared` (`:2647`), `exhaustion_spends_nothing` (`:2674`),
+  `exhaustion_excludes_delivery` (`:2683`: for one record, snapshot, height and added
+  envelope an exhaustion and a delivery never both exist), `exhaustion_charge_measurement_free`
+  (`:2713`).
+- **Tombstones.** An ended activity's record cell and a settled slot are written to the
+  empty-body cell (`vacant`, `:790`; `recordBody_ended`, `:2743`): `delivery_end_vacates`
+  (`:2769`), `birth_end_vacates` (`:2782`), `settle_reclaims_slot` (`:2797`),
+  `delivery_reclaims_slot` (`:2831`). A reclaimed cell reads as nothing, by name: a late
+  delivery is refused `recordMissing`, a late decision `slotMissing` (`recordOfBody_vacant`,
+  `:2738`; `slotOfBody_vacant`, `:2740`).
+- **Abandonment.** An await nobody ended (its decider never decided, its timeout was never
+  delivered, every attempt exhausted and nobody funded the next) may be abandoned by
+  anyone once the height passes its deadline plus `Config.abandonGrace` (`:339`). It
+  spends the await's claim (so it races deliveries under consume-once), reclaims the record
+  and the slot (an open slot's decision claim is spent with it), pays the timeout fee (or
+  what the purse still holds of it) to the collector and returns the rest of the purse to
+  the payer. `abandon_returns_escrow` (`:2842`), `abandon_closes_open_slot` (`:2859`),
+  `Abandonment.spends` (`:2873`), `abandon_delivery_exclusive` (`:2882`).
+- **A program fault.** A resumed segment that diverges or refuses commits `faulted`
+  (`runSegment`, `:761-762`), but a malformed Plan or an unextractable result is a refusal
+  of the turn (`decodePlan`, `:714`; `planExtraction`, `resultExtraction`), which leaves
+  the activity parked at its yield. Lane SCHOLAR-CALLS is in flight on that wedge.
+
+### Objects and their law
+
+A cell is an object to the kernel exactly when it has a record (`ObjectRecord`,
+`Kernel/ObjectRecord.lean:62-70`: id, `pin`, `schemaVersion`, `law`, `upgrade` policy,
+`continuity`, `payer`; installed by `create`). Every declared-state write, a birth's or a
+delivery's yield or a direct `writeState`, is judged by the object's law over the old and
+new state plus the request facts (`admitWrite`, `Kernel/ObjectRecord.lean:202-209`;
+facts `subject`, `height`, `target`, `turn`: `Facts`, `:168-175`), with the record read in the
+same turn and its cell guarded. A delivery's write is judged with the activity's principal
+(its birth subject, the escrow's payer) as subject, never the deliverer. A law refusal
+refuses the whole turn and names the failing clause (`WriteRefusal`, `:194-199`): nothing
+commits and the activity stays at its yield. Proved for the three writers of the state
+cell: `Birth.write_judged` (`Kernel/ObjectiveActivity.lean:2904`), `Delivery.write_judged`
+(`:2915`), `StateWrite.write_judged` (`:2925`), `writeState_refuses_lawless` (`:2958`).
+These are statements about this module's own turns; the receiver that would be the only
+writer of the state cell does not exist on main. The law sees the value, not the write
+version or the declared type: typing a write at a declared state type
+([Kernel/ObjectStateType](../Kernel/ObjectStateType.lean): a strict `Ty` codec, closed
+first-order typing `typedAt` and value subtyping `stateSubtype`) is defined but no turn
+consumes it yet, and `ObjectRecord` has no state-type field. The record's upgrade policy
+(`frozen | governed authority floors`, `:57-60`) has theorems but no turn consumes it; the
+upgrade turn, `schemaVersion` migration and the `upgraded` outcome's producer are not
+built (lane UPGRADE).
+
+### Not on main
+
+The native signed route (Host ops, `mini` verbs, the receiver) and its acceptance
+(`scripts/pipeline/journey-rows:66-78` runs one when a driver exists; none does); a
+storage charge for packages and checkpoints (the payer is recorded; lane RETENTION-PAYERS);
+upgrade dispositions; sends, inboxes and `message` awaits; the turn gate every turn goes
+through (CHECKPOINT-INVARIANT); the object's law pinned to its package at birth
+([the laws pin](OBJECTIVE-BEND.md#which-code-wrote-the-objectiveartifact-slot-and-the-package-pin)).
+
 
 ## Compared with deos-js
 
@@ -302,12 +421,15 @@ change it, and a refusal comes back as `refused`.
 What Objective Bend cannot do yet: a view library (a View sum is expressible, but Plans
 and responses must be non-recursive data, so lists of children wait); live authoring and governed evolution;
 more than one action per yield (no multi-cell turn in one step); crawling the world
-from inside a program; snapshot and rewind; kernel delivery on the native signed-command
-route (the kernel itself is above); a guardedness check; string operations beyond equality; the
-`before`/`after` method qualifiers (now buildable on perform); dynamic `get`.
+from inside a program; snapshot and rewind; a native route for the kernel's turns (above);
+a guardedness check; string operations beyond equality; the `before`/`after` method
+qualifiers (buildable on `perform`, refused by the elaborator); dynamic `get`.
 
 ## Checks
 
 ```
-bash scripts/check-objective-frontend.sh   # every row through the Lean front end
+bash scripts/check-objective-frontend.sh          # every row through the Lean front end,
+                                                  # incl. activity-replay (the kernel replays a stored package)
+bash scripts/check-objective-proofs.sh proofs     # ObjectiveProofs + the statement/axiom snapshot
+bash scripts/check-objective-proofs.sh transparency  # stored checkpoint vs the machine's own yield
 ```

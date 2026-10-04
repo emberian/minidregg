@@ -19,7 +19,7 @@ The Breadstuffs audit found several costs that grow with the whole document or w
 - decoders which allocate from untrusted counts without a declared quota.
 
 The full source ledger is
-`/Users/ember/dev/HYPERDREGGMEDIA_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md`.
+`HYPERDREGGMEDIA_MINIDREGG_SUBSUMPTION_AUDIT_2026-08-09.md` (a scholar document outside this repository).
 
 ## Intended asymptotic shape
 

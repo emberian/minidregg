@@ -18,8 +18,8 @@ This document has two parts:
 Evidence classes: **compiled** means a named Lean module built in the lane `zk-truth`
 (persvati `claude-lanes/zk-truth/logs/*.log`, cited per module). **Authored** means written
 and not built. **Executed** means run against live state. Nothing here is integrated or
-deployed. The source of the bar is the scholar document `claudesplosion/planning/ZK.md` §2
-(2026-10-01, cv `01a0f6ae`). This file is its in-repo statement, adapted to the Objective
+deployed. The source of the bar is a scholar planning document of 2026-10-01, §2 (cv `01a0f6ae`;
+outside this repository). This file is its in-repo statement, adapted to the Objective
 proof path that exists after the cut.
 
 ---
