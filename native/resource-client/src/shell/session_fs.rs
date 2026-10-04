@@ -74,6 +74,39 @@ pub(crate) fn read(root: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, St
     Ok(bytes)
 }
 
+/// The directory `root/name` (one plain component) as a place for records:
+/// reached from the held `root` descriptor without following a symlink,
+/// created owner-private (0700) when absent, and refused unless it is a
+/// directory this user owns that no one else may read or write. A record
+/// argument names its directory; this is what decides it is the session's.
+pub(crate) fn private_folder(root: &Path, name: &str) -> Result<(), String> {
+    let component = component(std::ffi::OsStr::new(name))?;
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+        return Err("session folder must be one plain name".into());
+    }
+    let root = OpenOptions::new().read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(root).map_err(|e| format!("cannot anchor session directory: {e}"))?;
+    if unsafe { libc::mkdirat(root.as_raw_fd(), component.as_ptr(), 0o700) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(format!("cannot create session folder {name}: {error}"));
+        }
+    }
+    let fd = unsafe { libc::openat(root.as_raw_fd(), component.as_ptr(),
+        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(format!("session folder {name} is not a directory of this session: {}", std::io::Error::last_os_error()));
+    }
+    let folder = unsafe { File::from_raw_fd(fd) };
+    let metadata = folder.metadata().map_err(|e| e.to_string())?;
+    use std::os::unix::fs::MetadataExt;
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        return Err(format!("session folder {name} must be an owner-private directory"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

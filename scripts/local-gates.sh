@@ -23,6 +23,8 @@
 #   host-closure   the import closure of Host.Main equals scripts/gates/host-closure.pin
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
 #   exports        every @[export] is called from native/ or allowlisted with a reason
+#   shell-paths    no shell-line parser confines a friend-typed path by is_absolute();
+#                  paths go through shell::session_fs (scripts/check-shell-paths.sh; self-tests)
 #   rust-tests     the filtered native test lines of scripts/check-rust-tests.sh
 #   journey        native/resource-client/journey.sh from this tree on a fresh Store
 #                  (scripts/check-journey.sh; G at 1000 records unless
@@ -42,7 +44,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
+GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports shell-paths rust-tests journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -65,6 +67,7 @@ g_build-closure() { bash scripts/check-build-closure.sh && python3 scripts/test_
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
+g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
 g_journey()       { bash scripts/check-journey.sh; }
 

@@ -62,7 +62,6 @@ use std::fs;
 use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 /// The verbs this module adds to the shell (rows for `help`).
 pub(crate) const VERBS: &[Verb] = &[
@@ -303,11 +302,10 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
                 let sequence = number(value, "--expect-re-sequence")?;
                 if sequence == 0 || expected_sequence.replace(sequence).is_some() { return Err("invalid or duplicate --expect-re-sequence".into()); }
             }
-            "--operation-record" => {
-                let path = PathBuf::from(value);
-                if !path.is_absolute() { return Err("--operation-record must be absolute".into()); }
-                operation_record = Some(path);
-            }
+            // The spelling decides nothing: `operation_path` accepts only a
+            // plain record name in HOME/requests or WORKSPACE/room-operations,
+            // reached from the session roots by descriptor.
+            "--operation-record" => operation_record = Some(PathBuf::from(value)),
             "--file" => file = Some(value.to_owned()),
             "--via" => network = Some(value.to_owned()),
             "--via-id" => id = Some(value.to_owned()),
@@ -530,8 +528,9 @@ pub(crate) fn error(message: impl std::fmt::Display) -> Done {
     (EXIT_CLIENT, format!("error: {message}\n"))
 }
 
-/// The ending of a client run in a child process: the child's own `refused:`
-/// block verbatim (the Host's decoding, exit 3), or its error as `error:`.
+/// The ending of a client operation from its captured stderr: its own
+/// `refused:` block verbatim (the Host's decoding, exit 3), or its error as
+/// `error:`.
 fn child_ending(code: Option<i32>, stderr: &str) -> Done {
     let lines: Vec<&str> = stderr.lines().collect();
     if let Some(at) = lines.iter().position(|l| l.starts_with("refused: ")) {
@@ -650,35 +649,20 @@ pub(crate) fn reference(session: &Session, name: &str) -> Result<Value, String> 
 
 // ---------------------------------------------------------------- client calls
 
-/// One client operation in a child `mini` (the same binary), so its JSON does
-/// not reach the friend's terminal. Ok: the child's stdout.
+/// One client operation, run in this process with its output captured
+/// (`crate::capture::command`), so its JSON does not reach the friend's
+/// terminal. It ends exactly as the child `mini` it replaces ended: Ok is its
+/// stdout; an error is its own `refused:` block or its `mini:` error.
 pub(crate) fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
-    let exe = std::env::current_exe().map_err(|e| error(format!("cannot locate the mini client: {e}")))?;
-    let mut cmd = Command::new(exe);
-    cmd.arg(command);
-    for (name, value) in flags {
-        cmd.arg(format!("--{name}")).arg(value);
-    }
-    if let Some(socket) = crate::SOCKET.get() {
-        cmd.arg("--socket").arg(socket);
-    }
-    // The passphrase left this process's environment at start; the same
-    // binary, run as this child, is the one recipient that needs it back.
-    if let Some(passphrase) = crate::workspace::private::keycache_passphrase() {
-        use std::os::unix::ffi::OsStrExt;
-        cmd.env(crate::workspace::private::KEYCACHE_PASSPHRASE_ENV, OsStr::from_bytes(&passphrase));
-    }
     let started = std::time::Instant::now();
-    let out = cmd
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| error(format!("cannot run the mini client: {e}")))?;
+    let (code, stdout, stderr) = crate::capture::command(command, flags)
+        .map_err(|e| error(format!("cannot capture the client operation's output: {e}")))?;
     let action = flags.iter().find(|(n, _)| *n == "action").map(|(_, v)| v.to_string_lossy().into_owned()).unwrap_or_default();
-    crate::trace::record("spawn", &format!("mini {command} {action}"), 0, out.stdout.len(), started);
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    crate::trace::record("call", &format!("mini {command} {action}"), 0, stdout.len(), started);
+    if code == 0 {
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
     } else {
-        Err(child_ending(out.status.code(), &String::from_utf8_lossy(&out.stderr)))
+        Err(child_ending(Some(i32::from(code)), &String::from_utf8_lossy(&stderr)))
     }
 }
 
@@ -1582,25 +1566,33 @@ fn append_recorded(session: &Session, room: &Room, payload: Value, to: Option<St
     }
 }
 
-/// Shell callers may retain exact operations in their request directory; the
-/// resident controller uses its workspace room-operations directory. This checks
-/// argument scope; fleet still owns durable record binding and exact recovery.
+/// Shell callers retain exact operations in HOME/requests; the resident
+/// controller in WORKSPACE/room-operations. A record's directory must be one of
+/// those two, reached from its session root without following a symlink and
+/// owner-private (`session_fs::private_folder`); its leaf is a plain name, and
+/// an existing leaf is read through that same anchor, refusing symlinks and
+/// special files. Anything else (another session's directory, a relative or
+/// traversing path) is refused before a record exists. Fleet still owns
+/// durable record binding and exact recovery.
 fn operation_path(session: &Session, path: &Path) -> Result<(), String> {
     let parent = path.parent().ok_or("operation record has no parent")?;
-    if parent != session.home.join("requests") && parent != session.workspace.join("room-operations") {
+    let (root, folder) = if parent == session.home.join("requests") {
+        (&session.home, "requests")
+    } else if parent == session.workspace.join("room-operations") {
+        (&session.workspace, "room-operations")
+    } else {
         return Err("operation record must belong to HOME/requests or WORKSPACE/room-operations".into());
-    }
+    };
     let name = path.file_name().and_then(|v| v.to_str()).ok_or("operation record name is not UTF-8")?;
     if name.is_empty() || name.starts_with('.') || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
         return Err("operation record must have a plain file name".into());
     }
+    crate::shell::session_fs::private_folder(root, folder)?;
     // An absent leaf is valid for first creation. Existing leaves must be read
     // through the descriptor anchor, refusing symlinks and special files.
     match fs::symlink_metadata(path) {
-        Ok(_) => { crate::shell::session_fs::read(parent, path, 1 << 20)?; }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            workspace::private_dir(parent)?;
-        }
+        Ok(_) => { crate::shell::session_fs::read(root, path, 1 << 20)?; }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.to_string()),
     }
     Ok(())
@@ -2327,9 +2319,28 @@ mod tests {
             symlink("/etc/passwd", &path).unwrap();
             assert!(operation_path(&session, &path).is_err());
         }
-        for path in [root.join("foreign.json"), session.workspace.join("room-operations/../escape.json"), session.home.join("requests/.hidden")] {
-            assert!(operation_path(&session, &path).is_err());
+        for path in [root.join("foreign.json"), session.workspace.join("room-operations/../escape.json"), session.home.join("requests/.hidden"),
+            PathBuf::from("relative.json"), PathBuf::from("requests/hr-op.json"), PathBuf::from("/etc/hr-op.json"),
+            root.join("other-home/requests/hr-op.json")] {
+            assert!(operation_path(&session, &path).is_err(), "{}", path.display());
         }
+        // Another friend's request folder, reached through a symlink planted
+        // as this session's own requests folder, is refused; so is a folder
+        // others can write.
+        let other = root.join("other-home/requests");
+        fs::create_dir_all(&other).unwrap();
+        fs::set_permissions(&other, fs::Permissions::from_mode(0o700)).unwrap();
+        let mine = session.home.join("requests");
+        fs::remove_dir_all(&mine).unwrap();
+        symlink(&other, &mine).unwrap();
+        assert!(operation_path(&session, &mine.join("hr-op-write.json")).is_err());
+        assert!(!other.join("hr-op-write.json").exists());
+        fs::remove_file(&mine).unwrap();
+        fs::create_dir(&mine).unwrap();
+        fs::set_permissions(&mine, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(operation_path(&session, &mine.join("hr-op-write.json")).is_err());
+        fs::set_permissions(&mine, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(operation_path(&session, &mine.join("hr-op-write.json")).is_ok());
         assert!(parse_tail("--discover-json - --json -n 10").is_ok());
         assert!(parse_tail("--discover @stdin-discovery --json").is_err());
         assert!(parse_tail("--discover-json /etc/passwd").is_err());
@@ -2553,7 +2564,7 @@ mod tests {
 mod exact_operation_parse_tests {
     use super::*;
     #[test]
-    fn exact_operation_say_accepts_file_and_requires_absolute_record() {
+    fn exact_operation_say_accepts_file_and_names_its_record() {
         match plan("say --in commons --operation-record /private/g7-write.json --file answer.txt").unwrap().unwrap() {
             Line::Say { operation_record, text, .. } => {
                 assert_eq!(operation_record, Some(PathBuf::from("/private/g7-write.json")));
@@ -2561,7 +2572,9 @@ mod exact_operation_parse_tests {
             }
             other => panic!("wrong command: {other:?}"),
         }
-        assert!(plan("say --operation-record relative.json hello").unwrap().is_err());
+        // A relative record parses; `operation_path` refuses it (its directory
+        // is not one of the session's two record folders).
+        assert!(plan("say --operation-record relative.json hello").unwrap().is_ok());
     }
 
     /// Adoption is the founder's alone and resumes only its own roster.

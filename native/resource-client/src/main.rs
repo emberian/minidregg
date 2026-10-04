@@ -15,6 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod agent_lifetime_grant;
 mod trace;
 #[cfg(unix)]
+mod capture;
+#[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]
 mod key_adoption;
@@ -4494,28 +4496,41 @@ fn main() -> ExitCode {
     };
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
+    let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
+    print!("{}", ending.stdout);
+    eprint!("{}", ending.stderr);
+    ExitCode::from(ending.code)
+}
+
+/// How a command ends once it has run: the exit code and what is printed
+/// after it returned. `main` prints it; `capture::command` (a command run in
+/// this process instead of a child `mini`) returns it, so the two endings are
+/// one function.
+pub(crate) struct MainEnding {
+    pub(crate) code: u8,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+pub(crate) fn main_ending(parsed: Result<()>, status: u8) -> MainEnding {
+    let ended = |code: u8, stdout: String, stderr: String| MainEnding { code, stdout, stderr };
     if let Some(ending) = take_command_ending() {
         let (code, message) = ending.render();
-        eprint!("{message}");
-        return ExitCode::from(code);
+        return ended(code, String::new(), message);
     }
     match parsed {
-        Ok(()) => ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed)),
-        Err(error) if error == USAGE => {
-            print!("{error}");
-            ExitCode::SUCCESS
-        }
+        Ok(()) => ended(status, String::new(), String::new()),
+        Err(error) if error == USAGE => ended(0, error, String::new()),
         Err(error) => match take_host_decision().as_ref().and_then(host_refusal_ending) {
-            Some(line) => {
-                eprintln!("{line}\n  client: {error}");
-                ExitCode::from(EXIT_REFUSED)
-            }
-            None => {
-                eprintln!("mini: {error}");
-                ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed).max(1))
-            }
+            Some(line) => ended(EXIT_REFUSED, String::new(), format!("{line}\n  client: {error}\n")),
+            None => ended(status.max(1), String::new(), format!("mini: {error}\n")),
         },
     }
+}
+
+/// Replace the process exit status a verb raised (`set_exit`); the old value.
+pub(crate) fn swap_exit_status(value: u8) -> u8 {
+    EXIT_STATUS.swap(value, Ordering::Relaxed)
 }
 
 #[cfg(test)]
