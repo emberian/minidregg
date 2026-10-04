@@ -4038,7 +4038,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "9ef94c09191bcb1f61f22321c25fc6b9699953a31d9cb5d38e53ee4535355768",
+      "sha256": "df3bfae9cb881c611bcca4330cf39a7c9ab86a5067defcb7adeca6f3d46756d2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6524,6 +6524,13 @@
       "module": "Kernel.ObjectState",
       "path": "Kernel/ObjectState.lean",
       "sha256": "bde0a96a93d17734523cc64321f18161f6a984564ab017b1e14348d30d548471",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ObjectStateType",
+      "path": "Kernel/ObjectStateType.lean",
+      "sha256": "5872bc6bd7625cbac0a424b45706fda97bcd94cd992b081f086857d56e8a4184",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
