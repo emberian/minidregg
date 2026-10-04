@@ -558,6 +558,7 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         serde_json::to_vec(&json!({
             "policyId":"7101",
             "domain":"1","semantics":"2","version":"3","address":"4",
+            "canonical":"0a0b0c",
             "predicate":managed_worker_policy_source("7", &workers, "1")
         }))
         .unwrap(),
@@ -579,7 +580,7 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
   exit 0
 fi
 "#;
-    let policy_query = r#"if [ "$command" = query ] && grep -q '"view":"policy"' "$intent"; then
+    let policy_query = r#"if [ "$command" = query ] && grep -q '"view": "policy"' "$intent"; then
   cp "$state/policy-view.json" "$dir/view.json"
   printf '%s\n' '{"authorityRoot":"200","signing":[{}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
@@ -609,6 +610,9 @@ fi
     let installed: Value = serde_json::from_slice(&fs::read(source_path).unwrap()).unwrap();
     assert_eq!(installed["workerSubjects"], json!(["8", "9", "10"]));
     assert_eq!(installed["workerGeneration"], "2");
+    // The re-pin carries the signed view's canonical source, so the Host
+    // preserves its non-predicate metadata (30746612).
+    assert_eq!(installed["currentSourceHex"], "0a0b0c");
     drop(runtime);
     fs::remove_dir_all(root).unwrap();
 }
