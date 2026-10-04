@@ -2,6 +2,7 @@
 node/tick/canonical encoded output budgets are shared across all fields. Budget suspension
 retains the exact graph, never a partial successful Plan or invalid-program claim. -/
 import Theory.ObjectiveBendDemandMachine
+import Theory.ObjectiveBendDemandMachineFast
 import Theory.ObjectiveBendTypes
 namespace Minidregg.Theory.ObjectiveBendDemandData
 open ObjectiveBendDemandMachine
@@ -47,6 +48,16 @@ def forceWith (policy : State → Bool) (limits : Limits) : Nat → State → Ou
       match runBounded limits 1 state with
       | .suspended .ticks next => forceWith policy limits ticks next
       | other => (other,ticks)
+
+/-- Compiled code runs `forceWithFast` (depth carried, one transition per
+allowance); this is `forceWith` exactly (ObjectiveBendDemandMachineFast). -/
+@[csimp] theorem forceWith_eq_fast : @forceWith = @ObjectiveBendDemandMachineFast.forceWithFast :=
+  ObjectiveBendDemandMachineFast.forceWithFast_unique forceWith (fun _ _ _ => rfl) (fun _ _ _ _ => rfl)
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandData.forceWith_eq_fast' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms forceWith_eq_fast
 
 def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget → RuntimeValue → State → Except (Failure × State) Result
   | 0, _, _, state => .error (.budget,state)
