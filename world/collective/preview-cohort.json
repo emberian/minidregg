@@ -1,0 +1,1463 @@
+[
+ {
+  "name": "CollectiveInitialIsValid",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "initialIsValid",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveAliceYesCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "aliceYesCount",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "CollectiveAliceTotalCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "aliceTotalCount",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "CollectiveBobYesCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "bobYesCount",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CollectiveBobTotalCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "bobTotalCount",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CollectiveCarolNoYesCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "carolNoYesCount",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CollectiveCarolNoTotalCount",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "carolNoTotalCount",
+  "arguments": [],
+  "expected": "3"
+ },
+ {
+  "name": "CollectiveCastsAreExact",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "castsAreExact",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveDuplicateVoteRefused",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "duplicateVoteRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveNonElectorRefused",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "nonElectorRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveWrongRoundRefused",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "wrongRoundRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveCastAfterCloseRefused",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "castAfterCloseRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveBelowQuorumResolvesControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "belowQuorumResolves",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveAtQuorumResolved",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "atQuorumResolved",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveDissentDoesNotBlockQuorum",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "dissentDoesNotBlockQuorum",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveResolutionClosesSameImage",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "resolutionClosesSameImage",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveResolutionRetainsPredecessor",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "resolutionRetainsPredecessor",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveDoubleResolutionAcceptedControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "doubleResolutionAccepted",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveVotesWereKept",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "votesWereKept",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CollectiveZeroQuorumResolvesControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "zeroQuorumResolves",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveZeroQuorumRefusesVotes",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "zeroQuorumRefusesVotes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveUnattainableQuorumRefusesVotes",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "unattainableQuorumRefusesVotes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveDuplicateElectorateIsValidControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "duplicateElectorateIsValid",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveStuffedBallotIsValidControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "stuffedBallotIsValid",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveRuleCarriesAtQuorum",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ruleCarriesAtQuorum",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveRuleCarriesZeroQuorumControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ruleCarriesZeroQuorum",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveRuleCarriesShortOfQuorumControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ruleCarriesShortOfQuorum",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveRuleAttainsAtSeats",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ruleAttainsAtSeats",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveRuleAttainsAboveSeatsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ruleAttainsAboveSeats",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveInstallsFromClosedQuorum",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "installsFromClosedQuorum",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveInstallationIsExact",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "installationIsExact",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CollectiveInstalledPredecessorRevision",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "installedPredecessorRevision",
+  "arguments": [],
+  "expected": "1"
+ },
+ {
+  "name": "CollectiveInstalledSelectedRevision",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "installedSelectedRevision",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CollectiveOpenBallotsInstallControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "openBallotsInstall",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveChangedBaseInstallsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "changedBaseInstalls",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveChangedKindRootInstallsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "changedKindRootInstalls",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveChangedMigrationInstallsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "changedMigrationInstalls",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveUnreadyReviewInstallsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "unreadyReviewInstalls",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveClosedShortOfQuorumInstallsControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "closedShortOfQuorumInstalls",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveBallotsEqSeesVotesControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "ballotsEqSeesVotes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveCastExactSeesActorControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "castExactSeesActor",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CollectiveInstallationExactSeesPolicyControl",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "CatalogReview",
+    "source": "../workshop/CatalogReview.obend",
+    "imports": []
+   },
+   {
+    "name": "CollectiveAdoption",
+    "source": "CollectiveAdoption.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "Review",
+      "path": "./CatalogReview.obend",
+      "module": "1"
+     }
+    ]
+   }
+  ],
+  "entry": "installationExactSeesPolicy",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ }
+]

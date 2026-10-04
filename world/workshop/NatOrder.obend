@@ -1,0 +1,42 @@
+edition ObjectiveBend 1
+# Natural-number order for the world programs. Core4 has `+`, `*` and Nat `==`
+# but no `-`, `<` or `<=` (objective-elaborate.ts `awaiting`), so order is a
+# structural recursion. Everything is total on the naturals: `minus` saturates
+# at 0n and never wraps.
+
+def predecessor(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p: p
+
+# a - b, saturating at 0n.
+def minus(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0n: a
+    case 1n+q: minus(predecessor(a), q)
+
+def lessOrEqual(a: Nat, b: Nat) -> Bool:
+  minus(a, b) == 0n
+
+def less(a: Nat, b: Nat) -> Bool:
+  lessOrEqual(a + 1n, b)
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def minimum(a: Nat, b: Nat) -> Nat:
+  if lessOrEqual(a, b) then a else b
+
+# The checks below are the only evidence for this file: closed instances whose
+# expected values are read from the definitions above (authored, then executed).
+def minusSaturates() -> Nat:
+  minus(3n, 5n)
+
+def minusExact() -> Nat:
+  minus(9n, 4n)
+
+def lessOrEqualAtEdge() -> Bool:
+  lessOrEqual(4n, 4n) && not(lessOrEqual(5n, 4n)) && lessOrEqual(0n, 0n)
+
+def lessIsStrict() -> Bool:
+  less(3n, 4n) && not(less(4n, 4n)) && not(less(5n, 4n))

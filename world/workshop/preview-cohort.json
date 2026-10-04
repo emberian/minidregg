@@ -1,5 +1,59 @@
 [
  {
+  "name": "NatOrderMinusSaturates",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "NatOrder.obend",
+    "imports": []
+   }
+  ],
+  "entry": "minusSaturates",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "NatOrderMinusExact",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "NatOrder.obend",
+    "imports": []
+   }
+  ],
+  "entry": "minusExact",
+  "arguments": [],
+  "expected": "5"
+ },
+ {
+  "name": "NatOrderLessOrEqualAtEdge",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "NatOrder.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lessOrEqualAtEdge",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "NatOrderLessIsStrict",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "NatOrder.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lessIsStrict",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
   "name": "CatalogProposesWhenEligible",
   "modules": [
    {
