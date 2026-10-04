@@ -5,9 +5,13 @@ the contract host's single-use token).
 An invitation names the contract instance it admits to, the package (code
 identity) that instance runs, the role, and terms the holder can read before
 using it. It is minted only by a turn of the instance it names, carrying that
-instance's own package; it is held by exactly one subject, who may hand it
-over; and it is spent like a nullifier by the `offer` that creates a seat
-(`Kernel.Seat`). A spent id can never be minted or used again.
+instance's own package (on the native route: a `mint` member of the Plan the
+instance's own package method returns, under an id the receiver derives from the
+instance, the invoking turn and the member's index, so the code chooses role,
+terms and holder but never the id or the package); it is held by exactly one
+subject, who may hand it over; and it is spent like a nullifier by the `offer`
+that creates a seat (`Kernel.Seat`; natively also a durable claim). A spent id
+can never be minted or used again.
 
 This module is pure data and pure rules; `Kernel.Seat` runs them inside the
 seat world's one transition function. -/
@@ -37,7 +41,7 @@ structure Invitation where
   package : Digest
   role : String
   /-- Terms the holder can assay before offering (Zoe's `customDetails`). -/
-  terms : List (String × Int)
+  terms : List (String × Nat)
   holder : SubjectId
   deriving DecidableEq, Repr
 
@@ -51,11 +55,14 @@ inductive Refusal where
   | assayFailed (id : InvitationId)
   deriving DecidableEq, Repr
 
-/-- The live invitations, the spent ids and the instances. -/
+/-- The live invitations, the spent ids, the live instances and the retired
+instance ids (a retired id is never created again). On the native route this is
+the part of the stored registry a turn loads (`Kernel.SeatStore`). -/
 structure Registry where
   instances : List Instance
   live : List Invitation
   spent : List InvitationId
+  retired : List InstanceId := []
   deriving DecidableEq, Repr
 
 def Registry.instance? (registry : Registry) (inst : InstanceId) : Option Instance :=

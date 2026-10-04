@@ -1,36 +1,50 @@
 /- Seats: offer safety as a law judged on every reallocation, over the Book.
 
 An `offer` presents an invitation (`Kernel.Invitation`) and a proposal
-`{give, want, exit}`. The kernel spends the invitation, registers a fresh Book
-account for the seat, posts `give` from the offerer's funding account into it,
-and installs the seat. From then on:
+`{give, want, exit}`. The kernel spends the invitation, registers the seat's
+Book account (on the native route, its seat cell's protected coordinate, at or
+above `2^256`: no user can own, squat or pre-fund it), posts `give` from the
+offerer's funding account into it, and installs the seat. From then on:
 
 * the seat's balances are judged by its law `offerSafe proposal`, a `Pred`
   (`Pred.Core`) over a TOTAL view of the seat's Book balances: every asset the
   proposal names has a slot, so the fail-closed reading of an absent slot can
   never be what the law sees (`view_total`);
-* a seat is debited only by (a) a `reallocate` turn OF its own contract
-  instance, after which every seat the reallocation touched must satisfy its law,
-  or (b) `exit`/`terminate`, which post the seat's whole allocation to its payee
-  and close it (`seat_debit_authorized`);
+* a seat is debited only by (a) a `reallocate` OF its own contract instance,
+  after which every seat the reallocation touched must satisfy its law, or (b)
+  `exit`/`terminate`/the end of the activity that holds it, which post the
+  seat's whole allocation to its payee and close it (`seat_debit_authorized`);
 * `exit` is a kernel action: the contract's own clause is consulted for
-  reallocations and never for an exit, so no contract clause can forbid it
-  (`exit_ignores_contract_clause`);
-* `terminate` of an instance exits every open seat of that instance.
+  reallocations and never for an exit, so no contract clause can forbid it;
+* `terminate` of an instance exits every open seat of that instance, and the
+  end of an activity exits every open seat it holds (`closeHeld`).
+
+**One Book batch per step.** Every step's postings are one
+`CanonicalResourceKernel.Batch`, admitted on the step's own Book
+(`Batch.Admission`: endpoints registered, every debit funded on the intermediate
+book, a registered account fresh), and the next Book is that batch applied
+(`step_posts`); a sequence of steps (a contract method's Plan, an activity's
+end) posts the concatenation (`Posts.seq`). So every admitted step conserves
+every asset by the Book's own posting theorem (`seat_conserves`).
+
+**Who acts.** `Actor.subject` is a signer; `Actor.inst` is the contract
+instance, which on the native route acts ONLY through the Plan its own package
+method returns when the receiver re-executes it (`runPlan`): the content of a
+reallocation or a mint comes from the contract code, never from a signer's
+say-so. Offerers are protected by offer safety, exit and conservation, whoever
+invoked the method; the contract can propose only what its code computes.
+`Actor.activity` is the end of the activity (its record cell) that holds a seat.
 
 T3 (design `MINI-PROGRAM-MODEL-20261004` §3, root rulings of 2026-10-05):
 `seat_offer_safe_forever` (every open seat of every reachable world satisfies
 its law), `exit_enabled` and `exit_pays_allocation` (an on-demand offerer can
 always exit, and the exit moves exactly the seat's balances to its payee),
 `seat_conserves` (every admitted step conserves every asset). Teeth and
-inhabitants are at the end: a two-party swap that settles after the price moved
-from the quote, a zero-`want` seat, and refusals.
-
-What is not here: the native signed-command route (`Kernel.ObjectiveBendNative*`
-does not yet emit seat actions), activities holding seats (an activity ABORT must
-call `closeSeat` for every seat it holds; `terminate` shows the shape), fees,
-and non-fungible (set) amounts. -/
+inhabitants are at the end. The native route (`Kernel.SeatReceiver`) commits
+exactly what `step`/`runPlan` decide over the cells it loads (`Kernel.SeatStore`).
+Not here: fees (the receiver charges them), non-fungible (set) amounts. -/
 import Kernel.Invitation
+import Kernel.ProtectedCell
 
 namespace Minidregg.Kernel.Seats
 open Minidregg.Theory.CanonicalResourceKernel
@@ -140,9 +154,10 @@ theorem safeAt_congr {book book' : Book} {account account' : AccountId} {proposa
   Bool.eq_iff_iff.mpr ⟨safeAt_mono (fun asset member => (same asset member).le),
     safeAt_mono (fun asset member => (same asset member).ge)⟩
 
-/-! ## Postings -/
 
-/-- A movement between Book accounts. -/
+/-! ## Postings: Book operations, one batch per step -/
+
+/-- A movement between Book accounts: one `Operation.transfer`. -/
 structure Transfer where
   source : AccountId
   destination : AccountId
@@ -150,8 +165,10 @@ structure Transfer where
   amount : Nat
   deriving DecidableEq, Repr
 
-def post (book : Book) (transfer : Transfer) : Book :=
-  (Operation.transfer transfer.source transfer.destination transfer.asset transfer.amount).apply book
+def Transfer.op (transfer : Transfer) : Operation :=
+  .transfer transfer.source transfer.destination transfer.asset transfer.amount
+
+def opsOf (transfers : List Transfer) : List Operation := transfers.map Transfer.op
 
 theorem single_at (p : AccountId × AssetId) (v : Int) (account : AccountId) (asset : AssetId) :
     (DFinsupp.single p v : Π₀ _ : AccountId × AssetId, Int) (account, asset) =
@@ -166,8 +183,8 @@ theorem single_at (p : AccountId × AssetId) (v : Int) (account : AccountId) (as
     subst e
     exact ⟨rfl, rfl⟩
 
-theorem balance_post (book : Book) (transfer : Transfer) (account : AccountId) (asset : AssetId) :
-    (post book transfer).balance account asset =
+theorem balance_op (book : Book) (transfer : Transfer) (account : AccountId) (asset : AssetId) :
+    (transfer.op.apply book).balance account asset =
       book.balance account asset
         - (if account = transfer.source ∧ asset = transfer.asset then (transfer.amount : Int) else 0)
         + (if account = transfer.destination ∧ asset = transfer.asset then (transfer.amount : Int) else 0) := by
@@ -179,22 +196,273 @@ theorem balance_post (book : Book) (transfer : Transfer) (account : AccountId) (
   split_ifs <;> simp
   all_goals omega
 
-@[simp] theorem post_accounts (book : Book) (transfer : Transfer) :
-    (post book transfer).accounts = book.accounts := by
-  simp [post]
+theorem applyOperations_accounts_eq (book : Book) (operations : List Operation) :
+    (applyOperations book operations).accounts = book.accounts := by
+  induction operations generalizing book with
+  | nil => rfl
+  | cons operation rest ih => simp only [applyOperations]; rw [ih, Operation.apply_accounts]
 
-theorem post_conserves (book : Book) (transfer : Transfer)
-    (source : transfer.source ∈ book.accounts) (destination : transfer.destination ∈ book.accounts)
-    (asset : AssetId) : (post book transfer).totalAsset asset = book.totalAsset asset :=
-  Operation.apply_conserves (Operation.transfer transfer.source transfer.destination transfer.asset transfer.amount)
-    book source destination asset
+theorem applyOperations_append_eq (book : Book) (first later : List Operation) :
+    applyOperations book (first ++ later) = applyOperations (applyOperations book first) later := by
+  induction first generalizing book with
+  | nil => rfl
+  | cons operation rest ih => simp only [List.cons_append, applyOperations]; exact ih _
+
+/-- An account no transfer names keeps every balance. -/
+theorem ops_untouched {book : Book} {transfers : List Transfer} {account : AccountId}
+    (away : ∀ transfer ∈ transfers, transfer.source ≠ account ∧ transfer.destination ≠ account)
+    (asset : AssetId) : (applyOperations book (opsOf transfers)).balance account asset = book.balance account asset := by
+  induction transfers generalizing book with
+  | nil => rfl
+  | cons transfer rest ih =>
+    simp only [opsOf, List.map_cons, applyOperations]
+    obtain ⟨notSource, notDestination⟩ := away transfer (by simp)
+    rw [show List.map Transfer.op rest = opsOf rest from rfl, ih (fun t m => away t (by simp [m])), balance_op,
+      if_neg (fun h => notSource h.1.symm), if_neg (fun h => notDestination h.1.symm)]
+    simp
+
+/-- Transfers in other assets leave every balance of `asset` alone. -/
+theorem ops_other_asset {book : Book} {transfers : List Transfer} {asset : AssetId}
+    (away : ∀ transfer ∈ transfers, transfer.asset ≠ asset) (account : AccountId) :
+    (applyOperations book (opsOf transfers)).balance account asset = book.balance account asset := by
+  induction transfers generalizing book with
+  | nil => rfl
+  | cons transfer rest ih =>
+    simp only [opsOf, List.map_cons, applyOperations]
+    have other := away transfer (by simp)
+    rw [show List.map Transfer.op rest = opsOf rest from rfl, ih (fun t m => away t (by simp [m])), balance_op,
+      if_neg (fun h => other h.2.symm), if_neg (fun h => other h.2.symm)]
+    simp
+
+/-- An account no transfer debits never loses balance. -/
+theorem ops_credit_only {book : Book} {transfers : List Transfer} {account : AccountId}
+    (away : ∀ transfer ∈ transfers, transfer.source ≠ account)
+    (asset : AssetId) : book.balance account asset ≤ (applyOperations book (opsOf transfers)).balance account asset := by
+  induction transfers generalizing book with
+  | nil => exact le_rfl
+  | cons transfer rest ih =>
+    simp only [opsOf, List.map_cons, applyOperations]
+    show book.balance account asset ≤ (applyOperations (transfer.op.apply book) (opsOf rest)).balance account asset
+    have step := ih (book := transfer.op.apply book) (fun t m => away t (by simp [m]))
+    have notSource := away transfer (by simp)
+    rw [balance_op, if_neg (fun h => notSource h.1.symm)] at step
+    split_ifs at step <;> omega
+
+/-- Admitted transfers keep an account's balances non-negative: every debit is
+funded on the intermediate book. -/
+theorem ops_nonneg {book : Book} {transfers : List Transfer} {account : AccountId}
+    (admitted : OperationsAdmitted book (opsOf transfers)) (nonneg : ∀ asset, 0 ≤ book.balance account asset)
+    (asset : AssetId) : 0 ≤ (applyOperations book (opsOf transfers)).balance account asset := by
+  induction transfers generalizing book with
+  | nil => exact nonneg asset
+  | cons transfer rest ih =>
+    simp only [opsOf, List.map_cons, applyOperations, OperationsAdmitted] at admitted ⊢
+    have funded : (transfer.amount : Int) ≤ book.balance transfer.source transfer.asset :=
+      admitted.1.sourceSolvent.resolve_left (by simp [Transfer.op, Operation.isIssuerMint])
+    apply ih admitted.2
+    intro asset'
+    rw [balance_op]
+    have := nonneg asset'
+    split_ifs with h1 h2 <;> (try obtain ⟨rfl, rfl⟩ := h1) <;> omega
+
+/-- No postings. -/
+def noPostings : Batch := ⟨[], []⟩
+
+/-- Two batches in sequence (the second registers nothing: only an offer
+registers, and an offer is one step on its own). -/
+def seqBatch (first later : Batch) : Batch :=
+  ⟨first.registrations ++ later.registrations, first.operations ++ later.operations⟩
+
+/-- What a step posts: one batch admitted on the step's own Book, and the next
+Book is that batch applied. -/
+def Posts (book : Book) (batch : Batch) (next : Book) : Prop :=
+  batch.Admission book ∧ next = batch.apply book
+
+theorem Posts.conserves {book next : Book} {batch : Batch} (posted : Posts book batch next) (asset : AssetId) :
+    next.totalAsset asset = book.totalAsset asset := by
+  rw [posted.2]; exact Batch.conservation book batch posted.1 asset
+
+theorem Posts.accounts {book next : Book} {batch : Batch} (posted : Posts book batch next)
+    (none : batch.registrations = []) : next.accounts = book.accounts := by
+  rw [posted.2]; unfold Batch.apply; rw [none, applyOperations_accounts_eq]; rfl
+
+theorem posts_none (book : Book) : Posts book noPostings book := ⟨⟨trivial, trivial⟩, rfl⟩
+
+theorem Posts.seq {book middle next : Book} {first later : Batch} (p : Posts book first middle)
+    (q : Posts middle later next) (none : later.registrations = []) : Posts book (seqBatch first later) next := by
+  obtain ⟨⟨regs, ops⟩, rfl⟩ := p
+  obtain ⟨⟨_, ops'⟩, rfl⟩ := q
+  simp only [Batch.apply, none, registerAccounts] at ops' ⊢
+  refine ⟨⟨by simpa [seqBatch, none] using regs, ?_⟩, ?_⟩
+  · show OperationsAdmitted (registerAccounts book (first.registrations ++ later.registrations))
+      (first.operations ++ later.operations)
+    rw [none, List.append_nil, operationsAdmitted_append]
+    exact ⟨ops, ops'⟩
+  · show _ = applyOperations (registerAccounts book (first.registrations ++ later.registrations))
+      (first.operations ++ later.operations)
+    rw [none, List.append_nil, applyOperations_append_eq]
+
+/-- Why a batch was refused: a label for the signer, read off the first failing
+posting (the decision itself is `Batch.Admission`). -/
+inductive BookRefusal where
+  | accountNotFresh (account : AccountId)
+  | missing (account : AccountId)
+  | unfunded (account : AccountId) (asset : AssetId)
+  deriving DecidableEq, Repr
+
+def diagnoseOps : Book → List Operation → BookRefusal
+  | _, [] => .missing 0
+  | book, operation :: rest =>
+    let posting := operation.posting
+    if posting.source ∉ book.accounts then .missing posting.source
+    else if posting.destination ∉ book.accounts then .missing posting.destination
+    else if book.balance posting.source posting.asset < posting.amount then .unfunded posting.source posting.asset
+    else diagnoseOps (operation.apply book) rest
+
+def diagnose (book : Book) (batch : Batch) : BookRefusal :=
+  if RegistrationsAdmitted book batch.registrations then
+    diagnoseOps (registerAccounts book batch.registrations) batch.operations
+  else .accountNotFresh (batch.registrations.headD 0)
+
+/-! ## Payout: a seat's whole allocation to its payee -/
+
+/-- The transfers that move a seat's balance of each listed asset (as read on
+`book`) to the payee. -/
+def payoutTransfers (book : Book) (account payee : AccountId) (assets : List AssetId) : List Transfer :=
+  assets.map fun asset => ⟨account, payee, asset, (book.balance account asset).toNat⟩
+
+theorem payout_sources {book : Book} {account payee : AccountId} {assets : List AssetId} :
+    ∀ transfer ∈ payoutTransfers book account payee assets, transfer.source = account := by
+  intro transfer member
+  simp only [payoutTransfers, List.mem_map] at member
+  obtain ⟨_, _, rfl⟩ := member
+  rfl
+
+/-- Over distinct assets and non-negative balances, the payout is admitted on
+any book that agrees with `pre` on the seat's listed balances. -/
+theorem payout_admitted_from (pre : Book) (account payee : AccountId) (different : payee ≠ account) :
+    ∀ (assets : List AssetId) (book : Book), assets.Nodup →
+      account ∈ book.accounts → payee ∈ book.accounts →
+      (∀ asset ∈ assets, book.balance account asset = pre.balance account asset ∧ 0 ≤ pre.balance account asset) →
+      OperationsAdmitted book (opsOf (payoutTransfers pre account payee assets))
+  | [], _, _, _, _, _ => trivial
+  | first :: rest, book, nodup, accountIn, payeeIn, agree => by
+    rw [List.nodup_cons] at nodup
+    obtain ⟨same, nonneg⟩ := agree first (by simp)
+    refine ⟨⟨accountIn, payeeIn, Or.inr ?_, trivial⟩, ?_⟩
+    · show ((pre.balance account first).toNat : Int) ≤ book.balance account first
+      rw [Int.toNat_of_nonneg nonneg, same]
+    · apply payout_admitted_from pre account payee different rest _ nodup.2
+        (by simpa using accountIn) (by simpa using payeeIn)
+      intro asset member
+      have ne : asset ≠ first := fun h => nodup.1 (h ▸ member)
+      refine ⟨?_, (agree asset (by simp [member])).2⟩
+      rw [balance_op]
+      simp [ne, (agree asset (by simp [member])).1]
+
+/-- Over distinct assets, a payout moves exactly the seat's non-negative
+balances: the seat ends at zero and the payee gains exactly that much. -/
+theorem payout_exact_from (pre : Book) (account payee : AccountId) (different : payee ≠ account) :
+    ∀ (assets : List AssetId) (book : Book), assets.Nodup →
+      (∀ asset ∈ assets, book.balance account asset = pre.balance account asset ∧ 0 ≤ pre.balance account asset) →
+      ∀ asset ∈ assets,
+        (applyOperations book (opsOf (payoutTransfers pre account payee assets))).balance account asset = 0 ∧
+        (applyOperations book (opsOf (payoutTransfers pre account payee assets))).balance payee asset =
+          book.balance payee asset + book.balance account asset
+  | [], _, _, _, asset, named => by simp at named
+  | first :: rest, book, nodup, agree, asset, named => by
+    rw [List.nodup_cons] at nodup
+    simp only [payoutTransfers, List.map_cons, opsOf, applyOperations]
+    rw [show List.map Transfer.op (List.map (fun asset => (⟨account, payee, asset,
+      (pre.balance account asset).toNat⟩ : Transfer)) rest) = opsOf (payoutTransfers pre account payee rest) from rfl]
+    obtain ⟨same, nonneg⟩ := agree first (by simp)
+    rcases List.mem_cons.mp named with rfl | member
+    · have away : ∀ transfer ∈ payoutTransfers pre account payee rest, transfer.asset ≠ asset := by
+        intro transfer tmem
+        simp only [payoutTransfers, List.mem_map] at tmem
+        obtain ⟨a, amem, rfl⟩ := tmem
+        exact fun h => nodup.1 (h ▸ amem)
+      rw [ops_other_asset away, ops_other_asset away, balance_op, balance_op]
+      simp only [and_self, if_true, Ne.symm different, false_and, if_false, different]
+      rw [Int.toNat_of_nonneg nonneg, same]
+      constructor <;> simp
+    · have ne : asset ≠ first := fun h => nodup.1 (h ▸ member)
+      have := payout_exact_from pre account payee different rest
+        ((Transfer.op ⟨account, payee, first, (pre.balance account first).toNat⟩).apply book) nodup.2 (fun a m => by
+        have ne' : a ≠ first := fun h => nodup.1 (h ▸ m)
+        refine ⟨?_, (agree a (by simp [m])).2⟩
+        rw [balance_op]; simp [ne', (agree a (by simp [m])).1]) asset member
+      refine ⟨this.1, ?_⟩
+      rw [this.2, balance_op, balance_op]
+      simp [ne]
+
+/-- Accounts other than the seat only gain. -/
+theorem payout_credit_only (book pre : Book) (account payee other : AccountId) (assets : List AssetId)
+    (different : other ≠ account) (asset : AssetId) :
+    book.balance other asset ≤
+      (applyOperations book (opsOf (payoutTransfers pre account payee assets))).balance other asset :=
+  ops_credit_only (fun transfer member => (payout_sources transfer member).symm ▸ Ne.symm different) asset
+
+/-! ## The seat world -/
+
+/-- The protected coordinate space seat accounts live in (`Kernel.ProtectedCell`). -/
+abbrev reservedBase : Nat := Minidregg.Kernel.ProtectedCell.reservedBase
+
+/-- An ordinary account (below the protected space) is never a protected one. -/
+theorem ordinary_ne_protected {ordinary protected_ : Nat} (below : ¬ reservedBase ≤ ordinary)
+    (above : ¬ protected_ < reservedBase) : ordinary ≠ protected_ :=
+  fun same => below (same ▸ Nat.le_of_not_lt above)
+
+structure Seat where
+  account : AccountId
+  inst : InstanceId
+  offerer : SubjectId
+  payee : AccountId
+  proposal : Proposal
+  /-- The activity (its record cell) that holds this seat, if any: the
+  activity's end exits it (`closeHeld`). -/
+  holder : Option Nat
+  isOpen : Bool
+  deriving DecidableEq, Repr
+
+structure World where
+  book : Book
+  registry : Registry
+  seats : List Seat
+
+def World.seat? (world : World) (account : AccountId) : Option Seat :=
+  world.seats.find? (fun seat => seat.account == account)
+
+/-- Who acts: a subject signing, the contract instance (only through the Plan
+its own method returns), or the end of the activity that holds a seat. -/
+inductive Actor where
+  | subject (subject : SubjectId)
+  | inst (inst : InstanceId)
+  | activity (record : Nat)
+  deriving DecidableEq, Repr
+
+inductive Action where
+  | create (inst : Instance)
+  | mint (invitation : Invitation)
+  | handOver (id : InvitationId) (recipient : SubjectId)
+  | offer (id : InvitationId) (expect : Expectation) (seat funding payee : AccountId) (proposal : Proposal)
+      (holder : Option Nat)
+  | reallocate (inst : InstanceId) (transfers : List Transfer)
+  | exit (seat : AccountId)
+  | terminate (inst : InstanceId)
+  deriving Repr
+
+/-- Only an offer registers a Book account. -/
+def Action.registers : Action → Bool
+  | .offer .. => true
+  | _ => false
 
 inductive Refusal where
   | invitation (reason : Invitations.Refusal)
   | notASubject | notAnInstance | notTheInstance (inst : InstanceId)
-  | seatAccountNotFresh (account : AccountId) | seatAccountOwned (account : AccountId)
-  | fundingNotOwned (account : AccountId) | payeeMissing (account : AccountId)
-  | missing (account : AccountId) | unfunded (account : AccountId) (asset : AssetId)
+  | seatNotProtected (account : AccountId) | fundingProtected (account : AccountId)
+  | payeeProtected (account : AccountId) | payeeMissing (account : AccountId)
+  | book (reason : BookRefusal)
   | offerUnsafe (account : AccountId)
   | outsideSeats (transfer : Transfer) (inst : InstanceId)
   | contractClauseRefused (inst : InstanceId)
@@ -203,256 +471,50 @@ inductive Refusal where
   | instanceExists (inst : InstanceId)
   deriving DecidableEq, Repr
 
-/-- Apply transfers in order; each needs both endpoints registered and a funded
-source (no issuer mint happens here). -/
-def settle (book : Book) : List Transfer → Except Refusal Book
-  | [] => .ok book
-  | transfer :: rest =>
-    if transfer.source ∉ book.accounts then .error (.missing transfer.source)
-    else if transfer.destination ∉ book.accounts then .error (.missing transfer.destination)
-    else if book.balance transfer.source transfer.asset < transfer.amount then
-      .error (.unfunded transfer.source transfer.asset)
-    else settle (post book transfer) rest
+/-- Admit one batch on a Book: its result, or the named refusal. -/
+def admit (book : Book) (batch : Batch) : Except Refusal Book :=
+  if batch.Admission book then .ok (batch.apply book) else .error (.book (diagnose book batch))
 
-theorem settle_accounts {book book' : Book} {transfers : List Transfer}
-    (settled : settle book transfers = .ok book') : book'.accounts = book.accounts := by
-  induction transfers generalizing book with
-  | nil => simp only [settle] at settled; cases settled; rfl
-  | cons transfer rest ih =>
-    simp only [settle] at settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    rw [ih settled, post_accounts]
-
-theorem settle_conserves {book book' : Book} {transfers : List Transfer}
-    (settled : settle book transfers = .ok book') (asset : AssetId) :
-    book'.totalAsset asset = book.totalAsset asset := by
-  induction transfers generalizing book with
-  | nil => simp only [settle] at settled; cases settled; rfl
-  | cons transfer rest ih =>
-    simp only [settle] at settled
-    split at settled
-    · cases settled
-    rename_i source
-    split at settled
-    · cases settled
-    rename_i destination
-    split at settled
-    · cases settled
-    rw [ih settled, post_conserves book transfer (not_not.mp source) (not_not.mp destination)]
-
-/-- An account no transfer names keeps every balance. -/
-theorem settle_untouched {book book' : Book} {transfers : List Transfer} {account : AccountId}
-    (settled : settle book transfers = .ok book')
-    (away : ∀ transfer ∈ transfers, transfer.source ≠ account ∧ transfer.destination ≠ account)
-    (asset : AssetId) : book'.balance account asset = book.balance account asset := by
-  induction transfers generalizing book with
-  | nil => simp only [settle] at settled; cases settled; rfl
-  | cons transfer rest ih =>
-    simp only [settle] at settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    obtain ⟨notSource, notDestination⟩ := away transfer (by simp)
-    rw [ih settled (fun t m => away t (by simp [m])), balance_post,
-      if_neg (fun h => notSource h.1.symm), if_neg (fun h => notDestination h.1.symm)]
-    simp
-
-/-- An account no transfer debits never loses balance. -/
-theorem settle_credit_only {book book' : Book} {transfers : List Transfer} {account : AccountId}
-    (settled : settle book transfers = .ok book')
-    (away : ∀ transfer ∈ transfers, transfer.source ≠ account)
-    (asset : AssetId) : book.balance account asset ≤ book'.balance account asset := by
-  induction transfers generalizing book with
-  | nil => simp only [settle] at settled; cases settled; exact le_rfl
-  | cons transfer rest ih =>
-    simp only [settle] at settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    have step := ih settled (fun t m => away t (by simp [m]))
-    have notSource := away transfer (by simp)
-    rw [balance_post, if_neg (fun h => notSource h.1.symm)] at step
-    split_ifs at step <;> omega
-
-/-- Settling keeps an account's balances non-negative: every debit is funded. -/
-theorem settle_nonneg {book book' : Book} {transfers : List Transfer} {account : AccountId}
-    (settled : settle book transfers = .ok book') (nonneg : ∀ asset, 0 ≤ book.balance account asset)
-    (asset : AssetId) : 0 ≤ book'.balance account asset := by
-  induction transfers generalizing book with
-  | nil => simp only [settle] at settled; cases settled; exact nonneg asset
-  | cons transfer rest ih =>
-    simp only [settle] at settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    split at settled
-    · cases settled
-    rename_i funded
-    apply ih settled
-    intro asset'
-    rw [balance_post]
-    have := nonneg asset'
-    split_ifs with h1 h2 <;> (try obtain ⟨rfl, rfl⟩ := h1) <;> omega
-
-/-! ## Payout: a seat's whole allocation to its payee -/
-
-/-- Move the seat's current balance of each listed asset to the payee. Only
-registered endpoints are admitted, so the move conserves; no funding check is
-needed because the amount IS the balance. -/
-def payout (book : Book) (account payee : AccountId) : List AssetId → Book
-  | [] => book
-  | asset :: rest =>
-    payout (post book ⟨account, payee, asset, (book.balance account asset).toNat⟩) account payee rest
-
-@[simp] theorem payout_accounts (book : Book) (account payee : AccountId) (assets : List AssetId) :
-    (payout book account payee assets).accounts = book.accounts := by
-  induction assets generalizing book with
-  | nil => rfl
-  | cons asset rest ih => simp [payout, ih]
-
-theorem payout_conserves (book : Book) (account payee : AccountId) (assets : List AssetId)
-    (accountMember : account ∈ book.accounts) (payeeMember : payee ∈ book.accounts) (asset : AssetId) :
-    (payout book account payee assets).totalAsset asset = book.totalAsset asset := by
-  induction assets generalizing book with
-  | nil => rfl
-  | cons first rest ih =>
-    simp only [payout]
-    rw [ih _ (by simpa using accountMember) (by simpa using payeeMember)]
-    exact post_conserves _ _ accountMember payeeMember asset
-
-/-- Accounts other than the seat only gain. -/
-theorem payout_credit_only (book : Book) (account payee other : AccountId) (assets : List AssetId)
-    (different : other ≠ account) (asset : AssetId) :
-    book.balance other asset ≤ (payout book account payee assets).balance other asset := by
-  induction assets generalizing book with
-  | nil => exact le_rfl
-  | cons first rest ih =>
-    simp only [payout]
-    refine le_trans ?_ (ih _)
-    rw [balance_post]
-    simp only [different, false_and, if_false, sub_zero]
-    split_ifs <;> omega
-
-/-- Over distinct assets, a payout moves exactly the seat's non-negative
-balances: the seat ends at zero and the payee gains exactly that much. -/
-theorem payout_exact (book : Book) (account payee : AccountId) (assets : List AssetId)
-    (nodup : assets.Nodup) (different : payee ≠ account)
-    (nonneg : ∀ asset ∈ assets, 0 ≤ book.balance account asset) (asset : AssetId) (named : asset ∈ assets) :
-    (payout book account payee assets).balance account asset = 0 ∧
-      (payout book account payee assets).balance payee asset =
-        book.balance payee asset + book.balance account asset := by
-  induction assets generalizing book with
-  | nil => simp at named
-  | cons first rest ih =>
-    simp only [payout]
-    rw [List.nodup_cons] at nodup
-    have posted : ∀ a ∈ rest, (post book ⟨account, payee, first, (book.balance account first).toNat⟩).balance account a =
-        book.balance account a := by
-      intro a member
-      have : a ≠ first := fun h => nodup.1 (h ▸ member)
-      rw [balance_post]; simp [this, Ne.symm different]
-    rcases List.mem_cons.mp named with rfl | member
-    · -- the first asset is paid now and untouched by the rest
-      have untouchedSeat : ∀ (b : Book) (as : List AssetId), asset ∉ as →
-          (payout b account payee as).balance account asset = b.balance account asset ∧
-          (payout b account payee as).balance payee asset = b.balance payee asset := by
-        intro b as away
-        induction as generalizing b with
-        | nil => exact ⟨rfl, rfl⟩
-        | cons a more ihm =>
-          simp only [payout]
-          have ne : asset ≠ a := fun h => away (h ▸ List.mem_cons_self)
-          obtain ⟨h1, h2⟩ := ihm (post b ⟨account, payee, a, (b.balance account a).toNat⟩)
-            (fun m => away (List.mem_cons_of_mem _ m))
-          rw [h1, h2, balance_post, balance_post]
-          simp [ne]
-      obtain ⟨seat, gain⟩ := untouchedSeat _ rest nodup.1
-      rw [seat, gain, balance_post, balance_post]
-      have := nonneg asset (by simp)
-      simp only [and_self, if_true, Ne.symm different, false_and, if_false, different]
-      constructor <;> simp [Int.toNat_of_nonneg this]
-    · have := ih _ nodup.2 (fun a m => (posted a m).symm ▸ nonneg a (List.mem_cons_of_mem _ m)) member
-      have ne : asset ≠ first := fun h => nodup.1 (h ▸ member)
-      rw [posted asset member] at this
-      refine ⟨this.1, ?_⟩
-      rw [this.2, balance_post]
-      simp [ne]
-
-/-! ## The seat world -/
-
-structure Seat where
-  account : AccountId
-  inst : InstanceId
-  offerer : SubjectId
-  payee : AccountId
-  proposal : Proposal
-  isOpen : Bool
-  deriving DecidableEq, Repr
-
-structure World where
-  book : Book
-  /-- Which subject controls each ordinary (non-seat) Book account. -/
-  owners : List (AccountId × SubjectId)
-  registry : Registry
-  seats : List Seat
-
-def World.ownerOf (world : World) (account : AccountId) : Option SubjectId :=
-  (world.owners.find? (fun entry => entry.1 == account)).map Prod.snd
-
-def World.seat? (world : World) (account : AccountId) : Option Seat :=
-  world.seats.find? (fun seat => seat.account == account)
-
-/-- Who acts: a subject signing, or a turn of a contract instance. -/
-inductive Actor where
-  | subject (subject : SubjectId)
-  | inst (inst : InstanceId)
-  deriving DecidableEq, Repr
-
-inductive Action where
-  | create (inst : Instance)
-  | mint (invitation : Invitation)
-  | handOver (id : InvitationId) (recipient : SubjectId)
-  | offer (id : InvitationId) (expect : Expectation) (seat funding payee : AccountId) (proposal : Proposal)
-  | reallocate (inst : InstanceId) (transfers : List Transfer)
-  | exit (seat : AccountId)
-  | terminate (inst : InstanceId)
-  deriving Repr
+theorem admit_posts {book next : Book} {batch : Batch} (admitted : admit book batch = .ok next) :
+    Posts book batch next := by
+  unfold admit at admitted
+  split at admitted
+  · rename_i h; cases admitted; exact ⟨h, rfl⟩
+  · cases admitted
 
 def closeSeats (seats : List Seat) (account : AccountId) : List Seat :=
   seats.map fun seat => if seat.account = account then { seat with isOpen := false } else seat
 
-/-- Close one open seat: pay its whole allocation to its payee. -/
-def closeSeat (world : World) (seat : Seat) : Except Refusal World :=
-  if seat.account ∉ world.book.accounts then .error (.missing seat.account)
-  else if seat.payee ∉ world.book.accounts then .error (.payeeMissing seat.payee)
-  else .ok { world with
-    book := payout world.book seat.account seat.payee seat.proposal.assets
-    seats := closeSeats world.seats seat.account }
+/-- The batch that closes one seat: its whole allocation to its payee. -/
+def closeBatch (book : Book) (seat : Seat) : Batch :=
+  ⟨[], opsOf (payoutTransfers book seat.account seat.payee seat.proposal.assets)⟩
 
-def closeAll (world : World) : List Seat → Except Refusal World
-  | [] => .ok world
+/-- Close one open seat: pay its whole allocation to its payee. -/
+def closeSeat (world : World) (seat : Seat) : Except Refusal (World × Batch) :=
+  match admit world.book (closeBatch world.book seat) with
+  | .error reason => .error reason
+  | .ok book => .ok ({ world with book := book, seats := closeSeats world.seats seat.account },
+      closeBatch world.book seat)
+
+def closeAll (world : World) : List Seat → Except Refusal (World × Batch)
+  | [] => .ok (world, noPostings)
   | seat :: rest =>
     match closeSeat world seat with
     | .error reason => .error reason
-    | .ok next => closeAll next rest
+    | .ok (middle, first) =>
+      match closeAll middle rest with
+      | .error reason => .error reason
+      | .ok (next, later) => .ok (next, seqBatch first later)
 
+/-- Who may exit a seat: its offerer on demand; its contract; the activity that
+holds it; anyone once a deadline seat's due height is reached. The contract's
+clause is not an argument. -/
 def exitAuthorized (height : Nat) (actor : Actor) (seat : Seat) : Bool :=
   match actor, seat.proposal.exit with
   | .subject subject, .onDemand => subject == seat.offerer
   | .inst inst, _ => inst == seat.inst
-  | _, .afterDeadline due => decide (due ≤ height)
+  | .activity record, _ => seat.holder == some record
+  | .subject _, .afterDeadline due => decide (due ≤ height)
 
 def openSeatsOf (world : World) (inst : InstanceId) : List Seat :=
   world.seats.filter fun seat => seat.isOpen && seat.inst == inst
@@ -461,8 +523,8 @@ def touches (transfers : List Transfer) (account : AccountId) : Bool :=
   transfers.any fun transfer => transfer.source == account || transfer.destination == account
 
 /-- A reallocation moves value only between open seats of its own instance, and
-credits a seat only in an asset its proposal names (so `exit` pays out
-everything a seat holds). -/
+credits a seat only in an asset its proposal names (so `exit`, which pays only
+named assets, never strands value in a closed seat). -/
 def addressed (seats : List Seat) (transfer : Transfer) : Bool :=
   seats.any (fun seat => seat.account == transfer.source) &&
     seats.any (fun seat => seat.account == transfer.destination && transfer.asset ∈ seat.proposal.assets)
@@ -474,7 +536,7 @@ def firstUnsafe (seats : List Seat) (book : Book) (transfers : List Transfer) : 
 def giveTransfers (funding seat : AccountId) (proposal : Proposal) : List Transfer :=
   proposal.give.map fun entry => ⟨funding, seat, entry.1, entry.2⟩
 
-def requestState (action : Int) : Pred.State := ⟨[("request/action", action)]⟩
+def requestState (action : Int) : Minidregg.Pred.State := ⟨[("request/action", action)]⟩
 
 /-- The contract's own clause, consulted for reallocations only. -/
 def contractAdmits (inst : Instance) : Bool :=
@@ -484,54 +546,61 @@ def retireInstance (registry : Registry) (inst : InstanceId) : Registry :=
   { registry with
     instances := registry.instances.filter (fun i => i.id ≠ inst)
     live := registry.live.filter (fun v => v.inst ≠ inst)
-    spent := (registry.live.filter (fun v => v.inst = inst)).map Invitation.id ++ registry.spent }
+    spent := (registry.live.filter (fun v => v.inst = inst)).map Invitation.id ++ registry.spent
+    retired := inst :: registry.retired }
 
-/-- The one transition function of the seat world. -/
-def step (world : World) (height : Nat) (actor : Actor) : Action → Except Refusal World
+/-- The batch an offer posts: register the seat account, move `give` into it. -/
+def offerBatch (funding seat : AccountId) (proposal : Proposal) : Batch :=
+  ⟨[seat], opsOf (giveTransfers funding seat proposal)⟩
+
+/-- The one transition function of the seat world: the next world and the one
+Book batch the step posts. -/
+def step (world : World) (height : Nat) (actor : Actor) : Action → Except Refusal (World × Batch)
   | .create inst =>
     match actor with
-    | .inst _ => .error .notASubject
     | .subject _ =>
-      if (world.registry.instance? inst.id).isSome then .error (.instanceExists inst.id)
-      else .ok { world with registry := { world.registry with instances := inst :: world.registry.instances } }
+      if (world.registry.instance? inst.id).isSome || world.registry.retired.contains inst.id then
+        .error (.instanceExists inst.id)
+      else .ok ({ world with registry := { world.registry with instances := inst :: world.registry.instances } },
+        noPostings)
+    | _ => .error .notASubject
   | .mint invitation =>
     match actor with
-    | .subject _ => .error .notAnInstance
     | .inst acting =>
       match Invitations.mint world.registry acting invitation with
       | .error reason => .error (.invitation reason)
-      | .ok registry => .ok { world with registry := registry }
+      | .ok registry => .ok ({ world with registry := registry }, noPostings)
+    | _ => .error .notAnInstance
   | .handOver id recipient =>
     match actor with
-    | .inst _ => .error .notASubject
     | .subject subject =>
       match Invitations.handOver world.registry subject id recipient with
       | .error reason => .error (.invitation reason)
-      | .ok registry => .ok { world with registry := registry }
-  | .offer id expect seatAccount funding payee proposal =>
+      | .ok registry => .ok ({ world with registry := registry }, noPostings)
+    | _ => .error .notASubject
+  | .offer id expect seatAccount funding payee proposal holder =>
     match actor with
-    | .inst _ => .error .notASubject
     | .subject subject =>
       match Invitations.spend world.registry subject id expect with
       | .error reason => .error (.invitation reason)
       | .ok (invitation, registry) =>
-        if ¬ RegistrationAdmission world.book seatAccount then .error (.seatAccountNotFresh seatAccount)
-        else if (world.ownerOf seatAccount).isSome then .error (.seatAccountOwned seatAccount)
-        else if world.ownerOf funding ≠ some subject then .error (.fundingNotOwned funding)
+        if seatAccount < reservedBase then .error (.seatNotProtected seatAccount)
+        else if reservedBase ≤ funding then .error (.fundingProtected funding)
+        else if reservedBase ≤ payee then .error (.payeeProtected payee)
         else if payee ∉ world.book.accounts then .error (.payeeMissing payee)
         else
-          match settle (world.book.registerAccount seatAccount) (giveTransfers funding seatAccount proposal) with
+          match admit world.book (offerBatch funding seatAccount proposal) with
           | .error reason => .error reason
           | .ok book =>
             if safeAt book seatAccount proposal then
-              .ok { world with
-                book := book
-                registry := registry
-                seats := ⟨seatAccount, invitation.inst, subject, payee, proposal, true⟩ :: world.seats }
+              .ok ({ book := book
+                     registry := registry
+                     seats := ⟨seatAccount, invitation.inst, subject, payee, proposal, holder, true⟩ :: world.seats },
+                offerBatch funding seatAccount proposal)
             else .error (.offerUnsafe seatAccount)
+    | _ => .error .notASubject
   | .reallocate instId transfers =>
     match actor with
-    | .subject _ => .error .notAnInstance
     | .inst acting =>
       if acting ≠ instId then .error (.notTheInstance instId)
       else match world.registry.instance? instId with
@@ -541,12 +610,13 @@ def step (world : World) (height : Nat) (actor : Actor) : Action → Except Refu
         else match transfers.find? (fun transfer => !addressed (openSeatsOf world instId) transfer) with
         | some transfer => .error (.outsideSeats transfer instId)
         | none =>
-          match settle world.book transfers with
+          match admit world.book ⟨[], opsOf transfers⟩ with
           | .error reason => .error reason
           | .ok book =>
             match firstUnsafe world.seats book transfers with
             | some seat => .error (.offerUnsafe seat.account)
-            | none => .ok { world with book := book }
+            | none => .ok ({ world with book := book }, ⟨[], opsOf transfers⟩)
+    | _ => .error .notAnInstance
   | .exit account =>
     match world.seat? account with
     | none => .error (.seatMissing account)
@@ -556,12 +626,136 @@ def step (world : World) (height : Nat) (actor : Actor) : Action → Except Refu
       else closeSeat world seat
   | .terminate instId =>
     match actor with
-    | .subject _ => .error .notAnInstance
     | .inst acting =>
       if acting ≠ instId then .error (.notTheInstance instId)
       else match closeAll world (openSeatsOf world instId) with
       | .error reason => .error reason
-      | .ok closed => .ok { closed with registry := retireInstance closed.registry instId }
+      | .ok (closed, batch) => .ok ({ closed with registry := retireInstance closed.registry instId }, batch)
+    | _ => .error .notAnInstance
+
+/-! ## Every step posts one admitted batch -/
+
+theorem closeSeat_spec {world next : World} {seat : Seat} {batch : Batch}
+    (closed : closeSeat world seat = .ok (next, batch)) :
+    batch = closeBatch world.book seat ∧ Posts world.book batch next.book ∧
+      next = { world with book := next.book, seats := closeSeats world.seats seat.account } := by
+  unfold closeSeat at closed
+  split at closed
+  · cases closed
+  · rename_i book admitted
+    cases closed
+    exact ⟨rfl, admit_posts admitted, rfl⟩
+
+theorem closeAll_posts {world next : World} {seats : List Seat} {batch : Batch}
+    (closed : closeAll world seats = .ok (next, batch)) :
+    Posts world.book batch next.book ∧ batch.registrations = [] := by
+  induction seats generalizing world next batch with
+  | nil => simp only [closeAll] at closed; cases closed; exact ⟨posts_none _, rfl⟩
+  | cons seat rest ih =>
+    simp only [closeAll] at closed
+    split at closed
+    · cases closed
+    · rename_i middle first hfirst
+      split at closed
+      · cases closed
+      · rename_i later hlater
+        cases closed
+        obtain ⟨rfl, posted, _⟩ := closeSeat_spec hfirst
+        obtain ⟨postedLater, none⟩ := ih hlater
+        exact ⟨posted.seq postedLater none, by simp [seqBatch, closeBatch, none]⟩
+
+theorem step_posts {world next : World} {height : Nat} {actor : Actor} {action : Action} {batch : Batch}
+    (admitted : step world height actor action = .ok (next, batch)) :
+    Posts world.book batch next.book ∧ (action.registers = false → batch.registrations = []) := by
+  cases action with
+  | create inst =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      · cases admitted; exact ⟨posts_none _, fun _ => rfl⟩
+    · cases admitted
+  | mint invitation =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      · cases admitted; exact ⟨posts_none _, fun _ => rfl⟩
+    · cases admitted
+  | handOver id recipient =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      · cases admitted; exact ⟨posts_none _, fun _ => rfl⟩
+    · cases admitted
+  | offer id expect seatAccount funding payee proposal holder =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      · split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        · rename_i book hbook
+          split at admitted
+          · cases admitted; exact ⟨admit_posts hbook, fun h => by simp [Action.registers] at h⟩
+          · cases admitted
+    · cases admitted
+  | reallocate instId transfers =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      · rename_i book hbook
+        split at admitted
+        · cases admitted
+        · cases admitted; exact ⟨admit_posts hbook, fun _ => rfl⟩
+    · cases admitted
+  | exit account =>
+    simp only [step] at admitted
+    split at admitted
+    · cases admitted
+    split at admitted
+    · cases admitted
+    split at admitted
+    · cases admitted
+    obtain ⟨rfl, posted, _⟩ := closeSeat_spec admitted
+    exact ⟨posted, fun _ => rfl⟩
+  | terminate instId =>
+    simp only [step] at admitted
+    split at admitted
+    · split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      · rename_i closed hclosed
+        cases admitted
+        obtain ⟨posted, none⟩ := closeAll_posts hclosed
+        exact ⟨posted, fun _ => none⟩
+    · cases admitted
+
+/-- **T3 (c): every admitted step conserves every asset**, by the Book's own
+posting theorem on the step's one batch. -/
+theorem seat_conserves {world next : World} {height : Nat} {actor : Actor} {action : Action} {batch : Batch}
+    (admitted : step world height actor action = .ok (next, batch)) (asset : AssetId) :
+    next.book.totalAsset asset = world.book.totalAsset asset :=
+  (step_posts admitted).1.conserves asset
 
 /-! ## The invariant -/
 
@@ -569,12 +763,18 @@ structure Inv (world : World) : Prop where
   safe : ∀ seat ∈ world.seats, seat.isOpen = true → safeAt world.book seat.account seat.proposal = true
   nonneg : ∀ seat ∈ world.seats, seat.isOpen = true → ∀ asset, 0 ≤ world.book.balance seat.account asset
   member : ∀ seat ∈ world.seats, seat.account ∈ world.book.accounts ∧ seat.payee ∈ world.book.accounts
-  payeeOther : ∀ seat ∈ world.seats, seat.payee ≠ seat.account
-  unowned : ∀ seat ∈ world.seats, world.ownerOf seat.account = none
+  /-- A seat account is a protected coordinate; its payee is not. So no funding
+  account, payee or other seat's payee is a seat account. -/
+  protect : ∀ seat ∈ world.seats, reservedBase ≤ seat.account ∧ seat.payee < reservedBase
   distinct : (world.seats.map Seat.account).Nodup
 
 theorem Inv.genesis (world : World) (empty : world.seats = []) : Inv world := by
   constructor <;> simp [empty]
+
+theorem Inv.payeeOther {world : World} (inv : Inv world) {seat : Seat} (member : seat ∈ world.seats) :
+    seat.payee ≠ seat.account := by
+  obtain ⟨above, below⟩ := inv.protect seat member
+  exact Nat.ne_of_lt (lt_of_lt_of_le below above)
 
 /-- In a world with distinct seat accounts, the seat found by account is the
 one in the list. -/
@@ -590,22 +790,6 @@ theorem seat?_eq {world : World} (distinct : (world.seats.map Seat.account).Nodu
   have sameAccount : found.account = seat.account := by simpa using List.find?_some hfound
   exact congrArg some (List.inj_on_of_nodup_map distinct foundMember member sameAccount)
 
-/-! ## Lemmas about the transitions -/
-
-theorem closeSeat_spec {world next : World} {seat : Seat} (closed : closeSeat world seat = .ok next) :
-    seat.account ∈ world.book.accounts ∧ seat.payee ∈ world.book.accounts ∧
-    next = { world with
-      book := payout world.book seat.account seat.payee seat.proposal.assets
-      seats := closeSeats world.seats seat.account } := by
-  unfold closeSeat at closed
-  split at closed
-  · cases closed
-  · split at closed
-    · cases closed
-    · rename_i a p
-      cases closed
-      exact ⟨not_not.mp a, not_not.mp p, rfl⟩
-
 theorem closeSeats_map_account (seats : List Seat) (account : AccountId) :
     (closeSeats seats account).map Seat.account = seats.map Seat.account := by
   unfold closeSeats
@@ -618,176 +802,174 @@ theorem closeSeats_map_account (seats : List Seat) (account : AccountId) :
 theorem mem_closeSeats {seats : List Seat} {account : AccountId} {seat : Seat}
     (member : seat ∈ closeSeats seats account) :
     ∃ original ∈ seats, original.account = seat.account ∧ original.payee = seat.payee ∧
-      original.proposal = seat.proposal ∧ original.inst = seat.inst ∧
+      original.proposal = seat.proposal ∧ original.inst = seat.inst ∧ original.holder = seat.holder ∧
       (seat.isOpen = true → original.isOpen = true ∧ seat.account ≠ account) := by
   unfold closeSeats at member
   obtain ⟨original, originalMember, rfl⟩ := List.mem_map.mp member
   refine ⟨original, originalMember, ?_⟩
   split_ifs with same
   · simp
-  · exact ⟨rfl, rfl, rfl, rfl, fun o => ⟨o, same⟩⟩
+  · exact ⟨rfl, rfl, rfl, rfl, rfl, fun o => ⟨o, same⟩⟩
+
+/-- Closing a seat changes the book only by its payout. -/
+theorem closeSeat_book {world next : World} {seat : Seat} {batch : Batch}
+    (closed : closeSeat world seat = .ok (next, batch)) :
+    next.book = applyOperations world.book (opsOf (payoutTransfers world.book seat.account seat.payee
+      seat.proposal.assets)) := by
+  obtain ⟨rfl, posted, _⟩ := closeSeat_spec closed
+  rw [posted.2]; rfl
 
 /-- Closing one seat of the list preserves the invariant. -/
-theorem closeSeat_inv {world next : World} {seat : Seat} (inv : Inv world)
-    (closed : closeSeat world seat = .ok next) : Inv next := by
-  obtain ⟨_, _, rfl⟩ := closeSeat_spec closed
+theorem closeSeat_inv {world next : World} {seat : Seat} {batch : Batch} (inv : Inv world)
+    (closed : closeSeat world seat = .ok (next, batch)) : Inv next := by
+  have book := closeSeat_book closed
+  obtain ⟨rfl, posted, shape⟩ := closeSeat_spec closed
+  have accounts := posted.accounts rfl
+  rw [shape]
   constructor
   · intro s hs openS
-    obtain ⟨o, ho, account, _, proposal, _, opened⟩ := mem_closeSeats hs
+    obtain ⟨o, ho, account, _, proposal, _, _, opened⟩ := mem_closeSeats hs
     obtain ⟨oOpen, different⟩ := opened openS
-    rw [← account, ← proposal] at *
-    exact safeAt_mono (fun asset _ => payout_credit_only _ _ _ _ _ different asset) (inv.safe o ho oOpen)
+    rw [← account, ← proposal]
+    show safeAt next.book o.account o.proposal = true
+    rw [book]
+    exact safeAt_mono (fun asset _ => payout_credit_only _ _ _ _ _ _ (account ▸ different) asset)
+      (inv.safe o ho oOpen)
   · intro s hs openS asset
-    obtain ⟨o, ho, account, _, _, _, opened⟩ := mem_closeSeats hs
+    obtain ⟨o, ho, account, _, _, _, _, opened⟩ := mem_closeSeats hs
     obtain ⟨oOpen, different⟩ := opened openS
-    rw [← account] at *
-    exact le_trans (inv.nonneg o ho oOpen asset) (payout_credit_only _ _ _ _ _ different asset)
-  · intro s hs
-    obtain ⟨o, ho, account, payee, _⟩ := mem_closeSeats hs
-    rw [← account, ← payee]
-    simpa using inv.member o ho
-  · intro s hs
-    obtain ⟨o, ho, account, payee, _⟩ := mem_closeSeats hs
-    rw [← account, ← payee]
-    exact inv.payeeOther o ho
-  · intro s hs
-    obtain ⟨o, ho, account, _⟩ := mem_closeSeats hs
     rw [← account]
-    exact inv.unowned o ho
+    show 0 ≤ next.book.balance o.account asset
+    rw [book]
+    exact le_trans (inv.nonneg o ho oOpen asset) (payout_credit_only _ _ _ _ _ _ (account ▸ different) asset)
+  · intro s hs
+    obtain ⟨o, ho, account, payee, _⟩ := mem_closeSeats hs
+    rw [← account, ← payee]
+    show o.account ∈ next.book.accounts ∧ o.payee ∈ next.book.accounts
+    rw [accounts]; exact inv.member o ho
+  · intro s hs
+    obtain ⟨o, ho, account, payee, _⟩ := mem_closeSeats hs
+    rw [← account, ← payee]
+    exact inv.protect o ho
   · show ((closeSeats world.seats seat.account).map Seat.account).Nodup
     rw [closeSeats_map_account]; exact inv.distinct
 
-theorem closeAll_inv {world next : World} {seats : List Seat} (inv : Inv world)
-    (closed : closeAll world seats = .ok next) : Inv next := by
-  induction seats generalizing world with
+theorem closeSeat_seats {world next : World} {seat : Seat} {batch : Batch}
+    (closed : closeSeat world seat = .ok (next, batch)) : next.seats = closeSeats world.seats seat.account := by
+  obtain ⟨_, _, shape⟩ := closeSeat_spec closed
+  rw [shape]
+
+theorem closeAll_inv {world next : World} {seats : List Seat} {batch : Batch} (inv : Inv world)
+    (closed : closeAll world seats = .ok (next, batch)) : Inv next := by
+  induction seats generalizing world next batch with
   | nil => simp only [closeAll] at closed; cases closed; exact inv
   | cons seat rest ih =>
     simp only [closeAll] at closed
     split at closed
     · cases closed
-    · rename_i mid hmid
-      exact ih (closeSeat_inv inv hmid) closed
-
-theorem closeAll_conserves {world next : World} {seats : List Seat}
-    (closed : closeAll world seats = .ok next) (asset : AssetId) :
-    next.book.totalAsset asset = world.book.totalAsset asset := by
-  induction seats generalizing world with
-  | nil => simp only [closeAll] at closed; cases closed; rfl
-  | cons seat rest ih =>
-    simp only [closeAll] at closed
-    split at closed
-    · cases closed
-    · rename_i mid hmid
-      obtain ⟨a, p, rfl⟩ := closeSeat_spec hmid
-      rw [ih closed]
-      exact payout_conserves _ _ _ _ a p asset
+    · rename_i middle first hfirst
+      split at closed
+      · cases closed
+      · rename_i later hlater
+        cases closed
+        exact ih (closeSeat_inv inv hfirst) hlater
 
 /-- An account none of the closed seats owns only gains during `closeAll`. -/
-theorem closeAll_credit_only {world next : World} {seats : List Seat} {account : AccountId}
-    (closed : closeAll world seats = .ok next) (away : ∀ seat ∈ seats, seat.account ≠ account)
+theorem closeAll_credit_only {world next : World} {seats : List Seat} {batch : Batch} {account : AccountId}
+    (closed : closeAll world seats = .ok (next, batch)) (away : ∀ seat ∈ seats, seat.account ≠ account)
     (asset : AssetId) : world.book.balance account asset ≤ next.book.balance account asset := by
-  induction seats generalizing world with
+  induction seats generalizing world next batch with
   | nil => simp only [closeAll] at closed; cases closed; exact le_rfl
   | cons seat rest ih =>
     simp only [closeAll] at closed
     split at closed
     · cases closed
-    · rename_i mid hmid
-      obtain ⟨_, _, rfl⟩ := closeSeat_spec hmid
-      exact le_trans (payout_credit_only _ _ _ _ _ (Ne.symm (away seat (by simp))) asset)
-        (ih closed (fun s m => away s (by simp [m])))
-
-theorem registerAccount_balance (book : Book) (seat account : AccountId) (asset : AssetId) :
-    (book.registerAccount seat).balance account asset = book.balance account asset := rfl
+    · rename_i middle first hfirst
+      split at closed
+      · cases closed
+      · rename_i later hlater
+        cases closed
+        refine le_trans ?_ (ih hlater (fun s m => away s (by simp [m])))
+        rw [closeSeat_book hfirst]
+        exact payout_credit_only _ _ _ _ _ _ (Ne.symm (away seat (by simp))) asset
 
 /-! ## The offer and reallocation cases -/
 
-theorem offer_away {world : World} (inv : Inv world) {seatAccount funding : AccountId} {subject : SubjectId}
-    (fresh : RegistrationAdmission world.book seatAccount)
-    (funded : ¬ world.ownerOf funding ≠ some subject) (proposal : Proposal) :
-    ∀ s ∈ world.seats, ∀ t ∈ giveTransfers funding seatAccount proposal,
-      t.source ≠ s.account ∧ t.destination ≠ s.account := by
-  intro s hs t ht
-  simp only [giveTransfers, List.mem_map] at ht
-  obtain ⟨e, _, rfl⟩ := ht
-  refine ⟨fun eq => ?_, fun eq => fresh.1 (by simp only at eq; rw [eq]; exact (inv.member s hs).1)⟩
-  have := inv.unowned s hs
-  rw [← eq] at this
-  rw [this] at funded
-  exact funded (by simp)
-
-/-- An offer leaves every existing seat's balances untouched. -/
-theorem offer_untouched {world : World} (inv : Inv world) {seatAccount funding : AccountId} {subject : SubjectId}
-    {proposal : Proposal} {book : Book}
-    (fresh : RegistrationAdmission world.book seatAccount)
-    (funded : ¬ world.ownerOf funding ≠ some subject)
-    (settled : settle (world.book.registerAccount seatAccount) (giveTransfers funding seatAccount proposal) = .ok book)
-    {seat : Seat} (member : seat ∈ world.seats) (asset : AssetId) :
-    book.balance seat.account asset = world.book.balance seat.account asset := by
-  rw [settle_untouched settled (offer_away inv fresh funded proposal seat member) asset]
-  rfl
-
 theorem offer_inv {world : World} (inv : Inv world) {seatAccount funding payee : AccountId}
     {subject : SubjectId} {proposal : Proposal} {book : Book} {inst : InstanceId} {registry : Registry}
-    (fresh : RegistrationAdmission world.book seatAccount)
-    (owned : ¬ (world.ownerOf seatAccount).isSome = true)
-    (funded : ¬ world.ownerOf funding ≠ some subject)
-    (payeeIn : payee ∈ world.book.accounts)
-    (settled : settle (world.book.registerAccount seatAccount) (giveTransfers funding seatAccount proposal) = .ok book)
+    {holder : Option Nat}
+    (protectedSeat : ¬ seatAccount < reservedBase) (fundingOrdinary : ¬ reservedBase ≤ funding)
+    (payeeOrdinary : ¬ reservedBase ≤ payee) (payeeIn : payee ∈ world.book.accounts)
+    (admitted : admit world.book (offerBatch funding seatAccount proposal) = .ok book)
     (safeNew : safeAt book seatAccount proposal = true) :
-    Inv { world with
-      book := book
-      registry := registry
-      seats := ⟨seatAccount, inst, subject, payee, proposal, true⟩ :: world.seats } := by
-  have accountsEq := settle_accounts settled
-  have notOwned : world.ownerOf seatAccount = none := by
-    cases h : world.ownerOf seatAccount <;> simp_all
-  have fundingOther : funding ≠ seatAccount := by
-    intro eq; rw [eq, notOwned] at funded; exact funded (by simp)
+    Inv { book := book
+          registry := registry
+          seats := ⟨seatAccount, inst, subject, payee, proposal, holder, true⟩ :: world.seats } := by
+  obtain ⟨⟨⟨registered, _⟩, _⟩, rfl⟩ := admit_posts admitted
+  have fresh := registered.1
+  have accountsEq : (Batch.apply (offerBatch funding seatAccount proposal) world.book).accounts =
+      insert seatAccount world.book.accounts := by
+    unfold Batch.apply; rw [applyOperations_accounts_eq]; rfl
+  have fundingOther : funding ≠ seatAccount := ordinary_ne_protected fundingOrdinary protectedSeat
+  have away : ∀ s ∈ world.seats, ∀ t ∈ giveTransfers funding seatAccount proposal,
+      t.source ≠ s.account ∧ t.destination ≠ s.account := by
+    intro s hs t ht
+    simp only [giveTransfers, List.mem_map] at ht
+    obtain ⟨e, _, rfl⟩ := ht
+    have above := (inv.protect s hs).1
+    refine ⟨fun eq => ordinary_ne_protected fundingOrdinary (Nat.not_lt.mpr above) (by simpa using eq),
+      fun eq => fresh (by simp only at eq; rw [eq]; exact (inv.member s hs).1)⟩
+  have untouched : ∀ s ∈ world.seats, ∀ asset,
+      (Batch.apply (offerBatch funding seatAccount proposal) world.book).balance s.account asset =
+        world.book.balance s.account asset := by
+    intro s hs asset
+    exact ops_untouched (away s hs) asset
   constructor
   · intro s hs openS
     rcases List.mem_cons.mp hs with rfl | old
     · exact safeNew
-    · rw [safeAt_congr (fun asset _ => offer_untouched inv fresh funded settled old asset)]
+    · show safeAt (Batch.apply (offerBatch funding seatAccount proposal) world.book) s.account s.proposal = true
+      rw [safeAt_congr (fun asset _ => untouched s old asset)]
       exact inv.safe s old openS
   · intro s hs openS asset
     rcases List.mem_cons.mp hs with rfl | old
     · have zero : (world.book.registerAccount seatAccount).balance seatAccount asset = 0 :=
-        fresh.balance_zero asset
-      have credit := settle_credit_only settled (account := seatAccount) (fun t ht => by
-        simp only [giveTransfers, List.mem_map] at ht
-        obtain ⟨e, _, rfl⟩ := ht
-        exact fundingOther) asset
+        RegistrationAdmission.balance_zero registered asset
+      have credit := ops_credit_only (book := world.book.registerAccount seatAccount)
+        (transfers := giveTransfers funding seatAccount proposal) (account := seatAccount) (fun t ht => by
+          simp only [giveTransfers, List.mem_map] at ht
+          obtain ⟨e, _, rfl⟩ := ht
+          exact fundingOther) asset
       rw [zero] at credit; exact credit
-    · rw [offer_untouched inv fresh funded settled old]; exact inv.nonneg s old openS asset
+    · show 0 ≤ (Batch.apply (offerBatch funding seatAccount proposal) world.book).balance s.account asset
+      rw [untouched s old]; exact inv.nonneg s old openS asset
   · intro s hs
-    show s.account ∈ book.accounts ∧ s.payee ∈ book.accounts
+    show s.account ∈ (Batch.apply (offerBatch funding seatAccount proposal) world.book).accounts ∧
+      s.payee ∈ (Batch.apply (offerBatch funding seatAccount proposal) world.book).accounts
     rw [accountsEq]
-    show s.account ∈ insert seatAccount world.book.accounts ∧ s.payee ∈ insert seatAccount world.book.accounts
     rcases List.mem_cons.mp hs with rfl | old
     · exact ⟨Finset.mem_insert_self _ _, Finset.mem_insert_of_mem payeeIn⟩
     · exact ⟨Finset.mem_insert_of_mem (inv.member s old).1, Finset.mem_insert_of_mem (inv.member s old).2⟩
   · intro s hs
     rcases List.mem_cons.mp hs with rfl | old
-    · intro eq; simp only at eq; exact fresh.1 (eq ▸ payeeIn)
-    · exact inv.payeeOther s old
-  · intro s hs
-    rcases List.mem_cons.mp hs with rfl | old
-    · exact notOwned
-    · exact inv.unowned s old
-  · show ((⟨seatAccount, inst, subject, payee, proposal, true⟩ :: world.seats).map Seat.account).Nodup
+    · exact ⟨Nat.le_of_not_lt protectedSeat, Nat.lt_of_not_le payeeOrdinary⟩
+    · exact inv.protect s old
+  · show ((⟨seatAccount, inst, subject, payee, proposal, holder, true⟩ :: world.seats).map Seat.account).Nodup
     rw [List.map_cons, List.nodup_cons]
     refine ⟨fun mem => ?_, inv.distinct⟩
     obtain ⟨s, hs, eq⟩ := List.mem_map.mp mem
     simp only at eq
-    exact fresh.1 (eq ▸ (inv.member s hs).1)
+    exact fresh (eq ▸ (inv.member s hs).1)
 
 theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Transfer} {book : Book}
-    (settled : settle world.book transfers = .ok book)
+    (admitted : admit world.book ⟨[], opsOf transfers⟩ = .ok book)
     (noneUnsafe : firstUnsafe world.seats book transfers = none) :
     Inv { world with book := book } := by
+  obtain ⟨⟨_, ops⟩, rfl⟩ := admit_posts admitted
+  have bookEq : Batch.apply ⟨[], opsOf transfers⟩ world.book = applyOperations world.book (opsOf transfers) := rfl
   unfold firstUnsafe at noneUnsafe
   rw [List.find?_eq_none] at noneUnsafe
+  rw [bookEq] at noneUnsafe ⊢
   constructor
   · intro s hs openS
     by_cases touched : touches transfers s.account = true
@@ -798,94 +980,91 @@ theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Trans
         simp only [touches, List.any_eq_true, Bool.or_eq_true, beq_iff_eq, not_exists, not_and,
           not_or] at touched
         exact touched t ht
-      show safeAt book s.account s.proposal = true
-      rw [safeAt_congr (fun asset _ => settle_untouched settled away asset)]
+      show safeAt (applyOperations world.book (opsOf transfers)) s.account s.proposal = true
+      rw [safeAt_congr (fun asset _ => ops_untouched away asset)]
       exact inv.safe s hs openS
   · intro s hs openS asset
-    exact settle_nonneg settled (inv.nonneg s hs openS) asset
+    exact ops_nonneg ops (inv.nonneg s hs openS) asset
   · intro s hs
-    show s.account ∈ book.accounts ∧ s.payee ∈ book.accounts
-    rw [settle_accounts settled]; exact inv.member s hs
-  · exact inv.payeeOther
-  · exact inv.unowned
+    show s.account ∈ (applyOperations world.book (opsOf transfers)).accounts ∧
+      s.payee ∈ (applyOperations world.book (opsOf transfers)).accounts
+    rw [applyOperations_accounts_eq]; exact inv.member s hs
+  · exact inv.protect
   · exact inv.distinct
 
 /-! ## T3 (a): every open seat of every reachable world satisfies its law -/
 
-theorem step_inv {world next : World} {height : Nat} {actor : Actor} {action : Action}
-    (inv : Inv world) (admitted : step world height actor action = .ok next) : Inv next := by
+theorem step_inv {world next : World} {height : Nat} {actor : Actor} {action : Action} {batch : Batch}
+    (inv : Inv world) (admitted : step world height actor action = .ok (next, batch)) : Inv next := by
   cases action with
   | create inst =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.payeeOther, inv.unowned, inv.distinct⟩
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct⟩
+    · cases admitted
   | mint invitation =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.payeeOther, inv.unowned, inv.distinct⟩
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct⟩
+    · cases admitted
   | handOver id recipient =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
-      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.payeeOther, inv.unowned, inv.distinct⟩
-  | offer id expect seatAccount funding payee proposal =>
+      · cases admitted; exact ⟨inv.safe, inv.nonneg, inv.member, inv.protect, inv.distinct⟩
+    · cases admitted
+  | offer id expect seatAccount funding payee proposal holder =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
-    rename_i subject
-    split at admitted
-    · cases admitted
-    rename_i invitation registry _
-    split at admitted
-    · cases admitted
-    rename_i fresh
-    split at admitted
-    · cases admitted
-    rename_i owned
-    split at admitted
-    · cases admitted
-    rename_i funded
-    split at admitted
-    · cases admitted
-    rename_i payeeIn
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · rename_i safeNew
-      cases admitted
-      exact offer_inv inv (not_not.mp fresh) owned funded (not_not.mp payeeIn) settled safeNew
+    · split at admitted
+      · cases admitted
+      · rename_i invitation registry _
+        split at admitted
+        · cases admitted
+        rename_i protectedSeat
+        split at admitted
+        · cases admitted
+        rename_i fundingOrdinary
+        split at admitted
+        · cases admitted
+        rename_i payeeOrdinary
+        split at admitted
+        · cases admitted
+        rename_i payeeIn
+        split at admitted
+        · cases admitted
+        · rename_i book hbook
+          split at admitted
+          · rename_i safeNew
+            cases admitted
+            exact offer_inv inv protectedSeat fundingOrdinary payeeOrdinary (not_not.mp payeeIn) hbook safeNew
+          · cases admitted
     · cases admitted
   | reallocate instId transfers =>
     simp only [step] at admitted
     split at admitted
+    · split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      · rename_i book hbook
+        split at admitted
+        · cases admitted
+        · rename_i noneUnsafe
+          cases admitted
+          exact reallocate_inv inv hbook noneUnsafe
     · cases admitted
-    rename_i acting
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i inst _
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · cases admitted
-    rename_i noneUnsafe
-    cases admitted
-    exact reallocate_inv inv settled noneUnsafe
   | exit account =>
     simp only [step] at admitted
     split at admitted
@@ -898,20 +1077,20 @@ theorem step_inv {world next : World} {height : Nat} {actor : Actor} {action : A
   | terminate instId =>
     simp only [step] at admitted
     split at admitted
+    · split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      · rename_i closed hclosed
+        cases admitted
+        have := closeAll_inv inv hclosed
+        exact ⟨this.safe, this.nonneg, this.member, this.protect, this.distinct⟩
     · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i closed hclosed
-    cases admitted
-    have := closeAll_inv inv hclosed
-    exact ⟨this.safe, this.nonneg, this.member, this.payeeOther, this.unowned, this.distinct⟩
 
 inductive Reachable (genesis : World) : World → Prop
   | start : Reachable genesis genesis
-  | admit {world next : World} (height : Nat) (actor : Actor) (action : Action) :
-      Reachable genesis world → step world height actor action = .ok next → Reachable genesis next
+  | admit {world next : World} {batch : Batch} (height : Nat) (actor : Actor) (action : Action) :
+      Reachable genesis world → step world height actor action = .ok (next, batch) → Reachable genesis next
 
 theorem reachable_inv {genesis world : World} (empty : genesis.seats = [])
     (reachable : Reachable genesis world) : Inv world := by
@@ -920,7 +1099,7 @@ theorem reachable_inv {genesis world : World} (empty : genesis.seats = [])
   | admit _ _ _ _ admitted ih => exact step_inv ih admitted
 
 /-- **T3 (a).** From a world with no seats, in every world reachable by admitted
-turns, every open seat's Book balances satisfy its offer-safety law. -/
+steps, every open seat's Book balances satisfy its offer-safety law. -/
 theorem seat_offer_safe_forever {genesis world : World} (empty : genesis.seats = [])
     (reachable : Reachable genesis world) :
     ∀ seat ∈ world.seats, seat.isOpen = true → safeAt world.book seat.account seat.proposal = true :=
@@ -928,17 +1107,23 @@ theorem seat_offer_safe_forever {genesis world : World} (empty : genesis.seats =
 
 /-! ## T3 (b): exit is always available and pays exactly the allocation -/
 
+theorem closeBatch_admitted {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats)
+    (opened : seat.isOpen = true) : (closeBatch world.book seat).Admission world.book :=
+  ⟨trivial, payout_admitted_from world.book seat.account seat.payee (inv.payeeOther member) _ world.book
+    (List.nodup_dedup _) (inv.member seat member).1 (inv.member seat member).2
+    (fun asset _ => ⟨rfl, inv.nonneg seat member opened asset⟩)⟩
+
 theorem exit_admitted {world : World} {height : Nat} {actor : Actor} {seat : Seat} (inv : Inv world)
     (member : seat ∈ world.seats) (opened : seat.isOpen = true)
     (authorized : exitAuthorized height actor seat = true) :
     step world height actor (.exit seat.account) =
-      .ok { world with
-        book := payout world.book seat.account seat.payee seat.proposal.assets
-        seats := closeSeats world.seats seat.account } := by
+      .ok ({ world with
+        book := (closeBatch world.book seat).apply world.book
+        seats := closeSeats world.seats seat.account }, closeBatch world.book seat) := by
   simp only [step, seat?_eq inv.distinct member, opened, authorized, Bool.not_true, if_false,
     Bool.false_eq_true]
-  unfold closeSeat
-  rw [if_neg (not_not.mpr (inv.member seat member).1), if_neg (not_not.mpr (inv.member seat member).2)]
+  unfold closeSeat admit
+  rw [if_pos (closeBatch_admitted inv member opened)]
 
 /-- **T3 (b), the offerer's right.** An on-demand seat's offerer can exit at any
 height, whatever any contract clause says: the step does not consult one. -/
@@ -954,14 +1139,28 @@ theorem exit_after_deadline {world : World} {seat : Seat} (inv : Inv world) (mem
     ∃ next, step world height (.subject anyone) (.exit seat.account) = .ok next :=
   ⟨_, exit_admitted inv member opened (by simp [exitAuthorized, deadline, reached])⟩
 
+/-- The activity that holds a seat can always end it. -/
+theorem exit_by_holder {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats)
+    (opened : seat.isOpen = true) {record : Nat} (held : seat.holder = some record) (height : Nat) :
+    ∃ next, step world height (.activity record) (.exit seat.account) = .ok next :=
+  ⟨_, exit_admitted inv member opened (by simp [exitAuthorized, held])⟩
+
+theorem closeBatch_pays {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats)
+    (opened : seat.isOpen = true) :
+    ∀ asset ∈ seat.proposal.assets,
+      ((closeBatch world.book seat).apply world.book).balance seat.account asset = 0 ∧
+      ((closeBatch world.book seat).apply world.book).balance seat.payee asset =
+        world.book.balance seat.payee asset + world.book.balance seat.account asset :=
+  payout_exact_from world.book seat.account seat.payee (inv.payeeOther member) _ world.book
+    (List.nodup_dedup _) (fun asset _ => ⟨rfl, inv.nonneg seat member opened asset⟩)
+
 /-- **T3 (b), what an exit pays.** The seat ends at zero in every asset its
 proposal names, and its payee gains exactly the seat's balance. -/
 theorem exit_pays_allocation {world next : World} {height : Nat} {actor : Actor} {seat : Seat}
-    (inv : Inv world) (member : seat ∈ world.seats) (opened : seat.isOpen = true)
-    (admitted : step world height actor (.exit seat.account) = .ok next) :
+    {batch : Batch} (inv : Inv world) (member : seat ∈ world.seats) (opened : seat.isOpen = true)
+    (admitted : step world height actor (.exit seat.account) = .ok (next, batch)) :
     ∀ asset ∈ seat.proposal.assets, next.book.balance seat.account asset = 0 ∧
       next.book.balance seat.payee asset = world.book.balance seat.payee asset + world.book.balance seat.account asset := by
-  intro asset named
   have authorized : exitAuthorized height actor seat = true := by
     simp only [step, seat?_eq inv.distinct member, opened, Bool.not_true, if_false,
       Bool.false_eq_true] at admitted
@@ -970,107 +1169,15 @@ theorem exit_pays_allocation {world next : World} {height : Nat} {actor : Actor}
     · rename_i h; simpa using h
   rw [exit_admitted inv member opened authorized] at admitted
   cases admitted
-  exact payout_exact _ _ _ _ (List.nodup_dedup _) (inv.payeeOther seat member)
-    (fun a _ => inv.nonneg seat member opened a) asset named
-
-/-! ## T3 (c): every admitted step conserves every asset -/
-
-theorem seat_conserves {world next : World} {height : Nat} {actor : Actor} {action : Action}
-    (admitted : step world height actor action = .ok next) (asset : AssetId) :
-    next.book.totalAsset asset = world.book.totalAsset asset := by
-  cases action with
-  | create inst =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    · split at admitted
-      · cases admitted
-      · cases admitted; rfl
-  | mint invitation =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    · split at admitted
-      · cases admitted
-      · cases admitted; rfl
-  | handOver id recipient =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    · split at admitted
-      · cases admitted
-      · cases admitted; rfl
-  | offer id expect seatAccount funding payee proposal =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i fresh
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · cases admitted
-      show book.totalAsset asset = world.book.totalAsset asset
-      rw [settle_conserves settled, Book.registerAccount_conserves _ _ (not_not.mp fresh)]
-    · cases admitted
-  | reallocate instId transfers =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · cases admitted
-    cases admitted
-    exact settle_conserves settled asset
-  | exit account =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    obtain ⟨a, p, rfl⟩ := closeSeat_spec admitted
-    exact payout_conserves _ _ _ _ a p asset
-  | terminate instId =>
-    simp only [step] at admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i closed hclosed
-    cases admitted
-    exact closeAll_conserves hclosed asset
+  exact closeBatch_pays inv member opened
 
 /-! ## Who may debit a seat -/
 
 /-- **A seat is debited only by its own instance's reallocation, its exit, or
 its instance's termination.** -/
 theorem seat_debit_authorized {world next : World} {height : Nat} {actor : Actor} {action : Action}
-    (inv : Inv world) (admitted : step world height actor action = .ok next)
-    {seat : Seat} (member : seat ∈ world.seats) (opened : seat.isOpen = true) {asset : AssetId}
+    {batch : Batch} (inv : Inv world) (admitted : step world height actor action = .ok (next, batch))
+    {seat : Seat} (member : seat ∈ world.seats) {asset : AssetId}
     (debited : next.book.balance seat.account asset < world.book.balance seat.account asset) :
     (actor = .inst seat.inst ∧ ∃ transfers, action = .reallocate seat.inst transfers) ∨
       action = .exit seat.account ∨ (actor = .inst seat.inst ∧ action = .terminate seat.inst) := by
@@ -1078,89 +1185,97 @@ theorem seat_debit_authorized {world next : World} {height : Nat} {actor : Actor
   | create inst =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
       · cases admitted; exact absurd debited (lt_irrefl _)
+    · cases admitted
   | mint invitation =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
       · cases admitted; exact absurd debited (lt_irrefl _)
+    · cases admitted
   | handOver id recipient =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
     · split at admitted
       · cases admitted
       · cases admitted; exact absurd debited (lt_irrefl _)
-  | offer id expect seatAccount funding payee proposal =>
+    · cases admitted
+  | offer id expect seatAccount funding payee proposal holder =>
     simp only [step] at admitted
     split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i fresh
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i funded
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · cases admitted
-      rw [offer_untouched inv (not_not.mp fresh) funded settled member] at debited
-      exact absurd debited (lt_irrefl _)
+    · split at admitted
+      · cases admitted
+      · split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        rename_i fundingOrdinary
+        split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        split at admitted
+        · cases admitted
+        · rename_i book hbook
+          split at admitted
+          · cases admitted
+            obtain ⟨⟨⟨registered, _⟩, _⟩, rfl⟩ := admit_posts hbook
+            have protect := (inv.protect seat member).1
+            have away : ∀ t ∈ giveTransfers funding seatAccount proposal,
+                t.source ≠ seat.account ∧ t.destination ≠ seat.account := by
+              intro t ht
+              simp only [giveTransfers, List.mem_map] at ht
+              obtain ⟨e, _, rfl⟩ := ht
+              exact ⟨fun eq => ordinary_ne_protected fundingOrdinary (Nat.not_lt.mpr protect) (by simpa using eq),
+                fun eq => registered.1 (by simp only at eq; rw [eq]; exact (inv.member seat member).1)⟩
+            have := ops_untouched (book := world.book.registerAccount seatAccount) away asset
+            exact absurd (this.trans rfl ▸ debited) (lt_irrefl _)
+          · cases admitted
     · cases admitted
   | reallocate instId transfers =>
     simp only [step] at admitted
     split at admitted
+    · rename_i acting
+      split at admitted
+      · cases admitted
+      rename_i sameInst
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      split at admitted
+      · cases admitted
+      rename_i addressedAll
+      split at admitted
+      · cases admitted
+      · rename_i book hbook
+        split at admitted
+        · cases admitted
+        · cases admitted
+          obtain ⟨_, rfl⟩ := admit_posts hbook
+          have acting' : acting = instId := not_not.mp sameInst
+          subst acting'
+          have source : ∃ transfer ∈ transfers, transfer.source = seat.account := by
+            by_contra none
+            simp only [not_exists, not_and] at none
+            exact absurd (ops_credit_only (book := world.book) (fun t m h => none t m h) asset) (not_le.mpr debited)
+          obtain ⟨transfer, tmem, tsrc⟩ := source
+          have within := List.find?_eq_none.mp addressedAll transfer tmem
+          simp only [Bool.not_eq_true', Bool.not_eq_false, addressed, Bool.and_eq_true, List.any_eq_true,
+            beq_iff_eq] at within
+          obtain ⟨⟨s, smem, saccount⟩, _⟩ := within
+          have sseat : s ∈ world.seats := (List.mem_filter.mp smem).1
+          have sinst : s.inst = acting := by
+            have := (List.mem_filter.mp smem).2
+            simp only [Bool.and_eq_true, beq_iff_eq] at this
+            exact this.2
+          have same : s = seat := List.inj_on_of_nodup_map inv.distinct sseat member (saccount.trans tsrc)
+          subst same
+          exact Or.inl ⟨by rw [sinst], transfers, by rw [sinst]⟩
     · cases admitted
-    rename_i acting
-    split at admitted
-    · cases admitted
-    rename_i sameInst
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    split at admitted
-    · cases admitted
-    rename_i addressedAll
-    split at admitted
-    · cases admitted
-    rename_i book settled
-    split at admitted
-    · cases admitted
-    cases admitted
-    have acting' : acting = instId := not_not.mp sameInst
-    subst acting'
-    -- the seat was a source of some transfer, so it is an open seat of this instance
-    have source : ∃ transfer ∈ transfers, transfer.source = seat.account := by
-      by_contra none
-      simp only [not_exists, not_and] at none
-      exact absurd (settle_credit_only settled (fun t m h => none t m h) asset) (not_le.mpr debited)
-    obtain ⟨transfer, tmem, tsrc⟩ := source
-    have within := List.find?_eq_none.mp addressedAll transfer tmem
-    simp only [Bool.not_eq_true', Bool.not_eq_false, addressed, Bool.and_eq_true, List.any_eq_true,
-      beq_iff_eq] at within
-    obtain ⟨⟨s, smem, saccount⟩, _⟩ := within
-    have sseat : s ∈ world.seats := (List.mem_filter.mp smem).1
-    have sinst : s.inst = acting := by
-      have := (List.mem_filter.mp smem).2
-      simp only [Bool.and_eq_true, beq_iff_eq] at this
-      exact this.2
-    have same : s = seat := List.inj_on_of_nodup_map inv.distinct sseat member (saccount.trans tsrc)
-    subst same
-    exact Or.inl ⟨by rw [sinst], transfers, by rw [sinst]⟩
   | exit account =>
     simp only [step] at admitted
     split at admitted
@@ -1170,47 +1285,260 @@ theorem seat_debit_authorized {world next : World} {height : Nat} {actor : Actor
     · cases admitted
     split at admitted
     · cases admitted
-    obtain ⟨_, _, rfl⟩ := closeSeat_spec admitted
+    have book := closeSeat_book admitted
     have closingAccount : closing.account = account := by
       simpa using List.find?_some found
     by_cases same : seat.account = account
     · exact Or.inr (Or.inl (by rw [same]))
     · exfalso
-      have := payout_credit_only world.book closing.account closing.payee seat.account
+      have := payout_credit_only world.book world.book closing.account closing.payee seat.account
         closing.proposal.assets (by rw [closingAccount]; exact same) asset
+      rw [← book] at this
       exact absurd this (not_le.mpr debited)
   | terminate instId =>
     simp only [step] at admitted
     split at admitted
+    · rename_i acting
+      split at admitted
+      · cases admitted
+      rename_i sameInst
+      split at admitted
+      · cases admitted
+      · rename_i closed hclosed
+        cases admitted
+        have acting' : acting = instId := not_not.mp sameInst
+        subst acting'
+        by_cases same : seat.inst = acting
+        · exact Or.inr (Or.inr ⟨by rw [same], by rw [same]⟩)
+        · exfalso
+          have away : ∀ s ∈ openSeatsOf world acting, s.account ≠ seat.account := by
+            intro s hs eq
+            have sseat : s ∈ world.seats := (List.mem_filter.mp hs).1
+            have sinst : s.inst = acting := by
+              have := (List.mem_filter.mp hs).2
+              simp only [Bool.and_eq_true, beq_iff_eq] at this
+              exact this.2
+            have := List.inj_on_of_nodup_map inv.distinct sseat member eq
+            subst this
+            exact same sinst
+          exact absurd (closeAll_credit_only hclosed away asset) (not_le.mpr debited)
     · cases admitted
-    rename_i acting
-    split at admitted
-    · cases admitted
-    rename_i sameInst
-    split at admitted
-    · cases admitted
-    rename_i closed hclosed
-    cases admitted
-    have acting' : acting = instId := not_not.mp sameInst
-    subst acting'
-    by_cases same : seat.inst = acting
-    · exact Or.inr (Or.inr ⟨by rw [same], by rw [same]⟩)
-    · exfalso
-      have away : ∀ s ∈ openSeatsOf world acting, s.account ≠ seat.account := by
-        intro s hs eq
-        have sseat : s ∈ world.seats := (List.mem_filter.mp hs).1
-        have sinst : s.inst = acting := by
-          have := (List.mem_filter.mp hs).2
-          simp only [Bool.and_eq_true, beq_iff_eq] at this
-          exact this.2
-        have := List.inj_on_of_nodup_map inv.distinct sseat member eq
-        subst this
-        exact same sinst
-      exact absurd (closeAll_credit_only hclosed away asset) (not_le.mpr debited)
 
-#assert_axioms view_total safeAt_mono settle_conserves payout_exact closeSeat_inv step_inv
-  seat_offer_safe_forever exit_enabled exit_after_deadline exit_pays_allocation seat_conserves
-  seat_debit_authorized
+/-! ## A contract method's Plan, and an activity's end
+
+On the native route the instance never signs. `reallocate`, `mint`, a
+contract-initiated `exit` and `terminate` reach `step` only as the members of
+the Plan the instance's own package method returns when the receiver
+re-executes it (`Kernel.SeatReceiver`), each a step of the instance, in order,
+under ONE batch: so every touched seat's law judges every reallocation, and the
+whole Plan commits or nothing does. A minted invitation's id is the receiver's
+`mintId index` (a digest of the instance, the invoking turn and the index), and
+its package is the instance's own: the code chooses role, terms and holder,
+never the id or the package. -/
+
+inductive PlanAction where
+  | reallocate (transfers : List Transfer)
+  | mint (role : String) (terms : List (String × Nat)) (holder : SubjectId)
+  | exit (seat : AccountId)
+  | terminate
+  deriving DecidableEq, Repr
+
+def PlanAction.action (inst : Instance) (mintId : Nat → InvitationId) (index : Nat) : PlanAction → Action
+  | .reallocate transfers => .reallocate inst.id transfers
+  | .mint role terms holder => .mint ⟨mintId index, inst.id, inst.package, role, terms, holder⟩
+  | .exit seat => .exit seat
+  | .terminate => .terminate inst.id
+
+def runPlan (height : Nat) (inst : Instance) (mintId : Nat → InvitationId) :
+    World → Nat → List PlanAction → Except Refusal (World × Batch)
+  | world, _, [] => .ok (world, noPostings)
+  | world, index, first :: rest =>
+    match step world height (.inst inst.id) (first.action inst mintId index) with
+    | .error reason => .error reason
+    | .ok (middle, posted) =>
+      match runPlan height inst mintId middle (index + 1) rest with
+      | .error reason => .error reason
+      | .ok (next, later) => .ok (next, seqBatch posted later)
+
+theorem PlanAction.action_registers (inst : Instance) (mintId : Nat → InvitationId) (index : Nat)
+    (planned : PlanAction) : (planned.action inst mintId index).registers = false := by
+  cases planned <;> rfl
+
+theorem runPlan_posts {height : Nat} {inst : Instance} {mintId : Nat → InvitationId} :
+    ∀ {world next : World} {index : Nat} {plan : List PlanAction} {batch : Batch},
+      runPlan height inst mintId world index plan = .ok (next, batch) →
+      Posts world.book batch next.book ∧ batch.registrations = []
+  | world, next, index, [], batch, ran => by
+    simp only [runPlan] at ran; cases ran; exact ⟨posts_none _, rfl⟩
+  | world, next, index, first :: rest, batch, ran => by
+    simp only [runPlan] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        obtain ⟨p, none⟩ := step_posts hstep
+        obtain ⟨q, none'⟩ := runPlan_posts hrest
+        have r := none (PlanAction.action_registers inst mintId index first)
+        exact ⟨p.seq q none', by simp [seqBatch, r, none']⟩
+
+theorem runPlan_reachable {height : Nat} {inst : Instance} {mintId : Nat → InvitationId} {genesis : World} :
+    ∀ {world next : World} {index : Nat} {plan : List PlanAction} {batch : Batch},
+      Reachable genesis world → runPlan height inst mintId world index plan = .ok (next, batch) →
+      Reachable genesis next
+  | world, next, index, [], batch, reachable, ran => by
+    simp only [runPlan] at ran; cases ran; exact reachable
+  | world, next, index, first :: rest, batch, reachable, ran => by
+    simp only [runPlan] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        exact runPlan_reachable (Reachable.admit height _ _ reachable hstep) hrest
+
+/-- The open seats an activity holds. -/
+def heldOpen (world : World) (record : Nat) : List Seat :=
+  world.seats.filter fun seat => seat.isOpen && seat.holder == some record
+
+/-- The end of the activity at `record`: exit every open seat it holds, each a
+step of `Actor.activity record`, under one batch. -/
+def exitEach (height : Nat) (record : Nat) : World → List AccountId → Except Refusal (World × Batch)
+  | world, [] => .ok (world, noPostings)
+  | world, account :: rest =>
+    match step world height (.activity record) (.exit account) with
+    | .error reason => .error reason
+    | .ok (middle, posted) =>
+      match exitEach height record middle rest with
+      | .error reason => .error reason
+      | .ok (next, later) => .ok (next, seqBatch posted later)
+
+def closeHeld (world : World) (height : Nat) (record : Nat) : Except Refusal (World × Batch) :=
+  exitEach height record world ((heldOpen world record).map Seat.account)
+
+theorem exitEach_posts {height record : Nat} :
+    ∀ {world next : World} {accounts : List AccountId} {batch : Batch},
+      exitEach height record world accounts = .ok (next, batch) →
+      Posts world.book batch next.book ∧ batch.registrations = [] ∧
+        ∀ {genesis : World}, Reachable genesis world → Reachable genesis next
+  | world, next, [], batch, ran => by
+    simp only [exitEach] at ran; cases ran; exact ⟨posts_none _, rfl, id⟩
+  | world, next, account :: rest, batch, ran => by
+    simp only [exitEach] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        obtain ⟨p, none⟩ := step_posts hstep
+        obtain ⟨q, none', reach⟩ := exitEach_posts hrest
+        exact ⟨p.seq q none', by simp [seqBatch, none rfl, none'],
+          fun reachable => reach (Reachable.admit height _ _ reachable hstep)⟩
+
+/-- A step that exits one seat keeps every other seat's open flag and its
+account balances in other accounts' favour; after `exitEach` every listed seat
+is closed. -/
+theorem step_exit_closes {world next : World} {height : Nat} {actor : Actor} {account : AccountId}
+    {batch : Batch} (admitted : step world height actor (.exit account) = .ok (next, batch)) :
+    next.seats = closeSeats world.seats account := by
+  simp only [step] at admitted
+  split at admitted
+  · cases admitted
+  rename_i closing found
+  split at admitted
+  · cases admitted
+  split at admitted
+  · cases admitted
+  rw [closeSeat_seats admitted]
+  have : closing.account = account := by simpa using List.find?_some found
+  rw [this]
+
+theorem closeSeats_closed (seats : List Seat) (account : AccountId) :
+    ∀ seat ∈ closeSeats seats account, seat.account = account → seat.isOpen = false := by
+  intro seat member same
+  obtain ⟨original, _, _, _, _, _, _, opened⟩ := mem_closeSeats member
+  cases h : seat.isOpen
+  · rfl
+  · exact absurd same (opened h).2
+
+theorem closeSeats_keeps_closed (seats : List Seat) (account : AccountId) (target : AccountId)
+    (closed : ∀ seat ∈ seats, seat.account = target → seat.isOpen = false) :
+    ∀ seat ∈ closeSeats seats account, seat.account = target → seat.isOpen = false := by
+  intro seat member same
+  obtain ⟨original, omem, oaccount, _, _, _, _, opened⟩ := mem_closeSeats member
+  cases h : seat.isOpen
+  · rfl
+  · exact absurd (closed original omem (oaccount.trans same)) (by simp [(opened h).1])
+
+theorem exitEach_keeps_closed {height record : Nat} {world next : World} {accounts : List AccountId} {batch : Batch}
+    (ran : exitEach height record world accounts = .ok (next, batch)) (target : AccountId)
+    (closed : ∀ seat ∈ world.seats, seat.account = target → seat.isOpen = false) :
+    ∀ seat ∈ next.seats, seat.account = target → seat.isOpen = false := by
+  induction accounts generalizing world next batch with
+  | nil => simp only [exitEach] at ran; cases ran; exact closed
+  | cons first rest ih =>
+    simp only [exitEach] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        apply ih hrest
+        rw [step_exit_closes hstep]
+        exact closeSeats_keeps_closed _ _ _ closed
+
+theorem exitEach_closes {height record : Nat} :
+    ∀ {world next : World} {accounts : List AccountId} {batch : Batch},
+      exitEach height record world accounts = .ok (next, batch) →
+      ∀ account ∈ accounts, ∀ seat ∈ next.seats, seat.account = account → seat.isOpen = false
+  | world, next, [], batch, _, account, named => by simp at named
+  | world, next, first :: rest, batch, ran, account, named => by
+    simp only [exitEach] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        rcases List.mem_cons.mp named with rfl | member
+        · -- closed by the first exit, and no later exit reopens a seat
+          have firstClosed : ∀ seat ∈ middle.seats, seat.account = account → seat.isOpen = false := by
+            rw [step_exit_closes hstep]; exact closeSeats_closed _ _
+          exact exitEach_keeps_closed hrest account firstClosed
+        · exact exitEach_closes hrest account member
+
+/-- **The end of an activity closes every seat it holds.** If the ending turn's
+`closeHeld` is admitted, every seat that was open and held by the activity is
+closed in the result, and the whole is one admitted batch that conserves every
+asset. (Each exit pays its payee exactly the seat's allocation:
+`exit_pays_allocation`; and `exit_by_holder` makes every such exit admissible
+from any world satisfying `Inv`.) -/
+theorem activity_end_closes_seats {world next : World} {height record : Nat} {batch : Batch}
+    (ended : closeHeld world height record = .ok (next, batch)) :
+    (∀ seat ∈ heldOpen world record, ∀ after ∈ next.seats, after.account = seat.account → after.isOpen = false) ∧
+      Posts world.book batch next.book ∧ ∀ asset, next.book.totalAsset asset = world.book.totalAsset asset := by
+  obtain ⟨posted, _, _⟩ := exitEach_posts ended
+  refine ⟨fun seat member after amember same =>
+    exitEach_closes ended seat.account (List.mem_map.mpr ⟨seat, member, rfl⟩) after amember same, posted,
+    posted.conserves⟩
+
+theorem closeHeld_reachable {genesis world next : World} {height record : Nat} {batch : Batch}
+    (reachable : Reachable genesis world) (ended : closeHeld world height record = .ok (next, batch)) :
+    Reachable genesis next :=
+  (exitEach_posts ended).2.2 reachable
+
+#assert_axioms view_total safeAt_mono payout_exact_from payout_admitted_from closeSeat_inv step_inv step_posts
+  seat_offer_safe_forever exit_enabled exit_after_deadline exit_by_holder exit_pays_allocation seat_conserves
+  seat_debit_authorized runPlan_posts runPlan_reachable activity_end_closes_seats closeHeld_reachable
 
 
 /-! ## Inhabitants and teeth
@@ -1219,7 +1547,8 @@ A two-party swap. Alice holds 10 X and was quoted 5 Y for them; Bob holds 7 Y.
 Each signs a RANGE, not an exact Plan: Alice gives 10 X and wants at least 5 Y;
 Bob gives 7 Y and wants at least 9 X. By settlement the price has moved from the
 quote (Bob pays 7 Y, not 5), and the swap still settles: an exact-plan signature
-over "Alice receives 5 Y" would have been refused as stale. -/
+over "Alice receives 5 Y" would have been refused as stale. The instance acts
+only through `runPlan`, as on the native route. -/
 
 namespace Example
 
@@ -1229,8 +1558,8 @@ def alice : SubjectId := ⟨1⟩
 def bob : SubjectId := ⟨2⟩
 def aliceAccount : AccountId := 10
 def bobAccount : AccountId := 20
-def aliceSeat : AccountId := 30
-def bobSeat : AccountId := 31
+def aliceSeat : AccountId := reservedBase + 30
+def bobSeat : AccountId := reservedBase + 31
 def package : Digest := ⟨77⟩
 
 def genesisBook : Book where
@@ -1238,48 +1567,60 @@ def genesisBook : Book where
   balances := DFinsupp.single (aliceAccount, X) 10 + DFinsupp.single (bobAccount, Y) 7
   leaseRecords := 0
 
-def genesis : World := ⟨genesisBook, [(aliceAccount, alice), (bobAccount, bob)], ⟨[], [], []⟩, []⟩
+def genesis : World := ⟨genesisBook, ⟨[], [], [], []⟩, []⟩
 
 /-- The swap contract's clause admits every reallocation. -/
 def swapInstance : Instance := ⟨1, package, Pred.all []⟩
 
-def sell : Invitation := ⟨1, 1, package, "sell", [], alice⟩
-def buy : Invitation := ⟨2, 1, package, "buy", [], bob⟩
+/-- The invoking turn's mint ids. -/
+def mintIds : Nat → InvitationId := fun index => index + 1
 
-def aliceProposal : Proposal := ⟨[(X, 10)], [(Y, 5)], .onDemand⟩
-def bobProposal : Proposal := ⟨[(Y, 7)], [(X, 9)], .onDemand⟩
+/-- A script entry: a signed step, or the instance's method returning a Plan. -/
+inductive Entry where
+  | signed (height : Nat) (subject : SubjectId) (action : Action)
+  | method (height : Nat) (inst : Instance) (plan : List PlanAction)
+  | ended (height : Nat) (record : Nat)
 
-/-- Run a script of (height, actor, action). -/
-def run : World → List (Nat × Actor × Action) → Except Refusal World
+def Entry.run (world : World) : Entry → Except Refusal (World × Batch)
+  | .signed height subject action => step world height (.subject subject) action
+  | .method height inst plan => runPlan height inst mintIds world 0 plan
+  | .ended height record => closeHeld world height record
+
+def run : World → List Entry → Except Refusal World
   | world, [] => .ok world
-  | world, (height, actor, action) :: rest =>
-    match step world height actor action with
+  | world, entry :: rest =>
+    match entry.run world with
     | .error reason => .error reason
-    | .ok next => run next rest
+    | .ok (next, _) => run next rest
 
-theorem run_reachable {genesis world next : World} {script : List (Nat × Actor × Action)}
+theorem run_reachable {genesis world next : World} {script : List Entry}
     (reachable : Reachable genesis world) (ran : run world script = .ok next) : Reachable genesis next := by
   induction script generalizing world with
   | nil => simp only [run] at ran; cases ran; exact reachable
   | cons entry rest ih =>
-    obtain ⟨height, actor, action⟩ := entry
     simp only [run] at ran
     split at ran
     · cases ran
-    · rename_i mid hmid
-      exact ih (Reachable.admit height actor action reachable hmid) ran
+    · rename_i middle posted hmid
+      apply ih _ ran
+      cases entry with
+      | signed height subject action =>
+        simp only [Entry.run] at hmid; exact Reachable.admit height _ _ reachable hmid
+      | method height inst plan => simp only [Entry.run] at hmid; exact runPlan_reachable reachable hmid
+      | ended height record => simp only [Entry.run] at hmid; exact closeHeld_reachable reachable hmid
 
-def opening : List (Nat × Actor × Action) :=
-  [ (1, .subject alice, .create swapInstance),
-    (1, .inst 1, .mint sell),
-    (1, .inst 1, .mint buy),
-    (2, .subject alice, .offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount aliceProposal),
-    (3, .subject bob, .offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount bobProposal) ]
+def opening : List Entry :=
+  [ .signed 1 alice (.create swapInstance),
+    .method 1 swapInstance [.mint "sell" [] alice, .mint "buy" [] bob],
+    .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
+      ⟨[(X, 10)], [(Y, 5)], .onDemand⟩ none),
+    .signed 3 bob (.offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount
+      ⟨[(Y, 7)], [(X, 9)], .onDemand⟩ none) ]
 
-def settlement : List (Nat × Actor × Action) :=
-  [ (4, .inst 1, .reallocate 1 [⟨aliceSeat, bobSeat, X, 10⟩, ⟨bobSeat, aliceSeat, Y, 7⟩]),
-    (5, .subject alice, .exit aliceSeat),
-    (5, .subject bob, .exit bobSeat) ]
+def settlement : List Entry :=
+  [ .method 4 swapInstance [.reallocate [⟨aliceSeat, bobSeat, X, 10⟩, ⟨bobSeat, aliceSeat, Y, 7⟩]],
+    .signed 5 alice (.exit aliceSeat),
+    .signed 5 bob (.exit bobSeat) ]
 
 def balances (world : World) : List Int :=
   [world.book.balance aliceAccount X, world.book.balance aliceAccount Y,
@@ -1293,40 +1634,51 @@ theorem swap_settles_after_price_move :
 /-- **Offer safety refuses a raid.** Taking Alice's 10 X while giving her only
 4 Y (below her `want` and below her `give`) is refused by her seat's law. -/
 theorem raid_refused :
-    (run genesis (opening ++ [(4, .inst 1, .reallocate 1
-      [⟨aliceSeat, bobSeat, X, 10⟩, ⟨bobSeat, aliceSeat, Y, 4⟩])])).map balances =
+    (run genesis (opening ++ [.method 4 swapInstance
+      [.reallocate [⟨aliceSeat, bobSeat, X, 10⟩, ⟨bobSeat, aliceSeat, Y, 4⟩]]])).map balances =
       .error (.offerUnsafe aliceSeat) := by decide +kernel
 
 /-- **A contract clause cannot forbid exit.** With a clause that refuses every
-reallocation, the reallocation is refused, and Alice's exit still pays her
-whole allocation back. -/
+reallocation, the reallocation its own method emits is refused, and Alice's
+exit still pays her whole allocation back. -/
 def lockedInstance : Instance := ⟨1, package, Pred.any []⟩
 
-def lockedOpening : List (Nat × Actor × Action) :=
-  (1, .subject alice, .create lockedInstance) :: opening.tail
+def lockedOpening : List Entry :=
+  .signed 1 alice (.create lockedInstance) ::
+    .method 1 lockedInstance [.mint "sell" [] alice, .mint "buy" [] bob] :: opening.drop 2
 
 theorem locked_contract_refuses_reallocation :
-    (run genesis (lockedOpening ++ [(4, .inst 1, .reallocate 1 [⟨aliceSeat, bobSeat, X, 10⟩])])).map balances =
+    (run genesis (lockedOpening ++ [.method 4 lockedInstance
+      [.reallocate [⟨aliceSeat, bobSeat, X, 10⟩]]])).map balances =
       .error (.contractClauseRefused 1) := by decide +kernel
 
 theorem locked_contract_cannot_stop_exit :
-    (run genesis (lockedOpening ++ [(4, .subject alice, .exit aliceSeat)])).map balances =
+    (run genesis (lockedOpening ++ [.signed 4 alice (.exit aliceSeat)])).map balances =
       .ok [10, 0, 0, 0] := by decide +kernel
 
 /-- Only the offerer (or the contract) may exit an on-demand seat. -/
 theorem stranger_cannot_exit :
-    (run genesis (opening ++ [(4, .subject bob, .exit aliceSeat)])).map balances =
+    (run genesis (opening ++ [.signed 4 bob (.exit aliceSeat)])).map balances =
       .error (.exitNotAuthorized aliceSeat) := by decide +kernel
 
 /-- An invitation is spent by its offer: offering it again is refused. -/
 theorem invitation_spent_once :
-    (run genesis (opening ++ [(4, .subject alice, .offer 1 ⟨1, package, "sell"⟩ 32 aliceAccount aliceAccount
-      aliceProposal)])).map balances = .error (.invitation (.invitationMissing 1)) := by decide +kernel
+    (run genesis (opening ++ [.signed 4 alice (.offer 1 ⟨1, package, "sell"⟩ (reservedBase + 32) aliceAccount
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand⟩ none)])).map balances =
+      .error (.invitation (.invitationMissing 1)) := by decide +kernel
 
 /-- An invitation must assay as the offerer expects (here: the wrong role). -/
 theorem assay_refused :
-    (run genesis (opening.take 3 ++ [(2, .subject alice, .offer 1 ⟨1, package, "buy"⟩ aliceSeat aliceAccount
-      aliceAccount aliceProposal)])).map balances = .error (.invitation (.assayFailed 1)) := by decide +kernel
+    (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "buy"⟩ aliceSeat aliceAccount
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand⟩ none)])).map balances =
+      .error (.invitation (.assayFailed 1)) := by decide +kernel
+
+/-- A signer cannot name an ordinary account as a seat: the seat account is a
+protected coordinate. -/
+theorem unprotected_seat_refused :
+    (run genesis (opening.take 2 ++ [.signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ 30 aliceAccount
+      aliceAccount ⟨[(X, 10)], [(Y, 5)], .onDemand⟩ none)])).map balances =
+      .error (.seatNotProtected 30) := by decide +kernel
 
 /-- **Zero `want`.** A seat that gives 10 X and wants 0 Y is satisfied by an
 allocation that holds nothing: the contract may take the whole gift. -/
@@ -1344,24 +1696,37 @@ theorem nat_predecessor_encoding_refuses_zero_want :
       (view Book.empty aliceSeat giftProposal) (view Book.empty aliceSeat giftProposal) = false := by
   decide +kernel
 
-def giftOpening : List (Nat × Actor × Action) :=
-  [ (1, .subject alice, .create swapInstance),
-    (1, .inst 1, .mint sell),
-    (1, .inst 1, .mint buy),
-    (2, .subject alice, .offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount giftProposal),
-    (3, .subject bob, .offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount bobProposal) ]
+def giftOpening : List Entry :=
+  opening.take 2 ++
+    [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount giftProposal none),
+      .signed 3 bob (.offer 2 ⟨1, package, "buy"⟩ bobSeat bobAccount bobAccount
+        ⟨[(Y, 7)], [(X, 9)], .onDemand⟩ none) ]
 
 /-- The contract takes the whole gift (Alice wanted 0 Y), and the reallocation
 is admitted. -/
 theorem zero_want_gift_admitted :
-    (run genesis (giftOpening ++ [(4, .inst 1, .reallocate 1 [⟨aliceSeat, bobSeat, X, 10⟩]),
-      (5, .subject bob, .exit bobSeat)])).map balances = .ok [0, 0, 10, 7] := by decide +kernel
+    (run genesis (giftOpening ++ [.method 4 swapInstance [.reallocate [⟨aliceSeat, bobSeat, X, 10⟩]],
+      .signed 5 bob (.exit bobSeat)])).map balances = .ok [0, 0, 10, 7] := by decide +kernel
 
 /-- The tooth for the total view: a view MISSING Alice's Y slot reads her
 `want` of 5 Y as met (the fail-closed `le` on an absent slot is false, so its
 negation is true). `view` always carries every named slot (`view_total`). -/
 theorem absent_slot_reads_as_met :
     Pred.eval (atLeast Y 5) ⟨[]⟩ ⟨[]⟩ = true := by decide +kernel
+
+/-- **An activity holding a seat ends, and the seat is paid back.** Alice's
+seat is held by the activity at record 900; its end exits the seat and pays her
+10 X back; Bob, who holds no seat of it, cannot end it. -/
+def heldOpening : List Entry :=
+  opening.take 2 ++
+    [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
+        ⟨[(X, 10)], [(Y, 5)], .onDemand⟩ (some 900)) ]
+
+theorem activity_end_pays_held_seat :
+    (run genesis (heldOpening ++ [.ended 7 900])).map balances = .ok [10, 0, 0, 7] := by decide +kernel
+
+theorem another_activity_ends_nothing :
+    (run genesis (heldOpening ++ [.ended 7 901])).map balances = .ok [0, 0, 0, 7] := by decide +kernel
 
 theorem swap_opening_two_seats : (run genesis opening).map (fun world => world.seats.length) = .ok 2 := by
   decide +kernel
@@ -1378,8 +1743,9 @@ theorem swap_opening_reachable : ∃ world, Reachable genesis world ∧ world.se
 
 #assert_axioms swap_settles_after_price_move raid_refused locked_contract_refuses_reallocation
   locked_contract_cannot_stop_exit stranger_cannot_exit invitation_spent_once assay_refused
-  zero_want_satisfied nat_predecessor_encoding_refuses_zero_want zero_want_gift_admitted
-  absent_slot_reads_as_met swap_opening_reachable
+  unprotected_seat_refused zero_want_satisfied nat_predecessor_encoding_refuses_zero_want
+  zero_want_gift_admitted absent_slot_reads_as_met activity_end_pays_held_seat another_activity_ends_nothing
+  swap_opening_reachable
 
 end Example
 
