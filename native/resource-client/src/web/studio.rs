@@ -197,7 +197,7 @@ pub(super) fn captured(site: &Site, id: &str, snapshot: &str) -> Page {
         }
     }
 }
-pub(super) fn submitted(site: &Site, id: &str, submission: &str) -> Page {
+pub(super) fn retained_draft(site: &Site, id: &str, submission: &str) -> Page {
     match studio::submission(&site.root,&site.workspace,id,submission){
         Err(e)=>failure_page("Retained source composition",&e),
         Ok(value)=>Page{status:200,title:"Retained source composition".into(),stamp:Stamp::None,body:format!("<p>This authored draft was retained against composition revision <code>{}</code>.</p><textarea readonly rows=24>{}</textarea><p><a href=\"{}/studio/{}\">Open the selected current composition to reconcile this draft</a></p>",escape(value["revision"].as_str().unwrap_or("?")),escape(value["text"].as_str().unwrap_or("")),site.base(),escape(id))}
@@ -290,7 +290,7 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
                 "Composition saved; source editor drafts remain retained.",
             ),
             Err(e) => {
-                let mut page = submitted(site, id, &submission);
+                let mut page = retained_draft(site, id, &submission);
                 page.status = 400;
                 page.body = format!("<p class=refusal>{}</p>{}", escape(&e), page.body);
                 page
@@ -331,7 +331,7 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
             "Composition saved. Prior module editor drafts remain available.",
         ),
         Err(e) => {
-            let mut page = submitted(site, id, &submission);
+            let mut page = retained_draft(site, id, &submission);
             page.status = 400;
             page.body=format!("<p class=refusal>{}</p><p><a href=\"{}/studio/{}/draft/{}\">This submitted draft is retained</a>.</p>{}",escape(&e),site.base(),escape(id),escape(&submission),page.body);
             page

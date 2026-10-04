@@ -175,6 +175,35 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A lock is attached to the open file description, so a child forked while the lease is
+    /// held (any thread's `Command::spawn` between fork and exec) keeps the description open.
+    /// Unlocking only by closing the descriptor would leave the file locked until that child
+    /// execs, and the owner's very next acquire would answer `Busy`: the flake the old
+    /// close-only `atomic_json` showed in resource-client's batch runs. The explicit LOCK_UN
+    /// in `release` frees the lock for the owner at once.
+    #[test]
+    fn dropping_the_lease_unlocks_even_while_a_forked_child_still_holds_the_descriptor() {
+        let dir = scratch("inherit");
+        let path = dir.join("l");
+        let lease = Lease::acquire(&path, Create::Yes, Wait::No).unwrap();
+        // SAFETY: the child only sleeps and `_exit`s; it keeps the inherited descriptor open.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            unsafe {
+                libc::usleep(1_500_000);
+                libc::_exit(0)
+            };
+        }
+        drop(lease);
+        let again = Lease::acquire(&path, Create::No, Wait::No);
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(again.is_ok(), "the owner could not retake its lock while a child held the inherited descriptor");
+        drop(again);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn a_forked_child_dropping_the_inherited_lease_does_not_unlock_the_parent() {
         let dir = scratch("fork");

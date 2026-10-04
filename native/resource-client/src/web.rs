@@ -635,7 +635,7 @@ impl Site {
             ["studio",id] => studio::package(self,id),
             ["studio",id,"module",index] => studio::module(self,id,index,false),
             ["studio",id,"module",index,"fresh"] => studio::module(self,id,index,true),
-            ["studio",id,"draft",submission] => studio::submitted(self,id,submission),
+            ["studio",id,"draft",submission] => studio::retained_draft(self,id,submission),
             ["studio",id,"snapshot",snapshot] => studio::captured(self,id,snapshot),
             ["studio",id,"snapshot",snapshot,"preview",run] => studio::preview(self,id,snapshot,run),
             ["studio",id,"history",revision] => studio::history(self,id,revision),

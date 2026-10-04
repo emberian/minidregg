@@ -568,6 +568,27 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    /// The pure codec operations (7 to 11) always run in the separately selected LOCAL
+    /// semantic Host (`HOST CONFIG stdio`, `client_consent::codec_frame`, 96a4165f); they
+    /// never travel the socket. This is the local Host stand-in's serve loop for op 8
+    /// (inspect): it answers with the bytes after the kind label, as `Fake` does, and
+    /// refuses any other operation, so a codec op that reaches it by mistake is a failure.
+    const LOCAL_CODEC_SERVE: &str = r#"
+import struct
+def serve():
+    inp, out = sys.stdin.buffer, sys.stdout.buffer
+    while True:
+        head = inp.read(4)
+        if len(head) < 4:
+            return
+        frame = inp.read(struct.unpack('<I', head)[0])
+        assert frame[0] == 8, 'local codec stand-in serves op 8 only, got %d' % frame[0]
+        kind = struct.unpack('<H', frame[1:3])[0]
+        body = bytes([8]) + frame[3 + kind:]
+        out.write(struct.pack('<I', len(body)) + body)
+        out.flush()
+"#;
+
     struct Fixture {
         root: PathBuf,
         daily: PathBuf,
@@ -905,7 +926,15 @@ mod tests {
         let host = f.root.join("host");
         let config = f.root.join("config.json");
         let socket = f.root.join("socket");
-        crate::create_private(&host, b"fixture host image, never executed").unwrap();
+        crate::create_private(
+            &host,
+            format!(
+                "#!/usr/bin/env python3\nimport sys\nassert sys.argv[2] == 'stdio'\n{LOCAL_CODEC_SERVE}serve()\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         crate::create_private(&config, b"{}").unwrap();
         let host_digest =
             crate::decode_hex(&host_image_sha256(&host).unwrap()).unwrap();
@@ -913,7 +942,8 @@ mod tests {
         let ingress = b"exact signed ingress including zero\0byte".to_vec();
         let expected = ingress.clone();
         let server = std::thread::spawn(move || {
-            for opcode in [189, 190, 8, 190, 8] {
+            // Inspection (op 8) is local, so only the two submits and the lookup arrive here.
+            for opcode in [189, 190, 190] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let frame = transport::read_frame(&mut stream).unwrap().unwrap();
                 assert_eq!(frame[0], 2);
@@ -1024,9 +1054,13 @@ mod tests {
         // endpoint is forbidden from supplying plan/ingress interpretation.
         crate::create_private(
             &host,
-            br#"#!/usr/bin/env python3
-import json, sys
-if sys.argv[2] == 'profile':
+            [
+                "#!/usr/bin/env python3\nimport json, sys\n",
+                LOCAL_CODEC_SERVE,
+                r#"
+if sys.argv[2] == 'stdio':
+    serve()
+elif sys.argv[2] == 'profile':
     print('{"domain":"1","semantics":"2","expectedSeed":"3"}')
 elif sys.argv[2] == 'author':
     kind = sys.argv[3]
@@ -1048,6 +1082,9 @@ else:
     with open(sys.argv[5], 'w') as output:
         json.dump(value, output)
 "#,
+            ]
+            .concat()
+            .as_bytes(),
         )
         .unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1143,9 +1180,39 @@ else:
             return;
         }
         if mode == "rotation-reject" {
+            // Every signing plan the socket returns is reconstructed by the independently
+            // selected local consent provider (op 224, `transport::check_signing_plan_reply`,
+            // 96a4165f), found beside the Host as `minidregg-client-consent`. This stand-in
+            // accepts exactly op 140's plan for the locally authored command bytes [1, 2],
+            // and returns the candidate plan; the refusal under test is the local verifier's.
+            let consent = f.root.join("minidregg-client-consent");
+            crate::create_private(
+                &consent,
+                br#"#!/usr/bin/env python3
+import struct, sys
+assert sys.argv[2] == 'stdio'
+inp, out = sys.stdin.buffer, sys.stdout.buffer
+while True:
+    head = inp.read(4)
+    if len(head) < 4:
+        break
+    frame = inp.read(struct.unpack('<I', head)[0])
+    assert frame[0] == 224, 'consent stand-in serves op 224 only, got %d' % frame[0]
+    split = struct.unpack('<I', frame[1:5])[0]
+    request, candidate = frame[5:5 + split], frame[5 + split:]
+    assert request == bytes([140, 1, 2]), request
+    body = bytes([224]) + candidate
+    out.write(struct.pack('<I', len(body)) + body)
+    out.flush()
+"#,
+            )
+            .unwrap();
+            fs::set_permissions(&consent, fs::Permissions::from_mode(0o700)).unwrap();
             let listener = UnixListener::bind(&socket).unwrap();
             let server = std::thread::spawn(move || {
-                for opcode in [144, 140] {
+                // 144: the named key's status; 144 again: workspace load re-checks the
+                // next-key commitment (founder_rotation_gate, 33a8fd59); 140: the plan.
+                for opcode in [144, 144, 140] {
                     let (mut stream, _) = listener.accept().unwrap();
                     let frame = transport::read_frame(&mut stream).unwrap().unwrap();
                     assert_eq!(
@@ -1201,7 +1268,8 @@ else:
         let manifest_before = fs::read(f.root.join("workspace.json")).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         let server = std::thread::spawn(move || {
-            for expected in [6, 190, 8] {
+            // Inspection (op 8) is local; only the profile (6) and the lookup (190) arrive.
+            for expected in [6, 190] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let frame = transport::read_frame(&mut stream).unwrap().unwrap();
                 assert_eq!(

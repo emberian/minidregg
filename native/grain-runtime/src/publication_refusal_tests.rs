@@ -395,6 +395,19 @@ fn foreground_status_uses_signed_parent_lease_without_a_hermes_child() {
         runtime
             .foreground_tool(attachment_id, request.as_bytes(), &input)
             .unwrap();
+        // The attachment is a bounded socket. A client that never reads lets the
+        // kernel send buffer fill, and after the 2 s write timeout the controller
+        // detaches it (the next call then refuses: no attached idle task). How many
+        // unread frames fit depends on the kernel skb accounting (6.8 holds all
+        // 17, 6.17 does not), so the test reads each delivered result as a real
+        // client does.
+        let mut delivered = String::new();
+        io::BufReader::new(&mut connection)
+            .read_line(&mut delivered)
+            .unwrap();
+        let event: Value = serde_json::from_str(&delivered).unwrap();
+        assert_eq!(event["type"], "tool-complete");
+        assert_eq!(event["requestId"], format!("{index:032x}"));
     }
     assert_eq!(runtime.journal.foreground_history.len(), 18);
     assert!(runtime
