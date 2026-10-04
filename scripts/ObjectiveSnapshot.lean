@@ -20,8 +20,20 @@ checked-in copies.  An announced change is a commit that regenerates them
 announcement.
 
 Run: `lake env lean scripts/ObjectiveSnapshot.lean`
+
+The environment is the Theory modules of the `ObjectiveProofs` target, imported one by one, not
+the target itself: the rows are pretty-printed, and an imported Mathlib changes the rendering of
+unchanged statements (`ℕ` for `Nat`, `∀ f ∈ fs,` for `∀ f, f ∈ fs →`, `f.2` for `f.snd`). The
+target gained a Mathlib-importing Kernel module (Kernel.ObjectiveBendAdmissionSemantics, d67fd95d)
+and 458 unchanged statements re-rendered. The scan refuses to run with any `Mathlib` module in
+the environment, so that can never again pass for (or hide) a statement change.
 -/
-import ObjectiveProofs
+import Theory.ObjectiveBendDemandInvariant
+import Theory.ObjectiveBendDemandTyping
+import Theory.ObjectiveBendDemandPreservation
+import Theory.ObjectiveBendDemandAdequacy
+import Theory.ObjectiveBendDemandCompleteness
+import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveBendExtensions
 import Theory.ObjectiveBendDemandCapacity
@@ -118,6 +130,8 @@ def run : MetaM Unit := do
     found := found.push name
   -- SCAN-END
   let mut failures : Array String := #[]
+  if (← getEnv).header.moduleNames.any (fun m => (`Mathlib).isPrefixOf m) then
+    failures := failures.push "instrument: a Mathlib module is in the snapshot environment; its delaborators change the rendering of unchanged statements"
   if rows.size < scanFloor then
     failures := failures.push s!"instrument: only {rows.size} declarations scanned (floor {scanFloor})"
   for n in mustFind do
