@@ -59,7 +59,7 @@ set_option autoImplicit false
 /-! ## Reading a cell's role -/
 
 /-- The record a cell's bytes hold (`readRecord` of one cell). -/
-def recordIn (bytes : Bytes) : Option Record := (bodyOf .record bytes).bind recordOfBody
+def recordIn (bytes : Bytes) : Option Record := (bodyOf .record bytes).bind decodeRecord
 
 theorem readRecord_eq {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
     readRecord snapshot cell = recordIn (snapshot.canonicalBytes cell) := rfl
@@ -171,22 +171,22 @@ theorem readRecord_package {rootBytes : Bytes → Digest} {snapshot : Snapshot r
   | none => simp [found] at read
   | some body => exact bodyOf_other found (by decide)
 
-/-- The only record a record post holds is the record it posts, and only while it awaits. -/
-theorem recordIn_recordImage {key : Bytes} {record found : Record}
-    (read : recordIn (image .record key (recordBody record)) = some found) :
+/-- A retired cell holds no record. -/
+theorem recordIn_retired : recordIn retiredImage = none := by
+  simp [recordIn, bodyOf, payloadOf_retired]
+
+/-- The only record a record post holds is the record it posts, and only while it awaits:
+an ended record is the retired image, which holds none. -/
+theorem recordIn_recordImage {record found : Record}
+    (read : recordIn (recordImage record) = some found) :
     found = record ∧ ∃ await, record.phase = .awaiting await := by
-  simp only [recordIn, bodyOf_image, Option.bind_some] at read
-  unfold recordBody at read
+  unfold recordImage at read
   split at read
   · rename_i await awaiting
-    simp only [recordOfBody, List.isEmpty_iff, encodeRecord_ne_nil, if_false, record_roundTrip,
-      Option.some.injEq] at read
+    simp only [recordIn, bodyOf_image, Option.bind_some, record_roundTrip, Option.some.injEq] at read
     exact ⟨read.symm, await, awaiting⟩
-  · simp [recordOfBody] at read
-  · simp [recordOfBody] at read
-
-theorem recordIn_vacant (key : Bytes) : recordIn (vacant .record key) = none := by
-  simp [recordIn, vacant, bodyOf_image, recordOfBody]
+  · rw [recordIn_retired] at read; cases read
+  · rw [recordIn_retired] at read; cases read
 
 /-! ## The invariant -/
 
@@ -353,6 +353,11 @@ theorem slot_post_safe {rootBytes : Bytes → Digest} {config : Config} {snapsho
     PostSafe config snapshot (postAt snapshot (AnswerSlot.cell config.domain name) (image .slot (AnswerSlot.key name) bytes)) :=
   postSafe_inert pre (recordIn_image_other _ _ (by decide))
 
+theorem slot_retire_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {name : Digest} (pre : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none) :
+    PostSafe config snapshot (slotRetire config snapshot name) :=
+  postSafe_inert pre recordIn_retired
+
 /-- A yield's posts (its declared-state write and the answer slot it opens) are safe. -/
 theorem commitYield_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
@@ -389,7 +394,9 @@ theorem commitYield_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
           · exact stateSafe post inState
           · subst isSlot
             refine slot_post_safe (bodyOf_of_payload_none ?_) _
-            simpa using fresh
+            have both := fresh
+            simp only [Bool.or_eq_true, not_or, Option.isSome_iff_ne_none, ne_eq, not_not] at both
+            exact both.1
       · split at ok
         · cases ok
         · simp only [Except.ok.injEq] at ok
@@ -417,11 +424,11 @@ theorem settle_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot :
     cases read : readSlot config snapshot name with
     | none => simp [read] at settled
     | some slot =>
-      have vacate : ∀ post ∈ [slotVacate config snapshot name], PostSafe config snapshot post := by
+      have vacate : ∀ post ∈ [slotRetire config snapshot name], PostSafe config snapshot post := by
         intro post member
         simp only [List.mem_singleton] at member
         subst member
-        exact slot_post_safe (readSlot_package read) []
+        exact slot_retire_safe (readSlot_package read)
       simp only [read] at settled
       split at settled
       · cases settled
@@ -456,11 +463,11 @@ theorem abandonSlot_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
     | none => simp [read] at ok
     | some slot =>
       simp only [read] at ok
-      have vacate : ∀ post ∈ [slotVacate config snapshot name], PostSafe config snapshot post := by
+      have vacate : ∀ post ∈ [slotRetire config snapshot name], PostSafe config snapshot post := by
         intro post member
         simp only [List.mem_singleton] at member
         subst member
-        exact slot_post_safe (readSlot_package read) []
+        exact slot_retire_safe (readSlot_package read)
       split at ok <;>
       · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
         rw [← ok.1]; exact vacate
@@ -602,7 +609,7 @@ theorem abandonment_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
   simp only [List.mem_cons, List.mem_append, List.not_mem_nil, or_false] at member
   rcases member with isRecord | (inSlot | isBook)
   · subst isRecord
-    exact postSafe_inert (readRecord_package abandoned.recordExact) (recordIn_vacant _)
+    exact postSafe_inert (readRecord_package abandoned.recordExact) (recordIn_retired)
   · exact abandonSlot_safe abandoned.slotExact post inSlot
   · subst isBook
     exact book_post_safe abandoned.bookExact abandoned.posted
@@ -750,7 +757,7 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
 #assert_axioms readSlot_package
 #assert_axioms readRecord_package
 #assert_axioms recordIn_recordImage
-#assert_axioms recordIn_vacant
+#assert_axioms recordIn_retired
 #assert_axioms packageBytes_eq
 #assert_axioms decodeStored_nil
 #assert_axioms loadProgram_present
@@ -765,6 +772,7 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
 #assert_axioms book_post_safe
 #assert_axioms state_post_safe
 #assert_axioms slot_post_safe
+#assert_axioms slot_retire_safe
 #assert_axioms commitYield_safe
 #assert_axioms segmentCommit_safe
 #assert_axioms settle_safe

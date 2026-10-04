@@ -286,16 +286,9 @@ theorem Config.sourceGate_physicalPostLaw_live (config : Config) {own : Option C
       Minidregg.Compiler.CanonicalCellRegistry.CellLaw deployment write.cellId.value cell :=
   ObjectiveActivityGate.ordinary_physicalPostLaw_live (config.sourceGate_ordinary foreign admitted) member law
 
-/-- The deployment's ordinary transport judges through `sourceGate none`, a
-facet that is not the kernel activity's: only `activityTransport` is exempt. -/
-theorem Config.transport_sourceGate (config : Config) : config.transport.sourceGate = config.sourceGate none := by
-  unfold Config.transport Config.physicalTransport
-  split <;> rfl
-
 #assert_axioms Config.sourceGate_ordinary
 #assert_axioms Config.sourceGate_refuses_protected
 #assert_axioms Config.sourceGate_physicalPostLaw_live
-#assert_axioms Config.transport_sourceGate
 
 /-- The Store transport keeps the actual system-cell tail law and checks every
 protected facet before physical append. -/
@@ -318,6 +311,16 @@ theorem Config.transport_systemCell (config : Config) :
 
 theorem Config.physicalTransport_systemCell (config : Config) :
     config.physicalTransport.systemCell = some config.systemCell := rfl
+
+/-- The deployment's ordinary transport judges through `sourceGate none`, a
+facet that is not the kernel activity's: only `activityTransport` is exempt. -/
+theorem Config.transport_sourceGate (config : Config) {rootBytes : List UInt8 → Digest}
+    (snapshot : DurableDataIntent.DataSnapshot rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
+    config.transport.sourceGate snapshot intent = config.sourceGate none snapshot intent := by
+  unfold Config.transport Config.physicalTransport
+  split <;> rfl
+
+#assert_axioms Config.transport_sourceGate
 
 /-- The transport of the kernel activity's own typed turns: the deployment's
 transport with the `objectiveActivity` facet, so the protected activity

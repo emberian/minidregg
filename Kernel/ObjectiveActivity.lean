@@ -2902,6 +2902,7 @@ theorem settlePurse_prefix {config : Config} {book : Book} {held : AccountId} {e
     (ok : settlePurse config book held escrow deposit before segment = .ok batch) :
     ∃ rest, batch.operations = before.operations ++ rest := by
   unfold settlePurse at ok
+  dsimp only at ok
   split at ok
   · split at ok
     · cases ok; exact ⟨[], by simp⟩

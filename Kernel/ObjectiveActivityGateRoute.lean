@@ -58,7 +58,7 @@ theorem derived_route {config : Config} {opened : Opened config} (derived : Deri
     right
     rw [held] at source
     simp only at source
-    have joint : ∀ {s : DataSnapshot ResourceBirthCodec.rootBytes},
+    have joint : ∀ {s : DataSnapshot Minidregg.Compiler.ResourceBirthCodec.rootBytes},
         config.otherFacetGate .joint s derived.intent = .ok () →
           ObjectiveActivityGate.ordinaryGate derived.intent = .ok () :=
       fun ok => config.sourceGate_ordinary (own := some .joint) (by decide) ok
